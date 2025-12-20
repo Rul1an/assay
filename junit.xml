@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="ci_smoke_test">
-  <testcase name="ci_echo"></testcase>
-  <testcase name="ci_calc"></testcase>
-</testsuite>

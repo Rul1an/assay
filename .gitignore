@@ -4,3 +4,8 @@ Cargo.lock
 .eval
 .DS_Store
 *.log
+junit.xml
+sarif.json
+run.json
+otel.jsonl
+out/
