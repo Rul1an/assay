@@ -32,7 +32,7 @@ struct RunArgs {
     #[arg(long, default_value_t = 0)]
     rerun_failures: u32,
 
-    /// quarantine mode: off|warn|strict
+    /// quarantine mode: off|warn|strict (controls status of quarantined tests)
     #[arg(long, default_value = "warn")]
     quarantine_mode: String,
 
@@ -42,6 +42,7 @@ struct RunArgs {
     #[arg(long)]
     redact_prompts: bool,
 
+    /// strict mode (controls exit code policy: warn/flaky -> exit 1)
     #[arg(long)]
     strict: bool,
 }
@@ -71,6 +72,7 @@ struct CiArgs {
     #[arg(long)]
     redact_prompts: bool,
 
+    /// strict mode (controls exit code policy: warn/flaky -> exit 1)
     #[arg(long)]
     strict: bool,
 }
@@ -218,6 +220,7 @@ fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool
     let mut has_error = false;
     let mut has_warn = false;
     let mut has_flaky = false;
+    let mut has_config_error = false;
 
     for r in results {
         match r.status {
@@ -225,8 +228,17 @@ fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool
             TestStatus::Warn => has_warn = true,
             TestStatus::Flaky => has_flaky = true,
             TestStatus::Fail => has_fail = true,
-            TestStatus::Error => has_error = true,
+            TestStatus::Error => {
+                 if r.message.starts_with("config error:") {
+                     has_config_error = true;
+                 }
+                 has_error = true;
+            },
         }
+    }
+
+    if has_config_error {
+        return exit_codes::CONFIG_ERROR;
     }
 
     if has_error || has_fail {

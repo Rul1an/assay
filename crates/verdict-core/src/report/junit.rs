@@ -13,7 +13,10 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
         match r.status {
             TestStatus::Pass => {}
             TestStatus::Warn | TestStatus::Flaky => {
-                xml.push_str(&format!(r#"<skipped message="{}"/>"#, escape(&r.message)))
+                xml.push_str(&format!(
+                    r#"<system-out>WARNING: {}</system-out>"#,
+                    escape(&r.message)
+                ))
             }
             TestStatus::Fail => {
                 xml.push_str(&format!(r#"<failure message="{}"/>"#, escape(&r.message)))
@@ -35,4 +38,60 @@ fn escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::TestStatus;
+    use crate::model::TestResultRow;
+
+    #[test]
+    fn test_junit_output_structure() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("junit.xml");
+
+        let results = vec![
+            TestResultRow {
+                test_id: "test_pass".into(),
+                status: TestStatus::Pass,
+                message: "ok".into(),
+                score: Some(1.0),
+                cached: false,
+                details: serde_json::Value::Null,
+                duration_ms: Some(10),
+            },
+            TestResultRow {
+                test_id: "test_warn".into(),
+                status: TestStatus::Warn,
+                message: "almost".into(),
+                score: Some(0.5),
+                cached: false,
+                details: serde_json::Value::Null,
+                duration_ms: Some(10),
+            },
+            TestResultRow {
+                test_id: "test_fail".into(),
+                status: TestStatus::Fail,
+                message: "bad".into(),
+                score: Some(0.0),
+                cached: false,
+                details: serde_json::Value::Null,
+                duration_ms: Some(10),
+            },
+        ];
+
+        write_junit("demo", &results, &path).unwrap();
+
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(content.contains(r#"<testsuite name="demo">"#));
+        // Pass
+        assert!(content.contains(r#"<testcase name="test_pass">"#));
+        // Warn (system-out)
+        assert!(content.contains(r#"<testcase name="test_warn">"#));
+        assert!(content.contains(r#"<system-out>WARNING: almost</system-out>"#));
+        // Fail
+        assert!(content.contains(r#"<testcase name="test_fail">"#));
+        assert!(content.contains(r#"<failure message="bad"/>"#));
+    }
 }

@@ -8,9 +8,16 @@ tests:
     expected:
       type: must_contain
       must_contain: ["Hello"]
-  - id: "ci_calc"
+  - id: "ci_calc_sum"
     input:
-      prompt: "ci_calc_sum"
+      prompt: "calculate 10 + 20"
     expected:
       type: must_contain
-      must_contain: ["42"]
+      must_contain: ["30"]
+  - id: "ci_regex"
+    input:
+      prompt: "ci_regex"
+    expected:
+      type: regex_match
+      pattern: "Hello\\s+CI"
+      flags: ["i"]

@@ -48,6 +48,17 @@ pub enum Expected {
         must_not_contain: Vec<String>,
     },
 
+    RegexMatch {
+        pattern: String,
+        #[serde(default)]
+        flags: Vec<String>,
+    },
+    RegexNotMatch {
+        pattern: String,
+        #[serde(default)]
+        flags: Vec<String>,
+    },
+
     // v0.3 hooks (placeholders)
     JsonSchema {
         json_schema: String,

@@ -8,8 +8,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Redaction**: Added `--redact-prompts` flag to CLI to ensure PII hygiene in artifacts.
 - **CI/CD**: GitHub Actions workflow (`verdict.yml`) running smoke tests in deterministic Replay Mode.
+- **Metrics**: Added `regex_match` and `regex_not_match` metrics with support for flags (e.g., `i`, `m`).
 - **Strict Mode**: Added `--strict` flag to fail CI on `Warn` or `Flaky` statuses (Exit 1). Default is non-blocking.
-- **CLI Refactor**: Unified runner initialization for better maintainability.
+- **Reporting**: JUnit reports now mark `Warn`/`Flaky` as passing tests with `<system-out>` logs, improving CI visibility.
+- **CLI Refactor**: Unified runner initialization and clarified help strings.
 - **Trace Injection**: Run evaluations offline using `--trace-file <path.jsonl>`.
   - Supports strictly deterministic replay of LLM interactions.
   - **Replay Semantics**: Forces `rerun_failures=0` in replay mode. Injects `verdict.replay=true` in metadata.

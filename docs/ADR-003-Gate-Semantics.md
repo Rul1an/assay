@@ -21,10 +21,10 @@ We implement a configurable strictness model using a `--strict` flag.
 
 ### 2. CI/CD Integration
 - **JUnit**:
-  - `Pass` -> `<testcase>`
-  - `Fail` -> `<failure>`
-  - `Error` -> `<error>`
-  - `Warn` / `Flaky` -> `<testcase>` (Pass) with embedded `<system-out>` warning log.
+  - `Pass` / `Warn` / `Flaky` -> `<testcase>` (Pass).
+  - `Warn` / `Flaky` include `<system-out>` with warning details for visibility without failing strict parsers.
+  - `Fail` -> `<failure>`.
+  - `Error` -> `<error>`.
 - **SARIF**:
   - `Fail` -> `error` level.
   - `Warn` / `Flaky` -> `warning` level (always visible as code scanning alert).
