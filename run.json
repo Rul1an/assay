@@ -1,0 +1,54 @@
+{
+  "results": [
+    {
+      "cached": true,
+      "details": {
+        "metrics": {
+          "must_contain": {
+            "details": {},
+            "passed": true,
+            "score": 1.0,
+            "unstable": false
+          },
+          "must_not_contain": {
+            "details": {},
+            "passed": true,
+            "score": 1.0,
+            "unstable": false
+          }
+        }
+      },
+      "duration_ms": 0,
+      "message": "ok",
+      "score": 1.0,
+      "status": "pass",
+      "test_id": "t1_must_contain"
+    },
+    {
+      "cached": true,
+      "details": {
+        "metrics": {
+          "must_contain": {
+            "details": {},
+            "passed": true,
+            "score": 1.0,
+            "unstable": false
+          },
+          "must_not_contain": {
+            "details": {},
+            "passed": true,
+            "score": 1.0,
+            "unstable": false
+          }
+        }
+      },
+      "duration_ms": 0,
+      "message": "ok",
+      "score": 1.0,
+      "status": "pass",
+      "test_id": "t2_must_not_contain"
+    }
+  ],
+  "run_id": 3,
+  "suite": "demo"
+}

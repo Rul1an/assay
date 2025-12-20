@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="demo">
+  <testcase name="t1_must_contain"></testcase>
+  <testcase name="t2_must_not_contain"></testcase>
+</testsuite>

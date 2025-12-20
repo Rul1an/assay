@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/verdict-core",
+  "crates/verdict-metrics",
+  "crates/verdict-cli",
+]

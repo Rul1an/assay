@@ -1,0 +1,2 @@
+{"attributes":{"gen_ai.request.model":"unknown","gen_ai.response.completion_tokens":0,"gen_ai.system":"verdict","verdict.cached":true,"verdict.duration_ms":0,"verdict.score":1.0,"verdict.status":"Pass","verdict.test_id":"t1_must_contain"},"timestamp":"2025-12-20T22:49:26.590544+00:00"}
+{"attributes":{"gen_ai.request.model":"unknown","gen_ai.response.completion_tokens":0,"gen_ai.system":"verdict","verdict.cached":true,"verdict.duration_ms":0,"verdict.score":1.0,"verdict.status":"Pass","verdict.test_id":"t2_must_not_contain"},"timestamp":"2025-12-20T22:49:26.590595+00:00"}
