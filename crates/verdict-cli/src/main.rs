@@ -41,6 +41,9 @@ struct RunArgs {
 
     #[arg(long)]
     redact_prompts: bool,
+
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -67,6 +70,9 @@ struct CiArgs {
 
     #[arg(long)]
     redact_prompts: bool,
+
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Parser)]
@@ -141,91 +147,31 @@ async fn cmd_init(args: InitArgs) -> anyhow::Result<i32> {
 async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
     let cfg = verdict_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    let runner = build_runner(
+        &args.db,
+        &args.trace_file,
+        &cfg,
+        args.rerun_failures,
+        &args.quarantine_mode,
+    ).await?;
 
-    let store = verdict_core::storage::Store::open(&args.db)?;
-    store.init_schema()?;
-    let cache = verdict_core::cache::vcr::VcrCache::new(store.clone());
-
-    let client: Arc<dyn verdict_core::providers::llm::LlmClient> =
-        if let Some(trace_path) = &args.trace_file {
-            Arc::new(
-                verdict_core::providers::trace::TraceClient::from_path(trace_path)
-                    .map_err(|e| anyhow::anyhow!(e))?,
-            )
-        } else {
-            Arc::new(DummyClient::new(&cfg.model))
-        };
-    let metrics = verdict_metrics::default_metrics();
-
-    let replay_mode = args.trace_file.is_some();
-    let rerun_failures = if replay_mode {
-        if args.rerun_failures > 0 {
-            eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
-        }
-        0
-    } else {
-        args.rerun_failures
-    };
-
-    let policy = verdict_core::engine::runner::RunPolicy {
-        rerun_failures,
-        quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(&args.quarantine_mode),
-    };
-
-    let runner = verdict_core::engine::runner::Runner {
-        store,
-        cache,
-        client,
-        metrics,
-        policy,
-    };
     let artifacts = runner.run_suite(&cfg).await?;
 
     verdict_core::report::console::print_summary(&artifacts.results);
-    Ok(decide_exit_code(&artifacts.results))
+    Ok(decide_exit_code(&artifacts.results, args.strict))
 }
 
 async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
     let cfg = verdict_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    let runner = build_runner(
+        &args.db,
+        &args.trace_file,
+        &cfg,
+        args.rerun_failures,
+        &args.quarantine_mode,
+    ).await?;
 
-    let store = verdict_core::storage::Store::open(&args.db)?;
-    store.init_schema()?;
-    let cache = verdict_core::cache::vcr::VcrCache::new(store.clone());
-
-    let client: Arc<dyn verdict_core::providers::llm::LlmClient> =
-        if let Some(trace_path) = &args.trace_file {
-            Arc::new(
-                verdict_core::providers::trace::TraceClient::from_path(trace_path)
-                    .map_err(|e| anyhow::anyhow!(e))?,
-            )
-        } else {
-            Arc::new(DummyClient::new(&cfg.model))
-        };
-    let metrics = verdict_metrics::default_metrics();
-
-    let replay_mode = args.trace_file.is_some();
-    let rerun_failures = if replay_mode {
-        if args.rerun_failures > 0 {
-            eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
-        }
-        0
-    } else {
-        args.rerun_failures
-    };
-
-    let policy = verdict_core::engine::runner::RunPolicy {
-        rerun_failures,
-        quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(&args.quarantine_mode),
-    };
-
-    let runner = verdict_core::engine::runner::Runner {
-        store: store.clone(),
-        cache,
-        client,
-        metrics,
-        policy,
-    };
     let artifacts = runner.run_suite(&cfg).await?;
 
     verdict_core::report::junit::write_junit(&cfg.suite, &artifacts.results, &args.junit)?;
@@ -238,7 +184,7 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     };
     let _ = verdict_core::otel::export_jsonl(&otel_cfg, &cfg.suite, &artifacts.results);
 
-    Ok(decide_exit_code(&artifacts.results))
+    Ok(decide_exit_code(&artifacts.results, args.strict))
 }
 
 async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
@@ -266,24 +212,78 @@ async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
     Ok(exit_codes::OK)
 }
 
-fn decide_exit_code(results: &[verdict_core::model::TestResultRow]) -> i32 {
+fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool) -> i32 {
     use verdict_core::model::TestStatus;
     let mut has_fail = false;
     let mut has_error = false;
+    let mut has_warn = false;
+    let mut has_flaky = false;
 
     for r in results {
         match r.status {
-            TestStatus::Pass | TestStatus::Warn | TestStatus::Flaky => {}
+            TestStatus::Pass => {}
+            TestStatus::Warn => has_warn = true,
+            TestStatus::Flaky => has_flaky = true,
             TestStatus::Fail => has_fail = true,
             TestStatus::Error => has_error = true,
         }
     }
 
     if has_error || has_fail {
-        exit_codes::TEST_FAILED
-    } else {
-        exit_codes::OK
+        return exit_codes::TEST_FAILED;
     }
+
+    if strict && (has_warn || has_flaky) {
+        return exit_codes::TEST_FAILED;
+    }
+
+    exit_codes::OK
+}
+
+async fn build_runner(
+    db_path: &std::path::Path,
+    trace_file: &Option<PathBuf>,
+    cfg: &verdict_core::model::EvalConfig,
+    rerun_failures_arg: u32,
+    quarantine_mode_str: &str,
+) -> anyhow::Result<verdict_core::engine::runner::Runner> {
+    let store = verdict_core::storage::Store::open(db_path)?;
+    store.init_schema()?;
+    let cache = verdict_core::cache::vcr::VcrCache::new(store.clone());
+
+    let client: Arc<dyn verdict_core::providers::llm::LlmClient> =
+        if let Some(trace_path) = trace_file {
+            Arc::new(
+                verdict_core::providers::trace::TraceClient::from_path(trace_path)
+                    .map_err(|e| anyhow::anyhow!(e))?,
+            )
+        } else {
+            Arc::new(DummyClient::new(&cfg.model))
+        };
+    let metrics = verdict_metrics::default_metrics();
+
+    let replay_mode = trace_file.is_some();
+    let rerun_failures = if replay_mode {
+        if rerun_failures_arg > 0 {
+            eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
+        }
+        0
+    } else {
+        rerun_failures_arg
+    };
+
+    let policy = verdict_core::engine::runner::RunPolicy {
+        rerun_failures,
+        quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(quarantine_mode_str),
+    };
+
+    Ok(verdict_core::engine::runner::Runner {
+        store,
+        cache,
+        client,
+        metrics,
+        policy,
+    })
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> anyhow::Result<()> {
