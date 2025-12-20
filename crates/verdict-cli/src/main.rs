@@ -157,8 +157,18 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
         };
     let metrics = verdict_metrics::default_metrics();
 
+    let replay_mode = args.trace_file.is_some();
+    let rerun_failures = if replay_mode {
+        if args.rerun_failures > 0 {
+            eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
+        }
+        0
+    } else {
+        args.rerun_failures
+    };
+
     let policy = verdict_core::engine::runner::RunPolicy {
-        rerun_failures: args.rerun_failures,
+        rerun_failures,
         quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(&args.quarantine_mode),
     };
 
@@ -194,8 +204,18 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
         };
     let metrics = verdict_metrics::default_metrics();
 
+    let replay_mode = args.trace_file.is_some();
+    let rerun_failures = if replay_mode {
+        if args.rerun_failures > 0 {
+            eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
+        }
+        0
+    } else {
+        args.rerun_failures
+    };
+
     let policy = verdict_core::engine::runner::RunPolicy {
-        rerun_failures: args.rerun_failures,
+        rerun_failures,
         quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(&args.quarantine_mode),
     };
 

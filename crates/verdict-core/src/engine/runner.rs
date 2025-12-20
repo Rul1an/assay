@@ -223,7 +223,7 @@ impl Runner {
         }
 
         let duration_ms = start.elapsed().as_millis() as u64;
-        let row = TestResultRow {
+        let mut row = TestResultRow {
             test_id: tc.id.clone(),
             status: final_status,
             score: final_score,
@@ -232,6 +232,10 @@ impl Runner {
             details,
             duration_ms: Some(duration_ms),
         };
+
+        if self.client.provider_name() == "trace" {
+            row.details["verdict.replay"] = serde_json::json!(true);
+        }
         Ok((row, resp))
     }
 

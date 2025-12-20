@@ -2,7 +2,15 @@
   "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
   "runs": [
     {
-      "results": [],
+      "results": [
+        {
+          "level": "error",
+          "message": {
+            "text": "test_failure: failed: must_contain"
+          },
+          "ruleId": "verdict"
+        }
+      ],
       "tool": {
         "driver": {
           "name": "verdict"

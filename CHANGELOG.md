@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **Redaction**: Added `--redact-prompts` flag to CLI to ensure PII hygiene in artifacts.
 - **Trace Injection**: Run evaluations offline using `--trace-file <path.jsonl>`.
   - Supports strictly deterministic replay of LLM interactions.
+  - **Replay Semantics**: Forces `rerun_failures=0` in replay mode. Injects `verdict.replay=true` in metadata.
   - **Hardened Schema**: Enforces Trace Schema v1 (version, type) and unique `request_id`/`prompt`.
 - **OpenTelemetry Export**: New `--otel-jsonl` flag for `verdict ci`.
   - Adheres to OTel GenAI Semantic Conventions.

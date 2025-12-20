@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="demo">
-  <testcase name="t1_must_contain"></testcase>
-  <testcase name="t2_must_not_contain"></testcase>
+<testsuite name="replay_test">
+  <testcase name="test_failure"><failure message="failed: must_contain"/></testcase>
 </testsuite>
