@@ -1,0 +1,45 @@
+version: 1
+suite: "rag_grounding_demo"
+model: "trace"
+
+settings:
+  cache: false
+  thresholding:
+    mode: relative
+    max_drop: 0.05
+    min_floor: 0.80
+
+tests:
+  - id: "rag_grounding_semantic"
+    input:
+      prompt: "rag_grounding_q1_semantic"
+      context:
+        - "[chunk:1] Polisvoorwaarden Basisverzekering 2024: Eigen risico algemeen: €385 per jaar."
+        - "[chunk:2] Tandarts: geen eigen risico voor controle en reiniging."
+        - "[chunk:3] Tandarts behandelingen: vallen onder algemeen eigen risico."
+    expected:
+      type: semantic_similarity_to
+      semantic_similarity_to: "Tandartsbehandelingen vallen onder het algemene eigen risico van €385; controles en reiniging zijn vrijgesteld."
+      min_score: 0.85
+
+  - id: "rag_grounding_must_contain_385"
+    input:
+      prompt: "rag_grounding_q1_contains"
+      context:
+        - "[chunk:1] Polisvoorwaarden Basisverzekering 2024: Eigen risico algemeen: €385 per jaar."
+        - "[chunk:2] Tandarts: geen eigen risico voor controle en reiniging."
+        - "[chunk:3] Tandarts behandelingen: vallen onder algemeen eigen risico."
+    expected:
+      type: must_contain
+      must_contain: ["385", "Controles", "reiniging"]
+
+  - id: "rag_grounding_must_not_contain_hallucination"
+    input:
+      prompt: "rag_grounding_q1_nohalluc"
+      context:
+        - "[chunk:1] Polisvoorwaarden Basisverzekering 2024: Eigen risico algemeen: €385 per jaar."
+        - "[chunk:2] Tandarts: geen eigen risico voor controle en reiniging."
+        - "[chunk:3] Tandarts behandelingen: vallen onder algemeen eigen risico."
+    expected:
+      type: must_not_contain
+      must_not_contain: ["€500", "500 euro", "onbeperkt", "€250"]

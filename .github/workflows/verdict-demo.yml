@@ -1,0 +1,40 @@
+name: Verdict Demo Gate
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  verdict-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Verdict
+        run: cargo build --release
+
+      - name: Gate (RAG grounding / replay + baseline)
+        run: |
+          target/release/verdict ci \
+            --config examples/rag-grounding/eval.yaml \
+            --trace-file examples/rag-grounding/traces/good.jsonl \
+            --baseline examples/rag-grounding/baseline.json \
+            --strict
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-demo-reports
+          path: |
+            junit.xml
+            sarif.json
+            run.json
+            otel.jsonl

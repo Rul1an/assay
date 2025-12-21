@@ -4,14 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.2.0] - 2025-12-20
+## [0.2.0] - 2025-12-21
+
 ### Added
-- **Baselines (PR11)**: Detect regressions using `--baseline <file>`.
-  - Supports `relative` thresholding logic (e.g. `max_drop: 0.01`).
-  - Strict schema versioning and suite mismatch hardening (Exit 2).
-- **CI Polish (PR12)**: First-class GitHub Action support.
-  - New inputs: `baseline`, `export_baseline`, `upload_exported_baseline`.
-  - Robust "Git Show" workflow recommended in docs.
+- **Baseline regression gating**: Compare candidate runs against known-good baselines
+- **Relative thresholds**: `max_drop` config to catch score regressions
+- **verdict-action improvements**: `baseline` and `export_baseline` inputs
+- **Schema versioning**: Strict validation prevents baseline/suite mismatches (Exit 2)
+
+### Changed
+- CI mode now defaults to `--strict` when baseline is provided
+
+### Fixed
+- Path resolution in verdict-action for monorepo setups
 - **Baselines (PR11)**: Detect regressions using `--baseline <file>`.
   - Supports `relative` thresholding logic (e.g. `max_drop: 0.01`).
   - Strict schema versioning and suite mismatch hardening (Exit 2).

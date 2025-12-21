@@ -1,84 +1,82 @@
-# Verdict GitHub Action
+# Verdict PR Gate (GitHub Action)
 
-Official GitHub Action for [Verdict](https://github.com/Rul1an/verdict), the deterministic regression testing tool for LLM pipelines.
-
-![License](https://img.shields.io/github/license/Rul1an/verdict)
-![Version](https://img.shields.io/github/v/release/Rul1an/verdict)
-
-## Features
-- **Replay Support**: Run tests deterministically using pre-recorded traces.
-- **Reporting**: Automatically uploads JUnit and SARIF reports.
-- **Quarantine**: Respects quarantine status for failing tests.
-- **Baselines**: Compare PRs against a "known good" baseline from main.
+Marketplace-ready composite action that:
+- downloads a pinned Verdict binary from GitHub Releases
+- runs `verdict ci` (optionally in replay mode via `--trace-file`)
+- uploads JUnit + SARIF + run artifacts
+- optionally uploads SARIF to GitHub Code Scanning
 
 ## Usage
 
-### Basic Usage (Replay Mode)
+### Minimal (Replay mode / deterministic)
 ```yaml
-- uses: Rul1an/verdict-action@v1
-  with:
-    verdict_version: v0.1.0
-    config: ci-eval.yaml
-    trace_file: traces/ci.jsonl
-```
+name: Verdict CI
 
-### Baseline Gating (Recommended)
-This workflow ensures that a PR does not regress compared to the `main` branch.
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
 
-**1. PR Gate (compare against main)**
-Fetches the baseline from the main branch and gates the PR against it.
-```yaml
-- name: Get baseline from main
-  shell: bash
-  run: |
-    git fetch origin main:refs/remotes/origin/main
-    git show origin/main:baselines/ci.baseline.json > baseline.json
-
-- uses: Rul1an/verdict-action@v1
-  with:
-    verdict_version: v0.1.0
-    config: ci-eval.yaml
-    trace_file: traces/ci.jsonl
-    baseline: baseline.json
-    strict: "true"
-```
-
-**2. Export Baseline (on main)**
-Runs tests on `main` and (optionally) exports the updated baseline.
-```yaml
-- uses: Rul1an/verdict-action@v1
-  with:
-    verdict_version: v0.1.0
-    config: ci-eval.yaml
-    trace_file: traces/ci.jsonl
-    export_baseline: baselines/ci.baseline.json
-    upload_exported_baseline: "true"
-    exported_baseline_artifact_name: "ci-baseline"
-```
-
-## Inputs
-
-| Input | Description | Default |
-| :--- | :--- | :--- |
-| `repo` | Repository to download Verdict binary from. | `Rul1an/verdict` |
-| `verdict_version` | **Required**. Release tag to download (e.g. `v0.1.0`). | |
-| `config` | Path to eval config YAML. | `ci-eval.yaml` |
-| `trace_file` | Path to JSONL trace file (activates Replay Mode). | `""` |
-| `baseline` | Path to baseline JSON for regression checking. | `""` |
-| `export_baseline` | Path to write new baseline JSON to. | `""` |
-| `upload_exported_baseline` | Upload exported baseline as artifact? | `false` |
-| `strict` | If true, Warn/Flaky tests cause exit code 1. | `false` |
-| `working_directory` | Directory to run verdict in. | `.` |
-
-## Permissions
-If enabling SARIF upload (`upload_sarif: true`), you must grant:
-```yaml
 permissions:
+  contents: read
   security-events: write
+
+jobs:
+  verdict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: verdict-eval/action@v1
+        with:
+          verdict_version: v0.2.0
+          config: ci-eval.yaml
+          trace_file: traces/ci.jsonl
+          redact_prompts: "true"
 ```
 
-## Outputs
-- `junit_path`: Path to generated JUnit XML.
-- `sarif_path`: Path to generated SARIF JSON.
-- `baseline_path`: Resolved path to input baseline.
-- `exported_baseline_path`: Resolved path to exported baseline.
+### Strict mode (Warn/Flaky become blocking)
+
+```yaml
+      - uses: verdict-eval/action@v1
+        with:
+          verdict_version: v0.2.0
+          config: ci-eval.yaml
+          trace_file: traces/ci.jsonl
+          strict: "true"
+```
+
+### Inputs (selected)
+
+*   `verdict_version` (required): pinned release tag (e.g. `v0.2.0`)
+*   `repo`: where releases live (default `Rul1an/verdict`)
+*   `config`: eval config file (default `ci-eval.yaml`)
+*   `trace_file`: JSONL traces for replay mode (default empty)
+*   `strict`: `true`|`false` (default `false`)
+*   `redact_prompts`: `true`|`false` (default `true`)
+*   `upload_sarif`: `true`|`false` (default `true`)
+*   `upload_artifacts`: `true`|`false` (default `true`)
+
+### Required release assets
+
+This action downloads a Verdict release asset:
+
+`verdict-${os}-${arch}.tar.gz`
+
+Examples:
+*   `verdict-linux-x86_64.tar.gz`
+*   `verdict-macos-aarch64.tar.gz`
+
+The tarball must contain an executable named `verdict`.
+
+If your asset name differs, pass `asset_name`:
+
+```yaml
+with:
+  verdict_version: v0.2.0
+  asset_name: verdict-x86_64-unknown-linux-musl.tar.gz
+```
+
+### Notes
+*   On forked PRs, Code Scanning upload may be restricted by permissions. This action sets `continue-on-error: true` for SARIF upload to avoid blocking the job.
+*   For best reproducibility, always pin `verdict_version` to a tag.

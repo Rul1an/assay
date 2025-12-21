@@ -58,7 +58,9 @@ fn normalize_paths(cfg: &mut EvalConfig, config_path: &Path) -> anyhow::Result<(
 }
 
 pub fn write_sample_config(path: &Path) -> Result<(), ConfigError> {
-    std::fs::write(path, r#"version: 1
+    std::fs::write(
+        path,
+        r#"version: 1
 suite: demo
 model: dummy
 settings:
@@ -80,7 +82,8 @@ tests:
     expected:
       type: must_not_contain
       must_not_contain: ["banana"]
-"#)
-        .map_err(|e| ConfigError(format!("failed to write sample config: {}", e)))?;
+"#,
+    )
+    .map_err(|e| ConfigError(format!("failed to write sample config: {}", e)))?;
     Ok(())
 }

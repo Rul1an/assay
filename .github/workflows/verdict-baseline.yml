@@ -1,0 +1,64 @@
+name: Verdict Gate + Baseline
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+
+      # PRs: gate against repo baseline
+      - name: Gate (PR) using repo baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          target/release/verdict ci \
+            --config examples/rag-grounding/eval.yaml \
+            --trace-file examples/rag-grounding/traces/good.jsonl \
+            --baseline examples/rag-grounding/baseline.json \
+            --strict
+
+      # main: export a fresh baseline (no commit), upload as artifact
+      - name: Export baseline (main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          target/release/verdict ci \
+            --config examples/rag-grounding/eval.yaml \
+            --trace-file examples/rag-grounding/traces/good.jsonl \
+            --export-baseline baseline.export.json \
+            --strict
+
+      - name: Upload baseline artifact (main)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-baseline
+          path: baseline.export.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-reports
+          path: |
+            junit.xml
+            sarif.json
+            run.json
+            otel.jsonl
+
+      - name: Upload SARIF
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: sarif.json

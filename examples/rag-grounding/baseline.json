@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "suite": "rag_grounding_demo",
+  "verdict_version": "0.2.0",
+  "created_at": "2025-12-21T12:44:00.911218+00:00",
+  "config_fingerprint": "md5:unknown",
+  "entries": [
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "faithfulness",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "json_schema",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "must_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "must_not_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "regex_match",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "relevance",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_semantic",
+      "metric": "semantic_similarity_to",
+      "score": 0.9999499937496875
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "faithfulness",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "json_schema",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "must_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "must_not_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "regex_match",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "relevance",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_contain_385",
+      "metric": "semantic_similarity_to",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "faithfulness",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "json_schema",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "must_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "must_not_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "regex_match",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "relevance",
+      "score": 1.0
+    },
+    {
+      "test_id": "rag_grounding_must_not_contain_hallucination",
+      "metric": "semantic_similarity_to",
+      "score": 1.0
+    }
+  ]
+}

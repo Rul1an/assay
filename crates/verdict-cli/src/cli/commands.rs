@@ -443,7 +443,9 @@ fn export_baseline(
         suite: cfg.suite.clone(),
         verdict_version: env!("CARGO_PKG_VERSION").to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
-        config_fingerprint: verdict_core::baseline::compute_config_fingerprint(PathBuf::from("config_path_placeholder").as_path()),
+        config_fingerprint: verdict_core::baseline::compute_config_fingerprint(
+            PathBuf::from("config_path_placeholder").as_path(),
+        ),
         entries,
     };
 
