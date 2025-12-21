@@ -47,7 +47,7 @@ impl JudgeService {
         let rubric_version = suite_rubric_version.unwrap_or("v1");
 
         // 1. Trace Check
-        if let Some(trace_judge) = meta.pointer(&format!("/verdict/judge/{}", rubric_id)) {
+        if let Some(_trace_judge) = meta.pointer(&format!("/verdict/judge/{}", rubric_id)) {
             // Already present in trace
             // We could validate it, but for now accept it.
             // Ensure "source" is "trace" if not set?
@@ -101,7 +101,7 @@ impl JudgeService {
 
         for _ in 0..samples {
             // In a real impl, we'd use the actual rubric prompt template
-            let sys_prompt = format!("You are a judge for rubric {}. Output JSON with {{passed: bool, rationale: string}}.", rubric_id);
+            let _sys_prompt = format!("You are a judge for rubric {}. Output JSON with {{passed: bool, rationale: string}}.", rubric_id);
             // This prompt is simplistic; strict impl would use templates.
             let resp = client.complete(&prompt, None).await?; // Assuming prompt contains everything
                                                               // Parse JSON

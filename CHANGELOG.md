@@ -6,11 +6,24 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.0] - 2025-12-20
 ### Added
+- **Baselines (PR11)**: Detect regressions using `--baseline <file>`.
+  - Supports `relative` thresholding logic (e.g. `max_drop: 0.01`).
+  - Strict schema versioning and suite mismatch hardening (Exit 2).
+- **CI Polish (PR12)**: First-class GitHub Action support.
+  - New inputs: `baseline`, `export_baseline`, `upload_exported_baseline`.
+  - Robust "Git Show" workflow recommended in docs.
+- **Baselines (PR11)**: Detect regressions using `--baseline <file>`.
+  - Supports `relative` thresholding logic (e.g. `max_drop: 0.01`).
+  - Strict schema versioning and suite mismatch hardening (Exit 2).
+- **CI Polish (PR12)**: First-class GitHub Action support.
+  - New inputs: `baseline`, `export_baseline`, `upload_exported_baseline`.
+  - Robust "Git Show" workflow recommended in docs.
 - **Redaction**: Added `--redact-prompts` flag to CLI to ensure PII hygiene in artifacts.
 - **CI/CD**: GitHub Actions workflow (`verdict.yml`) running smoke tests in deterministic Replay Mode.
 - **Docs**: Comprehensive [User Guide](docs/user-guide.md) and new `init` onboarding.
 - **Onboarding**: `verdict init --ci` generates production-ready CI scaffolding.
-- **Metrics**: Added `regex_match` (PR5) and `json_schema` (PR6) metrics.
+- **Metrics**: Added `regex_match` (PR5), `json_schema` (PR6), `semantic_similarity` (PR8).
+- **LLM-as-a-Judge**: Built-in `Faithfulness` and `Relevance` metrics (OpenAI-based).
 - **Config**: Added support for relative file paths in configuration (resolves relative to config file).
 - **Strict Mode**: Added `--strict` flag to fail CI on `Warn` or `Flaky` statuses (Exit 1). Default is non-blocking.
 - **Reporting**: JUnit reports now mark `Warn`/`Flaky` as passing tests with `<system-out>` logs, improving CI visibility.

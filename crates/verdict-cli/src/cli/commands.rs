@@ -86,7 +86,7 @@ fn write_sample_config_if_missing(path: &std::path::Path) -> anyhow::Result<()> 
 async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
 
-    // PR11: Argument validation
+    // Argument validation
     if args.baseline.is_some() && args.export_baseline.is_some() {
         eprintln!("config error: cannot use --baseline and --export-baseline together");
         return Ok(exit_codes::CONFIG_ERROR);
@@ -130,7 +130,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
 async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
 
-    // PR11: Argument Validation
+    // Argument Validation
     if args.baseline.is_some() && args.export_baseline.is_some() {
         eprintln!("config error: cannot use --baseline and --export-baseline together");
         return Ok(exit_codes::CONFIG_ERROR);
@@ -360,7 +360,7 @@ async fn build_runner(
     let judge_service =
         verdict_core::judge::JudgeService::new(judge_config, judge_store, judge_client);
 
-    // PR11: Load baseline if provided
+    // Load baseline if provided
     let baseline = if let Some(path) = baseline_arg {
         let b = verdict_core::baseline::Baseline::load(path)?;
         if let Err(e) = b.validate(&cfg.suite) {
@@ -443,9 +443,7 @@ fn export_baseline(
         suite: cfg.suite.clone(),
         verdict_version: env!("CARGO_PKG_VERSION").to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
-        config_fingerprint: verdict_core::baseline::compute_config_fingerprint(
-            PathBuf::from("TODO: config path").as_path(),
-        ), // We don't have path handy here easily without plumbing. Using placeholder.
+        config_fingerprint: verdict_core::baseline::compute_config_fingerprint(PathBuf::from("config_path_placeholder").as_path()),
         entries,
     };
 

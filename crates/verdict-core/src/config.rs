@@ -58,7 +58,29 @@ fn normalize_paths(cfg: &mut EvalConfig, config_path: &Path) -> anyhow::Result<(
 }
 
 pub fn write_sample_config(path: &Path) -> Result<(), ConfigError> {
-    std::fs::write(path, include_str!("../../../eval.yaml"))
+    std::fs::write(path, r#"version: 1
+suite: demo
+model: dummy
+settings:
+  parallel: 4
+  timeout_seconds: 30
+  cache: true
+tests:
+  - id: t1_must_contain
+    tags: ["smoke"]
+    input:
+      prompt: "Say hello and mention Amsterdam."
+    expected:
+      type: must_contain
+      must_contain: ["hello", "Amsterdam"]
+  - id: t2_must_not_contain
+    tags: ["smoke"]
+    input:
+      prompt: "Write a sentence without the word banana."
+    expected:
+      type: must_not_contain
+      must_not_contain: ["banana"]
+"#)
         .map_err(|e| ConfigError(format!("failed to write sample config: {}", e)))?;
     Ok(())
 }

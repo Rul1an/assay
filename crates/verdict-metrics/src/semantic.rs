@@ -98,8 +98,9 @@ mod tests {
                 context: None,
             },
             expected: Expected::SemanticSimilarityTo {
-                semantic_similarity_to: "ref".into(),
+                semantic_similarity_to: "hello world".to_string(),
                 min_score,
+                thresholding: None,
             },
             tags: vec![],
             metadata: None,

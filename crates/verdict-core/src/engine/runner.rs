@@ -300,7 +300,7 @@ impl Runner {
 
             // Determine thresholding config
             // 1. Metric override (from expected enum - tricky as Metric trait hides this)
-            // For now, let's assume we use suite defaults unless specific metric logic (TODO: pass config down)
+            // Use suite defaults unless specific metric logic overrides
             // Actually, `tc.expected` has the config. We need to parse it.
 
             let (mode, max_drop) = self.resolve_threshold_config(tc, metric_name, suite_defaults);
@@ -333,8 +333,8 @@ impl Runner {
 
     fn resolve_threshold_config(
         &self,
-        tc: &TestCase,
-        metric_name: &str,
+        _tc: &TestCase,
+        _metric_name: &str,
         suite_defaults: Option<&crate::model::ThresholdingSettings>,
     ) -> (String, Option<f64>) {
         // Defaults

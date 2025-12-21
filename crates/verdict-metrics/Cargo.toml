@@ -9,7 +9,7 @@ repository.workspace = true
 anyhow = "1"
 async-trait = "0.1"
 serde_json = "1"
-verdict-core = { version = "0.1.0" }
+verdict-core = { path = "../verdict-core", version = "0.2.0" }
 regex = "1"
 jsonschema = "0.19"
 

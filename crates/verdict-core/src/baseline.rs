@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Baseline {
@@ -38,19 +37,7 @@ impl Baseline {
             );
         }
 
-        // Hardening: Suite mismatch
-        // Note: We need access to current suite name to check this.
-        // `load` currently only takes path.
-        // We might need to change signature of `load` OR check it outside.
-        // Let's keep `load` simple-ish but maybe we add verification methods?
-        // Actually, the plan said "Hardening (Exit 2 on schema/suite mismatch)".
-        // If we want to check suite, we need the expected suite.
-        // Let's modify `load` signature? No, that breaks callers unless we update them.
-        // `load` is called in `commands.rs`. We can check suite *after* load there.
-        // BUT `schema_version` is structural, so `load` handles it.
-        // Let's stick to `schema_version` here. Suite check should be in `commands.rs` or `runner.rs` where we have context.
-        // Wait, the plan said "Core: Hardening".
-        // Let's verify compatibility *in* `baseline.rs` but maybe as a separate method `validate(&self, current_suite: &str, current_version: &str)`.
+        // Note: Suite mismatch and verdict version checks are handled in `validate()` to separate structural loading from semantic validation.
 
         Ok(baseline)
     }
