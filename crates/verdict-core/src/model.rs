@@ -66,12 +66,21 @@ pub enum Expected {
         schema_file: Option<String>,
     },
     SemanticSimilarityTo {
+        // canonical field
+        #[serde(alias = "text")]
         semantic_similarity_to: String,
-        min_score: Option<f64>,
+
+        // canonical field
+        #[serde(default = "default_min_score", alias = "threshold")]
+        min_score: f64,
     },
     JudgeCriteria {
         judge_criteria: serde_json::Value,
     },
+}
+
+fn default_min_score() -> f64 {
+    0.80
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -45,6 +45,18 @@ struct RunArgs {
     /// strict mode (controls exit code policy: warn/flaky -> exit 1)
     #[arg(long)]
     strict: bool,
+
+    /// embedder provider (none|openai|fake)
+    #[arg(long, default_value = "none")]
+    embedder: String,
+
+    /// embedding model name
+    #[arg(long, default_value = "text-embedding-3-small")]
+    embedding_model: String,
+
+    /// force refresh of embeddings (ignore cache)
+    #[arg(long)]
+    refresh_embeddings: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -75,6 +87,15 @@ struct CiArgs {
     /// strict mode (controls exit code policy: warn/flaky -> exit 1)
     #[arg(long)]
     strict: bool,
+
+    #[arg(long, default_value = "none")]
+    embedder: String,
+
+    #[arg(long, default_value = "text-embedding-3-small")]
+    embedding_model: String,
+
+    #[arg(long)]
+    refresh_embeddings: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -161,7 +182,10 @@ async fn cmd_init(args: InitArgs) -> anyhow::Result<i32> {
 
     // 3. CI Scaffolding
     if args.ci {
-        write_file_if_missing(std::path::Path::new("ci-eval.yaml"), templates::CI_EVAL_YAML)?;
+        write_file_if_missing(
+            std::path::Path::new("ci-eval.yaml"),
+            templates::CI_EVAL_YAML,
+        )?;
         write_file_if_missing(
             std::path::Path::new("schemas/ci_answer.schema.json"),
             templates::CI_SCHEMA_JSON,
@@ -190,9 +214,11 @@ fn write_file_if_missing(path: &std::path::Path, content: &str) -> anyhow::Resul
         eprintln!("note: {} already exists (skipped)", path.display());
     }
     Ok(())
+    // ... (rest of file)
 }
 
 fn write_sample_config_if_missing(path: &std::path::Path) -> anyhow::Result<()> {
+    // ... (rest of file)
     if !path.exists() {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -214,7 +240,11 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
         &cfg,
         args.rerun_failures,
         &args.quarantine_mode,
-    ).await?;
+        &args.embedder,
+        &args.embedding_model,
+        args.refresh_embeddings,
+    )
+    .await?;
 
     let artifacts = runner.run_suite(&cfg).await?;
 
@@ -231,7 +261,11 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
         &cfg,
         args.rerun_failures,
         &args.quarantine_mode,
-    ).await?;
+        &args.embedder,
+        &args.embedding_model,
+        args.refresh_embeddings,
+    )
+    .await?;
 
     let artifacts = runner.run_suite(&cfg).await?;
 
@@ -276,7 +310,10 @@ async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
 fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool) -> i32 {
     use verdict_core::model::TestStatus;
 
-    if results.iter().any(|r| r.message.starts_with("config error:")) {
+    if results
+        .iter()
+        .any(|r| r.message.starts_with("config error:"))
+    {
         return exit_codes::CONFIG_ERROR;
     }
 
@@ -305,6 +342,9 @@ async fn build_runner(
     cfg: &verdict_core::model::EvalConfig,
     rerun_failures_arg: u32,
     quarantine_mode_str: &str,
+    embedder_provider: &str,
+    embedding_model: &str,
+    refresh_embeddings: bool,
 ) -> anyhow::Result<verdict_core::engine::runner::Runner> {
     let store = verdict_core::storage::Store::open(db_path)?;
     store.init_schema()?;
@@ -322,6 +362,7 @@ async fn build_runner(
     let metrics = verdict_metrics::default_metrics();
 
     let replay_mode = trace_file.is_some();
+    // ...
     let rerun_failures = if replay_mode {
         if rerun_failures_arg > 0 {
             eprintln!("note: replay mode active; forcing --rerun-failures=0 for determinism");
@@ -336,12 +377,38 @@ async fn build_runner(
         quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(quarantine_mode_str),
     };
 
+    // Embedder construction
+    use verdict_core::providers::embedder::{fake::FakeEmbedder, openai::OpenAIEmbedder, Embedder};
+
+    let embedder: Option<Arc<dyn Embedder>> = match embedder_provider {
+        "none" => None,
+        "openai" => {
+            let key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+                anyhow::anyhow!("OPENAI_API_KEY environment variable required for openai embedder")
+            })?;
+            Some(Arc::new(OpenAIEmbedder::new(
+                embedding_model.to_string(),
+                key,
+            )))
+        }
+        "fake" => {
+            // Useful for testing CLI flow
+            Some(Arc::new(FakeEmbedder::new(
+                embedding_model,
+                vec![1.0, 0.0, 0.0],
+            )))
+        }
+        _ => anyhow::bail!("unknown embedder provider: {}", embedder_provider),
+    };
+
     Ok(verdict_core::engine::runner::Runner {
         store,
         cache,
         client,
         metrics,
         policy,
+        embedder,
+        refresh_embeddings,
     })
 }
 

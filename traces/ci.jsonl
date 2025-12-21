@@ -1,4 +1,3 @@
-{"schema_version": 1, "type": "verdict.trace", "request_id": "ci-1", "prompt": "ci_echo_hello", "response": "Hello World"}
-{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_2", "prompt": "calculate 10 + 20", "response": "The sum is 30.", "model": "trace", "provider": "trace"}
-{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_3", "prompt": "ci_regex", "response": "hello   ci", "model": "trace", "provider": "trace"}
-{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_4", "prompt": "ci_json_schema_file", "response": "{\"answer\":\"ok\"}", "model": "trace", "provider": "trace"}
+{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_1", "prompt": "ci_regex", "response": "hello   ci", "model": "trace", "provider": "trace"}
+{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_2", "prompt": "ci_schema", "response": "{\"answer\":\"ok\"}", "model": "trace", "provider": "trace"}
+{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_3", "prompt": "ci_semantic", "response": "Hello Semantic", "model": "trace", "provider": "trace", "meta": {"verdict": {"embeddings": {"model":"trace-embed","response":[1.0,0.0,0.0],"reference":[1.0,0.0,0.0],"source_response":"trace","source_reference":"trace"}}}}

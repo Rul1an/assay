@@ -134,6 +134,36 @@ impl Store {
         )?;
         Ok(())
     }
+
+    // embeddings
+    pub fn get_embedding(&self, key: &str) -> anyhow::Result<Option<(String, Vec<f32>)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT model, vec FROM embeddings WHERE key = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![key])?;
+
+        if let Some(row) = rows.next()? {
+            let model: String = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            let vec = crate::embeddings::util::decode_vec_f32(&blob)?;
+            Ok(Some((model, vec)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn put_embedding(&self, key: &str, model: &str, vec: &[f32]) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let blob = crate::embeddings::util::encode_vec_f32(vec);
+        let dims = vec.len() as i64;
+        let created_at = now_rfc3339ish();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO embeddings (key, model, dims, vec, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![key, model, dims, blob, created_at],
+        )?;
+        Ok(())
+    }
 }
 
 fn now_rfc3339ish() -> String {

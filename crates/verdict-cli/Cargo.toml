@@ -1,8 +1,9 @@
 [package]
 name = "verdict-cli"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "verdict"
@@ -15,5 +16,5 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = "1"
 
-verdict-core = { path = "../verdict-core" }
-verdict-metrics = { path = "../verdict-metrics" }
+verdict-core = { version = "0.1.0" }
+verdict-metrics = { version = "0.1.0" }

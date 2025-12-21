@@ -1,14 +1,15 @@
 pub mod attempts;
 pub mod cache;
 pub mod config;
+pub mod embeddings;
 pub mod engine;
 pub mod errors;
 pub mod metrics_api;
 pub mod model;
 pub mod otel;
-pub mod redaction;
 pub mod providers;
 pub mod quarantine;
+pub mod redaction;
 pub mod report;
 pub mod storage;
 pub mod thresholds;

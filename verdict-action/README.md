@@ -27,9 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: verdict-eval/action@v1
+      - uses: Rul1an/verdict-action@v1
         with:
-          verdict_version: v0.6.0
+          verdict_version: v0.1.0
           config: ci-eval.yaml
           trace_file: traces/ci.jsonl
           redact_prompts: "true"
@@ -38,23 +38,38 @@ jobs:
 ### Strict mode (Warn/Flaky become blocking)
 
 ```yaml
-      - uses: verdict-eval/action@v1
+      - uses: Rul1an/verdict-action@v1
         with:
-          verdict_version: v0.6.0
+          verdict_version: v0.1.0
           config: ci-eval.yaml
           trace_file: traces/ci.jsonl
           strict: "true"
+          upload_sarif: "true"
 ```
 
 ## Inputs (selected)
-- `verdict_version` (required): pinned release tag (e.g. `v0.6.0`)
-- `repo`: where releases live (default `YOURORG/verdict`)
+- `verdict_version` (required): pinned release tag (e.g. `v0.1.0`)
+- `repo`: where releases live (default `Rul1an/verdict`)
 - `config`: eval config file (default `ci-eval.yaml`)
 - `trace_file`: JSONL traces for replay mode (default empty)
 - `strict`: `true|false` (default `false`)
 - `redact_prompts`: `true|false` (default `true`)
 - `upload_sarif`: `true|false` (default `true`)
 - `upload_artifacts`: `true|false` (default `true`)
+
+## Permissions & Security
+To enable **SARIF Upload** (GitHub Code Scanning integration), your generic `permissions` block must include:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write # Required for upload-sarif
+```
+
+### Fork Behavior
+The action automatically detects if it is running in a **Fork PR**.
+- `upload_sarif` is intentionally skipped on forks to prevent permission errors, as forks generally do not have `security-events: write` access.
+- Tests will still run, and `junit.xml` / `run.json` artifacts will be uploaded, ensuring contributors still get feedback.
 
 ## Required release assets
 
@@ -70,15 +85,3 @@ Examples:
 > Windows is currently **not supported**, as `verdict` is primarily tested on Linux/macOS.
 
 The tarball must contain an executable named `verdict`.
-
-If your asset name differs, pass `asset_name`:
-
-```yaml
-with:
-  verdict_version: v0.6.0
-  asset_name: verdict-x86_64-unknown-linux-musl.tar.gz
-```
-
-## Notes
-- On forked PRs, Code Scanning upload may be restricted by permissions. This action sets `continue-on-error: true` for SARIF upload to avoid blocking the job.
-- For best reproducibility, always pin `verdict_version` to a tag.

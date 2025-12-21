@@ -7,10 +7,7 @@ pub struct PathResolver {
 
 impl PathResolver {
     pub fn new(config_path: &Path) -> Self {
-        let base_dir = config_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf();
+        let base_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
         Self { base_dir }
     }
 

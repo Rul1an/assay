@@ -53,7 +53,11 @@ impl TraceClient {
             // Validate Schema
             if let Some(v) = entry.schema_version {
                 if v != 1 {
-                    return Err(anyhow::anyhow!("line {}: unsupported schema_version {}", i + 1, v));
+                    return Err(anyhow::anyhow!(
+                        "line {}: unsupported schema_version {}",
+                        i + 1,
+                        v
+                    ));
                 }
             }
             if let Some(t) = &entry.r#type {
@@ -64,7 +68,12 @@ impl TraceClient {
 
             let text = match entry.text.or(entry.response) {
                 Some(t) => t,
-                None => return Err(anyhow::anyhow!("line {}: missing `text`/`response` field", i + 1)),
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "line {}: missing `text`/`response` field",
+                        i + 1
+                    ))
+                }
             };
 
             let resp = LlmResponse {
@@ -78,7 +87,11 @@ impl TraceClient {
             // Uniqueness Check
             if let Some(rid) = &entry.request_id {
                 if request_ids.contains(rid) {
-                    return Err(anyhow::anyhow!("line {}: Duplicate request_id {}", i + 1, rid));
+                    return Err(anyhow::anyhow!(
+                        "line {}: Duplicate request_id {}",
+                        i + 1,
+                        rid
+                    ));
                 }
                 request_ids.insert(rid.clone());
             }
@@ -176,12 +189,22 @@ mod tests {
     async fn test_trace_client_duplicate_request_id() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         // different prompts, same ID
-        writeln!(tmp, r#"{{"request_id": "id1", "prompt": "p1", "response": "1"}}"#)?;
-        writeln!(tmp, r#"{{"request_id": "id1", "prompt": "p2", "response": "2"}}"#)?;
+        writeln!(
+            tmp,
+            r#"{{"request_id": "id1", "prompt": "p1", "response": "1"}}"#
+        )?;
+        writeln!(
+            tmp,
+            r#"{{"request_id": "id1", "prompt": "p2", "response": "2"}}"#
+        )?;
 
         let result = TraceClient::from_path(tmp.path());
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("Duplicate request_id"));
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Duplicate request_id"));
         Ok(())
     }
 
@@ -189,12 +212,18 @@ mod tests {
     async fn test_trace_schema_validation() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         // Bad version
-        writeln!(tmp, r#"{{"schema_version": 2, "prompt": "p", "response": "r"}}"#)?;
+        writeln!(
+            tmp,
+            r#"{{"schema_version": 2, "prompt": "p", "response": "r"}}"#
+        )?;
         assert!(TraceClient::from_path(tmp.path()).is_err());
 
         let mut tmp2 = NamedTempFile::new()?;
         // Bad type
-        writeln!(tmp2, r#"{{"type": "wrong", "prompt": "p", "response": "r"}}"#)?;
+        writeln!(
+            tmp2,
+            r#"{{"type": "wrong", "prompt": "p", "response": "r"}}"#
+        )?;
         assert!(TraceClient::from_path(tmp2.path()).is_err());
 
         let mut tmp3 = NamedTempFile::new()?;

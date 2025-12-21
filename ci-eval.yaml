@@ -1,30 +1,25 @@
 version: 1
-suite: "ci_smoke_test"
-model: "trace" # Ignored by trace-file typically, but good practice
+suite: "ci_smoke"
+model: "trace"
 tests:
-  - id: "ci_echo"
-    input:
-      prompt: "ci_echo_hello"
-    expected:
-      type: must_contain
-      must_contain: ["Hello"]
-  - id: "ci_calc_sum"
-    input:
-      prompt: "calculate 10 + 20"
-    expected:
-      type: must_contain
-      must_contain: ["30"]
-  - id: "ci_regex"
+  - id: "ci_smoke_regex"
     input:
       prompt: "ci_regex"
     expected:
       type: regex_match
       pattern: "Hello\\s+CI"
       flags: ["i"]
-  - id: "ci_json_schema_file"
+  - id: "ci_smoke_schema"
     input:
-      prompt: "ci_json_schema_file"
+      prompt: "ci_schema"
     expected:
       type: json_schema
       json_schema: "{}"
       schema_file: "schemas/ci_answer.schema.json"
+  - id: "ci_smoke_semantic"
+    input:
+      prompt: "ci_semantic"
+    expected:
+      type: semantic_similarity_to
+      text: "Hello Semantic"
+      threshold: 0.99

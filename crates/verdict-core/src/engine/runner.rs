@@ -32,6 +32,8 @@ pub struct Runner {
     pub client: Arc<dyn LlmClient>,
     pub metrics: Vec<Arc<dyn Metric>>,
     pub policy: RunPolicy,
+    pub embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
+    pub refresh_embeddings: bool,
 }
 
 impl Runner {
@@ -197,6 +199,9 @@ impl Runner {
         };
         resp.cached = resp.cached || cached;
 
+        // Semantic Enrichment
+        self.enrich_semantic(tc, &mut resp).await?;
+
         let mut final_status = TestStatus::Pass;
         let mut final_score: Option<f64> = None;
         let mut msg = String::new();
@@ -255,7 +260,79 @@ impl Runner {
             client: self.client.clone(),
             metrics: self.metrics.clone(),
             policy: self.policy.clone(),
+            embedder: self.embedder.clone(),
+            refresh_embeddings: self.refresh_embeddings,
         }
+    }
+
+    // Embeddings logic
+    async fn enrich_semantic(&self, tc: &TestCase, resp: &mut LlmResponse) -> anyhow::Result<()> {
+        use crate::model::Expected;
+
+        let Expected::SemanticSimilarityTo {
+            semantic_similarity_to,
+            ..
+        } = &tc.expected
+        else {
+            return Ok(());
+        };
+
+        // If trace already provided both vectors, accept them
+        if resp.meta.pointer("/verdict/embeddings/response").is_some()
+            && resp.meta.pointer("/verdict/embeddings/reference").is_some()
+        {
+            return Ok(());
+        }
+
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "config error: semantic_similarity_to requires an embedder (--embedder) or trace meta embeddings"
+            )
+        })?;
+
+        let model_id = embedder.model_id();
+
+        let (resp_vec, src_resp) = self
+            .embed_text(&model_id, embedder.as_ref(), &resp.text)
+            .await?;
+        let (ref_vec, src_ref) = self
+            .embed_text(&model_id, embedder.as_ref(), semantic_similarity_to)
+            .await?;
+
+        // write into meta.verdict.embeddings
+        if !resp.meta.get("verdict").map_or(false, |v| v.is_object()) {
+            resp.meta["verdict"] = serde_json::json!({});
+        }
+        resp.meta["verdict"]["embeddings"] = serde_json::json!({
+            "model": model_id,
+            "response": resp_vec,
+            "reference": ref_vec,
+            "source_response": src_resp,
+            "source_reference": src_ref
+        });
+
+        Ok(())
+    }
+
+    pub async fn embed_text(
+        &self,
+        model_id: &str,
+        embedder: &dyn crate::providers::embedder::Embedder,
+        text: &str,
+    ) -> anyhow::Result<(Vec<f32>, &'static str)> {
+        use crate::embeddings::util::embed_cache_key;
+
+        let key = embed_cache_key(model_id, text);
+
+        if !self.refresh_embeddings {
+            if let Some((_m, vec)) = self.store.get_embedding(&key)? {
+                return Ok((vec, "cache"));
+            }
+        }
+
+        let vec = embedder.embed(text).await?;
+        self.store.put_embedding(&key, model_id, &vec)?;
+        Ok((vec, "live"))
     }
 }
 
@@ -266,6 +343,8 @@ struct RunnerRef {
     client: Arc<dyn LlmClient>,
     metrics: Vec<Arc<dyn Metric>>,
     policy: RunPolicy,
+    embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
+    refresh_embeddings: bool,
 }
 
 impl RunnerRef {
@@ -281,6 +360,8 @@ impl RunnerRef {
             client: self.client.clone(),
             metrics: self.metrics.clone(),
             policy: self.policy.clone(),
+            embedder: self.embedder.clone(),
+            refresh_embeddings: self.refresh_embeddings,
         };
         runner.run_test_with_policy(cfg, tc, run_id).await
     }

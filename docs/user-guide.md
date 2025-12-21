@@ -80,6 +80,48 @@ tests:
 - `must_not_contain`: List of substrings that must be absent.
 - `regex_match` / `regex_not_match`: Perl-style regex validation.
 - `json_schema`: Validates structure against a JSON Schema (inline or file).
+- `semantic_similarity_to`: Fuzzy match using vector embeddings (requires `openai` embedder or trace metadata).
+
+### Semantic Similarity (Fuzzy Match)
+Use this metric to check if the output "means" the same as a reference string, even if the wording differs.
+
+```yaml
+    expected:
+      type: semantic_similarity_to
+      text: "The user is allowed to reset their password."
+      threshold: 0.85 # (Default: 0.80)
+```
+
+**Running Locally (Live)**:
+Requires `OPENAI_API_KEY`.
+```bash
+export OPENAI_API_KEY=sk-...
+verdict run --embedder openai --embedding-model text-embedding-3-small
+```
+
+**Running in CI (Offline/Replay)**:
+If you are using `--trace-file`, Verdict will look for pre-computed embeddings in the matching trace entry `meta.verdict.embeddings`.
+This makes semantic tests **deterministic and free** in CI. No API calls are made if embeddings are present in the trace.
+
+**Trace Schema (v1)**:
+```json
+{
+  "request_id": "...",
+  "prompt": "...",
+  "response": "...",
+  "meta": {
+    "verdict": {
+      "embeddings": {
+        "model": "text-embedding-3-small",
+        "response": [0.1, 0.2, ...],
+        "reference": [0.3, 0.4, ...],
+        "source_response": "live",
+        "source_reference": "live"
+      }
+    }
+  }
+}
+```
 
 ---
 

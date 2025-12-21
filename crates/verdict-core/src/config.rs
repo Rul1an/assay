@@ -45,12 +45,10 @@ fn normalize_paths(cfg: &mut EvalConfig, config_path: &Path) -> anyhow::Result<(
 
                         meta["verdict"]["schema_file_original"] = serde_json::json!(before);
                         meta["verdict"]["schema_file_resolved"] = serde_json::json!(resolved);
-                        meta["verdict"]["config_dir"] = serde_json::json!(
-                            config_path
-                                .parent()
-                                .unwrap_or(Path::new("."))
-                                .to_string_lossy()
-                        );
+                        meta["verdict"]["config_dir"] = serde_json::json!(config_path
+                            .parent()
+                            .unwrap_or(Path::new("."))
+                            .to_string_lossy());
                     }
                 }
             }

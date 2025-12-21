@@ -20,7 +20,9 @@ impl Metric for RegexMatchMetric {
     ) -> anyhow::Result<MetricResult> {
         let (pattern, flags, negate) = match expected {
             Expected::RegexMatch { pattern, flags } => (pattern.as_str(), flags.as_slice(), false),
-            Expected::RegexNotMatch { pattern, flags } => (pattern.as_str(), flags.as_slice(), true),
+            Expected::RegexNotMatch { pattern, flags } => {
+                (pattern.as_str(), flags.as_slice(), true)
+            }
             _ => return Ok(MetricResult::pass(1.0)),
         };
 

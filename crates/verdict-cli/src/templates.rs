@@ -16,6 +16,13 @@ tests:
       type: json_schema
       json_schema: "{}"
       schema_file: "schemas/ci_answer.schema.json"
+  - id: "ci_smoke_semantic"
+    input:
+      prompt: "ci_semantic"
+    expected:
+      type: semantic_similarity_to
+      text: "Hello Semantic"
+      threshold: 0.99
 "#;
 
 pub const CI_SCHEMA_JSON: &str = r#"{
@@ -29,6 +36,7 @@ pub const CI_SCHEMA_JSON: &str = r#"{
 
 pub const CI_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_1", "prompt": "ci_regex", "response": "hello   ci", "model": "trace", "provider": "trace"}
 {"schema_version": 1, "type": "verdict.trace", "request_id": "ci_2", "prompt": "ci_schema", "response": "{\"answer\":\"ok\"}", "model": "trace", "provider": "trace"}
+{"schema_version": 1, "type": "verdict.trace", "request_id": "ci_3", "prompt": "ci_semantic", "response": "Hello Semantic", "model": "trace", "provider": "trace", "meta": {"verdict": {"embeddings": {"model":"trace-embed","response":[1.0,0.0,0.0],"reference":[1.0,0.0,0.0],"source_response":"trace","source_reference":"trace"}}}}
 "#;
 
 pub const CI_WORKFLOW_YML: &str = r#"name: Verdict Gate
@@ -38,14 +46,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      # Note: In real usage, you would install verdict binary or use a container.
-      # This example assumes verdict is available or you build it.
       - name: Run Verdict Smoke Test
-        run: |
-          # Example: download release or build
-          # cargo install --git https://github.com/Rul1an/verdict.git verdict-cli
-          # verdict ci --config ci-eval.yaml --trace-file traces/ci.jsonl --strict
-          echo "Customize this workflow to install verdict!"
+        uses: Rul1an/verdict-action@v1.0.0
+        with:
+          verdict_version: "v0.1.0" # Update to latest
+          config: ci-eval.yaml
+          trace_file: traces/ci.jsonl
+          strict: "true"
 "#;
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/verdict\n";

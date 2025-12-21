@@ -5,3 +5,14 @@ members = [
   "crates/verdict-metrics",
   "crates/verdict-cli",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Rul1an/verdict"
+authors = ["Verdict"]
+
+[patch.crates-io]
+verdict-core = { path = "crates/verdict-core" }
+verdict-metrics = { path = "crates/verdict-metrics" }

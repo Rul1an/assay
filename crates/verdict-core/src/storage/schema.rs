@@ -31,4 +31,12 @@ CREATE TABLE IF NOT EXISTS cache (
   response_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS embeddings (
+  key TEXT PRIMARY KEY,
+  model TEXT NOT NULL,
+  dims INTEGER NOT NULL,
+  vec BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);
 "#;

@@ -12,12 +12,10 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
         xml.push_str(&format!(r#"  <testcase name="{}">"#, escape(&r.test_id)));
         match r.status {
             TestStatus::Pass => {}
-            TestStatus::Warn | TestStatus::Flaky => {
-                xml.push_str(&format!(
-                    r#"<system-out>WARNING: {}</system-out>"#,
-                    escape(&r.message)
-                ))
-            }
+            TestStatus::Warn | TestStatus::Flaky => xml.push_str(&format!(
+                r#"<system-out>WARNING: {}</system-out>"#,
+                escape(&r.message)
+            )),
             TestStatus::Fail => {
                 xml.push_str(&format!(r#"<failure message="{}"/>"#, escape(&r.message)))
             }
@@ -43,8 +41,8 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::TestStatus;
     use crate::model::TestResultRow;
+    use crate::model::TestStatus;
 
     #[test]
     fn test_junit_output_structure() {

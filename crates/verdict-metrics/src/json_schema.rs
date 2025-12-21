@@ -74,8 +74,8 @@ impl Metric for JsonSchemaMetric {
 
         let result = compiled.validate(&instance);
         if let Err(errors) = result {
-             let error_list: Vec<String> = errors.map(|e| e.to_string()).collect();
-             Ok(MetricResult {
+            let error_list: Vec<String> = errors.map(|e| e.to_string()).collect();
+            Ok(MetricResult {
                 score: 0.0,
                 passed: false,
                 unstable: false,
@@ -85,7 +85,7 @@ impl Metric for JsonSchemaMetric {
                 }),
             })
         } else {
-             Ok(MetricResult::pass(1.0))
+            Ok(MetricResult::pass(1.0))
         }
     }
 }
