@@ -31,6 +31,26 @@ inputs:
     required: false
     default: ""
 
+  baseline:
+    description: "Optional baseline JSON path (enables relative threshold gating)."
+    required: false
+    default: ""
+
+  export_baseline:
+    description: "Optional path to write baseline JSON to (export baseline)."
+    required: false
+    default: ""
+
+  upload_exported_baseline:
+    description: "If true and export_baseline is set, uploads the exported baseline as an artifact."
+    required: false
+    default: "false"
+
+  exported_baseline_artifact_name:
+    description: "Artifact name for uploaded baseline (if upload_exported_baseline is true)."
+    required: false
+    default: "verdict-baseline"
+
   db:
     description: "SQLite db path."
     required: false
@@ -71,16 +91,6 @@ inputs:
     required: false
     default: ""
 
-  baseline:
-    description: "Path to baseline.json for regression checking."
-    required: false
-    default: ""
-
-  export_baseline:
-    description: "Path to export updated baseline.json to."
-    required: false
-    default: ""
-
   upload_artifacts:
     description: "Upload junit/sarif/run.json/otel.jsonl as workflow artifacts."
     required: false
@@ -90,16 +100,6 @@ inputs:
     description: "Artifact name if upload_artifacts is true."
     required: false
     default: "verdict-reports"
-
-  upload_exported_baseline:
-    description: "If 'true', uploads the exported baseline as an artifact."
-    required: false
-    default: "false"
-
-  exported_baseline_artifact_name:
-    description: "Artifact name for exported baseline."
-    required: false
-    default: "verdict-baseline"
 
   upload_sarif:
     description: "Upload SARIF to GitHub Code Scanning."
@@ -127,10 +127,41 @@ outputs:
   verdict_version:
     description: "Installed verdict version"
     value: ${{ steps.install.outputs.verdict_version }}
+  baseline_path:
+    description: "Baseline input path (resolved)"
+    value: ${{ steps.paths.outputs.baseline_path }}
+  exported_baseline_path:
+    description: "Exported baseline path (resolved)"
+    value: ${{ steps.paths.outputs.exported_baseline_path }}
 
 runs:
   using: "composite"
   steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        wd="${{ inputs.working_directory }}"
+        if [ -z "$wd" ]; then wd="."; fi
+
+        join() {
+          local p="$1"
+          if [ -z "$p" ]; then echo ""; return 0; fi
+          case "$p" in
+            /*) echo "$p" ;;
+            *)  echo "$wd/$p" ;;
+          esac
+        }
+
+        echo "junit_path=$(join "${{ inputs.junit }}")" >> "$GITHUB_OUTPUT"
+        echo "sarif_path=$(join "${{ inputs.sarif }}")" >> "$GITHUB_OUTPUT"
+        echo "otel_jsonl_path=$(join "${{ inputs.otel_jsonl }}")" >> "$GITHUB_OUTPUT"
+        echo "run_json_path=$(join "run.json")" >> "$GITHUB_OUTPUT"
+        echo "baseline_path=$(join "${{ inputs.baseline }}")" >> "$GITHUB_OUTPUT"
+        echo "exported_baseline_path=$(join "${{ inputs.export_baseline }}")" >> "$GITHUB_OUTPUT"
+
     - name: Install Verdict binary
       id: install
       shell: bash
@@ -209,16 +240,16 @@ runs:
           cmd+=(--trace-file "${{ inputs.trace_file }}")
         fi
 
-        if [ -n "${{ inputs.otel_jsonl }}" ]; then
-          cmd+=(--otel-jsonl "${{ inputs.otel_jsonl }}")
-        fi
-
         if [ -n "${{ inputs.baseline }}" ]; then
           cmd+=(--baseline "${{ inputs.baseline }}")
         fi
 
         if [ -n "${{ inputs.export_baseline }}" ]; then
           cmd+=(--export-baseline "${{ inputs.export_baseline }}")
+        fi
+
+        if [ -n "${{ inputs.otel_jsonl }}" ]; then
+          cmd+=(--otel-jsonl "${{ inputs.otel_jsonl }}")
         fi
 
         if [ "${{ inputs.redact_prompts }}" = "true" ]; then
@@ -239,18 +270,17 @@ runs:
         name: ${{ inputs.artifact_name }}
         if-no-files-found: warn
         path: |
-          ${{ inputs.junit }}
-          ${{ inputs.sarif }}
-          run.json
-          run.json
-          ${{ inputs.otel_jsonl }}
+          ${{ steps.paths.outputs.junit_path }}
+          ${{ steps.paths.outputs.sarif_path }}
+          ${{ steps.paths.outputs.run_json_path }}
+          ${{ steps.paths.outputs.otel_jsonl_path }}
 
     - name: Upload Exported Baseline
       if: ${{ inputs.upload_exported_baseline == 'true' && inputs.export_baseline != '' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.exported_baseline_artifact_name }}
-        path: ${{ inputs.export_baseline }}
+        path: ${{ steps.paths.outputs.exported_baseline_path }}
         if-no-files-found: warn
 
     - name: Upload SARIF (Code Scanning)
@@ -261,13 +291,13 @@ runs:
       uses: github/codeql-action/upload-sarif@v4
       continue-on-error: true
       with:
-        sarif_file: ${{ inputs.sarif }}
+        sarif_file: ${{ steps.paths.outputs.sarif_path }}
 
     - name: Set outputs
       id: out
       shell: bash
       run: |
-        echo "junit_path=${{ inputs.junit }}" >> "$GITHUB_OUTPUT"
-        echo "sarif_path=${{ inputs.sarif }}" >> "$GITHUB_OUTPUT"
-        echo "run_json_path=run.json" >> "$GITHUB_OUTPUT"
-        echo "otel_jsonl_path=${{ inputs.otel_jsonl }}" >> "$GITHUB_OUTPUT"
+        echo "junit_path=${{ steps.paths.outputs.junit_path }}" >> "$GITHUB_OUTPUT"
+        echo "sarif_path=${{ steps.paths.outputs.sarif_path }}" >> "$GITHUB_OUTPUT"
+        echo "run_json_path=${{ steps.paths.outputs.run_json_path }}" >> "$GITHUB_OUTPUT"
+        echo "otel_jsonl_path=${{ steps.paths.outputs.otel_jsonl_path }}" >> "$GITHUB_OUTPUT"
