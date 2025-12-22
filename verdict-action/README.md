@@ -40,7 +40,7 @@ Supports:
 
 ### 1. Gate PRs against baseline (Monorepo)
 ```yaml
-- uses: Rul1an/verdict-action@v1
+- uses: Rul1an/verdict/verdict-action@v0.4.0
   with:
     verdict_version: v0.4.0
     workdir: packages/ai
@@ -52,7 +52,7 @@ Supports:
 
 ### 2. Export baseline on main
 ```yaml
-- uses: Rul1an/verdict-action@v1
+- uses: Rul1an/verdict/verdict-action@v0.4.0
   with:
     verdict_version: v0.4.0
     config: eval.yaml
