@@ -12,7 +12,7 @@ Supports:
 | Input | Default | Description |
 |------|---------|-------------|
 | `repo` | `Rul1an/verdict` | GitHub repo hosting Verdict releases |
-| `verdict_version` | *(required)* | Release tag (e.g. `v0.3.4`) |
+| `verdict_version` | *(required)* | Release tag (e.g. `v0.4.0`) |
 | `config` | *(required)* | Config YAML path (relative to `workdir`) |
 | `workdir` | `.` | Working directory (monorepo support) |
 | `trace_file` | `""` | Trace JSONL (relative to `workdir`) |
@@ -42,7 +42,7 @@ Supports:
 ```yaml
 - uses: Rul1an/verdict-action@v1
   with:
-    verdict_version: v0.3.4
+    verdict_version: v0.4.0
     workdir: packages/ai
     config: eval.yaml
     trace_file: traces/ci.jsonl
@@ -54,7 +54,7 @@ Supports:
 ```yaml
 - uses: Rul1an/verdict-action@v1
   with:
-    verdict_version: v0.3.4
+    verdict_version: v0.4.0
     config: eval.yaml
     trace_file: traces/main.jsonl
     export_baseline: baseline.json
