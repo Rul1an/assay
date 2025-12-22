@@ -1,0 +1,10 @@
+version: 1
+suite: debug
+model: gpt-4o-mini
+tests:
+  - id: debug
+    input:
+      prompt: "foo"
+    expected:
+      type: regex_match
+      pattern: "bar"

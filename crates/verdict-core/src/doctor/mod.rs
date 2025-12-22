@@ -226,17 +226,23 @@ fn summarize_db(path: &Path, _diags: &mut Vec<Diagnostic>) -> anyhow::Result<DbS
     store.init_schema()?; // ensure migrations
 
     // These queries are intentionally light
-    let (runs, results, last_run_id, last_run_started_at) = store
+    let stats = store
         .stats_best_effort()
-        .unwrap_or((None, None, None, None));
+        .unwrap_or(crate::storage::store::StoreStats {
+            runs: None,
+            results: None,
+            last_run_id: None,
+            last_run_at: None,
+            version: None,
+        });
 
     Ok(DbSummary {
         path: path.display().to_string(),
         size_bytes,
-        runs,
-        results,
-        last_run_id,
-        last_run_started_at,
+        runs: stats.runs,
+        results: stats.results,
+        last_run_id: stats.last_run_id,
+        last_run_started_at: stats.last_run_at,
     })
 }
 

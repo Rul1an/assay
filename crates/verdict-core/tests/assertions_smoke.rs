@@ -1,7 +1,7 @@
 use serde_json::json;
 use verdict_core::agent_assertions::{model::TraceAssertion, verify_assertions};
 use verdict_core::storage::Store;
-use verdict_core::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
+use verdict_core::trace::schema::{EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
 
 #[test]
 fn test_assertions_logic() -> anyhow::Result<()> {

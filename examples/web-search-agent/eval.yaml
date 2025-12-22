@@ -1,0 +1,22 @@
+version: 1
+suite: web-search-suite
+model: gpt-4
+policies:
+  research_policy:
+    assertions:
+      # Must search at least twice to compare
+      - type: trace_must_call_tool
+        tool_name: web_search
+        min_calls: 2
+
+      # Ensure no errors
+      - type: trace_no_tool_errors
+
+tests:
+  - id: ws-trace-01
+    policy: research_policy
+    input:
+      prompt: "Compare population of Tokyo and NYC"
+    expected:
+      type: must_contain
+      must_contain: ["Tokyo", "NYC", "million"]

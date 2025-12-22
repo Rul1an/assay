@@ -3,12 +3,13 @@
 Verdict is a **local-first** evaluation and regression-gating tool for LLM apps (RAG, agents, assistants).
 It’s optimized for **deterministic replay in CI**, **baseline regression detection**, and
 - **[User Guide](./docs/user-guide.md)**: Full configuration reference
+- **[Testing Agents](./docs/AGENTS.md)**: Guide for OTel ingestion and tool assertions
 - **[Troubleshooting](./docs/TROUBLESHOOTING.md)**: Fast path for fixing CI issues
 - **[Installation](./docs/install.md)**: Setup guided (CI): GitHub Action
 Use the GitHub Action so you **don’t need a Rust toolchain**.
 
 ```yaml
-- uses: Rul1an/verdict-action@v0.3.4
+- uses: Rul1an/verdict-action@v0.4.0
   with:
     config: eval.yaml
     trace_file: traces/ci.jsonl
@@ -48,7 +49,7 @@ verdict ci --config eval.yaml --trace-file traces/pr.jsonl --baseline baseline.j
 **GitHub Action example**:
 
 ```yaml
-- uses: Rul1an/verdict-action@v0.3.4
+- uses: Rul1an/verdict-action@v0.4.0
   with:
     config: eval.yaml
     trace_file: traces/pr.jsonl

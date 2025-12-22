@@ -41,12 +41,10 @@ pub async fn run(args: DoctorArgs) -> anyhow::Result<i32> {
     if let Some(p) = args.out {
         std::fs::write(&p, rendered)?;
         eprintln!("wrote file: {}", p.display());
+    } else if args.format == "json" {
+        println!("{}", rendered);
     } else {
-        if args.format == "json" {
-            println!("{}", rendered);
-        } else {
-            eprintln!("{}", rendered);
-        }
+        eprintln!("{}", rendered);
     }
 
     Ok(0)

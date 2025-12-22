@@ -104,6 +104,7 @@ mod tests {
             },
             tags: vec![],
             metadata: None,
+            assertions: None,
         };
         let expected = tc.expected.clone();
         let resp = LlmResponse {

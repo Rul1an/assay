@@ -8,18 +8,18 @@ pub fn cmd_baseline_report(args: BaselineReportArgs) -> anyhow::Result<()> {
     store.init_schema()?;
     let report = report_from_db(&store, &args.suite, args.last)?;
 
-    let json_output = serde_json::to_string_pretty(&report)?;
-
-    if args.format == "json" && args.out.extension().map_or(true, |ext| ext == "json") {
-        fs::write(&args.out, json_output)?;
+    if args.format == "json" && args.out.extension().is_none_or(|ext| ext == "json") {
+        let json = serde_json::to_string_pretty(&report)?;
+        std::fs::write(&args.out, json)?;
         eprintln!("wrote {}", args.out.display());
-    } else if args.format == "md" || args.out.extension().map_or(false, |ext| ext == "md") {
+    } else if args.format == "md" || args.out.extension().is_some_and(|ext| ext == "md") {
         let md = generate_markdown(&report);
         fs::write(&args.out, md)?;
         eprintln!("wrote {}", args.out.display());
     } else {
-        // Default to JSON if ambiguous
-        fs::write(&args.out, json_output)?;
+        // Default to JSON
+        let json = serde_json::to_string_pretty(&report)?;
+        std::fs::write(&args.out, json)?;
         eprintln!("wrote {}", args.out.display());
     }
 

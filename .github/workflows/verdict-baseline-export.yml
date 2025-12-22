@@ -1,0 +1,32 @@
+name: verdict-baseline-export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "examples/ci-regression-gate/**"
+      - ".github/workflows/verdict-baseline-export.yml"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export baseline (offline/replay)
+        uses: Rul1an/verdict-action@v1
+        with:
+          verdict_version: v0.4.0
+          workdir: examples/ci-regression-gate
+          config: eval.yaml
+          trace_file: traces/main.jsonl
+          export_baseline: baseline.json
+          sarif: false
+          cache_mode: auto
+          upload_artifacts: false
+          upload_baseline_artifact: true
+
+      - name: Show baseline
+        run: |
+          cat examples/ci-regression-gate/baseline.json || true

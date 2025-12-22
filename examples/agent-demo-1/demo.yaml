@@ -1,0 +1,31 @@
+version: 1
+suite: demo-agent-suite
+model: gpt-4o-mini
+
+policies:
+  demo_policy:
+    assertions:
+      # 1. We expect the agent to check the weather
+      - type: trace_must_call_tool
+        tool_name: get_weather
+        min_calls: 1
+
+      # 2. We forbid sending emails (safety)
+      - type: trace_must_call_tool
+        tool_name: send_email
+        max_calls: 0
+
+      # 3. We check the arguments (Paris)
+      - type: trace_tool_arg_match
+        tool_name: get_weather
+        argument: location
+        regex: "(?i)Paris"
+
+tests:
+  - id: demo-test-01
+    policy: demo_policy
+    input:
+      prompt: "What's the weather in Paris?"
+    expected:
+      type: must_contain
+      must_contain: ["sunny"]

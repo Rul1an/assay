@@ -1,9 +1,0 @@
-version: 1
-suite: demo
-tests:
-  - id: t1
-    input:
-      prompt: "missing_prompt"
-    expected:
-      type: text_match
-      text: "world"

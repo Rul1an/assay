@@ -17,19 +17,42 @@ fn test_otel_ingest_logic() -> anyhow::Result<()> {
     }
 
     // 2. Convert
+    // 2. Convert
     let events = convert_spans_to_episodes(spans);
     assert_eq!(
         events.len(),
-        4,
-        "Expected EpisodeStart + Step(Model) + Step(Tool) + ToolCall"
+        5,
+        "Expected EpisodeStart + Step(Model) + Step(Tool) + ToolCall + EpisodeEnd"
     );
-    // EpisodeStart (1), Step1 (Chat), Step2 (Tool), ToolCall (Tool) = 4 events?
+
+    // Robust checks
+    let starts = events
+        .iter()
+        .filter(|e| matches!(e, verdict_core::trace::schema::TraceEvent::EpisodeStart(_)))
+        .count();
+    let ends = events
+        .iter()
+        .filter(|e| matches!(e, verdict_core::trace::schema::TraceEvent::EpisodeEnd(_)))
+        .count();
+    assert_eq!(starts, 1, "Should have exactly 1 EpisodeStart");
+    assert_eq!(ends, 1, "Should have exactly 1 EpisodeEnd");
+
+    // Verify last event is EpisodeEnd
+    if let verdict_core::trace::schema::TraceEvent::EpisodeEnd(end) = events.last().unwrap() {
+        assert!(!end.episode_id.is_empty());
+        // Note: fixture currently doesn't have gen_ai.completion in root span, so final_output is None.
+        // If we update fixture, we can assert is_some().
+    } else {
+        panic!("Last event should be EpisodeEnd");
+    }
+
     // Let's check logic:
     // loop spans:
     //   span1 (chat) -> Step
     //   span2 (tool) -> Step + ToolCall
     // + EpisodeStart at beginning.
-    // Total 1 + 1 + 2 = 4. Correct.
+    // + EpisodeEnd at the end.
+    // Total 1 + 1 + 2 + 1 = 5. Correct.
 
     // 3. Store
     let store = Store::memory()?;
@@ -42,13 +65,13 @@ fn test_otel_ingest_logic() -> anyhow::Result<()> {
     store.insert_batch(&events, Some(run_id), Some("test-agent"))?;
 
     // 4. Verify via Graph
-    let graph = store.get_episode_graph(1, "test-agent")?; // test_id irrelevant as we just query by run_id/test_id if linked.
-                                                           // Wait, get_episode_graph takes (run_id, test_id).
-                                                           // Otel ingest does NOT link to run_id/test_id by default (passed None, None).
-                                                           // So `get_episode_graph` might fail to find it IF it relies on `episodes.run_id` match.
-                                                           // `get_episode_graph` query:
-                                                           // `SELECT id FROM episodes WHERE run_id = ?1 AND test_id = ?2`
-                                                           // So YES, it will fail if we don't link it.
+    let _graph = store.get_episode_graph(1, "test-agent")?; // test_id irrelevant as we just query by run_id/test_id if linked.
+                                                            // Wait, get_episode_graph takes (run_id, test_id).
+                                                            // Otel ingest does NOT link to run_id/test_id by default (passed None, None).
+                                                            // So `get_episode_graph` might fail to find it IF it relies on `episodes.run_id` match.
+                                                            // `get_episode_graph` query:
+                                                            // `SELECT id FROM episodes WHERE run_id = ?1 AND test_id = ?2`
+                                                            // So YES, it will fail if we don't link it.
 
     // FIX: Otel ingest (CLI) passes None/None.
     // Tests need to manually link or we use a different query method.

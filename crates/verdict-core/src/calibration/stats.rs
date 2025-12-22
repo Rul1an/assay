@@ -51,7 +51,7 @@ impl Aggregator {
 
             // 2. Max Drop: How much variance is normal? (Median - Tail)
             // Clamp it between 2% (noise floor) and 10% (safety ceiling)
-            let recommended_max_drop = (p50 - p10).max(0.02).min(0.10);
+            let recommended_max_drop = (p50 - p10).clamp(0.02, 0.10);
 
             metrics.push(MetricSummary {
                 key,

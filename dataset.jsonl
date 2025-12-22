@@ -1,1 +1,0 @@
-{"schema_version":1,"type":"verdict.trace","request_id":"req-123_0","prompt":"hello","response":"hello world","meta":{"original":{"latency":100,"prompt":"hello","request_id":"req-123","response":"hello world"}}}

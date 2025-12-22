@@ -1,0 +1,35 @@
+name: verdict-pr-gate
+
+on:
+  pull_request:
+    paths:
+      - "examples/ci-regression-gate/**"
+      - ".github/workflows/verdict-pr-gate.yml"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch baseline from base branch (anti-tamper)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ github.base_ref }}"
+          git fetch origin "$BASE" --depth=1
+          mkdir -p examples/ci-regression-gate
+          git show "origin/$BASE:examples/ci-regression-gate/baseline.json" > examples/ci-regression-gate/baseline.json
+          echo "✅ baseline loaded from origin/$BASE"
+
+      - name: Gate PR trace against baseline (offline/replay)
+        uses: Rul1an/verdict-action@v1
+        with:
+          verdict_version: v0.4.0
+          workdir: examples/ci-regression-gate
+          config: eval.yaml
+          trace_file: traces/pr_bad.jsonl
+          baseline: baseline.json
+          sarif: false
+          cache_mode: auto
+          upload_artifacts: false

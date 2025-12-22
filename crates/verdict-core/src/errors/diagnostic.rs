@@ -52,7 +52,7 @@ impl Diagnostic {
         s.push_str(&format!("  source: {}\n", self.source));
 
         // Simple pretty print for context if not empty object
-        if !self.context.is_null() && self.context.as_object().map_or(false, |o| !o.is_empty()) {
+        if !self.context.is_null() && self.context.as_object().is_some_and(|o| !o.is_empty()) {
             if let Ok(json) = serde_json::to_string_pretty(&self.context) {
                 // Indent context
                 for line in json.lines() {

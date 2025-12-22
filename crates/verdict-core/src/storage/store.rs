@@ -10,6 +10,14 @@ pub struct Store {
     pub conn: Arc<Mutex<Connection>>,
 }
 
+pub struct StoreStats {
+    pub runs: Option<u64>,
+    pub results: Option<u64>,
+    pub last_run_id: Option<i64>,
+    pub last_run_at: Option<String>,
+    pub version: Option<String>,
+}
+
 impl Store {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path).context("failed to open sqlite db")?;
@@ -394,9 +402,7 @@ impl Store {
         )?;
         Ok(())
     }
-    pub fn stats_best_effort(
-        &self,
-    ) -> anyhow::Result<(Option<u64>, Option<u64>, Option<i64>, Option<String>)> {
+    pub fn stats_best_effort(&self) -> anyhow::Result<StoreStats> {
         let conn = self.conn.lock().unwrap();
 
         let runs: Option<u64> = conn
@@ -424,7 +430,18 @@ impl Store {
             (None, None)
         };
 
-        Ok((runs, results, last_id, last_started))
+        let v_str: Option<String> = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .ok()
+            .map(|v: i64| v.to_string());
+
+        Ok(StoreStats {
+            runs,
+            results,
+            last_run_id: last_id,
+            last_run_at: last_started,
+            version: v_str,
+        })
     }
 
     // --- Assertions Support ---
@@ -557,15 +574,22 @@ impl Store {
                 .unwrap_or_default();
         let meta = serde_json::to_string(&e.meta).unwrap_or_default();
 
+        let effective_test_id = test_id.or(Some(&e.episode_id));
+
         // Idempotent: OR REPLACE to update meta/prompt if re-ingesting? Or OR IGNORE?
         // User said: "INSERT OR IGNORE op episode_id" for idempotency of IDs.
         tx.execute(
             "INSERT INTO episodes (id, run_id, test_id, timestamp, prompt, meta_json) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET run_id=excluded.run_id, test_id=excluded.test_id",
+             ON CONFLICT(id) DO UPDATE SET
+                run_id=COALESCE(excluded.run_id, episodes.run_id),
+                test_id=COALESCE(excluded.test_id, episodes.test_id),
+                timestamp=excluded.timestamp,
+                prompt=excluded.prompt,
+                meta_json=excluded.meta_json",
             (
                 &e.episode_id,
                 run_id,
-                test_id,
+                effective_test_id,
                 e.timestamp,
                 prompt_str,
                 meta,
@@ -582,7 +606,7 @@ impl Store {
         tx.execute(
             "INSERT INTO steps (id, episode_id, idx, kind, name, content, content_sha256, truncations_json, meta_json)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(episode_id, idx) DO UPDATE SET content=excluded.content",
+             ON CONFLICT(id) DO UPDATE SET content=excluded.content, meta_json=excluded.meta_json",
             (
                 &e.step_id,
                 &e.episode_id,
@@ -691,6 +715,83 @@ fn get_columns(
     Ok(out)
 }
 
+impl Store {
+    pub fn get_latest_episode_graph_by_test_id(
+        &self,
+        test_id: &str,
+    ) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. Find latest episode for this test_id
+        let mut stmt = conn.prepare(
+            "SELECT id FROM episodes
+             WHERE test_id = ?1
+             ORDER BY timestamp DESC
+             LIMIT 1",
+        )?;
+
+        let episode_id: String = stmt.query_row(params![test_id], |row| row.get(0))
+            .map_err(|e| anyhow::anyhow!("E_TRACE_EPISODE_MISSING: No episode found for test_id={} (fallback check) : {}", test_id, e))?;
+
+        // 2. Load steps (V2 schema)
+        let mut stmt = conn.prepare(
+            "SELECT id, episode_id, idx, kind, name, content
+             FROM steps
+             WHERE episode_id = ?1
+             ORDER BY idx ASC",
+        )?;
+
+        let steps_iter = stmt.query_map(params![episode_id], |row| {
+            Ok(crate::storage::rows::StepRow {
+                id: row.get(0)?,
+                episode_id: row.get(1)?,
+                idx: row.get(2)?,
+                kind: row.get(3)?,
+                name: row.get(4)?,
+                content: row.get(5)?,
+            })
+        })?;
+
+        let mut steps = Vec::new();
+        for step in steps_iter {
+            steps.push(step?);
+        }
+
+        // 3. Load tool calls (Joined for ordering)
+        let mut stmt_tools = conn.prepare(
+            "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
+             FROM tool_calls tc
+             JOIN steps s ON tc.step_id = s.id
+             WHERE tc.episode_id = ?
+             ORDER BY s.idx ASC, tc.call_index ASC"
+        )?;
+
+        let tc_iter = stmt_tools.query_map(params![episode_id], |row| {
+            Ok(crate::storage::rows::ToolCallRow {
+                id: row.get(0)?,
+                step_id: row.get(1)?,
+                episode_id: row.get(2)?,
+                tool_name: row.get(3)?,
+                call_index: row.get(4)?,
+                args: row.get(5)?,
+                result: row.get(6)?,
+            })
+        })?;
+
+        let mut tool_calls = Vec::new();
+        for tc in tc_iter {
+            tool_calls.push(tc?);
+        }
+
+        Ok(crate::agent_assertions::EpisodeGraph {
+            episode_id,
+            steps,
+            tool_calls,
+        })
+    }
+}
+
+// Keep helper functions separate
 fn add_column_if_missing(
     conn: &Connection,
     cols: &std::collections::HashSet<String>,

@@ -13,7 +13,12 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             );
             Ok(exit_codes::OK)
         }
-        TraceSub::IngestOtel { input, db } => {
+        TraceSub::IngestOtel {
+            input,
+            db,
+            suite: _suite,
+            out_trace,
+        } => {
             use std::io::BufRead;
             use verdict_core::storage::Store;
             use verdict_core::trace::otel_ingest::{convert_spans_to_episodes, OtelSpan};
@@ -47,6 +52,19 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
                 events.len(),
                 db.display()
             );
+
+            if let Some(out_path) = out_trace {
+                let f = std::fs::File::create(&out_path)
+                    .map_err(|e| anyhow::anyhow!("failed to create output trace file: {}", e))?;
+                let mut writer = std::io::BufWriter::new(f);
+                for event in &events {
+                    use std::io::Write;
+                    let json = serde_json::to_string(event)?;
+                    writeln!(writer, "{}", json)?;
+                }
+                eprintln!("Wrote trace replay file to {}", out_path.display());
+            }
+
             Ok(exit_codes::OK)
         }
         TraceSub::Verify { trace, config } => {

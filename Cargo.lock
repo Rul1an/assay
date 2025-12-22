@@ -1785,7 +1785,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "verdict-cli"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "verdict-core"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "verdict-metrics"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",

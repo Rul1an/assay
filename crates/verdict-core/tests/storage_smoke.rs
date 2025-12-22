@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use tempfile::tempdir;
 use verdict_core::storage::store::Store;
 use verdict_core::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};

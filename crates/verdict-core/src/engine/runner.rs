@@ -258,9 +258,7 @@ impl Runner {
                                 .map(|d| serde_json::to_value(d).unwrap_or_default())
                                 .collect();
 
-                            final_row.details["assertions"] = serde_json::json!({
-                                "failed": diag_json
-                            });
+                            final_row.details["assertions"] = serde_json::Value::Array(diag_json);
 
                             let fail_msg = format!("assertions failed ({})", diags.len());
                             if final_row.message == "ok" {
@@ -431,6 +429,10 @@ impl Runner {
         if self.client.provider_name() == "trace" {
             row.details["verdict.replay"] = serde_json::json!(true);
         }
+
+        // Add prompt to details for visibility
+        row.details["prompt"] = serde_json::Value::String(tc.input.prompt.clone());
+
         Ok((row, resp))
     }
 

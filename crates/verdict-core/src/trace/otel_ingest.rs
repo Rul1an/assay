@@ -77,7 +77,7 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
     let mut out = Vec::new();
 
     for (trace_id, mut trace_spans) in by_trace {
-        // 2. Sort: Start Time ASC, End Time DESC (widest first?), Span ID ASC
+        // 2. Sort: Start Time ASC, End Time DESC
         trace_spans.sort_by(|a, b| {
             let start_a = a.start_time_unix_nano.parse::<u128>().unwrap_or(0);
             let start_b = b.start_time_unix_nano.parse::<u128>().unwrap_or(0);
@@ -102,11 +102,10 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
             .map(|s| s.start_time_unix_nano.parse::<u64>().unwrap_or(0) / 1_000_000)
             .unwrap_or(0);
 
-        // MVP: Assuming single root per trace_id is implicitly handled by grouping
         out.push(TraceEvent::EpisodeStart(EpisodeStart {
             episode_id: trace_id.clone(),
             timestamp: start_ts,
-            input: serde_json::Value::Null, // Optional input not readily available on root span yet
+            input: serde_json::Value::Null,
             meta: serde_json::json!({
                 "source": "otel",
                 "trace_id": trace_id
@@ -115,7 +114,7 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
 
         let mut step_idx = 0;
 
-        for span in trace_spans {
+        for span in &trace_spans {
             let attrs = span.attributes.clone().unwrap_or_default();
             let attrs_value = serde_json::to_value(&attrs)
                 .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
@@ -137,17 +136,6 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
 
-                // Get raw values, let json_best_effort handle string vs json
-                let prompt_raw = attrs.get("gen_ai.prompt").map(|v| v.to_string()); // to_string might escape quotes if it's already a string value?
-                                                                                    // Wait, attrs.get returns &Value. If it IS a string Value::String("foo"), to_string gives "\"foo\"".
-                                                                                    // We want the inner str if it is a string.
-                let prompt_str = attrs
-                    .get("gen_ai.prompt")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| attrs.get("gen_ai.prompt").map(|_| "")); // simplified
-                                                                         // Actually let's just use our helper on the Value directly if possible?
-                                                                         // Helper takes &str.
-                                                                         // Let's rely on our helper logic:
                 let prompt_val = attrs.get("gen_ai.prompt").cloned().unwrap_or(Value::Null);
                 let prompt_normalized = json_best_effort_value(prompt_val);
 
@@ -163,15 +151,26 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
                     "completion": comp_normalized,
                 });
 
+                // FIX: Ensure prompt is in meta for TraceClient fallback
+                let mut meta_fixed = meta.clone();
+                if let Some(p) = attrs.get("gen_ai.prompt").and_then(|v| v.as_str()) {
+                    if let Some(obj) = meta_fixed.as_object_mut() {
+                        obj.insert(
+                            "gen_ai.prompt".to_string(),
+                            serde_json::Value::String(p.to_string()),
+                        );
+                    }
+                }
+
                 out.push(TraceEvent::Step(StepEntry {
                     episode_id: trace_id.clone(),
-                    step_id: format!("{}-{}", trace_id, step_idx), // synthetic ID
+                    step_id: format!("{}-{}", trace_id, step_idx),
                     idx: step_idx,
                     timestamp: ts,
                     kind: "model".to_string(),
                     name: Some(span.name.clone()),
                     content: Some(serde_json::to_string(&content_json).unwrap()),
-                    meta: meta,
+                    meta: meta_fixed,
                     content_sha256: None,
                     truncations: vec![],
                 }));
@@ -186,7 +185,7 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
                     .unwrap_or(&span.name)
                     .to_string();
 
-                // Step (stores meta/attrs)
+                // Step
                 out.push(TraceEvent::Step(StepEntry {
                     episode_id: trace_id.clone(),
                     step_id: step_id.clone(),
@@ -194,16 +193,16 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
                     timestamp: ts,
                     kind: "tool".to_string(),
                     name: Some(span.name.clone()),
-                    content: None,      // No text content for tool step usually
-                    meta: meta.clone(), // Tool attrs live here
+                    content: None,
+                    meta: meta.clone(),
                     content_sha256: None,
                     truncations: vec![],
                 }));
 
-                // ToolCall (clean)
+                // ToolCall
                 let args_raw = attrs.get("gen_ai.tool.args");
                 let args_val = match args_raw {
-                    Some(v) => json_best_effort_value(v.clone()), // parses stringified json if needed
+                    Some(v) => json_best_effort_value(v.clone()),
                     None => Value::Object(serde_json::Map::new()),
                 };
 
@@ -212,9 +211,9 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
 
                 out.push(TraceEvent::ToolCall(ToolCallEntry {
                     episode_id: trace_id.clone(),
-                    step_id: step_id,
+                    step_id,
                     timestamp: ts,
-                    tool_name: tool_name,
+                    tool_name,
                     call_index: Some(0),
                     args: args_val,
                     result: result_val,
@@ -239,12 +238,38 @@ pub fn convert_spans_to_episodes(spans: Vec<OtelSpan>) -> Vec<TraceEvent> {
                     kind: "agent".to_string(),
                     name: Some(span.name.clone()),
                     content: Some(serde_json::to_string(&content_json).unwrap()),
-                    meta: meta,
+                    meta,
                     content_sha256: None,
                     truncations: vec![],
                 }));
             }
         }
+
+        // Episode End
+        let end_ts = trace_spans
+            .iter()
+            .map(|s| s.end_time_unix_nano.parse::<u64>().unwrap_or(0) / 1_000_000)
+            .max()
+            .unwrap_or(start_ts);
+
+        // Extract final output
+        let final_output = if let Some(root) = trace_spans.first() {
+            root.attributes.as_ref().and_then(|attrs| {
+                attrs
+                    .get("gen_ai.completion")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+        } else {
+            None
+        };
+
+        out.push(TraceEvent::EpisodeEnd(crate::trace::schema::EpisodeEnd {
+            episode_id: trace_id.clone(),
+            timestamp: end_ts,
+            final_output,
+            outcome: None,
+        }));
     }
     out
 }

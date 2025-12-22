@@ -1,4 +1,5 @@
 /target
+archive/
 **/*.rs.bk
 Cargo.lock
 .eval

@@ -112,15 +112,6 @@ fn check_subsequence(
     calls: &[crate::storage::rows::ToolCallRow],
     expected: &[String],
 ) -> Result<(), String> {
-    let mut call_iter = calls.iter();
-    // We need to find expected items in order in the call_iter
-    // But simplistic iterator matching is not enough if we want to skip non-matching items?
-    // "subsequence" usually means they appear in that order, but potentially with gaps.
-    // Yes: [A, B] matches [A, X, B].
-
-    // We can't just consume the iterator once strictly if we want flexibility,
-    // but actually for subsequence we just search forward.
-
     let mut current_idx = 0; // index in calls
 
     for expected_tool in expected {
@@ -155,16 +146,12 @@ fn make_diag(
     // Note: DiagnosticCode enum usage is available in other files but here we might need strings?
     // The Diagnostic struct uses String for code.
 
-    let mut d = Diagnostic {
+    Diagnostic {
         code: code.to_string(),
         severity: "error".to_string(),
         source: "agent_assertions".to_string(),
         message: message.to_string(),
         context: context.unwrap_or(serde_json::json!({})),
         fix_steps: vec![],
-    };
-
-    // We could add expected info to context if not already there
-    // But struct doesn't have a dedicated expected field.
-    d
+    }
 }

@@ -96,6 +96,22 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
             TestStatus::Fail => {
                 fail += 1;
                 eprintln!("❌ {:<20} {}  {}", r.test_id, r.message, duration);
+                if let Some(prompt) = r.details.get("prompt").and_then(|p| p.as_str()) {
+                    // Truncate if extremely long, but typically we want to see it
+                    let display_prompt = if prompt.len() > 100 {
+                        format!("{}...", &prompt[..100])
+                    } else {
+                        prompt.to_string()
+                    };
+                    eprintln!("      Prompt: \"{}\"", display_prompt);
+                }
+                if let Some(failures) = r.details.get("assertions").and_then(|a| a.as_array()) {
+                    for f in failures {
+                        if let Some(msg) = f.get("message").and_then(|m| m.as_str()) {
+                            eprintln!("      → {}", msg);
+                        }
+                    }
+                }
             }
             TestStatus::Error => {
                 error += 1;

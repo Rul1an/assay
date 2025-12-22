@@ -307,6 +307,13 @@ pub enum TraceSub {
         input: PathBuf,
         #[arg(long)]
         db: PathBuf,
+        /// Optional: Link ingested traces to a new run in this suite
+        #[arg(long)]
+        suite: Option<String>,
+
+        /// Optional: Write converted trace events to this JSONL file (V2 format) for replay
+        #[arg(long)]
+        out_trace: Option<PathBuf>,
     },
     /// Verify a trace dataset covers all prompts in eval config
     Verify {

@@ -1,5 +1,5 @@
 use super::args::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 
@@ -490,7 +490,7 @@ fn ensure_parent_dir(path: &std::path::Path) -> anyhow::Result<()> {
 
 fn export_baseline(
     path: &PathBuf,
-    config_path: &PathBuf,
+    config_path: &Path,
     cfg: &verdict_core::model::EvalConfig,
     results: &[verdict_core::model::TestResultRow],
 ) -> anyhow::Result<()> {

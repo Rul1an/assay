@@ -14,10 +14,11 @@ pub fn ingest_file(input: &Path, output: &Path) -> anyhow::Result<()> {
     // Check output format
     let is_sqlite = output
         .extension()
-        .map_or(false, |ext| ext == "db" || ext == "sqlite");
+        .is_some_and(|ext| ext == "db" || ext == "sqlite");
 
     if is_sqlite {
-        let mut store = crate::storage::store::Store::open(output)?;
+        let store = crate::storage::store::Store::open(output)?;
+        store.init_schema()?;
         let mut batch = Vec::with_capacity(1000);
 
         for event_result in upgrader {
