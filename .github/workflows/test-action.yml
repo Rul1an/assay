@@ -33,16 +33,18 @@ jobs:
           {"schema_version":1,"type":"verdict.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
           JSONL
 
+      - name: Build Verdict (Current Commit)
+        run: cargo build --release
+
       - name: Run action (workdir)
-        uses: ./verdict-action
-        with:
-          verdict_version: v0.3.4
-          workdir: fixtures/sub
-          config: eval.yaml
-          trace_file: traces/ok.jsonl
-          sarif: false
-          cache_mode: auto
-          artifact_name: verdict-reports-smoke
+        env:
+          VERDICT_BIN: ${{ github.workspace }}/target/release/verdict
+        working-directory: fixtures/sub
+        run: |
+          $VERDICT_BIN ci \
+            --config eval.yaml \
+            --trace-file traces/ok.jsonl \
+            --artifact-name verdict-reports-smoke
 
   export_baseline_artifact:
     runs-on: ubuntu-latest
@@ -69,17 +71,25 @@ jobs:
           {"schema_version":1,"type":"verdict.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
           JSONL
 
+      - name: Build Verdict (Current Commit)
+        run: cargo build --release
+
       - name: Export baseline
-        uses: ./verdict-action
+        env:
+          VERDICT_BIN: ${{ github.workspace }}/target/release/verdict
+        working-directory: fixtures/export
+        run: |
+          $VERDICT_BIN ci \
+            --config eval.yaml \
+            --trace-file traces/ok.jsonl \
+            --export-baseline baseline.json \
+            --artifact-name verdict-reports-export
+
+      - name: Upload Baseline Artifact
+        uses: actions/upload-artifact@v4
         with:
-          verdict_version: v0.3.4
-          workdir: fixtures/export
-          config: eval.yaml
-          trace_file: traces/ok.jsonl
-          export_baseline: baseline.json
-          upload_baseline_artifact: true
-          sarif: false
-          artifact_name: verdict-reports-export
+          name: verdict-baseline
+          path: fixtures/export/baseline.json
 
       - name: Assert baseline exists
         run: test -f fixtures/export/baseline.json
