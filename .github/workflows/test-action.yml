@@ -1,0 +1,83 @@
+name: verdict-action-contract-tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  smoke_monorepo_workdir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Minimal fake config + trace in a subdir
+      - name: Prepare fixtures
+        run: |
+          mkdir -p fixtures/sub/traces
+          cat > fixtures/sub/eval.yaml <<'YAML'
+          version: 1
+          suite: "action-contract"
+          model: "trace"
+          settings: { cache: false }
+          tests:
+            - id: "t1"
+              input: { prompt: "p1" }
+              expected:
+                type: must_contain
+                must_contain: ["hello"]
+          YAML
+
+          cat > fixtures/sub/traces/ok.jsonl <<'JSONL'
+          {"schema_version":1,"type":"verdict.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
+          JSONL
+
+      - name: Run action (workdir)
+        uses: ./verdict-action
+        with:
+          verdict_version: v0.3.3
+          workdir: fixtures/sub
+          config: eval.yaml
+          trace_file: traces/ok.jsonl
+          sarif: false
+          cache_mode: auto
+
+  export_baseline_artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare fixtures
+        run: |
+          mkdir -p fixtures/export/traces
+          cat > fixtures/export/eval.yaml <<'YAML'
+          version: 1
+          suite: "action-export"
+          model: "trace"
+          settings: { cache: false }
+          tests:
+            - id: "t1"
+              input: { prompt: "p1" }
+              expected:
+                type: must_contain
+                must_contain: ["hello"]
+          YAML
+
+          cat > fixtures/export/traces/ok.jsonl <<'JSONL'
+          {"schema_version":1,"type":"verdict.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
+          JSONL
+
+      - name: Export baseline
+        uses: ./verdict-action
+        with:
+          verdict_version: v0.3.3
+          workdir: fixtures/export
+          config: eval.yaml
+          trace_file: traces/ok.jsonl
+          export_baseline: baseline.json
+          upload_baseline_artifact: true
+          sarif: false
+
+      - name: Assert baseline exists
+        run: test -f fixtures/export/baseline.json

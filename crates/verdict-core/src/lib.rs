@@ -14,6 +14,10 @@ pub mod otel;
 pub mod providers;
 pub mod quarantine;
 pub mod redaction;
+
+pub mod validate;
+pub mod doctor;
+
 pub mod report;
 pub mod storage;
 pub mod thresholds;

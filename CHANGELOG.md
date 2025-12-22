@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.3.4] - 2025-12-23
+
+### Features
+*   **Adoption Hardening**: A suite of features to improve stability and support.
+*   **Verdict Doctor**: New command `verdict doctor` to generate support bundles (health check, stats, diagnostics).
+*   **Verdict Validate**: New command `verdict validate` for preflight checks of config, traces, and baselines.
+*   **Action Hardening**:
+    *   **Fork Support**: `sarif: auto` automatically skips Sarif uploads on fork PRs to prevent permission errors.
+    *   **Cache Splitting**: Distinct cache keys for DB (`.eval`) and Runtime (`~/.verdict`) to prevent cache confusion.
+    *   **Monorepo**: New `workdir` input for robust path resolution in nested projects.
+*   **Diagnostics**: Standardized error codes (e.g., `E_TRACE_MISS`, `E_BASE_MISMATCH`) with actionable "Fast fix" suggestions.
+*   **Troubleshooting Guide**: A new "cookbook" for fixing the top-10 failure modes in CI.
+
 ## [0.3.3] - 2025-12-22
 
 ### Added

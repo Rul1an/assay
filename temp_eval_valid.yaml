@@ -1,0 +1,10 @@
+version: 1
+suite: demo
+model: dummy
+tests:
+  - id: t1
+    input:
+      prompt: "missing_prompt"
+    expected:
+      type: must_contain
+      must_contain: ["world"]

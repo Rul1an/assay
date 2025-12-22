@@ -1,0 +1,42 @@
+name: "Design Partner Triage"
+description: "Submit a support request with a doctor report."
+title: "[Triage]: "
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please run `verdict doctor --config <your-config.yaml> --format json --out doctor.json` and paste the content below.
+
+  - type: textarea
+    id: doctor_report
+    attributes:
+      label: "Doctor Report (JSON)"
+      description: "Paste the content of doctor.json here"
+      render: json
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure_mode
+    attributes:
+      label: "Which failure mode does this resemble?"
+      options:
+        - "Possible trace miss / prompts"
+        - "Baseline churn / diffs"
+        - "Schema / Version drift"
+        - "Cache confusion / flaky CI"
+        - "Embedding dimension mismatch"
+        - "Judge variance / unstable"
+        - "Fork / Permission error"
+        - "Monorepo path issue"
+        - "Performance / Slow CI"
+        - "Unknown / No next step"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "Additional Context"
+      description: "Any other details?"

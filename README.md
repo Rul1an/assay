@@ -1,60 +1,90 @@
 # Verdict
 
-**Verdict** is a CI-first **PR regression gate** for RAG pipelines. It helps you verify LLM-based applications deterministically in CI/CD without accruing massive bills or dealing with flake.
+Verdict is a **local-first** evaluation and regression-gating tool for LLM apps (RAG, agents, assistants).
+It’s optimized for **deterministic replay in CI**, **baseline regression detection**, and
+- **[User Guide](./docs/user-guide.md)**: Full configuration reference
+- **[Troubleshooting](./docs/TROUBLESHOOTING.md)**: Fast path for fixing CI issues
+- **[Installation](./docs/install.md)**: Setup guided (CI): GitHub Action
+Use the GitHub Action so you **don’t need a Rust toolchain**.
 
-## Documentation
-- [**User Guide**](docs/user-guide.md): Comprehensive concepts, config reference, and CI usage.
-- [**CHANGELOG.md**](CHANGELOG.md): Release history.
-- [**Architecture Draft**](docs/architecture_draft.md): Design philosophy.
-- **JUnit/SARIF Support**: Native integration with GitHub Actions, GitLab CI, etc.
+```yaml
+- uses: Rul1an/verdict-action@v0.3.4
+  with:
+    config: eval.yaml
+    trace_file: traces/ci.jsonl
+```
 
-## Features (MVP v0.2.0)
+### Local (dev)
 
-- **Trace Injection** (`--trace-file`): Replay production/staging logs completely offline. No API keys required in CI.
-- **OpenTelemetry Export** (`--otel-jsonl`): Emits evaluation results using [GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
-- **VCR Caching**: Caches live LLM responses to SQLite for fast local iteration.
-
-## Installation
+If you have Rust installed:
 
 ```bash
-cargo install --path crates/verdict-cli
+cargo install verdict-cli
+verdict --version
 ```
 
-## Quick Start
+## Core concepts
+- **Trace file** (`.jsonl`): captured requests/responses for deterministic replay.
+- **Metrics**: deterministic checks, embeddings-based similarity, and optional LLM-as-judge.
+- **Baselines**: compare against a “known-good” run (relative thresholds) to catch regressions.
 
-### 1. Initialize
+## Common workflows
+
+### 1) Deterministic CI gate (baseline regression)
+
+**Main branch**: export baseline once (or update when behavior intentionally changes):
+
 ```bash
-verdict init
+verdict ci --config eval.yaml --trace-file traces/main.jsonl --export-baseline baseline.json --strict
+git add baseline.json && git commit -m "Update eval baseline"
 ```
-This fails if `eval.yaml` already exists.
 
-### 2. Run (Live Mode)
+**PRs**: gate against the committed baseline:
+
 ```bash
-# Requires dummy client (default) or configured provider
-verdict run --config eval.yaml
+verdict ci --config eval.yaml --trace-file traces/pr.jsonl --baseline baseline.json --strict
 ```
 
-### 3. Run (Trace Replay Mode) - Recommended for CI
+**GitHub Action example**:
+
+```yaml
+- uses: Rul1an/verdict-action@v0.3.4
+  with:
+    config: eval.yaml
+    trace_file: traces/pr.jsonl
+    baseline: baseline.json
+```
+
+### 2) Offline CI, cost-safe (strict replay)
+
+Use this when CI must be deterministic and must not make network calls.
+
 ```bash
-# Uses a JSONL file as the source of truth.
-# Errors if prompts are missing or duplicated.
-verdict ci --trace-file examples/traces.jsonl
+# 1) Normalize logs into a trace dataset (optional)
+verdict trace ingest --input raw_logs/*.jsonl --output trace.jsonl
+
+# 2) Precompute everything needed
+verdict trace precompute-embeddings --trace trace.jsonl --output trace.enriched.jsonl --embedder openai
+verdict trace precompute-judge      --trace trace.enriched.jsonl --output trace.enriched.jsonl --judge openai
+
+# 3) Run CI fully offline
+verdict ci --config eval.yaml --trace-file trace.enriched.jsonl --replay-strict
 ```
 
-### 4. CI Output (OTel + SARIF)
+If required data is missing (e.g., new semantic tests added), strict replay exits with code 2 and a clear instruction.
+
+### 3) Tune thresholds with data (calibration)
+
 ```bash
-verdict ci \
-  --trace-file traces.jsonl \
-  --junit report.xml \
-  --sarif results.sarif \
-  --otel-jsonl telemetry.jsonl
+# from a run artifact
+verdict calibrate --run run.json --out calibration.json
+
+# or from DB history
+verdict calibrate --db .eval/eval.db --suite my_suite --last 200 --out calibration.json
 ```
 
-## Trace Schema
-See [ADR-002](docs/ADR-002-Trace-Replay.md) for details.
-```json
-{"prompt": "...", "response": "..."}
-```
+### 4) Find flaky/unstable tests (hygiene report)
 
-## License
-MIT / Apache-2.0
+```bash
+verdict baseline report --db .eval/eval.db --suite my_suite --last 50 --out hygiene.json
+```

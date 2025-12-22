@@ -1,6 +1,7 @@
 use crate::attempts::{classify_attempts, FailureClass};
 use crate::cache::key::cache_key;
 use crate::cache::vcr::VcrCache;
+use crate::errors::try_map_error;
 use crate::metrics_api::Metric;
 use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestCase, TestResultRow, TestStatus};
 use crate::providers::llm::LlmClient;
@@ -120,7 +121,39 @@ impl Runner {
         let mut last_output: Option<LlmResponse> = None;
 
         for i in 0..max_attempts {
-            let (row, output) = self.run_test_once(cfg, tc).await?;
+            // Catch execution errors and convert to ResultRow to leverage retry/reporting logic
+            let (row, output) = match self.run_test_once(cfg, tc).await {
+                Ok(res) => res,
+                Err(e) => {
+                    let msg = if let Some(diag) = try_map_error(&e) {
+                         diag.to_string()
+                     } else {
+                         e.to_string()
+                     };
+
+                     (
+                         TestResultRow {
+                             test_id: tc.id.clone(),
+                             status: TestStatus::Error,
+                             score: None,
+                             cached: false,
+                             message: msg,
+                             details: serde_json::json!({ "error": true }),
+                             duration_ms: None,
+                             fingerprint: None,
+                             skip_reason: None,
+                             attempts: None,
+                         },
+                         LlmResponse {
+                             text: "".into(),
+                             provider: "error".into(),
+                             model: cfg.model.clone(),
+                             cached: false,
+                             meta: serde_json::json!({}),
+                         }
+                     )
+                }
+            };
             attempts.push(AttemptRow {
                 attempt_no: i + 1,
                 status: row.status.clone(),

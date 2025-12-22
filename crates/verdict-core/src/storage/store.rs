@@ -382,6 +382,26 @@ impl Store {
         )?;
         Ok(())
     }
+    pub fn stats_best_effort(&self) -> anyhow::Result<(Option<u64>, Option<u64>, Option<i64>, Option<String>)> {
+        let conn = self.conn.lock().unwrap();
+
+        let runs: Option<u64> = conn.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get::<_, i64>(0).map(|x| x as u64)).ok();
+        let results: Option<u64> = conn.query_row("SELECT COUNT(*) FROM results", [], |r| r.get::<_, i64>(0).map(|x| x as u64)).ok();
+
+        let last: Option<(i64, String)> = conn.query_row(
+            "SELECT id, started_at FROM runs ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?))
+        ).ok();
+
+        let (last_id, last_started) = if let Some((id, s)) = last {
+            (Some(id), Some(s))
+        } else {
+            (None, None)
+        };
+
+        Ok((runs, results, last_id, last_started))
+    }
 }
 
 fn now_rfc3339ish() -> String {

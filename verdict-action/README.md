@@ -1,94 +1,69 @@
-# Verdict PR Gate (GitHub Action)
+# Verdict Action
 
-Marketplace-ready composite action that:
-- downloads a pinned Verdict binary from GitHub Releases
-- runs `verdict ci` (optionally in replay mode via `--trace-file`)
-- uploads JUnit + SARIF + run artifacts + exported baselines
-- optionally uploads SARIF to GitHub Code Scanning
+Run Verdict evaluations in CI/CD pipelines (GitHub Actions).
 
-## Usage
+Supports:
+- **Baseline Gating**: Fail PRs if metrics degrade compared to `main`.
+- **Replay**: Deterministic evaluation from trace files.
+- **Reporting**: SARIF (Code Scanning), JUnit, and Artifacts.
 
-### 1. PR Gate (Compare against Baseline)
-Run checks and gate against a `baseline.json` (committed in repo).
+## Inputs
 
+| Input | Default | Description |
+|------|---------|-------------|
+| `repo` | `Rul1an/verdict` | GitHub repo hosting Verdict releases |
+| `verdict_version` | *(required)* | Release tag (e.g. `v0.3.4`) |
+| `config` | *(required)* | Config YAML path (relative to `workdir`) |
+| `workdir` | `.` | Working directory (monorepo support) |
+| `trace_file` | `""` | Trace JSONL (relative to `workdir`) |
+| `baseline` | `""` | Baseline JSON (relative to `workdir`) |
+| `export_baseline` | `""` | Export baseline to this path (relative to `workdir`) |
+| `sarif` | `auto` | `auto|true|false` — auto skips fork PRs |
+| `upload_baseline_artifact` | `true` | Upload exported baseline as an artifact |
+| `cache_mode` | `auto` | `auto` uses split caches (db + runtime) |
+
+### Optional Configuration
+| Input | Default | Description |
+|------|---------|-------------|
+| `strict` | `false` | If true, treat warnings as errors |
+| `junit` | `junit.xml` | JUnit report filename |
+| `otel_jsonl` | `""` | OpenTelemetry JSONL output filename |
+| `db` | `.eval/eval.db` | SQLite database path |
+
+### Deprecated aliases (backwards compatible)
+
+- `working_directory` → use `workdir`
+- `upload_sarif` → use `sarif`
+- `upload_exported_baseline` → use `upload_baseline_artifact`
+
+## Golden-path examples
+
+### 1. Gate PRs against baseline (Monorepo)
 ```yaml
-name: Verdict CI
-on: [pull_request]
-jobs:
-  verdict:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write # For SARIF
-    steps:
-      - uses: actions/checkout@v4
-      - uses: verdict-eval/action@v1
-        with:
-          verdict_version: v0.2.0
-          config: ci-eval.yaml
-          trace_file: traces/ci.jsonl
-          baseline: baseline.json # <--- Compare stats against this
+- uses: Rul1an/verdict-action@v1
+  with:
+    verdict_version: v0.3.4
+    workdir: packages/ai
+    config: eval.yaml
+    trace_file: traces/ci.jsonl
+    baseline: baseline.json
+    sarif: auto
 ```
 
-### 2. Main Branch (Export Baseline)
-Run checks on main and generate a fresh `baseline.json` artifact (to be merged or used by PRs).
-
+### 2. Export baseline on main
 ```yaml
-name: Verdict Baseline Export
-on:
-  push:
-    branches: [ "main" ]
-jobs:
-  export:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: verdict-eval/action@v1
-        with:
-          verdict_version: v0.2.0
-          config: ci-eval.yaml
-          trace_file: traces/ci.jsonl
-          export_baseline: baseline.json # <--- Generate new baseline
-          upload_artifacts: true
+- uses: Rul1an/verdict-action@v1
+  with:
+    verdict_version: v0.3.4
+    config: eval.yaml
+    trace_file: traces/main.jsonl
+    export_baseline: baseline.json
+    upload_baseline_artifact: true
 ```
 
-### Inputs
+### 3. Caching Behavior
+This action uses split caches to avoid "cache confusion":
+- **DB cache**: `workdir/.eval` (incremental skip history)
+- **Runtime caches**: `~/.verdict/cache` + `~/.verdict/embeddings` (precompute & performance)
 
-| Input | Description | Default |
-| :--- | :--- | :--- |
-| `verdict_version` | **Required**. Release tag to download (e.g. `v0.2.0`). | |
-| `repo` | GitHub repo for releases. | `Rul1an/verdict` |
-| `config` | Eval YAML config path. | `ci-eval.yaml` |
-| `trace_file` | JSONL trace for replay mode. | `""` |
-| `baseline` | Path to known-good baseline JSON (for gating). | `""` |
-| `export_baseline` | Path to write new baseline JSON to. | `""` |
-| `cache_mode` | Cache strategy: `off`, `verdict-cache`. | `verdict-cache` |
-| `strict` | If `true`, exit 1 on warnings/flakes. | `false` |
-| `redact_prompts` | Redact PII from outputs. | `true` |
-| `upload_sarif` | Upload to GitHub Code Scanning. | `true` |
-| `upload_artifacts` | Upload reports/baseline as artifacts. | `true` |
-| `asset_name` | Override binary filename. | `""` |
-
-### Caching
-
-By default (`cache_mode: verdict-cache`), this action caches the `.eval` directory. This speeds up runs by persisting:
-*   LLM Responses (HTTP Cache)
-*   Embeddings (Vector Store)
-
-The cache key is derived from: `verdict-{os}-{version}-{hash(config)}`. If the config changes, a fresh cache is built (but partial hits may be restored via `restore-keys`).
-To disable caching, set `cache_mode: off`.
-
-### Required release assets
-
-This action downloads a Verdict release asset:
-`verdict-${os}-${arch}.tar.gz`
-
-Examples:
-*   `verdict-linux-x86_64.tar.gz`
-*   `verdict-macos-aarch64.tar.gz`
-
-The tarball must contain an executable named `verdict`.
-
-### Notes
-*   On forked PRs, Code Scanning upload may be restricted by permissions. This action sets `continue-on-error: true` for SARIF upload.
-*   For best reproducibility, always pin `verdict_version`.
+Cache keys include OS, verdict version, and a hash of the workdir+config/trace to ensure safety.

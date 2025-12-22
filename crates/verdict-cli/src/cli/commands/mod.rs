@@ -7,6 +7,10 @@ pub mod baseline;
 pub mod calibrate;
 pub mod trace;
 
+pub mod validate;
+pub mod doctor;
+
+
 pub mod exit_codes {
     pub const OK: i32 = 0;
     pub const TEST_FAILED: i32 = 1;
@@ -18,6 +22,8 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Init(args) => cmd_init(args).await,
         Command::Run(args) => cmd_run(args).await,
         Command::Ci(args) => cmd_ci(args).await,
+        Command::Validate(args) => validate::run(args).await,
+        Command::Doctor(args) => doctor::run(args).await,
         Command::Quarantine(args) => cmd_quarantine(args).await,
         Command::Trace(args) => trace::cmd_trace(args).await,
         Command::Calibrate(args) => calibrate::cmd_calibrate(args).await,
@@ -125,6 +131,10 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     let runner = match runner {
         Ok(r) => r,
         Err(e) => {
+            if let Some(diag) = verdict_core::errors::try_map_error(&e) {
+                eprintln!("{}", diag);
+                return Ok(exit_codes::CONFIG_ERROR);
+            }
             if e.to_string().contains("config error") {
                 return Ok(exit_codes::CONFIG_ERROR);
             }
@@ -185,6 +195,10 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     let runner = match runner {
         Ok(r) => r,
         Err(e) => {
+            if let Some(diag) = verdict_core::errors::try_map_error(&e) {
+                eprintln!("{}", diag);
+                return Ok(exit_codes::CONFIG_ERROR);
+            }
             if e.to_string().contains("config error") {
                 return Ok(exit_codes::CONFIG_ERROR);
             }

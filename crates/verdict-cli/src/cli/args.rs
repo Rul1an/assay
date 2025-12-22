@@ -21,7 +21,27 @@ pub enum Command {
     Trace(TraceArgs),
     Calibrate(CalibrateArgs),
     Baseline(BaselineArgs),
+    Validate(ValidateArgs),
+    Doctor(DoctorArgs),
     Version,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ValidateArgs {
+    #[arg(long, default_value = "verdict.yaml")]
+    pub config: std::path::PathBuf,
+
+    #[arg(long)]
+    pub trace_file: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    pub baseline: Option<std::path::PathBuf>,
+
+    #[arg(long, default_value = "false")]
+    pub replay_strict: bool,
+
+    #[arg(long, default_value = "text")]
+    pub format: String, // text|json
 }
 
 #[derive(Parser, Clone)]
@@ -342,4 +362,28 @@ pub struct CalibrateArgs {
     /// Target tail for recommended min score (e.g. 0.10 for p10)
     #[arg(long, default_value_t = 0.10)]
     pub target_tail: f64,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DoctorArgs {
+    #[arg(long)]
+    pub config: std::path::PathBuf,
+
+    #[arg(long)]
+    pub trace_file: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    pub baseline: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    pub db: Option<std::path::PathBuf>,
+
+    #[arg(long, default_value = "false")]
+    pub replay_strict: bool,
+
+    #[arg(long, default_value = "text")]
+    pub format: String, // text|json
+
+    #[arg(long)]
+    pub out: Option<std::path::PathBuf>,
 }

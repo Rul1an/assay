@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 use std::path::Path;
+use crate::errors::{diagnostic::codes, similarity::closest_prompt, Diagnostic};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -59,16 +60,19 @@ impl TraceClient {
             // Validate Schema
             if let Some(v) = entry.schema_version {
                 if v != 1 {
-                    continue; // Skip unknown versions or error? For now skip
+                    return Err(anyhow::anyhow!("line {}: Unsupported schema_version {}", i + 1, v));
                 }
             }
             if let Some(t) = &entry.r#type {
                 if t != "verdict.trace" {
-                    continue;
+                    return Err(anyhow::anyhow!("line {}: Unsupported check type '{}'", i + 1, t));
                 }
             }
 
-            let response_text = entry.response.or(entry.text).unwrap_or_default();
+            let response_text = match entry.response.or(entry.text) {
+                Some(r) => r,
+                None => return Err(anyhow::anyhow!("line {}: Trace entry must have 'response' or 'text'", i + 1)),
+            };
 
             // Construct LlmResponse
             let resp = LlmResponse {
@@ -117,11 +121,29 @@ impl LlmClient for TraceClient {
         if let Some(resp) = self.traces.get(prompt) {
             Ok(resp.clone())
         } else {
-            // For now, fail if not found.
-            // In a partial replay scenario, we might want to fallback, but Requirements say "Input adapters: simpele JSONL trace ingest"
-            Err(anyhow::anyhow!(
-                "Trace miss: prompt not found in loaded traces"
-            ))
+            // Find closest match for hint
+            let closest = closest_prompt(prompt, self.traces.keys());
+
+            let mut diag = Diagnostic::new(
+                codes::E_TRACE_MISS,
+                format!("Trace miss: prompt not found in loaded traces"),
+            )
+            .with_source("trace")
+            .with_context(serde_json::json!({
+                "prompt": prompt,
+                "closest_match": closest
+            }));
+
+            if let Some(match_) = closest {
+                diag = diag.with_fix_step(format!("Did you mean '{}'? (similarity: {:.2})", match_.prompt, match_.similarity));
+                diag = diag.with_fix_step("Update your input prompt to match the trace exactly");
+            } else {
+                 diag = diag.with_fix_step("No similar prompts found in trace file");
+            }
+
+            diag = diag.with_fix_step("Regenerate the trace file: verdict trace ingest ...");
+
+            Err(anyhow::Error::new(diag))
         }
     }
 

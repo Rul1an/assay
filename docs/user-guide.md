@@ -14,6 +14,11 @@
    ```bash
    verdict init --ci --gitignore
    ```
+## Quick Links
+- [Configuration Reference](#configuration-reference)
+- [Command Line Interface](#command-line-interface)
+- [Troubleshooting](./TROUBLESHOOTING.md)
+
    This creates:
    - `ci-eval.yaml`: Evaluation configuration.
    - `traces/ci.jsonl`: Pre-recorded LLM interactions (Replay Mode).
