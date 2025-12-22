@@ -7,7 +7,7 @@ use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestCase, TestResultRow,
 use crate::providers::llm::LlmClient;
 use crate::quarantine::{QuarantineMode, QuarantineService};
 use crate::report::RunArtifacts;
-use crate::storage::Store;
+use crate::storage::store::Store;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
@@ -126,32 +126,32 @@ impl Runner {
                 Ok(res) => res,
                 Err(e) => {
                     let msg = if let Some(diag) = try_map_error(&e) {
-                         diag.to_string()
-                     } else {
-                         e.to_string()
-                     };
+                        diag.to_string()
+                    } else {
+                        e.to_string()
+                    };
 
-                     (
-                         TestResultRow {
-                             test_id: tc.id.clone(),
-                             status: TestStatus::Error,
-                             score: None,
-                             cached: false,
-                             message: msg,
-                             details: serde_json::json!({ "error": true }),
-                             duration_ms: None,
-                             fingerprint: None,
-                             skip_reason: None,
-                             attempts: None,
-                         },
-                         LlmResponse {
-                             text: "".into(),
-                             provider: "error".into(),
-                             model: cfg.model.clone(),
-                             cached: false,
-                             meta: serde_json::json!({}),
-                         }
-                     )
+                    (
+                        TestResultRow {
+                            test_id: tc.id.clone(),
+                            status: TestStatus::Error,
+                            score: None,
+                            cached: false,
+                            message: msg,
+                            details: serde_json::json!({ "error": true }),
+                            duration_ms: None,
+                            fingerprint: None,
+                            skip_reason: None,
+                            attempts: None,
+                        },
+                        LlmResponse {
+                            text: "".into(),
+                            provider: "error".into(),
+                            model: cfg.model.clone(),
+                            cached: false,
+                            meta: serde_json::json!({}),
+                        },
+                    )
                 }
             };
             attempts.push(AttemptRow {
@@ -237,6 +237,53 @@ impl Runner {
 
         final_row.attempts = Some(attempts.clone());
 
+        // PR-4.0.3 Agent Assertions
+        if let Some(assertions) = &tc.assertions {
+            if !assertions.is_empty() {
+                // Verify assertions against DB
+                match crate::agent_assertions::verify_assertions(
+                    &self.store,
+                    run_id,
+                    &tc.id,
+                    assertions,
+                ) {
+                    Ok(diags) => {
+                        if !diags.is_empty() {
+                            // Assertion Failures
+                            final_row.status = TestStatus::Fail;
+
+                            // serialize diagnostics
+                            let diag_json: Vec<serde_json::Value> = diags
+                                .iter()
+                                .map(|d| serde_json::to_value(d).unwrap_or_default())
+                                .collect();
+
+                            final_row.details["assertions"] = serde_json::json!({
+                                "failed": diag_json
+                            });
+
+                            let fail_msg = format!("assertions failed ({})", diags.len());
+                            if final_row.message == "ok" {
+                                final_row.message = fail_msg;
+                            } else {
+                                final_row.message = format!("{}; {}", final_row.message, fail_msg);
+                            }
+                        } else {
+                            // passed
+                            final_row.details["assertions"] = serde_json::json!({ "passed": true });
+                        }
+                    }
+                    Err(e) => {
+                        // Missing or Ambiguous Episode -> Fail
+                        final_row.status = TestStatus::Fail;
+                        final_row.message = format!("assertions error: {}", e);
+                        final_row.details["assertions"] =
+                            serde_json::json!({ "error": e.to_string() });
+                    }
+                }
+            }
+        }
+
         self.store
             .insert_result_embedded(run_id, &final_row, &attempts, &output)?;
 
@@ -281,9 +328,9 @@ impl Runner {
                         "skip": {
                              "reason": "fingerprint_match",
                              "fingerprint": fp.hex,
-                             "previous_run_id": prev.details.get("skip").and_then(|s| s.get("previous_run_id")).and_then(|v| v.as_i64()),
-                             "previous_at": prev.details.get("skip").and_then(|s| s.get("previous_at")).and_then(|v| v.as_str()),
-                             "origin_run_id": prev.details.get("skip").and_then(|s| s.get("origin_run_id")).and_then(|v| v.as_i64()),
+                             "previous_run_id": prev.details.get("skip").and_then(|s: &serde_json::Value| s.get("previous_run_id")).and_then(|v: &serde_json::Value| v.as_i64()),
+                             "previous_at": prev.details.get("skip").and_then(|s: &serde_json::Value| s.get("previous_at")).and_then(|v: &serde_json::Value| v.as_str()),
+                             "origin_run_id": prev.details.get("skip").and_then(|s: &serde_json::Value| s.get("origin_run_id")).and_then(|v: &serde_json::Value| v.as_i64()),
                              "previous_score": prev.score
                         }
                     }),

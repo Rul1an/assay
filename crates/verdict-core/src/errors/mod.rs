@@ -18,18 +18,30 @@ pub fn try_map_error(err: &anyhow::Error) -> Option<Diagnostic> {
     if msg.contains("embedding dims mismatch") || msg.contains("dimension mismatch") {
         // We could try to parse "expected A, got B" if the message format is stable
         // For now, actionable generic advice
-        return Some(Diagnostic::new(diagnostic::codes::E_EMB_DIMS, "Embedding dimensions mismatch")
+        return Some(
+            Diagnostic::new(
+                diagnostic::codes::E_EMB_DIMS,
+                "Embedding dimensions mismatch",
+            )
             .with_context(serde_json::json!({ "raw_error": msg }))
             .with_fix_step("Run: verdict trace precompute-embeddings --trace <file> ...")
-            .with_fix_step("Ensure the same embedding model is used for baseline and candidate runs"));
+            .with_fix_step(
+                "Ensure the same embedding model is used for baseline and candidate runs",
+            ),
+        );
     }
 
     // Baseline mismatch
     if msg.contains("Baseline mismatch") || (msg.contains("baseline") && msg.contains("schema")) {
-        return Some(Diagnostic::new(diagnostic::codes::E_BASE_MISMATCH, "Baseline incompatbile with current run")
+        return Some(
+            Diagnostic::new(
+                diagnostic::codes::E_BASE_MISMATCH,
+                "Baseline incompatbile with current run",
+            )
             .with_context(serde_json::json!({ "raw_error": msg }))
             .with_fix_step("Regenerate baseline on main branch: verdict ci --export-baseline ...")
-            .with_fix_step("Check that your config suite name matches the baseline suite"));
+            .with_fix_step("Check that your config suite name matches the baseline suite"),
+        );
     }
 
     None

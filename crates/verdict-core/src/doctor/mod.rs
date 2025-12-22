@@ -1,8 +1,8 @@
 pub mod model;
 
-use std::path::{Path, PathBuf};
 use chrono::Utc;
 use std::io::BufRead;
+use std::path::{Path, PathBuf};
 
 use crate::config::path_resolver::PathResolver;
 use crate::errors::diagnostic::{codes, Diagnostic};
@@ -20,7 +20,11 @@ pub struct DoctorOptions {
     pub replay_strict: bool,
 }
 
-pub async fn doctor(cfg: &EvalConfig, opts: &DoctorOptions, resolver: &PathResolver) -> anyhow::Result<DoctorReport> {
+pub async fn doctor(
+    cfg: &EvalConfig,
+    opts: &DoctorOptions,
+    resolver: &PathResolver,
+) -> anyhow::Result<DoctorReport> {
     let mut notes = vec![];
     let mut diagnostics: Vec<Diagnostic> = vec![];
 
@@ -101,12 +105,16 @@ fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
             Expected::Faithfulness { .. } => "faithfulness",
             Expected::Relevance { .. } => "relevance",
             Expected::JudgeCriteria { .. } => "judge_criteria",
-        }.to_string();
+        }
+        .to_string();
 
         *metric_counts.entry(key).or_insert(0) += 1;
     }
 
-    let (mode, max_drop, min_floor) = cfg.settings.thresholding.as_ref()
+    let (mode, max_drop, min_floor) = cfg
+        .settings
+        .thresholding
+        .as_ref()
         .map(|t| (t.mode.clone(), t.max_drop, t.min_floor))
         .unwrap_or((None, None, None));
 
@@ -121,7 +129,11 @@ fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
     }
 }
 
-fn summarize_trace(path: &Path, _cfg: &EvalConfig, _diags: &mut Vec<Diagnostic>) -> anyhow::Result<TraceSummary> {
+fn summarize_trace(
+    path: &Path,
+    _cfg: &EvalConfig,
+    _diags: &mut Vec<Diagnostic>,
+) -> anyhow::Result<TraceSummary> {
     // Keep it cheap: count lines, peek first line for schema_version/meta shape.
     let md = std::fs::metadata(path).ok();
     let approx_size_bytes = md.map(|m| m.len());
@@ -140,13 +152,18 @@ fn summarize_trace(path: &Path, _cfg: &EvalConfig, _diags: &mut Vec<Diagnostic>)
 
     for (i, line) in rdr.lines().enumerate() {
         let line = line?;
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         // Attempt to ignore non-JSON lines if possible, but assume JSONL
         entries += 1;
 
         if i == 0 {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                first_schema = v.get("schema_version").and_then(|x| x.as_u64()).map(|x| x as u32);
+                first_schema = v
+                    .get("schema_version")
+                    .and_then(|x| x.as_u64())
+                    .map(|x| x as u32);
                 if v.get("meta").and_then(|m| m.get("verdict")).is_some() {
                     has_verdict_meta = true;
                 }
@@ -157,9 +174,15 @@ fn summarize_trace(path: &Path, _cfg: &EvalConfig, _diags: &mut Vec<Diagnostic>)
         if i < 200 {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 if let Some(meta) = v.get("meta").and_then(|m| m.get("verdict")) {
-                    if meta.pointer("/embeddings").is_some() { has_embeddings = true; }
-                    if meta.pointer("/judge/faithfulness").is_some() { has_judge_faithfulness = true; }
-                    if meta.pointer("/judge/relevance").is_some() { has_judge_relevance = true; }
+                    if meta.pointer("/embeddings").is_some() {
+                        has_embeddings = true;
+                    }
+                    if meta.pointer("/judge/faithfulness").is_some() {
+                        has_judge_faithfulness = true;
+                    }
+                    if meta.pointer("/judge/relevance").is_some() {
+                        has_judge_relevance = true;
+                    }
                 }
             }
         } else if has_embeddings && has_judge_faithfulness && has_judge_relevance {
@@ -183,7 +206,10 @@ fn summarize_trace(path: &Path, _cfg: &EvalConfig, _diags: &mut Vec<Diagnostic>)
     })
 }
 
-fn summarize_baseline(path: &Path, _diags: &mut Vec<Diagnostic>) -> anyhow::Result<BaselineSummary> {
+fn summarize_baseline(
+    path: &Path,
+    _diags: &mut Vec<Diagnostic>,
+) -> anyhow::Result<BaselineSummary> {
     let b = crate::baseline::Baseline::load(path)?;
     Ok(BaselineSummary {
         path: path.display().to_string(),
@@ -196,11 +222,13 @@ fn summarize_baseline(path: &Path, _diags: &mut Vec<Diagnostic>) -> anyhow::Resu
 
 fn summarize_db(path: &Path, _diags: &mut Vec<Diagnostic>) -> anyhow::Result<DbSummary> {
     let size_bytes = std::fs::metadata(path).ok().map(|m| m.len());
-    let store = crate::storage::Store::open(path)?;
+    let store = crate::storage::store::Store::open(path)?;
     store.init_schema()?; // ensure migrations
 
     // These queries are intentionally light
-    let (runs, results, last_run_id, last_run_started_at) = store.stats_best_effort().unwrap_or((None,None,None,None));
+    let (runs, results, last_run_id, last_run_started_at) = store
+        .stats_best_effort()
+        .unwrap_or((None, None, None, None));
 
     Ok(DbSummary {
         path: path.display().to_string(),
@@ -235,7 +263,9 @@ fn summarize_caches(notes: &mut Vec<String>) -> CacheSummary {
 fn dir_size_bytes(p: &str) -> anyhow::Result<u64> {
     let mut total = 0u64;
     let path = std::path::Path::new(p);
-    if !path.exists() { return Ok(0); }
+    if !path.exists() {
+        return Ok(0);
+    }
 
     if path.is_file() {
         return Ok(path.metadata()?.len());
@@ -252,7 +282,7 @@ fn dir_size_bytes(p: &str) -> anyhow::Result<u64> {
             // Standard recursion is fine for cache dirs (usually flat or few levels)
             // But let's be careful about symlinks/cycles (ignore symlinks)
             if !ft.is_symlink() {
-                 total += dir_size_bytes(entry.path().to_str().unwrap_or(""))?;
+                total += dir_size_bytes(entry.path().to_str().unwrap_or(""))?;
             }
         }
     }
@@ -280,7 +310,10 @@ fn suggest_from(
         });
     }
 
-    if diags.iter().any(|d| d.code == codes::E_REPLAY_STRICT_MISSING) {
+    if diags
+        .iter()
+        .any(|d| d.code == codes::E_REPLAY_STRICT_MISSING)
+    {
         out.push(SuggestedAction {
             title: "Make trace strict-replay ready".into(),
             relates_to: "failure_mode_??_strict_replay_missing".into(),

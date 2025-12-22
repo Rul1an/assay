@@ -6,7 +6,10 @@ pub struct ClosestMatch {
     pub similarity: f64,
 }
 
-pub fn closest_prompt<'a>(needle: &str, hay: impl Iterator<Item = &'a String>) -> Option<ClosestMatch> {
+pub fn closest_prompt<'a>(
+    needle: &str,
+    hay: impl Iterator<Item = &'a String>,
+) -> Option<ClosestMatch> {
     let mut best: Option<ClosestMatch> = None;
 
     // Threshold for suggestion. 0.55 is a reasonable heuristic.

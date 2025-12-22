@@ -1,9 +1,8 @@
-use super::schema::TraceEntryV1;
 use crate::model::EvalConfig;
 use anyhow::Context;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::Path;
 
 pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()> {
@@ -13,16 +12,19 @@ pub fn verify_coverage(trace_path: &Path, cfg: &EvalConfig) -> anyhow::Result<()
     let mut trace_prompts = HashSet::new();
     let mut trace_ids = HashSet::new();
 
-    for (i, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let entry: TraceEntryV1 = serde_json::from_str(&line)
-            .context(format!("failed to parse trace entry at line {}", i + 1))?;
+    let upgrader = super::upgrader::StreamUpgrader::new(reader);
 
-        trace_prompts.insert(entry.prompt);
-        trace_ids.insert(entry.request_id);
+    for event_result in upgrader {
+        let event = event_result.context("failed to parse trace entry")?;
+
+        // We only care about EpisodeStart to verify prompt coverage
+        if let super::schema::TraceEvent::EpisodeStart(start) = event {
+            // Extract prompt from input
+            if let Some(prompt) = start.input.get("prompt").and_then(|v| v.as_str()) {
+                trace_prompts.insert(prompt.to_string());
+            }
+            trace_ids.insert(start.episode_id);
+        }
     }
 
     let mut missing = Vec::new();

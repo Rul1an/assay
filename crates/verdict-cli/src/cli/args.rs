@@ -301,6 +301,13 @@ pub enum TraceSub {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Ingest OpenTelemetry JSONL traces (GenAI SemConv)
+    IngestOtel {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        db: PathBuf,
+    },
     /// Verify a trace dataset covers all prompts in eval config
     Verify {
         #[arg(long)]

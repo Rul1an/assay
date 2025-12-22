@@ -7,9 +7,8 @@ pub mod baseline;
 pub mod calibrate;
 pub mod trace;
 
-pub mod validate;
 pub mod doctor;
-
+pub mod validate;
 
 pub mod exit_codes {
     pub const OK: i32 = 0;

@@ -4,9 +4,9 @@ use crate::errors::diagnostic::Diagnostic;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
-    pub schema_version: u32,          // 1
-    pub generated_at: String,         // rfc3339
-    pub verdict_version: String,      // e.g. "0.3.4"
+    pub schema_version: u32,     // 1
+    pub generated_at: String,    // rfc3339
+    pub verdict_version: String, // e.g. "0.3.4"
     pub platform: PlatformInfo,
 
     pub inputs: DoctorInputs,
@@ -93,8 +93,8 @@ pub struct CacheSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuggestedAction {
-    pub title: String,         // "Fix trace miss"
-    pub relates_to: String,    // "failure_mode_1_trace_miss"
+    pub title: String,      // "Fix trace miss"
+    pub relates_to: String, // "failure_mode_1_trace_miss"
     pub why: String,
-    pub steps: Vec<String>,    // copy/paste commands
+    pub steps: Vec<String>, // copy/paste commands
 }

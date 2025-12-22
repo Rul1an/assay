@@ -13,6 +13,42 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             );
             Ok(exit_codes::OK)
         }
+        TraceSub::IngestOtel { input, db } => {
+            use std::io::BufRead;
+            use verdict_core::storage::Store;
+            use verdict_core::trace::otel_ingest::{convert_spans_to_episodes, OtelSpan};
+
+            let file = std::fs::File::open(&input)
+                .map_err(|e| anyhow::anyhow!("failed to open input file: {}", e))?;
+            let reader = std::io::BufReader::new(file);
+
+            let mut spans = Vec::new();
+            for line in reader.lines() {
+                let line = line?; // propagate error
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let span: OtelSpan = serde_json::from_str(&line)
+                    .map_err(|e| anyhow::anyhow!("failed to parse OTel span: {}", e))?;
+                spans.push(span);
+            }
+
+            let events = convert_spans_to_episodes(spans);
+            let count = events.len();
+
+            let store = Store::open(&db)?;
+            store.init_schema()?; // ensure tables exist
+
+            store.insert_batch(&events, None, None)?;
+
+            eprintln!(
+                "Ingested {} OTel spans as {} V2 events into {}",
+                count,
+                events.len(),
+                db.display()
+            );
+            Ok(exit_codes::OK)
+        }
         TraceSub::Verify { trace, config } => {
             let cfg = verdict_core::config::load_config(&config)
                 .map_err(|e| anyhow::anyhow!("failed to load config: {}", e))?;

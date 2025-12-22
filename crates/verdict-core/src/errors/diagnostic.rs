@@ -43,7 +43,11 @@ impl Diagnostic {
     }
 
     pub fn format_terminal(&self) -> String {
-        let icon = if self.severity == "warn" { "⚠️ " } else { "❌" };
+        let icon = if self.severity == "warn" {
+            "⚠️ "
+        } else {
+            "❌"
+        };
         let mut s = format!("{} [{}] {}\n", icon, self.code, self.message);
         s.push_str(&format!("  source: {}\n", self.source));
 

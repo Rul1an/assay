@@ -1,0 +1,2 @@
+{"trace_id":"trace-123","span_id":"span-1","name":"chat","startTimeUnixNano":"1700000000000000000","endTimeUnixNano":"1700000001000000000","attributes":{"gen_ai.operation.name":"chat","gen_ai.request.model":"gpt-4","gen_ai.prompt":"Hello"}}
+{"trace_id":"trace-123","span_id":"span-2","parent_span_id":"span-1","name":"tool-call","startTimeUnixNano":"1700000000200000000","endTimeUnixNano":"1700000000800000000","attributes":{"gen_ai.operation.name":"execute_tool","gen_ai.tool.name":"search","gen_ai.tool.args":"{\"q\":\"weather\"}","gen_ai.tool.result":"{\"temp\":20}"}}

@@ -35,6 +35,8 @@ pub struct TestCase {
     pub input: TestInput,
     pub expected: Expected,
     #[serde(default)]
+    pub assertions: Option<Vec<crate::agent_assertions::model::TraceAssertion>>,
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,

@@ -1,4 +1,5 @@
 use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestResultRow, TestStatus};
+use crate::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
 use anyhow::Context;
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -6,12 +7,13 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct Store {
-    pub(crate) conn: Arc<Mutex<Connection>>,
+    pub conn: Arc<Mutex<Connection>>,
 }
 
 impl Store {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path).context("failed to open sqlite db")?;
+        conn.execute("PRAGMA foreign_keys = ON", [])?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -213,6 +215,16 @@ impl Store {
         }
     }
 
+    pub fn insert_run(&self, suite: &str) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let started_at = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO runs(suite, started_at, status) VALUES (?1, ?2, ?3)",
+            params![suite, started_at, "running"],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
     pub fn create_run(&self, cfg: &EvalConfig) -> anyhow::Result<i64> {
         let started_at = now_rfc3339ish();
         let conn = self.conn.lock().unwrap();
@@ -382,17 +394,29 @@ impl Store {
         )?;
         Ok(())
     }
-    pub fn stats_best_effort(&self) -> anyhow::Result<(Option<u64>, Option<u64>, Option<i64>, Option<String>)> {
+    pub fn stats_best_effort(
+        &self,
+    ) -> anyhow::Result<(Option<u64>, Option<u64>, Option<i64>, Option<String>)> {
         let conn = self.conn.lock().unwrap();
 
-        let runs: Option<u64> = conn.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get::<_, i64>(0).map(|x| x as u64)).ok();
-        let results: Option<u64> = conn.query_row("SELECT COUNT(*) FROM results", [], |r| r.get::<_, i64>(0).map(|x| x as u64)).ok();
+        let runs: Option<u64> = conn
+            .query_row("SELECT COUNT(*) FROM runs", [], |r| {
+                r.get::<_, i64>(0).map(|x| x as u64)
+            })
+            .ok();
+        let results: Option<u64> = conn
+            .query_row("SELECT COUNT(*) FROM results", [], |r| {
+                r.get::<_, i64>(0).map(|x| x as u64)
+            })
+            .ok();
 
-        let last: Option<(i64, String)> = conn.query_row(
-            "SELECT id, started_at FROM runs ORDER BY id DESC LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?))
-        ).ok();
+        let last: Option<(i64, String)> = conn
+            .query_row(
+                "SELECT id, started_at FROM runs ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
 
         let (last_id, last_started) = if let Some((id, s)) = last {
             (Some(id), Some(s))
@@ -401,6 +425,227 @@ impl Store {
         };
 
         Ok((runs, results, last_id, last_started))
+    }
+
+    // --- Assertions Support ---
+
+    pub fn get_episode_graph(
+        &self,
+        run_id: i64,
+        test_id: &str,
+    ) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. Find Episode
+        let mut stmt = conn.prepare("SELECT id FROM episodes WHERE run_id = ? AND test_id = ?")?;
+        let mut rows = stmt.query(params![run_id, test_id])?;
+
+        let mut episode_ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            episode_ids.push(row.get::<_, String>(0)?);
+        }
+
+        if episode_ids.is_empty() {
+            anyhow::bail!(
+                "E_TRACE_EPISODE_MISSING: No episode found for run_id={} test_id={}",
+                run_id,
+                test_id
+            );
+        }
+        if episode_ids.len() > 1 {
+            anyhow::bail!(
+                "E_TRACE_EPISODE_AMBIGUOUS: Multiple episodes ({}) found for run_id={} test_id={}",
+                episode_ids.len(),
+                run_id,
+                test_id
+            );
+        }
+        let episode_id = episode_ids[0].clone();
+
+        // 2. Fetch Steps
+        let mut stmt_steps = conn.prepare("SELECT id, episode_id, idx, kind, name, content FROM steps WHERE episode_id = ? ORDER BY idx ASC")?;
+        let step_rows = stmt_steps
+            .query_map(params![episode_id], |row| {
+                Ok(crate::storage::rows::StepRow {
+                    id: row.get(0)?,
+                    episode_id: row.get(1)?,
+                    idx: row.get(2)?,
+                    kind: row.get(3)?,
+                    name: row.get(4)?,
+                    content: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // 3. Fetch ToolCalls (Joined for ordering)
+        let mut stmt_tools = conn.prepare(
+            "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
+             FROM tool_calls tc
+             JOIN steps s ON tc.step_id = s.id
+             WHERE tc.episode_id = ?
+             ORDER BY s.idx ASC, tc.call_index ASC"
+        )?;
+        let tool_rows = stmt_tools
+            .query_map(params![episode_id], |row| {
+                Ok(crate::storage::rows::ToolCallRow {
+                    id: row.get(0)?,
+                    step_id: row.get(1)?,
+                    episode_id: row.get(2)?,
+                    tool_name: row.get(3)?,
+                    call_index: row.get(4)?,
+                    args: row.get(5)?,
+                    result: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(crate::agent_assertions::EpisodeGraph {
+            episode_id,
+            steps: step_rows,
+            tool_calls: tool_rows,
+        })
+    }
+
+    // --- Trace V2 Storage ---
+
+    pub fn insert_event(
+        &self,
+        event: &TraceEvent,
+        run_id: Option<i64>,
+        test_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        match event {
+            TraceEvent::EpisodeStart(e) => Self::insert_episode(&tx, e, run_id, test_id)?,
+            TraceEvent::Step(e) => Self::insert_step(&tx, e)?,
+            TraceEvent::ToolCall(e) => Self::insert_tool_call(&tx, e)?,
+            TraceEvent::EpisodeEnd(e) => Self::update_episode_end(&tx, e)?,
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn insert_batch(
+        &self,
+        events: &[TraceEvent],
+        run_id: Option<i64>,
+        test_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for event in events {
+            match event {
+                TraceEvent::EpisodeStart(e) => Self::insert_episode(&tx, e, run_id, test_id)?,
+                TraceEvent::Step(e) => Self::insert_step(&tx, e)?,
+                TraceEvent::ToolCall(e) => Self::insert_tool_call(&tx, e)?,
+                TraceEvent::EpisodeEnd(e) => Self::update_episode_end(&tx, e)?,
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn insert_episode(
+        tx: &rusqlite::Transaction,
+        e: &EpisodeStart,
+        run_id: Option<i64>,
+        test_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let prompt_str =
+            serde_json::to_string(&e.input.get("prompt").unwrap_or(&serde_json::Value::Null))
+                .unwrap_or_default();
+        let meta = serde_json::to_string(&e.meta).unwrap_or_default();
+
+        // Idempotent: OR REPLACE to update meta/prompt if re-ingesting? Or OR IGNORE?
+        // User said: "INSERT OR IGNORE op episode_id" for idempotency of IDs.
+        tx.execute(
+            "INSERT INTO episodes (id, run_id, test_id, timestamp, prompt, meta_json) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET run_id=excluded.run_id, test_id=excluded.test_id",
+            (
+                &e.episode_id,
+                run_id,
+                test_id,
+                e.timestamp,
+                prompt_str,
+                meta,
+            ),
+        ).context("insert episode")?;
+        Ok(())
+    }
+
+    fn insert_step(tx: &rusqlite::Transaction, e: &StepEntry) -> anyhow::Result<()> {
+        let meta = serde_json::to_string(&e.meta).unwrap_or_default();
+        let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
+
+        // Idempotency: UNIQUE(episode_id, idx)
+        tx.execute(
+            "INSERT INTO steps (id, episode_id, idx, kind, name, content, content_sha256, truncations_json, meta_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(episode_id, idx) DO UPDATE SET content=excluded.content",
+            (
+                &e.step_id,
+                &e.episode_id,
+                e.idx,
+                &e.kind,
+                e.name.as_deref(),
+                e.content.as_deref(),
+                e.content_sha256.as_deref(),
+                trunc,
+                meta
+            ),
+        ).context("insert step")?;
+        Ok(())
+    }
+
+    fn insert_tool_call(tx: &rusqlite::Transaction, e: &ToolCallEntry) -> anyhow::Result<()> {
+        let args = serde_json::to_string(&e.args).unwrap_or_default();
+        let result = e
+            .result
+            .as_ref()
+            .map(|r| serde_json::to_string(r).unwrap_or_default());
+        let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
+
+        let call_idx = e.call_index.unwrap_or(0); // Default 0
+
+        tx.execute(
+            "INSERT INTO tool_calls (step_id, episode_id, tool_name, call_index, args, args_sha256, result, result_sha256, error, truncations_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(step_id, call_index) DO NOTHING",
+            (
+                &e.step_id,
+                &e.episode_id,
+                &e.tool_name,
+                call_idx,
+                args,
+                e.args_sha256.as_deref(),
+                result,
+                e.result_sha256.as_deref(),
+                e.error.as_deref(),
+                trunc
+            ),
+        ).context("insert tool call")?;
+        Ok(())
+    }
+
+    pub fn count_rows(&self, table: &str) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        // Validation to prevent SQL injection (simple allowlist)
+        if !["episodes", "steps", "tool_calls", "runs", "results"].contains(&table) {
+            anyhow::bail!("Invalid table name for count_rows: {}", table);
+        }
+        let sql = format!("SELECT COUNT(*) FROM {}", table);
+        let n: i64 = conn.query_row(&sql, [], |r| r.get(0))?;
+        Ok(n)
+    }
+
+    fn update_episode_end(tx: &rusqlite::Transaction, e: &EpisodeEnd) -> anyhow::Result<()> {
+        tx.execute(
+            "UPDATE episodes SET outcome = ? WHERE id = ?",
+            (e.outcome.as_deref(), &e.episode_id),
+        )
+        .context("update episode outcome")?;
+        Ok(())
     }
 }
 

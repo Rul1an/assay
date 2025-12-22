@@ -1,4 +1,3 @@
-use serde_json::json; // Unused but kept for safety if needed later? No, remove unused.
 use verdict_core::config::{load_config, path_resolver::PathResolver};
 
 use crate::cli::args::DoctorArgs;
@@ -23,7 +22,14 @@ pub async fn run(args: DoctorArgs) -> anyhow::Result<i32> {
         // minimal human formatting (keep it short; diagnostics already have format_terminal)
         let mut s = String::new();
         s.push_str(&format!("Verdict Doctor (v{})\n", report.verdict_version));
-        s.push_str(&format!("Suite: {}\n", report.config.as_ref().map(|c| c.suite.as_str()).unwrap_or("<unknown>")));
+        s.push_str(&format!(
+            "Suite: {}\n",
+            report
+                .config
+                .as_ref()
+                .map(|c| c.suite.as_str())
+                .unwrap_or("<unknown>")
+        ));
         s.push_str(&format!("Diagnostics: {}\n", report.diagnostics.len()));
         s.push_str("\nNext actions:\n");
         for a in &report.suggested_actions {

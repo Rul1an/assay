@@ -1,3 +1,4 @@
+use crate::errors::{diagnostic::codes, similarity::closest_prompt, Diagnostic};
 use crate::model::LlmResponse;
 use crate::providers::llm::LlmClient;
 use async_trait::async_trait;
@@ -5,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
 use std::path::Path;
-use crate::errors::{diagnostic::codes, similarity::closest_prompt, Diagnostic};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -60,18 +60,31 @@ impl TraceClient {
             // Validate Schema
             if let Some(v) = entry.schema_version {
                 if v != 1 {
-                    return Err(anyhow::anyhow!("line {}: Unsupported schema_version {}", i + 1, v));
+                    return Err(anyhow::anyhow!(
+                        "line {}: Unsupported schema_version {}",
+                        i + 1,
+                        v
+                    ));
                 }
             }
             if let Some(t) = &entry.r#type {
                 if t != "verdict.trace" {
-                    return Err(anyhow::anyhow!("line {}: Unsupported check type '{}'", i + 1, t));
+                    return Err(anyhow::anyhow!(
+                        "line {}: Unsupported check type '{}'",
+                        i + 1,
+                        t
+                    ));
                 }
             }
 
             let response_text = match entry.response.or(entry.text) {
                 Some(r) => r,
-                None => return Err(anyhow::anyhow!("line {}: Trace entry must have 'response' or 'text'", i + 1)),
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "line {}: Trace entry must have 'response' or 'text'",
+                        i + 1
+                    ))
+                }
             };
 
             // Construct LlmResponse
@@ -135,10 +148,13 @@ impl LlmClient for TraceClient {
             }));
 
             if let Some(match_) = closest {
-                diag = diag.with_fix_step(format!("Did you mean '{}'? (similarity: {:.2})", match_.prompt, match_.similarity));
+                diag = diag.with_fix_step(format!(
+                    "Did you mean '{}'? (similarity: {:.2})",
+                    match_.prompt, match_.similarity
+                ));
                 diag = diag.with_fix_step("Update your input prompt to match the trace exactly");
             } else {
-                 diag = diag.with_fix_step("No similar prompts found in trace file");
+                diag = diag.with_fix_step("No similar prompts found in trace file");
             }
 
             diag = diag.with_fix_step("Regenerate the trace file: verdict trace ingest ...");

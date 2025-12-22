@@ -1,4 +1,4 @@
-use crate::storage::Store;
+use crate::storage::store::Store;
 
 #[derive(Debug, Clone, Copy)]
 pub enum QuarantineMode {

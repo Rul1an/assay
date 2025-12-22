@@ -47,7 +47,21 @@ Exit codes refresher:
 **Prevention**
 *   Treat prompts as API contracts: version prompt templates, update traces on main.
 
-**Relevant**
+- **Relevant Diagnostic**: `W_CACHE_CONFUSION`
+- **Verify**: `verdict doctor` (Check "Caches" section)
+- **Fast Fix**:
+    1.  **Use `verdict-action@v0.3.4+`** which splits caches automatically.
+- **Relevant Diagnostic**: `E_BASE_MISMATCH`
+- **Verify**: `verdict validate --config eval.yaml --baseline baseline.json`
+- **Fast Fix**:
+    1.  If the change is intentional (e.g., prompt update), **export a new baseline**:
+        ```bash
+        verdict ci --config eval.yaml --trace-file traces/pr.jsonl --export-baseline baseline.json --strict
+        ```
+- **Relevant Diagnostic**: `E_TRACE_MISS`, `E_TRACE_INVALID`
+- **Verify**: `verdict validate --config eval.yaml --trace-file traces/pr.jsonl`
+- **Fast Fix**:
+    1.  Ensure your app logs inputs/outputs in JSONL format.
 *   Codes: `E_TRACE_MISS`, `E_TRACE_INVALID`
 *   Commands: `verdict validate`, `verdict trace verify`
 
