@@ -42,6 +42,20 @@ uv pip install -r requirements.txt
 python demo_tui.py
 ```
 
+```text
+┌──────────────── Verdict TUI ────────────────┐
+│ 🟢 Status: Running   ⚡ Steps: 12/sec       │
+│                                             │
+│ > Thinking...                               │
+│ > Calling tool: search_web("rust ci")       │
+│ > Observation: Rust CI is fast...           │
+│                                             │
+│ [Dashboard] [Trace] [Metrics]               │
+└─────────────────────────────────────────────┘
+```
+*(Run the demo to see the full high-fidelity interface)*
+
+
 ---
 
 ## Repository Structure
