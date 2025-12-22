@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.0] - 2025-12-23
+
+### Features
+*   **SOTA TUI (Agent Demo 2)**: A high-fidelity, `rich`-based terminal UI demonstration.
+    *   Features real-time step streaming, live dashboard metrics, and attack simulation scenarios.
+    *   Reference implementation for building premium agent interfaces.
+*   **CI Regression Gate**: End-to-end example (`examples/ci-regression-gate`) of preventing regression in CI.
+    *   Safe: `cargo build --release` from source in workflows (no binary download dependency).
+*   **Code Sweep (Senior Polish)**:
+    *   **Zero Clippy Warnings**: Strict linting compliance.
+    *   **Refactored StoreStats**: Improved type safety in `verdict-core`.
+    *   **Optimizations**: `f64::clamp` usage, efficient `is_some_and` patterns.
+
 ## [v0.3.4] - 2025-12-23
 
 ### Features
