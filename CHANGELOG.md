@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.3] - 2025-12-22
+
+### Added
+- **Calibration**: New `verdict calibrate` command to analyze score distributions and recommend thresholds.
+- **Hygiene Report**: New `verdict baseline report` command to identify flaky tests, drift, and high failure rates.
+- **Strict Replay**: Added `--replay-strict` flag to fail CI with exit code 2 if network calls are attempted (deterministic guardrail).
+
+### Changed
+- **Metrics**: `Store::open` fix and performance improvements for result aggregation.
+- **Reporting**: Aggregation logic now includes "all attempts" source tracking for P90 scores.
 
 ## [0.2.1] - 2025-12-21
 
