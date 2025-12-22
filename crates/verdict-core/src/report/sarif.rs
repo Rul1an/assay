@@ -6,8 +6,8 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
         .iter()
         .filter_map(|r| {
             let level = match r.status {
-                TestStatus::Pass => return None,
-                TestStatus::Warn | TestStatus::Flaky => "warning",
+                TestStatus::Pass | TestStatus::Skipped => return None,
+                TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => "warning",
                 TestStatus::Fail | TestStatus::Error => "error",
             };
             Some(serde_json::json!({

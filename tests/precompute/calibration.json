@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "source": "eval.db",
+  "generated_at": "2025-12-22T09:38:48.407201+00:00",
+  "metrics": [
+    {
+      "key": {
+        "metric": "faithfulness",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "json_schema",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "must_contain",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "must_not_contain",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "regex_match",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "relevance",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    },
+    {
+      "key": {
+        "metric": "semantic_similarity_to",
+        "test_id": null
+      },
+      "n": 1,
+      "min": 1.0,
+      "max": 1.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "p10": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "recommended_min_score": 1.0,
+      "recommended_max_drop": 0.02
+    }
+  ],
+  "notes": [
+    "Warning: Low sample size (n < 10) makes percentiles unreliable."
+  ]
+}

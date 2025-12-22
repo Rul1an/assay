@@ -1,83 +1,22 @@
-# Verdict Examples
+# Verdict Examples 🌟
 
-Deze map bevat kleine, deterministische demo’s om Verdict te laten zien:
-- **RAG Grounding**: detecteer hallucinaties + semantische drift
-- **Negation Safety**: safety guardrails met must_contain + regex
+This directory contains ready-to-use examples for common Evaluation use-cases.
 
-Alle demo’s draaien **offline** met `--trace-file` (Replay Mode).
+## 1. [RAG Grounding](./rag-grounding)
+Evaluate if your RAG pipeline answers strictly based on context.
+**Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
 
-## Prereqs
+## 2. [Negation Safety](./negation-safety)
+Ensure model adheres to critical safety instructions (e.g. "Do NOT").
+**Metrics**: `regex`.
 
-Build de CLI:
+## 3. [Baseline Gate (CI)](./baseline-gate)
+Full workflow demonstration of **Regression Testing** with Baselines.
+**Features**: `--baseline`, `--export-baseline`.
 
-```bash
-cargo build --release
-```
-
-Gebruik vervolgens:
-
-```bash
-target/release/verdict --help
-```
-
-### Demo A: RAG Grounding
-
-Pass case (grounded):
+## Usage
+You can run any example directly from the root:
 
 ```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/good.jsonl \
-  --strict
-```
-
-Fail case (hallucination):
-
-```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/hallucination.jsonl \
-  --strict
-```
-
-### Demo B: Negation Safety
-
-Pass:
-
-```bash
-target/release/verdict ci \
-  --config examples/negation-safety/eval.yaml \
-  --trace-file examples/negation-safety/traces/safe-response.jsonl \
-  --strict
-```
-
-Fail:
-
-```bash
-target/release/verdict ci \
-  --config examples/negation-safety/eval.yaml \
-  --trace-file examples/negation-safety/traces/unsafe-response.jsonl \
-  --strict
-```
-
-### Baseline workflow (relative thresholds)
-
-Maak baseline (op main):
-
-```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/good.jsonl \
-  --export-baseline examples/rag-grounding/baseline.json \
-  --strict
-```
-
-Gate PRs:
-
-```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/good.jsonl \
-  --baseline examples/rag-grounding/baseline.json \
-  --strict
+verdict run --config examples/rag-grounding/eval.yaml --trace-file examples/rag-grounding/traces/good.jsonl
 ```

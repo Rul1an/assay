@@ -1,4 +1,5 @@
 use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestResultRow, TestStatus};
+use anyhow::Context;
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -10,7 +11,15 @@ pub struct Store {
 
 impl Store {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(path).context("failed to open sqlite db")?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    pub fn memory() -> anyhow::Result<Self> {
+        // SQLite in-memory DB
+        let conn = Connection::open_in_memory().context("failed to open in-memory sqlite db")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -19,7 +28,189 @@ impl Store {
     pub fn init_schema(&self) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(crate::storage::schema::DDL)?;
+
+        // v0.3.0 Migrations
+        migrate_v030(&conn)?;
+
+        // Ensure attempts table exists (covered by DDL if creating fresh, but good to be explicit if DDL didn't run on existing DB)
+        // DDL handles IF NOT EXISTS for attempts.
+
+        // Index on fingerprint for speed (CREATE INDEX IF NOT EXISTS is valid sqlite)
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_results_fingerprint ON results(fingerprint)",
+            [],
+        );
+
         Ok(())
+    }
+
+    pub fn fetch_recent_results(
+        &self,
+        suite: &str,
+        limit: u32,
+    ) -> anyhow::Result<Vec<crate::model::TestResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                r.test_id, r.outcome, r.duration_ms, r.score, r.attempts_json,
+                r.fingerprint, r.skip_reason
+             FROM results r
+             JOIN runs ON r.run_id = runs.id
+             WHERE runs.suite = ?1
+             ORDER BY r.id DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![suite, limit], |row| {
+            let attempts_str: Option<String> = row.get(4)?;
+
+            // Rehydrate "details" from last attempt (important for calibration)
+            let attempts: Option<Vec<crate::model::AttemptRow>> = match attempts_str {
+                Some(s) if !s.trim().is_empty() => serde_json::from_str(&s).ok(),
+                _ => None,
+            };
+
+            let (message, details) = attempts
+                .as_ref()
+                .and_then(|v| v.last())
+                .map(|a| (a.message.clone(), a.details.clone()))
+                .unwrap_or_else(|| (String::new(), serde_json::json!({})));
+
+            let cached = false;
+
+            Ok(crate::model::TestResultRow {
+                test_id: row.get(0)?,
+                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
+                message,
+                duration_ms: row.get(2)?,
+                details,
+                score: row.get(3)?,
+                cached,
+                fingerprint: row.get(5)?,
+                skip_reason: row.get(6)?,
+                attempts,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for r in rows {
+            results.push(r?);
+        }
+        Ok(results)
+    }
+
+    pub fn fetch_results_for_last_n_runs(
+        &self,
+        suite: &str,
+        n: u32,
+    ) -> anyhow::Result<Vec<crate::model::TestResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                r.test_id, r.outcome, r.duration_ms, r.score, r.attempts_json,
+                r.fingerprint, r.skip_reason
+             FROM results r
+             JOIN runs ON r.run_id = runs.id
+             WHERE runs.id IN (
+                 SELECT id FROM runs WHERE suite = ?1 ORDER BY id DESC LIMIT ?2
+             )
+             ORDER BY r.id DESC",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![suite, n], |row| {
+            let attempts_str: Option<String> = row.get(4)?;
+
+            let (message, details) =
+                if let Some(s) = attempts_str.as_ref().filter(|s| !s.trim().is_empty()) {
+                    if let Ok(attempts) = serde_json::from_str::<Vec<crate::model::AttemptRow>>(s) {
+                        attempts
+                            .last()
+                            .map(|a| (a.message.clone(), a.details.clone()))
+                            .unwrap_or_else(|| (String::new(), serde_json::json!({})))
+                    } else {
+                        (String::new(), serde_json::json!({}))
+                    }
+                } else {
+                    (String::new(), serde_json::json!({}))
+                };
+
+            let attempts: Option<Vec<crate::model::AttemptRow>> =
+                attempts_str.and_then(|s| serde_json::from_str(&s).ok());
+
+            Ok(crate::model::TestResultRow {
+                test_id: row.get(0)?,
+                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
+                message,
+                duration_ms: row.get(2)?,
+                details,
+                score: row.get(3)?,
+                cached: false,
+                fingerprint: row.get(5)?,
+                skip_reason: row.get(6)?,
+                attempts,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for r in rows {
+            results.push(r?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_last_passing_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> anyhow::Result<Option<TestResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        // We want the most recent passing result for this fingerprint.
+        // run_id DESC ensures recency.
+        let mut stmt = conn.prepare(
+            "SELECT r.test_id, r.outcome, r.score, r.duration_ms, r.output_json, r.skip_reason, run.id, run.started_at
+             FROM results r
+             JOIN runs run ON r.run_id = run.id
+             WHERE r.fingerprint = ?1 AND r.outcome = 'pass'
+             ORDER BY r.id DESC LIMIT 1"
+        )?;
+
+        let mut rows = stmt.query(params![fingerprint])?;
+        if let Some(row) = rows.next()? {
+            let outcome: String = row.get(1)?;
+            let status = match outcome.as_str() {
+                "pass" => TestStatus::Pass,
+                _ => TestStatus::Pass,
+            };
+
+            let skip_reason: Option<String> = row.get(5)?;
+            let run_id: i64 = row.get(6)?;
+            let started_at: String = row.get(7)?;
+
+            let details = serde_json::json!({
+                "skip": {
+                    "reason": skip_reason.clone().unwrap_or_else(|| "fingerprint_match".into()),
+                    "fingerprint": fingerprint,
+                    "previous_run_id": run_id,
+                    "previous_at": started_at,
+                    "origin_run_id": run_id,
+                    "previous_score": row.get::<_, Option<f64>>(2)?
+                }
+            });
+
+            Ok(Some(TestResultRow {
+                test_id: row.get(0)?,
+                status,
+                message: skip_reason.unwrap_or_else(|| "fingerprint_match".to_string()),
+                score: row.get(2)?,
+                duration_ms: row.get(3)?,
+                cached: true,
+                details,
+                fingerprint: Some(fingerprint.to_string()),
+                skip_reason: None,
+                attempts: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn create_run(&self, cfg: &EvalConfig) -> anyhow::Result<i64> {
@@ -54,9 +245,11 @@ impl Store {
         output: &LlmResponse,
     ) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
+
+        // 1. Insert into results
         conn.execute(
-            "INSERT INTO results(run_id, test_id, outcome, score, duration_ms, attempts_json, output_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO results(run_id, test_id, outcome, score, duration_ms, attempts_json, output_json, fingerprint, skip_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 run_id,
                 row.test_id,
@@ -65,10 +258,35 @@ impl Store {
                 row.duration_ms.map(|v| v as i64),
                 serde_json::to_string(attempts)?,
                 serde_json::to_string(output)?,
+                row.fingerprint,
+                row.skip_reason
             ],
         )?;
+
+        let result_id = conn.last_insert_rowid();
+
+        // 2. Insert individual attempts
+        let mut stmt = conn.prepare(
+            "INSERT INTO attempts(result_id, attempt_number, outcome, score, duration_ms, output_json, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        )?;
+
+        for attempt in attempts {
+            stmt.execute(params![
+                result_id,
+                attempt.attempt_no as i64,
+                status_to_outcome(&attempt.status),
+                0.0, // Score not tracked per attempt yet
+                attempt.duration_ms.map(|v| v as i64),
+                serde_json::to_string(&attempt.details)?,
+                Option::<String>::None
+            ])?;
+        }
+
         Ok(())
     }
+
+    // ... existing ...
 
     // quarantine
     pub fn quarantine_get_reason(
@@ -182,5 +400,42 @@ fn status_to_outcome(s: &TestStatus) -> &'static str {
         TestStatus::Flaky => "flaky",
         TestStatus::Warn => "warn",
         TestStatus::Error => "error",
+        TestStatus::Skipped => "skipped",
+        TestStatus::Unstable => "unstable",
     }
+}
+
+fn migrate_v030(conn: &Connection) -> anyhow::Result<()> {
+    let cols = get_columns(conn, "results")?;
+    add_column_if_missing(conn, &cols, "results", "fingerprint", "TEXT")?;
+    add_column_if_missing(conn, &cols, "results", "skip_reason", "TEXT")?;
+    add_column_if_missing(conn, &cols, "results", "attempts_json", "TEXT")?;
+    Ok(())
+}
+
+fn get_columns(
+    conn: &Connection,
+    table: &str,
+) -> anyhow::Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut out = std::collections::HashSet::new();
+    for r in rows {
+        out.insert(r?);
+    }
+    Ok(out)
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    cols: &std::collections::HashSet<String>,
+    table: &str,
+    col: &str,
+    ty: &str,
+) -> anyhow::Result<()> {
+    if !cols.contains(col) {
+        let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, col, ty);
+        conn.execute(&sql, [])?;
+    }
+    Ok(())
 }

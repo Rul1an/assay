@@ -120,7 +120,7 @@ fn default_min_score() -> f64 {
     0.80
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmResponse {
     pub text: String,
     pub provider: String,
@@ -130,7 +130,7 @@ pub struct LlmResponse {
     pub meta: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum TestStatus {
     Pass,
@@ -138,6 +138,24 @@ pub enum TestStatus {
     Flaky,
     Warn,
     Error,
+    // v0.3.0
+    Skipped,
+    Unstable,
+}
+
+impl TestStatus {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "pass" => TestStatus::Pass,
+            "fail" => TestStatus::Fail,
+            "flaky" => TestStatus::Flaky,
+            "warn" => TestStatus::Warn,
+            "error" => TestStatus::Error,
+            "skipped" => TestStatus::Skipped,
+            "unstable" => TestStatus::Unstable,
+            _ => TestStatus::Error, // Default fallback
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +168,13 @@ pub struct TestResultRow {
     #[serde(default)]
     pub details: serde_json::Value,
     pub duration_ms: Option<u64>,
+    // v0.3.0
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+    #[serde(default)]
+    pub skip_reason: Option<String>,
+    #[serde(default)]
+    pub attempts: Option<Vec<AttemptRow>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

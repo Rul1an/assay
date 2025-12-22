@@ -111,6 +111,11 @@ inputs:
     required: false
     default: "."
 
+  cache_mode:
+    description: "Cache strategies: off|verdict-cache (default)"
+    required: false
+    default: "verdict-cache"
+
 outputs:
   junit_path:
     description: "JUnit report path"
@@ -162,6 +167,16 @@ runs:
         echo "baseline_path=$(join "${{ inputs.baseline }}")" >> "$GITHUB_OUTPUT"
         echo "exported_baseline_path=$(join "${{ inputs.export_baseline }}")" >> "$GITHUB_OUTPUT"
 
+    - name: Cache Verdict Data
+      if: inputs.cache_mode == 'verdict-cache'
+      uses: actions/cache@v3
+      with:
+        path: .eval
+        key: verdict-${{ runner.os }}-${{ inputs.verdict_version }}-${{ hashFiles(inputs.config) }}
+        restore-keys: |
+          verdict-${{ runner.os }}-${{ inputs.verdict_version }}-
+          verdict-${{ runner.os }}-
+
     - name: Install Verdict binary
       id: install
       shell: bash
@@ -188,8 +203,7 @@ runs:
         esac
 
         if [ -z "$ASSET" ]; then
-          # Align this with your release artifact naming from cargo-dist.
-          # Example expected asset: verdict-${os_id}-${arch_id}.tar.gz
+          # Match standard assets: verdict-linux-x86_64.tar.gz
           ASSET="verdict-${os_id}-${arch_id}.tar.gz"
         fi
 

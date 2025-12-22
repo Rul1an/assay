@@ -1,35 +1,15 @@
-# RAG Grounding Demo
+# RAG Grounding Example
 
-This demo showcases how Verdict detects **hallucinations** and **semantic regressions** in a RAG pipeline.
-It runs entirely offline using **Deterministic Replay Mode**.
+This example demonstrates how to evaluate Retrieval Augmented Generation (RAG) pipelines for **Grounding** (Faithfulness) and **Semantic Similarity**.
 
-## Quickstart
+## Scenarios
+1.  **Semantic Similarity**: Does the answer match the golden reference meaning?
+2.  **Must Contain**: Does the answer contain specific key terms (e.g. "€385")?
+3.  **Must Not Contain**: Does the answer hallucinate terms (e.g. "€500")?
 
-### 1. The "Good" Run (Pass) ✅
-The implementation correctly answers the question about deductibles (€385) and cites sources.
-```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/good.jsonl \
-  --baseline examples/rag-grounding/baseline.json \
-  --strict
-```
-
-### 2. The "Bad" Run (Fail) ❌
-The implementation hallucinates the amount (€500) and adds an unsupported claim.
-Verdict catches this via:
-- `must_not_contain`: "€500" found.
-- `semantic_similarity`: Score drops below baseline threshold (`max_drop`).
+## Usage
+Run with the provided trace (no API key required):
 
 ```bash
-target/release/verdict ci \
-  --config examples/rag-grounding/eval.yaml \
-  --trace-file examples/rag-grounding/traces/hallucination.jsonl \
-  --baseline examples/rag-grounding/baseline.json \
-  --strict
+verdict run --config eval.yaml --trace-file traces/good.jsonl
 ```
-
-## What's happening?
-- **Replay Mode**: We use `--trace-file` to feed pre-recorded LLM outputs into Verdict. No API keys required.
-- **Baselines**: We compare the run-time score against `baseline.json`. If the score drops significantly, the build fails.
-- **Redaction**: PII/Sensitive data in prompts is redacted in `run.json` by default.

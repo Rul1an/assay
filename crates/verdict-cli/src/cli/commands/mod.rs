@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 
+pub mod baseline;
+pub mod calibrate;
+pub mod trace;
+
 pub mod exit_codes {
     pub const OK: i32 = 0;
     pub const TEST_FAILED: i32 = 1;
@@ -15,6 +19,13 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Run(args) => cmd_run(args).await,
         Command::Ci(args) => cmd_ci(args).await,
         Command::Quarantine(args) => cmd_quarantine(args).await,
+        Command::Trace(args) => trace::cmd_trace(args).await,
+        Command::Calibrate(args) => calibrate::cmd_calibrate(args).await,
+        Command::Baseline(args) => match args.cmd {
+            BaselineSub::Report(report_args) => {
+                baseline::cmd_baseline_report(report_args).map(|_| exit_codes::OK)
+            }
+        },
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)
@@ -102,9 +113,12 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
         &args.embedder,
         &args.embedding_model,
         args.refresh_embeddings,
+        args.incremental,
+        args.refresh_cache,
         &args.judge,
         &args.baseline,
         PathBuf::from(&args.config),
+        args.replay_strict,
     )
     .await;
 
@@ -128,7 +142,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     }
 
     verdict_core::report::json::write_json(&artifacts, &PathBuf::from("run.json"))?;
-    verdict_core::report::console::print_summary(&artifacts.results);
+    verdict_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     // PR11: Export baseline logic
     if let Some(path) = &args.export_baseline {
@@ -148,18 +162,23 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     }
 
     let cfg = verdict_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    // Strict mode implies no reruns by default policy (fail fast/accurate)
+    let reruns = if args.strict { 0 } else { args.rerun_failures };
     let runner = build_runner(
         &args.db,
         &args.trace_file,
         &cfg,
-        args.rerun_failures,
+        reruns,
         &args.quarantine_mode,
         &args.embedder,
         &args.embedding_model,
         args.refresh_embeddings,
+        args.incremental,
+        args.refresh_cache,
         &args.judge,
         &args.baseline,
         PathBuf::from(&args.config),
+        args.replay_strict,
     )
     .await;
 
@@ -185,6 +204,7 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
     verdict_core::report::junit::write_junit(&cfg.suite, &artifacts.results, &args.junit)?;
     verdict_core::report::sarif::write_sarif("verdict", &artifacts.results, &args.sarif)?;
     verdict_core::report::json::write_json(&artifacts, &PathBuf::from("run.json"))?;
+    verdict_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     let otel_cfg = verdict_core::otel::OTelConfig {
         jsonl_path: args.otel_jsonl.clone(),
@@ -241,9 +261,12 @@ fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool
     }
 
     if strict
-        && results
-            .iter()
-            .any(|r| matches!(r.status, TestStatus::Warn | TestStatus::Flaky))
+        && results.iter().any(|r| {
+            matches!(
+                r.status,
+                TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable
+            )
+        })
     {
         return exit_codes::TEST_FAILED;
     }
@@ -261,23 +284,35 @@ async fn build_runner(
     embedder_provider: &str,
     embedding_model: &str,
     refresh_embeddings: bool,
+    incremental: bool,
+    refresh_cache: bool,
     judge_args: &JudgeArgs,
     baseline_arg: &Option<PathBuf>,
     cfg_path: PathBuf,
+    replay_strict: bool,
 ) -> anyhow::Result<verdict_core::engine::runner::Runner> {
     let store = verdict_core::storage::Store::open(db_path)?;
     store.init_schema()?;
     let cache = verdict_core::cache::vcr::VcrCache::new(store.clone());
 
-    let client: Arc<dyn verdict_core::providers::llm::LlmClient> =
-        if let Some(trace_path) = trace_file {
-            Arc::new(
-                verdict_core::providers::trace::TraceClient::from_path(trace_path)
-                    .map_err(|e| anyhow::anyhow!(e))?,
-            )
-        } else {
-            Arc::new(DummyClient::new(&cfg.model))
-        };
+    use anyhow::Context;
+    use verdict_core::providers::llm::fake::FakeClient;
+    use verdict_core::providers::llm::LlmClient;
+    use verdict_core::providers::trace::TraceClient;
+
+    let mut client: Arc<dyn LlmClient + Send + Sync> = if let Some(trace_path) = trace_file {
+        let trace_client = TraceClient::from_path(trace_path).context("failed to load trace")?;
+        Arc::new(trace_client)
+    } else {
+        Arc::new(FakeClient::new(cfg.model.clone()))
+    };
+
+    // Strict Mode Wiring (LLM)
+    if replay_strict && client.provider_name() != "trace" {
+        use verdict_core::providers::strict::StrictLlmClient;
+        client = Arc::new(StrictLlmClient::new(client));
+    }
+
     let metrics = verdict_metrics::default_metrics();
 
     let replay_mode = trace_file.is_some();
@@ -294,28 +329,33 @@ async fn build_runner(
     let policy = verdict_core::engine::runner::RunPolicy {
         rerun_failures,
         quarantine_mode: verdict_core::quarantine::QuarantineMode::parse(quarantine_mode_str),
+        replay_strict,
     };
 
     // Embedder construction
     use verdict_core::providers::embedder::{fake::FakeEmbedder, openai::OpenAIEmbedder, Embedder};
 
-    let embedder: Option<Arc<dyn Embedder>> = match embedder_provider {
+    let mut embedder: Option<Arc<dyn Embedder>> = match embedder_provider {
         "none" => None,
         "openai" => {
-            let key = match std::env::var("OPENAI_API_KEY") {
-                Ok(k) => k,
-                Err(_) => {
-                    eprint!("OPENAI_API_KEY not set. Enter key: ");
-                    use std::io::Write;
-                    std::io::stderr().flush()?;
-                    let mut input = String::new();
-                    let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-                    reader.read_line(&mut input).await?;
-                    let trimmed = input.trim().to_string();
-                    if trimmed.is_empty() {
-                        anyhow::bail!("OpenAI API key is required");
+            let key = if replay_strict {
+                "strict-placeholder".to_string() // Don't ask for key if strict, we will wrap anyway
+            } else {
+                match std::env::var("OPENAI_API_KEY") {
+                    Ok(k) => k,
+                    Err(_) => {
+                        eprint!("OPENAI_API_KEY not set. Enter key: ");
+                        use std::io::Write;
+                        std::io::stderr().flush()?;
+                        let mut input = String::new();
+                        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
+                        reader.read_line(&mut input).await?;
+                        let trimmed = input.trim().to_string();
+                        if trimmed.is_empty() {
+                            anyhow::bail!("OpenAI API key is required");
+                        }
+                        trimmed
                     }
-                    trimmed
                 }
             };
             Some(Arc::new(OpenAIEmbedder::new(
@@ -333,6 +373,13 @@ async fn build_runner(
         _ => anyhow::bail!("unknown embedder provider: {}", embedder_provider),
     };
 
+    if replay_strict {
+        if let Some(inner) = embedder {
+            use verdict_core::providers::strict::StrictEmbedder;
+            embedder = Some(Arc::new(StrictEmbedder::new(inner)));
+        }
+    }
+
     // Judge Construction
     // ------------------
     let judge_config = verdict_core::judge::JudgeRuntimeConfig {
@@ -345,39 +392,49 @@ async fn build_runner(
         refresh: judge_args.judge_refresh,
     };
 
-    let judge_client: Option<Arc<dyn verdict_core::providers::llm::LlmClient>> = if !judge_config
-        .enabled
-    {
-        None
-    } else {
-        match judge_config.provider.as_str() {
-            "openai" => {
-                let key = match &judge_args.judge_api_key {
+    let mut judge_client: Option<Arc<dyn verdict_core::providers::llm::LlmClient>> =
+        if !judge_config.enabled {
+            None
+        } else {
+            match judge_config.provider.as_str() {
+                "openai" => {
+                    let key = if replay_strict {
+                        "strict-placeholder".into()
+                    } else {
+                        match &judge_args.judge_api_key {
                         Some(k) => k.clone(),
                         None => std::env::var("OPENAI_API_KEY")
                             .map_err(|_| anyhow::anyhow!("Judge enabled (openai) but OPENAI_API_KEY not set (VERDICT_JUDGE_API_KEY also empty)"))?
+                    }
                     };
-                let model = judge_config
-                    .model
-                    .clone()
-                    .unwrap_or("gpt-4o-mini".to_string());
-                Some(Arc::new(
-                    verdict_core::providers::llm::openai::OpenAIClient::new(
-                        model,
-                        key,
-                        judge_config.temperature,
-                        judge_config.max_tokens,
-                    ),
-                ))
+                    let model = judge_config
+                        .model
+                        .clone()
+                        .unwrap_or("gpt-4o-mini".to_string());
+                    Some(Arc::new(
+                        verdict_core::providers::llm::openai::OpenAIClient::new(
+                            model,
+                            key,
+                            judge_config.temperature,
+                            judge_config.max_tokens,
+                        ),
+                    ))
+                }
+                "fake" => {
+                    // For now, create a dummy client named "fake-judge"
+                    Some(Arc::new(DummyClient::new("fake-judge")))
+                }
+                "none" => None,
+                other => anyhow::bail!("unknown judge provider: {}", other),
             }
-            "fake" => {
-                // For now, create a dummy client named "fake-judge"
-                Some(Arc::new(DummyClient::new("fake-judge")))
-            }
-            "none" => None,
-            other => anyhow::bail!("unknown judge provider: {}", other),
+        };
+
+    if replay_strict {
+        if let Some(inner) = judge_client {
+            use verdict_core::providers::strict::StrictLlmClient;
+            judge_client = Some(Arc::new(StrictLlmClient::new(inner)));
         }
-    };
+    }
 
     let judge_store = verdict_core::storage::judge_cache::JudgeCache::new(store.clone());
     let judge_service =
@@ -404,6 +461,8 @@ async fn build_runner(
         policy,
         embedder,
         refresh_embeddings,
+        incremental,
+        refresh_cache,
         judge: Some(judge_service),
         baseline,
     })

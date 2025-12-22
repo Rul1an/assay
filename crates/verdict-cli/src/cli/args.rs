@@ -18,7 +18,44 @@ pub enum Command {
     Ci(CiArgs),
     Init(InitArgs),
     Quarantine(QuarantineArgs),
+    Trace(TraceArgs),
+    Calibrate(CalibrateArgs),
+    Baseline(BaselineArgs),
     Version,
+}
+
+#[derive(Parser, Clone)]
+pub struct BaselineArgs {
+    #[command(subcommand)]
+    pub cmd: BaselineSub,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum BaselineSub {
+    /// Generate a hygiene report for a suite
+    Report(BaselineReportArgs),
+}
+
+#[derive(Parser, Clone)]
+pub struct BaselineReportArgs {
+    #[arg(long, default_value = ".eval/eval.db")]
+    pub db: PathBuf,
+
+    /// Test suite name
+    #[arg(long)]
+    pub suite: String,
+
+    /// Number of recent runs to include
+    #[arg(long, default_value_t = 50)]
+    pub last: u32,
+
+    /// Output path (JSON or Markdown based on extension or format)
+    #[arg(long, default_value = "hygiene.json")]
+    pub out: PathBuf,
+
+    /// Output format: json | md
+    #[arg(long, default_value = "json")]
+    pub format: String,
 }
 
 #[derive(Parser, Clone)]
@@ -63,8 +100,24 @@ pub struct RunArgs {
     #[arg(long)]
     pub refresh_embeddings: bool,
 
+    /// enable incremental execution (skip passing tests with same fingerprint)
+    #[arg(long)]
+    pub incremental: bool,
+
+    /// ignore incremental cache (force re-run)
+    #[arg(long)]
+    pub refresh_cache: bool,
+
+    /// show details for skipped tests
+    #[arg(long)]
+    pub explain_skip: bool,
+
     #[command(flatten)]
     pub judge: JudgeArgs,
+
+    /// strict replay mode (forbid network calls; fail if precomputed data missing)
+    #[arg(long)]
+    pub replay_strict: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -78,7 +131,7 @@ pub struct CiArgs {
     #[arg(long, default_value = "sarif.json")]
     pub sarif: PathBuf,
 
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 2)]
     pub rerun_failures: u32,
     #[arg(long, default_value = "warn")]
     pub quarantine_mode: String,
@@ -111,8 +164,24 @@ pub struct CiArgs {
     #[arg(long)]
     pub refresh_embeddings: bool,
 
+    /// enable incremental execution (skip passing tests with same fingerprint)
+    #[arg(long)]
+    pub incremental: bool,
+
+    /// ignore incremental cache (force re-run)
+    #[arg(long)]
+    pub refresh_cache: bool,
+
+    /// show details for skipped tests
+    #[arg(long)]
+    pub explain_skip: bool,
+
     #[command(flatten)]
     pub judge: JudgeArgs,
+
+    /// strict replay mode (forbid network calls; fail if precomputed data missing)
+    #[arg(long)]
+    pub replay_strict: bool,
 }
 
 #[derive(clap::Args, Clone)]
@@ -195,4 +264,82 @@ pub enum QuarantineSub {
         test_id: String,
     },
     List,
+}
+
+#[derive(Parser, Clone)]
+pub struct TraceArgs {
+    #[command(subcommand)]
+    pub cmd: TraceSub,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum TraceSub {
+    /// Ingest a raw JSONL log file and normalize to trace dataset
+    Ingest {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Verify a trace dataset covers all prompts in eval config
+    Verify {
+        #[arg(long)]
+        trace: PathBuf,
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Precompute embeddings for trace entries
+    PrecomputeEmbeddings {
+        #[arg(long)]
+        trace: PathBuf,
+        #[arg(long)]
+        config: PathBuf, // Needed to know which model/embedder to use? Or explicitly pass embedder?
+        // Plan says: --trace dataset.jsonl --embedder openai
+        // But we also need model info potentially. Let's start with explicit args.
+        #[arg(long)]
+        embedder: String,
+        #[arg(long, default_value = "text-embedding-3-small")]
+        model: String,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Precompute judge scores for trace entries
+    PrecomputeJudge {
+        #[arg(long)]
+        trace: PathBuf,
+        #[arg(long)]
+        config: PathBuf, // Judge config usually in eval.yaml or separate args?
+        // Plan says: --judge openai
+        #[arg(long)]
+        judge: String,
+        #[arg(long)]
+        judge_model: Option<String>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+#[derive(Parser, Clone)]
+pub struct CalibrateArgs {
+    /// Path to a run.json file to analyze (if omitted, reads from DB)
+    #[arg(long)]
+    pub run: Option<PathBuf>,
+
+    #[arg(long, default_value = ".eval/eval.db")]
+    pub db: PathBuf,
+
+    /// Test suite name (required if using --db)
+    #[arg(long)]
+    pub suite: Option<String>,
+
+    /// Number of recent runs to include from DB
+    #[arg(long, default_value_t = 200)]
+    pub last: u32,
+
+    /// Output JSON path
+    #[arg(long, default_value = "calibration.json")]
+    pub out: PathBuf,
+
+    /// Target tail for recommended min score (e.g. 0.10 for p10)
+    #[arg(long, default_value_t = 0.10)]
+    pub target_tail: f64,
 }

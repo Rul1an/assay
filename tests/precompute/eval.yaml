@@ -1,0 +1,11 @@
+version: 1
+suite: strict-replay-test
+model: "dummy"
+tests:
+  - id: test-1
+    input:
+      prompt: "Say hello"
+    expected:
+      type: semantic_similarity_to
+      semantic_similarity_to: "Hello world"
+      min_score: 0.8

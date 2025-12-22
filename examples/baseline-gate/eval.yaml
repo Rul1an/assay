@@ -1,0 +1,14 @@
+version: 1
+suite: "baseline_gate_demo"
+model: "trace" # Replay mode
+
+settings:
+  cache: false
+
+tests:
+  - id: "gate_check_1"
+    input:
+      prompt: "hello"
+    expected:
+      type: regex_match
+      pattern: "world"

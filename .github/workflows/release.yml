@@ -21,7 +21,7 @@ jobs:
             suffix: linux-x86_64
             use_cross: true # Use cross for musl to ensure portability
 
-          - os: macos-15
+          - os: macos-13
             target: x86_64-apple-darwin
             suffix: macos-x86_64
             use_cross: false
@@ -87,15 +87,15 @@ jobs:
       - name: Generate Checksums
         run: |
           cd artifacts
-          sha256sum *.tar.gz > checksums.txt
-          cat checksums.txt
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             artifacts/*.tar.gz
-            artifacts/checksums.txt
+            artifacts/SHA256SUMS
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-') }} # v0.2.1-rc1 -> prerelease

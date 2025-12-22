@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "suite": "strict-replay-test",
+  "source": "eval.db",
+  "generated_at": "2025-12-22T09:53:57.561063+00:00",
+  "window": {
+    "last_runs": 50
+  },
+  "tests": [
+    {
+      "test_id": "test-1",
+      "n": 1,
+      "rates": {
+        "pass": 1.0,
+        "fail": 0.0,
+        "warn": 0.0,
+        "flaky": 0.0,
+        "unstable": 0.0,
+        "skipped": 0.0
+      },
+      "scores": {
+        "must_contain": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "regex_match": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "faithfulness": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "must_not_contain": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "relevance": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "semantic_similarity_to": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        },
+        "json_schema": {
+          "p10": 1.0,
+          "p50": 1.0,
+          "p90": 1.0,
+          "std": 0.0
+        }
+      },
+      "top_reasons": []
+    }
+  ],
+  "notes": []
+}

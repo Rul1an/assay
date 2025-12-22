@@ -62,11 +62,21 @@ jobs:
 | `trace_file` | JSONL trace for replay mode. | `""` |
 | `baseline` | Path to known-good baseline JSON (for gating). | `""` |
 | `export_baseline` | Path to write new baseline JSON to. | `""` |
+| `cache_mode` | Cache strategy: `off`, `verdict-cache`. | `verdict-cache` |
 | `strict` | If `true`, exit 1 on warnings/flakes. | `false` |
 | `redact_prompts` | Redact PII from outputs. | `true` |
 | `upload_sarif` | Upload to GitHub Code Scanning. | `true` |
 | `upload_artifacts` | Upload reports/baseline as artifacts. | `true` |
 | `asset_name` | Override binary filename. | `""` |
+
+### Caching
+
+By default (`cache_mode: verdict-cache`), this action caches the `.eval` directory. This speeds up runs by persisting:
+*   LLM Responses (HTTP Cache)
+*   Embeddings (Vector Store)
+
+The cache key is derived from: `verdict-{os}-{version}-{hash(config)}`. If the config changes, a fresh cache is built (but partial hits may be restored via `restore-keys`).
+To disable caching, set `cache_mode: off`.
 
 ### Required release assets
 

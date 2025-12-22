@@ -12,12 +12,12 @@ fn test_baseline_validation_suite_mismatch() {
     };
 
     // Should fail if suite differs
-    let err = b.validate("suite_b").unwrap_err();
+    let err = b.validate("suite_b", "md5:123").unwrap_err();
     assert!(err.to_string().contains("baseline suite mismatch"));
     assert!(err.to_string().contains("expected 'suite_b'"));
 
     // Should pass if suite matches
-    assert!(b.validate("suite_a").is_ok());
+    assert!(b.validate("suite_a", "md5:123").is_ok());
 }
 
 #[test]

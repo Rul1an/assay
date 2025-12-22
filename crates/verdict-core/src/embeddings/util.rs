@@ -59,7 +59,8 @@ pub fn cosine_similarity_f64(a: &[f64], b: &[f64]) -> anyhow::Result<f64> {
     if denom == 0.0 {
         anyhow::bail!("config error: zero-norm embedding");
     }
-    Ok(dot / denom)
+    let s = dot / denom;
+    Ok(s.clamp(-1.0, 1.0))
 }
 
 #[cfg(test)]

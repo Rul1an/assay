@@ -11,4 +11,5 @@ pub trait LlmClient: Send + Sync {
     fn provider_name(&self) -> &'static str;
 }
 
+pub mod fake;
 pub mod openai;

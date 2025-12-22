@@ -15,7 +15,20 @@ CREATE TABLE IF NOT EXISTS results (
   score REAL,
   duration_ms INTEGER,
   attempts_json TEXT,
-  output_json TEXT
+  output_json TEXT,
+  fingerprint TEXT,
+  skip_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  result_id INTEGER NOT NULL REFERENCES results(id),
+  attempt_number INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  score REAL,
+  duration_ms INTEGER,
+  output_json TEXT,
+  error_message TEXT
 );
 
 CREATE TABLE IF NOT EXISTS quarantine (

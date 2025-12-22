@@ -5,7 +5,9 @@ pub mod sarif;
 
 use crate::model::TestResultRow;
 
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunArtifacts {
     pub run_id: i64,
     pub suite: String,

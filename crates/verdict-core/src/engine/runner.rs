@@ -15,6 +15,7 @@ use tokio::time::{timeout, Duration};
 pub struct RunPolicy {
     pub rerun_failures: u32,
     pub quarantine_mode: QuarantineMode,
+    pub replay_strict: bool,
 }
 
 impl Default for RunPolicy {
@@ -22,6 +23,7 @@ impl Default for RunPolicy {
         Self {
             rerun_failures: 1,
             quarantine_mode: QuarantineMode::Warn,
+            replay_strict: false,
         }
     }
 }
@@ -34,6 +36,8 @@ pub struct Runner {
     pub policy: RunPolicy,
     pub embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
     pub refresh_embeddings: bool,
+    pub incremental: bool,   // v0.3.0
+    pub refresh_cache: bool, // v0.3.0
     pub judge: Option<crate::judge::JudgeService>,
     pub baseline: Option<crate::baseline::Baseline>,
 }
@@ -71,6 +75,9 @@ impl Runner {
                     message: format!("task error: {}", e),
                     details: serde_json::json!({}),
                     duration_ms: None,
+                    fingerprint: None,
+                    skip_reason: None,
+                    attempts: None,
                 },
                 Err(e) => TestResultRow {
                     test_id: "unknown".into(),
@@ -80,6 +87,9 @@ impl Runner {
                     message: format!("join error: {}", e),
                     details: serde_json::json!({}),
                     duration_ms: None,
+                    fingerprint: None,
+                    skip_reason: None,
+                    attempts: None,
                 },
             };
             any_fail = any_fail || matches!(row.status, TestStatus::Fail | TestStatus::Error);
@@ -123,7 +133,10 @@ impl Runner {
 
             match row.status {
                 TestStatus::Pass | TestStatus::Warn => break,
-                TestStatus::Fail | TestStatus::Error | TestStatus::Flaky => continue,
+                TestStatus::Skipped => break, // Should not happen in loop
+                TestStatus::Fail | TestStatus::Error | TestStatus::Flaky | TestStatus::Unstable => {
+                    continue
+                }
             }
         }
 
@@ -136,6 +149,9 @@ impl Runner {
             message: "no attempts".into(),
             details: serde_json::json!({}),
             duration_ms: None,
+            fingerprint: None,
+            skip_reason: None,
+            attempts: None,
         });
 
         // quarantine overlay
@@ -154,13 +170,28 @@ impl Runner {
         }
 
         match class {
-            FailureClass::Flake => {
+            FailureClass::Skipped => {
+                final_row.status = TestStatus::Skipped;
+                // message usually set by run_test_once
+            }
+            FailureClass::Flaky => {
                 final_row.status = TestStatus::Flaky;
                 final_row.message = "flake detected (rerun passed)".into();
                 final_row.details["flake"] = serde_json::json!({ "attempts": attempts.len() });
             }
+            FailureClass::Unstable => {
+                final_row.status = TestStatus::Unstable;
+                final_row.message = "unstable outcomes detected".into();
+                final_row.details["unstable"] = serde_json::json!({ "attempts": attempts.len() });
+            }
             FailureClass::Error => final_row.status = TestStatus::Error,
-            FailureClass::DeterministicFail => {}
+            FailureClass::DeterministicFail => {
+                // Ensures if last attempt was fail, we keep fail status
+                final_row.status = TestStatus::Fail;
+            }
+            FailureClass::DeterministicPass => {
+                final_row.status = TestStatus::Pass;
+            }
         }
 
         let output = last_output.unwrap_or(LlmResponse {
@@ -170,6 +201,9 @@ impl Runner {
             cached: false,
             meta: serde_json::json!({}),
         });
+
+        final_row.attempts = Some(attempts.clone());
+
         self.store
             .insert_result_embedded(run_id, &final_row, &attempts, &output)?;
 
@@ -181,13 +215,71 @@ impl Runner {
         cfg: &EvalConfig,
         tc: &TestCase,
     ) -> anyhow::Result<(TestResultRow, LlmResponse)> {
-        let fingerprint = format!("v{}|{}", cfg.version, self.client.provider_name());
-        let key = cache_key(&cfg.model, &tc.input.prompt, &fingerprint);
+        // v0.3.0 Fingerprinting
+        let expected_json = serde_json::to_string(&tc.expected).unwrap_or_default();
+        let metric_versions = [
+            ("verdict", env!("CARGO_PKG_VERSION")),
+            // TODO: Add metric-specific versions if available
+        ];
+
+        let fp = crate::fingerprint::compute(
+            &cfg.suite,
+            &cfg.model,
+            &tc.id,
+            &tc.input.prompt,
+            tc.input.context.as_deref(),
+            &expected_json,
+            &metric_versions,
+        );
+
+        // Incremental Check
+        // Note: Global --incremental flag should be checked here.
+        // Assuming self.incremental is available.
+        if self.incremental && !self.refresh_cache {
+            if let Some(prev) = self.store.get_last_passing_by_fingerprint(&fp.hex)? {
+                // Return Skipped Result
+                let row = TestResultRow {
+                    test_id: tc.id.clone(),
+                    status: TestStatus::Skipped,
+                    score: prev.score,
+                    cached: true,
+                    message: "skipped: fingerprint match".into(),
+                    details: serde_json::json!({
+                        "skip": {
+                             "reason": "fingerprint_match",
+                             "fingerprint": fp.hex,
+                             "previous_run_id": prev.details.get("skip").and_then(|s| s.get("previous_run_id")).and_then(|v| v.as_i64()),
+                             "previous_at": prev.details.get("skip").and_then(|s| s.get("previous_at")).and_then(|v| v.as_str()),
+                             "origin_run_id": prev.details.get("skip").and_then(|s| s.get("origin_run_id")).and_then(|v| v.as_i64()),
+                             "previous_score": prev.score
+                        }
+                    }),
+                    duration_ms: Some(0), // Instant
+                    fingerprint: Some(fp.hex.clone()),
+                    skip_reason: Some("fingerprint_match".into()),
+                    attempts: None,
+                };
+
+                // Construct placeholder response for pipeline consistency
+                let resp = LlmResponse {
+                    text: "".into(),
+                    provider: "skipped".into(),
+                    model: cfg.model.clone(),
+                    cached: true,
+                    meta: serde_json::json!({}),
+                };
+                return Ok((row, resp));
+            }
+        }
+
+        // Original Execution Logic
+        // We use the computed fingerprint for caching key to distinguish config variations
+        let key = cache_key(&cfg.model, &tc.input.prompt, &fp.hex);
 
         let start = std::time::Instant::now();
         let mut cached = false;
 
-        let mut resp: LlmResponse = if cfg.settings.cache.unwrap_or(true) {
+        let mut resp: LlmResponse = if cfg.settings.cache.unwrap_or(true) && !self.refresh_cache {
             if let Some(r) = self.cache.get(&key)? {
                 cached = true;
                 r
@@ -251,6 +343,9 @@ impl Runner {
             message: if msg.is_empty() { "ok".into() } else { msg },
             details,
             duration_ms: Some(duration_ms),
+            fingerprint: Some(fp.hex), // Store for future skips
+            skip_reason: None,
+            attempts: None,
         };
 
         if self.client.provider_name() == "trace" {
@@ -277,6 +372,8 @@ impl Runner {
             policy: self.policy.clone(),
             embedder: self.embedder.clone(),
             refresh_embeddings: self.refresh_embeddings,
+            incremental: self.incremental,
+            refresh_cache: self.refresh_cache,
             judge: self.judge.clone(),
             baseline: self.baseline.clone(),
         }
@@ -368,11 +465,14 @@ impl Runner {
             return Ok(());
         };
 
-        // If trace already provided both vectors, accept them
         if resp.meta.pointer("/verdict/embeddings/response").is_some()
             && resp.meta.pointer("/verdict/embeddings/reference").is_some()
         {
             return Ok(());
+        }
+
+        if self.policy.replay_strict {
+            anyhow::bail!("config error: --replay-strict is on, but embeddings are missing in trace. Run 'verdict trace precompute-embeddings' or disable strict mode.");
         }
 
         let embedder = self.embedder.as_ref().ok_or_else(|| {
@@ -437,6 +537,18 @@ impl Runner {
             _ => return Ok(()),
         };
 
+        // Check if judge result exists in meta is handled by JudgeService::evaluate
+        // BUT for a better error message in strict mode we can check here too or rely on the StrictLlmClient failure.
+        // User requested: "judge guard ... missing judge result in trace meta ... run precompute-judge"
+
+        let has_trace = resp
+            .meta
+            .pointer(&format!("/verdict/judge/{}", rubric_id))
+            .is_some();
+        if self.policy.replay_strict && !has_trace {
+            anyhow::bail!("config error: --replay-strict is on, but judge results are missing in trace for '{}'. Run 'verdict trace precompute-judge' or disable strict mode.", rubric_id);
+        }
+
         let judge = self.judge.as_ref().ok_or_else(|| {
             anyhow::anyhow!("config error: judge required but service not initialized")
         })?;
@@ -465,6 +577,8 @@ struct RunnerRef {
     policy: RunPolicy,
     embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
     refresh_embeddings: bool,
+    incremental: bool,
+    refresh_cache: bool,
     judge: Option<crate::judge::JudgeService>,
     baseline: Option<crate::baseline::Baseline>,
 }
@@ -484,6 +598,8 @@ impl RunnerRef {
             policy: self.policy.clone(),
             embedder: self.embedder.clone(),
             refresh_embeddings: self.refresh_embeddings,
+            incremental: self.incremental,
+            refresh_cache: self.refresh_cache,
             judge: self.judge.clone(),
             baseline: self.baseline.clone(),
         };

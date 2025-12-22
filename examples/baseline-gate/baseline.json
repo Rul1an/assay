@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "suite": "baseline_gate_demo",
+  "verdict_version": "0.2.0",
+  "created_at": "2025-12-21T19:33:35.395438+00:00",
+  "config_fingerprint": "md5:8f45ac1b6f2485a2161a829ad3fea3e3",
+  "entries": [
+    {
+      "test_id": "gate_check_1",
+      "metric": "faithfulness",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "json_schema",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "must_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "must_not_contain",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "regex_match",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "relevance",
+      "score": 1.0
+    },
+    {
+      "test_id": "gate_check_1",
+      "metric": "semantic_similarity_to",
+      "score": 1.0
+    }
+  ]
+}

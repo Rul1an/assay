@@ -1,10 +1,14 @@
-# Negation safety demo
+# Negation Safety Example
 
-Doel: laat zien dat embeddings alleen niet genoeg zijn voor safety-critical checks.
-We combineren:
-- must_contain (NOOIT)
-- regex_match (gevaar/giftig/chloorgas)
+This example demonstrates how to detect **Negation Blindness** (LLMs failing to see "not") using simple logic probes.
 
-Traces:
-- safe-response.jsonl => PASS
-- unsafe-response.jsonl => FAIL
+## Scenarios
+1.  **Must Contain**: Validates that critical safety phrases are present (e.g. "DO NOT mix").
+2.  **Metric**: regex match or keyword match.
+
+## Usage
+Run with the provided trace:
+
+```bash
+verdict run --config eval.yaml --trace-file traces/safe-response.jsonl
+```

@@ -2,6 +2,8 @@ use crate::model::LlmResponse;
 use crate::providers::llm::LlmClient;
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,26 +14,30 @@ pub struct TraceClient {
 }
 
 impl TraceClient {
-    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        let file = std::fs::File::open(path)
-            .map_err(|e| anyhow::anyhow!("failed to open trace file {}: {}", path.display(), e))?;
+    pub fn from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let file = File::open(path.as_ref()).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to open trace file '{}': {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
         let reader = std::io::BufReader::new(file);
 
         let mut traces = HashMap::new();
         let mut request_ids = HashSet::new();
-        use std::io::BufRead;
 
-        for (i, line) in reader.lines().enumerate() {
-            let line = line?;
+        for (i, line_res) in reader.lines().enumerate() {
+            let line = line_res?;
             if line.trim().is_empty() {
                 continue;
             }
 
             // Expected schema: { "prompt": "...", "response": "..." ... }
+
+            // Expected schema: { "prompt": "...", "response": "..." ... }
             // Or maybe a more complex OTel structure?
             // For MVP simplicity, let's assume a schema compatible with our internal LlmResponse or a simple mapping.
-            // Let's assume the JSONL contains objects that *can be deserialized* optionally, but primarily we need prompt + text.
-
             #[derive(serde::Deserialize)]
             struct TraceEntry {
                 schema_version: Option<u32>,
@@ -53,35 +59,24 @@ impl TraceClient {
             // Validate Schema
             if let Some(v) = entry.schema_version {
                 if v != 1 {
-                    return Err(anyhow::anyhow!(
-                        "line {}: unsupported schema_version {}",
-                        i + 1,
-                        v
-                    ));
+                    continue; // Skip unknown versions or error? For now skip
                 }
             }
             if let Some(t) = &entry.r#type {
                 if t != "verdict.trace" {
-                    return Err(anyhow::anyhow!("line {}: unsupported type {}", i + 1, t));
+                    continue;
                 }
             }
 
-            let text = match entry.text.or(entry.response) {
-                Some(t) => t,
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "line {}: missing `text`/`response` field",
-                        i + 1
-                    ))
-                }
-            };
+            let response_text = entry.response.or(entry.text).unwrap_or_default();
 
+            // Construct LlmResponse
             let resp = LlmResponse {
-                text,
-                provider: entry.provider.unwrap_or_else(|| "trace".into()),
-                model: entry.model.unwrap_or_else(|| "trace_model".into()),
-                cached: false,
+                text: response_text,
                 meta: entry.meta,
+                model: entry.model.unwrap_or_else(|| "trace".to_string()),
+                provider: entry.provider.unwrap_or_else(|| "trace".to_string()),
+                ..Default::default()
             };
 
             // Uniqueness Check
@@ -231,6 +226,24 @@ mod tests {
         writeln!(tmp3, r#"{{"prompt": "p"}}"#)?;
         assert!(TraceClient::from_path(tmp3.path()).is_err());
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_trace_meta_preservation() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        // Using verbatim JSON from trace.jsonl (simplified)
+        let json = r#"{"schema_version":1,"type":"verdict.trace","request_id":"test-1","prompt":"Say hello","response":"Hello world","meta":{"verdict":{"embeddings":{"model":"text-embedding-3-small","response":[0.1],"reference":[0.1]}}}}"#;
+        writeln!(tmp, "{}", json)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("Say hello", None).await?;
+
+        println!("Meta from test: {}", resp.meta);
+        assert!(
+            resp.meta.pointer("/verdict/embeddings/response").is_some(),
+            "Meta embeddings missing!"
+        );
         Ok(())
     }
 }

@@ -12,10 +12,22 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
         xml.push_str(&format!(r#"  <testcase name="{}">"#, escape(&r.test_id)));
         match r.status {
             TestStatus::Pass => {}
-            TestStatus::Warn | TestStatus::Flaky => xml.push_str(&format!(
-                r#"<system-out>WARNING: {}</system-out>"#,
-                escape(&r.message)
-            )),
+            TestStatus::Skipped => {
+                xml.push_str(&format!(r#"<skipped message="{}"/>"#, escape(&r.message)))
+            }
+            TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => {
+                // Use clear warning label in system-out
+                let label = match r.status {
+                    TestStatus::Flaky => "FLAKY",
+                    TestStatus::Unstable => "UNSTABLE",
+                    _ => "WARNING",
+                };
+                xml.push_str(&format!(
+                    r#"<system-out>{}: {}</system-out>"#,
+                    label,
+                    escape(&r.message)
+                ));
+            }
             TestStatus::Fail => {
                 xml.push_str(&format!(r#"<failure message="{}"/>"#, escape(&r.message)))
             }
@@ -58,6 +70,9 @@ mod tests {
                 cached: false,
                 details: serde_json::Value::Null,
                 duration_ms: Some(10),
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
             },
             TestResultRow {
                 test_id: "test_warn".into(),
@@ -67,6 +82,9 @@ mod tests {
                 cached: false,
                 details: serde_json::Value::Null,
                 duration_ms: Some(10),
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
             },
             TestResultRow {
                 test_id: "test_fail".into(),
@@ -76,6 +94,9 @@ mod tests {
                 cached: false,
                 details: serde_json::Value::Null,
                 duration_ms: Some(10),
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
             },
         ];
 

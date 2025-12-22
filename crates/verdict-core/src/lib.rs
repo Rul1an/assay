@@ -1,10 +1,12 @@
 pub mod attempts;
 pub mod baseline;
 pub mod cache;
+pub mod calibration;
 pub mod config;
 pub mod embeddings;
 pub mod engine;
 pub mod errors;
+pub mod fingerprint;
 pub mod judge;
 pub mod metrics_api;
 pub mod model;
@@ -15,3 +17,4 @@ pub mod redaction;
 pub mod report;
 pub mod storage;
 pub mod thresholds;
+pub mod trace;
