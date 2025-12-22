@@ -252,6 +252,15 @@ runs:
         URL="https://github.com/${REPO}/releases/download/${VER}/${ASSET}"
 
         echo "Downloading $URL"
+
+        # Check if asset exists (hardening)
+        if ! curl -I --silent --fail "$URL" >/dev/null; then
+          echo "Error: Release asset '$ASSET' not found for version '$VER'." >&2
+          echo "URL: $URL" >&2
+          echo "Please ensure the release exists and the asset specific to this OS/Arch was uploaded." >&2
+          exit 1
+        fi
+
         curl -fsSL "$URL" -o "$ASSET"
         tar -xzf "$ASSET"
         chmod +x verdict
