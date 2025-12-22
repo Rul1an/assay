@@ -43,8 +43,16 @@ jobs:
         run: |
           $VERDICT_BIN ci \
             --config eval.yaml \
-            --trace-file traces/ok.jsonl \
-            --artifact-name verdict-reports-smoke
+            --trace-file traces/ok.jsonl
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-reports-smoke
+          path: |
+            fixtures/sub/junit.xml
+            fixtures/sub/verdict.sarif
+          if-no-files-found: ignore
 
   export_baseline_artifact:
     runs-on: ubuntu-latest
@@ -82,8 +90,7 @@ jobs:
           $VERDICT_BIN ci \
             --config eval.yaml \
             --trace-file traces/ok.jsonl \
-            --export-baseline baseline.json \
-            --artifact-name verdict-reports-export
+            --export-baseline baseline.json
 
       - name: Upload Baseline Artifact
         uses: actions/upload-artifact@v4
