@@ -84,7 +84,7 @@ class StreamAccumulator:
                 # No ID, look up known ID for this index
                 known_id = self._index_to_id.get(idx)
                 if known_id:
-                     key = (idx, known_id)
+                    key = (idx, known_id)
                 else:
                     # Fallback (implicit/unknown ID)
                     key = (idx, f"call_{idx}")
@@ -96,14 +96,14 @@ class StreamAccumulator:
 
                 # If we just found the ID but had previous args on 'call_{idx}'...
                 if tc_id:
-                     provisional_key = (idx, f"call_{idx}")
-                     if provisional_key in self._tool_buf:
-                         # Migrate provisional buffer to real ID
-                         self._tool_buf[key] = self._tool_buf.pop(provisional_key)
-                         buf = self._tool_buf[key]
-                     else:
-                         buf = {"name": name, "args_parts": []}
-                         self._tool_buf[key] = buf
+                    provisional_key = (idx, f"call_{idx}")
+                    if provisional_key in self._tool_buf:
+                        # Migrate provisional buffer to real ID
+                        self._tool_buf[key] = self._tool_buf.pop(provisional_key)
+                        buf = self._tool_buf[key]
+                    else:
+                        buf = {"name": name, "args_parts": []}
+                        self._tool_buf[key] = buf
                 else:
                     buf = {"name": name, "args_parts": []}
                     self._tool_buf[key] = buf

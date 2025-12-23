@@ -153,20 +153,32 @@ def record_chat_completions_stream_with_tools(
                 break
 
             # 2) record tool calls + execute
-            assistant_msg = {"role": "assistant", "content": content, "tool_calls": []}
+
+            # 2a) Construct and append assistant message first
+            assistant_msg = {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": str(tc["id"]),
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            # Re-serialize args for history fidelity, or use empty string if raw was bad
+                            "arguments": json.dumps(tc["args"]) if "_raw" not in tc["args"] else tc["args"]["_raw"],
+                        },
+                    }
+                    for tc in tcs
+                ]
+            }
+            current_messages.append(assistant_msg)
+
+            # 2b) Execute tools and append results
             for tc in tcs:
                 tc_id = str(tc["id"])
                 tool_name = tc["name"]
                 args = tc["args"]
                 idx = int(tc["index"])
-
-                assistant_msg["tool_calls"].append(
-                    {
-                        "id": tc_id,
-                        "type": "function",
-                        "function": {"name": tool_name, "arguments": ""},  # informational
-                    }
-                )
 
                 ep.tool_call(
                     tool_name=tool_name,
@@ -205,9 +217,6 @@ def record_chat_completions_stream_with_tools(
                 current_messages.append(
                     {"role": "tool", "tool_call_id": tc_id, "content": "" if result is None else str(result)}
                 )
-
-            # Add assistant message after tool execution context (optional but ok)
-            current_messages.append(assistant_msg)
 
             # 3) follow-up (non-stream) to keep client compat easy
             resp2 = client.chat.completions.create(
