@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from verdict_sdk.evaluator import Evaluator
 from verdict_sdk.judge.openai_judge import OpenAIJudge
-from verdict_sdk.judge.types import JudgeRequest, JudgeResponse
+from verdict_sdk.judge.types import JudgeRequest
 
 TRACE_CONTENT = '{"kind": "model", "content": "Paris is the capital of France."}'
 

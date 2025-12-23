@@ -122,20 +122,25 @@ class MockOpenAIClient:
                 })
 
             def _make_resp(self, content, tool_calls):
-                return type("Response", (), {
-                    "choices": [type("Choice", (), {
-                        "message": type("Message", (), {
-                            "content": content,
-                            "tool_calls": tool_calls if tool_calls else None
-                        })
-                    })],
-                    "usage": type("Usage", (), {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 10,
-                        "model_dump": lambda self: {"prompt_tokens": 10, "completion_tokens": 10}
-                    })(),
-                    "model": "mock-gpt"
-                })
+                class MockUsage:
+                    prompt_tokens = 10
+                    completion_tokens = 10
+                    def model_dump(self):
+                        return {"prompt_tokens": 10, "completion_tokens": 10}
+
+                class MockMessage:
+                    content = content
+                    tool_calls = tool_calls if tool_calls else None
+
+                class MockChoice:
+                    message = MockMessage()
+
+                class MockResponse:
+                    choices = [MockChoice()]
+                    usage = MockUsage()
+                    model = "mock-gpt"
+
+                return MockResponse()
 
 async def main():
     if len(sys.argv) < 2:

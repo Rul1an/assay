@@ -28,7 +28,7 @@ class OpenAIJudge(JudgeClient):
                     "openai is not installed. Install verdict-sdk[openai]."
                 ) from e
 
-            import os
+
 
             self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 

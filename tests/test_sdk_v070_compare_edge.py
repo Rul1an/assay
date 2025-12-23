@@ -2,9 +2,8 @@ import os
 from math import nan
 
 import pytest
-from verdict_sdk.errors import BaselineIncompatibleError, ConfigError
+from verdict_sdk.errors import BaselineIncompatibleError
 from verdict_sdk.evaluator import Evaluator
-from verdict_sdk.result import MetricResult
 
 
 @pytest.fixture

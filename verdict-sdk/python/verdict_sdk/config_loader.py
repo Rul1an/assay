@@ -103,12 +103,10 @@ def _parse_sdk_native(raw: Dict[str, Any]) -> EvalConfig:
         tid = str(t.get("id", "")).strip()
         prompt = str(t.get("prompt", "") or "")
         metrics_raw = t.get("metrics", []) or []
-        print(
-            f"DEBUG CONFIG: tid={tid} metrics_raw_len={len(metrics_raw)} keys={t.keys()}"
-        )
+
         metrics: list[MetricSpec] = []
         for m in metrics_raw:
-            sys.stderr.write(f"DEBUG LOOP METRIC: {m}\n")
+
             if not isinstance(m, dict):
                 raise ConfigError(f"metrics entries must be objects (test={tid}).")
             metrics.append(
