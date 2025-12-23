@@ -120,7 +120,7 @@ def record_chat_completions(
                     error=None,
                     step_id=sid,
                     call_index=i,
-                    tool_call_id=tc_id # Prio 0: Pass ID
+                    tool_call_id=tc_id
                 )
 
                 tool_calls_out.append({
@@ -199,7 +199,7 @@ def record_chat_completions_with_tools(
             response = client.chat.completions.create(**kwargs)
             choices = getattr(response, "choices", None) or []
             if not choices:
-                    break
+                break
             message = choices[0].message
             content_chunk = message.content or ""
             content = content_chunk
@@ -230,7 +230,7 @@ def record_chat_completions_with_tools(
                         "type": "function",
                         "function": {
                             "name": tc.function.name,
-                            "arguments": tc.function.arguments, # string
+                            "arguments": tc.function.arguments,
                         },
                     }
                     for (i, tc_id, tc) in normalized_tool_calls
@@ -270,7 +270,7 @@ def record_chat_completions_with_tools(
                         args=args_obj,
                         result=result_obj,
                         error=error_msg,
-                        tool_call_id=tc_id, # Prio 0: Pass ID
+                        tool_call_id=tc_id,
                         meta=tool_call_res_meta
                     )
 
@@ -281,7 +281,6 @@ def record_chat_completions_with_tools(
                         "error": error_msg
                     })
 
-                    # Prio 1: sort_keys=True
                     tool_content = json.dumps(result_obj, ensure_ascii=False, sort_keys=True) if result_obj is not None else (error_msg or "")
 
                     current_messages.append({

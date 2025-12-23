@@ -1,6 +1,4 @@
-import json
-import pytest
-from pathlib import Path
+
 from verdict_sdk.writer import TraceWriter
 
 def test_trace_writer_determinism(tmp_path):

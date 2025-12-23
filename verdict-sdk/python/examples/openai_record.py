@@ -1,8 +1,7 @@
 import os
 import sys
-import json
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import List, Optional
 from verdict_sdk import TraceWriter, record_chat_completions, record_chat_completions_with_tools
 
 # --- Tool Executors ---

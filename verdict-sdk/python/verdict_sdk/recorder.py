@@ -64,7 +64,7 @@ class EpisodeRecorder:
         args: Any,
         result: Any | None,
         error: str | None = None,
-        tool_call_id: Optional[str] = None, # Prio 0: Add explicit ID support
+        tool_call_id: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Writes a V2 tool_call event with executed result"""
@@ -94,7 +94,7 @@ class EpisodeRecorder:
         error: Optional[str] = None,
         step_id: Optional[str] = None,
         call_index: int = 0,
-        tool_call_id: Optional[str] = None, # Prio 0: Add explicit ID support
+        tool_call_id: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         # If no explicit step_id is provided, create an implicit "model" step to attach to
@@ -117,7 +117,7 @@ class EpisodeRecorder:
             "error": error,
             "meta": m,
         })
-        # Note: tool_call does not increment _idx itself, it's an attachment to a step logic
+
         return
 
     def end(self, *, outcome: str = "pass", meta: Optional[Dict[str, Any]] = None) -> None:
