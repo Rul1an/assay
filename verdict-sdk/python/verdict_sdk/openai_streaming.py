@@ -62,7 +62,6 @@ class StreamAccumulator:
 
         # tool_calls delta (OpenAI shape)
         tool_calls = _get(d, "tool_calls", None) or []
-        # tool_calls = _as_dict(tool_calls) # optional/harmless
 
         for tc in tool_calls:
             tc = _as_dict(tc)
@@ -92,12 +91,8 @@ class StreamAccumulator:
 
             buf = self._tool_buf.get(key)
             if buf is None:
-                # If we are creating a buffer with an explicit key, we are good.
-                # If we are creating a buffer with an implicit key, we might need to merge later?
-                # Actually, simply relying on index_to_id map handles the "late binding" perfectly
-                # as long as we migrate 'call_{idx}' buf if ID arrives late?
-                # Optimization: In practice, OpenAI sends ID in first chunk.
-                # But just to be safe if ID arrives late (after args), we check if we have a provisional buffer.
+                # Handle late-arriving IDs by migrating provisional buffers if needed.
+                # OpenAI usually sends IDs in the first chunk, but we must be robust.
 
                 # If we just found the ID but had previous args on 'call_{idx}'...
                 if tc_id:

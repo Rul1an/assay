@@ -98,7 +98,6 @@ class EpisodeRecorder:
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         # If no explicit step_id is provided, create an implicit "model" step to attach to
-        # (Though usually tool_calls follow a model/thinking step)
         sid = step_id or self.step(kind="model", name="agent", content="")
 
         m = meta or {}

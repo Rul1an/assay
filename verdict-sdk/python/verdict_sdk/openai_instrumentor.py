@@ -42,9 +42,8 @@ def record_chat_completions(
 ) -> Dict[str, Any]:
     """
     Executes OpenAI chat.completions call and records Verdict V2 trace events.
-    (Phase 1.1 Implementation with Fixes)
     """
-    # 1. Determine Prompt
+    # Prompt determination logic
     if prompt is None:
         for m in reversed(messages):
             if m.get("role") == "user":
@@ -55,7 +54,7 @@ def record_chat_completions(
         if prompt is None:
             prompt = ""
 
-    # 2. Setup Recorder
+    # Setup Recorder
     rec_meta = meta or {}
 
     with EpisodeRecorder(
@@ -87,7 +86,7 @@ def record_chat_completions(
 
         content = message.content or ""
 
-        # Step 1: Model Output
+        # Model Output
         sid = ep.step(
             kind="model",
             name="openai",
@@ -99,7 +98,7 @@ def record_chat_completions(
             }
         )
 
-        # Step 2: Tool Calls
+        # Tool Calls
         tool_calls_out = []
         if message.tool_calls:
             for i, tc in enumerate(message.tool_calls):
@@ -158,7 +157,7 @@ def record_chat_completions_with_tools(
     clock: Optional[Clock] = None,
 ) -> Dict[str, Any]:
     """
-    Executes OpenAI chat loop with tool execution (Phase 1.2).
+    Executes OpenAI chat loop with tool execution.
     """
     if prompt is None:
         for m in reversed(messages):
