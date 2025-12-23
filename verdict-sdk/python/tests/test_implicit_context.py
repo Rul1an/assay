@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,6 +10,7 @@ from verdict_sdk.writer import TraceWriter
 
 class MockWriter(TraceWriter):
     def __init__(self):
+        super().__init__("mock.jsonl")
         self.events = []
 
     def write_event(self, event):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 from .clock import Clock, SystemClock
 from .openai_instrumentor import _extract_usage, _jsonable

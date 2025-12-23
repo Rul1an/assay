@@ -1,7 +1,8 @@
+```python
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from .clock import Clock, SystemClock
 from .recorder import EpisodeRecorder

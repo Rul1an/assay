@@ -253,7 +253,7 @@ async def main():
 
     else:
         print(f"Recording Async Simple to {trace_path}...")
-        result = await record_chat_completions(
+        await record_chat_completions(
             writer=writer,
             client=client,
             model="gpt-4o-mini",

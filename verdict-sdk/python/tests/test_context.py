@@ -7,6 +7,7 @@ from verdict_sdk.writer import TraceWriter
 
 class MockWriter(TraceWriter):
     def __init__(self, name):
+        super().__init__("mock.jsonl")
         self.name = name
 
 

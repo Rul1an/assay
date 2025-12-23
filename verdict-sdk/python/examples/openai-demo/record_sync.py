@@ -310,7 +310,7 @@ def main():
         print("Done Stream.")
     else:
         print(f"Recording Simple to {trace_path}...")
-        result = record_chat_completions(
+        record_chat_completions(
             writer=writer,
             client=client,
             model="gpt-4o-mini",

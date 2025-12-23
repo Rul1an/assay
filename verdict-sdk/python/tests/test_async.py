@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,6 +13,7 @@ from verdict_sdk.writer import TraceWriter
 
 class MockWriter(TraceWriter):
     def __init__(self):
+        super().__init__("mock.jsonl")
         self.events = []
 
     def write_event(self, event: Any):
@@ -112,7 +112,7 @@ async def test_record_with_tools_async(mock_writer, mock_client, mock_clock):
 
     assert result["content"] == "Done"
 
-    # Events: Start(1) + Model(1) + ToolCall(1) + ToolResult(1) + Model(2) + End(1) = 6 events
+    # Events: Start(1) + Model(1) + ToolCall(1) + ToolResult(1, type="tool_call") + Model(2) + End(1) = 6 events
     assert len(mock_writer.events) == 6
 
     # Check Tool Result Event
