@@ -30,3 +30,4 @@ echo "running tests/e2e/openai_tool_loop_idempotency.sh (Phase 1.2 Idemp)..."
 bash tests/e2e/openai_tool_loop_idempotency.sh
 
 echo "ALL E2E TESTS PASSED 🚀"
+echo 'running tests/e2e/openai_streaming_smoke.sh...'; bash tests/e2e/openai_streaming_smoke.sh

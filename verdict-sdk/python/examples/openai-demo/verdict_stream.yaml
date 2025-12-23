@@ -1,0 +1,14 @@
+version: 1
+suite: openai-stream
+model: "trace"
+
+tests:
+  - id: openai_stream_demo
+    input:
+      prompt: "What's the weather like in Tokyo?"
+    expected:
+      type: regex_match
+      pattern: ".*"
+    assertions:
+      - type: trace_must_call_tool
+        tool: GetWeather
