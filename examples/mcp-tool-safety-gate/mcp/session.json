@@ -1,0 +1,57 @@
+[
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "id": 1
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [
+                {
+                    "name": "ApplyDiscount",
+                    "description": "Apply a discount code to the cart",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "GetShipping",
+                    "description": "Get shipping cost",
+                    "inputSchema": {
+                        "type": "object"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": 2,
+        "params": {
+            "name": "ApplyDiscount",
+            "arguments": {
+                "code": "SUMMER2025"
+            }
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Discount applied successfully"
+                }
+            ]
+        }
+    }
+]

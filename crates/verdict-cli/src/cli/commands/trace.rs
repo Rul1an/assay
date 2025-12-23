@@ -1,6 +1,8 @@
 use super::super::args::{TraceArgs, TraceSub};
 use super::exit_codes;
+
 use verdict_core::trace;
+mod import_mcp;
 
 pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
     match args.cmd {
@@ -217,6 +219,31 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
                 trace.display(),
                 final_output.display()
             );
+            Ok(exit_codes::OK)
+        }
+
+        TraceSub::ImportMcp {
+            input,
+            out_trace,
+            format,
+            episode_id,
+            test_id,
+            prompt,
+        } => {
+            let format_enum = match format.as_str() {
+                "inspector" => verdict_core::mcp::McpInputFormat::Inspector,
+                "jsonrpc" => verdict_core::mcp::McpInputFormat::JsonRpc,
+                other => anyhow::bail!("unknown format: {}", other),
+            };
+
+            import_mcp::run(import_mcp::ImportMcpArgs {
+                input,
+                out_trace,
+                format: format_enum,
+                episode_id,
+                test_id,
+                prompt,
+            })?;
             Ok(exit_codes::OK)
         }
     }
