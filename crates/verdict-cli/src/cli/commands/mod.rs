@@ -109,8 +109,10 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     }
 
     let cfg = verdict_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    let store = verdict_core::storage::Store::open(&args.db)?;
+
     let runner = build_runner(
-        &args.db,
+        store,
         &args.trace_file,
         &cfg,
         args.rerun_failures,
@@ -170,11 +172,31 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
+    // PR-406: Shared Store for Auto-Ingest
+    let store = verdict_core::storage::Store::open(&args.db)?;
+    store.init_schema()?; // Ensure tables exist for ingest
+
+    // PR-406: In Strict Replay mode, we MUST ingest the trace into the DB
+    // so that Agent Assertions (which query the DB) can find the episodes/steps.
+    if args.replay_strict {
+        if let Some(trace_path) = &args.trace_file {
+            let stats = verdict_core::trace::ingest::ingest_into_store(&store, trace_path)
+                .map_err(|e| anyhow::anyhow!("failed to ingest trace: {}", e))?;
+
+            eprintln!(
+                "auto-ingest: loaded {} events into {} (from {})",
+                stats.event_count,
+                args.db.display(),
+                trace_path.display()
+            );
+        }
+    }
+
     let cfg = verdict_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
     // Strict mode implies no reruns by default policy (fail fast/accurate)
     let reruns = if args.strict { 0 } else { args.rerun_failures };
     let runner = build_runner(
-        &args.db,
+        store,
         &args.trace_file,
         &cfg,
         reruns,
@@ -289,7 +311,7 @@ fn decide_exit_code(results: &[verdict_core::model::TestResultRow], strict: bool
 
 #[allow(clippy::too_many_arguments)]
 async fn build_runner(
-    db_path: &std::path::Path,
+    store: verdict_core::storage::Store,
     trace_file: &Option<PathBuf>,
     cfg: &verdict_core::model::EvalConfig,
     rerun_failures_arg: u32,
@@ -304,7 +326,6 @@ async fn build_runner(
     cfg_path: PathBuf,
     replay_strict: bool,
 ) -> anyhow::Result<verdict_core::engine::runner::Runner> {
-    let store = verdict_core::storage::Store::open(db_path)?;
     store.init_schema()?;
     let cache = verdict_core::cache::vcr::VcrCache::new(store.clone());
 

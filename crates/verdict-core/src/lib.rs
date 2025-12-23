@@ -19,6 +19,7 @@ pub mod doctor;
 pub mod validate;
 
 pub mod agent_assertions;
+pub mod mcp;
 pub mod report;
 pub mod storage;
 pub mod thresholds;

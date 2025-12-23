@@ -92,6 +92,7 @@ pub struct RunArgs {
     #[arg(long, default_value = "warn")]
     pub quarantine_mode: String,
 
+    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
     #[arg(long)]
     pub trace_file: Option<PathBuf>,
 
@@ -135,7 +136,7 @@ pub struct RunArgs {
     #[command(flatten)]
     pub judge: JudgeArgs,
 
-    /// strict replay mode (forbid network calls; fail if precomputed data missing)
+    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
     #[arg(long)]
     pub replay_strict: bool,
 }
@@ -159,6 +160,7 @@ pub struct CiArgs {
     #[arg(long)]
     pub otel_jsonl: Option<PathBuf>,
 
+    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
     #[arg(long)]
     pub trace_file: Option<PathBuf>,
 
@@ -199,7 +201,7 @@ pub struct CiArgs {
     #[command(flatten)]
     pub judge: JudgeArgs,
 
-    /// strict replay mode (forbid network calls; fail if precomputed data missing)
+    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
     #[arg(long)]
     pub replay_strict: bool,
 }
@@ -350,6 +352,28 @@ pub enum TraceSub {
         judge_model: Option<String>,
         #[arg(long)]
         output: Option<PathBuf>,
+    },
+    /// Import an MCP transcript (Inspector/JSON-RPC) and convert to Verdict V2 trace
+    ImportMcp {
+        #[arg(long)]
+        input: PathBuf,
+
+        #[arg(long)]
+        out_trace: PathBuf,
+
+        /// Input format: inspector | jsonrpc
+        #[arg(long, default_value = "inspector")]
+        format: String,
+
+        #[arg(long)]
+        episode_id: Option<String>,
+
+        #[arg(long)]
+        test_id: Option<String>,
+
+        /// User prompt text (strongly recommended for replay strictness)
+        #[arg(long)]
+        prompt: Option<String>,
     },
 }
 #[derive(Parser, Clone)]

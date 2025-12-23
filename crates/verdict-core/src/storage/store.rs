@@ -574,7 +574,9 @@ impl Store {
                 .unwrap_or_default();
         let meta = serde_json::to_string(&e.meta).unwrap_or_default();
 
-        let effective_test_id = test_id.or(Some(&e.episode_id));
+        // PR-406: Support test_id in meta (from MCP import) to override episode_id default
+        let meta_test_id = e.meta.get("test_id").and_then(|v| v.as_str());
+        let effective_test_id = test_id.or(meta_test_id).or(Some(&e.episode_id));
 
         // Idempotent: OR REPLACE to update meta/prompt if re-ingesting? Or OR IGNORE?
         // User said: "INSERT OR IGNORE op episode_id" for idempotency of IDs.
