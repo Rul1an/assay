@@ -54,6 +54,8 @@ class MockResponse:
 class MockCompletions:
     def create(self, **kwargs):
         msgs = kwargs.get("messages", [])
+        if not msgs:
+            return MockResponse(choices=[MockChoice(message=MockMessage(content="No messages provided"))])
         last_msg = msgs[-1]
 
         # Check if last msg is tool result -> Final Answer

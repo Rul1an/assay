@@ -62,8 +62,8 @@ class EpisodeRecorder:
         call_index: int,
         tool_name: str,
         args: Any,
-        result: Any | None,
-        error: str | None = None,
+        result: Optional[Any],
+        error: Optional[str] = None,
         tool_call_id: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> None:
