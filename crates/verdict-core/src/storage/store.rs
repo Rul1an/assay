@@ -569,9 +569,12 @@ impl Store {
         run_id: Option<i64>,
         test_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        let prompt_str =
-            serde_json::to_string(&e.input.get("prompt").unwrap_or(&serde_json::Value::Null))
-                .unwrap_or_default();
+        let prompt_val = e.input.get("prompt").unwrap_or(&serde_json::Value::Null);
+        let prompt_str = if let Some(s) = prompt_val.as_str() {
+            s.to_string()
+        } else {
+            serde_json::to_string(prompt_val).unwrap_or_default()
+        };
         let meta = serde_json::to_string(&e.meta).unwrap_or_default();
 
         // PR-406: Support test_id in meta (from MCP import) to override episode_id default

@@ -180,12 +180,13 @@ impl TraceClient {
                                 // --- OUTPUT EXTRACTION (Last Wins) ---
                                 // Rule 4: Step Content "completion"
                                 if let Some(c) = &ev.content {
+                                    let mut extracted = None;
                                     if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c)
                                     {
                                         if let Some(resp) =
                                             c_json.get("completion").and_then(|s| s.as_str())
                                         {
-                                            state.output = Some(resp.to_string());
+                                            extracted = Some(resp.to_string());
                                             // Capture model if present
                                             if let Some(m) =
                                                 c_json.get("model").and_then(|s| s.as_str())
@@ -193,6 +194,13 @@ impl TraceClient {
                                                 state.model = Some(m.to_string());
                                             }
                                         }
+                                    }
+
+                                    if let Some(out) = extracted {
+                                        state.output = Some(out);
+                                    } else {
+                                        // Fallback: use raw content as output if structured extraction failed
+                                        state.output = Some(c.clone());
                                     }
                                 }
                                 // Rule 5: Step Meta "gen_ai.completion"
