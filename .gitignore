@@ -21,3 +21,8 @@ build/
 .env
 .coverage
 htmlcov/
+
+# Release & Smoke Test
+.venv_smoke/
+smoke_test_ws/
+verdict_sdk.egg-info/

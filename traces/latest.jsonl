@@ -1,0 +1,14 @@
+{"episode_id":"ep_820cc09d","input":{"prompt":"What is the weather in Tokyo?"},"meta":{},"timestamp":1766505542812,"type":"episode_start"}
+{"episode_id":"ep_820cc09d","meta":{},"outcome":"error","timestamp":1766505543548,"type":"episode_end"}
+{"episode_id":"ep_74e63487","input":{"prompt":"What is the weather in Tokyo?"},"meta":{},"timestamp":1766505576415,"type":"episode_start"}
+{"episode_id":"ep_74e63487","meta":{},"outcome":"error","timestamp":1766505576415,"type":"episode_end"}
+{"episode_id":"ep_80fbb97f","input":{"prompt":"What is the weather in Tokyo?"},"meta":{},"timestamp":1766505609783,"type":"episode_start"}
+{"episode_id":"ep_80fbb97f","meta":{},"outcome":"error","timestamp":1766505609783,"type":"episode_end"}
+{"episode_id":"ep_acb02b16","input":{"prompt":"What is the weather in Tokyo?"},"meta":{},"timestamp":1766505665891,"type":"episode_start"}
+{"episode_id":"ep_acb02b16","meta":{},"outcome":"error","timestamp":1766505665892,"type":"episode_end"}
+{"episode_id":"ep_9ff3047f","input":{"prompt":"What is the weather in Tokyo?"},"meta":{},"timestamp":1766505700698,"type":"episode_start"}
+{"content":"","episode_id":"ep_9ff3047f","idx":0,"kind":"model","meta":{"gen_ai.request.model":"gpt-4o-mini","gen_ai.response.model":"mock-gpt","gen_ai.usage":{"completion_tokens":10,"prompt_tokens":10},"round":0},"name":"openai","step_id":"step_001","timestamp":1766505700699,"type":"step"}
+{"args":{"location":"Tokyo"},"call_index":0,"episode_id":"ep_9ff3047f","error":null,"meta":{"tool_call_id":"call_3c285ae4"},"result":null,"step_id":"step_001","timestamp":1766505700699,"tool_name":"GetWeather","type":"tool_call"}
+{"args":{"location":"Tokyo"},"call_index":0,"episode_id":"ep_9ff3047f","error":null,"meta":{"tool_call_id":"call_3c285ae4"},"result":{"conditions":"partly cloudy","humidity_percent":65,"location":"Tokyo","temperature_celsius":22},"step_id":"step_001","timestamp":1766505700699,"tool_name":"GetWeather","type":"tool_call"}
+{"content":"I can help with weather and math.","episode_id":"ep_9ff3047f","idx":1,"kind":"model","meta":{"gen_ai.request.model":"gpt-4o-mini","gen_ai.response.model":"mock-gpt","gen_ai.usage":{"completion_tokens":10,"prompt_tokens":10},"round":1},"name":"openai","step_id":"step_002","timestamp":1766505700699,"type":"step"}
+{"episode_id":"ep_9ff3047f","meta":{},"outcome":"pass","timestamp":1766505700699,"type":"episode_end"}

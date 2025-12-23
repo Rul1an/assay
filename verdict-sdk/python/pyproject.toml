@@ -4,15 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verdict-sdk"
-version = "0.6.0"
+version = "0.7.1"
 description = "Python SDK for Verdict - Deterministic Regression Gating"
 readme = "README.md"
 requires-python = ">=3.8"
-license = "MIT"
+license = { text = "MIT" }
 authors = [
   { name = "Verdict", email = "hello@verdict.dev" },
 ]
-dependencies = []
+dependencies = [
+  "PyYAML>=6.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -24,5 +37,24 @@ dev = [
 ]
 openai = ["openai>=1.0.0"]
 
+[project.scripts]
+verdict-sdk = "verdict_sdk.__main__:main"
+
+[project.urls]
+Homepage = "https://verdict.dev"
+Repository = "https://github.com/verdict-dev/verdict"
+Issues = "https://github.com/verdict-dev/verdict/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["verdict_sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "README.md",
+  "verdict_sdk/**",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"

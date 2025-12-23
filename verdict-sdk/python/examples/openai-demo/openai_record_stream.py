@@ -1,7 +1,8 @@
 import os
+
 from verdict_sdk import TraceWriter
-from verdict_sdk.openai_stream_wrapper import record_chat_completions_stream
 from verdict_sdk.mocks.openai_stream_mock import MockOpenAIClient
+from verdict_sdk.openai_stream_wrapper import record_chat_completions_stream
 
 
 def main():
@@ -11,14 +12,19 @@ def main():
     client = MockOpenAIClient()
 
     messages = [{"role": "user", "content": "What's the weather like in Tokyo?"}]
-    tools = [{
-        "type": "function",
-        "function": {
-            "name": "GetWeather",
-            "description": "Get current weather",
-            "parameters": {"type": "object", "properties": {"location": {"type": "string"}}},
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "GetWeather",
+                "description": "Get current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                },
+            },
         }
-    }]
+    ]
 
     with record_chat_completions_stream(
         writer=writer,
