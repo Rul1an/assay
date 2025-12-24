@@ -1,2 +1,2 @@
-{"schema_version":1,"type":"verdict.trace","request_id":"1","prompt":"Say hello","response":"hello world","model":"trace","provider":"trace","meta":{}}
-{"schema_version":1,"type":"verdict.trace","request_id":"2","prompt":"Return version as JSON: {\"version\": \"x.y\"}","response":"{\"version\":\"1.2\"}","model":"trace","provider":"trace","meta":{}}
+{"schema_version":1,"type":"assay.trace","request_id":"1","prompt":"Say hello","response":"hello world","model":"trace","provider":"trace","meta":{}}
+{"schema_version":1,"type":"assay.trace","request_id":"2","prompt":"Return version as JSON: {\"version\": \"x.y\"}","response":"{\"version\":\"1.2\"}","model":"trace","provider":"trace","meta":{}}

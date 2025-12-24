@@ -1,4 +1,4 @@
-# Generated test scenarios for Verdict
+# Generated test scenarios for Assay
 # Run: verdict ci --config verdict.yaml --trace-file traces/recorded.jsonl
 
 version: 1

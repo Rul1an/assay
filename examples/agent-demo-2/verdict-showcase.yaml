@@ -1,4 +1,4 @@
-# Showcase configuration for Verdict
+# Showcase configuration for Assay
 # Run: verdict ci --config verdict-showcase.yaml --trace-file traces/recorded.jsonl
 # This suite contains tests guaranteed to pass with the simple mock agent.
 
