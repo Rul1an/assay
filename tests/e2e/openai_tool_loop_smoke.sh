@@ -5,9 +5,9 @@ set -euo pipefail
 cargo build --bin verdict --release --quiet
 VERDICT=$PWD/target/release/verdict
 
-export PYTHONPATH=$PWD/verdict-sdk/python
-TRACE_FILE="$PWD/verdict-sdk/python/examples/openai-demo/traces/openai.jsonl"
-CONFIG_FILE="$PWD/verdict-sdk/python/examples/openai-demo/verdict.yaml"
+export PYTHONPATH=$PWD/assay/python
+TRACE_FILE="$PWD/assay/python/examples/openai-demo/traces/openai.jsonl"
+CONFIG_FILE="$PWD/assay/python/examples/openai-demo/verdict.yaml"
 
 # Truncate
 : > "$TRACE_FILE"
@@ -18,7 +18,7 @@ export VERDICT_TRACE="$TRACE_FILE"
 export OPENAI_API_KEY="mock"
 export RECORDER_MODE="loop"
 
-python3 verdict-sdk/python/examples/openai-demo/record_sync.py
+python3 assay/python/examples/openai-demo/record_sync.py
 
 echo "Trace Content (grep result):"
 grep '"result":' "$TRACE_FILE" || { echo "❌ Failed: No tool result recorded"; exit 1; }
@@ -27,7 +27,7 @@ grep '"tool_call_id":' "$TRACE_FILE" || { echo "❌ Failed: No tool_call_id reco
 # 2. Run Verdict CI (Replay Strict)
 # Use a temporary config tailored for the loop demo.
 
-LOOP_CONFIG="$PWD/verdict-sdk/python/examples/openai-demo/verdict_loop.yaml"
+LOOP_CONFIG="$PWD/assay/python/examples/openai-demo/verdict_loop.yaml"
 cat > "$LOOP_CONFIG" <<EOF
 version: 1
 suite: openai-loop

@@ -2,8 +2,8 @@ import os
 from math import nan
 
 import pytest
-from verdict_sdk.errors import BaselineIncompatibleError
-from verdict_sdk.evaluator import Evaluator
+from assay.errors import BaselineIncompatibleError
+from assay.evaluator import Evaluator
 
 
 @pytest.fixture

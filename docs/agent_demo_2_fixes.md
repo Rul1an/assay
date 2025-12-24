@@ -1,6 +1,6 @@
 # Agent Demo 2: Integration Fixes & Technical Summary
 
-This document serves as the canonical reference for the fixes applied to integrate Agent Demo 2 with `verdict-core` (v0.4.0+).
+This document serves as the canonical reference for the fixes applied to integrate Agent Demo 2 with `assay-core` (v0.4.0+).
 
 ## Goal
 Stabilize the end-to-end flow for Agent Demo 2:
@@ -10,7 +10,7 @@ Stabilize the end-to-end flow for Agent Demo 2:
 
 ---
 
-## 1. Verdict Core Hardening (`store.rs`)
+## 1. Assay Core Hardening (`store.rs`)
 
 ### A. Persistent Linking on Upsert (`insert_episode`)
 **Problem:** Re-ingesting a trace (e.g., to update metadata) without explicit `run_id` or `test_id` in the payload would overwrite existing database links with `NULL`, creating "orphan" episodes.
@@ -49,13 +49,13 @@ ON CONFLICT(id) DO UPDATE SET content=excluded.content, ...
 **Result:** All 25 scenarios persist correctly in the database without collision.
 
 ### B. Strict Replay Configuration (`run_demo.py`)
-**Problem:** `verdict ci` in strict mode failed because it attempts to use a live LLM client if no trace source is provided (which is forbidden).
+**Problem:** `assay ci` in strict mode failed because it attempts to use a live LLM client if no trace source is provided (which is forbidden).
 **Fix:** Explicitly pass `--trace-file traces/recorded.jsonl` in the verification command.
 **Result:** The runner correctly initializes the `TraceClient` for offline replay.
 
 ### C. Prompt Fidelity (`scenarios.py`)
-**Problem:** The script truncated prompts to 80 characters (`...`) in `verdict.yaml` for readability. This caused a content mismatch with the full recorded traces, leading to `Trace miss` errors.
-**Fix:** Removed truncation logic; `verdict.yaml` now contains exact prompts.
+**Problem:** The script truncated prompts to 80 characters (`...`) in `assay.yaml` for readability. This caused a content mismatch with the full recorded traces, leading to `Trace miss` errors.
+**Fix:** Removed truncation logic; `assay.yaml` now contains exact prompts.
 **Result:** Prompts match 100%, ensuring successful deterministic replay.
 
 ---
@@ -71,11 +71,11 @@ ON CONFLICT(id) DO UPDATE SET content=excluded.content, ...
 ### How to Run
 ```bash
 # 1. Record traces (Mock Mode)
-python3 scenarios.py --yaml > verdict.yaml
+python3 scenarios.py --yaml > assay.yaml
 OPENAI_API_KEY=mock python3 run_demo.py record
 
 # 2. Verify (Ingest + Check)
 OPENAI_API_KEY=mock python3 run_demo.py verify
 ```
 
-This setup proves that **Verdict** is working correctly as a safety guardrail.
+This setup proves that **Assay** is working correctly as a safety guardrail.

@@ -9,7 +9,7 @@
 |------|--------------|-------|-------|-------------------|-------|
 | 1 | Trace Miss / Prompts | `trace-miss` | 0 | Yes (E_TRACE_MISS) | |
 | 2 | Baseline Churn | `baseline-churn` | 0 | Yes (E_BASE_MISMATCH) | |
-| 3 | Schema Drift | `schema-drift` | 0 | Yes (verdict validate) | |
+| 3 | Schema Drift | `schema-drift` | 0 | Yes (assay validate) | |
 | 4 | Cache Confusion | `cache-confusion` | 0 | Yes (cache split) | |
 | 5 | Embedding Dimension Mismatch | `emb-dims` | 0 | Yes (E_EMB_DIMS) | |
 | 6 | Judge Variance | `judge-variance` | 0 | Partial (re-run logic) | |

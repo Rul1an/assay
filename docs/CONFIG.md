@@ -1,8 +1,8 @@
 # Configuration Reference (v0.7.0)
 
-Verdict supports two configuration styles:
+Assay supports two configuration styles:
 1.  **SDK-Native** (`eval.yaml`): The preferred format for v0.7.0+.
-2.  **CLI-Compat** (`verdict.yaml`): Legacy format for backward compatibility.
+2.  **CLI-Compat** (`assay.yaml`): Legacy format for backward compatibility.
 
 The SDK automatically detects and normalizes both formats into a single `EvalConfig` model.
 
@@ -30,7 +30,7 @@ tests:
 
 ---
 
-## 2. CLI-Compat Format (`verdict.yaml`)
+## 2. CLI-Compat Format (`assay.yaml`)
 
 This format uses `expected` and `assertions` keys. The SDK maps these to `metrics` internally.
 

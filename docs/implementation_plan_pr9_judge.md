@@ -9,10 +9,10 @@ Based on [ADR-004 v2](docs/ADR-004-Judge-Metrics.md).
 
 ## Proposed Changes
 
-### 1. CLI & Config (`verdict-cli`, `verdict-core`)
+### 1. CLI & Config (`assay-cli`, `assay-core`)
 Implement new flags and environment variable precedence.
 
-#### [MODIFY] [main.rs](file:///crates/verdict-cli/src/main.rs)
+#### [MODIFY] [main.rs](file:///crates/assay-cli/src/main.rs)
 - Add `JudgeArgs` flattened struct to `RunArgs` and `CiArgs`.
 - Flags:
     - `--judge` (`none`|`openai`|`fake`)
@@ -24,32 +24,32 @@ Implement new flags and environment variable precedence.
     - `--judge-api-key` (advanced/hidden)
 - implement `load_judge_config` with precedence (Flag > Env > Default).
 
-#### [MODIFY] [model.rs](file:///crates/verdict-core/src/model.rs)
+#### [MODIFY] [model.rs](file:///crates/assay-core/src/model.rs)
 - Update `Expected` enum to support `faithfulness`, `relevance`.
 - `Settings`: Add `JudgeConfig` but ONLY for suite-level overrides (rubric, etc). Runtime settings (provider, keys) stay in CLI/Env.
 
 ### 2. Core Engine & Providers
 Implement the "Enrichment Pattern" with separate Judge Cache.
 
-#### [NEW] [judge/mod.rs](file:///crates/verdict-core/src/judge/mod.rs)
+#### [NEW] [judge/mod.rs](file:///crates/assay-core/src/judge/mod.rs)
 - `JudgeService`: Orchestrates calls.
 - `VoteAggregator`: Implements majority vote + agreement calc.
 - `enrich_judge(tc, resp)`: Logic to check trace -> cache -> live.
 
-#### [NEW] [storage/judge_cache.rs](file:///crates/verdict-core/src/storage/judge_cache.rs)
+#### [NEW] [storage/judge_cache.rs](file:///crates/assay-core/src/storage/judge_cache.rs)
 - Separate SQLite table `judge_cache`.
 - Schema: `key` (PK), `provider`, `model`, `rubric_id`, `rubric_version`, `created_at`, `payload_json`.
 - `get(key)`, `put(key, payload)`.
 
-#### [MODIFY] [runner.rs](file:///crates/verdict-core/src/engine/runner.rs)
+#### [MODIFY] [runner.rs](file:///crates/assay-core/src/engine/runner.rs)
 - Inject `JudgeService` into `Runner`.
 - **Enrichment Logic**:
-    1.  **Trace Check**: If `resp.meta.verdict.judge.<rubric>` exists, use it (Source: "trace").
+    1.  **Trace Check**: If `resp.meta.assay.judge.<rubric>` exists, use it (Source: "trace").
     2.  **Judge Disabled**: If metadata missing AND `--judge none` -> **Exit 2** (Config Error) with actionable hint.
     3.  **Cache Check**: Generate key (incl. temp/tokens/samples). If hit -> Use it (Source: "cache").
     4.  **Live Call**: If enabled -> Call provider -> Cache -> Use it (Source: "live").
 
-#### [MODIFY] [redaction.rs](file:///crates/verdict-core/src/redaction.rs)
+#### [MODIFY] [redaction.rs](file:///crates/assay-core/src/redaction.rs)
 - Update redaction logic to redact `rationale` fields in judge metadata if `--redact-prompts` is active. (Samples/scores are safe).
 
 ### 3. Caching (Key Structure)
@@ -62,9 +62,9 @@ cache key generator in `judge/mod.rs` must include:
 - `template_hash` (prompt template)
 
 ### 4. Metrics
-#### [MODIFY] [judge.rs](file:///crates/verdict-metrics/src/judge.rs)
+#### [MODIFY] [judge.rs](file:///crates/assay-metrics/src/judge.rs)
 - Implement `FaithfulnessMetric`, `RelevanceMetric`.
-- Logic: Read from `resp.meta.verdict.judge`.
+- Logic: Read from `resp.meta.assay.judge`.
 - Use `score + epsilon >= min_score` for pass check.
 
 ## Reference: Copy/Paste Ready Text
@@ -100,7 +100,7 @@ help = "Max tokens for judge response (affects cache key). Default: 800"
 | **Unknown Provider** | 2 | `config error: unknown judge provider '<VALUE>'.` | `valid values: none \| openai \| fake` |
 | **Judge Disabled** | 2 | `config error: test '<TEST_ID>' requires judge results ... but judge is disabled.` | `options: 1) run live ... 2) run replay/CI offline ...` |
 | **Timeout** | 1 | `error: judge call timed out after <SECONDS>s for test '<TEST_ID>'.` | `increase timeout via settings.timeout_seconds` |
-| **Invalid Schema** | 2 | `config error: judge response for ... is invalid` | `try upgrading Verdict or re-running with --judge-refresh` |
+| **Invalid Schema** | 2 | `config error: judge response for ... is invalid` | `try upgrading Assay or re-running with --judge-refresh` |
 
 ### Warnings / Notes
 *   **Disagreement**: `warning: judge samples disagreed for test '<TEST_ID>' (<PASS_COUNT>/<K> passed). marking as unstable (status=Warn).`
@@ -109,7 +109,7 @@ help = "Max tokens for judge response (affects cache key). Default: 800"
 ### Trace Schema (Meta)
 ```json
 "meta": {
-  "verdict": {
+  "assay": {
     "judge": {
       "faithfulness": {
         "rubric_version": "v1",
@@ -144,7 +144,7 @@ help = "Max tokens for judge response (affects cache key). Default: 800"
 ### CLI Help Text (Baseline)
 ```rust
 // --baseline
-help = "Load a baseline.json and compare this run against it (relative thresholds). If a baseline entry is missing for a test, Verdict emits a warning by default."
+help = "Load a baseline.json and compare this run against it (relative thresholds). If a baseline entry is missing for a test, Assay emits a warning by default."
 
 // --export-baseline
 help = "Export a baseline.json from this run (for main branch baseline publishing)."
@@ -156,5 +156,5 @@ help = "Fail (config error) if any test is missing a baseline entry. Note: --str
 ### Baseline Messages
 | Scenario | Message | Hint |
 | :--- | :--- | :--- |
-| **Missing Entry** | `warning: no baseline entry found for test '<TEST_ID>' (metric='<METRIC>'). warning: regression check skipped for this test.` | `hint: to create a baseline run: verdict ci --export-baseline baseline.json` |
-| **Schema Mismatch** | `config error: unsupported baseline schema_version <X> (supported: <Y>).` | `hint: regenerate the baseline with: verdict ci --export-baseline baseline.json` |
+| **Missing Entry** | `warning: no baseline entry found for test '<TEST_ID>' (metric='<METRIC>'). warning: regression check skipped for this test.` | `hint: to create a baseline run: assay ci --export-baseline baseline.json` |
+| **Schema Mismatch** | `config error: unsupported baseline schema_version <X> (supported: <Y>).` | `hint: regenerate the baseline with: assay ci --export-baseline baseline.json` |

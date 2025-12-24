@@ -4,7 +4,7 @@ set -e
 # Setup cleanup
 cleanup() {
     echo "Cleaning up..."
-    rm -rf .venv_smoke dist build verdict_sdk.egg-info
+    rm -rf .venv_smoke dist build assay.egg-info
 }
 trap cleanup EXIT
 
@@ -31,13 +31,13 @@ pip install --upgrade pip
 
 # 3. Install Wheel with Extras
 # Find the wheel file (version agnostic)
-WHEEL=$(ls dist/verdict_sdk-*.whl | head -n 1)
+WHEEL=$(ls dist/assay-*.whl | head -n 1)
 echo "Found wheel: $WHEEL"
 pip install "$WHEEL[openai]"
 
 # 4. Run Doctor
 echo "[3/4] Running Doctor..."
-python -m verdict_sdk doctor
+python -m assay doctor
 
 # 5. Mini Quickstart Verification
 echo "[4/4] Verifying Core Logic (Mini Quickstart)..."
@@ -57,6 +57,6 @@ tests:
 echo '{"run_id": "smoke", "events": [{"kind": "model", "content": "ok"}]}' > trace.jsonl
 
 # Run Evaluator via Python one-liner
-python -c "from verdict_sdk import Evaluator; passed = Evaluator().run('trace.jsonl').passed; print(f'Passed: {passed}'); exit(0) if passed else exit(1)"
+python -c "from assay import Evaluator; passed = Evaluator().run('trace.jsonl').passed; print(f'Passed: {passed}'); exit(0) if passed else exit(1)"
 
 echo "✅ Release Smoke Test Passed!"

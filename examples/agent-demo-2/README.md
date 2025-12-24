@@ -2,7 +2,7 @@
 
 > **Gate your PRs on LLM tool call assertions. Catch the "agent gave 50% discount" bug BEFORE production.**
 
-This demo shows how [Verdict](https://github.com/your-org/verdict) prevents dangerous LLM tool calls from reaching production, using industry-standard patterns from BFCL, OpenTelemetry GenAI, and OWASP LLM Top 10.
+This demo shows how [Assay](https://github.com/your-org/assay) prevents dangerous LLM tool calls from reaching production, using industry-standard patterns from BFCL, OpenTelemetry GenAI, and OWASP LLM Top 10.
 
 ## The Problem (Dec 2025 Reality)
 
@@ -22,10 +22,10 @@ The gap: **89%** of orgs have agent observability, but only **52%** run offline 
 
 ## The Solution
 
-Verdict brings **deterministic CI gates** to non-deterministic LLM behavior:
+Assay brings **deterministic CI gates** to non-deterministic LLM behavior:
 
 ```yaml
-# verdict.yaml - Gate PRs on tool call assertions
+# assay.yaml - Gate PRs on tool call assertions
 tests:
   - id: discount_demand_blocked
     input:
@@ -44,7 +44,7 @@ tests:
 
 ```bash
 # In your GitHub Action
-- run: verdict ci --config verdict.yaml --replay-strict
+- run: assay ci --config assay.yaml --replay-strict
 ```
 
 **Result:** PR blocked if agent calls forbidden tools. Zero production incidents.
@@ -90,7 +90,7 @@ demo-function-calling/
 ├── tools.py          # 9 tools: 5 safe, 4 dangerous
 ├── agent.py          # OpenAI function calling agent
 ├── scenarios.py      # 20+ test scenarios (BFCL-style)
-├── verdict.yaml      # Verdict CI configuration
+├── assay.yaml      # Assay CI configuration
 ├── run_demo.py       # Demo runner
 └── traces/
     └── recorded.jsonl  # Pre-recorded for offline demo
@@ -120,7 +120,7 @@ demo-function-calling/
 | Adversarial | 6 | Prompt injection, jailbreaks |
 | Edge Cases | 4 | Unicode, mixed intent, minimal input |
 
-## How Verdict Assertions Work
+## How Assay Assertions Work
 
 ### `trace_must_call_tool`
 Verify the agent calls an expected tool:
@@ -184,21 +184,21 @@ name: LLM Safety Gate
 on: [pull_request]
 
 jobs:
-  verdict:
+  assay:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Verdict
-        uses: your-org/verdict-action@v1
+      - name: Run Assay
+        uses: your-org/assay-action@v1
         with:
-          config: verdict.yaml
+          config: assay.yaml
           replay-strict: true
 
       - name: Upload Report
         uses: actions/upload-artifact@v4
         with:
-          name: verdict-report
+          name: assay-report
           path: reports/
 ```
 
@@ -206,9 +206,9 @@ jobs:
 
 ```yaml
 llm-safety:
-  image: your-org/verdict:latest
+  image: your-org/assay:latest
   script:
-    - verdict ci --config verdict.yaml --replay-strict
+    - assay ci --config assay.yaml --replay-strict
   artifacts:
     reports:
       junit: reports/junit.xml
@@ -244,7 +244,7 @@ Model Context Protocol patterns.
 
 ## The Value Proposition
 
-### Without Verdict
+### Without Assay
 ```
 1. Developer changes prompt
 2. PR merged
@@ -255,31 +255,31 @@ Model Context Protocol patterns.
 7. Post-mortem, blame, sadness
 ```
 
-### With Verdict
+### With Assay
 ```
 1. Developer changes prompt
 2. PR opened
-3. verdict ci runs
+3. assay ci runs
 4. ❌ FAIL: trace_must_not_call_tool: ApplyDiscount
 5. PR blocked
 6. Developer fixes prompt
 7. Zero production incidents
 ```
 
-## Trace Format (Verdict V2)
+## Trace Format (Assay V2)
 
 Traces use JSONL format compatible with OTel export:
 
 ```jsonl
-{"type": "verdict.episode", "episode_id": "ep_001", "input": "What's the weather?", ...}
-{"type": "verdict.step", "step_id": "step_001", "span_kind": "llm", ...}
-{"type": "verdict.step", "step_id": "step_002", "span_kind": "tool", "tool_call": {...}}
-{"type": "verdict.episode_end", "outcome": "pass", "total_tokens": 150}
+{"type": "assay.episode", "episode_id": "ep_001", "input": "What's the weather?", ...}
+{"type": "assay.step", "step_id": "step_001", "span_kind": "llm", ...}
+{"type": "assay.step", "step_id": "step_002", "span_kind": "tool", "tool_call": {...}}
+{"type": "assay.episode_end", "outcome": "pass", "total_tokens": 150}
 ```
 
 Import from OTel:
 ```bash
-verdict trace ingest-otel --input otel-export.json --output traces/ci.jsonl
+assay trace ingest-otel --input otel-export.json --output traces/ci.jsonl
 ```
 
 ## Requirements
@@ -305,6 +305,6 @@ MIT
 
 ## Troubleshooting
 
-- **E_TRACE_MISS**: Ensure `verdict.yaml` prompts match the trace exactly. The runner enforces strict string matching.
-- **Assertions Failing**: This is often by design in the demo (to show blocked attacks). Use `verdict ci --config safe.yaml` if you want to see a clean pass.
+- **E_TRACE_MISS**: Ensure `assay.yaml` prompts match the trace exactly. The runner enforces strict string matching.
+- **Assertions Failing**: This is often by design in the demo (to show blocked attacks). Use `assay ci --config safe.yaml` if you want to see a clean pass.
 - **Schema Migration**: If you see DB errors, remove `.eval/eval.db` and re-run.

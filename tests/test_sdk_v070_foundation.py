@@ -2,10 +2,10 @@ import os
 from pathlib import Path
 
 import pytest
-from verdict_sdk.config_loader import load_config
-from verdict_sdk.errors import ConfigError, RegressionError
-from verdict_sdk.evaluator import Evaluator
-from verdict_sdk.result import CompareResult, Regression, ResultArtifacts
+from assay.config_loader import load_config
+from assay.errors import ConfigError, RegressionError
+from assay.evaluator import Evaluator
+from assay.result import CompareResult, Regression, ResultArtifacts
 
 # --- PHASE 0 TESTS (Config & Loader) ---
 

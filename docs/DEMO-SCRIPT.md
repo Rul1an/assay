@@ -1,4 +1,4 @@
-# Verdict 3-Minute Demo Script
+# Assay 3-Minute Demo Script
 
 ## 0. Setup (15s)
 Build the release binary to ensure speed and readiness.
@@ -9,7 +9,7 @@ cargo build --release
 ## 1. “Green / Grounded” Run (45s)
 Run the check against the "good" trace. This strictly validates standard behavior.
 ```bash
-target/release/verdict ci \
+target/release/assay ci \
   --config examples/rag-grounding/eval.yaml \
   --trace-file examples/rag-grounding/traces/good.jsonl \
   --baseline examples/rag-grounding/baseline.json \
@@ -23,7 +23,7 @@ target/release/verdict ci \
 ## 2. “Red / Hallucination” Run (45s)
 Run the check against the "bad" trace where the model hallucinates a deductible amount.
 ```bash
-target/release/verdict ci \
+target/release/assay ci \
   --config examples/rag-grounding/eval.yaml \
   --trace-file examples/rag-grounding/traces/hallucination.jsonl \
   --baseline examples/rag-grounding/baseline.json \
@@ -45,7 +45,7 @@ cat run.json | head -n 40
 ## 4. “Baseline Export” (15s)
 Demonstrate how easy it is to update the "golden" state.
 ```bash
-target/release/verdict ci \
+target/release/assay ci \
   --config examples/rag-grounding/eval.yaml \
   --trace-file examples/rag-grounding/traces/good.jsonl \
   --export-baseline examples/rag-grounding/baseline.json \

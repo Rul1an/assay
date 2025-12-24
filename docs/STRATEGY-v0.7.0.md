@@ -16,7 +16,7 @@ Based on the v0.6.0 retrospective, we are pivoting the v0.7.0 focus from **CLI E
 **Goal**: Allow running evaluations programmatically within tests (pytest/unittest).
 
 ```python
-from verdict_sdk import Evaluator
+from assay_sdk import Evaluator
 
 def test_rag_agent():
     # 1. Record
@@ -32,7 +32,7 @@ def test_rag_agent():
 ```
 
 **Work Required**:
-*   Expose `verdict-core` logic to Python (via PyO3 binding or subprocess wrapper initially).
+*   Expose `assay-core` logic to Python (via PyO3 binding or subprocess wrapper initially).
 *   Define `Evaluator` API contract.
 
 ---
@@ -42,7 +42,7 @@ def test_rag_agent():
 ### Q: Judge Metrics Status?
 *   **Must Contain / Regex**: ✅ Stable.
 *   **Semantic**: ✅ Stable (Embedding variants).
-*   **Faithfulness / Relevance**: 🚧 Wired in Rust (`verdict-metrics/src/lib.rs`), but relies on simplistic prompters. Needs "Golden Prompt" hardening.
+*   **Faithfulness / Relevance**: 🚧 Wired in Rust (`assay-metrics/src/lib.rs`), but relies on simplistic prompters. Needs "Golden Prompt" hardening.
 *   **Multi-sample Voting**: ✅ **Implemented**. The `JudgeService` in Rust already supports `samples: N` and calculates `agreement` score.
 
 ### Q: Baseline Management in SDK?

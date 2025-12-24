@@ -5,13 +5,13 @@ set -euo pipefail
 cargo build --bin verdict --release --quiet
 VERDICT=$PWD/target/release/verdict
 
-export PYTHONPATH=$PWD/verdict-sdk/python
-TRACE_FILE="$PWD/verdict-sdk/python/examples/openai-demo/traces/openai.jsonl"
-CONFIG_FILE="$PWD/verdict-sdk/python/examples/openai-demo/verdict.yaml" # Use default config but ensure ID matches if we use generic
+export PYTHONPATH=$PWD/assay/python
+TRACE_FILE="$PWD/assay/python/examples/openai-demo/traces/openai.jsonl"
+CONFIG_FILE="$PWD/assay/python/examples/openai-demo/verdict.yaml" # Use default config but ensure ID matches if we use generic
 
 # We need the loop config again, or just reuse the one from smoke test if available.
 # Let's recreate it to be safe and self-contained.
-LOOP_CONFIG="$PWD/verdict-sdk/python/examples/openai-demo/verdict_loop_idemp.yaml"
+LOOP_CONFIG="$PWD/assay/python/examples/openai-demo/verdict_loop_idemp.yaml"
 cat > "$LOOP_CONFIG" <<EOF
 version: 1
 suite: openai-loop-idemp
@@ -37,7 +37,7 @@ export VERDICT_TRACE="$TRACE_FILE"
 export OPENAI_API_KEY="mock"
 export RECORDER_MODE="loop"
 
-python3 verdict-sdk/python/examples/openai-demo/record_sync.py
+python3 assay/python/examples/openai-demo/record_sync.py
 $VERDICT ci --config "$LOOP_CONFIG" --trace-file "$TRACE_FILE" --db :memory: --replay-strict
 
 # 2. Second Run (Re-run)
@@ -45,7 +45,7 @@ $VERDICT ci --config "$LOOP_CONFIG" --trace-file "$TRACE_FILE" --db :memory: --r
 # This proves process idempotency.
 echo "Run 2: Re-Recording (Truncate) & CI"
 : > "$TRACE_FILE"
-python3 verdict-sdk/python/examples/openai-demo/record_sync.py
+python3 assay/python/examples/openai-demo/record_sync.py
 
 $VERDICT ci --config "$LOOP_CONFIG" --trace-file "$TRACE_FILE" --db :memory: --replay-strict
 

@@ -1,18 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/verdict-core",
-  "crates/verdict-metrics",
-  "crates/verdict-cli",
+  "crates/assay-core",
+  "crates/assay-metrics",
+  "crates/assay-cli",
 ]
 
 [workspace.package]
 version = "0.5.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Rul1an/verdict"
-authors = ["Verdict"]
+repository = "https://github.com/Rul1an/assay"
+authors = ["Assay"]
 
 [patch.crates-io]
-verdict-core = { path = "crates/verdict-core" }
-verdict-metrics = { path = "crates/verdict-metrics" }
+assay-core = { path = "crates/assay-core" }
+assay-metrics = { path = "crates/assay-metrics" }

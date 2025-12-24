@@ -6,10 +6,10 @@ cargo build --bin verdict --release --quiet
 VERDICT=$PWD/target/release/verdict
 
 # Ensure PYTHONPATH sees the SDK
-export PYTHONPATH=$PWD/verdict-sdk/python
+export PYTHONPATH=$PWD/assay/python
 
-TRACE_FILE="$PWD/verdict-sdk/python/examples/openai-demo/traces/openai.jsonl"
-CONFIG_FILE="$PWD/verdict-sdk/python/examples/openai-demo/verdict.yaml"
+TRACE_FILE="$PWD/assay/python/examples/openai-demo/traces/openai.jsonl"
+CONFIG_FILE="$PWD/assay/python/examples/openai-demo/verdict.yaml"
 
 # Truncate trace file for determinism
 : > "$TRACE_FILE"
@@ -19,7 +19,7 @@ echo "Recording Trace..."
 export VERDICT_TRACE="$TRACE_FILE"
 export OPENAI_API_KEY="mock"
 
-python3 verdict-sdk/python/examples/openai-demo/record_sync.py
+python3 assay/python/examples/openai-demo/record_sync.py
 
 echo "Trace Content:"
 cat "$TRACE_FILE"

@@ -13,12 +13,12 @@ This example demonstrates how to use **Baselines** in CI to detect regressions.
 Blocks the build if scores drop below the baseline.
 
 ```bash
-verdict run --config eval.yaml --trace-file traces/run.jsonl --baseline baseline.json
+assay run --config eval.yaml --trace-file traces/run.jsonl --baseline baseline.json
 ```
 
 ### 2. Export New Baseline (Update)
 Updates the baseline on `main` branch.
 
 ```bash
-verdict run --config eval.yaml --trace-file traces/run.jsonl --export-baseline baseline.json
+assay run --config eval.yaml --trace-file traces/run.jsonl --export-baseline baseline.json
 ```

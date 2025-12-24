@@ -2,7 +2,7 @@
 
 ## Context
 A CI gate must provide clear signals: "Block" vs "Inform". Teams have different risk appetites.
-Verdict introduces `Pass`, `Fail`, `Warn`, and `Flaky` statuses.
+Assay introduces `Pass`, `Fail`, `Warn`, and `Flaky` statuses.
 - `Fail`: Always blocks (Exit 1).
 - `Pass`: Always passes.
 - `Warn` / `Flaky`: Ambiguous.

@@ -1,18 +1,18 @@
 # Agent Demo 2: Quickstart
 
-This demo showcases **Verdict's** ability to gate dangerous agent behaviors using trace analysis.
+This demo showcases **Assay's** ability to gate dangerous agent behaviors using trace analysis.
 
 ## Status: 🟩 Operational
 *   **Infrastructure**: Fully working (Ingest, Replay, Assertions).
 *   **Results**: ~50% Pass / ~50% Fail.
     *   **Failures are expected!** The demo agent is intentionally "unsafe" (it tries to apply discounts without permission) and "lazy" (it skips some tool calls).
-    *   **Verdict's Job**: The red crosses prove that Verdict is **catching** these violations.
+    *   **Assay's Job**: The red crosses prove that Assay is **catching** these violations.
 
 ## How to Run
 
 1.  **Generate Config**:
     ```bash
-    python3 scenarios.py --yaml > verdict.yaml
+    python3 scenarios.py --yaml > assay.yaml
     ```
 
 2.  **Record Traces** (Simulates agent traffic):
@@ -20,7 +20,7 @@ This demo showcases **Verdict's** ability to gate dangerous agent behaviors usin
     OPENAI_API_KEY=mock python3 run_demo.py record
     ```
 
-3.  **Verify** (Run Verdict CI Policy):
+3.  **Verify** (Run Assay CI Policy):
     ```bash
     OPENAI_API_KEY=mock python3 run_demo.py verify
     ```

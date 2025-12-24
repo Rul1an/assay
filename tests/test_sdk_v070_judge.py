@@ -3,9 +3,9 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from verdict_sdk.evaluator import Evaluator
-from verdict_sdk.judge.openai_judge import OpenAIJudge
-from verdict_sdk.judge.types import JudgeRequest
+from assay.evaluator import Evaluator
+from assay.judge.openai_judge import OpenAIJudge
+from assay.judge.types import JudgeRequest
 
 TRACE_CONTENT = '{"kind": "model", "content": "Paris is the capital of France."}'
 
@@ -46,7 +46,7 @@ tests:
     )
     # Mocking openai package
     # We patch where it is imported:
-    with patch("verdict_sdk.judge.openai_judge.OpenAI") as mock_cls:
+    with patch("assay.judge.openai_judge.OpenAI") as mock_cls:
         # Mock Client
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
@@ -93,7 +93,7 @@ tests:
 
         # 3. Invalid JSON (Snippet Check)
         mock_completion.choices[0].message.content = "NOT JSON HERE"
-        from verdict_sdk.errors import JudgeParseError
+        from assay.errors import JudgeParseError
 
         with pytest.raises(JudgeParseError) as exc:
             judge.evaluate(req)

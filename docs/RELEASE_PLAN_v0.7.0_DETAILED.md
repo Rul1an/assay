@@ -2,7 +2,7 @@
 
 ## Phase 3.0: Trace Ingest & Matching (P0)
 - [x] **3.0.1 Trace Reader**
-    - [x] Create `verdict_sdk/trace_reader.py`.
+    - [x] Create `assay_sdk/trace_reader.py`.
     - [x] Implement `read_events(path) -> list[dict]`.
     - [x] Implement `group_by_episode(events) -> dict`.
     - [x] Helpers: `extract_last_model_content`, `extract_tool_calls`.
@@ -13,7 +13,7 @@
 
 ## Phase 3.1: Builtin Metrics Engine (P0)
 - [x] **3.1.1 Metrics Module**
-    - [x] Create `verdict_sdk/metrics/builtin.py`.
+    - [x] Create `assay_sdk/metrics/builtin.py`.
     - [x] Implement `eval_regex_match`.
     - [x] Implement `eval_trace_must_call_tool`.
 - [x] **3.1.2 Integration**
@@ -30,17 +30,17 @@
 
 ## Phase 3.3: Judge MVP (P1)
 - [ ] **3.3.1 Types & Config**
-    - [ ] Create `verdict_sdk/judge/types.py`.
-    - [ ] Update `verdict_sdk/config.py` with `JudgeConfig`.
+    - [ ] Create `assay_sdk/judge/types.py`.
+    - [ ] Update `assay_sdk/config.py` with `JudgeConfig`.
 - [ ] **3.3.2 Implementation**
-    - [ ] Create `verdict_sdk/judge/openai_judge.py` (Strict JSON).
-    - [ ] Create `verdict_sdk/judge/cache.py` (Robust Keying).
+    - [ ] Create `assay_sdk/judge/openai_judge.py` (Strict JSON).
+    - [ ] Create `assay_sdk/judge/cache.py` (Robust Keying).
 - [ ] **3.3.3 Integration**
     - [ ] Wire `Evaluator` to use `JudgeConfig`.
     - [ ] Implement `Evaluator.run` loop dispatch with correct `MetricResult` mapping.
 
 ## Phase 3.4: artifacts & CI (P1)
 - [ ] **3.4.1 JUnit**
-    - [ ] `verdict_sdk/reporting/junit.py`.
+    - [ ] `assay_sdk/reporting/junit.py`.
 - [ ] **3.4.2 DX**
     - [ ] Validated Contracts (Idempotency).

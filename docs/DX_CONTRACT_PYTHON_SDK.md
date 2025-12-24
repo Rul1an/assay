@@ -1,9 +1,9 @@
 # Python SDK PR Checklist & Release Gates
 
-Specific requirements for `verdict-sdk` (Python) to adhere to the core [DX Contract](DX_CONTRACT.md).
+Specific requirements for `assay-sdk` (Python) to adhere to the core [DX Contract](DX_CONTRACT.md).
 
 ## 1. API & Backwards Compatibility
-- [ ] **Public API**: No breaking changes in `verdict_sdk.*` imports or signatures without major version bump.
+- [ ] **Public API**: No breaking changes in `assay_sdk.*` imports or signatures without major version bump.
 - [ ] **Defaults**: Defaults remain stable (e.g., `temperature=0.0`, `max_tool_rounds=4`).
 - [ ] **Deprecations**: Changes include compat layer or clear error + migration note.
 
@@ -41,18 +41,18 @@ Specific requirements for `verdict-sdk` (Python) to adhere to the core [DX Contr
 
 | Scenario | Script | Expectation |
 | :--- | :--- | :--- |
-| **A. Smoke (Phase 1.1)** | `tests/e2e/openai_sdk_smoke.sh` | Record -> `verdict ci --replay-strict --db :memory:` -> Exit 0 |
+| **A. Smoke (Phase 1.1)** | `tests/e2e/openai_sdk_smoke.sh` | Record -> `assay ci --replay-strict --db :memory:` -> Exit 0 |
 | **B. Tool Loop (Phase 1.2)** | `tests/e2e/openai_tool_loop_smoke.sh` | Tool Call + Result in trace, Replay-Strict OK |
 | **C. Workflow Idempotency** | `tests/e2e/openai_tool_loop_idempotency.sh` | Record+CI -> Truncate -> Record+CI -> Exit 0 (Both runs) |
 | **D. Negative (Strict Miss)** | *(Manual/Unit)* | Prompt mismatch -> `E_TRACE_MISS` / Exit != 0 |
 
 ## CI Commands
 ```bash
-# Build Verdict
-cargo build --bin verdict --release --quiet
+# Build Assay
+cargo build --bin assay --release --quiet
 
 # Python Path
-export PYTHONPATH=$PWD/verdict-sdk/python
+export PYTHONPATH=$PWD/assay-sdk/python
 
 # Gates
 bash tests/e2e/openai_sdk_smoke.sh

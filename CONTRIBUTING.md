@@ -1,4 +1,4 @@
-# Contributing to Verdict
+# Contributing to Assay
 
 We enforce strict code quality standards to ensure reliability in CI environments.
 
@@ -27,6 +27,6 @@ We enforce strict code quality standards to ensure reliability in CI environment
 
 ## Architecture
 
-*   **Core**: Business logic goes in `crates/verdict-core`.
-*   **CLI**: Interface logic goes in `crates/verdict-cli`.
+*   **Core**: Business logic goes in `crates/assay-core`.
+*   **CLI**: Interface logic goes in `crates/assay-cli`.
 *   **No Flakiness**: Any test that relies on network or external state must utilize the `replay` mechanism or be mocked.

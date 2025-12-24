@@ -10,5 +10,5 @@ This example demonstrates how to detect **Negation Blindness** (LLMs failing to 
 Run with the provided trace:
 
 ```bash
-verdict run --config eval.yaml --trace-file traces/safe-response.jsonl
+assay run --config eval.yaml --trace-file traces/safe-response.jsonl
 ```

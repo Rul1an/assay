@@ -1,6 +1,6 @@
-# Testing Agents with Verdict
+# Testing Agents with Assay
 
-Verdict provides first-class support for testing AI Agents, including function calling, tool use sequences, and multi-step reasoning.
+Assay provides first-class support for testing AI Agents, including function calling, tool use sequences, and multi-step reasoning.
 
 ## Overview
 
@@ -9,14 +9,14 @@ Testing agents is harder than testing simple RAG pipelines because:
 2.  **Side-effects**: Running agents live (with tools) in CI is slow, expensive, and risky.
 3.  **Complexity**: You need to assert on the *intermediate steps* (did it call the search tool?) not just the final answer.
 
-Verdict solves this with:
+Assay solves this with:
 *   **OpenTelemetry Ingestion**: Record traces from your actual agent framework (LangChain, AutoGen, custom).
 *   **Dual-Mode Replay**: Use recorded traces to "replay" the agent's execution without live LLM calls, while verifying assertions against the structured execution graph (Episodes, Steps, Tool Calls).
 *   **Behavioral Assertions**: Built-in assertions for tool usage, sequence enforcement, and more.
 
 ## Real-World Use Cases (2025)
 
-Verdict is designed for the challenges of modern AI engineering:
+Assay is designed for the challenges of modern AI engineering:
 
 ### 1. "Compliance-First" Agents (FinTech/Health)
 **Context**: Autonomous agents performing sensitive actions (e.g., "block card", "change limit").
@@ -33,12 +33,12 @@ Verdict is designed for the challenges of modern AI engineering:
 ### 3. Model Migration & Validation (The "Exit Strategy")
 **Context**: Migrating from expensive hosted models to specialized, smaller, or on-premise models.
 **Problem**: Verifying that the new model is "good enough" without manual review.
-**Solution**: `Baseline Regression Testing` (`verdict ci --baseline`).
+**Solution**: `Baseline Regression Testing` (`assay ci --baseline`).
 **Value**: Use existing traces as a baseline to flag semantic deviations in the new model.
 
 ## 1. Instrumentation (OpenTelemetry)
 
-Verdict ingests traces via the OpenTelemetry (OTel) GenAI Semantic Conventions.
+Assay ingests traces via the OpenTelemetry (OTel) GenAI Semantic Conventions.
 Most Python/JS frameworks support OTel export.
 
 Ensure your traces include:
@@ -55,22 +55,22 @@ To enable fast, deterministic CI, we use a "Dual Output" strategy:
 ### Workflow
 
 1.  **Record**: Run your agent (locally or in staging) to generate an `otel_trace.jsonl` file.
-2.  **Ingest**: Use `verdict trace ingest-otel` to convert this into Verdict's format.
+2.  **Ingest**: Use `assay trace ingest-otel` to convert this into Assay's format.
 
 ```bash
 # Ingest OTel spans -> SQLite DB (assertions) + Replay File (LLM mock)
-verdict trace ingest-otel \
+assay trace ingest-otel \
   --input otel_trace.jsonl \
   --db .eval/eval.db \
   --suite my-agent-suite \
   --out-trace otel.v2.jsonl
 ```
 
-3.  **Run Gate**: Run `verdict ci` using the generated replay file.
+3.  **Run Gate**: Run `assay ci` using the generated replay file.
 
 ```bash
 # Run assertions using the captured trace data
-verdict ci \
+assay ci \
   --config eval.yaml \
   --db .eval/eval.db \
   --trace-file otel.v2.jsonl \
@@ -81,7 +81,7 @@ verdict ci \
 
 ### Deterministic Replay (Precedence Rules)
 
-To handle "noisy" traces where multiple model calls or tools might occur, Verdict V0.4.0+ uses strict precedence rules to determine exactly what prompt/output to use for the replay:
+To handle "noisy" traces where multiple model calls or tools might occur, Assay V0.4.0+ uses strict precedence rules to determine exactly what prompt/output to use for the replay:
 
 **Prompt Extraction**:
 1.  **`EpisodeStart`**: If the trace provides an input at start, it wins.

@@ -5,16 +5,16 @@ set -euo pipefail
 cargo build --bin verdict --release --quiet
 VERDICT=$PWD/target/release/verdict
 
-TRACE_FILE="/tmp/verdict_sdk_trace.jsonl"
-CONFIG_FILE="/tmp/verdict_sdk_eval.yaml"
+TRACE_FILE="/tmp/assay_trace.jsonl"
+CONFIG_FILE="/tmp/assay_eval.yaml"
 
 rm -f "$TRACE_FILE"
 
 echo "Generating trace via Python SDK..."
 
-PYTHONPATH=verdict-sdk/python python3 - <<'PY'
-from verdict_sdk import TraceWriter, EpisodeRecorder
-w = TraceWriter("/tmp/verdict_sdk_trace.jsonl")
+PYTHONPATH=assay/python python3 - <<'PY'
+from assay import TraceWriter, EpisodeRecorder
+w = TraceWriter("/tmp/assay_trace.jsonl")
 with EpisodeRecorder(writer=w, episode_id="mcp_demo", test_id="mcp_demo", prompt="demo_user_prompt") as ep:
     sid = ep.step(kind="model", name="agent", content="ok")
     ep.tool_call(tool_name="ApplyDiscount", args={"percent":50}, result={"value":"denied"}, step_id=sid)

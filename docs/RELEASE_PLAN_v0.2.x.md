@@ -5,12 +5,12 @@
 - [ ] PR gate works with `baseline.json` fetched from `origin/main`.
 - [ ] Main job exports `baseline.json` as an artifact without errors.
 - [ ] Tag `v0.2.1` publishes release assets (tarballs + checksums) to GitHub Releases.
-- [ ] `verdict-action` installs successfully on Ubuntu & macOS runners.
+- [ ] `assay-action` installs successfully on Ubuntu & macOS runners.
 - [ ] Docs contain copy/paste "Golden Path".
 
 ---
 
-## PR13: verdict-action Polish (Baseline Inputs)
+## PR13: assay-action Polish (Baseline Inputs)
 
 **Scope**: Make baseline workflow "first-class" in GitHub Action.
 
@@ -43,7 +43,7 @@
     - `schema_version` mismatch.
     - `suite` name mismatch.
 - [ ] **Validation (Warn)**:
-    - `verdict_version` mismatch.
+    - `assay_version` mismatch.
     - `config_fingerprint` mismatch.
 - [ ] **UX**: Actionable error messages ("Regenerate baseline using...").
 
@@ -65,16 +65,16 @@
 ### Checklist
 - [ ] **Trigger**: On tag `v*`.
 - [ ] **Matrix**:
-    - `ubuntu-latest` -> `verdict-linux-x86_64.tar.gz`
-    - `macos-13` (x86) -> `verdict-macos-x86_64.tar.gz`
-    - `macos-14` (arm64) -> `verdict-macos-aarch64.tar.gz`
-- [ ] **Artifacts**: Tarballs contain `verdict` binary in root.
+    - `ubuntu-latest` -> `assay-linux-x86_64.tar.gz`
+    - `macos-13` (x86) -> `assay-macos-x86_64.tar.gz`
+    - `macos-14` (arm64) -> `assay-macos-aarch64.tar.gz`
+- [ ] **Artifacts**: Tarballs contain `assay` binary in root.
 - [ ] **Publish**: Generate `checksums.txt` (sha256) and upload all to GitHub Release.
 
 ### Verification
 - [ ] **Manual**: Push tag `v0.2.1-rc1`.
 - [ ] **Check**: Assets appear in GitHub Releases.
-- [ ] **Action**: Install step resolves URL and runs `verdict version`.
+- [ ] **Action**: Install step resolves URL and runs `assay version`.
 
 ### Acceptance Criteria
 - [ ] 3 assets + checksums present.

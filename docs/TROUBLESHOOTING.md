@@ -1,22 +1,22 @@
 # Troubleshooting
 
-This document is the “fast path” for fixing Verdict issues in CI.
-If you’re stuck: run `verdict validate` first, then `verdict doctor` (v0.3.4+).
+This document is the “fast path” for fixing Assay issues in CI.
+If you’re stuck: run `assay validate` first, then `assay doctor` (v0.3.4+).
 
 ## Quick Triage (90 seconds)
 1) **Preflight**
 ```bash
-verdict validate --config eval.yaml --trace-file traces/ci.jsonl
+assay validate --config eval.yaml --trace-file traces/ci.jsonl
 ```
 
 2) **If you use offline CI**
 ```bash
-verdict validate --config eval.yaml --trace-file traces/ci.jsonl --replay-strict
+assay validate --config eval.yaml --trace-file traces/ci.jsonl --replay-strict
 ```
 
 3) **If you gate against baseline**
 ```bash
-verdict validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json
+assay validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json
 ```
 
 Exit codes refresher:
@@ -39,31 +39,31 @@ Exit codes refresher:
 *   Update `input.prompt` in config to exactly match trace or regenerate trace.
 *   If you intended the new prompt: re-ingest + re-precompute (if strict/offline):
     ```bash
-    verdict trace ingest --input raw_logs/*.jsonl --output trace.jsonl
-    verdict trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai
-    verdict trace precompute-judge --trace trace_enriched.jsonl --output trace_enriched.jsonl --judge openai
+    assay trace ingest --input raw_logs/*.jsonl --output trace.jsonl
+    assay trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai
+    assay trace precompute-judge --trace trace_enriched.jsonl --output trace_enriched.jsonl --judge openai
     ```
 
 **Prevention**
 *   Treat prompts as API contracts: version prompt templates, update traces on main.
 
 - **Relevant Diagnostic**: `W_CACHE_CONFUSION`
-- **Verify**: `verdict doctor` (Check "Caches" section)
+- **Verify**: `assay doctor` (Check "Caches" section)
 - **Fast Fix**:
-    1.  **Use `verdict-action@v0.3.4+`** which splits caches automatically.
+    1.  **Use `assay-action@v0.3.4+`** which splits caches automatically.
 - **Relevant Diagnostic**: `E_BASE_MISMATCH`
-- **Verify**: `verdict validate --config eval.yaml --baseline baseline.json`
+- **Verify**: `assay validate --config eval.yaml --baseline baseline.json`
 - **Fast Fix**:
     1.  If the change is intentional (e.g., prompt update), **export a new baseline**:
         ```bash
-        verdict ci --config eval.yaml --trace-file traces/pr.jsonl --export-baseline baseline.json --strict
+        assay ci --config eval.yaml --trace-file traces/pr.jsonl --export-baseline baseline.json --strict
         ```
 - **Relevant Diagnostic**: `E_TRACE_MISS`, `E_TRACE_INVALID`
-- **Verify**: `verdict validate --config eval.yaml --trace-file traces/pr.jsonl`
+- **Verify**: `assay validate --config eval.yaml --trace-file traces/pr.jsonl`
 - **Fast Fix**:
     1.  Ensure your app logs inputs/outputs in JSONL format.
 *   Codes: `E_TRACE_MISS`, `E_TRACE_INVALID`
-*   Commands: `verdict validate`, `verdict trace verify`
+*   Commands: `assay validate`, `assay trace verify`
 
 ---
 
@@ -80,12 +80,12 @@ Exit codes refresher:
 **Fast fix**
 *   Run calibration on historical data:
     ```bash
-    verdict calibrate --db .eval/eval.db --suite <suite> --out calibration.json
+    assay calibrate --db .eval/eval.db --suite <suite> --out calibration.json
     ```
 *   Use recommended thresholds (`recommended_min_score`, `recommended_max_drop`) for your suite.
 *   Use hygiene report to identify unstable tests:
     ```bash
-    verdict baseline report --db .eval/eval.db --suite <suite> --out hygiene.json
+    assay baseline report --db .eval/eval.db --suite <suite> --out hygiene.json
     ```
 
 **Prevention**
@@ -93,7 +93,7 @@ Exit codes refresher:
 *   Quarantine or relax thresholds for unstable tests.
 
 **Relevant**
-*   Commands: `verdict ci --export-baseline ...`, `verdict calibrate`, `verdict baseline report`
+*   Commands: `assay ci --export-baseline ...`, `assay calibrate`, `assay baseline report`
 
 ---
 
@@ -110,11 +110,11 @@ Exit codes refresher:
 **Fast fix**
 *   Regenerate baseline for the correct suite:
     ```bash
-    verdict ci --config eval.yaml --trace-file traces/main.jsonl --export-baseline baseline.json --strict
+    assay ci --config eval.yaml --trace-file traces/main.jsonl --export-baseline baseline.json --strict
     ```
 *   Run validate with baseline to get actionable diagnostics:
     ```bash
-    verdict validate --config eval.yaml --baseline baseline.json
+    assay validate --config eval.yaml --baseline baseline.json
     ```
 
 **Prevention**
@@ -137,7 +137,7 @@ Exit codes refresher:
 **Fast fix**
 *   Nuke local cache:
     ```bash
-    rm -rf .eval ~/.verdict/cache ~/.verdict/embeddings
+    rm -rf .eval ~/.assay/cache ~/.assay/embeddings
     ```
 *   In CI, ensure cache split is enabled (v0.3.4 action defaults should handle this).
 
@@ -146,7 +146,7 @@ Exit codes refresher:
 *   Keep `.eval` cache separate from runtime caches.
 
 **Relevant**
-*   Commands: `verdict ci --incremental`, `--refresh-cache`
+*   Commands: `assay ci --incremental`, `--refresh-cache`
 *   Action: cache split (db vs runtime)
 
 ---
@@ -164,7 +164,7 @@ Exit codes refresher:
 **Fast fix**
 *   Recompute embeddings with the intended model:
     ```bash
-    verdict trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai --model <your-model>
+    assay trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai --model <your-model>
     ```
 
 **Prevention**
@@ -173,7 +173,7 @@ Exit codes refresher:
 
 **Relevant**
 *   Codes: `E_EMB_DIMS`
-*   Commands: `verdict validate --replay-strict`
+*   Commands: `assay validate --replay-strict`
 
 ---
 
@@ -256,7 +256,7 @@ with:
 **Fast fix**
 *   Enable incremental:
     ```bash
-    verdict ci --incremental ...
+    assay ci --incremental ...
     ```
 *   Use precompute + `replay-strict` (offline deterministic).
 *   Ensure action runtime caches are enabled (`cache_mode: auto`).
@@ -274,7 +274,7 @@ with:
 **Fix**
 *   Always start with:
     ```bash
-    verdict validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json --replay-strict
+    assay validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json --replay-strict
     ```
 *   Then follow the Diagnostic’s `fix_steps`.
 

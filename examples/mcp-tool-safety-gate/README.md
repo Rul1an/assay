@@ -1,25 +1,25 @@
 # MCP Tool Safety Gate Example
 
-This example demonstrates how to use Verdict to enforce safety policies on Model Context Protocol (MCP) traces.
+This example demonstrates how to use Assay to enforce safety policies on Model Context Protocol (MCP) traces.
 
 ## Overview
 - **Protocol**: MCP (Inspector or JSON-RPC)
 - **Goal**: Verify that an agent does NOT call a specific tool (`unsafe_tool`) given a certain prompt.
-- **Verdict Features**:
-    - `verdict trace import-mcp`: Converts MCP logs to V2 traces.
-    - `verdict ci --replay-strict`: Replays the trace deterministically and checks `trace_must_not_call_tool`.
+- **Assay Features**:
+    - `assay trace import-mcp`: Converts MCP logs to V2 traces.
+    - `assay ci --replay-strict`: Replays the trace deterministically and checks `trace_must_not_call_tool`.
 
 ## Prerequisites
-- Verdict CLI installed (`cargo install --path .`)
+- Assay CLI installed (`cargo install --path .`)
 - An MCP transcript file (provided: `mcp/session.json`)
 
 ## Usage
 
 ### 1. Import Trace
-Convert the raw MCP log into a Verdict trace. We explicitly set the `test-id` to link it to our test case.
+Convert the raw MCP log into a Assay trace. We explicitly set the `test-id` to link it to our test case.
 
 ```bash
-verdict trace import-mcp \
+assay trace import-mcp \
   --input mcp/session.json \
   --format inspector \
   --episode-id mcp_demo \
@@ -29,11 +29,11 @@ verdict trace import-mcp \
 ```
 
 ### 2. Run Gate (Strict Replay)
-Run the regression test. We use an in-memory database (`:memory:`) to ensure a clean state for every run. Verdict automatically ingests the trace file into this ephemeral DB.
+Run the regression test. We use an in-memory database (`:memory:`) to ensure a clean state for every run. Assay automatically ingests the trace file into this ephemeral DB.
 
 ```bash
-verdict ci \
-  --config verdict.yaml \
+assay ci \
+  --config assay.yaml \
   --trace-file traces/trace.v2.jsonl \
   --replay-strict \
   --db :memory:
@@ -60,14 +60,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Setup Verdict (or download binary)
-      - name: Build Verdict
-        run: cargo build --bin verdict --release
+      # 1. Setup Assay (or download binary)
+      - name: Build Assay
+        run: cargo build --bin assay --release
 
       # 2. Import Transcript (or fetch from artifact store)
       - name: Import MCP Transcript
         run: |
-          ./target/release/verdict trace import-mcp \
+          ./target/release/assay trace import-mcp \
             --input examples/mcp-tool-safety-gate/mcp/session.json \
             --format inspector \
             --episode-id mcp_demo \
@@ -76,10 +76,10 @@ jobs:
             --out-trace trace.jsonl
 
       # 3. Gate
-      - name: Run Verdict Gate
+      - name: Run Assay Gate
         run: |
-          ./target/release/verdict ci \
-            --config examples/mcp-tool-safety-gate/verdict.yaml \
+          ./target/release/assay ci \
+            --config examples/mcp-tool-safety-gate/assay.yaml \
             --trace-file trace.jsonl \
             --replay-strict \
             --db :memory:

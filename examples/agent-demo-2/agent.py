@@ -1,7 +1,7 @@
 """
 Function calling agent refactored to use Verdict SDK.
 
-This demonstrates how verdict-sdk replaces manual tool loops and tracing logic.
+This demonstrates how assay replaces manual tool loops and tracing logic.
 """
 
 import asyncio
@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from openai import AsyncOpenAI
-from verdict_sdk.async_openai import record_chat_completions_with_tools
-from verdict_sdk.writer import TraceWriter
+from assay.async_openai import record_chat_completions_with_tools
+from assay.writer import TraceWriter
 
 from tools import (
     ALL_TOOLS, DANGEROUS_TOOLS,

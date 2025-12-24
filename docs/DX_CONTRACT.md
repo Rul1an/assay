@@ -1,6 +1,6 @@
 # Developer Experience (DX) Contract & Release Gates
 
-All Verdict integration features (Importers, CI adapters) must pass this contract before merging. This ensures a "Zero-Footgun" experience for users.
+All Assay integration features (Importers, CI adapters) must pass this contract before merging. This ensures a "Zero-Footgun" experience for users.
 
 ## 1. The Core Principles
 1.  **Zero-Footgun**: Users cannot corrupt state by following standard docs.

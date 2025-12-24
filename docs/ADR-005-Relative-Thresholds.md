@@ -6,7 +6,7 @@ Accepted (v2)
 ## Context
 Absolute thresholds (e.g., “0.85”) create adoption friction and are hard to justify across teams and domains. For most CI gates, the intended question is not “is this good enough in absolute terms?”, but “did this regress compared to **main** (or another baseline)?”.
 
-Verdict therefore needs a **baseline-driven** workflow where:
+Assay therefore needs a **baseline-driven** workflow where:
 - teams can pin a known-good behavior (baseline),
 - PR runs compare against that baseline using **relative thresholds**,
 - missing baseline data is actionable and non-blocking by default (unless strict).
@@ -20,16 +20,16 @@ This ADR focuses on baseline DX, config ergonomics, and compatibility guarantees
 
 - **Generate baseline (main branch):**
   ```bash
-  verdict ci --export-baseline baseline.json --strict
+  assay ci --export-baseline baseline.json --strict
   ```
 
 - **Gate against baseline (PR):**
   ```bash
-  verdict ci --baseline baseline.json --strict
+  assay ci --baseline baseline.json --strict
   ```
 
 - **Advanced tool (non-primary):**
-  `verdict compare` remains available for offline comparison, debugging, and custom pipelines, but is not the onboarding path.
+  `assay compare` remains available for offline comparison, debugging, and custom pipelines, but is not the onboarding path.
 
 **Rationale:** Friction kills adoption. Baselines must feel like “normal CI”.
 
@@ -77,7 +77,7 @@ Pure pass/fail metrics (e.g., `regex_match`, `json_schema`, `must_contain`) are 
   ```text
   Warning: No baseline entry for test '<test_id>' metric '<metric_name>'.
     This test will run, but no regression check is applied.
-    To create a baseline: verdict ci --export-baseline baseline.json --strict
+    To create a baseline: assay ci --export-baseline baseline.json --strict
     To enforce baselines: run with --strict (or future --require-baseline)
   ```
 
@@ -94,7 +94,7 @@ Pure pass/fail metrics (e.g., `regex_match`, `json_schema`, `must_contain`) are 
 {
   "schema_version": 1,
   "suite": "demo_suite",
-  "verdict_version": "0.1.0",
+  "assay_version": "0.1.0",
   "created_at": "2025-12-21T12:00:00Z",
   "config_fingerprint": "sha256:<hash>",
   "entries": [
@@ -114,7 +114,7 @@ Pure pass/fail metrics (e.g., `regex_match`, `json_schema`, `must_contain`) are 
 **Required fields:**
 - `schema_version` (u32)
 - `suite` (string)
-- `verdict_version` (string)
+- `assay_version` (string)
 - `created_at` (RFC3339 string, UTC recommended)
 - `config_fingerprint` (string, sha256: prefix recommended)
 - `entries[]` (array)
@@ -134,7 +134,7 @@ Optional per entry:
   - Prevents accidentally comparing unrelated suites.
 - `config_fingerprint` mismatch -> **Warn by default; Fail under `--strict`**
   - Rationale: suite may match, but config/test definitions may have changed.
-- `verdict_version` mismatch -> **Warn** (do not block by default)
+- `assay_version` mismatch -> **Warn** (do not block by default)
   - Rationale: minor version drift may still be comparable; warn for awareness.
 
 **config_fingerprint definition (v1):**
@@ -151,11 +151,11 @@ Exact canonicalization is an implementation detail, but must be:
 ### Gate Semantics with Baselines
 
 When `--baseline` is provided:
-1. Verdict runs the suite normally (respecting replay/live, redaction, strict mode, etc.).
+1. Assay runs the suite normally (respecting replay/live, redaction, strict mode, etc.).
 2. For each scored metric result:
    - If baseline entry exists -> compute delta and evaluate thresholding rules.
    - If baseline missing -> apply Missing Baseline behavior (Warn by default).
-3. Verdict final status/exit code follows ADR-003 semantics:
+3. Assay final status/exit code follows ADR-003 semantics:
    - Fail/Error -> Exit 1
    - Warn/Flaky -> Exit 0 (unless `--strict`, then Exit 1)
    - Config errors (schema mismatch, invalid baseline) -> Exit 2

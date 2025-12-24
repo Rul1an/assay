@@ -1,4 +1,4 @@
-# Demo DX Vision 2025 (Verdict)
+# Demo DX Vision 2025 (Assay)
 
 ## Why this matters
 A dev tool for LLM apps wins on:
@@ -6,7 +6,7 @@ A dev tool for LLM apps wins on:
 2) the next 5 days (frictionless iteration)
 3) the next 5 months (observability + governance)
 
-Verdict already has a strong core (streaming traces, SQLite, assertions, OTel ingest).
+Assay already has a strong core (streaming traces, SQLite, assertions, OTel ingest).
 DX is how we make it *feel* inevitable.
 
 ---
@@ -23,7 +23,7 @@ DX is how we make it *feel* inevitable.
 - Stage progress (record → ingest → replay → assertions)
 - Live log tail panel
 - Friendly error surfacing (Trace miss, prompt mismatch, assertion failures)
-- Print “closest match” hints (already present in Verdict output)
+- Print “closest match” hints (already present in Assay output)
 
 ### 3) Determinism-by-default
 - No live calls in the demo
@@ -33,7 +33,7 @@ DX is how we make it *feel* inevitable.
 ---
 
 ## Next-level DX (weeks)
-### A) `verdict doctor`
+### A) `assay doctor`
 A single command that checks:
 - sqlite schema compatibility
 - trace file format + upgrade path
@@ -41,7 +41,7 @@ A single command that checks:
 - replay readiness (are prompts matchable?)
 - suggests exact commands to fix issues
 
-### B) `verdict report --format summary`
+### B) `assay report --format summary`
 Developer-facing report:
 - pass rate by suite
 - first failing step
@@ -49,7 +49,7 @@ Developer-facing report:
 - top assertion failures
 
 ### C) “Red Button” playground
-`verdict playground`
+`assay playground`
 - Pick a test
 - Run once live (if allowed)
 - Save trace + baseline

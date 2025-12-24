@@ -1,4 +1,4 @@
-# Handoff: Verdict v0.2.0
+# Handoff: Assay v0.2.0
 
 **Date:** 2025-12-21
 **Version:** v0.2.0
@@ -7,14 +7,14 @@
 ## TL;DR for Maintainers 🚀
 *   **Status**: Stable, Hardened, Clean ("0 warnings").
 *   **Tag**: `v0.2.0` pushed to `main`.
-*   **Key New Feat**: Baselines (Regression Testing) & `verdict-action` hardening.
+*   **Key New Feat**: Baselines (Regression Testing) & `assay-action` hardening.
 *   **CI**: Green. Uses deterministic replay.
-*   **Immediate Action**: Ready to be used via `uses: Rul1an/verdict-action@v0.2.0`.
+*   **Immediate Action**: Ready to be used via `uses: Rul1an/assay-action@v0.2.0`.
 
 ---
 
 ## 1. Project Overview
-**Verdict** is a high-performance, local-first LLM evaluation engine written in Rust. It focuses on deterministic replay, CI/CD integration, and privacy-first design (local traces, PII redaction).
+**Assay** is a high-performance, local-first LLM evaluation engine written in Rust. It focuses on deterministic replay, CI/CD integration, and privacy-first design (local traces, PII redaction).
 
 ### Key Features
 - **Deterministic Replay**: Record LLM interactions once, replay them reliably in CI.
@@ -25,17 +25,17 @@
   - `semantic_similarity_to` (embeddings + cosine similarity)
   - `faithfulness` / `relevance` (LLM-as-a-Judge)
 - **Baselines**: Detect regressions relative to a known-good baseline using relative thresholds (`max_drop`, `min_floor`).
-- **CI/CD Ready**: GitHub Action (`verdict-action`), JUnit/SARIF reporting, and strict failure modes.
+- **CI/CD Ready**: GitHub Action (`assay-action`), JUnit/SARIF reporting, and strict failure modes.
 
 ## 2. Codebase Structure
 The project is organized as a Cargo Workspace with three primary crates + an action wrapper:
 
 | Component | Path | Purpose |
 | :--- | :--- | :--- |
-| **verdict-core** | `crates/verdict-core` | Engine heart: `Runner`, SQLite storage/cache, providers (LLM/embedder/judge), traces, baseline logic. |
-| **verdict-metrics** | `crates/verdict-metrics` | Metric implementations (regex, schema, semantic similarity, judge metrics). |
-| **verdict-cli** | `crates/verdict-cli` | CLI wiring (`clap`), config loading, runner assembly, reporting outputs. |
-| **verdict-action** | `verdict-action/` | GitHub Action wrapper around the Verdict CLI (Marketplace-ready). |
+| **assay-core** | `crates/assay-core` | Engine heart: `Runner`, SQLite storage/cache, providers (LLM/embedder/judge), traces, baseline logic. |
+| **assay-metrics** | `crates/assay-metrics` | Metric implementations (regex, schema, semantic similarity, judge metrics). |
+| **assay-cli** | `crates/assay-cli` | CLI wiring (`clap`), config loading, runner assembly, reporting outputs. |
+| **assay-action** | `assay-action/` | GitHub Action wrapper around the Assay CLI (Marketplace-ready). |
 
 ## 3. Key Workflows
 
@@ -48,19 +48,19 @@ The project is organized as a Cargo Workspace with three primary crates + an act
 ### 3.2 Running Evaluations
 - **Standard Run**:
   ```bash
-  verdict run --config verdict.yaml
+  assay run --config assay.yaml
   ```
 - **Run with Baseline Comparison**:
   ```bash
-  verdict run --config verdict.yaml --baseline baseline_main.json
+  assay run --config assay.yaml --baseline baseline_main.json
   ```
 - **Export Baseline**:
   ```bash
-  verdict ci --config verdict.yaml --export-baseline baseline_new.json
+  assay ci --config assay.yaml --export-baseline baseline_new.json
   ```
 
 ### 3.3 CI/CD Integration
-Recommended integration uses the `verdict-action`. See `docs/user-guide.md` for the baseline workflow.
+Recommended integration uses the `assay-action`. See `docs/user-guide.md` for the baseline workflow.
 
 Two common baseline storage models:
 
@@ -78,7 +78,7 @@ git show origin/main:baseline.json > baseline.json
 ```
 
 ## 4. Configuration
-Configuration combines `verdict.yaml` (tests + settings) and CLI args.
+Configuration combines `assay.yaml` (tests + settings) and CLI args.
 - **Runner settings**: `parallel`, timeouts, config-relative path resolution.
 - **Providers**:
     - Replay/trace provider (`--trace-file`) for deterministic CI.

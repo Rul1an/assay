@@ -4,13 +4,13 @@
 Accepted (v2)
 
 ## Context
-LLM-as-judge is essential for RAG evaluation (faithfulness/relevancy), but introduces variance, costs, and privacy risks. Since Verdict is CI-first, judge-metrics must not undermine the reliability of the gate.
+LLM-as-judge is essential for RAG evaluation (faithfulness/relevancy), but introduces variance, costs, and privacy risks. Since Assay is CI-first, judge-metrics must not undermine the reliability of the gate.
 
 ## Decision
 
 ### A. Architecture: Enrichment Pattern + Stateless Metrics
 **Decision**: Retain the enrichment pattern.
-The `Runner` handles replay, caching, voting, timeouts, and error mapping, injecting results into `resp.meta.verdict.judge`. The metric implementations (`faithfulness`, etc.) read solely from this metadata.
+The `Runner` handles replay, caching, voting, timeouts, and error mapping, injecting results into `resp.meta.assay.judge`. The metric implementations (`faithfulness`, etc.) read solely from this metadata.
 **Rationale**: Prevents infrastructure duplication per metric, maximizes reuse, and keeps metrics purely functional/testable.
 
 ### B. CLI DX: Short Flags + Env Var Fallback
@@ -81,7 +81,7 @@ expected:
 **Decision**: Enrich trace metadata.
 ```json
 "meta": {
-  "verdict": {
+  "assay": {
     "judge": {
       "faithfulness": {
         "rubric_version": "v1",

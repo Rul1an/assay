@@ -1,4 +1,4 @@
-# Verdict Examples 🌟
+# Assay Examples 🌟
 
 This directory contains ready-to-use examples for common Evaluation use-cases.
 
@@ -18,5 +18,5 @@ Full workflow demonstration of **Regression Testing** with Baselines.
 You can run any example directly from the root:
 
 ```bash
-verdict run --config examples/rag-grounding/eval.yaml --trace-file examples/rag-grounding/traces/good.jsonl
+assay run --config examples/rag-grounding/eval.yaml --trace-file examples/rag-grounding/traces/good.jsonl
 ```

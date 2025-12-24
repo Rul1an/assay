@@ -8,7 +8,7 @@ Live LLM calls in CI/CD are problematic due to cost, nondeterminism and latency.
 We need to run the exact same evaluation logic against recorded interactions.
 
 ## Decision
-We implement a **Trace Replay** mode where `verdict` accepts a trace file (JSONL) as the backend instead of a live provider.
+We implement a **Trace Replay** mode where `assay` accepts a trace file (JSONL) as the backend instead of a live provider.
 
 ### 1. Contract & Schema
 The trace file MUST be JSONL. Each line MUST be a valid JSON object conforming to **Trace Schema v1**:
@@ -16,7 +16,7 @@ The trace file MUST be JSONL. Each line MUST be a valid JSON object conforming t
 ```json
 {
   "schema_version": 1,
-  "type": "verdict.trace",
+  "type": "assay.trace",
   "request_id": "String (Optional) - Stable unique id",
   "prompt": "String (Required)",
   "context": ["String (Optional) - RAG context chunks"],
@@ -29,7 +29,7 @@ The trace file MUST be JSONL. Each line MUST be a valid JSON object conforming t
 
 **Validation Rules**:
 - **Schema Version**: If present, must be `1`.
-- **Type**: If present, must be `verdict.trace`.
+- **Type**: If present, must be `assay.trace`.
 - **Content**: One of `text` or `response` is REQUIRED. Empty strings break the contract if implied as successful response.
 
 **Matching & Uniqueness**:
@@ -47,5 +47,5 @@ Traces can contain PII.
 Recommended workflow:
 1.  **Dev/Staging**: record fresh traces.
 2.  **Store**: commit sanitized traces.
-3.  **PR Gate**: `verdict ci --trace-file traces.jsonl`.
+3.  **PR Gate**: `assay ci --trace-file traces.jsonl`.
 4.  **Drift Mitigation**: periodic re-record jobs.

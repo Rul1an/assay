@@ -1,6 +1,6 @@
-# Verdict Python Agent Demo (2-Minute Showcase)
+# Assay Python Agent Demo (2-Minute Showcase)
 
-This demo showcases how to gate a generic Python agent using Verdict.
+This demo showcases how to gate a generic Python agent using Assay.
 
 ## 1. The Scenario
 We have a simple agent (`demo_agent.py`) that answers questions.
@@ -24,14 +24,14 @@ Generate a synthetic trace (mimicking OpenTelemetry output):
 python3 demo_agent.py > traces/ci.jsonl
 ```
 
-### B. Ingest to Verdict
-Convert the raw OTel spans into Verdict's V2 Graph format:
+### B. Ingest to Assay
+Convert the raw OTel spans into Assay's V2 Graph format:
 
 ```bash
-# Assuming you are in the root of the repo and have built verdict-cli
-# Or use `cargo run -p verdict-cli -- ...`
+# Assuming you are in the root of the repo and have built assay-cli
+# Or use `cargo run -p assay-cli -- ...`
 
-../../target/debug/verdict trace ingest-otel \
+../../target/debug/assay trace ingest-otel \
   --input traces/ci.jsonl \
   --db .eval/eval.db \
   --out-trace traces/replay.jsonl \
@@ -42,7 +42,7 @@ Convert the raw OTel spans into Verdict's V2 Graph format:
 Verify the agent's behavior against your policy (`demo.yaml`):
 
 ```bash
-../../target/debug/verdict ci \
+../../target/debug/assay ci \
   --config demo.yaml \
   --trace-file traces/replay.jsonl \
   --replay-strict

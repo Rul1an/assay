@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from verdict_sdk.evaluator import Evaluator
+from assay.evaluator import Evaluator
 
 
 class TestArtifacts(unittest.TestCase):
@@ -53,9 +53,9 @@ tests:
         try:
             # Mock builtin evaluation to always pass
             with unittest.mock.patch(
-                "verdict_sdk.metrics.builtin.eval_builtin"
+                "assay.metrics.builtin.eval_builtin"
             ) as mock_eval:
-                from verdict_sdk.result import MetricResult
+                from assay.result import MetricResult
 
                 mock_eval.return_value = MetricResult(
                     name="mock_builtin", value=1.0, passed=True

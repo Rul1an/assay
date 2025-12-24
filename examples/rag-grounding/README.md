@@ -11,5 +11,5 @@ This example demonstrates how to evaluate Retrieval Augmented Generation (RAG) p
 Run with the provided trace (no API key required):
 
 ```bash
-verdict run --config eval.yaml --trace-file traces/good.jsonl
+assay run --config eval.yaml --trace-file traces/good.jsonl
 ```
