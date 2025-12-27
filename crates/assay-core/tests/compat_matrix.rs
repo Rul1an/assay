@@ -6,7 +6,9 @@ use tempfile::NamedTempFile;
 fn test_compat_yaml_anchors() -> anyhow::Result<()> {
     // Verify YAML anchor support
     let mut tmp = NamedTempFile::new()?;
-    writeln!(tmp, r#"
+    writeln!(
+        tmp,
+        r#"
 version: 1
 suite: anchors
 model: dummy
@@ -19,7 +21,8 @@ tests:
     input: {{ prompt: "hi" }}
     expected: {{ type: must_contain, must_contain: ["hi"] }}
     # No way to inject settings into test scope yet, but verifying parse succeeds
-"#)?;
+"#
+    )?;
 
     let cfg = load_config(tmp.path(), false)?;
     assert_eq!(cfg.settings.timeout_seconds, Some(60));
@@ -30,7 +33,9 @@ tests:
 fn test_compat_unknown_fields() -> anyhow::Result<()> {
     // Verify forward compatibility (ignoring unknown fields)
     let mut tmp = NamedTempFile::new()?;
-    writeln!(tmp, r#"
+    writeln!(
+        tmp,
+        r#"
 version: 1
 suite: unknown_fields
 model: dummy
@@ -41,7 +46,8 @@ tests:
   - id: t1
     input: {{ prompt: "hi", extra_input: "ignored" }}
     expected: {{ type: must_contain, must_contain: ["hi"], future_metric_param: 123 }}
-"#)?;
+"#
+    )?;
 
     let cfg = load_config(tmp.path(), false)?;
     assert_eq!(cfg.suite, "unknown_fields");
@@ -53,7 +59,9 @@ tests:
 fn test_compat_duplicate_tools_sequence() -> anyhow::Result<()> {
     // Verify duplicate tools in sequence logic (legacy list)
     let mut tmp = NamedTempFile::new()?;
-    writeln!(tmp, r#"
+    writeln!(
+        tmp,
+        r#"
 version: 1
 suite: dupes
 model: dummy
@@ -63,7 +71,8 @@ tests:
     expected:
        type: sequence_valid
        sequence: ["tool_a", "tool_b", "tool_a"]
-"#)?;
+"#
+    )?;
 
     let cfg = load_config(tmp.path(), false)?;
     // Use pattern match to verifying parsing

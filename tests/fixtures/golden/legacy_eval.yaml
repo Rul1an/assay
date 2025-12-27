@@ -1,0 +1,9 @@
+suite: legacy_migration_demo
+model: trace
+tests:
+  - id: legacy_test
+    input:
+      prompt: "migrate me"
+    expected:
+      type: args_valid
+      policy: policies/legacy_args.yaml

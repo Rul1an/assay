@@ -108,6 +108,7 @@ fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
             Expected::ArgsValid { .. } => "args_valid",
             Expected::SequenceValid { .. } => "sequence_valid",
             Expected::ToolBlocklist { .. } => "tool_blocklist",
+            Expected::Reference { .. } => "reference",
         }
         .to_string();
 

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.8.0-rc.1] - 2025-12-27
+## [v0.8.0] - 2025-12-27
 
 ### Security & Hardening
 *   **Zero Conf Trust**: `assay migrate` ensures all policies are inlined, removing reliance on external mutable policy files.

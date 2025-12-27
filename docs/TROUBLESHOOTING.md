@@ -1,282 +1,313 @@
 # Troubleshooting
 
-This document is the “fast path” for fixing Assay issues in CI.
-If you’re stuck: run `assay validate` first, then `assay doctor` (v0.3.4+).
+Common errors and how to fix them.
 
-## Quick Triage (90 seconds)
-1) **Preflight**
-```bash
-assay validate --config eval.yaml --trace-file traces/ci.jsonl
+---
+
+## Configuration Errors (Exit Code 2)
+
+### Missing configVersion
+
+```
+fatal: ConfigError: missing required field 'configVersion'
 ```
 
-2) **If you use offline CI**
-```bash
-assay validate --config eval.yaml --trace-file traces/ci.jsonl --replay-strict
-```
+**Fix:** Add `configVersion: 1` at the top of your config:
 
-3) **If you gate against baseline**
-```bash
-assay validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json
-```
-
-Exit codes refresher:
-*   `0`: OK (Pass/Warn/Flaky/Skipped)
-*   `1`: Test failures (regressions)
-*   `2`: Config/setup errors (paths, schema mismatch, replay-strict missing data, etc.)
-
----
-
-## Failure Mode 1 — Trace miss (prompt drift)
-
-**Symptom**
-*   Runner/validate can’t find a prompt in the trace.
-*   Diagnostic: `E_TRACE_MISS` with “Did you mean…?” suggestion.
-
-**Likely cause**
-*   Prompt template changed (typo, spacing, new prefix), but trace dataset wasn’t updated.
-
-**Fast fix**
-*   Update `input.prompt` in config to exactly match trace or regenerate trace.
-*   If you intended the new prompt: re-ingest + re-precompute (if strict/offline):
-    ```bash
-    assay trace ingest --input raw_logs/*.jsonl --output trace.jsonl
-    assay trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai
-    assay trace precompute-judge --trace trace_enriched.jsonl --output trace_enriched.jsonl --judge openai
-    ```
-
-**Prevention**
-*   Treat prompts as API contracts: version prompt templates, update traces on main.
-
-- **Relevant Diagnostic**: `W_CACHE_CONFUSION`
-- **Verify**: `assay doctor` (Check "Caches" section)
-- **Fast Fix**:
-    1.  **Use `assay-action@v0.3.4+`** which splits caches automatically.
-- **Relevant Diagnostic**: `E_BASE_MISMATCH`
-- **Verify**: `assay validate --config eval.yaml --baseline baseline.json`
-- **Fast Fix**:
-    1.  If the change is intentional (e.g., prompt update), **export a new baseline**:
-        ```bash
-        assay ci --config eval.yaml --trace-file traces/pr.jsonl --export-baseline baseline.json --strict
-        ```
-- **Relevant Diagnostic**: `E_TRACE_MISS`, `E_TRACE_INVALID`
-- **Verify**: `assay validate --config eval.yaml --trace-file traces/pr.jsonl`
-- **Fast Fix**:
-    1.  Ensure your app logs inputs/outputs in JSONL format.
-*   Codes: `E_TRACE_MISS`, `E_TRACE_INVALID`
-*   Commands: `assay validate`, `assay trace verify`
-
----
-
-## Failure Mode 2 — Baseline churn (too many diffs / constant red PRs)
-
-**Symptom**
-*   PRs fail frequently due to “regression vs baseline”, but changes are expected.
-*   Team starts ignoring the gate.
-
-**Likely cause**
-*   Baseline exported from a run that isn’t representative (too small, wrong trace slice, unstable judge).
-*   `max_drop` too strict for the metric noise profile.
-
-**Fast fix**
-*   Run calibration on historical data:
-    ```bash
-    assay calibrate --db .eval/eval.db --suite <suite> --out calibration.json
-    ```
-*   Use recommended thresholds (`recommended_min_score`, `recommended_max_drop`) for your suite.
-*   Use hygiene report to identify unstable tests:
-    ```bash
-    assay baseline report --db .eval/eval.db --suite <suite> --out hygiene.json
-    ```
-
-**Prevention**
-*   Export baseline on main only, from a stable “golden” dataset.
-*   Quarantine or relax thresholds for unstable tests.
-
-**Relevant**
-*   Commands: `assay ci --export-baseline ...`, `assay calibrate`, `assay baseline report`
-
----
-
-## Failure Mode 3 — Schema/version drift (baseline / trace / db)
-
-**Symptom**
-*   Hard config errors after upgrades, or baseline refuses to load.
-*   Typical: suite mismatch, schema version mismatch.
-
-**Likely cause**
-*   Baseline from a different suite or incompatible schema.
-*   Upgraded binary, but reused an old baseline/db without migration.
-
-**Fast fix**
-*   Regenerate baseline for the correct suite:
-    ```bash
-    assay ci --config eval.yaml --trace-file traces/main.jsonl --export-baseline baseline.json --strict
-    ```
-*   Run validate with baseline to get actionable diagnostics:
-    ```bash
-    assay validate --config eval.yaml --baseline baseline.json
-    ```
-
-**Prevention**
-*   Store baseline next to config and update it like any other golden artifact.
-
-**Relevant**
-*   Codes: `E_BASE_MISMATCH`, `E_PATH_NOT_FOUND`
-
----
-
-## Failure Mode 4 — Cache confusion (masked failures / “it passes on CI but not locally”)
-
-**Symptom**
-*   Behavior differs between runs with identical inputs.
-*   Tests unexpectedly “SKIPPED fingerprint match” after meaningful changes.
-
-**Likely cause**
-*   Shared `.eval` DB across unrelated runs or incorrect cache keys in CI.
-
-**Fast fix**
-*   Nuke local cache:
-    ```bash
-    rm -rf .eval ~/.assay/cache ~/.assay/embeddings
-    ```
-*   In CI, ensure cache split is enabled (v0.3.4 action defaults should handle this).
-
-**Prevention**
-*   Use per-workdir cache keys (monorepo safe).
-*   Keep `.eval` cache separate from runtime caches.
-
-**Relevant**
-*   Commands: `assay ci --incremental`, `--refresh-cache`
-*   Action: cache split (db vs runtime)
-
----
-
-## Failure Mode 5 — Embedding dimension mismatch
-
-**Symptom**
-*   Config error: embedding dims mismatch (e.g. 1536 vs 3072) or empty vectors.
-*   Validate shows: `E_EMB_DIMS`.
-
-**Likely cause**
-*   Mixed embedding models between trace precompute runs.
-*   Old precomputed embeddings reused after changing embedder model.
-
-**Fast fix**
-*   Recompute embeddings with the intended model:
-    ```bash
-    assay trace precompute-embeddings --trace trace.jsonl --output trace_enriched.jsonl --embedder openai --model <your-model>
-    ```
-
-**Prevention**
-*   Pin embedder model in docs / pipeline.
-*   Treat embedding model as part of the dataset fingerprint.
-
-**Relevant**
-*   Codes: `E_EMB_DIMS`
-*   Commands: `assay validate --replay-strict`
-
----
-
-## Failure Mode 6 — Judge variance confusion (Warn/Flaky/Unstable)
-
-**Symptom**
-*   “Warn / Unstable” shows up; team doesn’t know if it’s safe to merge.
-*   Disagreement across samples.
-
-**Likely cause**
-*   Judge sampling (k>1) reveals borderline cases.
-*   Temperature/model changes in judge config.
-
-**Fast fix**
-*   In early adoption: allow Warn (exit 0) but track it.
-*   For strict gating: use `--strict` in CI.
-*   Use hygiene report to locate the unstable tests and either:
-    *   lower strictness for that metric/test, or
-    *   improve rubric / grounding.
-
-**Prevention**
-*   Keep judge prompts/rubrics versioned (`rubric_version`).
-*   Keep judge temperature stable.
-
-**Relevant**
-*   `--strict`, hygiene report, calibration
-
----
-
-## Failure Mode 7 — Fork PR permissions (SARIF/artifact uploads fail)
-
-**Symptom**
-*   Action fails on fork PRs due to permissions; SARIF upload errors.
-
-**Likely cause**
-*   GitHub restricts token permissions on forks.
-
-**Fast fix**
-*   Use `sarif: auto` (default): auto-skips SARIF on fork PRs.
-*   Or explicitly disable:
-    ```yaml
-    with:
-      sarif: false
-    ```
-
-**Prevention**
-*   Keep SARIF “best effort” for forks; require it only on main branch workflows.
-
----
-
-## Failure Mode 8 — Monorepo path resolution issues
-
-**Symptom**
-*   “file not found” for config/trace/baseline, but paths look correct.
-
-**Likely cause**
-*   Wrong working directory in Action vs repo layout.
-
-**Fast fix**
 ```yaml
-with:
-  workdir: packages/ai
-  config: eval.yaml
-  trace_file: traces/ci.jsonl
+configVersion: 1  # Add this line
+suite: my_suite
+tests:
+  # ...
 ```
 
-**Prevention**
-*   Always set `workdir` in monorepos; keep config-relative assets.
+### YAML Parse Error
+
+```
+fatal: ConfigError: failed to parse YAML: did not find expected node content at line 14 column 1, while parsing a flow node
+```
+
+**Common causes:**
+
+1. **Missing colon after key:**
+   ```yaml
+   # Wrong
+   type args_valid
+   
+   # Correct
+   type: args_valid
+   ```
+
+2. **Incorrect indentation:**
+   ```yaml
+   # Wrong (mixed tabs/spaces)
+   tests:
+   	- id: test1  # Tab character
+   
+   # Correct (2 spaces)
+   tests:
+     - id: test1
+   ```
+
+3. **Unquoted special characters:**
+   ```yaml
+   # Wrong
+   pattern: [a-z]+
+   
+   # Correct
+   pattern: "[a-z]+"
+   ```
+
+**Debug tip:** Use a YAML validator like [yamllint](https://www.yamllint.com/) to find syntax errors.
+
+### Unknown Policy Type
+
+```
+fatal: ConfigError: unknown policy type 'custom_check' in test 'my_test'
+```
+
+**Fix:** Use one of the supported policy types:
+
+- `args_valid`
+- `sequence_valid`
+- `tool_blocklist`
+- `regex_match`
+
+### Duplicate Test ID
+
+```
+fatal: ConfigError: duplicate test id 'my_test'
+```
+
+**Fix:** Ensure all test IDs are unique within the suite.
 
 ---
 
-## Failure Mode 9 — Large trace performance (slow CI)
+## Test Failures (Exit Code 1)
 
-**Symptom**
-*   CI takes too long; heavy JSONL parsing or repeated embedding/judge work.
+### Missing Required Tool
 
-**Likely cause**
-*   Too large dataset, missing incremental skip, or missing precompute caches.
+```
+❌ test_flow        failed: sequence_valid  (0.0s)
+      Message: Missing required tool: notify_slack
+```
 
-**Fast fix**
-*   Enable incremental:
-    ```bash
-    assay ci --incremental ...
-    ```
-*   Use precompute + `replay-strict` (offline deterministic).
-*   Ensure action runtime caches are enabled (`cache_mode: auto`).
+**What it means:** Your config requires `notify_slack` to be called, but the trace doesn't contain that tool call.
 
-**Prevention**
-*   Keep a “CI slice” dataset + a larger nightly dataset.
+**Possible fixes:**
+
+1. **Update the trace:** Record a new trace that includes the tool call
+2. **Remove the requirement:** If the tool is optional, remove the `require` rule
+3. **Check tool name spelling:** Ensure the tool name matches exactly
+
+### Blocked Tool Called
+
+```
+❌ security_test        failed: tool_blocklist  (0.0s)
+      Message: Blocked tool called: delete_users
+```
+
+**What it means:** The agent called a tool that's on your blocklist.
+
+**Possible fixes:**
+
+1. **Fix the agent:** The agent shouldn't call this tool
+2. **Update blocklist:** If the tool is now allowed, remove it from `blocked`
+
+### Sequence Violation
+
+```
+❌ migration_flow        failed: sequence_valid  (0.0s)
+      Message: Order violation: run_migration called before create_backup
+```
+
+**What it means:** Tools were called in the wrong order.
+
+**Possible fixes:**
+
+1. **Fix the agent logic:** Ensure tools are called in the correct order
+2. **Update the rule:** If the order doesn't matter, remove the `before` rule
+
+### Schema Validation Failed
+
+```
+❌ deploy_test        failed: args_valid  (0.0s)
+      Message: Argument validation failed for deploy_service:
+        - port: expected integer, got string "8080"
+```
+
+**What it means:** The tool was called with arguments that don't match the schema.
+
+**Possible fixes:**
+
+1. **Fix the agent:** Ensure arguments have correct types
+2. **Loosen the schema:** If string is acceptable, update the schema
+
+### Regex Not Matched
+
+```
+❌ output_test        failed: regex_match  (0.0s)
+      Message: Output did not match pattern: "temperature is \d+ degrees"
+```
+
+**What it means:** The agent's output doesn't match the expected pattern.
+
+**Debug tip:** Check the actual output in the trace file to see what was returned.
 
 ---
 
-## Failure Mode 10 — “No idea what to do next”
+## Trace Issues
 
-**Symptom**
-*   Users get an error but don’t know the next command to run.
+### Trace File Not Found
 
-**Fix**
-*   Always start with:
-    ```bash
-    assay validate --config eval.yaml --trace-file traces/ci.jsonl --baseline baseline.json --replay-strict
-    ```
-*   Then follow the Diagnostic’s `fix_steps`.
+```
+fatal: IOError: trace file not found: traces/golden.jsonl
+```
 
-**Prevention**
-*   Keep docs and examples in-repo; link this page from README.
+**Fix:** Check the path and ensure the file exists:
+
+```bash
+ls -la traces/
+```
+
+### Invalid Trace Format
+
+```
+fatal: TraceError: invalid JSON at line 42: expected ',' or '}'
+```
+
+**Fix:** Validate the JSONL file:
+
+```bash
+# Check for JSON errors
+cat trace.jsonl | jq -c . > /dev/null
+```
+
+### Empty Trace
+
+```
+fatal: TraceError: trace file is empty: traces/empty.jsonl
+```
+
+**Fix:** Ensure your recording captured events. Re-record if necessary.
+
+---
+
+## Cache Issues
+
+### Unexpected Skips
+
+```
+Running 5 tests...
+⏭️  test_1        skipped (fingerprint match)
+⏭️  test_2        skipped (fingerprint match)
+⏭️  test_3        skipped (fingerprint match)
+```
+
+**What it means:** Tests are being skipped because the trace fingerprint matches a previous run.
+
+**To force re-run:**
+
+```bash
+# Option 1: Use fresh database
+assay run --config eval.yaml --trace-file trace.jsonl --db :memory:
+
+# Option 2: Delete the cache
+rm -rf .assay/store.db
+```
+
+### Cache Corruption
+
+```
+fatal: CacheError: failed to read cache: database disk image is malformed
+```
+
+**Fix:** Delete and rebuild the cache:
+
+```bash
+rm -rf .assay/
+assay run --config eval.yaml --trace-file trace.jsonl
+```
+
+---
+
+## Migration Issues
+
+### External Policy Not Found
+
+```
+fatal: MigrationError: could not read policy file: policies/args.yaml
+```
+
+**Fix:** Ensure the policy file exists at the referenced path.
+
+### Already Migrated
+
+```
+warn: Config already has configVersion: 1, skipping migration
+```
+
+**What it means:** The config is already in v1 format. No action needed.
+
+---
+
+## CI/CD Issues
+
+### Non-Zero Exit in CI
+
+```
+Error: Process completed with exit code 1.
+```
+
+**Meaning:** One or more tests failed. Check the logs for specific failures.
+
+**Common CI fixes:**
+
+1. **Ensure trace files are committed:**
+   ```yaml
+   - uses: actions/checkout@v4
+     with:
+       lfs: true  # If using Git LFS for traces
+   ```
+
+2. **Use correct paths:**
+   ```yaml
+   - run: assay run --config ./path/to/eval.yaml --trace-file ./path/to/trace.jsonl
+   ```
+
+3. **Install Assay in CI:**
+   ```yaml
+   - name: Install Assay
+     run: cargo install assay-cli
+   ```
+
+### Permission Denied
+
+```
+fatal: IOError: permission denied: .assay/store.db
+```
+
+**Fix:** Ensure the runner has write permissions, or use in-memory mode:
+
+```bash
+assay run --config eval.yaml --trace-file trace.jsonl --db :memory:
+```
+
+---
+
+## Getting Help
+
+If you're stuck:
+
+1. **Enable debug logging:**
+   ```bash
+   RUST_LOG=assay=debug assay run --config eval.yaml --trace-file trace.jsonl
+   ```
+
+2. **Check the GitHub Issues:**
+   [github.com/Rul1an/assay/issues](https://github.com/Rul1an/assay/issues)
+
+3. **File a bug report** with:
+   - Assay version (`assay --version`)
+   - Full error output
+   - Minimal config to reproduce

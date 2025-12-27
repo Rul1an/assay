@@ -497,7 +497,6 @@ impl Runner {
             // Determine thresholding config
             // 1. Metric override (from expected enum - tricky as Metric trait hides this)
             // Use suite defaults unless specific metric logic overrides
-            // Actually, `tc.expected` has the config. We need to parse it.
 
             let (mode, max_drop) = self.resolve_threshold_config(tc, metric_name, suite_defaults);
 
@@ -544,11 +543,8 @@ impl Runner {
             max_drop = s.max_drop;
         }
 
-        // Per-metric overrides
-        // Provide a clumsy match here or better implement a helper on Expected
-        // For MVP, we'll check suite defaults primarily.
-        // Actual implementation requires mapping metric_name to Expected variant fields.
-        // Let's stick to suite defaults for this iteration to get it compiling.
+        // TODO: Map metric_name to strict Expected variant fields for per-test overrides.
+        // Currently relies on global suite defaults.
         (mode, max_drop)
     }
 
