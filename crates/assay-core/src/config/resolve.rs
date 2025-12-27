@@ -56,28 +56,35 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                         .with_context(|| format!("failed to parse policy: {}", path))?;
 
                     if v.get("schema").is_some() {
-                         test.expected = Expected::ArgsValid {
-                             policy: None,
-                             schema: v.get("schema").cloned()
-                         };
+                        test.expected = Expected::ArgsValid {
+                            policy: None,
+                            schema: v.get("schema").cloned(),
+                        };
                     } else if v.get("sequence").is_some() {
-                         // TODO: parse sequence
-                         test.expected = Expected::SequenceValid {
-                             policy: None,
-                             sequence: serde_json::from_value(v.get("sequence").unwrap().clone()).ok(),
-                             rules: None
-                         };
+                        // TODO: parse sequence
+                        test.expected = Expected::SequenceValid {
+                            policy: None,
+                            sequence: serde_json::from_value(v.get("sequence").unwrap().clone())
+                                .ok(),
+                            rules: None,
+                        };
                     } else if v.get("must_contain").is_some() {
-                         test.expected = Expected::MustContain {
-                             must_contain: serde_json::from_value(v.get("must_contain").unwrap().clone()).unwrap_or_default()
-                         };
+                        test.expected = Expected::MustContain {
+                            must_contain: serde_json::from_value(
+                                v.get("must_contain").unwrap().clone(),
+                            )
+                            .unwrap_or_default(),
+                        };
                     } else {
                         // Fallback: try parsing as simple schema (for ArgsValid ref)
                         // Some legacy refs pointed directly to a JSON schema
                         if v.get("type").and_then(|t| t.as_str()) == Some("object") {
-                             test.expected = Expected::ArgsValid { policy: None, schema: Some(v) };
+                            test.expected = Expected::ArgsValid {
+                                policy: None,
+                                schema: Some(v),
+                            };
                         } else {
-                             anyhow::bail!("Could not infer policy type for {}", path);
+                            anyhow::bail!("Could not infer policy type for {}", path);
                         }
                     }
                 }

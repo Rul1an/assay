@@ -112,64 +112,72 @@ impl<'de> Deserialize<'de> for TestCase {
                             expected_main = exp;
                         }
                     } else if let Some(obj) = item.as_object() {
-                       // Try Legacy Heuristics
-                       let mut parsed = None;
-                       let mut matched_keys = Vec::new();
+                        // Try Legacy Heuristics
+                        let mut parsed = None;
+                        let mut matched_keys = Vec::new();
 
-                       if let Some(r) = obj.get("$ref") {
-                           parsed = Some(Expected::Reference { path: r.as_str().unwrap_or("").to_string() });
-                           matched_keys.push("$ref");
-                       }
+                        if let Some(r) = obj.get("$ref") {
+                            parsed = Some(Expected::Reference {
+                                path: r.as_str().unwrap_or("").to_string(),
+                            });
+                            matched_keys.push("$ref");
+                        }
 
-                       // Don't chain else-ifs, check all to detect ambiguity
-                       if let Some(mc) = obj.get("must_contain") {
-                           let val = if mc.is_string() {
-                               vec![mc.as_str().unwrap().to_string()]
-                           } else {
-                               serde_json::from_value(mc.clone()).unwrap_or_default()
-                           };
-                           // Last match wins for parsed, but we warn below
-                           if parsed.is_none() {
+                        // Don't chain else-ifs, check all to detect ambiguity
+                        if let Some(mc) = obj.get("must_contain") {
+                            let val = if mc.is_string() {
+                                vec![mc.as_str().unwrap().to_string()]
+                            } else {
+                                serde_json::from_value(mc.clone()).unwrap_or_default()
+                            };
+                            // Last match wins for parsed, but we warn below
+                            if parsed.is_none() {
                                 parsed = Some(Expected::MustContain { must_contain: val });
-                           }
-                           matched_keys.push("must_contain");
-                       }
+                            }
+                            matched_keys.push("must_contain");
+                        }
 
-                       if obj.get("sequence").is_some() {
-                           if parsed.is_none() {
+                        if obj.get("sequence").is_some() {
+                            if parsed.is_none() {
                                 parsed = Some(Expected::SequenceValid {
                                     policy: None,
-                                    sequence: serde_json::from_value(obj.get("sequence").unwrap().clone()).ok(),
-                                    rules: None
+                                    sequence: serde_json::from_value(
+                                        obj.get("sequence").unwrap().clone(),
+                                    )
+                                    .ok(),
+                                    rules: None,
                                 });
-                           }
-                           matched_keys.push("sequence");
-                       }
+                            }
+                            matched_keys.push("sequence");
+                        }
 
-                       if obj.get("schema").is_some() {
+                        if obj.get("schema").is_some() {
                             if parsed.is_none() {
-                                parsed = Some(Expected::ArgsValid { policy: None, schema: obj.get("schema").cloned() });
+                                parsed = Some(Expected::ArgsValid {
+                                    policy: None,
+                                    schema: obj.get("schema").cloned(),
+                                });
                             }
                             matched_keys.push("schema");
-                       }
+                        }
 
-                       if matched_keys.len() > 1 {
-                           eprintln!("WARN: Ambiguous legacy expected block. Found keys: {:?}. Using first match.", matched_keys);
-                       }
+                        if matched_keys.len() > 1 {
+                            eprintln!("WARN: Ambiguous legacy expected block. Found keys: {:?}. Using first match.", matched_keys);
+                        }
 
-                       if let Some(p) = parsed {
-                           if i == 0 {
-                               expected_main = p;
-                           }
-                           // else: drop or move to assertions (out of scope for quick fix, primary policy is priority)
-                       }
+                        if let Some(p) = parsed {
+                            if i == 0 {
+                                expected_main = p;
+                            }
+                            // else: drop or move to assertions (out of scope for quick fix, primary policy is priority)
+                        }
                     }
                 }
             } else {
-                 // Try V1 single object
-                 if let Ok(exp) = serde_json::from_value(val.clone()) {
-                     expected_main = exp;
-                 }
+                // Try V1 single object
+                if let Ok(exp) = serde_json::from_value(val.clone()) {
+                    expected_main = exp;
+                }
             }
         }
 
@@ -177,7 +185,11 @@ impl<'de> Deserialize<'de> for TestCase {
             id: raw.id,
             input: raw.input,
             expected: expected_main,
-            assertions: if extra_assertions.is_empty() { None } else { Some(extra_assertions) },
+            assertions: if extra_assertions.is_empty() {
+                None
+            } else {
+                Some(extra_assertions)
+            },
             tags: raw.tags,
             metadata: raw.metadata,
         })
@@ -227,7 +239,8 @@ impl<'de> Deserialize<'de> for TestInput {
                     #[serde(default)]
                     context: Option<Vec<String>>,
                 }
-                let helper = Helper::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                let helper =
+                    Helper::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
                 Ok(TestInput {
                     prompt: helper.prompt,
                     context: helper.context,
@@ -466,9 +479,9 @@ mod tests {
         "#;
         let tc: TestCase = serde_yaml::from_str(yaml).expect("failed to parse");
         if let Expected::MustContain { must_contain } = tc.expected {
-             assert_eq!(must_contain, vec!["Paris"]);
+            assert_eq!(must_contain, vec!["Paris"]);
         } else {
-             panic!("Expected MustContain, got {:?}", tc.expected);
+            panic!("Expected MustContain, got {:?}", tc.expected);
         }
     }
 
@@ -498,8 +511,13 @@ mod tests {
             thresholds: Default::default(),
             tests: vec![TestCase {
                 id: "t1".into(),
-                input: TestInput { prompt: "hi".into(), context: None },
-                expected: Expected::Reference { path: "foo.yaml".into() },
+                input: TestInput {
+                    prompt: "hi".into(),
+                    context: None,
+                },
+                expected: Expected::Reference {
+                    path: "foo.yaml".into(),
+                },
                 assertions: None,
                 tags: vec![],
                 metadata: None,
