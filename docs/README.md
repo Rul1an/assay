@@ -76,10 +76,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Install Assay
         run: cargo install assay-cli
-
+      
       - name: Run evals
         run: assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl --strict
 ```
@@ -110,10 +110,10 @@ A "golden trace" is a known-good recording that becomes your regression baseline
 
 ## Documentation
 
-- [CLI Reference](docs/CLI_REFERENCE.md) — All commands and flags
-- [Config Reference](docs/CONFIG_REFERENCE.md) — Full `mcp-eval.yaml` schema
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — Common errors and fixes
-- [Migration Guide](docs/MIGRATION.md) — Upgrading from v0 configs
+- [CLI Reference](./CLI_REFERENCE.md) — All commands and flags
+- [Config Reference](./CONFIG_REFERENCE.md) — Full `mcp-eval.yaml` schema
+- [Troubleshooting](./TROUBLESHOOTING.md) — Common errors and fixes
+- [Migration Guide](./MIGRATION.md) — Upgrading from v0 configs
 
 ## Use Cases
 
