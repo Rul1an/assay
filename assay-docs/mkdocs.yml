@@ -1,0 +1,197 @@
+# Assay Documentation Site
+# docs.assay.dev
+# Built with MkDocs + Material theme
+
+site_name: Assay
+site_url: https://docs.assay.dev
+site_description: "The purity test for AI — Zero-flake CI for AI agents"
+site_author: Assay Team
+
+repo_name: Rul1an/assay
+repo_url: https://github.com/Rul1an/assay
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2025 Assay
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/logo.svg
+  favicon: assets/favicon.png
+  
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+  features:
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: Rul1an
+      repo: assay
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Rul1an/assay
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/assay_dev
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/assay
+  
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  
+  version:
+    provider: mike
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Your First Test: getting-started/first-test.md
+    - CI Integration: getting-started/ci-integration.md
+  
+  - Core Concepts:
+    - concepts/index.md
+    - Traces: concepts/traces.md
+    - Policies: concepts/policies.md
+    - Metrics: concepts/metrics.md
+    - Replay Engine: concepts/replay.md
+    - Cache & Fingerprints: concepts/cache.md
+  
+  - MCP Integration:
+    - mcp/index.md
+    - Quick Start: mcp/quickstart.md
+    - Import Formats: mcp/import-formats.md
+    - Assay MCP Server: mcp/server.md
+    - Self-Correcting Agents: mcp/self-correction.md
+  
+  - Configuration:
+    - config/index.md
+    - mcp-eval.yaml: config/eval-yaml.md
+    - Policy Files: config/policies.md
+    - Sequence Rules DSL: config/sequences.md
+    - Migration Guide: config/migration.md
+  
+  - CLI Reference:
+    - cli/index.md
+    - assay run: cli/run.md
+    - assay import: cli/import.md
+    - assay migrate: cli/migrate.md
+    - assay replay: cli/replay.md
+    - assay mcp-server: cli/mcp-server.md
+  
+  - Metrics Reference:
+    - metrics/index.md
+    - args_valid: metrics/args-valid.md
+    - sequence_valid: metrics/sequence-valid.md
+    - tool_blocklist: metrics/tool-blocklist.md
+    - Custom Metrics: metrics/custom.md
+  
+  - Use Cases:
+    - use-cases/index.md
+    - CI Regression Gate: use-cases/ci-gate.md
+    - Trace-Driven Debugging: use-cases/debugging.md
+    - Air-Gapped Enterprise: use-cases/air-gapped.md
+    - Agent Self-Correction: use-cases/self-correction.md
+  
+  - Architecture:
+    - architecture/index.md
+    - Crate Structure: architecture/crates.md
+    - Data Flow: architecture/data-flow.md
+    - ADRs: architecture/adrs.md
+  
+  - Contributing:
+    - contributing/index.md
+    - Development Setup: contributing/setup.md
+    - Adding Metrics: contributing/metrics.md
+    - Release Process: contributing/releases.md
+  
+  - Changelog: changelog.md
