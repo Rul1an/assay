@@ -1,0 +1,13 @@
+configVersion: 1
+suite: golden_broken
+model: trace
+tests:
+  - id: test_broken
+    input:
+      prompt: "hi"
+    expected:
+      type: args_valid
+      schema:
+        port: integer  # Invalid JSON Schema implies type: const "integer" which is probably not what user wants, but strict parser might fail validation if I force it.
+        # Actually I need a syntax error for "Invalid Config" example.
+      rules: [  # Syntax error: array bracket not closed

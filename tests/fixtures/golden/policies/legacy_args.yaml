@@ -1,0 +1,5 @@
+schema:
+  type: object
+  properties:
+    foo:
+      type: string

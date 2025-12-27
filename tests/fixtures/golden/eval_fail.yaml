@@ -1,0 +1,12 @@
+configVersion: 1
+suite: golden_fail
+model: trace
+tests:
+  - id: test_golden_1
+    input:
+      prompt: "calls tool"
+    expected:
+      type: sequence_valid
+      rules:
+        - type: require
+          tool: missing_tool

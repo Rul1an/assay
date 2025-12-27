@@ -35,7 +35,10 @@ tests:
     // 1. Load Legacy
     let legacy = load_config(&config_path, true)?;
     assert!(legacy.is_legacy());
-    assert_eq!(legacy.tests[0].expected.get_policy_path(), Some("policy.yaml"));
+    assert_eq!(
+        legacy.tests[0].expected.get_policy_path(),
+        Some("policy.yaml")
+    );
 
     // 2. Resolve (Migrate in memory)
     let migrated = resolve_policies(legacy, dir.path())?;
