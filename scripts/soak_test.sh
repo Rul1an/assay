@@ -114,7 +114,7 @@ if [[ "$NONZERO_CODES" -ne 0 ]]; then
   exit 1
 fi
 
-# Cache expectation: na warm-up wil je 0 misses
+# Cache expectation: after warm-up we expect 0 misses
 if [[ "$CACHE_MISS_COUNT" -ne 0 ]]; then
   echo "FAIL: cache misses detected after warm-up (expected 100% hit rate)"
   exit 1

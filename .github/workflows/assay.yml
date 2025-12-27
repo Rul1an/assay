@@ -6,7 +6,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# Least-privilege. (Als je de optional test reporter gebruikt: checks: write)
+# Least-privilege. (If using optional test reporter: checks: write)
 permissions:
   contents: read
   checks: write
@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Verwacht: exit 0 als config ok is; exit 2 bij config error/legacy/unknown fields.
+          # Expect: exit 0 if config is ok; exit 2 on error/legacy/unknown fields.
           assay migrate --check --config tests/fixtures/contract/pass.yaml
 
       - name: Run Assay suite (strict + JUnit)
@@ -52,7 +52,7 @@ jobs:
           path: reports/assay-junit.xml
           retention-days: 14
 
-      # Optional: toon JUnit direct in GitHub UI als Check Run / summary
+      # Optional: show JUnit directly in GitHub UI as Check Run / summary
       - name: Publish test report
         if: always()
         uses: dorny/test-reporter@v1
