@@ -31,6 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p reports
+          touch reports/trace.jsonl
           # Verwacht: exit 0 als config ok is; exit 2 bij config error/legacy/unknown fields.
           assay migrate --check --config tests/fixtures/contract/pass.yaml
 
