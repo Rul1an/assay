@@ -1,0 +1,6 @@
+{"type":"episode_start","episode_id":"transcript","timestamp":1766761011737,"input":{"prompt":"<mcp:session>"},"meta":{"episode_id":"transcript","source":"mcp_import"}}
+{"type":"step","episode_id":"transcript","step_id":"step_000","idx":0,"timestamp":1766761011737,"kind":"tool","name":"tool_A","content":null,"content_sha256":null,"truncations":[],"meta":{"jsonrpc_id":null}}
+{"type":"tool_call","episode_id":"transcript","step_id":"step_000","timestamp":1766761011737,"tool_name":"tool_A","call_index":0,"args":{},"args_sha256":null,"result":null,"result_sha256":null,"error":null,"truncations":[]}
+{"type":"step","episode_id":"transcript","step_id":"step_001","idx":1,"timestamp":1766761011737,"kind":"tool","name":"tool_B","content":null,"content_sha256":null,"truncations":[],"meta":{"jsonrpc_id":null}}
+{"type":"tool_call","episode_id":"transcript","step_id":"step_001","timestamp":1766761011737,"tool_name":"tool_B","call_index":0,"args":{},"args_sha256":null,"result":null,"result_sha256":null,"error":null,"truncations":[]}
+{"type":"episode_end","episode_id":"transcript","timestamp":1766761011737,"outcome":null,"final_output":null}

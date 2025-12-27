@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.8.0-rc.1] - 2025-12-27
+
+### Security & Hardening
+*   **Zero Conf Trust**: `assay migrate` ensures all policies are inlined, removing reliance on external mutable policy files.
+*   **Cache Key V2**: Cache keys now include trace fingerprints, ensuring invalidation when trace inputs change (ADR-005).
+*   **Trace Security**: Enforced V2 Schema for trace ingest.
+*   **Strict Mode**: `assay run --strict` now forces `rerun_failures=0` to prevent "retry-until-max-attempts" pattern.
+
+### Features
+*   **Auto-Migration**: `assay migrate` automatically upgrades `v0` configs to `v1`.
+    *   Inlines external `policy: file.yaml` references.
+    *   Converts list-based sequences to Rule DSL.
+*   **Sequence DSL**: New `rules` based syntax for `sequence_valid` metric.
+    *   `require: tool_name` (order-independent)
+    *   `before: { first: A, then: B }`
+    *   `blocklist: pattern`
+*   **Legacy Compat**: `MCP_CONFIG_LEGACY=1` environment variable to bypass v1 enforcement.
+*   **Versioning**: Configs now require explicit `configVersion: 1`.
+
+### Internals
+*   **Golden Harness**: E2E regression testing for CLI output stability.
+*   **Python SDK Cleanup**: Repository no longer retains `__pycache__` artifacts.
+## [v0.5.0] - 2025-12-24
+
+### Features
+*   **MCP Integration**: Full support for Model Context Protocol.
+    *   **Import**: `assay import --format mcp-inspector --init` to ingest logs and auto-scaffold metrics.
+    *   **Verify**: `assay run --replay-strict` ensures deterministic tool execution.
+    *   **Metrics**: `args_valid` (JSON Schema) and `sequence_valid` (Strict Ordering).
+*   **Hardening**:
+    *   `--no-cache` alias for better DX.
+    *   `sequence_valid` shows precise diff index on failure.
+    *   Robust handling of orphaned tool calls and complex nested arguments.
+
 ## [v0.4.0] - 2025-12-23
 
 ### Features

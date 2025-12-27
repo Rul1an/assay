@@ -2,6 +2,7 @@ use crate::errors::{diagnostic::codes, similarity::closest_prompt, Diagnostic};
 use crate::model::LlmResponse;
 use crate::providers::llm::LlmClient;
 use async_trait::async_trait;
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufRead;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 pub struct TraceClient {
     // prompts -> response
     traces: Arc<HashMap<String, LlmResponse>>,
+    fingerprint: String,
 }
 impl TraceClient {
     pub fn from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
@@ -34,6 +36,7 @@ impl TraceClient {
             model: Option<String>,
             meta: serde_json::Value,
             input_is_model: bool,
+            tool_calls: Vec<crate::model::ToolCallRecord>,
         }
         let mut active_episodes: HashMap<String, EpisodeState> = HashMap::new();
 
@@ -96,9 +99,27 @@ impl TraceClient {
                                 model: None,  // extract from steps?
                                 meta: ev.meta,
                                 input_is_model: has_input, // authoritative only if present
+                                tool_calls: Vec::new(),
                             };
                             active_episodes.insert(ev.episode_id, state);
                             continue; // Wait for end
+                        }
+                    }
+                    "tool_call" => {
+                        if let Ok(ev) =
+                            serde_json::from_value::<crate::trace::schema::ToolCallEntry>(v.clone())
+                        {
+                            if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
+                                state.tool_calls.push(crate::model::ToolCallRecord {
+                                    id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
+                                    tool_name: ev.tool_name,
+                                    args: ev.args,
+                                    result: ev.result,
+                                    error: ev.error.map(serde_json::Value::String),
+                                    index: state.tool_calls.len(), // Global index for sequence validation
+                                    ts_ms: ev.timestamp,
+                                });
+                            }
                         }
                     }
                     "episode_end" => {
@@ -115,6 +136,14 @@ impl TraceClient {
                                 if let Some(p) = state.input {
                                     prompt_opt = Some(p);
                                     response_opt = state.output;
+
+                                    // Inject tool calls into meta
+                                    if !state.tool_calls.is_empty() {
+                                        state.meta["tool_calls"] =
+                                            serde_json::to_value(&state.tool_calls)
+                                                .unwrap_or_default();
+                                    }
+
                                     meta = state.meta;
                                     // model?
                                 }
@@ -303,8 +332,25 @@ impl TraceClient {
             }
         }
 
+        // Compute deterministic fingerprint of traces
+        let mut keys: Vec<&String> = traces.keys().collect();
+        keys.sort();
+        let mut hasher = sha2::Sha256::new();
+        for k in keys {
+            use sha2::Digest;
+            hasher.update(k.as_bytes());
+            if let Some(v) = traces.get(k) {
+                // hash validation relevant parts of response
+                hasher.update(v.text.as_bytes());
+                // include meta/model? yes for completeness
+                hasher.update(v.model.as_bytes());
+            }
+        }
+        let fingerprint = hex::encode(hasher.finalize());
+
         Ok(Self {
             traces: Arc::new(traces),
+            fingerprint,
         })
     }
 }
@@ -350,6 +396,10 @@ impl LlmClient for TraceClient {
 
     fn provider_name(&self) -> &'static str {
         "trace"
+    }
+
+    fn fingerprint(&self) -> Option<String> {
+        Some(self.fingerprint.clone())
     }
 }
 

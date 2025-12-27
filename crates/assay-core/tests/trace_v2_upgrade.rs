@@ -1,6 +1,6 @@
-use std::io::Cursor;
 use assay_core::trace::schema::TraceEvent;
 use assay_core::trace::upgrader::StreamUpgrader;
+use std::io::Cursor;
 
 #[test]
 fn test_upgrade_v1_to_v2_stream() {

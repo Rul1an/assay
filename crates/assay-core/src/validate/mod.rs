@@ -162,9 +162,7 @@ pub async fn validate(
                         "baseline_file": opts.baseline_file
                     }))
                     .with_fix_step("Use the baseline file created for this suite")
-                    .with_fix_step(
-                        "Or export a new baseline: assay ci ... --export-baseline ...",
-                    ),
+                    .with_fix_step("Or export a new baseline: assay ci ... --export-baseline ..."),
             );
         }
     }

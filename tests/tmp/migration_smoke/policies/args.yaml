@@ -1,0 +1,4 @@
+valid_tool:
+  type: object
+  properties:
+    foo: { type: string }

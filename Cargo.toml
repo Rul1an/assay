@@ -3,11 +3,11 @@ resolver = "2"
 members = [
   "crates/assay-core",
   "crates/assay-metrics",
-  "crates/assay-cli",
+  "crates/assay-cli", "crates/assay-mcp-server",
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.8.0-rc.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"

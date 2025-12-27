@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use assay_core::embeddings::util::cosine_similarity_f64;
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
+use async_trait::async_trait;
 
 const EPSILON: f64 = 1e-6;
 

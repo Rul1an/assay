@@ -37,8 +37,8 @@ pub struct Runner {
     pub policy: RunPolicy,
     pub embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
     pub refresh_embeddings: bool,
-    pub incremental: bool,   // v0.3.0
-    pub refresh_cache: bool, // v0.3.0
+    pub incremental: bool,
+    pub refresh_cache: bool,
     pub judge: Option<crate::judge::JudgeService>,
     pub baseline: Option<crate::baseline::Baseline>,
 }
@@ -293,22 +293,30 @@ impl Runner {
         cfg: &EvalConfig,
         tc: &TestCase,
     ) -> anyhow::Result<(TestResultRow, LlmResponse)> {
-        // v0.3.0 Fingerprinting
         let expected_json = serde_json::to_string(&tc.expected).unwrap_or_default();
-        let metric_versions = [
-            ("assay", env!("CARGO_PKG_VERSION")),
-            // Add metric-specific versions if available
-        ];
+        let metric_versions = [("assay", env!("CARGO_PKG_VERSION"))];
 
-        let fp = crate::fingerprint::compute(
-            &cfg.suite,
-            &cfg.model,
-            &tc.id,
-            &tc.input.prompt,
-            tc.input.context.as_deref(),
-            &expected_json,
-            &metric_versions,
-        );
+        let policy_hash = if let Some(path) = tc.expected.get_policy_path() {
+            // Read policy content to ensure cache invalidation on content change
+            match std::fs::read_to_string(path) {
+                Ok(content) => Some(crate::fingerprint::sha256_hex(&content)),
+                Err(_) => None, // If file missing, finding it later will error.
+                                // We don't fail here to allow error reporting in metrics phase or main loop.
+            }
+        } else {
+            None
+        };
+
+        let fp = crate::fingerprint::compute(crate::fingerprint::Context {
+            suite: &cfg.suite,
+            model: &cfg.model,
+            test_id: &tc.id,
+            prompt: &tc.input.prompt,
+            context: tc.input.context.as_deref(),
+            expected_canonical: &expected_json,
+            policy_hash: policy_hash.as_deref(),
+            metric_versions: &metric_versions,
+        });
 
         // Incremental Check
         // Note: Global --incremental flag should be checked here.
@@ -352,7 +360,12 @@ impl Runner {
 
         // Original Execution Logic
         // We use the computed fingerprint for caching key to distinguish config variations
-        let key = cache_key(&cfg.model, &tc.input.prompt, &fp.hex);
+        let key = cache_key(
+            &cfg.model,
+            &tc.input.prompt,
+            &fp.hex,
+            self.client.fingerprint().as_deref(),
+        );
 
         let start = std::time::Instant::now();
         let mut cached = false;
@@ -360,6 +373,11 @@ impl Runner {
         let mut resp: LlmResponse = if cfg.settings.cache.unwrap_or(true) && !self.refresh_cache {
             if let Some(r) = self.cache.get(&key)? {
                 cached = true;
+                eprintln!(
+                    "  [CACHE HIT] key={} prompt_len={}",
+                    key,
+                    tc.input.prompt.len()
+                );
                 r
             } else {
                 let r = self.call_llm(cfg, tc).await?;
@@ -421,7 +439,7 @@ impl Runner {
             message: if msg.is_empty() { "ok".into() } else { msg },
             details,
             duration_ms: Some(duration_ms),
-            fingerprint: Some(fp.hex), // Store for future skips
+            fingerprint: Some(fp.hex),
             skip_reason: None,
             attempts: None,
         };
@@ -430,7 +448,6 @@ impl Runner {
             row.details["assay.replay"] = serde_json::json!(true);
         }
 
-        // Add prompt to details for visibility
         row.details["prompt"] = serde_json::Value::String(tc.input.prompt.clone());
 
         Ok((row, resp))

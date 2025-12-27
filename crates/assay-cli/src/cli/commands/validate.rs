@@ -1,13 +1,13 @@
-use serde_json::json;
 use assay_core::config::{load_config, path_resolver::PathResolver};
 use assay_core::errors::diagnostic::Diagnostic;
 use assay_core::validate::{validate, ValidateOptions, ValidateReport};
+use serde_json::json;
 
 use crate::cli::args::ValidateArgs;
 
-pub async fn run(args: ValidateArgs) -> anyhow::Result<i32> {
+pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     // 1. Load Config
-    let cfg = match load_config(&args.config) {
+    let cfg = match load_config(&args.config, legacy_mode) {
         Ok(c) => c,
         Err(e) => {
             // If config fails to load, that's an E_CFG_PARSE or similar.

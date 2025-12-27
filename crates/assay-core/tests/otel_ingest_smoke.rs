@@ -1,6 +1,6 @@
-use std::io::BufRead;
 use assay_core::storage::Store;
 use assay_core::trace::otel_ingest::{convert_spans_to_episodes, OtelSpan};
+use std::io::BufRead;
 
 #[test]
 fn test_otel_ingest_logic() -> anyhow::Result<()> {

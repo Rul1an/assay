@@ -1,6 +1,6 @@
-use serde_json::json;
 use assay_core::mcp::{mcp_events_to_v2_trace, parse_mcp_transcript, McpInputFormat};
 use assay_core::trace::schema::TraceEvent;
+use serde_json::json;
 
 #[test]
 fn test_mcp_correlation_and_prompt() {

@@ -59,4 +59,16 @@ echo '{"run_id": "smoke", "events": [{"kind": "model", "content": "ok"}]}' > tra
 # Run Evaluator via Python one-liner
 python -c "from assay import Evaluator; passed = Evaluator().run('trace.jsonl').passed; print(f'Passed: {passed}'); exit(0) if passed else exit(1)"
 
+
+# 6. Migration Verification
+echo "[5/4] Verifying Migration Path (Rust Binary)..."
+# Ensure we use the built binary if possible, but the smoke test defaults to target/debug
+# We export APP to override
+export APP="target/release/assay"
+if [ -f "$APP" ]; then
+    ./tests/migration_smoke.sh || exit 1
+else
+    echo "⚠️ Skipping migration test (target/release/assay not found)"
+fi
+
 echo "✅ Release Smoke Test Passed!"

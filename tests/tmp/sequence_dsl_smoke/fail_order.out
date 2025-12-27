@@ -1,0 +1,7 @@
+
+Running 1 tests...
+❌ dsl_fail_2           failed: sequence_valid  (0.0s)
+      Prompt: "test"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 0 passed, 1 failed, 0 skipped, 0 flaky, 0 unstable, 0 warn, 0 error

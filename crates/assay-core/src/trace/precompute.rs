@@ -30,10 +30,7 @@ pub async fn precompute_embeddings(
 
         // Check if already embedded
         let has_embedding = entry.meta.pointer("/assay/embeddings/response").is_some()
-            && entry
-                .meta
-                .pointer("/assay/embeddings/reference")
-                .is_some();
+            && entry.meta.pointer("/assay/embeddings/reference").is_some();
 
         if !has_embedding {
             eprintln!("Embedding entry {}...", entry.request_id);

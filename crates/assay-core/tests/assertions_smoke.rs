@@ -1,7 +1,7 @@
-use serde_json::json;
 use assay_core::agent_assertions::{model::TraceAssertion, verify_assertions};
 use assay_core::storage::Store;
 use assay_core::trace::schema::{EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
+use serde_json::json;
 
 #[test]
 fn test_assertions_logic() -> anyhow::Result<()> {

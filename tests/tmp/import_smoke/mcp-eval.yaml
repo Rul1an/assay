@@ -1,0 +1,34 @@
+# Auto-generated MCP Evaluation Config
+configVersion: 1
+suite: mcp-suite
+model: mcp-replay
+settings:
+  parallel: 1
+tests:
+  - id: mcp-quality-gate
+    input:
+      prompt: "<mcp:session>"
+    expected:
+      type: args_valid
+      # Inline schema validation (default: strict object)
+      schema:
+        tool_A:
+          type: object
+          additionalProperties: true
+          properties: {}
+        tool_B:
+          type: object
+          additionalProperties: true
+          properties: {}
+
+  - id: mcp-sequence-gate
+    input:
+      prompt: "<mcp:session>"
+    expected:
+      type: sequence_valid
+      # Inline expected sequence (rules)
+      rules:
+        - type: require
+          tool: "tool_A"
+        - type: require
+          tool: "tool_B"

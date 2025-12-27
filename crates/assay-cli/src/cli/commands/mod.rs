@@ -8,6 +8,8 @@ pub mod calibrate;
 pub mod trace;
 
 pub mod doctor;
+pub mod import;
+pub mod migrate;
 pub mod validate;
 
 pub mod exit_codes {
@@ -16,21 +18,23 @@ pub mod exit_codes {
     pub const CONFIG_ERROR: i32 = 2;
 }
 
-pub async fn dispatch(cli: Cli) -> anyhow::Result<i32> {
+pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => cmd_init(args).await,
-        Command::Run(args) => cmd_run(args).await,
-        Command::Ci(args) => cmd_ci(args).await,
-        Command::Validate(args) => validate::run(args).await,
-        Command::Doctor(args) => doctor::run(args).await,
+        Command::Run(args) => cmd_run(args, legacy_mode).await,
+        Command::Ci(args) => cmd_ci(args, legacy_mode).await,
+        Command::Validate(args) => validate::run(args, legacy_mode).await,
+        Command::Doctor(args) => doctor::run(args, legacy_mode).await,
+        Command::Import(args) => import::cmd_import(args),
         Command::Quarantine(args) => cmd_quarantine(args).await,
-        Command::Trace(args) => trace::cmd_trace(args).await,
+        Command::Trace(args) => trace::cmd_trace(args, legacy_mode).await,
         Command::Calibrate(args) => calibrate::cmd_calibrate(args).await,
         Command::Baseline(args) => match args.cmd {
             BaselineSub::Report(report_args) => {
                 baseline::cmd_baseline_report(report_args).map(|_| exit_codes::OK)
             }
         },
+        Command::Migrate(args) => migrate::cmd_migrate(args),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)
@@ -99,7 +103,7 @@ fn write_sample_config_if_missing(path: &std::path::Path) -> anyhow::Result<()> 
     Ok(())
 }
 
-async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
+async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
 
     // Argument validation
@@ -108,7 +112,14 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
-    let cfg = assay_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = assay_core::config::load_config(&args.config, legacy_mode)
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    // Check for deprecated legacy usage
+    if !cfg.is_legacy() && cfg.has_legacy_usage() {
+        eprintln!("WARN: Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.", cfg.version);
+    }
+
     let store = assay_core::storage::Store::open(&args.db)?;
 
     let runner = build_runner(
@@ -121,7 +132,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
         &args.embedding_model,
         args.refresh_embeddings,
         args.incremental,
-        args.refresh_cache,
+        args.refresh_cache || args.no_cache,
         &args.judge,
         &args.baseline,
         PathBuf::from(&args.config),
@@ -163,7 +174,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<i32> {
     Ok(decide_exit_code(&artifacts.results, args.strict))
 }
 
-async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
+async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
 
     // Argument Validation
@@ -192,7 +203,15 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let cfg = assay_core::config::load_config(&args.config).map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = assay_core::config::load_config(&args.config, legacy_mode)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    // Observability: Log config version
+    if cfg.version > 0 {
+        eprintln!("Loaded config version: {}", cfg.version);
+        if cfg.has_legacy_usage() {
+            eprintln!("WARN: Deprecated policy file usage detected. Run 'assay migrate'.");
+        }
+    }
     // Strict mode implies no reruns by default policy (fail fast/accurate)
     let reruns = if args.strict { 0 } else { args.rerun_failures };
     let runner = build_runner(
@@ -205,7 +224,7 @@ async fn cmd_ci(args: CiArgs) -> anyhow::Result<i32> {
         &args.embedding_model,
         args.refresh_embeddings,
         args.incremental,
-        args.refresh_cache,
+        args.refresh_cache || args.no_cache,
         &args.judge,
         &args.baseline,
         PathBuf::from(&args.config),
@@ -426,42 +445,43 @@ async fn build_runner(
         refresh: judge_args.judge_refresh,
     };
 
-    let mut judge_client: Option<Arc<dyn assay_core::providers::llm::LlmClient>> =
-        if !judge_config.enabled {
-            None
-        } else {
-            match judge_config.provider.as_str() {
-                "openai" => {
-                    let key = if replay_strict {
-                        "strict-placeholder".into()
-                    } else {
-                        match &judge_args.judge_api_key {
+    let mut judge_client: Option<Arc<dyn assay_core::providers::llm::LlmClient>> = if !judge_config
+        .enabled
+    {
+        None
+    } else {
+        match judge_config.provider.as_str() {
+            "openai" => {
+                let key = if replay_strict {
+                    "strict-placeholder".into()
+                } else {
+                    match &judge_args.judge_api_key {
                         Some(k) => k.clone(),
                         None => std::env::var("OPENAI_API_KEY")
                             .map_err(|_| anyhow::anyhow!("Judge enabled (openai) but OPENAI_API_KEY not set (VERDICT_JUDGE_API_KEY also empty)"))?
                     }
-                    };
-                    let model = judge_config
-                        .model
-                        .clone()
-                        .unwrap_or("gpt-4o-mini".to_string());
-                    Some(Arc::new(
-                        assay_core::providers::llm::openai::OpenAIClient::new(
-                            model,
-                            key,
-                            judge_config.temperature,
-                            judge_config.max_tokens,
-                        ),
-                    ))
-                }
-                "fake" => {
-                    // For now, create a dummy client named "fake-judge"
-                    Some(Arc::new(DummyClient::new("fake-judge")))
-                }
-                "none" => None,
-                other => anyhow::bail!("unknown judge provider: {}", other),
+                };
+                let model = judge_config
+                    .model
+                    .clone()
+                    .unwrap_or("gpt-4o-mini".to_string());
+                Some(Arc::new(
+                    assay_core::providers::llm::openai::OpenAIClient::new(
+                        model,
+                        key,
+                        judge_config.temperature,
+                        judge_config.max_tokens,
+                    ),
+                ))
             }
-        };
+            "fake" => {
+                // For now, create a dummy client named "fake-judge"
+                Some(Arc::new(DummyClient::new("fake-judge")))
+            }
+            "none" => None,
+            other => anyhow::bail!("unknown judge provider: {}", other),
+        }
+    };
 
     if replay_strict {
         if let Some(inner) = judge_client {

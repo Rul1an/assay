@@ -1,0 +1,11 @@
+version: 1
+suite: unknown-compat
+model: fake-gpt
+unknown_field: "should be ignored"
+tests:
+  - id: unknown-test
+    input: { prompt: "test" }
+    extra_field: "ignored"
+    expected:
+      type: args_valid
+      schema: { type: object }

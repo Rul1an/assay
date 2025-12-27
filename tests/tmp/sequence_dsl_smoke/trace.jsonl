@@ -1,0 +1,6 @@
+{"type":"episode_start","episode_id":"ep1","timestamp":0,"input":{"prompt":"test"},"meta":{}}
+{"type":"step","episode_id":"ep1","step_id":"s_llm","idx":0,"timestamp":10,"kind":"llm_completion","name":"gpt","content":"thought","meta":{}}
+{"type":"tool_call","episode_id":"ep1","step_id":"s1","timestamp":100,"tool_name":"init","args":{},"call_index":0}
+{"type":"tool_call","episode_id":"ep1","step_id":"s2","timestamp":200,"tool_name":"work","args":{},"call_index":1}
+{"type":"tool_call","episode_id":"ep1","step_id":"s3","timestamp":300,"tool_name":"shutdown","args":{},"call_index":2}
+{"type":"episode_end","episode_id":"ep1","timestamp":400,"outcome":"pass"}

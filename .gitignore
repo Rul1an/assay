@@ -21,8 +21,11 @@ build/
 .env
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Release & Smoke Test
 .venv_smoke/
 smoke_test_ws/
 verdict_sdk.egg-info/
+assay_python_sdk.egg-info/

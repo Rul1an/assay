@@ -3,20 +3,29 @@ use crate::model::EvalConfig;
 use std::path::Path;
 
 pub mod path_resolver;
+pub mod resolve;
 
 pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
 
-pub fn load_config(path: &Path) -> Result<EvalConfig, ConfigError> {
+pub fn load_config(path: &Path, legacy_mode: bool) -> Result<EvalConfig, ConfigError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| ConfigError(format!("failed to read config {}: {}", path.display(), e)))?;
     let mut cfg: EvalConfig = serde_yaml::from_str(&raw)
         .map_err(|e| ConfigError(format!("failed to parse YAML: {}", e)))?;
-    if cfg.version != SUPPORTED_CONFIG_VERSION {
+
+    // Legacy override
+    if legacy_mode {
+        cfg.version = 0;
+    }
+
+    // Allow 0 or 1
+    if cfg.version != 0 && cfg.version != SUPPORTED_CONFIG_VERSION {
         return Err(ConfigError(format!(
-            "unsupported config version {} (supported: {})",
+            "unsupported config version {} (supported: 0, {})",
             cfg.version, SUPPORTED_CONFIG_VERSION
         )));
     }
+
     if cfg.tests.is_empty() {
         return Err(ConfigError("config has no tests".into()));
     }

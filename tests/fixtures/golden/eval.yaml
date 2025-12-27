@@ -1,0 +1,16 @@
+configVersion: 1
+suite: golden_harness
+model: trace
+settings:
+  cache: false
+  timeout_seconds: 5
+
+tests:
+  - id: test_golden_1
+    input:
+      prompt: "calls tool"
+    expected:
+      type: sequence_valid
+      rules:
+        - type: require
+          tool: fake_tool

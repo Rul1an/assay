@@ -1,0 +1,8 @@
+  [CACHE HIT] key=58fc06e33090cd79fbcdc9efb95847b3a1f54491a4d1964e6865f52929d9c11a prompt_len=4
+
+Running 1 tests...
+❌ dsl_fail_1           failed: sequence_valid  (0.0s)
+      Prompt: "test"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 0 passed, 1 failed, 0 skipped, 0 flaky, 0 unstable, 0 warn, 0 error

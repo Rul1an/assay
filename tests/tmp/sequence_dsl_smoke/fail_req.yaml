@@ -1,0 +1,12 @@
+version: 1
+suite: "dsl_fail_req"
+model: "dummy"
+tests:
+  - id: "dsl_fail_1"
+    input:
+      prompt: "test"
+    expected:
+      type: sequence_valid
+      rules:
+        - type: require
+          tool: "missing_tool"

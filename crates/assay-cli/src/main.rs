@@ -9,7 +9,8 @@ use cli::commands::dispatch;
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let cli = Cli::parse();
-    let code = match dispatch(cli).await {
+    let legacy_mode = std::env::var("MCP_CONFIG_LEGACY").ok().as_deref() == Some("1");
+    let code = match dispatch(cli, legacy_mode).await {
         Ok(code) => code,
         Err(e) => {
             eprintln!("fatal: {e:?}");

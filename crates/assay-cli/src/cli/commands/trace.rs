@@ -4,7 +4,7 @@ use super::exit_codes;
 use assay_core::trace;
 mod import_mcp;
 
-pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
+pub async fn cmd_trace(args: TraceArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     match args.cmd {
         TraceSub::Ingest { input, output } => {
             trace::ingest::ingest_file(&input, &output)?;
@@ -21,9 +21,9 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             suite: _suite,
             out_trace,
         } => {
-            use std::io::BufRead;
             use assay_core::storage::Store;
             use assay_core::trace::otel_ingest::{convert_spans_to_episodes, OtelSpan};
+            use std::io::BufRead;
 
             let file = std::fs::File::open(&input)
                 .map_err(|e| anyhow::anyhow!("failed to open input file: {}", e))?;
@@ -70,7 +70,7 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             Ok(exit_codes::OK)
         }
         TraceSub::Verify { trace, config } => {
-            let cfg = assay_core::config::load_config(&config)
+            let cfg = assay_core::config::load_config(&config, legacy_mode)
                 .map_err(|e| anyhow::anyhow!("failed to load config: {}", e))?;
 
             trace::verify::verify_coverage(&trace, &cfg)?;
@@ -83,14 +83,14 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             model,
             output,
         } => {
-            let cfg = assay_core::config::load_config(&config)
+            let cfg = assay_core::config::load_config(&config, legacy_mode)
                 .map_err(|e| anyhow::anyhow!("failed to load config: {}", e))?;
 
             // Build embedder (simplified version of build_runner logic)
-            use std::sync::Arc;
             use assay_core::providers::embedder::{
                 fake::FakeEmbedder, openai::OpenAIEmbedder, Embedder,
             };
+            use std::sync::Arc;
 
             let embedder_client: Arc<dyn Embedder> = match embedder.as_str() {
                 "openai" => {
@@ -147,7 +147,7 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
             judge_model,
             output,
         } => {
-            let cfg = assay_core::config::load_config(&config)
+            let cfg = assay_core::config::load_config(&config, legacy_mode)
                 .map_err(|e| anyhow::anyhow!("failed to load config: {}", e))?;
 
             // Build judge service
@@ -173,8 +173,8 @@ pub async fn cmd_trace(args: TraceArgs) -> anyhow::Result<i32> {
                 .clone()
                 .unwrap_or_else(|| "gpt-4o-mini".to_string());
 
-            use std::sync::Arc;
             use assay_core::providers::llm::{fake::FakeClient, openai::OpenAIClient, LlmClient};
+            use std::sync::Arc;
 
             let client: Option<Arc<dyn LlmClient>> = match judge.as_str() {
                 "openai" => {

@@ -1,6 +1,6 @@
-use tempfile::tempdir;
 use assay_core::storage::store::Store;
 use assay_core::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
+use tempfile::tempdir;
 
 #[test]
 fn test_storage_smoke_lifecycle() -> anyhow::Result<()> {

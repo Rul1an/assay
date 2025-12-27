@@ -9,6 +9,9 @@ pub trait LlmClient: Send + Sync {
         context: Option<&[String]>,
     ) -> anyhow::Result<LlmResponse>;
     fn provider_name(&self) -> &'static str;
+    fn fingerprint(&self) -> Option<String> {
+        None
+    }
 }
 
 pub mod fake;

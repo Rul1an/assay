@@ -1,0 +1,23 @@
+configVersion: 1
+suite: migration-test
+model: fake-gpt
+tests:
+- id: legacy-test
+  input:
+    prompt: test
+  expected:
+    type: args_valid
+    schema:
+      valid_tool:
+        properties:
+          foo:
+            type: string
+        type: object
+- id: legacy-sequence
+  input:
+    prompt: test
+  expected:
+    type: sequence_valid
+    sequence:
+    - valid_tool
+    - other_tool

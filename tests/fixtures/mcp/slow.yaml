@@ -1,0 +1,7 @@
+strict_tool:
+  type: object
+  properties:
+    code:
+      type: integer
+  required: ["code"]
+  additionalProperties: false

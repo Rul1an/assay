@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
+use async_trait::async_trait;
 
 const EPSILON: f64 = 1e-9;
 
@@ -64,9 +64,7 @@ fn evaluate_judge_result(
     _rubric_version: Option<&str>,
     output: &LlmResponse,
 ) -> anyhow::Result<MetricResult> {
-    let judge_data = output
-        .meta
-        .pointer(&format!("/assay/judge/{}", rubric_id));
+    let judge_data = output.meta.pointer(&format!("/assay/judge/{}", rubric_id));
 
     let Some(data) = judge_data else {
         // Judge result missing

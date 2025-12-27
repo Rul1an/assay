@@ -1,0 +1,7 @@
+discount_tool:
+  type: object
+  properties:
+    percent:
+      type: integer
+      maximum: 30
+  required: ["percent"]

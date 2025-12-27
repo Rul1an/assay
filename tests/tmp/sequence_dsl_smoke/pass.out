@@ -1,0 +1,7 @@
+  [CACHE HIT] key=32ef89a832b04f5614d040eb317d89f0479df153d7de93f8732feee96053656f prompt_len=4
+
+Running 1 tests...
+✅ dsl_pass_1           1.00  (0.0s)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Summary: 1 passed, 0 failed, 0 skipped, 0 flaky, 0 unstable, 0 warn, 0 error

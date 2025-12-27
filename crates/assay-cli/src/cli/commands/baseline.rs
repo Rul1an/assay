@@ -1,7 +1,7 @@
 use crate::cli::args::BaselineReportArgs;
-use std::fs;
 use assay_core::baseline::report::report_from_db;
 use assay_core::storage::Store;
+use std::fs;
 
 pub fn cmd_baseline_report(args: BaselineReportArgs) -> anyhow::Result<()> {
     let store = Store::open(&args.db)?;

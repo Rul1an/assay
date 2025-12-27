@@ -1,0 +1,33 @@
+configVersion: 1
+suite: complex-migration
+model: fake-gpt
+tests:
+- id: empty-schema
+  input:
+    prompt: test
+  expected:
+    type: args_valid
+    schema:
+      additionalProperties: true
+      properties: {}
+      type: object
+- id: strict-schema
+  input:
+    prompt: test
+  expected:
+    type: args_valid
+    schema:
+      additionalProperties: false
+      properties:
+        foo:
+          type: string
+      type: object
+- id: dup-sequence
+  input:
+    prompt: test
+  expected:
+    type: sequence_valid
+    sequence:
+    - tool_a
+    - tool_b
+    - tool_a

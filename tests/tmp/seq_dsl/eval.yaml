@@ -1,0 +1,31 @@
+version: 1
+suite: seq-dsl
+model: fake-gpt
+tests:
+  - id: seq-pass
+    input: { prompt: "pass" }
+    # fake-gpt creates empty trace by default if not strictly mocking
+    # We will mock the output using a trace file approach or just relying on "fake-gpt"
+    # Actually, easiest is to assume "fake-gpt" returns predictable tools if prompted so?
+    # No, fake-gpt is too simple. We should use trace replay for stability.
+    expected:
+      type: sequence_valid
+      rules:
+        - require: "step1"
+          before: ["step2"]
+
+  - id: seq-fail-missing
+    input: { prompt: "fail_missing" }
+    expected:
+      type: sequence_valid
+      rules:
+        - require: "stepX"
+          before: []
+
+  - id: seq-fail-order
+    input: { prompt: "fail_order" }
+    expected:
+      type: sequence_valid
+      rules:
+        - require: "step2"
+          before: ["step1"]

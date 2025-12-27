@@ -1,0 +1,3 @@
+{"prompt":"pass","response":"ok","meta":{"tool_calls":[{"id":"c1","tool_name":"step1","args":{},"index":0,"result":null,"error":null,"ts_ms":100},{"id":"c2","tool_name":"step2","args":{},"index":1,"result":null,"error":null,"ts_ms":200}]}}
+{"prompt":"fail_missing","response":"ok","meta":{"tool_calls":[{"id":"c1","tool_name":"step1","args":{},"index":0,"result":null,"error":null,"ts_ms":100}]}}
+{"prompt":"fail_order","response":"ok","meta":{"tool_calls":[{"id":"c1","tool_name":"step1","args":{},"index":0,"result":null,"error":null,"ts_ms":100},{"id":"c2","tool_name":"step2","args":{},"index":1,"result":null,"error":null,"ts_ms":200}]}}

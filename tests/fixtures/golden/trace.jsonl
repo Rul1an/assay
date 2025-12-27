@@ -1,0 +1,5 @@
+{"type":"episode_start","episode_id":"test_golden_1","timestamp":1000,"input":{"prompt":"calls tool"}}
+{"type":"step","episode_id":"test_golden_1","step_id":"s1","idx":0,"timestamp":1100,"kind":"llm","content":"I will call a tool."}
+{"type":"tool_call","episode_id":"test_golden_1","step_id":"s1","timestamp":1150,"tool_name":"fake_tool","call_index":0,"args":{"arg":"val"},"result":{"content":[{"type":"text","text":"tool result"}]}}
+{"type":"step","episode_id":"test_golden_1","step_id":"s2","idx":1,"timestamp":1200,"kind":"llm","content":"Tool done."}
+{"type":"episode_end","episode_id":"test_golden_1","timestamp":1300,"final_output":"Tool done."}

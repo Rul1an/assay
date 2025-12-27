@@ -4,8 +4,8 @@ use crate::errors::diagnostic::Diagnostic;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
-    pub schema_version: u32,     // 1
-    pub generated_at: String,    // rfc3339
+    pub schema_version: u32,   // 1
+    pub generated_at: String,  // rfc3339
     pub assay_version: String, // e.g. "0.3.4"
     pub platform: PlatformInfo,
 

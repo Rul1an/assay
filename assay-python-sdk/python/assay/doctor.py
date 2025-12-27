@@ -47,6 +47,20 @@ def check_openai() -> Tuple[bool, str]:
     return True, "✅ OpenAI ready (package installed, API key set)."
 
 
+def check_baseline_store() -> Tuple[bool, str]:
+    baseline_file = Path("assay-baselines.json")
+    if baseline_file.exists():
+        if not os.access(baseline_file, os.W_OK):
+            return False, f"❌ baseline store '{baseline_file}' exists but is not writable."
+        return True, f"✅ baseline store '{baseline_file}' found and writable."
+
+    # Check if directory is writable for creation
+    if not os.access(".", os.W_OK):
+        return False, "❌ Current directory not writable (cannot create baseline store)."
+
+    return True, "✅ baseline store (new) can be created."
+
+
 def run_doctor() -> None:
     print("Assay SDK Doctor 🩺")
     print("======================")
@@ -54,6 +68,7 @@ def run_doctor() -> None:
     checks = [
         check_config,
         check_permissions,
+        check_baseline_store,
         check_openai,
     ]
 

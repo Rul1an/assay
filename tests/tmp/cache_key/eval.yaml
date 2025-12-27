@@ -1,0 +1,9 @@
+version: 1
+suite: cache-test
+model: fake-gpt
+tests:
+  - id: cache-test-1
+    input: { prompt: "test" }
+    expected:
+      type: args_valid
+      policy: policies/args.yaml

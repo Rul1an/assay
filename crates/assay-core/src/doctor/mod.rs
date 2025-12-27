@@ -105,6 +105,9 @@ fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
             Expected::Faithfulness { .. } => "faithfulness",
             Expected::Relevance { .. } => "relevance",
             Expected::JudgeCriteria { .. } => "judge_criteria",
+            Expected::ArgsValid { .. } => "args_valid",
+            Expected::SequenceValid { .. } => "sequence_valid",
+            Expected::ToolBlocklist { .. } => "tool_blocklist",
         }
         .to_string();
 

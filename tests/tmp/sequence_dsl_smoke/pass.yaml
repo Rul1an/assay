@@ -1,0 +1,17 @@
+version: 1
+suite: "dsl_pass"
+model: "dummy"
+tests:
+  - id: "dsl_pass_1"
+    input:
+      prompt: "test"
+    expected:
+      type: sequence_valid
+      rules:
+        - type: require
+          tool: "init"
+        - type: before
+          first: "init"
+          then: "shutdown"
+        - type: blocklist
+          pattern: "format"

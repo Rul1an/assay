@@ -1,0 +1,80 @@
+[
+    {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    },
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": "1",
+        "params": {
+            "name": "valid_tool",
+            "arguments": {
+                "simple": "yes"
+            }
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Result 1"
+                }
+            ]
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": "2",
+        "params": {
+            "name": "orphan_request",
+            "arguments": {
+                "reason": "timeout"
+            }
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": "3",
+        "error": {
+            "code": -32603,
+            "message": "Orphaned response (no request)",
+            "data": "some_data"
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": "4",
+        "params": {
+            "name": "complex_tool",
+            "arguments": {
+                "active": true,
+                "user": {
+                    "name": "Alice",
+                    "roles": [
+                        "admin",
+                        "editor"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": "4",
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Done"
+                }
+            ]
+        }
+    }
+]

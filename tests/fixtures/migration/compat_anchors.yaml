@@ -1,0 +1,15 @@
+version: 1
+suite: anchors-compat
+model: fake-gpt
+# Anchor definition
+x-common-input: &common-input
+  prompt: test
+
+tests:
+  - id: anchor-test
+    input: *common-input
+    expected:
+      type: args_valid
+      schema:
+        type: object
+        properties: {}

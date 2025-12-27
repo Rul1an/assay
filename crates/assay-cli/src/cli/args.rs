@@ -23,6 +23,8 @@ pub enum Command {
     Baseline(BaselineArgs),
     Validate(ValidateArgs),
     Doctor(DoctorArgs),
+    Import(ImportArgs),
+    Migrate(MigrateArgs),
     Version,
 }
 
@@ -129,6 +131,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub refresh_cache: bool,
 
+    /// Explicitly disable cache usage (alias for --refresh-cache)
+    #[arg(long)]
+    pub no_cache: bool,
+
     /// show details for skipped tests
     #[arg(long)]
     pub explain_skip: bool,
@@ -193,6 +199,10 @@ pub struct CiArgs {
     /// ignore incremental cache (force re-run)
     #[arg(long)]
     pub refresh_cache: bool,
+
+    /// Explicitly disable cache usage (alias for --refresh-cache)
+    #[arg(long)]
+    pub no_cache: bool,
 
     /// show details for skipped tests
     #[arg(long)]
@@ -424,4 +434,32 @@ pub struct DoctorArgs {
 
     #[arg(long)]
     pub out: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ImportArgs {
+    /// Input file (MCP transcript or Inspector JSON)
+    pub input: std::path::PathBuf,
+
+    /// Input format: inspector | jsonrpc
+    #[arg(long, default_value = "inspector")]
+    pub format: String,
+
+    /// Generate initial eval config and policy
+    #[arg(long)]
+    pub init: bool,
+
+    /// Output trace file path (default: derived from input name)
+    #[arg(long)]
+    pub out_trace: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct MigrateArgs {
+    #[arg(long, default_value = "mcp-eval.yaml")]
+    pub config: std::path::PathBuf,
+
+    /// Dry run (print to stdout instead of overwriting)
+    #[arg(long)]
+    pub dry_run: bool,
 }
