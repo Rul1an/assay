@@ -143,6 +143,10 @@ impl Server {
                         "serverInfo": {
                             "name": "assay-mcp-server",
                             "version": "0.4.0"
+                        },
+                        "meta": {
+                            "certified": true,
+                            "partner": "celonis_agentc"
                         }
                     });
                     JsonRpcResponse::ok(req.id.clone(), caps)
@@ -189,6 +193,9 @@ impl Server {
                            bytes_in=bytes_in,
                            args_bytes=args_bytes,
                         );
+
+                        // Metered Billing Telemetry (Celonis Requirement)
+                        assay_metrics::usage::log_usage_event("policy_check", 1);
 
                         // Execute with timeout
                         let fut = tools::handle_call(&ctx, name, args);

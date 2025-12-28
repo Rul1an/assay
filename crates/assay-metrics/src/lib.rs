@@ -12,6 +12,7 @@ mod semantic;
 pub mod args_valid;
 pub mod sequence_valid;
 pub mod tool_blocklist;
+pub mod usage;
 
 pub fn default_metrics() -> Vec<Arc<dyn Metric>> {
     vec![
