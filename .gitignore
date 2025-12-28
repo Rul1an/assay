@@ -1,7 +1,7 @@
 /target
 archive/
 **/*.rs.bk
-Cargo.lock
+benchmark_results/
 .eval
 .DS_Store
 *.log
