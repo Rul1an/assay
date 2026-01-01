@@ -194,13 +194,25 @@ impl CoverageAnalyzer {
                 format!("max_calls_{}_{}", tool.to_lowercase(), max)
             }
             crate::model::SequenceRule::Before { first, then } => {
-                format!("before_{}_then_{}", first.to_lowercase(), then.to_lowercase())
+                format!(
+                    "before_{}_then_{}",
+                    first.to_lowercase(),
+                    then.to_lowercase()
+                )
             }
             crate::model::SequenceRule::After { trigger, then, .. } => {
-                format!("after_{}_then_{}", trigger.to_lowercase(), then.to_lowercase())
+                format!(
+                    "after_{}_then_{}",
+                    trigger.to_lowercase(),
+                    then.to_lowercase()
+                )
             }
             crate::model::SequenceRule::NeverAfter { trigger, forbidden } => {
-                format!("never_after_{}_forbidden_{}", trigger.to_lowercase(), forbidden.to_lowercase())
+                format!(
+                    "never_after_{}_forbidden_{}",
+                    trigger.to_lowercase(),
+                    forbidden.to_lowercase()
+                )
             }
             crate::model::SequenceRule::Sequence { tools, strict } => {
                 let mode = if *strict { "strict" } else { "seq" };
@@ -243,7 +255,8 @@ impl CoverageAnalyzer {
             .collect();
         let tools_seen_count = seen_policy_tools.len();
 
-        let unseen_tools: Vec<String> = self.policy_tools
+        let unseen_tools: Vec<String> = self
+            .policy_tools
             .iter()
             .filter(|t| !self.is_tool_seen(t, &tools_seen))
             .cloned()
@@ -259,7 +272,8 @@ impl CoverageAnalyzer {
         let total_rules = self.rule_ids.len();
         let triggered_count = rules_triggered.len();
 
-        let untriggered_rules: Vec<String> = self.rule_ids
+        let untriggered_rules: Vec<String> = self
+            .rule_ids
             .iter()
             .filter(|r| !rules_triggered.contains(*r))
             .cloned()
@@ -272,7 +286,8 @@ impl CoverageAnalyzer {
         };
 
         // Identify high-risk gaps
-        let high_risk_gaps: Vec<HighRiskGap> = self.high_risk_tools
+        let high_risk_gaps: Vec<HighRiskGap> = self
+            .high_risk_tools
             .iter()
             .filter(|t| !t.starts_with('*')) // Skip patterns
             .filter(|t| !self.is_tool_seen(t, &tools_seen))
@@ -443,9 +458,7 @@ mod tests {
                     "GetCustomerInfo".to_string(),
                     "CreateTicket".to_string(),
                 ]),
-                deny: Some(vec![
-                    "DeleteAccount".to_string(),
-                ]),
+                deny: Some(vec!["DeleteAccount".to_string()]),
                 require_args: None,
                 arg_constraints: None,
             },
@@ -469,21 +482,19 @@ mod tests {
         let policy = make_policy();
         let analyzer = CoverageAnalyzer::from_policy(&policy);
 
-        let traces = vec![
-            TraceRecord {
-                trace_id: "t1".to_string(),
-                tools_called: vec![
-                    "SearchKnowledgeBase".to_string(),
-                    "GetCustomerInfo".to_string(),
-                    "CreateTicket".to_string(),
-                    "DeleteAccount".to_string(), // High-risk, but tested
-                ],
-                rules_triggered: HashSet::from([
-                    "before_searchknowledgebase_then_createticket".to_string(),
-                    "max_calls_getcustomerinfo_3".to_string(),
-                ]),
-            },
-        ];
+        let traces = vec![TraceRecord {
+            trace_id: "t1".to_string(),
+            tools_called: vec![
+                "SearchKnowledgeBase".to_string(),
+                "GetCustomerInfo".to_string(),
+                "CreateTicket".to_string(),
+                "DeleteAccount".to_string(), // High-risk, but tested
+            ],
+            rules_triggered: HashSet::from([
+                "before_searchknowledgebase_then_createticket".to_string(),
+                "max_calls_getcustomerinfo_3".to_string(),
+            ]),
+        }];
 
         let report = analyzer.analyze(&traces, 80.0);
 
@@ -498,21 +509,23 @@ mod tests {
         let policy = make_policy();
         let analyzer = CoverageAnalyzer::from_policy(&policy);
 
-        let traces = vec![
-            TraceRecord {
-                trace_id: "t1".to_string(),
-                tools_called: vec![
-                    "SearchKnowledgeBase".to_string(),
-                ],
-                rules_triggered: HashSet::new(),
-            },
-        ];
+        let traces = vec![TraceRecord {
+            trace_id: "t1".to_string(),
+            tools_called: vec!["SearchKnowledgeBase".to_string()],
+            rules_triggered: HashSet::new(),
+        }];
 
         let report = analyzer.analyze(&traces, 80.0);
 
         assert_eq!(report.tool_coverage.tools_seen_in_traces, 1);
-        assert!(report.tool_coverage.unseen_tools.contains(&"CreateTicket".to_string()));
-        assert!(report.tool_coverage.unseen_tools.contains(&"GetCustomerInfo".to_string()));
+        assert!(report
+            .tool_coverage
+            .unseen_tools
+            .contains(&"CreateTicket".to_string()));
+        assert!(report
+            .tool_coverage
+            .unseen_tools
+            .contains(&"GetCustomerInfo".to_string()));
         assert!(!report.high_risk_gaps.is_empty()); // DeleteAccount not seen
         assert!(!report.meets_threshold);
     }
@@ -522,20 +535,21 @@ mod tests {
         let policy = make_policy();
         let analyzer = CoverageAnalyzer::from_policy(&policy);
 
-        let traces = vec![
-            TraceRecord {
-                trace_id: "t1".to_string(),
-                tools_called: vec![
-                    "SearchKnowledgeBase".to_string(),
-                    "UnknownTool".to_string(), // Not in policy
-                ],
-                rules_triggered: HashSet::new(),
-            },
-        ];
+        let traces = vec![TraceRecord {
+            trace_id: "t1".to_string(),
+            tools_called: vec![
+                "SearchKnowledgeBase".to_string(),
+                "UnknownTool".to_string(), // Not in policy
+            ],
+            rules_triggered: HashSet::new(),
+        }];
 
         let report = analyzer.analyze(&traces, 50.0);
 
-        assert!(report.tool_coverage.unexpected_tools.contains(&"UnknownTool".to_string()));
+        assert!(report
+            .tool_coverage
+            .unexpected_tools
+            .contains(&"UnknownTool".to_string()));
     }
 
     #[test]
@@ -554,13 +568,11 @@ mod tests {
                 coverage_pct: 50.0,
                 untriggered_rules: vec!["max_calls_api_3".to_string()],
             },
-            high_risk_gaps: vec![
-                HighRiskGap {
-                    tool: "DeleteAccount".to_string(),
-                    reason: "Never tested".to_string(),
-                    severity: "high".to_string(),
-                },
-            ],
+            high_risk_gaps: vec![HighRiskGap {
+                tool: "DeleteAccount".to_string(),
+                reason: "Never tested".to_string(),
+                severity: "high".to_string(),
+            }],
             overall_coverage_pct: 50.0,
             meets_threshold: false,
             threshold: 80.0,

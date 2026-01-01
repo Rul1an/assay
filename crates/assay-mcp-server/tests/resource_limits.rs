@@ -38,11 +38,15 @@ fn extract_inner(resp: &Value) -> Value {
     let result = resp.get("result").expect("Missing result");
     // New MCP compliance wrapping
     if let Some(content) = result.get("content") {
-         let text = content[0].get("text").expect("Missing text").as_str().expect("Not string");
-         serde_json::from_str(text).expect("Failed to parse inner JSON")
+        let text = content[0]
+            .get("text")
+            .expect("Missing text")
+            .as_str()
+            .expect("Not string");
+        serde_json::from_str(text).expect("Failed to parse inner JSON")
     } else {
-         // Fallback if unwrapped (e.g. error)
-         result.clone()
+        // Fallback if unwrapped (e.g. error)
+        result.clone()
     }
 }
 
@@ -70,7 +74,7 @@ fn test_transport_limit_exceeded() -> Result<()> {
 
     if let Some(_err) = resp.get("error") {
         // Standard JSONRPC error?
-         return Ok(());
+        return Ok(());
     }
 
     let inner = extract_inner(&resp);
@@ -80,11 +84,14 @@ fn test_transport_limit_exceeded() -> Result<()> {
     // Check if we got E_LIMIT_EXCEEDED in error field (if present)
     if let Some(err) = inner.get("error") {
         if let Some(code) = err.get("code") {
-             if code.as_str() == Some("E_LIMIT_EXCEEDED") {
-                 let allowed = inner.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
-                 assert!(!allowed);
-                 return Ok(());
-             }
+            if code.as_str() == Some("E_LIMIT_EXCEEDED") {
+                let allowed = inner
+                    .get("allowed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                assert!(!allowed);
+                return Ok(());
+            }
         }
     }
 
@@ -247,7 +254,7 @@ fn test_boundary_exact_limits() -> Result<()> {
 
     // Might fail policy read, but NOT limit
     if let Some(err) = inner_ok.get("error") {
-         assert_ne!(
+        assert_ne!(
             err.get("code").unwrap().as_str().unwrap(),
             "E_LIMIT_EXCEEDED",
             "10 bytes should pass limit check"

@@ -1,14 +1,19 @@
-use serde_json::json;
-use assay_mcp_server::tools::{ToolContext, check_sequence};
-use assay_mcp_server::config::ServerConfig;
 use assay_mcp_server::cache::PolicyCaches;
+use assay_mcp_server::config::ServerConfig;
+use assay_mcp_server::tools::{check_sequence, ToolContext};
+use serde_json::json;
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 async fn run_check(policy_yaml: &str, history: Vec<&str>, next: &str) -> serde_json::Value {
     let unique_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!("assay_evt_test_{}", unique_id));
+    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let temp_dir = std::env::temp_dir().join(format!("assay_evt_test_{}_{}", unique_id, count));
     tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 
     let policy_path = temp_dir.join("policy.yaml");
@@ -72,7 +77,7 @@ sequences:
     let res = run_check(policy, vec!["A", "B", "C"], "Target").await;
     assert_eq!(res["allowed"].as_bool().unwrap(), false);
     let msg = res["violations"][0]["message"].as_str().unwrap();
-    assert!(msg.contains("appeared at index 3 which is after the limit of 3"));
+    assert!(msg.contains("appeared at index 3 but must appear within first 3 calls"));
 }
 
 #[tokio::test]
@@ -90,7 +95,7 @@ sequences:
     // Trace: A, B, C, D (len 4). Target not in A,B,C,D.
     assert_eq!(res["allowed"].as_bool().unwrap(), false);
     let msg = res["violations"][0]["message"].as_str().unwrap();
-    assert!(msg.contains("required within 3 calls but not found yet"));
+    assert!(msg.contains("required within first 3 calls but not found"));
 }
 
 #[tokio::test]

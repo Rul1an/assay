@@ -37,16 +37,13 @@ fn test_golden_harness() {
 
     let stderr = String::from_utf8(output.stderr).expect("Stderr not UTF-8");
 
-    // Normalize: Remove variable timing info "(0.0s)" or similar if it changes
-    // The golden file has "(0.0s)". If it changes to "(0.1s)", test fails.
-    // For now, assume it's fast enough to be 0.0s or stable.
-    // We can also strip lines starting with "Finished" or "Running" if --quiet doesn't catch them.
-
     let golden_stderr = std::fs::read_to_string(golden_dir.join("stderr.golden"))
         .expect("Failed to read golden stderr");
 
-    // Simple normalization: Trim whitespace
-    let normalized_actual = stderr.trim();
+    // Normalize: Remove variable timing info "(0.0s)" or similar if it changes
+    // The golden file has "(0.0s)". If it changes to "(0.1s)", test fails.
+    let re = regex::Regex::new(r"\(\d+\.\d+s\)").unwrap();
+    let normalized_actual = re.replace_all(&stderr, "(0.0s)").trim().to_string();
     let normalized_expected = golden_stderr.trim();
 
     assert_eq!(

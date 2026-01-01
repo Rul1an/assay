@@ -125,8 +125,14 @@ impl TraceExplainer {
             }
         }
 
-        let allowed_steps = steps.iter().filter(|s| s.verdict == StepVerdict::Allowed).count();
-        let blocked_steps = steps.iter().filter(|s| s.verdict == StepVerdict::Blocked).count();
+        let allowed_steps = steps
+            .iter()
+            .filter(|s| s.verdict == StepVerdict::Allowed)
+            .count();
+        let blocked_steps = steps
+            .iter()
+            .filter(|s| s.verdict == StepVerdict::Blocked)
+            .count();
 
         TraceExplanation {
             policy_name: self.policy.name.clone(),
@@ -295,7 +301,10 @@ impl ExplainerState {
                 }
             }
 
-            crate::model::SequenceRule::Eventually { tool: ev_tool, within } => {
+            crate::model::SequenceRule::Eventually {
+                tool: ev_tool,
+                within,
+            } => {
                 let targets = self.resolve_alias(ev_tool);
                 let seen = self.tools_seen.iter().any(|t| targets.contains(t))
                     || targets.contains(&tool.to_string());
@@ -306,7 +315,13 @@ impl ExplainerState {
                 let explanation = if seen {
                     format!("'{}' already seen ✓", ev_tool)
                 } else if current_idx < *within {
-                    format!("'{}' required within {} calls (at {}/{})", ev_tool, within, idx + 1, within)
+                    format!(
+                        "'{}' required within {} calls (at {}/{})",
+                        ev_tool,
+                        within,
+                        idx + 1,
+                        within
+                    )
                 } else {
                     format!("'{}' not seen within first {} calls", ev_tool, within)
                 };
@@ -325,12 +340,16 @@ impl ExplainerState {
                 }
             }
 
-            crate::model::SequenceRule::MaxCalls { tool: max_tool, max } => {
+            crate::model::SequenceRule::MaxCalls {
+                tool: max_tool,
+                max,
+            } => {
                 let targets = self.resolve_alias(max_tool);
                 let current_count = if targets.contains(&tool.to_string()) {
                     self.call_counts.get(tool).copied().unwrap_or(0) + 1
                 } else {
-                    targets.iter()
+                    targets
+                        .iter()
                         .map(|t| self.call_counts.get(t).copied().unwrap_or(0))
                         .sum()
                 };
@@ -340,7 +359,10 @@ impl ExplainerState {
                 let explanation = if passed {
                     format!("'{}' call {}/{}", max_tool, current_count, max)
                 } else {
-                    format!("'{}' exceeded max calls ({} > {})", max_tool, current_count, max)
+                    format!(
+                        "'{}' exceeded max calls ({} > {})",
+                        max_tool, current_count, max
+                    )
                 };
 
                 RuleEvaluation {
@@ -372,7 +394,11 @@ impl ExplainerState {
                 };
 
                 RuleEvaluation {
-                    rule_id: format!("before_{}_then_{}", first.to_lowercase(), then.to_lowercase()),
+                    rule_id: format!(
+                        "before_{}_then_{}",
+                        first.to_lowercase(),
+                        then.to_lowercase()
+                    ),
                     rule_type: "before".to_string(),
                     passed,
                     explanation,
@@ -385,7 +411,11 @@ impl ExplainerState {
                 }
             }
 
-            crate::model::SequenceRule::After { trigger, then, within } => {
+            crate::model::SequenceRule::After {
+                trigger,
+                then,
+                within,
+            } => {
                 let is_trigger = self.matches(tool, trigger);
                 let is_then = self.matches(tool, then);
 
@@ -413,17 +443,25 @@ impl ExplainerState {
                     } else {
                         explanation = format!(
                             "Pending: '{}' needed within {} more calls",
-                            then, deadline - idx
+                            then,
+                            deadline - idx
                         );
                     }
                 } else if is_trigger {
-                    explanation = format!("'{}' triggered, '{}' required within {}", trigger, then, within);
+                    explanation = format!(
+                        "'{}' triggered, '{}' required within {}",
+                        trigger, then, within
+                    );
                 } else {
                     explanation = format!("After rule: waiting for '{}'", trigger);
                 }
 
                 RuleEvaluation {
-                    rule_id: format!("after_{}_then_{}", trigger.to_lowercase(), then.to_lowercase()),
+                    rule_id: format!(
+                        "after_{}_then_{}",
+                        trigger.to_lowercase(),
+                        then.to_lowercase()
+                    ),
                     rule_type: "after".to_string(),
                     passed,
                     explanation,
@@ -451,14 +489,21 @@ impl ExplainerState {
                         forbidden, trigger, trigger_idx
                     )
                 } else if triggered {
-                    format!("'{}' forbidden (trigger at {})", forbidden,
-                        self.never_after_triggered.get(&rule_idx).unwrap())
+                    format!(
+                        "'{}' forbidden (trigger at {})",
+                        forbidden,
+                        self.never_after_triggered.get(&rule_idx).unwrap()
+                    )
                 } else {
                     format!("Waiting for trigger '{}'", trigger)
                 };
 
                 RuleEvaluation {
-                    rule_id: format!("never_after_{}_forbidden_{}", trigger.to_lowercase(), forbidden.to_lowercase()),
+                    rule_id: format!(
+                        "never_after_{}_forbidden_{}",
+                        trigger.to_lowercase(),
+                        forbidden.to_lowercase()
+                    ),
                     rule_type: "never_after".to_string(),
                     passed,
                     explanation,
@@ -489,13 +534,20 @@ impl ExplainerState {
                                 expected, tool
                             );
                         } else if is_expected {
-                            explanation = format!("Sequence step {}/{}: '{}' ✓", seq_idx + 1, tools.len(), tool);
+                            explanation = format!(
+                                "Sequence step {}/{}: '{}' ✓",
+                                seq_idx + 1,
+                                tools.len(),
+                                tool
+                            );
                         } else {
                             explanation = format!("Waiting for sequence start: '{}'", tools[0]);
                         }
                     } else {
                         // Non-strict: check for out-of-order
-                        let future_match = tools.iter().skip(seq_idx + 1)
+                        let future_match = tools
+                            .iter()
+                            .skip(seq_idx + 1)
                             .position(|t| self.matches(tool, t));
 
                         if future_match.is_some() {
@@ -505,9 +557,19 @@ impl ExplainerState {
                                 tool, expected
                             );
                         } else if is_expected {
-                            explanation = format!("Sequence step {}/{}: '{}' ✓", seq_idx + 1, tools.len(), tool);
+                            explanation = format!(
+                                "Sequence step {}/{}: '{}' ✓",
+                                seq_idx + 1,
+                                tools.len(),
+                                tool
+                            );
                         } else {
-                            explanation = format!("Sequence: waiting for '{}' ({}/{})", expected, seq_idx, tools.len());
+                            explanation = format!(
+                                "Sequence: waiting for '{}' ({}/{})",
+                                expected,
+                                seq_idx,
+                                tools.len()
+                            );
                         }
                     }
                 } else {
@@ -558,16 +620,21 @@ impl ExplainerState {
         for (rule_idx, rule) in policy.sequences.iter().enumerate() {
             match rule {
                 crate::model::SequenceRule::NeverAfter { trigger, .. } => {
-                    if self.matches(tool, trigger) && !self.never_after_triggered.contains_key(&rule_idx) {
+                    if self.matches(tool, trigger)
+                        && !self.never_after_triggered.contains_key(&rule_idx)
+                    {
                         self.never_after_triggered.insert(rule_idx, idx);
                     }
                 }
-                crate::model::SequenceRule::After { trigger, within, .. } => {
+                crate::model::SequenceRule::After {
+                    trigger, within, ..
+                } => {
                     if self.matches(tool, trigger) {
                         // Start/restart the deadline timer on trigger
                         // Note: If triggered multiple times, this implementation updates to the LATEST trigger.
                         // This matches "within N calls after [any] trigger".
-                        self.pending_after.insert(rule_idx, (idx, idx + *within as usize));
+                        self.pending_after
+                            .insert(rule_idx, (idx, idx + *within as usize));
                     }
                 }
                 crate::model::SequenceRule::Sequence { tools, .. } => {
@@ -603,19 +670,25 @@ impl ExplainerState {
                         });
                     }
                 }
-                crate::model::SequenceRule::After { trigger, then, within } => {
+                crate::model::SequenceRule::After {
+                    trigger,
+                    then,
+                    within,
+                } => {
                     // If we have a pending deadline that wasn't satisfied
-                     if let Some((trigger_idx, deadline)) = self.pending_after.get(&rule_idx) {
+                    if let Some((trigger_idx, deadline)) = self.pending_after.get(&rule_idx) {
                         // Check if we saw 'then' AFTER the trigger
                         // Note: self.tools_seen contains all calls.
                         // We need to see if 'then' appeared between trigger_idx+1 and end (or deadline).
-                         let then_targets = self.resolve_alias(then);
-                         let seen_after = self.tools_seen.iter()
-                             .skip(*trigger_idx + 1)
-                             .any(|t| then_targets.contains(t));
+                        let then_targets = self.resolve_alias(then);
+                        let seen_after = self
+                            .tools_seen
+                            .iter()
+                            .skip(*trigger_idx + 1)
+                            .any(|t| then_targets.contains(t));
 
-                         if !seen_after {
-                              violations.push(RuleEvaluation {
+                        if !seen_after {
+                            violations.push(RuleEvaluation {
                                  rule_id: format!("after_{}_then_{}", trigger.to_lowercase(), then.to_lowercase()),
                                  rule_type: "after".to_string(),
                                  passed: false,
@@ -626,8 +699,8 @@ impl ExplainerState {
                                      "trace_len": self.tools_seen.len()
                                  })),
                              });
-                         }
-                     }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -654,9 +727,14 @@ impl TraceExplanation {
     pub fn to_terminal(&self) -> String {
         let mut lines = Vec::new();
 
-        lines.push(format!("Policy: {} (v{})", self.policy_name, self.policy_version));
-        lines.push(format!("Trace: {} steps ({} allowed, {} blocked)\n",
-            self.total_steps, self.allowed_steps, self.blocked_steps));
+        lines.push(format!(
+            "Policy: {} (v{})",
+            self.policy_name, self.policy_version
+        ));
+        lines.push(format!(
+            "Trace: {} steps ({} allowed, {} blocked)\n",
+            self.total_steps, self.allowed_steps, self.blocked_steps
+        ));
 
         lines.push("Timeline:".to_string());
 
@@ -667,7 +745,9 @@ impl TraceExplanation {
                 StepVerdict::Warning => "⚠️",
             };
 
-            let args_str = step.args.as_ref()
+            let args_str = step
+                .args
+                .as_ref()
                 .map(|a| format!("({})", summarize_args(a)))
                 .unwrap_or_default();
 
@@ -677,12 +757,9 @@ impl TraceExplanation {
                 StepVerdict::Warning => "warning".to_string(),
             };
 
-            lines.push(format!("  [{}] {}{:<40} {} {}",
-                step.index,
-                step.tool,
-                args_str,
-                icon,
-                status
+            lines.push(format!(
+                "  [{}] {}{:<40} {} {}",
+                step.index, step.tool, args_str, icon, status
             ));
 
             // Show blocking rule details
@@ -711,13 +788,23 @@ impl TraceExplanation {
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
 
-        let status = if self.blocked_steps == 0 { "✅ PASS" } else { "❌ BLOCKED" };
+        let status = if self.blocked_steps == 0 {
+            "✅ PASS"
+        } else {
+            "❌ BLOCKED"
+        };
 
         md.push_str(&format!("## Trace Explanation {}\n\n", status));
-        md.push_str(&format!("**Policy:** {} (v{})\n\n", self.policy_name, self.policy_version));
+        md.push_str(&format!(
+            "**Policy:** {} (v{})\n\n",
+            self.policy_name, self.policy_version
+        ));
         md.push_str(&format!("| Steps | Allowed | Blocked |\n"));
         md.push_str(&format!("|-------|---------|----------|\n"));
-        md.push_str(&format!("| {} | {} | {} |\n\n", self.total_steps, self.allowed_steps, self.blocked_steps));
+        md.push_str(&format!(
+            "| {} | {} | {} |\n\n",
+            self.total_steps, self.allowed_steps, self.blocked_steps
+        ));
 
         md.push_str("### Timeline\n\n");
         md.push_str("| # | Tool | Verdict | Details |\n");
@@ -731,7 +818,8 @@ impl TraceExplanation {
             };
 
             let details = if step.verdict == StepVerdict::Blocked {
-                step.rules_evaluated.iter()
+                step.rules_evaluated
+                    .iter()
                     .filter(|e| !e.passed)
                     .map(|e| e.explanation.clone())
                     .collect::<Vec<_>>()
@@ -740,8 +828,10 @@ impl TraceExplanation {
                 String::new()
             };
 
-            md.push_str(&format!("| {} | `{}` | {} | {} |\n",
-                step.index, step.tool, icon, details));
+            md.push_str(&format!(
+                "| {} | `{}` | {} | {} |\n",
+                step.index, step.tool, icon, details
+            ));
         }
 
         if !self.blocking_rules.is_empty() {
@@ -768,15 +858,25 @@ impl TraceExplanation {
         html.push_str(".blocked { background: #f8d7da; }\n");
         html.push_str(".warning { background: #fff3cd; }\n");
         html.push_str(".rule-detail { margin-left: 2rem; color: #666; font-size: 0.9em; }\n");
-        html.push_str("code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }\n");
+        html.push_str(
+            "code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }\n",
+        );
         html.push_str("</style>\n</head><body>\n");
 
-        let status = if self.blocked_steps == 0 { "✅ PASS" } else { "❌ BLOCKED" };
+        let status = if self.blocked_steps == 0 {
+            "✅ PASS"
+        } else {
+            "❌ BLOCKED"
+        };
         html.push_str(&format!("<h1>Trace Explanation {}</h1>\n", status));
-        html.push_str(&format!("<p><strong>Policy:</strong> {} (v{})</p>\n",
-            self.policy_name, self.policy_version));
-        html.push_str(&format!("<p><strong>Summary:</strong> {} steps ({} allowed, {} blocked)</p>\n",
-            self.total_steps, self.allowed_steps, self.blocked_steps));
+        html.push_str(&format!(
+            "<p><strong>Policy:</strong> {} (v{})</p>\n",
+            self.policy_name, self.policy_version
+        ));
+        html.push_str(&format!(
+            "<p><strong>Summary:</strong> {} steps ({} allowed, {} blocked)</p>\n",
+            self.total_steps, self.allowed_steps, self.blocked_steps
+        ));
 
         html.push_str("<h2>Timeline</h2>\n");
 
@@ -794,8 +894,10 @@ impl TraceExplanation {
             };
 
             html.push_str(&format!("<div class=\"step {}\">\n", class));
-            html.push_str(&format!("  <strong>[{}]</strong> <code>{}</code> {}\n",
-                step.index, step.tool, icon));
+            html.push_str(&format!(
+                "  <strong>[{}]</strong> <code>{}</code> {}\n",
+                step.index, step.tool, icon
+            ));
 
             if step.verdict == StepVerdict::Blocked {
                 for eval in &step.rules_evaluated {
@@ -818,26 +920,25 @@ impl TraceExplanation {
 
 fn summarize_args(args: &serde_json::Value) -> String {
     match args {
-        serde_json::Value::Object(map) => {
-            map.iter()
-                .take(2)
-                .map(|(k, v)| {
-                    let v_str = match v {
-                        serde_json::Value::String(s) => {
-                            if s.len() > 20 {
-                                format!("\"{}...\"", &s[..20])
-                            } else {
-                                format!("\"{}\"", s)
-                            }
+        serde_json::Value::Object(map) => map
+            .iter()
+            .take(2)
+            .map(|(k, v)| {
+                let v_str = match v {
+                    serde_json::Value::String(s) => {
+                        if s.len() > 20 {
+                            format!("\"{}...\"", &s[..20])
+                        } else {
+                            format!("\"{}\"", s)
                         }
-                        _ => v.to_string()
-                    };
-                    format!("{}: {}", k, v_str)
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-        _ => args.to_string()
+                    }
+                    _ => v.to_string(),
+                };
+                format!("{}: {}", k, v_str)
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => args.to_string(),
     }
 }
 
@@ -861,17 +962,21 @@ mod tests {
 
     #[test]
     fn test_explain_simple_trace() {
-        let policy = make_policy(vec![
-            SequenceRule::Before {
-                first: "Search".to_string(),
-                then: "Create".to_string(),
-            },
-        ]);
+        let policy = make_policy(vec![SequenceRule::Before {
+            first: "Search".to_string(),
+            then: "Create".to_string(),
+        }]);
 
         let explainer = TraceExplainer::new(policy);
         let trace = vec![
-            ToolCall { tool: "Search".to_string(), args: None },
-            ToolCall { tool: "Create".to_string(), args: None },
+            ToolCall {
+                tool: "Search".to_string(),
+                args: None,
+            },
+            ToolCall {
+                tool: "Create".to_string(),
+                args: None,
+            },
         ];
 
         let explanation = explainer.explain(&trace);
@@ -883,16 +988,17 @@ mod tests {
 
     #[test]
     fn test_explain_blocked_trace() {
-        let policy = make_policy(vec![
-            SequenceRule::Before {
-                first: "Search".to_string(),
-                then: "Create".to_string(),
-            },
-        ]);
+        let policy = make_policy(vec![SequenceRule::Before {
+            first: "Search".to_string(),
+            then: "Create".to_string(),
+        }]);
 
         let explainer = TraceExplainer::new(policy);
         let trace = vec![
-            ToolCall { tool: "Create".to_string(), args: None }, // Blocked - no Search first
+            ToolCall {
+                tool: "Create".to_string(),
+                args: None,
+            }, // Blocked - no Search first
         ];
 
         let explanation = explainer.explain(&trace);
@@ -904,18 +1010,25 @@ mod tests {
 
     #[test]
     fn test_explain_max_calls() {
-        let policy = make_policy(vec![
-            SequenceRule::MaxCalls {
-                tool: "API".to_string(),
-                max: 2,
-            },
-        ]);
+        let policy = make_policy(vec![SequenceRule::MaxCalls {
+            tool: "API".to_string(),
+            max: 2,
+        }]);
 
         let explainer = TraceExplainer::new(policy);
         let trace = vec![
-            ToolCall { tool: "API".to_string(), args: None },
-            ToolCall { tool: "API".to_string(), args: None },
-            ToolCall { tool: "API".to_string(), args: None }, // Blocked
+            ToolCall {
+                tool: "API".to_string(),
+                args: None,
+            },
+            ToolCall {
+                tool: "API".to_string(),
+                args: None,
+            },
+            ToolCall {
+                tool: "API".to_string(),
+                args: None,
+            }, // Blocked
         ];
 
         let explanation = explainer.explain(&trace);
@@ -929,9 +1042,10 @@ mod tests {
     fn test_terminal_output() {
         let policy = make_policy(vec![]);
         let explainer = TraceExplainer::new(policy);
-        let trace = vec![
-            ToolCall { tool: "Search".to_string(), args: None },
-        ];
+        let trace = vec![ToolCall {
+            tool: "Search".to_string(),
+            args: None,
+        }];
 
         let explanation = explainer.explain(&trace);
         let output = explanation.to_terminal();

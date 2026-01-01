@@ -1,7 +1,7 @@
-use serde_json::json;
-use assay_mcp_server::tools::{ToolContext, check_sequence};
-use assay_mcp_server::config::ServerConfig;
 use assay_mcp_server::cache::PolicyCaches;
+use assay_mcp_server::config::ServerConfig;
+use assay_mcp_server::tools::{check_sequence, ToolContext};
+use serde_json::json;
 
 #[tokio::test]
 async fn test_alias_resolution_require() {
@@ -22,7 +22,9 @@ sequences:
   - type: require
     tool: Search
 "#;
-    tokio::fs::write(&policy_path, policy_content).await.unwrap();
+    tokio::fs::write(&policy_path, policy_content)
+        .await
+        .unwrap();
 
     let cfg = ServerConfig::default();
     let caches = PolicyCaches::new(100);
@@ -42,7 +44,10 @@ sequences:
         "policy": "alias_policy.yaml"
     });
     let res1 = check_sequence::check_sequence(&ctx, &args1).await.unwrap();
-    assert_eq!(res1["allowed"], true, "SearchWeb should satisfy Search requirement");
+    assert_eq!(
+        res1["allowed"], true,
+        "SearchWeb should satisfy Search requirement"
+    );
 
     // Case 2: SearchKB (Alias Member 2) -> Allowed
     let args2 = json!({
@@ -51,7 +56,10 @@ sequences:
         "policy": "alias_policy.yaml"
     });
     let res2 = check_sequence::check_sequence(&ctx, &args2).await.unwrap();
-    assert_eq!(res2["allowed"], true, "SearchKB should satisfy Search requirement");
+    assert_eq!(
+        res2["allowed"], true,
+        "SearchKB should satisfy Search requirement"
+    );
 
     // Case 3: Other -> Blocked
     let args3 = json!({
@@ -60,9 +68,14 @@ sequences:
         "policy": "alias_policy.yaml"
     });
     let res3 = check_sequence::check_sequence(&ctx, &args3).await.unwrap();
-    assert_eq!(res3["allowed"], false, "Missing required tool (alias group) should fail");
+    assert_eq!(
+        res3["allowed"], false,
+        "Missing required tool (alias group) should fail"
+    );
     let msg = res3["violations"][0]["message"].as_str().unwrap();
-    assert!(msg.contains("required tool 'Search' (aliases: [\"SearchWeb\", \"SearchKB\"]) not found"));
+    assert!(
+        msg.contains("required tool 'Search' (aliases: [\"SearchWeb\", \"SearchKB\"]) not found")
+    );
 
     // Cleanup
     let _ = tokio::fs::remove_dir_all(temp_dir).await;
@@ -89,7 +102,9 @@ sequences:
     first: Prepare
     then: Action
 "#;
-    tokio::fs::write(&policy_path, policy_content).await.unwrap();
+    tokio::fs::write(&policy_path, policy_content)
+        .await
+        .unwrap();
 
     let cfg = ServerConfig::default();
     let caches = PolicyCaches::new(100);

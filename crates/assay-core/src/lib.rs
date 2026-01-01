@@ -3,12 +3,12 @@ pub mod baseline;
 pub mod cache;
 pub mod calibration;
 pub mod config;
-pub mod embeddings;
 pub mod coverage;
-#[cfg(feature = "experimental")]
-pub mod experimental;
+pub mod embeddings;
 pub mod engine;
 pub mod errors;
+#[cfg(feature = "experimental")]
+pub mod experimental;
 pub mod fingerprint;
 pub mod judge;
 pub mod metrics_api;

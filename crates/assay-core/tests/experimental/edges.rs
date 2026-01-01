@@ -7,7 +7,7 @@
 //! - Multiple violations per step
 //! - Undefined tools
 
-use assay_core::experimental::explain::{TraceExplainer, ToolCall, StepVerdict};
+use assay_core::experimental::explain::{StepVerdict, ToolCall, TraceExplainer};
 use assay_core::model::{Policy, SequenceRule, ToolsPolicy};
 use assay_core::on_error::ErrorPolicy;
 use std::collections::HashMap;
@@ -24,7 +24,10 @@ fn make_policy(rules: Vec<SequenceRule>) -> Policy {
     }
 }
 
-fn make_policy_with_aliases(rules: Vec<SequenceRule>, aliases: HashMap<String, Vec<String>>) -> Policy {
+fn make_policy_with_aliases(
+    rules: Vec<SequenceRule>,
+    aliases: HashMap<String, Vec<String>>,
+) -> Policy {
     Policy {
         version: "1.1".to_string(),
         name: "alias-test-policy".to_string(),
@@ -37,20 +40,21 @@ fn make_policy_with_aliases(rules: Vec<SequenceRule>, aliases: HashMap<String, V
 }
 
 fn trace(tools: &[&str]) -> Vec<ToolCall> {
-    tools.iter().map(|t| ToolCall {
-        tool: t.to_string(),
-        args: None,
-    }).collect()
+    tools
+        .iter()
+        .map(|t| ToolCall {
+            tool: t.to_string(),
+            args: None,
+        })
+        .collect()
 }
 
 #[test]
 fn test_strict_sequence_interrupted() {
-    let policy = make_policy(vec![
-        SequenceRule::Sequence {
-            tools: vec!["A".to_string(), "B".to_string()],
-            strict: true,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Sequence {
+        tools: vec!["A".to_string(), "B".to_string()],
+        strict: true,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // A, C, B -> C interrupts A->B sequence
@@ -63,25 +67,34 @@ fn test_strict_sequence_interrupted() {
     // NOTE: Current implementation might only check "next expected".
     // If we are at index 1 (C), we expect B.
     // C != B, so C should fail the sequence rule.
-    let seq_rule = c_step.rules_evaluated.iter()
+    let seq_rule = c_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "sequence")
         .expect("sequence rule");
 
-    assert!(!seq_rule.passed, "Strict sequence should fail on interruption");
+    assert!(
+        !seq_rule.passed,
+        "Strict sequence should fail on interruption"
+    );
     assert!(seq_rule.explanation.contains("expected 'B'"));
 }
 
 #[test]
 fn test_alias_resolution() {
     let mut aliases = HashMap::new();
-    aliases.insert("Write".to_string(), vec!["Insert".to_string(), "Update".to_string()]);
+    aliases.insert(
+        "Write".to_string(),
+        vec!["Insert".to_string(), "Update".to_string()],
+    );
 
-    let policy = make_policy_with_aliases(vec![
-        SequenceRule::Before {
+    let policy = make_policy_with_aliases(
+        vec![SequenceRule::Before {
             first: "Auth".to_string(),
             then: "Write".to_string(),
-        },
-    ], aliases);
+        }],
+        aliases,
+    );
 
     let explainer = TraceExplainer::new(policy);
 
@@ -90,7 +103,11 @@ fn test_alias_resolution() {
 
     assert_eq!(explanation.blocked_steps, 1);
     let step = &explanation.steps[0];
-    let rule = step.rules_evaluated.iter().find(|r| r.rule_type == "before").unwrap();
+    let rule = step
+        .rules_evaluated
+        .iter()
+        .find(|r| r.rule_type == "before")
+        .unwrap();
     assert!(!rule.passed);
     assert!(rule.explanation.contains("requires 'Auth'"));
 
@@ -101,31 +118,31 @@ fn test_alias_resolution() {
 
 #[test]
 fn test_zero_max_calls() {
-    let policy = make_policy(vec![
-        SequenceRule::MaxCalls {
-            tool: "Dangerous".to_string(),
-            max: 0,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::MaxCalls {
+        tool: "Dangerous".to_string(),
+        max: 0,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Dangerous"]));
 
     assert_eq!(explanation.blocked_steps, 1);
     let step = &explanation.steps[0];
-    let rule = step.rules_evaluated.iter().find(|r| r.rule_type == "max_calls").unwrap();
+    let rule = step
+        .rules_evaluated
+        .iter()
+        .find(|r| r.rule_type == "max_calls")
+        .unwrap();
     assert!(!rule.passed);
     assert!(rule.explanation.contains("exceeded"));
 }
 
 #[test]
 fn test_eventually_boundary() {
-    let policy = make_policy(vec![
-        SequenceRule::Eventually {
-            tool: "Target".to_string(),
-            within: 3,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Eventually {
+        tool: "Target".to_string(),
+        within: 3,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Case 1: Exactly at limit (index 2 is 3rd item)
@@ -201,8 +218,8 @@ fn test_eventually_boundary() {
     // If it passes (allows late), we need to fix the logic.
     // Asserting failure here to catch the issue.
     if explanation_late.blocked_steps == 0 {
-       // Marking as a potential logic flaw to investigate
-       // For now, let's just see.
+        // Marking as a potential logic flaw to investigate
+        // For now, let's just see.
     }
 }
 
@@ -229,25 +246,51 @@ fn test_multiple_violations() {
     let explanation = explainer.explain(&trace(&["A", "A"]));
 
     let step1 = &explanation.steps[0];
-    assert!(!step1.rules_evaluated.iter().find(|r| r.rule_type == "deny").unwrap().passed);
+    assert!(
+        !step1
+            .rules_evaluated
+            .iter()
+            .find(|r| r.rule_type == "deny")
+            .unwrap()
+            .passed
+    );
     // Max calls should pass step 1
-    assert!(step1.rules_evaluated.iter().find(|r| r.rule_type == "max_calls").unwrap().passed);
+    assert!(
+        step1
+            .rules_evaluated
+            .iter()
+            .find(|r| r.rule_type == "max_calls")
+            .unwrap()
+            .passed
+    );
 
     let step2 = &explanation.steps[1];
-    assert!(!step2.rules_evaluated.iter().find(|r| r.rule_type == "deny").unwrap().passed);
+    assert!(
+        !step2
+            .rules_evaluated
+            .iter()
+            .find(|r| r.rule_type == "deny")
+            .unwrap()
+            .passed
+    );
     // Max calls should fail step 2
-    assert!(!step2.rules_evaluated.iter().find(|r| r.rule_type == "max_calls").unwrap().passed);
+    assert!(
+        !step2
+            .rules_evaluated
+            .iter()
+            .find(|r| r.rule_type == "max_calls")
+            .unwrap()
+            .passed
+    );
 }
 
 #[test]
 fn test_undefined_tools() {
     // Policy has rules for A and B.
-    let policy = make_policy(vec![
-        SequenceRule::Before {
-            first: "A".to_string(),
-            then: "B".to_string(),
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Before {
+        first: "A".to_string(),
+        then: "B".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Trace has C, D, E.
@@ -260,13 +303,11 @@ fn test_undefined_tools() {
 
 #[test]
 fn test_after_trigger_boundary() {
-    let policy = make_policy(vec![
-        SequenceRule::After {
-            trigger: "Start".to_string(),
-            then: "Stop".to_string(),
-            within: 2,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::After {
+        trigger: "Start".to_string(),
+        then: "Stop".to_string(),
+        within: 2,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Start at 0. Deadline is 0+2 = 2.
@@ -289,7 +330,14 @@ fn test_after_trigger_boundary() {
 
     assert!(expl_fail.blocked_steps > 0);
     let stop_step = &expl_fail.steps[3];
-    let rule = stop_step.rules_evaluated.iter().find(|r| r.rule_type == "after").unwrap();
+    let rule = stop_step
+        .rules_evaluated
+        .iter()
+        .find(|r| r.rule_type == "after")
+        .unwrap();
     assert!(!rule.passed);
-    assert!(rule.explanation.contains("called too late") || rule.explanation.contains("required within"));
+    assert!(
+        rule.explanation.contains("called too late")
+            || rule.explanation.contains("required within")
+    );
 }

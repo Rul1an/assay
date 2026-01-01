@@ -394,23 +394,52 @@ pub struct ToolsPolicy {
     #[serde(default)]
     pub require_args: Option<std::collections::HashMap<String, Vec<String>>>,
     #[serde(default)]
-    pub arg_constraints: Option<std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>>,
+    pub arg_constraints: Option<
+        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+    >,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SequenceRule {
-    Require { tool: String },
-    Eventually { tool: String, within: u32 },
-    MaxCalls { tool: String, max: u32 },
-    Before { first: String, then: String },
-    After { trigger: String, then: String, #[serde(default = "default_one")] within: u32 },
-    NeverAfter { trigger: String, forbidden: String },
-    Sequence { tools: Vec<String>, #[serde(default)] strict: bool },
-    Blocklist { pattern: String },
+    Require {
+        tool: String,
+    },
+    Eventually {
+        tool: String,
+        within: u32,
+    },
+    MaxCalls {
+        tool: String,
+        max: u32,
+    },
+    Before {
+        first: String,
+        then: String,
+    },
+    After {
+        trigger: String,
+        then: String,
+        #[serde(default = "default_one")]
+        within: u32,
+    },
+    NeverAfter {
+        trigger: String,
+        forbidden: String,
+    },
+    Sequence {
+        tools: Vec<String>,
+        #[serde(default)]
+        strict: bool,
+    },
+    Blocklist {
+        pattern: String,
+    },
 }
 
-fn default_one() -> u32 { 1 }
+fn default_one() -> u32 {
+    1
+}
 
 // Helper for alias resolution
 impl Policy {
@@ -418,14 +447,14 @@ impl Policy {
         if let Some(members) = self.aliases.get(tool_name) {
             members.clone()
         } else {
-             // If not an alias, return strict singleton if no alias found?
-             // RFC says: "Matches SearchKnowledgeBase OR SearchWeb".
-             // "Alias can be used anywhere a tool name is expected".
-             // If we rely on resolve_alias to return all matches for a "rule target",
-             // AND we want to support literals:
-             // If 'Search' is in aliases, satisfy if match any alias member.
-             // If 'Search' is NOT in aliases, it's a literal.
-             vec![tool_name.to_string()]
+            // If not an alias, return strict singleton if no alias found?
+            // RFC says: "Matches SearchKnowledgeBase OR SearchWeb".
+            // "Alias can be used anywhere a tool name is expected".
+            // If we rely on resolve_alias to return all matches for a "rule target",
+            // AND we want to support literals:
+            // If 'Search' is in aliases, satisfy if match any alias member.
+            // If 'Search' is NOT in aliases, it's a literal.
+            vec![tool_name.to_string()]
         }
     }
 }

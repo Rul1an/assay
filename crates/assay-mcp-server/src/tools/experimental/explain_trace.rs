@@ -3,8 +3,8 @@
 //! Provides step-by-step explanation of trace evaluation against a policy.
 
 use crate::tools::{ToolContext, ToolError};
-use assay_core::experimental::explain;
 use anyhow::{Context, Result};
+use assay_core::experimental::explain;
 use serde_json::Value;
 
 #[derive(Debug, serde::Deserialize)]
@@ -38,8 +38,8 @@ fn default_format() -> String {
 }
 
 pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
-    let input: ExplainInput = serde_json::from_value(args.clone())
-        .context("Invalid explain input")?;
+    let input: ExplainInput =
+        serde_json::from_value(args.clone()).context("Invalid explain input")?;
 
     // Load policy
     let policy_path = match ctx.resolve_policy_path(&input.policy).await {
@@ -53,7 +53,8 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
             return ToolError::new(
                 "E_POLICY_NOT_FOUND",
                 &format!("Policy not found: {}", input.policy),
-            ).result();
+            )
+            .result();
         }
         Err(e) => return ToolError::new("E_POLICY_READ", &e.to_string()).result(),
     };
@@ -61,15 +62,14 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
     let policy: assay_core::model::Policy = match serde_yaml::from_slice(&policy_bytes) {
         Ok(p) => p,
         Err(e) => {
-            return ToolError::new(
-                "E_POLICY_PARSE",
-                &format!("Failed to parse policy: {}", e),
-            ).result();
+            return ToolError::new("E_POLICY_PARSE", &format!("Failed to parse policy: {}", e))
+                .result();
         }
     };
 
     // Convert input to ToolCall
-    let trace: Vec<explain::ToolCall> = input.trace
+    let trace: Vec<explain::ToolCall> = input
+        .trace
         .into_iter()
         .map(|t| explain::ToolCall {
             tool: t.tool,
@@ -83,30 +83,24 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
 
     // Format output
     match input.format.as_str() {
-        "markdown" | "md" => {
-            Ok(serde_json::json!({
-                "format": "markdown",
-                "content": explanation.to_markdown(),
-                "blocked_steps": explanation.blocked_steps,
-                "total_steps": explanation.total_steps
-            }))
-        }
-        "html" => {
-            Ok(serde_json::json!({
-                "format": "html",
-                "content": explanation.to_html(),
-                "blocked_steps": explanation.blocked_steps,
-                "total_steps": explanation.total_steps
-            }))
-        }
-        "terminal" | "text" => {
-            Ok(serde_json::json!({
-                "format": "terminal",
-                "content": explanation.to_terminal(),
-                "blocked_steps": explanation.blocked_steps,
-                "total_steps": explanation.total_steps
-            }))
-        }
+        "markdown" | "md" => Ok(serde_json::json!({
+            "format": "markdown",
+            "content": explanation.to_markdown(),
+            "blocked_steps": explanation.blocked_steps,
+            "total_steps": explanation.total_steps
+        })),
+        "html" => Ok(serde_json::json!({
+            "format": "html",
+            "content": explanation.to_html(),
+            "blocked_steps": explanation.blocked_steps,
+            "total_steps": explanation.total_steps
+        })),
+        "terminal" | "text" => Ok(serde_json::json!({
+            "format": "terminal",
+            "content": explanation.to_terminal(),
+            "blocked_steps": explanation.blocked_steps,
+            "total_steps": explanation.total_steps
+        })),
         _ => {
             // Default: full JSON
             Ok(serde_json::to_value(&explanation)?)
@@ -117,9 +111,9 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::ToolContext;
-    use crate::config::ServerConfig;
     use crate::cache::PolicyCaches;
+    use crate::config::ServerConfig;
+    use crate::tools::ToolContext;
     use serde_json::json;
 
     async fn setup_test(policy_yaml: &str) -> (ToolContext, std::path::PathBuf) {
@@ -223,7 +217,10 @@ sequences: []
         let result = explain_trace(&ctx, &args).await.unwrap();
 
         assert_eq!(result["format"], "markdown");
-        assert!(result["content"].as_str().unwrap().contains("## Trace Explanation"));
+        assert!(result["content"]
+            .as_str()
+            .unwrap()
+            .contains("## Trace Explanation"));
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
     }

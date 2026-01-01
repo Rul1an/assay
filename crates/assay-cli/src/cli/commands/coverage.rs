@@ -1,5 +1,5 @@
-use crate::cli::args::CoverageArgs;
 use super::exit_codes;
+use crate::cli::args::CoverageArgs;
 use anyhow::{Context, Result};
 
 pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
@@ -28,7 +28,10 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     }
 
     if policy_paths.len() > 1 {
-        eprintln!("warning: multiple policies found in config: {:?}. Using the first one.", policy_paths);
+        eprintln!(
+            "warning: multiple policies found in config: {:?}. Using the first one.",
+            policy_paths
+        );
     }
 
     let policy_rel_path = policy_paths.iter().next().unwrap();
@@ -36,26 +39,32 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     let config_dir = args.config.parent().unwrap_or(std::path::Path::new("."));
     let policy_path = config_dir.join(policy_rel_path);
 
-    let policy_content = tokio::fs::read_to_string(&policy_path).await
+    let policy_content = tokio::fs::read_to_string(&policy_path)
+        .await
         .with_context(|| format!("failed to read policy file: {}", policy_path.display()))?;
 
-    let policy: assay_core::model::Policy = serde_yaml::from_str(&policy_content)
-        .context("failed to parse policy yaml")?;
+    let policy: assay_core::model::Policy =
+        serde_yaml::from_str(&policy_content).context("failed to parse policy yaml")?;
 
     // 3. Load Traces
-    let file_content: String = tokio::fs::read_to_string(&args.trace_file).await
+    let file_content: String = tokio::fs::read_to_string(&args.trace_file)
+        .await
         .context("failed to read trace file")?;
 
     let mut trace_records = Vec::new();
 
     // Parse all lines as Value
-    let mut events_by_id: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+    let mut events_by_id: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
 
     for line in file_content.lines() {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let v: serde_json::Value = serde_json::from_str(line).context("invalid jsonl")?;
 
-        let id_val = v.get("test_id")
+        let id_val = v
+            .get("test_id")
             .or_else(|| v.get("episode_id"))
             .or_else(|| v.get("run_id"))
             .or_else(|| v.get("id"));
@@ -76,7 +85,11 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         for event in events {
             if let Some(typ) = event.get("type").and_then(|s| s.as_str()) {
                 if typ == "call_tool" {
-                    if let Some(tool) = event.get("tool_name").or_else(|| event.get("tool")).and_then(|s| s.as_str()) {
+                    if let Some(tool) = event
+                        .get("tool_name")
+                        .or_else(|| event.get("tool"))
+                        .and_then(|s| s.as_str())
+                    {
                         tools_called.push(tool.to_string());
                     }
                 }
@@ -111,15 +124,16 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     match args.format.as_str() {
         "json" => {
             println!("{}", serde_json::to_string_pretty(&report)?);
-        },
+        }
         "markdown" => {
             print_markdown_report(&report);
-        },
+        }
         "github" => {
             print_markdown_report(&report);
-        },
-        _ => { // text
-             print_text_report(&report);
+        }
+        _ => {
+            // text
+            print_text_report(&report);
         }
     }
 
@@ -127,7 +141,10 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     if report.meets_threshold {
         Ok(exit_codes::OK)
     } else {
-        eprintln!("Coverage threshold not met ({:.1}% < {:.1}%)", report.overall_coverage_pct, report.threshold);
+        eprintln!(
+            "Coverage threshold not met ({:.1}% < {:.1}%)",
+            report.overall_coverage_pct, report.threshold
+        );
         Ok(exit_codes::TEST_FAILED)
     }
 }
@@ -135,10 +152,16 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
 fn print_text_report(report: &assay_core::coverage::CoverageReport) {
     println!("Coverage Report");
     println!("===============");
-    println!("Overall: {:.1}% (Threshold: {:.1}%)", report.overall_coverage_pct, report.threshold);
+    println!(
+        "Overall: {:.1}% (Threshold: {:.1}%)",
+        report.overall_coverage_pct, report.threshold
+    );
     println!();
     println!("Tool Coverage: {:.1}%", report.tool_coverage.coverage_pct);
-    println!("  Seen: {}/{}", report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy);
+    println!(
+        "  Seen: {}/{}",
+        report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
+    );
     if !report.tool_coverage.unseen_tools.is_empty() {
         println!("  Unseen Tools:");
         for t in &report.tool_coverage.unseen_tools {
@@ -152,17 +175,26 @@ fn print_text_report(report: &assay_core::coverage::CoverageReport) {
         println!();
         println!("HIGH RISK GAPS DETECTED:");
         for gap in &report.high_risk_gaps {
-             println!("  [!] {}: {}", gap.tool, gap.reason);
+            println!("  [!] {}: {}", gap.tool, gap.reason);
         }
     }
 }
 
 fn print_markdown_report(report: &assay_core::coverage::CoverageReport) {
     println!("# Coverage Report");
-    println!("**Overall**: {:.1}% (Threshold: {:.1}%)", report.overall_coverage_pct, report.threshold);
+    println!(
+        "**Overall**: {:.1}% (Threshold: {:.1}%)",
+        report.overall_coverage_pct, report.threshold
+    );
 
-    println!("## Tool Coverage: {:.1}%", report.tool_coverage.coverage_pct);
-    println!("- Seen: {}/{}", report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy);
+    println!(
+        "## Tool Coverage: {:.1}%",
+        report.tool_coverage.coverage_pct
+    );
+    println!(
+        "- Seen: {}/{}",
+        report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
+    );
 
     if !report.tool_coverage.unseen_tools.is_empty() {
         println!("### Unseen Tools");

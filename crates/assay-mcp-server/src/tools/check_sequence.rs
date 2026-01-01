@@ -55,17 +55,18 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
         tracing::debug!(event="cache_miss", key=%cache_key, cache="sequence");
         // Compile (Parse)
         // Try parsing as v1.1 Policy first
-        let policy_item = if let Ok(pol) = serde_yaml::from_slice::<assay_core::model::Policy>(&policy_bytes) {
-             crate::cache::SequencePolicy::V1_1(pol)
-        } else if let Ok(rules) =
-            serde_yaml::from_slice::<Vec<assay_core::model::SequenceRule>>(&policy_bytes)
-        {
-            crate::cache::SequencePolicy::Rules(rules)
-        } else if let Ok(seq) = serde_yaml::from_slice::<Vec<String>>(&policy_bytes) {
-            crate::cache::SequencePolicy::Legacy(seq)
-        } else {
-            return ToolError::new("E_POLICY_PARSE", "Invalid sequence policy format").result();
-        };
+        let policy_item =
+            if let Ok(pol) = serde_yaml::from_slice::<assay_core::model::Policy>(&policy_bytes) {
+                crate::cache::SequencePolicy::V1_1(pol)
+            } else if let Ok(rules) =
+                serde_yaml::from_slice::<Vec<assay_core::model::SequenceRule>>(&policy_bytes)
+            {
+                crate::cache::SequencePolicy::Rules(rules)
+            } else if let Ok(seq) = serde_yaml::from_slice::<Vec<String>>(&policy_bytes) {
+                crate::cache::SequencePolicy::Legacy(seq)
+            } else {
+                return ToolError::new("E_POLICY_PARSE", "Invalid sequence policy format").result();
+            };
 
         let arc = std::sync::Arc::new(policy_item);
         ctx.caches.sequence.insert(cache_key, arc.clone());
@@ -93,11 +94,9 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
                 }))
             }
         }
-        crate::cache::SequencePolicy::Rules(rules) => {
-             validate_rules(rules, &actual_names, None)
-        }
+        crate::cache::SequencePolicy::Rules(rules) => validate_rules(rules, &actual_names, None),
         crate::cache::SequencePolicy::V1_1(pol) => {
-             validate_rules(&pol.sequences, &actual_names, Some(pol))
+            validate_rules(&pol.sequences, &actual_names, Some(pol))
         }
     }
 }
@@ -105,7 +104,7 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
 fn validate_rules(
     rules: &[assay_core::model::SequenceRule],
     actual_names: &[String],
-    policy_context: Option<&assay_core::model::Policy>
+    policy_context: Option<&assay_core::model::Policy>,
 ) -> Result<Value> {
     let mut violations = Vec::new();
 
@@ -119,9 +118,8 @@ fn validate_rules(
     };
 
     // Helper to check if tool matches any target
-    let matches_any = |tool_name: &str, targets: &[String]| -> bool {
-        targets.iter().any(|t| t == tool_name)
-    };
+    let matches_any =
+        |tool_name: &str, targets: &[String]| -> bool { targets.iter().any(|t| t == tool_name) };
 
     for rule in rules {
         match rule {
@@ -132,7 +130,10 @@ fn validate_rules(
                 let found = targets.iter().any(|t| actual_names.contains(t));
                 if !found {
                     let msg = if targets.len() > 1 {
-                        format!("required tool '{}' (aliases: {:?}) not found", tool, targets)
+                        format!(
+                            "required tool '{}' (aliases: {:?}) not found",
+                            tool, targets
+                        )
                     } else {
                         format!("required tool '{}' not found", tool)
                     };
@@ -219,8 +220,12 @@ fn validate_rules(
                 let then_targets = resolve(then);
 
                 // Check positions
-                let first_idx = actual_names.iter().position(|n| matches_any(n, &first_targets));
-                let then_idx = actual_names.iter().position(|n| matches_any(n, &then_targets));
+                let first_idx = actual_names
+                    .iter()
+                    .position(|n| matches_any(n, &first_targets));
+                let then_idx = actual_names
+                    .iter()
+                    .position(|n| matches_any(n, &then_targets));
 
                 // Only check if 'then' was called
                 if let Some(t_idx) = then_idx {
@@ -262,7 +267,11 @@ fn validate_rules(
             }
 
             // ===== AFTER: after trigger, then must occur within N calls =====
-            assay_core::model::SequenceRule::After { trigger, then, within } => {
+            assay_core::model::SequenceRule::After {
+                trigger,
+                then,
+                within,
+            } => {
                 let trigger_targets = resolve(trigger);
                 let then_targets = resolve(then);
 
@@ -318,7 +327,7 @@ fn validate_rules(
                         // So at index 3 (next tool), if we pass deadline.
                         // If actual_names.len() > deadline, we failed.
                         if actual_names.len() > deadline {
-                             violations.push(serde_json::json!({
+                            violations.push(serde_json::json!({
                                 "rule_type": "after",
                                 "tool": then,
                                 "event_index": actual_names.len() - 1,
@@ -382,10 +391,7 @@ fn validate_rules(
             // ===== SEQUENCE: exact ordering (with optional strict mode) =====
             assay_core::model::SequenceRule::Sequence { tools, strict } => {
                 // Resolve all tools through aliases
-                let tool_targets: Vec<Vec<String>> = tools
-                    .iter()
-                    .map(|t| resolve(t))
-                    .collect();
+                let tool_targets: Vec<Vec<String>> = tools.iter().map(|t| resolve(t)).collect();
 
                 if *strict {
                     // Strict mode: tools must appear consecutively in exact order
@@ -394,7 +400,8 @@ fn validate_rules(
                     let mut start_idx = 0usize;
 
                     for (idx, name) in actual_names.iter().enumerate() {
-                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx]) {
+                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx])
+                        {
                             if !started {
                                 started = true;
                                 start_idx = idx;
@@ -436,11 +443,14 @@ fn validate_rules(
                     // let mut out_of_order_detected = false;
 
                     for (idx, name) in actual_names.iter().enumerate() {
-                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx]) {
+                        if seq_idx < tool_targets.len() && matches_any(name, &tool_targets[seq_idx])
+                        {
                             seq_idx += 1;
                         } else {
                             // Check for out-of-order: a later sequence member appearing before current
-                            for (future_seq_idx, future_targets) in tool_targets.iter().enumerate().skip(seq_idx + 1) {
+                            for (future_seq_idx, future_targets) in
+                                tool_targets.iter().enumerate().skip(seq_idx + 1)
+                            {
                                 if matches_any(name, future_targets) {
                                     violations.push(serde_json::json!({
                                         "rule_type": "sequence",
@@ -488,8 +498,6 @@ fn validate_rules(
     if violations.is_empty() {
         Ok(serde_json::json!({ "allowed": true, "violations": [], "suggested_fix": null }))
     } else {
-        Ok(
-            serde_json::json!({ "allowed": false, "violations": violations, "suggested_fix": null }),
-        )
+        Ok(serde_json::json!({ "allowed": false, "violations": violations, "suggested_fix": null }))
     }
 }

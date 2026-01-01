@@ -49,9 +49,9 @@ impl ToolError {
 pub mod check_args;
 pub mod check_coverage;
 pub mod check_sequence;
-pub mod policy_decide;
 #[cfg(feature = "experimental")]
 pub mod experimental;
+pub mod policy_decide;
 
 pub fn list_tools() -> Vec<Value> {
     vec![

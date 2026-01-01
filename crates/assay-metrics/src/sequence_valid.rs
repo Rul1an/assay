@@ -80,7 +80,6 @@ impl Metric for SequenceValidMetric {
             .map(|c| c.tool_name.clone())
             .collect();
 
-
         // 2. Validate Rules (DSL)
         if let Some(rules) = effective_rules {
             for rule in rules {

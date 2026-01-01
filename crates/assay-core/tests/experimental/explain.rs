@@ -2,7 +2,7 @@
 //!
 //! Tests the full explain workflow from trace to visualization.
 
-use assay_core::experimental::explain::{TraceExplainer, ToolCall, StepVerdict};
+use assay_core::experimental::explain::{StepVerdict, ToolCall, TraceExplainer};
 use assay_core::model::{Policy, SequenceRule, ToolsPolicy};
 use assay_core::on_error::ErrorPolicy;
 use std::collections::HashMap;
@@ -41,10 +41,13 @@ fn make_policy_with_tools(
 }
 
 fn trace(tools: &[&str]) -> Vec<ToolCall> {
-    tools.iter().map(|t| ToolCall {
-        tool: t.to_string(),
-        args: None,
-    }).collect()
+    tools
+        .iter()
+        .map(|t| ToolCall {
+            tool: t.to_string(),
+            args: None,
+        })
+        .collect()
 }
 
 // ==================== BASIC TESTS ====================
@@ -78,12 +81,10 @@ fn test_explain_all_allowed() {
 
 #[test]
 fn test_explain_before_pass() {
-    let policy = make_policy(vec![
-        SequenceRule::Before {
-            first: "Auth".to_string(),
-            then: "Access".to_string(),
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Before {
+        first: "Auth".to_string(),
+        then: "Access".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Auth", "Access"]));
@@ -94,7 +95,9 @@ fn test_explain_before_pass() {
     let access_step = &explanation.steps[1];
     assert_eq!(access_step.verdict, StepVerdict::Allowed);
 
-    let before_rule = access_step.rules_evaluated.iter()
+    let before_rule = access_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "before")
         .expect("before rule should be evaluated");
     assert!(before_rule.passed);
@@ -103,12 +106,10 @@ fn test_explain_before_pass() {
 
 #[test]
 fn test_explain_before_fail() {
-    let policy = make_policy(vec![
-        SequenceRule::Before {
-            first: "Auth".to_string(),
-            then: "Access".to_string(),
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Before {
+        first: "Auth".to_string(),
+        then: "Access".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Access"]));
@@ -119,7 +120,9 @@ fn test_explain_before_fail() {
     let access_step = &explanation.steps[0];
     assert_eq!(access_step.verdict, StepVerdict::Blocked);
 
-    let before_rule = access_step.rules_evaluated.iter()
+    let before_rule = access_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "before")
         .expect("before rule should be evaluated");
     assert!(!before_rule.passed);
@@ -130,12 +133,10 @@ fn test_explain_before_fail() {
 
 #[test]
 fn test_explain_max_calls_counting() {
-    let policy = make_policy(vec![
-        SequenceRule::MaxCalls {
-            tool: "API".to_string(),
-            max: 3,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::MaxCalls {
+        tool: "API".to_string(),
+        max: 3,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["API", "API", "API", "API"]));
@@ -147,7 +148,9 @@ fn test_explain_max_calls_counting() {
 
     // Check progressive counting in explanations
     for (i, step) in explanation.steps.iter().take(3).enumerate() {
-        let max_rule = step.rules_evaluated.iter()
+        let max_rule = step
+            .rules_evaluated
+            .iter()
             .find(|r| r.rule_type == "max_calls")
             .expect("max_calls rule should be evaluated");
         assert!(max_rule.passed);
@@ -156,7 +159,9 @@ fn test_explain_max_calls_counting() {
 
     // Check 4th call shows exceeded
     let blocked_step = &explanation.steps[3];
-    let max_rule = blocked_step.rules_evaluated.iter()
+    let max_rule = blocked_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "max_calls")
         .expect("max_calls rule should be evaluated");
     assert!(!max_rule.passed);
@@ -167,12 +172,10 @@ fn test_explain_max_calls_counting() {
 
 #[test]
 fn test_explain_eventually_progress() {
-    let policy = make_policy(vec![
-        SequenceRule::Eventually {
-            tool: "Validate".to_string(),
-            within: 3,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Eventually {
+        tool: "Validate".to_string(),
+        within: 3,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Search", "Create", "Validate"]));
@@ -181,7 +184,9 @@ fn test_explain_eventually_progress() {
 
     // Validate appears at index 2, which is within 3 (indices 0, 1, 2)
     let validate_step = &explanation.steps[2];
-    let ev_rule = validate_step.rules_evaluated.iter()
+    let ev_rule = validate_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "eventually")
         .expect("eventually rule should be evaluated");
     assert!(ev_rule.passed);
@@ -190,12 +195,10 @@ fn test_explain_eventually_progress() {
 
 #[test]
 fn test_explain_eventually_fail() {
-    let policy = make_policy(vec![
-        SequenceRule::Eventually {
-            tool: "Validate".to_string(),
-            within: 2,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Eventually {
+        tool: "Validate".to_string(),
+        within: 2,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Validate never appears, trace exceeds within
@@ -209,12 +212,10 @@ fn test_explain_eventually_fail() {
 
 #[test]
 fn test_explain_never_after_triggered() {
-    let policy = make_policy(vec![
-        SequenceRule::NeverAfter {
-            trigger: "Archive".to_string(),
-            forbidden: "Delete".to_string(),
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::NeverAfter {
+        trigger: "Archive".to_string(),
+        forbidden: "Delete".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Archive", "Delete"]));
@@ -225,7 +226,9 @@ fn test_explain_never_after_triggered() {
     // Delete should be blocked
     assert_eq!(explanation.steps[1].verdict, StepVerdict::Blocked);
 
-    let never_rule = explanation.steps[1].rules_evaluated.iter()
+    let never_rule = explanation.steps[1]
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "never_after")
         .expect("never_after rule should be evaluated");
     assert!(!never_rule.passed);
@@ -234,12 +237,10 @@ fn test_explain_never_after_triggered() {
 
 #[test]
 fn test_explain_never_after_before_trigger() {
-    let policy = make_policy(vec![
-        SequenceRule::NeverAfter {
-            trigger: "Archive".to_string(),
-            forbidden: "Delete".to_string(),
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::NeverAfter {
+        trigger: "Archive".to_string(),
+        forbidden: "Delete".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Delete before Archive is OK
@@ -252,12 +253,10 @@ fn test_explain_never_after_before_trigger() {
 
 #[test]
 fn test_explain_sequence_progress() {
-    let policy = make_policy(vec![
-        SequenceRule::Sequence {
-            tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
-            strict: false,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Sequence {
+        tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        strict: false,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["A", "X", "B", "Y", "C"]));
@@ -266,7 +265,9 @@ fn test_explain_sequence_progress() {
 
     // Check sequence progress in explanations
     let step_a = &explanation.steps[0];
-    let seq_rule_a = step_a.rules_evaluated.iter()
+    let seq_rule_a = step_a
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "sequence")
         .unwrap();
     assert!(seq_rule_a.explanation.contains("1/3"));
@@ -274,12 +275,10 @@ fn test_explain_sequence_progress() {
 
 #[test]
 fn test_explain_sequence_strict_violation() {
-    let policy = make_policy(vec![
-        SequenceRule::Sequence {
-            tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
-            strict: true,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Sequence {
+        tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        strict: true,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // X between A and B violates strict mode
@@ -295,11 +294,7 @@ fn test_explain_sequence_strict_violation() {
 
 #[test]
 fn test_explain_deny_list() {
-    let policy = make_policy_with_tools(
-        vec![],
-        None,
-        Some(vec!["DeleteAccount", "DropDatabase"]),
-    );
+    let policy = make_policy_with_tools(vec![], None, Some(vec!["DeleteAccount", "DropDatabase"]));
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["Search", "DeleteAccount"]));
@@ -307,7 +302,9 @@ fn test_explain_deny_list() {
     assert_eq!(explanation.steps[0].verdict, StepVerdict::Allowed);
     assert_eq!(explanation.steps[1].verdict, StepVerdict::Blocked);
 
-    let deny_rule = explanation.steps[1].rules_evaluated.iter()
+    let deny_rule = explanation.steps[1]
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "deny")
         .expect("deny rule should be evaluated");
     assert!(!deny_rule.passed);
@@ -318,12 +315,10 @@ fn test_explain_deny_list() {
 
 #[test]
 fn test_terminal_output_format() {
-    let policy = make_policy(vec![
-        SequenceRule::MaxCalls {
-            tool: "API".to_string(),
-            max: 2,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::MaxCalls {
+        tool: "API".to_string(),
+        max: 2,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     let explanation = explainer.explain(&trace(&["API", "API", "API"]));
@@ -417,25 +412,33 @@ fn test_explain_first_failure_stops_not_evaluation() {
     // But both rules should be evaluated
     let step = &explanation.steps[0];
     assert!(step.rules_evaluated.iter().any(|r| r.rule_type == "before"));
-    assert!(step.rules_evaluated.iter().any(|r| r.rule_type == "max_calls"));
+    assert!(step
+        .rules_evaluated
+        .iter()
+        .any(|r| r.rule_type == "max_calls"));
 }
 
 #[test]
 fn test_require_end_of_trace_violation() {
-    let policy = make_policy(vec![
-        SequenceRule::Require { tool: "Audit".to_string() },
-    ]);
+    let policy = make_policy(vec![SequenceRule::Require {
+        tool: "Audit".to_string(),
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Trace ends without Audit ever being called
     let explanation = explainer.explain(&trace(&["Search", "Create"]));
 
     // Should have violation in blocking_rules
-    assert!(explanation.blocking_rules.iter().any(|r| r.contains("require_audit")));
+    assert!(explanation
+        .blocking_rules
+        .iter()
+        .any(|r| r.contains("require_audit")));
 
     // And last step should have the violation appended
     let last_step = explanation.steps.last().unwrap();
-    let req_rule = last_step.rules_evaluated.iter()
+    let req_rule = last_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "require" && !r.passed)
         .expect("require rule failure should be reported at end");
     assert!(req_rule.explanation.contains("never called"));
@@ -443,13 +446,11 @@ fn test_require_end_of_trace_violation() {
 
 #[test]
 fn test_after_end_of_trace_violation() {
-    let policy = make_policy(vec![
-        SequenceRule::After {
-            trigger: "Create".to_string(),
-            then: "Notify".to_string(),
-            within: 2,
-        },
-    ]);
+    let policy = make_policy(vec![SequenceRule::After {
+        trigger: "Create".to_string(),
+        then: "Notify".to_string(),
+        within: 2,
+    }]);
     let explainer = TraceExplainer::new(policy);
 
     // Create triggered, but trace ends without Notify (and before 2 steps pass)
@@ -458,11 +459,16 @@ fn test_after_end_of_trace_violation() {
     let explanation = explainer.explain(&trace(&["Create", "Update"]));
 
     // Should have violation in blocking_rules
-    assert!(explanation.blocking_rules.iter().any(|r| r.contains("after_create")));
+    assert!(explanation
+        .blocking_rules
+        .iter()
+        .any(|r| r.contains("after_create")));
 
     // Last step (Update) should contain the violation
     let last_step = explanation.steps.last().unwrap();
-    let after_rule = last_step.rules_evaluated.iter()
+    let after_rule = last_step
+        .rules_evaluated
+        .iter()
         .find(|r| r.rule_type == "after" && !r.passed)
         .expect("after rule failure should be reported at end");
     assert!(after_rule.explanation.contains("trace ended"));
