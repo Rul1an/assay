@@ -203,6 +203,7 @@ mod tests {
             assertions: None,
             tags: vec![],
             metadata: None,
+            on_error: None,
         };
         let mut meta = serde_json::Map::new();
         let tool_calls: Vec<ToolCallRecord> = actual_tools
