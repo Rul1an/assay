@@ -1,12 +1,20 @@
-use serde_json::json;
-use assay_mcp_server::tools::{ToolContext, check_sequence};
-use assay_mcp_server::config::ServerConfig;
 use assay_mcp_server::cache::PolicyCaches;
+use assay_mcp_server::config::ServerConfig;
+use assay_mcp_server::tools::{check_sequence, ToolContext};
+use serde_json::json;
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 async fn run_check(policy_yaml: &str, history: Vec<&str>, next: &str) -> serde_json::Value {
     // Unique dir to avoid collisions
-    let unique_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!("assay_ops_test_{}", unique_id));
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let temp_dir = std::env::temp_dir().join(format!("assay_ops_test_{}_{}", unique_id, count));
     tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 
     let policy_path = temp_dir.join("policy.yaml");
