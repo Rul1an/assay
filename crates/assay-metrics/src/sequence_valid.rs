@@ -80,11 +80,6 @@ impl Metric for SequenceValidMetric {
             .map(|c| c.tool_name.clone())
             .collect();
 
-        // DEBUG
-        // eprintln!("DEBUG: seq_valid: actual_names={:?}", actual_names);
-        // if let Some(r) = &effective_rules {
-        //    eprintln!("DEBUG: seq_valid: rules={:?}", r);
-        // }
 
         // 2. Validate Rules (DSL)
         if let Some(rules) = effective_rules {
@@ -134,7 +129,8 @@ impl Metric for SequenceValidMetric {
                         }
                     }
                     _ => {
-                        // TODO: Implement v1.1 operators (Eventually, MaxCalls, etc) in metrics
+                        // TODO: Implement v1.1 operators (Eventually, MaxCalls, etc)
+                        // Note: Consider delegating to assay-core::explain::TraceExplainer once stabilized.
                     }
                 }
             }

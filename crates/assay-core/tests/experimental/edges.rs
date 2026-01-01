@@ -7,7 +7,7 @@
 //! - Multiple violations per step
 //! - Undefined tools
 
-use assay_core::explain::{TraceExplainer, ToolCall, StepVerdict};
+use assay_core::experimental::explain::{TraceExplainer, ToolCall, StepVerdict};
 use assay_core::model::{Policy, SequenceRule, ToolsPolicy};
 use assay_core::on_error::ErrorPolicy;
 use std::collections::HashMap;

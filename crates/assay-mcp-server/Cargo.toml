@@ -7,6 +7,9 @@ repository.workspace = true
 readme.workspace = true
 description = "MCP server integration for Assay"
 
+[features]
+experimental = ["assay-core/experimental"]
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }

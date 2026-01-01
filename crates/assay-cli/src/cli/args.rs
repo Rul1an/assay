@@ -26,7 +26,8 @@ pub enum Command {
     Import(ImportArgs),
     Migrate(MigrateArgs),
     Coverage(CoverageArgs),
-    Explain(super::commands::explain::ExplainArgs),
+    #[cfg(feature = "experimental")]
+    Explain(super::commands::experimental::explain::ExplainArgs),
     Version,
 }
 

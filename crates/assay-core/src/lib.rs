@@ -5,6 +5,8 @@ pub mod calibration;
 pub mod config;
 pub mod embeddings;
 pub mod coverage;
+#[cfg(feature = "experimental")]
+pub mod experimental;
 pub mod engine;
 pub mod errors;
 pub mod fingerprint;
@@ -13,7 +15,6 @@ pub mod metrics_api;
 pub mod model;
 pub mod on_error;
 pub mod otel;
-pub mod explain;
 pub mod policy_engine;
 pub mod providers;
 pub mod quarantine;

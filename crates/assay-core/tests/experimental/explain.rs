@@ -2,7 +2,7 @@
 //!
 //! Tests the full explain workflow from trace to visualization.
 
-use assay_core::explain::{TraceExplainer, ToolCall, StepVerdict};
+use assay_core::experimental::explain::{TraceExplainer, ToolCall, StepVerdict};
 use assay_core::model::{Policy, SequenceRule, ToolsPolicy};
 use assay_core::on_error::ErrorPolicy;
 use std::collections::HashMap;

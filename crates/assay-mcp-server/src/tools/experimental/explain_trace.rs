@@ -2,7 +2,8 @@
 //!
 //! Provides step-by-step explanation of trace evaluation against a policy.
 
-use super::{ToolContext, ToolError};
+use crate::tools::{ToolContext, ToolError};
+use assay_core::experimental::explain;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
@@ -68,16 +69,16 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
     };
 
     // Convert input to ToolCall
-    let trace: Vec<assay_core::explain::ToolCall> = input.trace
+    let trace: Vec<explain::ToolCall> = input.trace
         .into_iter()
-        .map(|t| assay_core::explain::ToolCall {
+        .map(|t| explain::ToolCall {
             tool: t.tool,
             args: t.args,
         })
         .collect();
 
     // Run explanation
-    let explainer = assay_core::explain::TraceExplainer::new(policy);
+    let explainer = explain::TraceExplainer::new(policy);
     let explanation = explainer.explain(&trace);
 
     // Format output

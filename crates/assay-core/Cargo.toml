@@ -7,6 +7,9 @@ repository.workspace = true
 readme.workspace = true
 description = "High-performance evaluation framework for LLM agents (Core)"
 
+[features]
+experimental = []
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -29,3 +32,7 @@ tracing = "0.1.44"
 [dev-dependencies]
 tempfile = "3.23.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+[[test]]
+name = "experimental"
+required-features = ["experimental"]

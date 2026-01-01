@@ -9,10 +9,7 @@ use std::collections::HashMap;
 /// A single step in the explained trace
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplainedStep {
-    /// 0-based index in trace
     pub index: usize,
-
-    /// Tool name
     pub tool: String,
 
     /// Tool arguments (if available)
@@ -43,19 +40,11 @@ pub enum StepVerdict {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleEvaluation {
-    /// Rule identifier
     pub rule_id: String,
-
-    /// Rule type (before, max_calls, etc.)
     pub rule_type: String,
-
-    /// Whether rule passed or failed
     pub passed: bool,
-
-    /// Human-readable explanation
     pub explanation: String,
 
-    /// Additional context
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
 }
@@ -63,22 +52,12 @@ pub struct RuleEvaluation {
 /// Complete explanation of a trace
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceExplanation {
-    /// Policy name
     pub policy_name: String,
-
-    /// Policy version
     pub policy_version: String,
-
-    /// Total steps in trace
     pub total_steps: usize,
-
-    /// Steps that were allowed
     pub allowed_steps: usize,
-
-    /// Steps that were blocked
     pub blocked_steps: usize,
 
-    /// Index of first blocked step (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_block_index: Option<usize>,
 
@@ -412,7 +391,7 @@ impl ExplainerState {
 
                 // Check if we're past deadline
                 let mut passed = true;
-                let mut explanation = String::new();
+                let explanation;
 
                 if let Some((trigger_idx, deadline)) = self.pending_after.get(&rule_idx) {
                     if is_then {
@@ -495,7 +474,7 @@ impl ExplainerState {
                 let seq_idx = self.sequence_progress.get(&rule_idx).copied().unwrap_or(0);
 
                 let mut passed = true;
-                let mut explanation = String::new();
+                let explanation;
 
                 if seq_idx < tools.len() {
                     let expected = &tools[seq_idx];

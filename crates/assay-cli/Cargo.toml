@@ -11,6 +11,9 @@ description = "CLI for Assay"
 name = "assay"
 path = "src/main.rs"
 
+[features]
+experimental = ["assay-core/experimental"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

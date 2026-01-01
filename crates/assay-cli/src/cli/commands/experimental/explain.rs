@@ -13,6 +13,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use std::path::PathBuf;
+use assay_core::experimental::explain::{self, StepVerdict};
 
 #[derive(Args, Debug)]
 pub struct ExplainArgs {
@@ -76,8 +77,8 @@ struct OTelSpan {
 }
 
 impl ToolCallInput {
-    fn to_tool_call(self) -> assay_core::explain::ToolCall {
-        assay_core::explain::ToolCall {
+    fn to_tool_call(self) -> explain::ToolCall {
+        explain::ToolCall {
             tool: self.tool,
             args: self.args.or(self.params),
         }
@@ -106,7 +107,7 @@ pub async fn run(args: ExplainArgs) -> Result<i32> {
     }
 
     // Run explanation
-    let explainer = assay_core::explain::TraceExplainer::new(policy);
+    let explainer = explain::TraceExplainer::new(policy);
     let explanation = explainer.explain(&tool_calls);
 
     // Format output
@@ -139,7 +140,7 @@ pub async fn run(args: ExplainArgs) -> Result<i32> {
     Ok(if explanation.blocked_steps > 0 { 1 } else { 0 })
 }
 
-fn parse_trace(content: &str) -> Result<Vec<assay_core::explain::ToolCall>> {
+fn parse_trace(content: &str) -> Result<Vec<explain::ToolCall>> {
     let content = content.trim();
 
     // Try parsing as JSON first
@@ -157,7 +158,7 @@ fn parse_trace(content: &str) -> Result<Vec<assay_core::explain::ToolCall>> {
                 // Convert OTel spans to tool calls
                 spans.into_iter()
                     .filter(|s| s.name.contains('.') || !s.name.starts_with("internal"))
-                    .map(|s| assay_core::explain::ToolCall {
+                    .map(|s| explain::ToolCall {
                         tool: s.name,
                         args: s.attributes,
                     })
@@ -182,7 +183,7 @@ fn parse_trace(content: &str) -> Result<Vec<assay_core::explain::ToolCall>> {
     Ok(calls)
 }
 
-fn format_verbose(explanation: &assay_core::explain::TraceExplanation) -> String {
+fn format_verbose(explanation: &explain::TraceExplanation) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!("Policy: {} (v{})", explanation.policy_name, explanation.policy_version));
@@ -194,9 +195,9 @@ fn format_verbose(explanation: &assay_core::explain::TraceExplanation) -> String
 
     for step in &explanation.steps {
         let icon = match step.verdict {
-            assay_core::explain::StepVerdict::Allowed => "✅",
-            assay_core::explain::StepVerdict::Blocked => "❌",
-            assay_core::explain::StepVerdict::Warning => "⚠️",
+            explain::StepVerdict::Allowed => "✅",
+            explain::StepVerdict::Blocked => "❌",
+            explain::StepVerdict::Warning => "⚠️",
         };
 
         lines.push(format!("─── Step {} ───", step.index));
@@ -222,7 +223,7 @@ fn format_verbose(explanation: &assay_core::explain::TraceExplanation) -> String
     lines.join("\n")
 }
 
-fn format_blocked_only(explanation: &assay_core::explain::TraceExplanation) -> String {
+fn format_blocked_only(explanation: &explain::TraceExplanation) -> String {
     let mut lines = Vec::new();
 
     if explanation.blocked_steps == 0 {
@@ -233,7 +234,7 @@ fn format_blocked_only(explanation: &assay_core::explain::TraceExplanation) -> S
     lines.push(format!("❌ {} blocked step(s):\n", explanation.blocked_steps));
 
     for step in &explanation.steps {
-        if step.verdict != assay_core::explain::StepVerdict::Blocked {
+        if step.verdict != explain::StepVerdict::Blocked {
             continue;
         }
 

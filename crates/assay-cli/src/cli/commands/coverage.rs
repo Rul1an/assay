@@ -18,11 +18,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         // Also check assertions
         if let Some(assertions) = &test.assertions {
             for _assertion in assertions {
-                // Assertions might have policy references (not exposed in helper yet?)
-                // Assuming primary policy is in expected for now or we need helper in model
-                // Quick hack: check if assertion is SequenceValid-like
-                // Actually `TraceAssertion` model in `agent_assertions::model`?
-                // Let's stick to `expected` for MVP or check `get_policy_path` which handles ArgsValid/SequenceValid
+                // Context: Assertions might reference policies, but we currently relay on 'expected' block.
             }
         }
     }
@@ -121,7 +117,6 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         },
         "github" => {
             print_markdown_report(&report);
-             // TODO: Print GitHub annotations if needed
         },
         _ => { // text
              print_text_report(&report);
