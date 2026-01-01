@@ -1,4 +1,4 @@
-name: Assay CI Gate
+name: Smoke Install (E2E)
 
 on:
   pull_request:

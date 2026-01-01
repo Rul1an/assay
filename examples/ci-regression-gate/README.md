@@ -33,4 +33,4 @@ The script should report that the gate **CORRECTLY failed**, because `t_hello` r
 
 This directory includes two example workflows in `.github/workflows/`:
 *   `assay-baseline-export.yml`: Updates the baseline on pushes to `main`.
-*   `assay-pr-gate.yml`: Checks PRs against the baseline from the base branch.
+*   `example-pr-gate.yml`: Checks PRs against the baseline from the base branch.

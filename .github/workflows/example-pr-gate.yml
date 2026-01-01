@@ -1,4 +1,4 @@
-name: assay-pr-gate
+name: Example CI Gate
 
 on:
   pull_request:
