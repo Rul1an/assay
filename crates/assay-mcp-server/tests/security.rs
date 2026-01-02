@@ -12,15 +12,23 @@ async fn test_path_traversal_prevention() -> Result<()> {
         .await?;
     assert!(status.success());
     // Resolve binary path
-    let mut bin_path = std::env::current_dir()?.join("target/debug/assay-mcp-server");
+    let bin_name = if cfg!(windows) {
+        "assay-mcp-server.exe"
+    } else {
+        "assay-mcp-server"
+    };
+    let mut bin_path = std::env::current_dir()?.join("target/debug").join(bin_name);
     if !bin_path.exists() {
         // Try workspace root from crate dir
-        bin_path = std::env::current_dir()?.join("../../target/debug/assay-mcp-server");
+        bin_path = std::env::current_dir()?
+            .join("../../target/debug")
+            .join(bin_name);
     }
     if !bin_path.exists() {
         panic!(
-            "Could not find assay-mcp-server binary at {:?} or in ../../target",
-            std::env::current_dir()?.join("target/debug/assay-mcp-server")
+            "Could not find {} binary at {:?} or in ../../target",
+            bin_name,
+            std::env::current_dir()?.join("target/debug").join(bin_name)
         );
     }
 

@@ -75,7 +75,7 @@ struct OTelSpan {
 }
 
 impl ToolCallInput {
-    fn to_tool_call(self) -> explain::ToolCall {
+    fn into_tool_call(self) -> explain::ToolCall {
         explain::ToolCall {
             tool: self.tool,
             args: self.args.or(self.params),
@@ -113,7 +113,16 @@ pub async fn run(args: ExplainArgs) -> Result<i32> {
         "markdown" | "md" => explanation.to_markdown(),
         "html" => explanation.to_html(),
         "json" => serde_json::to_string_pretty(&explanation)?,
-        "terminal" | _ => {
+        "terminal" => {
+            if args.verbose {
+                format_verbose(&explanation)
+            } else if args.blocked_only {
+                format_blocked_only(&explanation)
+            } else {
+                explanation.to_terminal()
+            }
+        }
+        _ => {
             if args.verbose {
                 format_verbose(&explanation)
             } else if args.blocked_only {
@@ -144,8 +153,8 @@ fn parse_trace(content: &str) -> Result<Vec<explain::ToolCall>> {
     // Try parsing as JSON first (Array or Object or OTel)
     if let Ok(input) = serde_json::from_str::<TraceInput>(content) {
         return Ok(match input {
-            TraceInput::Array(calls) => calls.into_iter().map(|c| c.to_tool_call()).collect(),
-            TraceInput::Object { tools } => tools.into_iter().map(|c| c.to_tool_call()).collect(),
+            TraceInput::Array(calls) => calls.into_iter().map(|c| c.into_tool_call()).collect(),
+            TraceInput::Object { tools } => tools.into_iter().map(|c| c.into_tool_call()).collect(),
             TraceInput::OTelTrace { spans } => {
                 // Convert OTel spans to tool calls
                 spans
@@ -170,7 +179,7 @@ fn parse_trace(content: &str) -> Result<Vec<explain::ToolCall>> {
 
         let input: ToolCallInput =
             serde_json::from_str(line).with_context(|| format!("Invalid JSON line: {}", line))?;
-        calls.push(input.to_tool_call());
+        calls.push(input.into_tool_call());
     }
 
     Ok(calls)

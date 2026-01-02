@@ -75,7 +75,7 @@ sequences:
 "#;
     // Index 3 -> Fail (3 >= 3)
     let res = run_check(policy, vec!["A", "B", "C"], "Target").await;
-    assert_eq!(res["allowed"].as_bool().unwrap(), false);
+    assert!(!res["allowed"].as_bool().unwrap());
     let msg = res["violations"][0]["message"].as_str().unwrap();
     assert!(msg.contains("appeared at index 3 but must appear within first 3 calls"));
 }
@@ -93,7 +93,7 @@ sequences:
     // Length 4, not found -> Fail
     let res = run_check(policy, vec!["A", "B", "C"], "D").await;
     // Trace: A, B, C, D (len 4). Target not in A,B,C,D.
-    assert_eq!(res["allowed"].as_bool().unwrap(), false);
+    assert!(!res["allowed"].as_bool().unwrap());
     let msg = res["violations"][0]["message"].as_str().unwrap();
     assert!(msg.contains("required within first 3 calls but not found"));
 }
@@ -136,5 +136,5 @@ sequences:
 
     // Fail late
     let res = run_check(policy, vec!["A", "B"], "Target").await; // Index 2. Fail.
-    assert_eq!(res["allowed"].as_bool().unwrap(), false);
+    assert!(!res["allowed"].as_bool().unwrap());
 }

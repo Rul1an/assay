@@ -1,4 +1,4 @@
-use assay_core::policy_engine::{evaluate_tool_args, Verdict, VerdictStatus};
+use assay_core::policy_engine::{evaluate_tool_args, VerdictStatus};
 use serde_json::json;
 
 #[test]

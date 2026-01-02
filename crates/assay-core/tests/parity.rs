@@ -634,7 +634,7 @@ pub mod fixtures {
     }
 
     fn edge_cases() -> Vec<(PolicyCheck, CheckInput, Outcome)> {
-        let schema = serde_json::json!({
+        let _schema = serde_json::json!({
              "type": "string",
              "minLength": 5
         });

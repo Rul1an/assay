@@ -132,6 +132,10 @@ fn check_blocklist(blocked: &[&str], tool_name: &str) -> bool {
     !blocked.contains(&tool_name)
 }
 
+fn main() {
+    println!("Run benchmarks with: cargo test -p assay-core --test latency_check -- --nocapture");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,8 +278,4 @@ mod tests {
             "Combined SLA targets not met - this blocks v1.0 release"
         );
     }
-}
-
-fn main() {
-    println!("Run benchmarks with: cargo test -p assay-core --test latency_check -- --nocapture");
 }

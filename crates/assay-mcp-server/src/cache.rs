@@ -15,7 +15,7 @@ pub type CompiledArgsSchema = std::sync::Arc<jsonschema::JSONSchema>;
 pub enum SequencePolicy {
     Legacy(Vec<String>),
     Rules(Vec<assay_core::model::SequenceRule>),
-    V1_1(assay_core::model::Policy),
+    V1_1(Box<assay_core::model::Policy>),
 }
 pub type ParsedSequencePolicy = std::sync::Arc<SequencePolicy>;
 

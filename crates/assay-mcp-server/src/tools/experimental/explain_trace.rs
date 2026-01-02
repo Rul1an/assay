@@ -21,7 +21,7 @@ struct ExplainInput {
 
     /// Include verbose rule evaluation details
     #[serde(default)]
-    verbose: bool,
+    _verbose: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]

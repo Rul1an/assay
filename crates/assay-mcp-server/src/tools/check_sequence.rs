@@ -57,7 +57,7 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
         // Try parsing as v1.1 Policy first
         let policy_item =
             if let Ok(pol) = serde_yaml::from_slice::<assay_core::model::Policy>(&policy_bytes) {
-                crate::cache::SequencePolicy::V1_1(pol)
+                crate::cache::SequencePolicy::V1_1(Box::new(pol))
             } else if let Ok(rules) =
                 serde_yaml::from_slice::<Vec<assay_core::model::SequenceRule>>(&policy_bytes)
             {
@@ -316,34 +316,32 @@ fn validate_rules(
 
                 // Check if there's an unsatisfied pending at trace end
                 if let Some((trigger_idx, deadline)) = pending_deadline {
-                    if actual_names.len() - 1 >= deadline || actual_names.len() <= deadline {
-                        // We're past the deadline or trace ended without satisfaction
-                        // Note: actual_names includes next_tool, so last idx is len-1.
-                        // If len <= deadline, we might still have time IF next calls happen.
-                        // But check_sequence validates SO FAR.
-                        // If we are strictly checking "trace so far", pending is fine unless deadline passed.
-                        // However, RFC example: Trace C: [Create, Search, Update] -> FAIL (no Audit within 2)
-                        // If Update is at index 2, deadline was 2 (create at 0 + 2 = 2).
-                        // So at index 3 (next tool), if we pass deadline.
-                        // If actual_names.len() > deadline, we failed.
-                        if actual_names.len() > deadline {
-                            violations.push(serde_json::json!({
-                                "rule_type": "after",
-                                "tool": then,
-                                "event_index": actual_names.len() - 1,
-                                "constraint": "after",
-                                "message": format!(
-                                    "tool '{}' required within {} calls after '{}' (triggered at index {}) but trace exceeded deadline",
-                                    then, within, trigger, trigger_idx
-                                ),
-                                "context": {
-                                    "trigger": trigger,
-                                    "trigger_index": trigger_idx,
-                                    "within": within,
-                                    "trace_ended": true
-                                }
-                            }));
-                        }
+                    // We're past the deadline or trace ended without satisfaction
+                    // Note: actual_names includes next_tool, so last idx is len-1.
+                    // If len <= deadline, we might still have time IF next calls happen.
+                    // But check_sequence validates SO FAR.
+                    // If we are strictly checking "trace so far", pending is fine unless deadline passed.
+                    // However, RFC example: Trace C: [Create, Search, Update] -> FAIL (no Audit within 2)
+                    // If Update is at index 2, deadline was 2 (create at 0 + 2 = 2).
+                    // So at index 3 (next tool), if we pass deadline.
+                    // If actual_names.len() > deadline, we failed.
+                    if actual_names.len() > deadline {
+                        violations.push(serde_json::json!({
+                            "rule_type": "after",
+                            "tool": then,
+                            "event_index": actual_names.len() - 1,
+                            "constraint": "after",
+                            "message": format!(
+                                "tool '{}' required within {} calls after '{}' (triggered at index {}) but trace exceeded deadline",
+                                then, within, trigger, trigger_idx
+                            ),
+                            "context": {
+                                "trigger": trigger,
+                                "trigger_index": trigger_idx,
+                                "within": within,
+                                "trace_ended": true
+                            }
+                        }));
                     }
                 }
             }
