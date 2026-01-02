@@ -354,7 +354,6 @@ sequences:
 
     let report = run_coverage_test(policy, traces, 50.0).await;
 
-
     // Should have 2 rules
     assert_eq!(
         report["rule_coverage"]["total_rules"].as_u64().unwrap(),
