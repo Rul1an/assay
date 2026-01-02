@@ -76,7 +76,8 @@ async fn test_path_traversal_prevention() -> Result<()> {
     let resp: serde_json::Value = serde_json::from_str(&line)?;
 
     // Parse MCP ToolResult: content[0].text contains the JSON result
-    let content_text = resp["result"]["content"][0]["text"].as_str()
+    let content_text = resp["result"]["content"][0]["text"]
+        .as_str()
         .expect("Missing content text in MCP response");
 
     // Debug print raw response if needed
@@ -86,7 +87,8 @@ async fn test_path_traversal_prevention() -> Result<()> {
 
     assert!(
         tool_res["allowed"].as_bool().unwrap_or(false),
-        "Valid policy should be allowed. Got: {:?}", tool_res
+        "Valid policy should be allowed. Got: {:?}",
+        tool_res
     );
 
     // 3. Test: Access Invalid Path (Traversal)
@@ -111,7 +113,8 @@ async fn test_path_traversal_prevention() -> Result<()> {
     reader.read_line(&mut line).await?;
     let resp: serde_json::Value = serde_json::from_str(&line)?;
 
-    let content_text = resp["result"]["content"][0]["text"].as_str()
+    let content_text = resp["result"]["content"][0]["text"]
+        .as_str()
         .expect("Missing content text in MCP response");
     let tool_res: serde_json::Value = serde_json::from_str(content_text)?;
 
@@ -156,8 +159,9 @@ async fn test_path_traversal_prevention() -> Result<()> {
         reader.read_line(&mut line).await?;
         let resp: serde_json::Value = serde_json::from_str(&line)?;
 
-        let content_text = resp["result"]["content"][0]["text"].as_str()
-             .expect("Missing content text in MCP response");
+        let content_text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("Missing content text in MCP response");
         let tool_res: serde_json::Value = serde_json::from_str(content_text)?;
 
         // Expect failure due to canonicalization check
