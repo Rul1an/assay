@@ -1,4 +1,0 @@
-{"episode_id":"openai_stream_demo","input":{"prompt":"What's the weather like in Tokyo?"},"meta":{"test_id":"openai_stream_demo"},"timestamp":1766502698291,"type":"episode_start"}
-{"content":"","episode_id":"openai_stream_demo","idx":0,"kind":"model","meta":{"gen_ai.finish_reason":"tool_calls","gen_ai.request.model":"gpt-4o-mini","gen_ai.response.model":"gpt-4o-mini","gen_ai.stream":true},"name":"openai","step_id":"step_001","timestamp":1766502698291,"type":"step"}
-{"args":{"location":"Tokyo"},"call_index":0,"episode_id":"openai_stream_demo","error":null,"meta":{"tool_call_id":"call_stream_123"},"result":null,"step_id":"step_001","timestamp":1766502698291,"tool_name":"GetWeather","type":"tool_call"}
-{"episode_id":"openai_stream_demo","meta":{},"outcome":"pass","timestamp":1766502698291,"type":"episode_end"}

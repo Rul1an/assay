@@ -9,8 +9,7 @@ pub mod trace;
 
 pub mod coverage;
 pub mod doctor;
-#[cfg(feature = "experimental")]
-pub mod experimental;
+pub mod explain;
 pub mod import;
 pub mod migrate;
 pub mod validate;
@@ -36,11 +35,16 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
             BaselineSub::Report(report_args) => {
                 baseline::cmd_baseline_report(report_args).map(|_| exit_codes::OK)
             }
+            BaselineSub::Record(record_args) => {
+                baseline::cmd_baseline_record(record_args).map(|_| exit_codes::OK)
+            }
+            BaselineSub::Check(check_args) => {
+                baseline::cmd_baseline_check(check_args).map(|_| exit_codes::OK)
+            }
         },
         Command::Migrate(args) => migrate::cmd_migrate(args),
         Command::Coverage(args) => coverage::cmd_coverage(args).await,
-        #[cfg(feature = "experimental")]
-        Command::Explain(args) => experimental::explain::run(args).await,
+        Command::Explain(args) => explain::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)
@@ -573,6 +577,7 @@ fn export_baseline(
         assay_version: env!("CARGO_PKG_VERSION").to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
         config_fingerprint: assay_core::baseline::compute_config_fingerprint(config_path),
+        git_info: None,
         entries,
     };
 

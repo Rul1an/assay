@@ -170,6 +170,70 @@ impl Store {
         Ok(results)
     }
 
+    pub fn get_latest_run_id(&self, suite: &str) -> anyhow::Result<Option<i64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM runs WHERE suite = ?1 ORDER BY id DESC LIMIT 1")?;
+        let mut rows = stmt.query(params![suite])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn fetch_results_for_run(&self, run_id: i64) -> anyhow::Result<Vec<crate::model::TestResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                r.test_id, r.outcome, r.duration_ms, r.score, r.attempts_json,
+                r.fingerprint, r.skip_reason
+             FROM results r
+             WHERE r.run_id = ?1
+             ORDER BY r.test_id ASC",
+        )?;
+
+        let rows = stmt.query_map(params![run_id], |row| {
+            let attempts_str: Option<String> = row.get(4)?;
+
+            let (message, details) =
+                if let Some(s) = attempts_str.as_ref().filter(|s| !s.trim().is_empty()) {
+                    if let Ok(attempts) = serde_json::from_str::<Vec<crate::model::AttemptRow>>(s) {
+                        attempts
+                            .last()
+                            .map(|a| (a.message.clone(), a.details.clone()))
+                            .unwrap_or_else(|| (String::new(), serde_json::json!({})))
+                    } else {
+                        (String::new(), serde_json::json!({}))
+                    }
+                } else {
+                    (String::new(), serde_json::json!({}))
+                };
+
+            let attempts: Option<Vec<crate::model::AttemptRow>> =
+                attempts_str.and_then(|s| serde_json::from_str(&s).ok());
+
+            Ok(crate::model::TestResultRow {
+                test_id: row.get(0)?,
+                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
+                message,
+                duration_ms: row.get(2)?,
+                details,
+                score: row.get(3)?,
+                cached: false,
+                fingerprint: row.get(5)?,
+                skip_reason: row.get(6)?,
+                attempts,
+                error_policy_applied: None,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for r in rows {
+            results.push(r?);
+        }
+        Ok(results)
+    }
+
     pub fn get_last_passing_by_fingerprint(
         &self,
         fingerprint: &str,

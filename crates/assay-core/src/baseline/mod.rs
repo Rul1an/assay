@@ -12,7 +12,18 @@ pub struct Baseline {
     pub assay_version: String,
     pub created_at: String,
     pub config_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_info: Option<GitInfo>,
     pub entries: Vec<BaselineEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GitInfo {
+    pub commit: String,
+    pub branch: Option<String>,
+    pub dirty: bool,
+    pub author: Option<String>,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -22,6 +33,32 @@ pub struct BaselineEntry {
     pub score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineDiff {
+    pub regressions: Vec<Regression>,
+    pub improvements: Vec<Improvement>,
+    pub new_tests: Vec<String>,
+    pub missing_tests: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Regression {
+    pub test_id: String,
+    pub metric: String,
+    pub baseline_score: f64,
+    pub candidate_score: f64,
+    pub delta: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Improvement {
+    pub test_id: String,
+    pub metric: String,
+    pub baseline_score: f64,
+    pub candidate_score: f64,
+    pub delta: f64,
 }
 
 impl Baseline {
@@ -78,8 +115,16 @@ impl Baseline {
         }
         let file = File::create(path)
             .with_context(|| format!("failed to create baseline file: {}", path.display()))?;
+
+        // Create a sorted clone for deterministic output
+        let mut sorted = self.clone();
+        sorted.entries.sort_by(|a, b| {
+            a.test_id.cmp(&b.test_id)
+                .then_with(|| a.metric.cmp(&b.metric))
+        });
+
         // Use pretty print for git diffability
-        serde_json::to_writer_pretty(file, self).context("failed to write baseline JSON")?;
+        serde_json::to_writer_pretty(file, &sorted).context("failed to write baseline JSON")?;
         Ok(())
     }
 
@@ -89,6 +134,70 @@ impl Baseline {
             .iter()
             .find(|e| e.test_id == test_id && e.metric == metric)
             .map(|e| e.score)
+    }
+
+    pub fn diff(&self, candidate: &Baseline) -> BaselineDiff {
+        let mut regressions = Vec::new();
+        let mut improvements = Vec::new();
+        let mut new_tests = Vec::new();
+        let mut missing_tests = Vec::new();
+
+        // Map baseline entries by (test_id, metric) for quick lookup
+        let mut baseline_map = std::collections::HashMap::new();
+        for entry in &self.entries {
+            baseline_map.insert((entry.test_id.clone(), entry.metric.clone()), entry.score);
+        }
+
+        let mut candidate_seen = std::collections::HashSet::new();
+
+        for entry in &candidate.entries {
+             candidate_seen.insert((entry.test_id.clone(), entry.metric.clone()));
+
+             if let Some(baseline_score) = baseline_map.get(&(entry.test_id.clone(), entry.metric.clone())) {
+                 let delta = entry.score - baseline_score;
+                 // Floating point comparison with epsilon?
+                 // For now, exact logic, but maybe ignore tiny deltas.
+                 if delta < -0.000001 {
+                     regressions.push(Regression {
+                         test_id: entry.test_id.clone(),
+                         metric: entry.metric.clone(),
+                         baseline_score: *baseline_score,
+                         candidate_score: entry.score,
+                         delta,
+                     });
+                 } else if delta > 0.000001 {
+                     improvements.push(Improvement {
+                         test_id: entry.test_id.clone(),
+                         metric: entry.metric.clone(),
+                         baseline_score: *baseline_score,
+                         candidate_score: entry.score,
+                         delta,
+                     });
+                 }
+             } else {
+                 new_tests.push(format!("{} (metric: {})", entry.test_id, entry.metric));
+             }
+        }
+
+        // Identify missing
+        for ((test_id, metric), _) in &baseline_map {
+            if !candidate_seen.contains(&(test_id.clone(), metric.clone())) {
+                missing_tests.push(format!("{} (metric: {})", test_id, metric));
+            }
+        }
+
+        // Sort results for stability
+        regressions.sort_by(|a, b| a.test_id.cmp(&b.test_id).then(a.metric.cmp(&b.metric)));
+        improvements.sort_by(|a, b| a.test_id.cmp(&b.test_id).then(a.metric.cmp(&b.metric)));
+        new_tests.sort();
+        missing_tests.sort();
+
+        BaselineDiff {
+            regressions,
+            improvements,
+            new_tests,
+            missing_tests,
+        }
     }
 }
 
