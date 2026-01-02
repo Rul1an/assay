@@ -1,8 +1,8 @@
 use crate::cli::args::BaselineReportArgs;
+use anyhow::Context;
 use assay_core::baseline::report::report_from_db;
 use assay_core::storage::Store;
 use std::fs;
-use anyhow::Context;
 
 pub fn cmd_baseline_report(args: BaselineReportArgs) -> anyhow::Result<()> {
     let store = Store::open(&args.db)?;
@@ -53,16 +53,16 @@ pub fn cmd_baseline_record(args: crate::cli::args::BaselineRecordArgs) -> anyhow
     let mut entries = Vec::new();
     for r in results {
         if let Some(metrics) = r.details.get("metrics").and_then(|v| v.as_object()) {
-             for (metric_name, m_val) in metrics {
-                 if let Some(score) = m_val.get("score").and_then(|s| s.as_f64()) {
-                     entries.push(assay_core::baseline::BaselineEntry {
-                         test_id: r.test_id.clone(),
-                         metric: metric_name.clone(),
-                         score,
-                         meta: None,
-                     });
-                 }
-             }
+            for (metric_name, m_val) in metrics {
+                if let Some(score) = m_val.get("score").and_then(|s| s.as_f64()) {
+                    entries.push(assay_core::baseline::BaselineEntry {
+                        test_id: r.test_id.clone(),
+                        metric: metric_name.clone(),
+                        score,
+                        meta: None,
+                    });
+                }
+            }
         } else if let Some(score) = r.score {
             // If no granular metrics, use main score if present
             entries.push(assay_core::baseline::BaselineEntry {
@@ -87,7 +87,12 @@ pub fn cmd_baseline_record(args: crate::cli::args::BaselineRecordArgs) -> anyhow
     };
 
     baseline.save(&args.out)?;
-    eprintln!("Recorded baseline for run {} (suite: {}) to {}", run_id, suite, args.out.display());
+    eprintln!(
+        "Recorded baseline for run {} (suite: {}) to {}",
+        run_id,
+        suite,
+        args.out.display()
+    );
     Ok(())
 }
 
@@ -97,7 +102,10 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
     let cfg = assay_core::config::load_config(&args.config, false, false)?;
     let suite = args.suite.unwrap_or(cfg.suite.clone());
 
-    if let Err(e) = baseline.validate(&suite, &assay_core::baseline::compute_config_fingerprint(&args.config)) {
+    if let Err(e) = baseline.validate(
+        &suite,
+        &assay_core::baseline::compute_config_fingerprint(&args.config),
+    ) {
         eprintln!("warning: {}", e);
     }
 
@@ -105,7 +113,9 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
     let run_id = if let Some(id_str) = args.run_id {
         id_str.parse::<i64>().context("invalid run_id")?
     } else {
-        store.get_latest_run_id(&suite)?.context(format!("no runs found for suite '{}'", suite))?
+        store
+            .get_latest_run_id(&suite)?
+            .context(format!("no runs found for suite '{}'", suite))?
     };
 
     let results = store.fetch_results_for_run(run_id)?;
@@ -117,16 +127,16 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
     let mut entries = Vec::new();
     for r in results {
         if let Some(metrics) = r.details.get("metrics").and_then(|v| v.as_object()) {
-             for (metric_name, m_val) in metrics {
-                 if let Some(score) = m_val.get("score").and_then(|s| s.as_f64()) {
-                     entries.push(assay_core::baseline::BaselineEntry {
-                         test_id: r.test_id.clone(),
-                         metric: metric_name.clone(),
-                         score,
-                         meta: None,
-                     });
-                 }
-             }
+            for (metric_name, m_val) in metrics {
+                if let Some(score) = m_val.get("score").and_then(|s| s.as_f64()) {
+                    entries.push(assay_core::baseline::BaselineEntry {
+                        test_id: r.test_id.clone(),
+                        metric: metric_name.clone(),
+                        score,
+                        meta: None,
+                    });
+                }
+            }
         } else if let Some(score) = r.score {
             entries.push(assay_core::baseline::BaselineEntry {
                 test_id: r.test_id.clone(),
@@ -155,7 +165,10 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
     if !diff.regressions.is_empty() {
         println!("\n❌ REGRESSIONS ({}):", diff.regressions.len());
         for r in &diff.regressions {
-            println!("  - {} metric '{}': {:.2} -> {:.2} ({:.2})", r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta);
+            println!(
+                "  - {} metric '{}': {:.2} -> {:.2} ({:.2})",
+                r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
+            );
         }
     } else {
         println!("\n✅ No regressions.");
@@ -164,22 +177,25 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
     if !diff.improvements.is_empty() {
         println!("\n🎉 IMPROVEMENTS ({}):", diff.improvements.len());
         for i in &diff.improvements {
-             println!("  - {} metric '{}': {:.2} -> {:.2} (+{:.2})", i.test_id, i.metric, i.baseline_score, i.candidate_score, i.delta);
+            println!(
+                "  - {} metric '{}': {:.2} -> {:.2} (+{:.2})",
+                i.test_id, i.metric, i.baseline_score, i.candidate_score, i.delta
+            );
         }
     }
 
     if !diff.new_tests.is_empty() {
-         println!("\n🆕 NEW TESTS/METRICS ({}):", diff.new_tests.len());
-         for n in &diff.new_tests {
-             println!("  - {}", n);
-         }
+        println!("\n🆕 NEW TESTS/METRICS ({}):", diff.new_tests.len());
+        for n in &diff.new_tests {
+            println!("  - {}", n);
+        }
     }
 
     if !diff.missing_tests.is_empty() {
-         println!("\n⚠️ MISSING TESTS/METRICS ({}):", diff.missing_tests.len());
-         for m in &diff.missing_tests {
-             println!("  - {}", m);
-         }
+        println!("\n⚠️ MISSING TESTS/METRICS ({}):", diff.missing_tests.len());
+        for m in &diff.missing_tests {
+            println!("  - {}", m);
+        }
     }
 
     if args.fail_on_regression && !diff.regressions.is_empty() {
@@ -192,27 +208,50 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
 fn capture_git_info() -> Option<assay_core::baseline::GitInfo> {
     use std::process::Command;
 
-    let output = Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
-    if !output.status.success() { return None; }
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
     let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    let output = Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).output().ok()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
     let branch = if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else { None };
+    } else {
+        None
+    };
 
-    let output = Command::new("git").args(["diff", "--quiet"]).output().ok()?;
+    let output = Command::new("git")
+        .args(["diff", "--quiet"])
+        .output()
+        .ok()?;
     let dirty = !output.status.success(); // diff --quiet returns 1 if dirty
 
-    let output = Command::new("git").args(["show", "-s", "--format=%an"]).output().ok()?;
+    let output = Command::new("git")
+        .args(["show", "-s", "--format=%an"])
+        .output()
+        .ok()?;
     let author = if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else { None };
+    } else {
+        None
+    };
 
-    let output = Command::new("git").args(["show", "-s", "--format=%cI"]).output().ok()?;
-     let timestamp = if output.status.success() {
+    let output = Command::new("git")
+        .args(["show", "-s", "--format=%cI"])
+        .output()
+        .ok()?;
+    let timestamp = if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else { None };
+    } else {
+        None
+    };
 
     Some(assay_core::baseline::GitInfo {
         commit,

@@ -172,7 +172,8 @@ impl Store {
 
     pub fn get_latest_run_id(&self, suite: &str) -> anyhow::Result<Option<i64>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id FROM runs WHERE suite = ?1 ORDER BY id DESC LIMIT 1")?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM runs WHERE suite = ?1 ORDER BY id DESC LIMIT 1")?;
         let mut rows = stmt.query(params![suite])?;
         if let Some(row) = rows.next()? {
             Ok(Some(row.get(0)?))
@@ -181,7 +182,10 @@ impl Store {
         }
     }
 
-    pub fn fetch_results_for_run(&self, run_id: i64) -> anyhow::Result<Vec<crate::model::TestResultRow>> {
+    pub fn fetch_results_for_run(
+        &self,
+        run_id: i64,
+    ) -> anyhow::Result<Vec<crate::model::TestResultRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT

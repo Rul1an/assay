@@ -56,7 +56,7 @@ pub struct BaselineArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum BaselineSub {
-//     /// Generate a hygiene report for a suite
+    //     /// Generate a hygiene report for a suite
     Report(BaselineReportArgs),
     /// Record the latest run as a baseline
     Record(BaselineRecordArgs),

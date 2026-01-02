@@ -119,7 +119,8 @@ impl Baseline {
         // Create a sorted clone for deterministic output
         let mut sorted = self.clone();
         sorted.entries.sort_by(|a, b| {
-            a.test_id.cmp(&b.test_id)
+            a.test_id
+                .cmp(&b.test_id)
                 .then_with(|| a.metric.cmp(&b.metric))
         });
 
@@ -151,32 +152,34 @@ impl Baseline {
         let mut candidate_seen = std::collections::HashSet::new();
 
         for entry in &candidate.entries {
-             candidate_seen.insert((entry.test_id.clone(), entry.metric.clone()));
+            candidate_seen.insert((entry.test_id.clone(), entry.metric.clone()));
 
-             if let Some(baseline_score) = baseline_map.get(&(entry.test_id.clone(), entry.metric.clone())) {
-                 let delta = entry.score - baseline_score;
-                 // Floating point comparison with epsilon?
-                 // For now, exact logic, but maybe ignore tiny deltas.
-                 if delta < -0.000001 {
-                     regressions.push(Regression {
-                         test_id: entry.test_id.clone(),
-                         metric: entry.metric.clone(),
-                         baseline_score: *baseline_score,
-                         candidate_score: entry.score,
-                         delta,
-                     });
-                 } else if delta > 0.000001 {
-                     improvements.push(Improvement {
-                         test_id: entry.test_id.clone(),
-                         metric: entry.metric.clone(),
-                         baseline_score: *baseline_score,
-                         candidate_score: entry.score,
-                         delta,
-                     });
-                 }
-             } else {
-                 new_tests.push(format!("{} (metric: {})", entry.test_id, entry.metric));
-             }
+            if let Some(baseline_score) =
+                baseline_map.get(&(entry.test_id.clone(), entry.metric.clone()))
+            {
+                let delta = entry.score - baseline_score;
+                // Floating point comparison with epsilon?
+                // For now, exact logic, but maybe ignore tiny deltas.
+                if delta < -0.000001 {
+                    regressions.push(Regression {
+                        test_id: entry.test_id.clone(),
+                        metric: entry.metric.clone(),
+                        baseline_score: *baseline_score,
+                        candidate_score: entry.score,
+                        delta,
+                    });
+                } else if delta > 0.000001 {
+                    improvements.push(Improvement {
+                        test_id: entry.test_id.clone(),
+                        metric: entry.metric.clone(),
+                        baseline_score: *baseline_score,
+                        candidate_score: entry.score,
+                        delta,
+                    });
+                }
+            } else {
+                new_tests.push(format!("{} (metric: {})", entry.test_id, entry.metric));
+            }
         }
 
         // Identify missing
