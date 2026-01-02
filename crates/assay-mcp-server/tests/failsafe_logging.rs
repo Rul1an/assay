@@ -1,7 +1,6 @@
 use assay_core::on_error::log_fail_safe;
 use std::sync::{Arc, Mutex};
-use tracing::Subscriber;
-
+#[allow(unused_imports)]
 use tracing_subscriber::fmt::MakeWriter;
 
 #[test]

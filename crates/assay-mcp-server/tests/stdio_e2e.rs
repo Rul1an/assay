@@ -98,7 +98,10 @@ fn test_stdio_flow() {
     line.clear();
     reader.read_line(&mut line).unwrap();
     let resp: Value = serde_json::from_str(&line).unwrap();
-    assert_eq!(resp["result"]["allowed"], true);
+    let content_text = resp["result"]["content"][0]["text"].as_str()
+        .expect("Missing content text in MCP response");
+    let tool_res: Value = serde_json::from_str(content_text).unwrap();
+    assert_eq!(tool_res["allowed"], true);
 
     // 4. Kill server
     // Dropping stdin typically signals EOF, but we can kill explicitly.
