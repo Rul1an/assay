@@ -30,3 +30,5 @@ serde = { version = "1", features = ["derive"] }
 [dev-dependencies]
 tempfile = "3"
 regex = "1"
+assert_cmd = "2.0"
+predicates = "3.0"

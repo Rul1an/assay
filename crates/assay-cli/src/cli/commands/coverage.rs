@@ -118,7 +118,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
 
     // 4. Analyze
     let analyzer = assay_core::coverage::CoverageAnalyzer::from_policy(&policy);
-    let report = analyzer.analyze(&trace_records, args.threshold);
+    let report = analyzer.analyze(&trace_records, args.min_coverage);
 
     // 5. Output
     match args.format.as_str() {

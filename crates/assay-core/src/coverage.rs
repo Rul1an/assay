@@ -20,13 +20,15 @@ pub struct CoverageReport {
     /// High-risk gaps (blocklisted tools never seen)
     pub high_risk_gaps: Vec<HighRiskGap>,
 
-    /// Overall coverage percentage
+    /// Overall coverage percentage (min of tool and rule coverage)
     pub overall_coverage_pct: f64,
 
     /// Whether coverage meets threshold
+    #[serde(rename = "passes_threshold")]
     pub meets_threshold: bool,
 
     /// Threshold that was checked
+    #[serde(rename = "min_coverage_threshold")]
     pub threshold: f64,
 }
 
@@ -298,8 +300,8 @@ impl CoverageAnalyzer {
             })
             .collect();
 
-        // Overall coverage (average of tool and rule coverage)
-        let overall_coverage_pct = (tool_coverage_pct + rule_coverage_pct) / 2.0;
+        // Overall coverage (min of tool and rule coverage, conservative)
+        let overall_coverage_pct = f64::min(tool_coverage_pct, rule_coverage_pct);
         let meets_threshold = overall_coverage_pct >= threshold;
 
         CoverageReport {
