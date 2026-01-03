@@ -105,7 +105,47 @@ fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Policy>()?;
     m.add_class::<CoverageAnalyzer>()?;
     m.add_class::<AssayClient>()?;
+    m.add_class::<TraceExplainer>()?;
     Ok(())
+}
+
+#[pyclass]
+struct TraceExplainer {
+    inner: assay_core::explain::TraceExplainer,
+}
+
+#[pymethods]
+impl TraceExplainer {
+    #[new]
+    fn new(policy: &Policy) -> Self {
+        TraceExplainer {
+            inner: assay_core::explain::TraceExplainer::new(policy.inner.clone()),
+        }
+    }
+
+    fn explain(&self, traces: Vec<PyObject>, py: Python<'_>) -> PyResult<String> {
+        let mut tool_calls = Vec::new();
+        for obj in traces {
+            let bound = obj.bind(py);
+             // Reuse RawToolCall logic if possible, or duplicate for now as it is private.
+             // Duplicating for simplicity or extracting deserialization logic.
+             // Since RawToolCall is private in lib.rs, I can reuse it if definition is available.
+             // It is defined at line 28.
+            let raw: RawToolCall = pythonize::depythonize(bound)
+                .map_err(|e| PyValueError::new_err(format!("Invalid tool call format: {}", e)))?;
+
+            let tool = raw
+                .tool
+                .or(raw.tool_name)
+                .unwrap_or_else(|| "unknown".to_string());
+            let args = raw.args.or(raw.params);
+
+            tool_calls.push(assay_core::explain::ToolCall { tool, args });
+        }
+
+        let explanation = self.inner.explain(&tool_calls);
+        serde_json::to_string(&explanation).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
 }
 
 #[pyclass]

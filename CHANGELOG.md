@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.0] - 2026-01-04
+
+### 🐍 Python SDK (`assay-python-sdk`)
+Native Python bindings for seamless integration into Pytest and other Python workflows.
+
+-   **`AssayClient`**: Record traces directly from python code using `client.record_trace(obj)`.
+-   **`Coverage`**: Analyze trace coverage with `assay.Coverage(policy_path).analyze(traces)`.
+-   **`Explainer`**: Generate human-readable explanations of tool usage vs policy.
+-   **Performance**: Built on `PyO3` + `maturin` for high-performance Rust bindings.
+
+### 🛡️ Coverage Thresholds & Gates (`assay coverage`)
+New `assay coverage` command to enforce quality gates in CI.
+
+-   **Min Coverage**: Fail build if coverage drops below threshold (`--min-coverage 80`).
+-   **Baseline Regressions**: Compare against a baseline and fail on regression (`--baseline base.json`).
+-   **High Risk Gaps**: Detect and fail if critical `deny`-listed tools are never exercised.
+-   **Export**: Save baselines with `--export-baseline`.
+
+### 📉 Baseline Foundation (`assay baseline`)
+Manage and track baselines to detect behavioral shifts.
+
+-   `assay baseline record`: Capture current run metrics.
+-   `assay baseline check`: Diff current run against stored baseline.
+-   **Determinism**: Guaranteed deterministic output for reliable regression testing.
+
+### Added
+-   **`assay-python-sdk`** package on PyPI (upcoming).
+-   `TraceExplainer` logic exposed to Python.
+
 ## [v1.1.0] - 2026-01-02
 
 ### Added
