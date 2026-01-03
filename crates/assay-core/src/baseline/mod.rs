@@ -183,7 +183,7 @@ impl Baseline {
         }
 
         // Identify missing
-        for ((test_id, metric), _) in &baseline_map {
+        for (test_id, metric) in baseline_map.keys() {
             if !candidate_seen.contains(&(test_id.clone(), metric.clone())) {
                 missing_tests.push(format!("{} (metric: {})", test_id, metric));
             }
