@@ -193,7 +193,7 @@ fn test_coverage_analysis_determinism() {
 
     let report1 = analyzer.analyze(&traces, 80.0);
     let report2 = analyzer.analyze(&traces, 80.0);
-    let report3 = analyzer.analyze(&traces, 80.0);
+
 
     assert_eq!(report1.overall_coverage_pct, report2.overall_coverage_pct);
     assert_eq!(report1.meets_threshold, report2.meets_threshold);
