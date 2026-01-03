@@ -6,7 +6,7 @@
 
 use assay_core::baseline::{Baseline, BaselineEntry, GitInfo};
 use assay_core::coverage::{CoverageAnalyzer, TraceRecord};
-use assay_core::model::{Policy, ToolsPolicy, SequenceRule};
+use assay_core::model::{Policy, SequenceRule, ToolsPolicy};
 use std::collections::{HashMap, HashSet};
 use tempfile::TempDir;
 
@@ -25,12 +25,10 @@ fn make_policy() -> Policy {
             require_args: None,
             arg_constraints: None,
         },
-        sequences: vec![
-            SequenceRule::MaxCalls {
-                tool: "Alpha".to_string(),
-                max: 5,
-            },
-        ],
+        sequences: vec![SequenceRule::MaxCalls {
+            tool: "Alpha".to_string(),
+            max: 5,
+        }],
         aliases: HashMap::new(),
         on_error: assay_core::on_error::ErrorPolicy::default(),
     }
@@ -127,14 +125,12 @@ fn test_baseline_roundtrip_determinism() {
         suite: "roundtrip-test".to_string(),
         assay_version: "1.0.0".to_string(),
         config_fingerprint: "abc123def456".to_string(),
-        entries: vec![
-             BaselineEntry {
-                test_id: "coverage".to_string(),
-                metric: "overall".to_string(),
-                score: 75.5,
-                meta: None,
-            },
-        ],
+        entries: vec![BaselineEntry {
+            test_id: "coverage".to_string(),
+            metric: "overall".to_string(),
+            score: 75.5,
+            meta: None,
+        }],
     };
 
     baseline.save(&path).unwrap();
@@ -144,7 +140,10 @@ fn test_baseline_roundtrip_determinism() {
     loaded.save(&path).unwrap();
     let content_after = std::fs::read_to_string(&path).unwrap();
 
-    assert_eq!(content_before, content_after, "Roundtrip must preserve exact content");
+    assert_eq!(
+        content_before, content_after,
+        "Roundtrip must preserve exact content"
+    );
 }
 
 #[test]
@@ -156,14 +155,12 @@ fn test_diff_determinism() {
         suite: "test".to_string(),
         assay_version: "1.0.0".to_string(),
         config_fingerprint: "hash".to_string(),
-        entries: vec![
-             BaselineEntry {
-                test_id: "coverage".to_string(),
-                metric: "overall".to_string(),
-                score: 80.0,
-                meta: None,
-            },
-        ],
+        entries: vec![BaselineEntry {
+            test_id: "coverage".to_string(),
+            metric: "overall".to_string(),
+            score: 80.0,
+            meta: None,
+        }],
     };
 
     let policy = make_policy();
@@ -172,12 +169,8 @@ fn test_diff_determinism() {
     let analyzer = CoverageAnalyzer::from_policy(&policy);
     let report = analyzer.analyze(&traces, 0.0);
 
-    let candidate = Baseline::from_coverage_report(
-        &report,
-        "test".to_string(),
-        "hash".to_string(),
-        None,
-    );
+    let candidate =
+        Baseline::from_coverage_report(&report, "test".to_string(), "hash".to_string(), None);
 
     let diff1 = baseline.diff(&candidate);
     let diff2 = baseline.diff(&candidate);
@@ -245,10 +238,7 @@ fn test_trace_order_independence() {
     let report1 = analyzer.analyze(&traces_order1, 0.0);
     let report2 = analyzer.analyze(&traces_order2, 0.0);
 
-    assert_eq!(
-        report1.overall_coverage_pct,
-        report2.overall_coverage_pct,
-    );
+    assert_eq!(report1.overall_coverage_pct, report2.overall_coverage_pct,);
 
     assert_eq!(
         report1.tool_coverage.tools_seen_in_traces,
@@ -273,13 +263,11 @@ fn test_removing_trace_triggers_regression() {
         },
     ];
 
-    let reduced_traces = vec![
-        TraceRecord {
-            trace_id: "a".to_string(),
-            tools_called: vec!["Alpha".to_string(), "Beta".to_string()],
-            rules_triggered: HashSet::new(),
-        },
-    ];
+    let reduced_traces = vec![TraceRecord {
+        trace_id: "a".to_string(),
+        tools_called: vec!["Alpha".to_string(), "Beta".to_string()],
+        rules_triggered: HashSet::new(),
+    }];
 
     let analyzer = CoverageAnalyzer::from_policy(&policy);
 
@@ -293,7 +281,7 @@ fn test_removing_trace_triggers_regression() {
 
     let current_report = analyzer.analyze(&reduced_traces, 0.0);
 
-     let candidate = Baseline::from_coverage_report(
+    let candidate = Baseline::from_coverage_report(
         &current_report,
         "test".to_string(),
         "fingerprint".to_string(),
@@ -302,8 +290,15 @@ fn test_removing_trace_triggers_regression() {
 
     let diff = baseline.diff(&candidate);
 
-    assert!(!diff.regressions.is_empty(), "Removing a trace should cause a regression");
-    let reg = diff.regressions.iter().find(|r| r.metric == "overall").unwrap();
+    assert!(
+        !diff.regressions.is_empty(),
+        "Removing a trace should cause a regression"
+    );
+    let reg = diff
+        .regressions
+        .iter()
+        .find(|r| r.metric == "overall")
+        .unwrap();
     assert!(reg.delta < 0.0);
 }
 
@@ -311,13 +306,11 @@ fn test_removing_trace_triggers_regression() {
 fn test_adding_trace_no_regression() {
     let policy = make_policy();
 
-    let baseline_traces = vec![
-        TraceRecord {
-            trace_id: "a".to_string(),
-            tools_called: vec!["Alpha".to_string()],
-            rules_triggered: HashSet::new(),
-        },
-    ];
+    let baseline_traces = vec![TraceRecord {
+        trace_id: "a".to_string(),
+        tools_called: vec!["Alpha".to_string()],
+        rules_triggered: HashSet::new(),
+    }];
 
     let extended_traces = vec![
         TraceRecord {
@@ -373,14 +366,12 @@ fn test_yaml_format_stable() {
         suite: "stable-test".to_string(),
         assay_version: "1.0.0".to_string(),
         config_fingerprint: "deadbeef".to_string(),
-        entries: vec![
-            BaselineEntry {
-                test_id: "coverage".to_string(),
-                metric: "overall".to_string(),
-                score: 85.0,
-                meta: None,
-            },
-        ],
+        entries: vec![BaselineEntry {
+            test_id: "coverage".to_string(),
+            metric: "overall".to_string(),
+            score: 85.0,
+            meta: None,
+        }],
     };
 
     let yaml = serde_json::to_string_pretty(&baseline).unwrap();
@@ -400,14 +391,12 @@ fn test_json_export_deterministic() {
         suite: "json-test".to_string(),
         assay_version: "1.0.0".to_string(),
         config_fingerprint: "hash".to_string(),
-        entries: vec![
-            BaselineEntry {
-                test_id: "coverage".to_string(),
-                metric: "overall".to_string(),
-                score: 50.0,
-                meta: None,
-            },
-        ],
+        entries: vec![BaselineEntry {
+            test_id: "coverage".to_string(),
+            metric: "overall".to_string(),
+            score: 50.0,
+            meta: None,
+        }],
     };
 
     let json1 = serde_json::to_string_pretty(&baseline).unwrap();
