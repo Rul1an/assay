@@ -127,10 +127,10 @@ impl TraceExplainer {
         let mut tool_calls = Vec::new();
         for obj in traces {
             let bound = obj.bind(py);
-             // Reuse RawToolCall logic if possible, or duplicate for now as it is private.
-             // Duplicating for simplicity or extracting deserialization logic.
-             // Since RawToolCall is private in lib.rs, I can reuse it if definition is available.
-             // It is defined at line 28.
+            // Reuse RawToolCall logic if possible, or duplicate for now as it is private.
+            // Duplicating for simplicity or extracting deserialization logic.
+            // Since RawToolCall is private in lib.rs, I can reuse it if definition is available.
+            // It is defined at line 28.
             let raw: RawToolCall = pythonize::depythonize(bound)
                 .map_err(|e| PyValueError::new_err(format!("Invalid tool call format: {}", e)))?;
 
