@@ -131,7 +131,9 @@ impl AssayClient {
                 .create(true)
                 .append(true)
                 .open(path)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to open trace file: {}", e)))?;
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to open trace file: {}", e))
+                })?;
             Some(std::sync::Mutex::new(std::io::BufWriter::new(file)))
         } else {
             None
@@ -160,13 +162,16 @@ impl AssayClient {
 
             // Write as JSONL
             use std::io::Write;
-            serde_json::to_writer(&mut *writer, &value)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize trace: {}", e)))?;
+            serde_json::to_writer(&mut *writer, &value).map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to serialize trace: {}", e))
+            })?;
             writeln!(writer)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to write newline: {}", e)))?;
 
             // Flush to ensure data is written immediately (useful for logs/traces)
-            writer.flush().map_err(|e| PyRuntimeError::new_err(format!("Failed to flush: {}", e)))?;
+            writer
+                .flush()
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to flush: {}", e)))?;
         } else {
             return Err(PyRuntimeError::new_err(
                 "trace_file is not configured; provide trace_file when creating AssayClient to enable record_trace",
