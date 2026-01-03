@@ -202,6 +202,44 @@ impl Baseline {
             missing_tests,
         }
     }
+
+    pub fn from_coverage_report(
+        report: &crate::coverage::CoverageReport,
+        suite: String,
+        config_fingerprint: String,
+        git_info: Option<GitInfo>,
+    ) -> Self {
+        let entries = vec![
+            BaselineEntry {
+                test_id: "coverage".to_string(),
+                metric: "overall".to_string(),
+                score: report.overall_coverage_pct,
+                meta: None,
+            },
+            BaselineEntry {
+                test_id: "coverage".to_string(),
+                metric: "tool".to_string(),
+                score: report.tool_coverage.coverage_pct,
+                meta: None,
+            },
+            BaselineEntry {
+                test_id: "coverage".to_string(),
+                metric: "rule".to_string(),
+                score: report.rule_coverage.coverage_pct,
+                meta: None,
+            },
+        ];
+
+        Self {
+            schema_version: 1,
+            suite,
+            assay_version: env!("CARGO_PKG_VERSION").to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            config_fingerprint,
+            git_info,
+            entries,
+        }
+    }
 }
 
 // Fingerprint logic could go here or in util
