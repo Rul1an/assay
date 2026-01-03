@@ -174,7 +174,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
             .context("failed to load baseline for comparison")?;
 
         // Construct candidate strictly for diffing logic (reuse from_coverage_report)
-         let candidate = assay_core::baseline::Baseline::from_coverage_report(
+        let candidate = assay_core::baseline::Baseline::from_coverage_report(
             &report,
             suite_name.clone(),
             config_fingerprint.clone(),
@@ -184,16 +184,16 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         let diff = baseline.diff(&candidate);
 
         if !diff.regressions.is_empty() {
-             eprintln!("\n❌ REGRESSION DETECTED against baseline:");
-             for r in &diff.regressions {
-                 eprintln!(
-                     "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
-                     r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
-                 );
-             }
-             clean_pass = false;
+            eprintln!("\n❌ REGRESSION DETECTED against baseline:");
+            for r in &diff.regressions {
+                eprintln!(
+                    "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
+                    r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
+                );
+            }
+            clean_pass = false;
         } else {
-             eprintln!("\n✅ No regression against baseline.");
+            eprintln!("\n✅ No regression against baseline.");
         }
     }
 
