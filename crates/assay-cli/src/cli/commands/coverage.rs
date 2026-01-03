@@ -148,6 +148,8 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         }
     }
 
+    let mut clean_pass = true;
+
     // 6. Export Baseline (if requested)
     if let Some(export_path) = args.export_baseline {
         // Capture git info if possible
@@ -172,32 +174,30 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
             .context("failed to load baseline for comparison")?;
 
         // Construct candidate strictly for diffing logic (reuse from_coverage_report)
-        let candidate = assay_core::baseline::Baseline::from_coverage_report(
+         let candidate = assay_core::baseline::Baseline::from_coverage_report(
             &report,
             suite_name.clone(),
-            "".to_string(), // irrelevant for diff
-            None,
+            config_fingerprint.clone(),
+            None, // Git info optional for candidte diff? No, let's capture it.
         );
 
         let diff = baseline.diff(&candidate);
 
         if !diff.regressions.is_empty() {
-            eprintln!("\n❌ REGRESSION DETECTED against baseline:");
-            for r in &diff.regressions {
-                eprintln!(
-                    "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
-                    r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
-                );
-            }
-            // Fail immediately on regression
-            return Ok(exit_codes::TEST_FAILED);
+             eprintln!("\n❌ REGRESSION DETECTED against baseline:");
+             for r in &diff.regressions {
+                 eprintln!(
+                     "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
+                     r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
+                 );
+             }
+             clean_pass = false;
         } else {
-            eprintln!("\n✅ No regression against baseline.");
+             eprintln!("\n✅ No regression against baseline.");
         }
     }
 
     // 8. Exit checks
-    let mut clean_pass = true;
 
     // Check 1: High Risk Gaps
     if !report.high_risk_gaps.is_empty() {
@@ -212,7 +212,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     // Check 2: Min Coverage
     if !report.meets_threshold {
         eprintln!(
-            "\n❌ Coverage threshold not met ({:.1}% < {:.1}%)",
+            "\n❌ Minimum coverage not met ({:.1}% < {:.1}%)",
             report.overall_coverage_pct, report.threshold
         );
         clean_pass = false;
