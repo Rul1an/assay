@@ -1,0 +1,16 @@
+[package]
+name = "assay-python-sdk"
+version = "1.2.0"
+edition = "2021"
+
+[lib]
+name = "assay"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23.3", features = ["extension-module"] }
+assay-core = { path = "../crates/assay-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+pythonize = "0.23.0"

@@ -8,6 +8,7 @@ fn test_baseline_validation_suite_mismatch() {
         assay_version: "0.1.0".into(),
         created_at: "now".into(),
         config_fingerprint: "md5:123".into(),
+        git_info: None,
         entries: vec![],
     };
 

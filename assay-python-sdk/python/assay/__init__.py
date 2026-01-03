@@ -1,24 +1,21 @@
-"""
-Verdict Python SDK: deterministic trace recording for regression gating.
-"""
+from ._native import Policy, CoverageAnalyzer
+import json
 
-from .clock import FrozenClock, SystemClock
-from .openai_instrumentor import (record_chat_completions,
-                                  record_chat_completions_with_tools)
-from .openai_stream_wrapper import (record_chat_completions_stream,
-                                    record_chat_completions_stream_with_tools)
-from .recorder import EpisodeRecorder
-from .redaction import make_redactor
-from .writer import TraceWriter
+__all__ = ["Policy", "CoverageAnalyzer", "analyze_coverage"]
 
-__all__ = [
-    "TraceWriter",
-    "EpisodeRecorder",
-    "SystemClock",
-    "FrozenClock",
-    "record_chat_completions",
-    "record_chat_completions_with_tools",
-    "make_redactor",
-    "record_chat_completions_stream",
-    "record_chat_completions_stream_with_tools",
-]
+def analyze_coverage(policy_path: str, traces: list, threshold: float = 80.0) -> dict:
+    """
+    High-level helper to analyze coverage.
+
+    Args:
+        policy_path: Path to assay policy file (.yaml)
+        traces: List of traces (each trace is a list of tool call dicts)
+        threshold: Minimum coverage percentage (default 80.0)
+
+    Returns:
+        dict: Coverage report object
+    """
+    policy = Policy.from_file(policy_path)
+    analyzer = CoverageAnalyzer(policy)
+    report_json = analyzer.analyze(traces, threshold)
+    return json.loads(report_json)

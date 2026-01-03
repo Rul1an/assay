@@ -49,6 +49,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -65,6 +70,8 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features --workspace
+        env:
+           PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
       - name: Run doc tests
         run: cargo test --doc --workspace
@@ -88,6 +95,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

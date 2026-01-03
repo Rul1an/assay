@@ -26,8 +26,7 @@ pub enum Command {
     Import(ImportArgs),
     Migrate(MigrateArgs),
     Coverage(CoverageArgs),
-    #[cfg(feature = "experimental")]
-    Explain(super::commands::experimental::explain::ExplainArgs),
+    Explain(super::commands::explain::ExplainArgs),
     Version,
 }
 
@@ -57,8 +56,56 @@ pub struct BaselineArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum BaselineSub {
-    /// Generate a hygiene report for a suite
+    //     /// Generate a hygiene report for a suite
     Report(BaselineReportArgs),
+    /// Record the latest run as a baseline
+    Record(BaselineRecordArgs),
+    /// Check the latest run against a baseline
+    Check(BaselineCheckArgs),
+}
+
+#[derive(Parser, Clone)]
+pub struct BaselineRecordArgs {
+    #[arg(long, default_value = "eval.yaml")]
+    pub config: PathBuf,
+    #[arg(long, default_value = ".eval/eval.db")]
+    pub db: PathBuf,
+
+    /// Test suite name (if omitted, inferred from config)
+    #[arg(long)]
+    pub suite: Option<String>,
+
+    /// Run ID to record (default: latest for suite)
+    #[arg(long)]
+    pub run_id: Option<String>,
+
+    /// Output path
+    #[arg(long, default_value = "assay-baseline.json")]
+    pub out: PathBuf,
+}
+
+#[derive(Parser, Clone)]
+pub struct BaselineCheckArgs {
+    #[arg(long, default_value = "eval.yaml")]
+    pub config: PathBuf,
+    #[arg(long, default_value = ".eval/eval.db")]
+    pub db: PathBuf,
+
+    /// Test suite name (if omitted, inferred from config)
+    #[arg(long)]
+    pub suite: Option<String>,
+
+    /// Run ID to check (default: latest for suite)
+    #[arg(long)]
+    pub run_id: Option<String>,
+
+    /// Baseline path
+    #[arg(long, default_value = "assay-baseline.json")]
+    pub baseline: PathBuf,
+
+    /// Fail on regression
+    #[arg(long, default_value_t = true)]
+    pub fail_on_regression: bool,
 }
 
 #[derive(Parser, Clone)]
