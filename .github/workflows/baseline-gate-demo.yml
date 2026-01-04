@@ -31,6 +31,12 @@ jobs:
           ASSAY_BIN: ${{ github.workspace }}/target/release/assay
         working-directory: examples/baseline-gate
         run: |
+          # 1. Replay traces to populate DB
+          $ASSAY_BIN run \
+            --config eval.yaml \
+            --trace-file traces/run.jsonl \
+            --replay-strict
+
+          # 2. Check for regression against baseline
           $ASSAY_BIN baseline check \
-            --baseline baseline.json \
-            --traces traces/run.jsonl
+            --baseline baseline.json
