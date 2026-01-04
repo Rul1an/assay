@@ -160,7 +160,7 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
 
     let diff = baseline.diff(&candidate);
 
-    if args.format == "json" {
+    if args.format == crate::cli::args::OutputFormat::Json {
         println!("{}", serde_json::to_string_pretty(&diff)?);
     } else {
         // Print Report

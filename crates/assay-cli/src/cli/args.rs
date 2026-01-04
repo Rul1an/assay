@@ -107,9 +107,16 @@ pub struct BaselineCheckArgs {
     #[arg(long, default_value_t = true)]
     pub fail_on_regression: bool,
 
-    /// Output format: text | json
-    #[arg(long, default_value = "text")]
-    pub format: String,
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
+pub enum OutputFormat {
+    #[default]
+    Text,
+    Json,
 }
 
 #[derive(Parser, Clone)]
