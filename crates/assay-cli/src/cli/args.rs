@@ -106,6 +106,10 @@ pub struct BaselineCheckArgs {
     /// Fail on regression
     #[arg(long, default_value_t = true)]
     pub fail_on_regression: bool,
+
+    /// Output format: text | json
+    #[arg(long, default_value = "text")]
+    pub format: String,
 }
 
 #[derive(Parser, Clone)]

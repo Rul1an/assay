@@ -160,41 +160,45 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
 
     let diff = baseline.diff(&candidate);
 
-    // Print Report
-    println!("Baseline comparison against run {}", run_id);
-    if !diff.regressions.is_empty() {
-        println!("\n❌ REGRESSIONS ({}):", diff.regressions.len());
-        for r in &diff.regressions {
-            println!(
-                "  - {} metric '{}': {:.2} -> {:.2} ({:.2})",
-                r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
-            );
-        }
+    if args.format == "json" {
+        println!("{}", serde_json::to_string_pretty(&diff)?);
     } else {
-        println!("\n✅ No regressions.");
-    }
-
-    if !diff.improvements.is_empty() {
-        println!("\n🎉 IMPROVEMENTS ({}):", diff.improvements.len());
-        for i in &diff.improvements {
-            println!(
-                "  - {} metric '{}': {:.2} -> {:.2} (+{:.2})",
-                i.test_id, i.metric, i.baseline_score, i.candidate_score, i.delta
-            );
+        // Print Report
+        println!("Baseline comparison against run {}", run_id);
+        if !diff.regressions.is_empty() {
+            println!("\n❌ REGRESSIONS ({}):", diff.regressions.len());
+            for r in &diff.regressions {
+                println!(
+                    "  - {} metric '{}': {:.2} -> {:.2} ({:.2})",
+                    r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
+                );
+            }
+        } else {
+            println!("\n✅ No regressions.");
         }
-    }
 
-    if !diff.new_tests.is_empty() {
-        println!("\n🆕 NEW TESTS/METRICS ({}):", diff.new_tests.len());
-        for n in &diff.new_tests {
-            println!("  - {}", n);
+        if !diff.improvements.is_empty() {
+            println!("\n🎉 IMPROVEMENTS ({}):", diff.improvements.len());
+            for i in &diff.improvements {
+                println!(
+                    "  - {} metric '{}': {:.2} -> {:.2} (+{:.2})",
+                    i.test_id, i.metric, i.baseline_score, i.candidate_score, i.delta
+                );
+            }
         }
-    }
 
-    if !diff.missing_tests.is_empty() {
-        println!("\n⚠️ MISSING TESTS/METRICS ({}):", diff.missing_tests.len());
-        for m in &diff.missing_tests {
-            println!("  - {}", m);
+        if !diff.new_tests.is_empty() {
+            println!("\n🆕 NEW TESTS/METRICS ({}):", diff.new_tests.len());
+            for n in &diff.new_tests {
+                println!("  - {}", n);
+            }
+        }
+
+        if !diff.missing_tests.is_empty() {
+            println!("\n⚠️ MISSING TESTS/METRICS ({}):", diff.missing_tests.len());
+            for m in &diff.missing_tests {
+                println!("  - {}", m);
+            }
         }
     }
 
@@ -206,6 +210,15 @@ pub fn cmd_baseline_check(args: crate::cli::args::BaselineCheckArgs) -> anyhow::
 }
 
 pub fn capture_git_info() -> Option<assay_core::baseline::GitInfo> {
+    // Try git command first
+    if let Some(info) = capture_git_from_cmd() {
+        return Some(info);
+    }
+    // Fallback to Env Vars (CI)
+    capture_git_from_env()
+}
+
+fn capture_git_from_cmd() -> Option<assay_core::baseline::GitInfo> {
     use std::process::Command;
 
     let output = Command::new("git")
@@ -231,7 +244,7 @@ pub fn capture_git_info() -> Option<assay_core::baseline::GitInfo> {
         .args(["diff", "--quiet"])
         .output()
         .ok()?;
-    let dirty = !output.status.success(); // diff --quiet returns 1 if dirty
+    let dirty = !output.status.success();
 
     let output = Command::new("git")
         .args(["show", "-s", "--format=%an"])
@@ -259,6 +272,24 @@ pub fn capture_git_info() -> Option<assay_core::baseline::GitInfo> {
         dirty,
         author,
         timestamp,
+    })
+}
+
+fn capture_git_from_env() -> Option<assay_core::baseline::GitInfo> {
+    let commit = std::env::var("GITHUB_SHA")
+        .or_else(|_| std::env::var("GIT_COMMIT"))
+        .ok()?;
+
+    let branch = std::env::var("GITHUB_REF_NAME")
+        .or_else(|_| std::env::var("GIT_BRANCH"))
+        .ok();
+
+    Some(assay_core::baseline::GitInfo {
+        commit,
+        branch,
+        dirty: false, // Assume CI is clean
+        author: std::env::var("GITHUB_ACTOR").ok(),
+        timestamp: None,
     })
 }
 
