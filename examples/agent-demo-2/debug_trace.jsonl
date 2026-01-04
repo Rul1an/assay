@@ -1,2 +1,0 @@
-{"type": "episode_start", "episode_id": "ep1", "timestamp": 100, "input": {"prompt": "foo"}, "meta": {}}
-{"type": "episode_end", "episode_id": "ep1", "timestamp": 200, "outcome": "pass", "final_output": "bar"}

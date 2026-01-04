@@ -14,6 +14,10 @@ Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 Full workflow demonstration of **Regression Testing** with Baselines.
 **Features**: `--baseline`, `--export-baseline`.
 
+## 4. [Python SDK Demo](./python-sdk-demo)
+Native Python integration using `pytest` and `assay` library.
+**Features**: `AssayClient`, `Coverage`, `pytest` integration.
+
 ## Usage
 You can run any example directly from the root:
 
