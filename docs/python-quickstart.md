@@ -1,6 +1,6 @@
 # Python Quickstart
 
-Assay provides a native Python SDK for integrating Model Context Protocol (MCP) validation directly into your existing test suites (Pytest, Unittest).
+Use the Assay Python SDK to validate Model Context Protocol (MCP) tool calls in your test suite.
 
 ## Installation
 
@@ -8,19 +8,11 @@ Assay provides a native Python SDK for integrating Model Context Protocol (MCP) 
 pip install assay
 ```
 
-## Core Concepts
+## Validate with Pytest
 
-*   **Policy**: A YAML file defining allowed tools, argument schemas, and sequences.
-*   **Trace**: A JSONL file containing recorded MCP tool calls (or OpenTelemetry logs).
-*   **Coverage**: A metric indicating how well your traces exercise the allowed policy.
+### 1. Define Policy
 
-## Usage with Pytest
-
-The simplest way to use Assay is via the `assay.pytest` plugin or direct wrapper usage.
-
-### 1. Create a Policy
-
-Define your expectations in `assay.yaml`:
+Create `assay.yaml` to define allowed tools, argument schemas, and sequences:
 
 ```yaml
 version: 1
@@ -32,66 +24,44 @@ tools:
 
   escalate_ticket:
     sequence:
-      before: ["search_kb"] # Must search first
+      before: ["search_kb"] # Must search before escalation
 ```
 
-### 2. Write a Test
+### 2. Write Test
 
-Create `test_agent.py`:
+Create `test_compliance.py`. Load your trace logs (JSONL) and assert coverage:
 
 ```python
+import json
 import pytest
 from assay import Coverage
 
-def test_agent_compliance():
-    """
-    Verify that the agent's recent run complies with the policy
-    and achieves sufficient tool coverage.
-    """
-    trace_file = "traces/latest_run.jsonl"
+def test_policy_compliance():
+    # 1. Load traces (list of tool call dicts)
+    with open("traces/latest_run.jsonl") as f:
+        traces = [json.loads(line) for line in f]
 
-    # Initialize coverage analyzer with your policy
+    # 2. Analyze against policy
     cov = Coverage("assay.yaml")
+    report = cov.analyze(traces, min_coverage=90.0)
 
-    # Analyze traces
-    report = cov.analyze(trace_file, min_coverage=90.0)
+    # 3. Assert compliance (report is a dict)
+    assert report["meets_threshold"], \
+        f"Coverage failed: {report['overall_coverage_pct']}% (expected 90%)"
 
-    # Assert compliance
-    assert report.meets_threshold, \
-        f"Coverage failed! Got {report.overall_coverage_pct}%, needed 90%"
-
-    # Check for specific high-risk gaps
-    assert not report.high_risk_gaps, \
-        "Found high-risk tools that were never called: " + str(report.high_risk_gaps)
+    assert not report["high_risk_gaps"], \
+        f"High risk gaps found: {report['high_risk_gaps']}"
 ```
 
-## Using the Pytest Fixture
+## Pytest Fixture
 
-Assay includes a `pytest` fixture for convenience if installed via `pip install assay`.
+The `assay_client` fixture is automatically available. Use it to record traces during live tests.
 
 ```python
-def test_with_fixture(assay_client):
-    # Record a live trace (if running a live agent test)
-    assay_client.record_trace(
-        tool="search_kb",
-        args={"query": "payment failure"}
-    )
-
-    # Or validate existing files
-    # ...
-```
-
-## CI Integration
-
-Run your tests as part of your standard CI pipeline:
-
-```yaml
-# .github/workflows/test.yml
-steps:
-  - uses: actions/checkout@v4
-  - name: Install dependencies
-    run: pip install pytest assay
-
-  - name: Run compliance tests
-    run: pytest test_agent.py
+def test_live_agent(assay_client):
+    # Record tool calls during test execution
+    assay_client.record_trace({
+        "tool": "search_kb",
+        "args": {"query": "payment failure"}
+    })
 ```
