@@ -1,0 +1,6 @@
+from typing import List, Optional, Any, Dict
+from ._native import AssayClient as NativeClient
+
+class AssayClient:
+    def __init__(self, trace_file: Optional[str] = None) -> None: ...
+    def record_trace(self, trace: Any) -> None: ...

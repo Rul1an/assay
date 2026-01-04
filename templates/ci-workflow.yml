@@ -1,0 +1,36 @@
+name: Assay Quality Gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  assay-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # (Optional) If running tests to generate traces
+      # - name: Run Tests
+      #   run: |
+      #     pip install .
+      #     pytest tests/ --trace-file traces.jsonl
+
+      - name: Assay Gate
+        uses: assay-dev/assay-action@v1
+        with:
+          policy: policies/agent.yaml
+          traces: traces.jsonl
+          min-coverage: 80
+          baseline: assay-baseline.json
+          export-baseline: new-baseline.json
+
+      # (Optional) Commit new baseline if on main branch
+      - name: Commit Baseline
+        if: github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update assay baseline"
+          file_pattern: new-baseline.json
