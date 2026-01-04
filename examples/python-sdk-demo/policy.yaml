@@ -5,8 +5,6 @@ tools:
   allow:
     - "Search"
     - "Summarize"
-  deny:
-    - "ExecuteShell"
 
 sequences:
   - type: eventually

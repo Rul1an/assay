@@ -16,7 +16,8 @@ jobs:
       # - name: Run Tests
       #   run: |
       #     pip install .
-      #     pytest tests/ --trace-file traces.jsonl
+      #     # Configure trace files via @pytest.mark.assay(trace_file="traces.jsonl")
+      #     pytest tests/
 
       - name: Assay Gate
         uses: assay-dev/assay-action@v1

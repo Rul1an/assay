@@ -1,8 +1,8 @@
 import pytest
 from assay import Coverage
 
-# Demo of using the assay_client fixture (auto-injected by lazy loading plugin)
-# Note: For this local dev setup, we might need to manually install the plugin first.
+# Demo of using the assay_client fixture (auto-registered via pytest plugin entry point)
+# Note: Installing this package via "pip install ." from the project root will also install and register the pytest plugin for this demo.
 
 @pytest.mark.assay(trace_file="demo_trace.jsonl")
 def test_search_and_summarize(assay_client):
@@ -23,8 +23,7 @@ def test_search_and_summarize(assay_client):
 
 def test_coverage():
     """
-    Verify coverage of the previous run (simulated here by manual trace construction
-    or just checking policy loading for now).
+    Verify coverage of the previous run.
     """
     traces = [
         [{"tool": "Search", "args": {}}, {"tool": "Summarize", "args": {}}]
@@ -33,4 +32,4 @@ def test_coverage():
     report = cov.analyze(traces)
 
     print(report)
-    assert report["overall_coverage_pct"] >= 50.0  # 2/2 allowed tools covered
+    assert report["overall_coverage_pct"] >= 100.0  # 2/2 allowed tools covered (100%)
