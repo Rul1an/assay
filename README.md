@@ -33,6 +33,11 @@ Assay is a toolchain for validating **Model Context Protocol (MCP)** interaction
 
 ## Installation
 
+### Python SDK
+```bash
+pip install assay
+```
+
 ### CLI (Linux/macOS)
 ```bash
 curl -sSL https://assay.dev/install.sh | sh
@@ -47,15 +52,29 @@ curl -sSL https://assay.dev/install.sh | sh
     traces: traces/
 ```
 
-### Python SDK
-```bash
-pip install assay-it
-```
-
 ## Quick Start
 
-### 1. Define Policy
-Create `assay.yaml` to define allowed tools and constraints:
+### 1. Validate with Python (Recommended)
+Write a native Pytest to validate tool coverage and policy compliance:
+
+```python
+# test_compliance.py
+import pytest
+from assay import Coverage
+
+def test_tool_coverage():
+    # Load traces from your agent run
+    traces = "traces/session.jsonl"
+
+    # Enforce policy coverage
+    cov = Coverage("assay.yaml")
+    report = cov.analyze(traces, min_coverage=80.0)
+
+    assert report.meets_threshold, f"Coverage too low: {report.overall_coverage_pct}%"
+```
+
+### 2. Define Policy (assay.yaml)
+Define allowed tools and constraints:
 
 ```yaml
 version: 1
