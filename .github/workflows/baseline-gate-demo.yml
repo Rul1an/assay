@@ -1,0 +1,36 @@
+name: Example CI Gate
+
+on:
+  pull_request:
+    paths:
+      - "examples/baseline-gate/**"
+      - ".github/workflows/baseline-gate-demo.yml"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch baseline from base branch (anti-tamper)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ github.base_ref }}"
+          git fetch origin "$BASE" --depth=1 || echo "Base not found"
+
+          # In a real setup we'd fetch baseline from artifact/main
+          # For this demo we use local baseline.json
+          echo "Simulating fetching baseline..."
+
+      - name: Build Verdict (Current Commit)
+        run: cargo build --release
+
+      - name: Gate PR trace against baseline (offline/replay)
+        env:
+          ASSAY_BIN: ${{ github.workspace }}/target/release/assay
+        working-directory: examples/baseline-gate
+        run: |
+          $ASSAY_BIN baseline check \
+            --baseline baseline.json \
+            --traces traces/run.jsonl
