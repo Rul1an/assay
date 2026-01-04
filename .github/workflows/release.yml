@@ -252,3 +252,52 @@ jobs:
           sleep 30  # Wait for crates.io to index assay-core
           cargo publish --package assay-cli --token ${{ secrets.CRATES_IO_TOKEN }}
         continue-on-error: true
+
+  # ============================================================
+  # Build and Publish Python Wheels (PyPI)
+  # ============================================================
+  wheels:
+    name: Build Wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --manifest-path assay-python-sdk/Cargo.toml
+          sccache: 'true'
+          manylinux: auto
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [release, wheels]
+    runs-on: ubuntu-latest
+    if: "!contains(github.ref, '-rc') && !contains(github.ref, '-beta')"
+    permissions:
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages_dir: dist
