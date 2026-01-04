@@ -4,7 +4,7 @@
 
 use crate::tools::{ToolContext, ToolError};
 use anyhow::{Context, Result};
-use assay_core::experimental::explain;
+use assay_core::explain;
 use serde_json::Value;
 
 #[derive(Debug, serde::Deserialize)]

@@ -7,8 +7,7 @@ pub mod coverage;
 pub mod embeddings;
 pub mod engine;
 pub mod errors;
-#[cfg(feature = "experimental")]
-pub mod experimental;
+
 pub mod explain;
 pub mod fingerprint;
 pub mod judge;

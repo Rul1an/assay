@@ -49,8 +49,7 @@ impl ToolError {
 pub mod check_args;
 pub mod check_coverage;
 pub mod check_sequence;
-#[cfg(feature = "experimental")]
-pub mod experimental;
+pub mod explain_trace;
 pub mod policy_decide;
 
 pub fn list_tools() -> Vec<Value> {
@@ -118,7 +117,6 @@ pub fn list_tools() -> Vec<Value> {
                 "required": ["policy", "traces"]
             }
         }),
-        #[cfg(feature = "experimental")]
         serde_json::json!({
             "name": "assay_explain_trace",
             "description": "Explain trace evaluation against a policy",
@@ -141,8 +139,7 @@ pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow:
         "assay_check_sequence" => check_sequence::check_sequence(ctx, args).await,
         "assay_policy_decide" => policy_decide::policy_decide(ctx, args).await,
         "assay_check_coverage" => check_coverage::check_coverage(ctx, args).await,
-        #[cfg(feature = "experimental")]
-        "assay_explain_trace" => experimental::explain_trace::explain_trace(ctx, args).await,
+        "assay_explain_trace" => explain_trace::explain_trace(ctx, args).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
