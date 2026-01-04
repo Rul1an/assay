@@ -29,6 +29,12 @@ inputs:
     description: 'Fail if high-risk tools are uncovered'
     required: false
     default: 'true'
+  baseline:
+    description: 'Path to baseline file for regression checking'
+    required: false
+  export-baseline:
+    description: 'Path to save new baseline file'
+    required: false
   version:
     description: 'Assay version to use'
     required: false
@@ -85,12 +91,12 @@ runs:
         mkdir -p ~/.assay/bin
         VERSION="${{ inputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
-        
+
         if [ "$VERSION" = "latest" ]; then
           # Get latest release tag
           VERSION=$(curl -sL https://api.github.com/repos/assay-dev/assay/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
         fi
-        
+
         DOWNLOAD_URL="https://github.com/assay-dev/assay/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
         echo "Downloading Assay ${VERSION} for ${TARGET}..."
         curl -sL "$DOWNLOAD_URL" | tar xz -C ~/.assay/bin
@@ -108,7 +114,7 @@ runs:
         # Create report directory
         mkdir -p .assay-reports
         REPORT_FILE=".assay-reports/coverage-report.json"
-        
+
         # Build command
         CMD="assay coverage"
         CMD="$CMD --policy '${{ inputs.policy }}'"
@@ -116,19 +122,27 @@ runs:
         CMD="$CMD --min-coverage ${{ inputs.min-coverage }}"
         CMD="$CMD --format ${{ inputs.format }}"
         CMD="$CMD --output $REPORT_FILE"
-        
+
         if [ "${{ inputs.fail-on-high-risk }}" = "true" ]; then
           CMD="$CMD --fail-on-high-risk"
         fi
-        
+
+        if [ -n "${{ inputs.baseline }}" ]; then
+          CMD="$CMD --baseline '${{ inputs.baseline }}'"
+        fi
+
+        if [ -n "${{ inputs.export-baseline }}" ]; then
+          CMD="$CMD --export-baseline '${{ inputs.export-baseline }}'"
+        fi
+
         echo "Running: $CMD"
-        
+
         # Run and capture exit code
         set +e
         eval $CMD
         EXIT_CODE=$?
         set -e
-        
+
         # Parse results for outputs
         if [ -f "$REPORT_FILE" ]; then
           COVERAGE=$(jq -r '.overall_coverage_pct // 0' "$REPORT_FILE")
@@ -137,7 +151,7 @@ runs:
           echo "meets_threshold=$MEETS" >> $GITHUB_OUTPUT
           echo "report=$REPORT_FILE" >> $GITHUB_OUTPUT
         fi
-        
+
         # Exit with original code
         exit $EXIT_CODE
 

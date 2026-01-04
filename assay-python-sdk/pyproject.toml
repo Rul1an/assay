@@ -12,6 +12,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.entry-points.pytest11]
+assay = "assay.pytest_plugin"
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "assay._native"

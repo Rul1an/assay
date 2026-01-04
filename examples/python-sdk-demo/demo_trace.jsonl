@@ -1,0 +1,4 @@
+{"args":{"query":"apples"},"tool":"Search"}
+{"args":{"text":"Apples are red."},"tool":"Summarize"}
+{"args":{"query":"apples"},"tool":"Search"}
+{"args":{"text":"Apples are red."},"tool":"Summarize"}
