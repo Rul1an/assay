@@ -272,11 +272,9 @@ impl TraceClient {
                 if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
                     model = m.to_string();
                 }
-                if let Some(m) = v.get("meta") {
-                    meta = m.clone();
+                if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
+                    request_id_check = Some(r.to_string());
                 }
-                // (If request_id is needed in validation, store in meta)
-
 
                 // Fix: Extract tool calls for V1/Legacy trace validation
                 let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
