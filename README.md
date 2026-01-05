@@ -31,6 +31,20 @@ Assay validates **Model Context Protocol (MCP)** interactions. It enforces schem
 *   **Runtime Gate**: Proxy to block non-compliant tool calls.
 *   **Compliance**: Audit log validation against policy files.
 
+## Quick Start
+
+The fastest way to validate an MCP trace against a policy (no database required):
+
+```bash
+# 1. Install CLI
+curl -sSL https://assay.dev/install.sh | sh
+
+# 2. Validate a trace file
+assay validate --config assay.yaml --trace-file traces.jsonl
+```
+
+For advanced features like **historical regression testing** and **CI gates**, see the [Usage](#cli-usage) section below.
+
 ## Installation
 
 ### Python SDK
