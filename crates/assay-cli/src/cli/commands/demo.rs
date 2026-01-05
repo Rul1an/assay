@@ -1,8 +1,7 @@
 use crate::cli::args::DemoArgs;
 use assay_core::config::path_resolver::PathResolver;
-use assay_core::validate::{validate, ValidateOptions, ValidateReport};
+use assay_core::validate::{validate, ValidateOptions};
 use std::fs;
-use std::path::Path;
 
 pub async fn cmd_demo(args: DemoArgs) -> anyhow::Result<i32> {
     let demo_dir = args.out;
