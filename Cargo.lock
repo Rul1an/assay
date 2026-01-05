@@ -92,7 +92,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "assay-cli"
-version = "1.2.0"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "1.2.0"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "1.2.0"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "1.2.0"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "assay-python-sdk"
-version = "1.2.0"
+version = "1.2.2"
 dependencies = [
  "assay-core",
  "pyo3",

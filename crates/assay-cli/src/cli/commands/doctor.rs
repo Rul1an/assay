@@ -53,6 +53,11 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                 .unwrap_or("<unknown>")
         ));
         s.push_str(&format!("Diagnostics: {}\n", report.diagnostics.len()));
+        for d in &report.diagnostics {
+            s.push_str(&d.format_terminal());
+            s.push('\n');
+        }
+
         s.push_str("\nNext actions:\n");
         for a in &report.suggested_actions {
             s.push_str(&format!("- {}\n", a.title));

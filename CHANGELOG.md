@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.2] - 2026-01-05
+
+### 💅 Polish & Fixes
+Strictness doesn't have to be unfriendly. This release polishes the "Strict Schema" experience.
+
+-   **Friendly Hints**: When unknown fields are detected (e.g. `requre_args`), Doctor now suggests the closest valid field ("Did you mean `require_args`?").
+-   **Output**: `assay doctor` now correctly displays diagnostic messages in human-readable output (previously they were counted but hidden).
+-   **Release Fix**: Removed legacy workflows to ensure smooth PyPI publishing.
+
+
 ## [v1.2.1-ext] - 2026-01-05
 
 ### 🩺 Smart Doctor (SOTA Agentic Edition)

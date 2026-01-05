@@ -1,0 +1,10 @@
+version: 1
+suite: hints
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected:
+      type: args_valid
+      policy: policy.yaml
+
