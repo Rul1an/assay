@@ -1,8 +1,0 @@
-
-name: test
-version: "1.1" # Required for valid policy
-tools:
-  allow: [Search, Create]
-sequences:
-  - type: require
-    tool: Search

@@ -30,7 +30,6 @@ pub async fn doctor(
     let mut notes = vec![];
     let mut diagnostics: Vec<Diagnostic> = vec![];
 
-    // 1) Validate (reuses validation logic)
     let vopts = ValidateOptions {
         trace_file: opts.trace_file.clone(),
         baseline_file: opts.baseline_file.clone(),
@@ -39,10 +38,8 @@ pub async fn doctor(
     let vreport = validate(cfg, &vopts, resolver).await?;
     diagnostics.extend(vreport.diagnostics);
 
-    // 2) Load all referenced policies for analysis
     let mut loaded_policies = HashMap::new();
-    // Regex matches serde error: unknown field `foo`, expected one of `bar`, `baz`
-    // (Note: backticks are common in serde error output)
+
     let unknown_field_re = regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
         .expect("Invalid regex for unknown field parsing");
 
@@ -65,7 +62,6 @@ pub async fn doctor(
                         .with_source("doctor.policy_load")
                         .with_context(serde_json::json!({ "path": pb, "error": msg }));
 
-                        // SOTA DX: Fuzzy match hint
                         if let Some(caps) = unknown_field_re.captures(&msg) {
                             let unknown = &caps[1];
                             let expected_str = &caps[2];
@@ -92,7 +88,6 @@ pub async fn doctor(
         }
     }
 
-    // 3) Run Analyzers
     analyzers::config::analyze_config_integrity(cfg, resolver, &mut diagnostics);
     analyzers::policy::analyze_policy_usage(cfg, &loaded_policies, &mut diagnostics);
 
@@ -100,32 +95,29 @@ pub async fn doctor(
         analyzers::trace::analyze_trace_schema(p, &mut diagnostics);
     }
 
-    // 4) Config summary
     let config_summary = Some(summarize_config(cfg));
 
-    // 5) Trace summary (best-effort)
     let trace_summary = match &opts.trace_file {
         Some(p) => summarize_trace(p, cfg, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 6) Baseline summary (best-effort)
     let baseline_summary = match &opts.baseline_file {
         Some(p) => summarize_baseline(p, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 7) DB summary (best-effort)
     let db_summary = match &opts.db_path {
+
         Some(p) => summarize_db(p, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 8) Cache summary (best-effort)
     let caches = summarize_caches(&mut notes);
 
-    // 9) Suggested actions (Top-10 mapping)
+
     let suggested_actions = suggest_from(&diagnostics, cfg, &trace_summary, &baseline_summary);
+
 
     Ok(DoctorReport {
         schema_version: 1,
@@ -375,7 +367,6 @@ fn suggest_from(
 ) -> Vec<SuggestedAction> {
     let mut out = vec![];
 
-    // Top-10 mapping by diagnostic code
     if diags.iter().any(|d| d.code == codes::E_TRACE_MISS) {
         out.push(SuggestedAction {
             title: "Fix trace miss (prompt drift)".into(),

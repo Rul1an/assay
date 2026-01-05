@@ -1,1 +1,0 @@
-{"prompt": "hi", "response": "ok", "function_call": {"name": "foo", "arguments": "{}"}}

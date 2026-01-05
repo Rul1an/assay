@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.9] - 2026-01-05
+
+### 🧹 Code Sweep
+-   Removed redundant directories (`test-*/`, `assay-doctor-*`).
+-   Refactored `doctor` module to remove verbose comments.
+-   Zero fluff policy applied.
+
 ## [v1.2.8] - 2026-01-05
 
 ### 📚 SOTA DX Features
