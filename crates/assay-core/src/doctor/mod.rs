@@ -1,10 +1,11 @@
 pub mod model;
 pub mod analyzers;
 
+
 use chrono::Utc;
+use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 use crate::config::path_resolver::PathResolver;
 use crate::errors::diagnostic::{codes, Diagnostic};

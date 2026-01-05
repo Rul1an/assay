@@ -30,8 +30,8 @@ tests:
 }
 
 #[test]
-fn test_compat_unknown_fields() -> anyhow::Result<()> {
-    // Verify forward compatibility (ignoring unknown fields)
+fn test_strict_schema_rejection() -> anyhow::Result<()> {
+    // Verify strict schema enforcement (unknown fields rejected)
     let mut tmp = NamedTempFile::new()?;
     writeln!(
         tmp,
@@ -39,19 +39,21 @@ fn test_compat_unknown_fields() -> anyhow::Result<()> {
 version: 1
 suite: unknown_fields
 model: dummy
-future_field: "should be ignored"
+future_field: "should be rejected"
 settings:
   new_setting_2026: true
 tests:
   - id: t1
-    input: {{ prompt: "hi", extra_input: "ignored" }}
+    input: {{ prompt: "hi", extra_input: "rejected" }}
     expected: {{ type: must_contain, must_contain: ["hi"], future_metric_param: 123 }}
 "#
     )?;
 
-    let cfg = load_config(tmp.path(), false, false)?;
-    assert_eq!(cfg.suite, "unknown_fields");
-    // Should pass without error
+    let res = load_config(tmp.path(), false, false);
+    assert!(res.is_err(), "Schema should be strict and reject future_field");
+    let err = res.unwrap_err();
+    let err_str = err.to_string();
+    assert!(err_str.contains("unknown field"), "Error should mention unknown field: {}", err_str);
     Ok(())
 }
 
