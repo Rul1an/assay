@@ -72,7 +72,11 @@ tests:
         println!();
         println!("Next steps:");
         println!("  1. Edit the policy: vim {}", policy_path.display());
-        println!("  2. Run validation:  assay validate --config {} --trace-file {}", config_path.display(), trace_path.display());
+        println!(
+            "  2. Run validation:  assay validate --config {} --trace-file {}",
+            config_path.display(),
+            trace_path.display()
+        );
         Ok(0)
     } else {
         // Should not happen in demo, but just in case

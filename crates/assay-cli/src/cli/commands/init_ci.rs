@@ -21,7 +21,10 @@ assay-check:
 "#,
             ".gitlab-ci.yml",
         ),
-        _ => anyhow::bail!("Unknown provider: {}. Supported: github, gitlab", args.provider),
+        _ => anyhow::bail!(
+            "Unknown provider: {}. Supported: github, gitlab",
+            args.provider
+        ),
     };
 
     let target = args.out.unwrap_or_else(|| PathBuf::from(default_path));

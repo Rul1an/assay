@@ -8,13 +8,13 @@ pub mod calibrate;
 pub mod trace;
 
 pub mod coverage;
+pub mod demo;
 pub mod doctor;
 pub mod explain;
 pub mod import;
+pub mod init_ci;
 pub mod migrate;
 pub mod validate;
-pub mod demo;
-pub mod init_ci;
 
 pub mod exit_codes {
     pub const OK: i32 = 0;

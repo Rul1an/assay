@@ -26,7 +26,9 @@ pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) ->
             let mut message = format!("Tool '{}' not defined in policy", tool_name);
             if let Some(obj) = policy.as_object() {
                 // Use our similarity helper
-                if let Some(match_) = crate::errors::similarity::closest_prompt(tool_name, obj.keys()) {
+                if let Some(match_) =
+                    crate::errors::similarity::closest_prompt(tool_name, obj.keys())
+                {
                     message.push_str(&format!(". Did you mean '{}'?", match_.prompt));
                 }
             }
