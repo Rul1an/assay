@@ -178,7 +178,7 @@ pub async fn validate(
                                 if let Some(calls) = tool_calls {
                                     // Convert to policy value for engine
                                     let policy_val = serde_json::to_value(
-                                        &pol.tools.arg_constraints.unwrap_or_default(),
+                                        pol.tools.arg_constraints.unwrap_or_default(),
                                     )
                                     .unwrap_or(serde_json::Value::Null);
 
