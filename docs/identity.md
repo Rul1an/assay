@@ -1,34 +1,28 @@
-# Assay: Two Mental Models
+# Identity: What is Assay?
 
-Assay serves two distinct use cases. Understanding which one applies to you will simplify your experience.
+Assay is **not** an evaluation framework (like Ragas or DeepEval).
+Assay is a **Policy Engine** and **Compliance Gate**.
 
-## 1. The Validation Tool (Stateless)
-**"I just want to check if my agent followed the rules."**
+## The Problem
+Agentic systems are non-deterministic. They call tools in unpredictable orders with unpredictable arguments.
+Documentation says "Search before Escalate", but your Agent escalates immediately.
 
-This is how 80% of users start. You have a log file (traces) and a rule file (policy). You want a Pass/Fail result.
+## The Solution
+**Assay uses Policy-as-Code to enforce limits.**
 
-- **Primary Command**: `assay validate`
-- **Primary Input**: `assay.yaml` (Policy) + `traces.jsonl`
-- **State**: None. No database. No history.
-- **CI/CD**: Blocks PRs if rules are broken.
+-   **Strict Schema**: "Argument `query` must be > 5 chars."
+-   **Sequence Rules**: "`search_kb` MUST PRECEDE `escalate_ticket`."
+-   **Forbidden Tools**: "Never call `delete_user` in prod."
 
-**Example**:
-```bash
-assay validate --config assay.yaml --trace-file runs.jsonl
-```
+## Who is it for?
 
-## 2. The Assay Platform (Stateful)
-**"I want to track regression over time and compare baselines."**
+### The "Vibecoder" (AI Operator)
+You are building agents with natural language. You need a **Guardrail** that screams red when the LLM hallucinates a command that breaks production.
 
-This is for power users managing long-term agent quality. It requires tracking "Baselines" (gold standard behaviors) and comparing new runs against them.
+### The Senior Engineer
+You need **CI/CD determinism**. You don't want "flaky evals" that pass 80% of the time based on LLM whims. Assay is deterministic: The input either matches the schema, or it fails.
 
-- **Primary Command**: `assay run`, `assay baseline check`
-- **Primary Input**: `assay.yaml` (Config) + Connection to LLM or Trace Store
-- **State**: Uses `.assay/eval.db` (SQLite) to store runs and baselines.
-- **CI/CD**: Gates deployments based on "No Regression" + "Coverage Maintenance".
-
-**Key Difference**:
-The **Platform** treats the "Validation Tool" as just one metric (Compliance) among others (Performance, Cost, Drift).
-
-## Recommendation
-Start with **The Validation Tool**. It delivers immediate value with zero infrastructure. Upgrade to **The Platform** only when you need historical analytics or advanced regression testing.
+## Key Principles
+1.  **Zero Fluff**: Reports are binary (Pass/Fail), not "Looks LGTM".
+2.  **Stateless**: Validates anywhere (CLI, CI, Python, Rust).
+3.  **Fast**: Rust-core performance (<10ms overhead).

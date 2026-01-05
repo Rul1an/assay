@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.10] - 2026-01-05
+
+### 📖 Documentation Refresh
+-   **README**: Overhauled for "Vibecoder + Senior" audience.
+-   **Guides**: Updated Python Quickstart and Identity docs.
+-   **Consistency**: `assay-it` is now the canonical package name in docs.
+
 ## [v1.2.9] - 2026-01-05
 
 ### 🧹 Code Sweep

@@ -6,7 +6,7 @@
   <br>
 </h1>
 
-<h4 align="center">MCP Integration Testing & Policy Engine</h4>
+<h4 align="center">The CI/CD Standard for Agentic Systems</h4>
 
 <p align="center">
   <a href="https://github.com/Rul1an/assay/actions/workflows/assay.yml">
@@ -22,111 +22,87 @@
 
 ---
 
-## Overview
+**Assay** is the missing link between your AI Agent and Production. It enforces **Policy-as-Code** on Model Context Protocol (MCP) tool usage, ensuring your agents behave safely and deterministically.
 
-Assay validates **Model Context Protocol (MCP)** interactions. It enforces schema policies and sequence constraints on JSON-RPC `call_tool` payloads.
+**For Vibecoders**: Connect your agent output, run `assay validate`, and see if it breaks the rules.
+**For Engineers**: High-performance Rust binary, rigid schema validation, and zero-fluff CI/CD integration.
 
-**Use Cases:**
-*   **CI/CD**: Deterministic replay of tool execution traces.
-*   **Runtime Gate**: Proxy to block non-compliant tool calls.
-*   **Compliance**: Audit log validation against policy files.
+## 🚀 Features
 
-## Quick Start
+-   **Policy Engine**: Enforce schema strictness and sequence ordering (`search_before_escalate`).
+-   **The Doctor**: Smart diagnostics (`assay doctor`) that fix typo'd tool names and config issues automatically.
+-   **CI-Native**: Generates GitHub/GitLab workflows instantly (`assay init-ci`).
+-   **Stateless Python SDK**: Validate traces directly in `pytest` without a database.
 
-The fastest way to get started is the interactive demo:
+## ⚡ Quick Start
+
+### 1. Instant Verification
+Don't guess. Verify.
 
 ```bash
-# 1. Install CLI
+# Install (macOS/Linux)
 curl -sSL https://assay.dev/install.sh | sh
 
-# 2. Run the instant demo (Generates valid policy & traces)
+# Generate a demo environment (policy + traces) and run checks
 assay demo
-
-# 3. See it pass!
-# ✅ Validation Passed!
 ```
 
-### Stateless Validation
-
-You don't need a database. Validates traces against a policy file directly:
+### 2. CI/CD in 10 Seconds
+Stop writing YAML manually.
 
 ```bash
-assay validate --config assay.yaml --trace-file traces.jsonl
+# Generate a ready-to-merge GitHub Actions workflow
+assay init-ci --provider github
 ```
 
-### Python SDK
+### 3. The Clinic (Debugging)
+Something wrong? Let the Doctor diagnose it.
 
-Validate traces in your Python tests with a clean, stateless API:
+```bash
+# Analyzes your config, policies, and traces for common issues
+assay doctor
+```
+
+## 🐍 Python SDK
+
+Integrate directly into your `pytest` suite. No server required.
+
+```bash
+pip install assay-it
+```
 
 ```python
 from assay import validate
 
-# Returns a report dict (raises if config is invalid)
-report = validate(policy="assay.yaml", traces=my_traces)
-assert report["success"]
+def test_agent_compliance(traces):
+    """
+    Validate agent traces against your defined policy.
+    Raises strict errors on violations.
+    """
+    report = validate(
+        policy_path="assay.yaml",
+        traces=traces
+    )
+
+    assert report["passed"], f"Policy Violation: {report['violations']}"
 ```
 
-## Installation
+> **Note**: Full docstrings and type hints included. Your IDE will love you.
 
-### CLI
-```bash
-curl -sSL https://assay.dev/install.sh | sh
-```
+## 🛠️ CLI Reference
 
-### Python
-```bash
-pip install assay
-```
+| Command | Purpose |
+| :--- | :--- |
+| `assay validate` | Run stateless validation on trace files. |
+| `assay doctor` | Diagnose config issues and fuzzy-match known errors. |
+| `assay init-ci` | Generate CI workflow templates (GitHub/GitLab). |
+| `assay run` | Execute and capture traces from an agent (Advanced). |
 
-### GitHub Action
-```yaml
-# .github/workflows/ci.yml
-- uses: assay-dev/assay-action@v1.2
-  with:
-    command: validate
-    config: assay.yaml
-    trace-file: traces.jsonl
-```
+## 📚 Documentation
 
-### Python Validation Example
-
-```python
-import json
-import pytest
-from assay import validate
-
-def test_tool_compliance():
-    # 1. Load traces (or capture them)
-    with open("traces.jsonl") as f:
-        traces = [json.loads(line) for line in f]
-
-    # 2. Validate against policy (Stateless)
-    report = validate(policy="assay.yaml", traces=traces)
-
-    assert report["meets_threshold"], f"Policy violation: {report['violations']}"
-```
-
-## CLI Usage
-
-Validate captured Inspector or OTel logs:
-
-```bash
-assay run --config assay.yaml --trace-file traces/session.jsonl --strict
-```
-
-Start an MCP-compliant policy server:
-
-```bash
-assay mcp-server --port 3001 --policy .
-```
-
-## Documentation
-
-Full reference: [docs.assay.dev](https://docs.assay.dev)
-
-*   [Configuration Schema](https://docs.assay.dev/config/)
-*   [CLI Commands](https://docs.assay.dev/cli/)
-*   [MCP Protocol Integration](https://docs.assay.dev/mcp/)
+-   [**Getting Started**](https://docs.assay.dev/getting-started/)
+-   [**Python Quickstart**](https://docs.assay.dev/python-quickstart/)
+-   [**Configuration Schema**](https://docs.assay.dev/config/)
 
 ## License
 

@@ -1,67 +1,70 @@
 # Python Quickstart
 
-Use the Assay Python SDK to validate Model Context Protocol (MCP) tool calls in your test suite.
+Integrate **Assay** into your Python test suite to enforce agent compliance. We provide a stateless SDK (`assay-it`) that runs natively in your `pytest` environment.
 
 ## Installation
 
 ```bash
-pip install assay
+pip install assay-it
 ```
 
-## Validate with Pytest
+## Usage
 
-### 1. Define Policy
+### 1. Stateless Validation
 
-Create `assay.yaml` to define allowed tools, argument schemas, and sequences:
-
-```yaml
-version: 1
-tools:
-  search_kb:
-    args:
-      properties:
-        query: { minLength: 5 }
-
-  escalate_ticket:
-    sequence:
-      before: ["search_kb"] # Must search before escalation
-```
-
-### 2. Write Test
-
-Create `test_compliance.py`. Load your trace logs (JSONL) and assert coverage:
+The `validate()` function is the primary entrypoint. It takes a policy path and a list of traces (dicts).
 
 ```python
 import json
 import pytest
-from assay import Coverage
+from assay import validate
 
-def test_policy_compliance():
-    # 1. Load traces (list of tool call dicts)
-    with open("traces/latest_run.jsonl") as f:
+def test_compliance():
+    # 1. Load your agent's trace logs
+    with open("traces.jsonl") as f:
         traces = [json.loads(line) for line in f]
 
-    # 2. Analyze against policy
-    cov = Coverage("assay.yaml")
-    report = cov.analyze(traces, min_coverage=90.0)
+    # 2. Validate against your policy
+    # Returns a rich report dict (passed, violations, score)
+    report = validate(
+        policy_path="assay.yaml",
+        traces=traces
+    )
 
-    # 3. Assert compliance (report is a dict)
-    assert report["meets_threshold"], \
-        f"Coverage failed: {report['overall_coverage_pct']}% (expected 90%)"
-
-    assert not report["high_risk_gaps"], \
-        f"High risk gaps found: {report['high_risk_gaps']}"
+    # 3. Assert success
+    assert report["passed"], \
+        f"Compliance Failed! Found {len(report['violations'])} violations."
 ```
 
-## Pytest Fixture
+### 2. Coverage Analysis
 
-The `assay_client` fixture is automatically available. Use it to record traces during live tests.
+If you need deeper inspection (e.g., coverage percentages), use the `Coverage` class.
 
 ```python
-def test_live_agent(assay_client):
-    # Record tool calls during test execution
-    assay_client.record_trace({
-        "tool": "search_kb",
-        "args": {"query": "payment failure"}
-    })
+from assay import Coverage
+
+def test_coverage():
+    cov = Coverage("assay.yaml")
+
+    # Analyze with a minimum coverage threshold of 90%
+    report = cov.analyze(traces=my_traces, min_coverage=90.0)
+
+    assert report["score"] >= 90.0
+```
+
+### 3. Pytest Fixture
+
+For live capture during tests, `assay-it` plays nice with custom fixtures.
+
+```python
+# conftest.py
+@pytest.fixture
+def assay_client():
+    from assay import AssayClient
+    return AssayClient(trace_file="live_run.jsonl")
+
+# test_agent.py
+def test_agent_run(assay_client):
+    # ... agent logic ...
+    assay_client.record_trace({"tool": "search", "args": {"q": "foo"}})
 ```
