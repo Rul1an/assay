@@ -9,16 +9,14 @@ pub fn analyze_trace_schema(path: &Path, diags: &mut Vec<Diagnostic>) {
         let mut found_tool_calls = 0;
         let mut line_count = 0;
 
-        for line in rdr.lines().take(500) {
-            if let Ok(l) = line {
-                line_count += 1;
-                // Heuristics:
-                if l.contains("\"function_call\"") {
-                    found_function_calls += 1;
-                }
-                if l.contains("\"tool_calls\"") || l.contains("\"tool\"") {
-                    found_tool_calls += 1;
-                }
+        for l in rdr.lines().take(500).flatten() {
+            line_count += 1;
+            // Heuristics:
+            if l.contains("\"function_call\"") {
+                found_function_calls += 1;
+            }
+            if l.contains("\"tool_calls\"") || l.contains("\"tool\"") {
+                found_tool_calls += 1;
             }
         }
 
