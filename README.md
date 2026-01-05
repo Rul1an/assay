@@ -9,8 +9,8 @@
 <h4 align="center">The CI/CD Standard for Agentic Systems</h4>
 
 <p align="center">
-  <a href="https://github.com/Rul1an/assay/actions/workflows/assay.yml">
-    <img src="https://github.com/Rul1an/assay/actions/workflows/assay.yml/badge.svg" alt="CI Status">
+  <a href="https://github.com/Rul1an/assay/actions/workflows/ci.yml">
+    <img src="https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg" alt="CI Status">
   </a>
   <a href="https://crates.io/crates/assay">
     <img src="https://img.shields.io/crates/v/assay.svg" alt="Crates.io">

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.12] - 2026-01-05
+
+### 🩹 Fix
+-   **README**: Fixed broken CI status badge (pointed to non-existent `assay.yml`).
+
 ## [v1.2.11] - 2026-01-05
 
 ### 📖 Docs Pages Update
