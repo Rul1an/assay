@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.3] - 2026-01-05
+
+### 🩹 CI Stabilization
+Patch release to resolve build pipeline issues.
+
+-   **Fix**: Resolved artifact corruption in wheel generation (PyPI Release).
+-   **Fix**: Corrected formatting in `doctor/mod.rs` to pass strict CI linting.
+
 ## [v1.2.2] - 2026-01-05
 
 ### 💅 Polish & Fixes

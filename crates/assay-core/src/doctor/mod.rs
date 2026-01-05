@@ -63,20 +63,28 @@ pub async fn doctor(
                         // SOTA DX: Fuzzy match hint
                         // Regex matches serde error: unknown field `foo`, expected one of `bar`, `baz`
                         // (Note: backticks are common in serde error output)
-                        if let Ok(re) = regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)") {
-                             if let Some(caps) = re.captures(&msg) {
-                                 let unknown = &caps[1];
-                                 let expected_str = &caps[2];
-                                 // expected_str usually looks like "`a`, `b`, `c`"
-                                 let candidates: Vec<String> = expected_str
-                                     .split(',')
-                                     .map(|s| s.trim().trim_matches('`').to_string())
-                                     .collect();
+                        if let Ok(re) =
+                            regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
+                        {
+                            if let Some(caps) = re.captures(&msg) {
+                                let unknown = &caps[1];
+                                let expected_str = &caps[2];
+                                // expected_str usually looks like "`a`, `b`, `c`"
+                                let candidates: Vec<String> = expected_str
+                                    .split(',')
+                                    .map(|s| s.trim().trim_matches('`').to_string())
+                                    .collect();
 
-                                 if let Some(hint) = crate::errors::similarity::closest_prompt(unknown, candidates.iter()) {
-                                     diag = diag.with_fix_step(format!("Replace `{}` with `{}`", unknown, hint.prompt));
-                                 }
-                             }
+                                if let Some(hint) = crate::errors::similarity::closest_prompt(
+                                    unknown,
+                                    candidates.iter(),
+                                ) {
+                                    diag = diag.with_fix_step(format!(
+                                        "Replace `{}` with `{}`",
+                                        unknown, hint.prompt
+                                    ));
+                                }
+                            }
                         }
                         diagnostics.push(diag);
                     }
