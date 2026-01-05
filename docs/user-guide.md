@@ -1,272 +1,70 @@
-# Assay User Guide
+# User Guide
 
-**Assay** is a strict, CI-first regression gate for RAG pipelines (and other LLM apps). It is designed to be deterministic, fast, and easy to integrate into Pull Request workflows.
+Assay ensures your Agentic System is **production-ready** by enforcing strict policies on tool usage.
 
-## 🚀 Quickstart
+## 🚀 Workflows
 
-1. **Install Assay** (via `cargo` or pre-built binary):
-   ```bash
-   cargo install --git https://github.com/Rul1an/assay.git assay-cli
-   ```
+### 1. The CI/CD Gate (Recommended)
+This workflow ensures no broken agent code merges to `main`.
 
-2. **Initialize Scaffolding**:
-   Run `init` to generate a ready-to-use CI setup, including a sample config and traces for deterministic replay.
-   ```bash
-   assay init --ci --gitignore
-   ```
-## Quick Links
-- [Configuration Reference](#configuration-reference)
-- [Command Line Interface](#command-line-interface)
-- [Troubleshooting](./TROUBLESHOOTING.md)
+1.  **Init**: Run `assay init-ci` to generate a GitHub Actions or GitLab CI workflow.
+2.  **Commit**: Push your `assay.yaml` policy and your `traces/` (golden dataset).
+3.  **Gate**: On every PR, Assay verifies your agent's current traces against the policy.
 
-   This creates:
-   - `ci-eval.yaml`: Evaluation configuration.
-   - `traces/ci.jsonl`: Pre-recorded LLM interactions (Replay Mode).
-   - `schemas/ci_answer.schema.json`: Example JSON Schema.
-   - `.github/workflows/assay.yml`: GitHub Actions workflow.
-
-3. **Run CI Gate**:
-   ```bash
-   assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --strict
-   ```
-
----
-
-## 💡 Core Concepts
-
-### Statuses
-Assay tests result in one of five statuses:
-- **Pass**: Metric matched expectation.
-- **Fail**: Metric failed (e.g. regex didn't match).
-- **Error**: System error (e.g. LLM call failed, config error, trace missing).
-- **Warn**: Test failed, but is marked as `warn` in Quarantine (Non-blocking by default).
-- **Flaky**: Test passed sometimes and failed sometimes (Auto-rerun detected).
-
-### Strict Mode (`--strict`)
-By default, `Warn` and `Flaky` statuses are treated as passing (Exit Code 0).
-Use `--strict` to treat them as failures (Exit Code 1), enforcing a clean green state.
-
-### Replay Mode vs Reruns
-- **Replay Mode**: When `--trace-file` is provided, Assay uses recorded LLM responses. This allows for **deterministic** and **fast** CI runs without API costs.
-- **Reruns**: In live mode, Assay can retry failed tests (`--rerun-failures N`) to detect flakiness. In Replay Mode, reruns are forced to 0.
-
-### Path Resolution
-File paths in configuration (e.g., `schema_file`) are resolved **relative to the configuration file**. This ensures your config works consistently whether run from the project root or a subdirectory.
-
----
-
-## 📝 Configuration (`eval.yaml`)
-
-```yaml
-version: 1
-suite: "my_rag_suite"
-model: "gpt-4o" # or "trace" for replay
-tests:
-  - id: "rag_q1"
-    input:
-      prompt: "Explain RAG"
-    expected:
-      # Option A: Regex Match
-      type: regex_match
-      pattern: "retrieval.*generation"
-      flags: ["i"]
-
-  - id: "json_output"
-    input:
-      prompt: "Output JSON"
-    expected:
-      # Option B: JSON Schema
-      type: json_schema
-      schema_file: "schemas/answer.schema.json" # Relative to eval.yaml
-```
-
-### Metrics
-- `must_contain`: List of substrings that must be present.
-- `must_not_contain`: List of substrings that must be absent.
-- `regex_match` / `regex_not_match`: Perl-style regex validation.
-- `json_schema`: Validates structure against a JSON Schema (inline or file).
-- `semantic_similarity_to`: Fuzzy match using vector embeddings (requires `openai` embedder or trace metadata).
-
-### Semantic Similarity (Fuzzy Match)
-Use this metric to check if the output "means" the same as a reference string, even if the wording differs.
-
-```yaml
-    expected:
-      type: semantic_similarity_to
-      text: "The user is allowed to reset their password."
-      threshold: 0.85 # (Default: 0.80)
-```
-
-**Running Locally (Live)**:
-Requires `OPENAI_API_KEY`.
-```bash
-export OPENAI_API_KEY=sk-...
-assay run --embedder openai --embedding-model text-embedding-3-small
-```
-
-**Running in CI (Offline/Replay)**:
-If you are using `--trace-file`, Assay will look for pre-computed embeddings in the matching trace entry `meta.assay.embeddings`.
-This makes semantic tests **deterministic and free** in CI. No API calls are made if embeddings are present in the trace.
-
-**Trace Schema (v1)**:
-```json
-{
-  "request_id": "...",
-  "prompt": "...",
-  "response": "...",
-  "meta": {
-    "assay": {
-      "embeddings": {
-        "model": "text-embedding-3-small",
-        "response": [0.1, 0.2, ...],
-        "reference": [0.3, 0.4, ...],
-        "source_response": "live",
-        "source_reference": "live"
-      }
-    }
-  }
-}
-```
-
----
-
-## 🛡️ Privacy & Security
-
-### `--redact-prompts`
-Use this flag to redact the `prompt` field in all generated artifacts (SARIF, JSON, JUnit). This prevents PII or sensitive data from leaking into CI logs.
+### 2. The Local Clinic (`doctor`)
+Use `assay doctor` when things go wrong.
 
 ```bash
-assay ci ... --redact-prompts
+$ assay doctor
+Diagnosing... Note: Found 1 issue.
+[ERROR] Policy 'deploy' requires 'env' arg, but trace missing it.
+[HINT]  Did you mean 'environment'?
 ```
 
----
+### 3. Python Tests (`pytest`)
+For developers who prefer defining tests in code.
 
-## 📊 CI/CD Integration
+```python
+from assay import validate
 
-Assay is designed for GitHub Actions (and other CI systems).
-
-### Reports
-- `junit.xml`: Test results for CI UI integration. `Warn`/`Flaky` tests appear as "Passed" with warning logs (unless `--strict`).
-- `sarif.json`: Static Analysis results for GitHub Code Scanning (showing failures inline in PRs).
-- `run.json`: Full detailed JSON report.
-
-### Workflow Example
-See `.github/workflows/assay.yml` generated by `assay init --ci`.
-
----
-
-## 🔧 Troubleshooting
-
-- **"config error: failed to read schema_file"**: Assay prints both the *resolved absolute path* and the *original relative path* to help you debug file location issues in CI.
-- "trace miss": In Replay Mode, this means the prompt requested is not found in the provided --trace-file.
-
----
-
----
-
-## 📈 Calibration (Metrics Analysis)
-
-Stop guessing metric thresholds. Use `calibrate` to analyze previous test runs and get statistical recommendations.
-
-### Usage
-
-1. **Run tests** (to generate data):
-   ```bash
-   assay ci --export-db .eval/eval.db
-   ```
-
-2. **Run Calibration Report**:
-   ```bash
-   assay calibrate --db .eval/eval.db --suite my_rag_suite --out calibration.json
-   ```
-
-### Output Example (`calibration.json`)
-```json
-"metrics": [
-  {
-    "key": { "metric": "semantic_similarity_to" },
-    "p10": 0.82, "p50": 0.89, "p90": 0.94,
-    "recommended_min_score": 0.82,
-    "recommended_max_drop": 0.07
-  }
-]
-```
-Use these values to tune your `eval.yaml` thresholds or set realistic baselines.
-
----
-
-## 📉 Baseline Workflow (Regression Testing)
-
-For critical applications, defining absolute thresholds (e.g. "score > 0.8") is hard. It is often better to ensure that new changes **do not degrade** performance compared to the `main` branch.
-
-### 3-Step Workflow
-
-**1. Export Baseline (on main)**
-In your CI pipeline for the `main` branch, run the tests and export the results as a baseline artifact.
-
-```bash
-assay ci --export-baseline baseline.json
-# Upload baseline.json as a CI artifact
+def test_agent_logic(traces):
+    assert validate("assay.yaml", traces)["passed"]
 ```
 
-**2. Compare (on PRs)**
-In your Pull Request pipeline, download the baseline artifact from `main` and run the tests against it.
+## 🧠 Core Concepts
 
-```bash
-# Download baseline.json
-assay ci --baseline baseline.json
-```
+### Policy-as-Code
+Assay does **not** use LLMs to evaluate your agent. It uses **Logic**.
+If you define `replicas < 5`, and the agent calls with `replicas: 10`, it fails. 100% of the time.
 
-**3. Configure Thresholds**
-In your `eval.yaml`, configure `thresholding` to define acceptable regression.
+### Statelessness
+Validation requires only two inputs:
+1.  **Policy File** (`assay.yaml`)
+2.  **Trace List** (JSONL or List of Dicts)
 
-```yaml
-settings:
-  thresholding:
-    mode: relative
-    max_drop: 0.01  # Allow 1% drop
-    # min_floor: 0.7 # Optional safety net
-```
+This means you can run Assay **anywhere**: Local, CI, Docker, Airgapped.
 
-If a test score drops by more than `0.01` compared to the baseline, the test will **Fail**.
+### Determinism
+Unlike "LLM-as-a-Judge" evaluators, Assay's output is deterministic.
+-   Same Input + Same Policy = Same Result.
+-   Zero flakiness.
 
-### GitHub Actions (Golden Path)
+## 🛠 Advanced Features
 
-Use the official `assay-action` which handles artifacts for you.
+### Baseline Regression
+Ensure your agent doesn't get *worse*.
 
-**1. Main Branch (Export)**
-```yaml
-- uses: assay-eval/action@v1
-  with:
-    assay_version: v0.2.1
-    export_baseline: baseline.json # generates and uploads 'assay-baseline' artifact
-```
+1.  **Export Baseline**: `assay ci --export-baseline baseline.json` (on `main`).
+2.  **Compare**: `assay ci --baseline baseline.json` (on `feat-branch`).
 
-**2. Pull Requests (Gate)**
-```yaml
-# Fetch baseline from artifact (or commit)
-- uses: actions/download-artifact@v4
-  with:
-    name: assay-baseline
-    path: .
-  continue-on-error: true
+If coverage drops by >5% (configurable), the build fails.
 
-- uses: assay-eval/action@v1
-  with:
-    assay_version: v0.2.1
-    baseline: baseline.json # runs comparison if file exists
-```
+### Friendly Hints
+Assay's error messages are designed for humans.
+-   **Fuzzy Matching**: Detects typos in tool names.
+-   **Context**: Shows lines of code where the error occurred (in Python SDK).
 
----
+## 📚 Reference
 
-## 🔧 Troubleshooting
-
-### Common Issues
-- **"config error: failed to read schema_file"**: Check if the path is relative to `eval.yaml`.
-- **"trace miss"**: The prompt requested is not found in the provided `--trace-file`.
-
-### Baseline Errors
-- **"config error: baseline suite mismatch (Exit 2)"**: You are trying to compare results against a baseline generated from a different test suite. Ensure you are downloading the correct artifact.
-- **"config error: unsupported baseline schema version (Exit 2)"**: The baseline was generated by a newer/older version of Assay that is incompatible. Regenerate the baseline on `main`.
-- **"warning: config fingerprint mismatch"**: The `eval.yaml` used to generate the baseline differs from the current configuration. This is expected if you just changed the config in your PR. The warning reminds you that the comparison might be noisy until the baseline is updated.
-
+-   [**CLI Commands**](cli/index.md)
+-   [**Configuration Schema**](config/index.md)

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.11] - 2026-01-05
+
+### 📖 Docs Pages Update
+-   **Index**: Aligned landing page with new "Vibecoder + Senior" positioning.
+-   **User Guide**: Rewritten to focus on CI/CD, Doctor, and Python workflows (removed legacy RAG metrics noise).
+-   **Consistency**: Unified messaging across README and documentation site.
+
 ## [v1.2.10] - 2026-01-05
 
 ### 📖 Documentation Refresh

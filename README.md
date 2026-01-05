@@ -25,7 +25,7 @@
 **Assay** is the missing link between your AI Agent and Production. It enforces **Policy-as-Code** on Model Context Protocol (MCP) tool usage, ensuring your agents behave safely and deterministically.
 
 **For Vibecoders**: Connect your agent output, run `assay validate`, and see if it breaks the rules.
-**For Engineers**: High-performance Rust binary, rigid schema validation, and zero-fluff CI/CD integration.
+**For Engineers**: High-performance Rust binary, rigid schema validation, and CI/CD integration.
 
 ## 🚀 Features
 

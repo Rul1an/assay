@@ -6,67 +6,79 @@
   <br>
 </h1>
 
-<p class="subtitle">MCP Integration Testing & Policy Engine</p>
+<p class="subtitle">The CI/CD Standard for Agentic Systems</p>
 
-Assay is a toolchain for ensuring strict protocol compliance in **Model Context Protocol (MCP)** implementations. It decouples testing from non-deterministic components (LLMs), enabling deterministic validation of tool execution and argument schemas.
+Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It validates that your AI Agents use tools correctly, enforcing schema limits and sequence rules before they hit production.
 
 ---
 
-## Core Functions
+## What is Assay?
 
 <div class="grid cards" markdown>
 
--   :material-clock-fast:{ .lg .middle } __Offline Validation (CI)__
+-   :material-robot:{ .lg .middle } __For Vibecoders__
 
     ---
 
-    Replays recorded JSON-RPC sessions against a policy set. Used to detect regression in tool usage patterns without invoking external APIs.
+    You build agents with natural language. Assay is your **Guardrail**. Connect your traces, run `assay validate`, and see if your agent is trying to delete the production database.
 
-    [:octicons-code-24: CLI Reference](cli/index.md)
+    [:octicons-arrow-right-24: Python Quickstart](python-quickstart.md)
 
--   :material-server-network:{ .lg .middle } __Runtime Enforcement__
+-   :material-console:{ .lg .middle } __For Engineers__
 
     ---
 
-    Acts as a policy sidecar or gateway, intercepting tool calls to enforce safety constraints before execution.
+    You need **Determinism**. Assay is a high-performance Rust binary that enforces rigid JSON Schemas and sequence constraints in CI. No flaky evals.
 
-    [:octicons-server-24: Gateway Pattern](guides/gateway-pattern.md)
+    [:octicons-arrow-right-24: CLI Reference](cli/index.md)
 
 </div>
 
-## Integration
+## How it Works
 
-### 1. Define Policies
-
-Policies are defined in YAML (`assay.yaml`) and describe the valid state space for tool arguments and sequences.
+### 1. Define Policy
+Create an `assay.yaml` that defines valid tool usage.
 
 ```yaml
-# assay.yaml
 version: 1
 tools:
   deploy_service:
     args:
       properties:
-        replicas: { max: 3 }
-        env: { pattern: "^(dev|staging)$" }
+        env: { pattern: "^(staging|prod)$" } # Enforce regex
     sequence:
-      before: ["check_health"]
+      before: ["run_tests"] # Must run tests before deploy
 ```
 
-### 2. Execute Validation
+### 2. Capture Traces
+Log your agent's MCP tool calls to a JSONL file.
 
-Use the CLI to validate recorded traces against these policies.
+```json
+{"tool": "run_tests", "args": {}}
+{"tool": "deploy_service", "args": {"env": "prod"}}
+```
+
+### 3. Validate
+Run the validation engine (Stateless).
 
 ```bash
-assay run --config assay.yaml --strict
+assay validate --config assay.yaml --trace-file traces.jsonl
 ```
 
----
+| Result | Status | Reason |
+| :--- | :--- | :--- |
+| **Pass** | ✅ | Schema matches, Sequence respected. |
+| **Fail** | ❌ | `env` was "dev" (pattern mismatch). |
 
-## Architecture
+## Key Features
 
-*   **Policy Engine (`assay-core`)**: The stateless validation kernel.
-*   **Replay Engine**: Ingests `session.json` (MCP Inspector format) and reconstructs the tool call sequence.
-*   **MCP Server**: Exposes the key `check_args` and `check_sequence` tools via JSON-RPC.
+- **Stateless**: No database required. Validate in GitHub Actions, GitLab CI, or local `pytest`.
+- **The Doctor**: `assay doctor` automatically diagnoses config errors and fixes typos.
+- **CI-Native**: `assay init-ci` generates workflow files for you.
+- **Fast**: Written in Rust. <10ms overhead.
 
-[:octicons-arrow-right-24: View Crate Architecture](architecture/index.md)
+## Next Steps
+
+- [**Get Started**](getting-started/index.md)
+- [**Python SDK**](python-quickstart.md)
+- [**Config Reference**](config/index.md)
