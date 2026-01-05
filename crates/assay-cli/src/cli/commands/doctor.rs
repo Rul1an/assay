@@ -3,8 +3,29 @@ use assay_core::config::{load_config, path_resolver::PathResolver};
 use crate::cli::args::DoctorArgs;
 
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    let cfg = load_config(&args.config, legacy_mode, false)
-        .map_err(|e| anyhow::anyhow!("config error: {}", e))?;
+    let cfg = match load_config(&args.config, legacy_mode, false) {
+        Ok(c) => c,
+        Err(e) => {
+            if args.format == "json" {
+                let err_report = serde_json::json!({
+                    "schema_version": 1,
+                    "assay_version": env!("CARGO_PKG_VERSION"),
+                    "generated_at": chrono::Utc::now().to_rfc3339(),
+                    "diagnostics": [{
+                        "code": "E_CFG_PARSE",
+                        "severity": "error",
+                        "source": "cli.load_config",
+                        "message": format!("Failed to parse config: {}", e),
+                        "context": { "error": e.to_string() }
+                    }]
+                });
+                println!("{}", serde_json::to_string_pretty(&err_report)?);
+                return Ok(1);
+            } else {
+                return Err(anyhow::anyhow!("config error: {}", e));
+            }
+        }
+    };
     let resolver = PathResolver::new(&args.config);
 
     let opts = assay_core::doctor::DoctorOptions {

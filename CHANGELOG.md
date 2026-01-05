@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.1-ext] - 2026-01-05
+
+### 🩺 Smart Doctor (SOTA Agentic Edition)
+Transformed `assay doctor` into a "System 2" diagnostic engine for Agentic workflows.
+
+-   **Analyzers**:
+    -   **Trace Drift**: Detects legacy `function_call` usage (recommends `tool_calls`).
+    -   **Integrity**: Validates existence of all referenced policy/config files.
+    -   **Logic**: Detects alias shadowing (e.g. `Search` alias hiding `Search` tool).
+-   **Agentic Contract**:
+    -   Output via `--format json` is strict, machine-readable, and deterministic.
+    -   Includes `fix_steps` for automated self-repair.
+    -   **Robust JSON Errors**: Even config parsing failures return valid JSON envelopes (when requested), ensuring Agents never crash on plain text errors.
+
+### ⚠️ Breaking Changes (Strict Schema)
+To prevent "Silent Failures" (phantom configs), we now enforce **Strict Schema Validation**:
+-   **Unknown fields in `assay.yaml` or `policy.yaml` now cause a HARD ERROR.**
+-   Previously, typos or incorrect nesting (e.g. `tools: ToolName:`) were silently ignored. Now you will see `E_CFG_PARSE` with "unknown field".
+-   *Why*: Required for reliable Agentic generation and debugging.
+
+### 🐛 Fixes
+-   **Demo**: `assay demo` now generates canonical, schema-compliant policies.
+-   **DX**: Restored `request_id` uniqueness check in trace client.
+
 ## [v1.2.0] - 2026-01-04
 
 ### 🐍 Python SDK (`assay-python-sdk`)
