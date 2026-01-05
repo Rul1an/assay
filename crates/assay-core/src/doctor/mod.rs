@@ -1,12 +1,14 @@
 pub mod model;
+pub mod analyzers;
 
 use chrono::Utc;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 use crate::config::path_resolver::PathResolver;
 use crate::errors::diagnostic::{codes, Diagnostic};
-use crate::model::{EvalConfig, Expected};
+use crate::model::{EvalConfig, Expected, Policy};
 use crate::validate::{validate, ValidateOptions};
 
 use model::*;
@@ -28,7 +30,7 @@ pub async fn doctor(
     let mut notes = vec![];
     let mut diagnostics: Vec<Diagnostic> = vec![];
 
-    // 1) Validate (reuses PR-3.4.2)
+    // 1) Validate (reuses validation logic)
     let vopts = ValidateOptions {
         trace_file: opts.trace_file.clone(),
         baseline_file: opts.baseline_file.clone(),
@@ -37,31 +39,67 @@ pub async fn doctor(
     let vreport = validate(cfg, &vopts, resolver).await?;
     diagnostics.extend(vreport.diagnostics);
 
-    // 2) Config summary
+    // 2) Load all referenced policies for analysis
+    let mut loaded_policies = HashMap::new();
+    for test in &cfg.tests {
+        if let Some(path) = test.expected.get_policy_path() {
+            let mut p_str = path.to_string();
+            resolver.resolve_str(&mut p_str);
+            let pb = PathBuf::from(p_str);
+            if pb.exists() {
+                 match Policy::load(&pb) {
+                     Ok(p) => {
+                         loaded_policies.insert(path.to_string(), p);
+                     }
+                     Err(e) => {
+                         diagnostics.push(
+                             Diagnostic::new(
+                                 codes::E_CFG_PARSE,
+                                 format!("Failed to parse policy '{}': {}", path, e),
+                             )
+                             .with_source("doctor.policy_load")
+                             .with_context(serde_json::json!({ "path": pb, "error": e.to_string() })),
+                         );
+                     }
+                 }
+            }
+        }
+    }
+
+    // 3) Run Analyzers
+    analyzers::config::analyze_config_integrity(cfg, resolver, &mut diagnostics);
+    analyzers::policy::analyze_policy_usage(cfg, &loaded_policies, &mut diagnostics);
+
+    if let Some(p) = &opts.trace_file {
+        analyzers::trace::analyze_trace_schema(p, &mut diagnostics);
+    }
+
+    // 4) Config summary
     let config_summary = Some(summarize_config(cfg));
 
-    // 3) Trace summary (best-effort)
+    // 5) Trace summary (best-effort)
     let trace_summary = match &opts.trace_file {
         Some(p) => summarize_trace(p, cfg, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 4) Baseline summary (best-effort)
+    // 6) Baseline summary (best-effort)
     let baseline_summary = match &opts.baseline_file {
         Some(p) => summarize_baseline(p, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 5) DB summary (best-effort)
+    // 7) DB summary (best-effort)
     let db_summary = match &opts.db_path {
         Some(p) => summarize_db(p, &mut diagnostics).ok(),
         None => None,
     };
 
-    // 6) Cache summary (best-effort)
+    // 8) Cache summary (best-effort)
     let caches = summarize_caches(&mut notes);
 
-    // 7) Suggested actions (Top-10 mapping)
+
+    // 9) Suggested actions (Top-10 mapping)
     let suggested_actions = suggest_from(&diagnostics, cfg, &trace_summary, &baseline_summary);
 
     Ok(DoctorReport {
@@ -89,6 +127,11 @@ pub async fn doctor(
         notes,
     })
 }
+
+// ... include existing summarize helpers ...
+// (Omitting full copy-paste of helpers to keep context small, assuming I can append them or they are preserved if I use smart edit, verify?)
+// Since I'm replacing the whole file content essentially (or a large chunk), I need to be careful.
+// I will use `replace_file_content` targeting the top section effectively.
 
 fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
     use std::collections::BTreeMap;

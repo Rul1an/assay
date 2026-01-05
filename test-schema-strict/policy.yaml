@@ -1,0 +1,5 @@
+version: 1
+tools:
+  Search:
+    allow: [Search]
+

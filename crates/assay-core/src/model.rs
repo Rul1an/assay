@@ -2,6 +2,7 @@ use crate::on_error::ErrorPolicy;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvalConfig {
     #[serde(default, rename = "configVersion", alias = "version")]
     pub version: u32,
@@ -110,6 +111,7 @@ impl<'de> Deserialize<'de> for TestCase {
         D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct RawTestCase {
             id: String,
             input: TestInput,
@@ -370,6 +372,7 @@ impl Default for Expected {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Policy {
     pub version: String,
     #[serde(default)]
@@ -387,6 +390,7 @@ pub struct Policy {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolsPolicy {
     #[serde(default)]
     pub allow: Option<Vec<String>>,

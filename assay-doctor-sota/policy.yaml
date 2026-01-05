@@ -1,0 +1,12 @@
+version: 1
+tools:
+  allow:
+    - Search
+    - OldTool
+  arg_constraints:
+    Search:
+       args: {}
+aliases:
+  Search: [SearchWeb]
+  OldTool: [Search]
+

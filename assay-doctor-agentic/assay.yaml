@@ -1,0 +1,10 @@
+version: 1
+suite: doctor-check
+model: dummy
+tests:
+  - id: t1
+    input: hi
+    expected:
+      type: args_valid
+      policy: missing_policy.yaml
+
