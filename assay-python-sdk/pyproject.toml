@@ -3,7 +3,7 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "assay"
+name = "assay-it"
 requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Rust",

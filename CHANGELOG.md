@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.5] - 2026-01-05
+
+### 📦 PyPI Metadata Fix (Real)
+Updated `pyproject.toml` to explicitly use `assay-it` as the package name, ensuring `maturin` builds the correct wheel metadata for PyPI.
+-   **Distribution Name**: `assay-it` (Final Fix)
+
 ## [v1.2.4] - 2026-01-05
 
 ### 📦 PyPI Package Rename
