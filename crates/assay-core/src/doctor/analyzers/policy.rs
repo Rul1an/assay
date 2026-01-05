@@ -1,7 +1,7 @@
 use crate::errors::diagnostic::{codes, Diagnostic};
 use crate::model::EvalConfig;
 use crate::model::Policy;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 pub fn analyze_policy_usage(
     _cfg: &EvalConfig,
@@ -19,7 +19,9 @@ pub fn analyze_policy_usage(
         // Alias Shadowing Check
         let mut tool_names: HashSet<String> = HashSet::new();
         if let Some(allow) = &policy.tools.allow {
-            for t in allow { tool_names.insert(t.clone()); }
+            for t in allow {
+                tool_names.insert(t.clone());
+            }
         }
         // Also check keys in arg_constraints (tools with schema)
         if let Some(constraints) = &policy.tools.arg_constraints {
@@ -32,9 +34,9 @@ pub fn analyze_policy_usage(
             if tool_names.contains(alias) {
                 diags.push(
                     Diagnostic::new(
-                         // Need a new code for this? reusing CONFIG_INVALID for now
+                        // Need a new code for this? reusing CONFIG_INVALID for now
                         codes::E_CFG_SCHEMA,
-                        format!("Alias '{}' shadows an explicit tool name.", alias)
+                        format!("Alias '{}' shadows an explicit tool name.", alias),
                     )
                     .with_severity("warn")
                     .with_source("doctor.policy_analysis")
@@ -43,7 +45,7 @@ pub fn analyze_policy_usage(
                         "alias": alias,
                         "targets": targets
                     }))
-                    .with_fix_step(format!("Rename alias '{}' to avoid confusion.", alias))
+                    .with_fix_step(format!("Rename alias '{}' to avoid confusion.", alias)),
                 );
             }
         }

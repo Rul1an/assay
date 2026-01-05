@@ -1,6 +1,5 @@
-pub mod model;
 pub mod analyzers;
-
+pub mod model;
 
 use chrono::Utc;
 use std::collections::HashMap;
@@ -48,21 +47,23 @@ pub async fn doctor(
             resolver.resolve_str(&mut p_str);
             let pb = PathBuf::from(p_str);
             if pb.exists() {
-                 match Policy::load(&pb) {
-                     Ok(p) => {
-                         loaded_policies.insert(path.to_string(), p);
-                     }
-                     Err(e) => {
-                         diagnostics.push(
-                             Diagnostic::new(
-                                 codes::E_CFG_PARSE,
-                                 format!("Failed to parse policy '{}': {}", path, e),
-                             )
-                             .with_source("doctor.policy_load")
-                             .with_context(serde_json::json!({ "path": pb, "error": e.to_string() })),
-                         );
-                     }
-                 }
+                match Policy::load(&pb) {
+                    Ok(p) => {
+                        loaded_policies.insert(path.to_string(), p);
+                    }
+                    Err(e) => {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                codes::E_CFG_PARSE,
+                                format!("Failed to parse policy '{}': {}", path, e),
+                            )
+                            .with_source("doctor.policy_load")
+                            .with_context(
+                                serde_json::json!({ "path": pb, "error": e.to_string() }),
+                            ),
+                        );
+                    }
+                }
             }
         }
     }
@@ -98,7 +99,6 @@ pub async fn doctor(
 
     // 8) Cache summary (best-effort)
     let caches = summarize_caches(&mut notes);
-
 
     // 9) Suggested actions (Top-10 mapping)
     let suggested_actions = suggest_from(&diagnostics, cfg, &trace_summary, &baseline_summary);

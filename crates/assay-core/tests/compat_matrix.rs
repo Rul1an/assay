@@ -50,10 +50,17 @@ tests:
     )?;
 
     let res = load_config(tmp.path(), false, false);
-    assert!(res.is_err(), "Schema should be strict and reject future_field");
+    assert!(
+        res.is_err(),
+        "Schema should be strict and reject future_field"
+    );
     let err = res.unwrap_err();
     let err_str = err.to_string();
-    assert!(err_str.contains("unknown field"), "Error should mention unknown field: {}", err_str);
+    assert!(
+        err_str.contains("unknown field"),
+        "Error should mention unknown field: {}",
+        err_str
+    );
     Ok(())
 }
 
