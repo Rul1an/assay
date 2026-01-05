@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.4] - 2026-01-05
+
+### 📦 PyPI Package Rename
+Renamed the Python SDK distribution package to `assay-it` to match the PyPI project name.
+-   **Distribution Name**: `assay-it` (PyPI)
+-   **Import Name**: `import assay` (Unchanged)
+
 ## [v1.2.3] - 2026-01-05
 
 ### 🩹 CI Stabilization
