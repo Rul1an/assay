@@ -52,8 +52,14 @@ impl TraceClient {
             // But schema might not be strictly followed in loose JSON files.
             // Let's use serde_json::Value to sniff.
 
-            let v: serde_json::Value = serde_json::from_str(&line)
-                .map_err(|e| anyhow::anyhow!("line {}: parse error: {}", i + 1, e))?;
+            let v: serde_json::Value = serde_json::from_str(&line).map_err(|e| {
+                anyhow::anyhow!(
+                    "line {}: Invalid trace format. Expected JSONL object.\n  Error: {}\n  Content: {}",
+                    i + 1,
+                    e,
+                    line.chars().take(50).collect::<String>()
+                )
+            })?;
 
             // Heuristic detection
             let mut prompt_opt = None;
@@ -271,6 +277,26 @@ impl TraceClient {
                 }
                 if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
                     request_id_check = Some(r.to_string());
+                }
+
+                // Fix: Extract tool calls for V1/Legacy trace validation
+                let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
+                let tool_args = v.get("args").cloned();
+
+                if let Some(tool) = tool_name {
+                    let record = crate::model::ToolCallRecord {
+                        id: "legacy-v1".to_string(),
+                        tool_name: tool,
+                        args: tool_args.unwrap_or(serde_json::json!({})),
+                        result: None,
+                        error: None,
+                        index: 0,
+                        ts_ms: 0,
+                    };
+                    meta["tool_calls"] = serde_json::json!([record]);
+                } else if let Some(calls) = v.get("tool_calls").and_then(|v| v.as_array()) {
+                    // Propagate full list if present in V1
+                    meta["tool_calls"] = serde_json::Value::Array(calls.clone());
                 }
             }
 

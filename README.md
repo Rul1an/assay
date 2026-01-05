@@ -33,74 +33,77 @@ Assay validates **Model Context Protocol (MCP)** interactions. It enforces schem
 
 ## Quick Start
 
-The fastest way to validate an MCP trace against a policy (no database required):
+The fastest way to get started is the interactive demo:
 
 ```bash
 # 1. Install CLI
 curl -sSL https://assay.dev/install.sh | sh
 
-# 2. Validate a trace file
+# 2. Run the instant demo (Generates valid policy & traces)
+assay demo
+
+# 3. See it pass!
+# ✅ Validation Passed!
+```
+
+### Stateless Validation
+
+You don't need a database. Validates traces against a policy file directly:
+
+```bash
 assay validate --config assay.yaml --trace-file traces.jsonl
 ```
 
-For advanced features like **historical regression testing** and **CI gates**, see the [Usage](#cli-usage) section below.
+### Python SDK
+
+Validate traces in your Python tests with a clean, stateless API:
+
+```python
+from assay import validate
+
+# Returns a report dict (raises if config is invalid)
+report = validate(policy="assay.yaml", traces=my_traces)
+assert report["success"]
+```
 
 ## Installation
 
-### Python SDK
-```bash
-pip install assay
-```
-
-### CLI (Linux/macOS)
+### CLI
 ```bash
 curl -sSL https://assay.dev/install.sh | sh
+```
+
+### Python
+```bash
+pip install assay
 ```
 
 ### GitHub Action
 ```yaml
 # .github/workflows/ci.yml
-- uses: assay-dev/assay-action@v1
+- uses: assay-dev/assay-action@v1.2
   with:
-    policy: policies/agent.yaml
-    traces: traces/
+    command: validate
+    config: assay.yaml
+    trace-file: traces.jsonl
 ```
 
-## Quick Start (Python)
-
-### 1. Define Policy (assay.yaml)
-
-```yaml
-version: 1
-tools:
-  deploy_prod:
-    args:
-      properties:
-        force: { const: false } # Block force=true
-        cluster: { pattern: "^(eu|us)-west-[0-9]$" }
-    sequence:
-      before: ["check_health"] # Must check health before deploy
-```
-
-### 2. Validate Traces
+### Python Validation Example
 
 ```python
-# test_compliance.py
 import json
 import pytest
-from assay import Coverage
+from assay import validate
 
-def test_tool_coverage():
-    # Load traces
-    with open("traces/session.jsonl") as f:
+def test_tool_compliance():
+    # 1. Load traces (or capture them)
+    with open("traces.jsonl") as f:
         traces = [json.loads(line) for line in f]
 
-    # Enforce policy
-    cov = Coverage("assay.yaml")
-    report = cov.analyze(traces, min_coverage=80.0)
+    # 2. Validate against policy (Stateless)
+    report = validate(policy="assay.yaml", traces=traces)
 
-    assert report["meets_threshold"], \
-        f"Coverage too low: {report['overall_coverage_pct']}%"
+    assert report["meets_threshold"], f"Policy violation: {report['violations']}"
 ```
 
 ## CLI Usage

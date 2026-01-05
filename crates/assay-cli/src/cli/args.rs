@@ -27,6 +27,8 @@ pub enum Command {
     Migrate(MigrateArgs),
     Coverage(CoverageArgs),
     Explain(super::commands::explain::ExplainArgs),
+    Demo(DemoArgs),
+    InitCi(InitCiArgs),
     Version,
 }
 
@@ -551,4 +553,22 @@ pub struct CoverageArgs {
 
     #[arg(long, default_value = "text")]
     pub format: String, // text|json|markdown|github
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct DemoArgs {
+    /// Output directory for demo files
+    #[arg(long, default_value = "assay-demo")]
+    pub out: PathBuf,
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct InitCiArgs {
+    /// CI Provider: github | gitlab
+    #[arg(long, default_value = "github")]
+    pub provider: String,
+
+    /// Output path (default depends on provider)
+    #[arg(long)]
+    pub out: Option<PathBuf>,
 }

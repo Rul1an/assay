@@ -16,13 +16,12 @@ pub struct ValidateOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ValidateReport {
     pub diagnostics: Vec<Diagnostic>,
-    // Could add summary stats here later
 }
 
 pub async fn validate(
     cfg: &EvalConfig,
     opts: &ValidateOptions,
-    _resolver: &PathResolver,
+    resolver: &PathResolver,
 ) -> anyhow::Result<ValidateReport> {
     let mut diags = Vec::new();
 
@@ -146,6 +145,87 @@ pub async fn validate(
                 // Better to check once per trace? But we don't have access to all embeddings.
                 // We'll check via response meta if available.
                 check_embedding_dims(&resp, &mut diags, opts.trace_file.as_deref());
+
+                // Check Policy (Requirement 2: ArgsValid)
+                if let Expected::ArgsValid { policy: Some(policy_path), .. } = &tc.expected {
+                    // 1. Load Policy
+                    // For now, load fully. In future, cache via resolver.
+                    // We need to resolve relative to config?
+                    // resolver.resolve_path(policy_path)?
+                     let mut p_str = policy_path.clone();
+                     resolver.resolve_str(&mut p_str);
+                     let policy_file = std::path::PathBuf::from(p_str);
+                     if !policy_file.exists() {
+                         diags.push(
+                            Diagnostic::new(
+                                codes::E_PATH_NOT_FOUND,
+                                format!("Policy file not found: {}", policy_file.display())
+                            )
+                            .with_source("validate")
+                            .with_context(serde_json::json!({ "path": policy_file }))
+                         );
+                     } else {
+                         match crate::model::Policy::load(&policy_file) {
+                             Ok(pol) => {
+                                 // 2. Get Tool Calls from Trace
+                                 let tool_calls = resp.meta.get("tool_calls").and_then(|v| v.as_array());
+
+                                 if let Some(calls) = tool_calls {
+                                     // Convert to policy value for engine
+                                     let policy_val = serde_json::to_value(&pol.tools.arg_constraints.unwrap_or_default()).unwrap_or(serde_json::Value::Null);
+
+                                     // Check for Allowed/Denied lists first?
+                                     // Let's use simple policy_engine:evaluate_tool_args which expects JSON schema map.
+                                     // Wait, Policy struct has complex structure.
+                                     // policy.tools.arg_constraints is Map<Tool, Schema>.
+                                     // policy.tools.allow/deny are lists.
+
+                                     // Simplified validation for v1.2.1: Just check args against schema if present.
+                                     // Detailed enforcement requires full policy engine context (TODO for v1.3)
+
+                                     for call in calls {
+                                          let tool_name = call.get("tool_name").and_then(|s| s.as_str()).unwrap_or("unknown");
+                                          let args = call.get("args").unwrap_or(&serde_json::Value::Null);
+
+                                          // Need to construct the "policy" value expected by evaluate_tool_args
+                                          // It expects { "ToolName": Schema, ... }
+                                          // This is exactly `arg_constraints`.
+
+                                          let verdict = crate::policy_engine::evaluate_tool_args(&policy_val, tool_name, args);
+
+                                          if let crate::policy_engine::VerdictStatus::Blocked = verdict.status {
+                                              let mut d = Diagnostic::new(
+                                                  verdict.reason_code,
+                                                  "Policy violation in tool call"
+                                              )
+                                              .with_source("policy")
+                                              .with_context(verdict.details);
+
+                                              // Add trace context
+                                              if let serde_json::Value::Object(ref mut map) = d.context {
+                                                  map.insert("tool".into(), tool_name.into());
+                                                  map.insert("test_id".into(), tc.id.clone().into());
+                                              }
+                                              diags.push(d);
+                                          }
+                                     }
+                                 } else {
+                                     // No tool calls found in trace?
+                                     // If policy expects validation, maybe warn?
+                                 }
+                             },
+                             Err(e) => {
+                                 diags.push(
+                                    Diagnostic::new(
+                                        codes::E_CFG_PARSE,
+                                        format!("Failed to parse policy: {}", e)
+                                    )
+                                    .with_source("policy")
+                                 );
+                             }
+                         }
+                     }
+                }
             }
         }
     }

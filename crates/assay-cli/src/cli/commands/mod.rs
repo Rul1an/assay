@@ -13,6 +13,8 @@ pub mod explain;
 pub mod import;
 pub mod migrate;
 pub mod validate;
+pub mod demo;
+pub mod init_ci;
 
 pub mod exit_codes {
     pub const OK: i32 = 0;
@@ -45,6 +47,8 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Migrate(args) => migrate::cmd_migrate(args),
         Command::Coverage(args) => coverage::cmd_coverage(args).await,
         Command::Explain(args) => explain::run(args).await,
+        Command::Demo(args) => demo::cmd_demo(args).await,
+        Command::InitCi(args) => init_ci::cmd_init_ci(args).map(|i| i),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)

@@ -22,22 +22,20 @@ pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) ->
     let schema_val = match policy.get(tool_name) {
         Some(s) => s,
         None => {
-            // Implicit block if not in policy? Or allow?
-            // "only validate if schema is present" vs "blocklist".
-            // If we are strictly validating "Must match schema", missing schema = unknown tool = potentially unsafe.
-            // But usually this means "no restrictions".
-            // User requirement: "tool actions te valideren ... blocklist"
-            // If policy engine is for "Validation", missing policy for a tool usually means "Unchecked" (Allowed) OR "Untrusted" (Blocked).
-            // Given "prevent Excessive Agency", "allowed list" is better.
-            // But let's assume if the policy is provided, it acts as an authority.
-            // Helper `args_valid` metric assumed "if not in policy, skipped".
-            // MCP check_args assumed "Tool not defined -> Error (E_POLICY_MISSING_TOOL)".
-            // Let's stick to MCP strictness: If checking against a policy, the tool MUST be in it.
+            // Check for potential typos
+            let mut message = format!("Tool '{}' not defined in policy", tool_name);
+            if let Some(obj) = policy.as_object() {
+                // Use our similarity helper
+                if let Some(match_) = crate::errors::similarity::closest_prompt(tool_name, obj.keys()) {
+                    message.push_str(&format!(". Did you mean '{}'?", match_.prompt));
+                }
+            }
+
             return Verdict {
                 status: VerdictStatus::Blocked,
                 reason_code: "E_POLICY_MISSING_TOOL".to_string(),
                 details: serde_json::json!({
-                    "message": format!("Tool '{}' not defined in policy", tool_name)
+                    "message": message
                 }),
             };
         }

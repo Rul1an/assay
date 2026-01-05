@@ -372,6 +372,7 @@ impl Default for Expected {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     pub version: String,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
@@ -443,6 +444,12 @@ fn default_one() -> u32 {
 
 // Helper for alias resolution
 impl Policy {
+    pub fn load<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let policy: Policy = serde_yaml::from_str(&content)?;
+        Ok(policy)
+    }
+
     pub fn resolve_alias(&self, tool_name: &str) -> Vec<String> {
         if let Some(members) = self.aliases.get(tool_name) {
             members.clone()
