@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.8] - 2026-01-05
+
+### 📚 SOTA DX Features
+-   **Python Docs**: Added comprehensive docstrings to `assay.Coverage`, `assay.validate`, and `AssayClient` wrappers. IDEs will now show rich tooltips. (Google-style)
+-   **Stability**: Added CLI verification tests for `assay init-ci`.
+
 ## [v1.2.7] - 2026-01-05
 
 ### 🩹 Formatting Fix
