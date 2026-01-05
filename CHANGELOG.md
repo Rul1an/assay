@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.6] - 2026-01-05
+
+### 🩹 Clippy Fix
+Patch release to fix a stable-clippy lint `regex_creation_in_loops`.
+-   **Performance**: Regex is now compiled once per doctor suite, not per policy.
+
 ## [v1.2.5] - 2026-01-05
 
 ### 📦 PyPI Metadata Fix (Real)

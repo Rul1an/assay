@@ -41,6 +41,11 @@ pub async fn doctor(
 
     // 2) Load all referenced policies for analysis
     let mut loaded_policies = HashMap::new();
+    // Regex matches serde error: unknown field `foo`, expected one of `bar`, `baz`
+    // (Note: backticks are common in serde error output)
+    let unknown_field_re = regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
+        .expect("Invalid regex for unknown field parsing");
+
     for test in &cfg.tests {
         if let Some(path) = test.expected.get_policy_path() {
             let mut p_str = path.to_string();
@@ -61,12 +66,7 @@ pub async fn doctor(
                         .with_context(serde_json::json!({ "path": pb, "error": msg }));
 
                         // SOTA DX: Fuzzy match hint
-                        // Regex matches serde error: unknown field `foo`, expected one of `bar`, `baz`
-                        // (Note: backticks are common in serde error output)
-                        if let Ok(re) =
-                            regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
-                        {
-                            if let Some(caps) = re.captures(&msg) {
+                        if let Some(caps) = unknown_field_re.captures(&msg) {
                                 let unknown = &caps[1];
                                 let expected_str = &caps[2];
                                 // expected_str usually looks like "`a`, `b`, `c`"
@@ -85,7 +85,6 @@ pub async fn doctor(
                                     ));
                                 }
                             }
-                        }
                         diagnostics.push(diag);
                     }
                 }
