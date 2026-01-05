@@ -67,24 +67,24 @@ pub async fn doctor(
 
                         // SOTA DX: Fuzzy match hint
                         if let Some(caps) = unknown_field_re.captures(&msg) {
-                                let unknown = &caps[1];
-                                let expected_str = &caps[2];
-                                // expected_str usually looks like "`a`, `b`, `c`"
-                                let candidates: Vec<String> = expected_str
-                                    .split(',')
-                                    .map(|s| s.trim().trim_matches('`').to_string())
-                                    .collect();
+                            let unknown = &caps[1];
+                            let expected_str = &caps[2];
+                            // expected_str usually looks like "`a`, `b`, `c`"
+                            let candidates: Vec<String> = expected_str
+                                .split(',')
+                                .map(|s| s.trim().trim_matches('`').to_string())
+                                .collect();
 
-                                if let Some(hint) = crate::errors::similarity::closest_prompt(
-                                    unknown,
-                                    candidates.iter(),
-                                ) {
-                                    diag = diag.with_fix_step(format!(
-                                        "Replace `{}` with `{}`",
-                                        unknown, hint.prompt
-                                    ));
-                                }
+                            if let Some(hint) = crate::errors::similarity::closest_prompt(
+                                unknown,
+                                candidates.iter(),
+                            ) {
+                                diag = diag.with_fix_step(format!(
+                                    "Replace `{}` with `{}`",
+                                    unknown, hint.prompt
+                                ));
                             }
+                        }
                         diagnostics.push(diag);
                     }
                 }

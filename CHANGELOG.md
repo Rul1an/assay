@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.2.7] - 2026-01-05
+
+### 🩹 Formatting Fix
+Patch release to verify `cargo fmt` compliance after `v1.2.6` refactoring.
+
 ## [v1.2.6] - 2026-01-05
 
 ### 🩹 Clippy Fix
