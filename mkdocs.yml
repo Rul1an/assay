@@ -117,6 +117,8 @@ extra:
       link: https://twitter.com/assay_dev
     - icon: fontawesome/brands/discord
       link: https://discord.gg/assay
+    - icon: material/download
+      link: https://getassay.dev
 
   analytics:
     provider: google
@@ -167,6 +169,8 @@ nav:
 
   - CLI Reference:
     - cli/index.md
+    - assay init: cli/init.md
+    - assay validate: cli/validate.md
     - assay run: cli/run.md
     - assay import: cli/import.md
     - assay migrate: cli/migrate.md
