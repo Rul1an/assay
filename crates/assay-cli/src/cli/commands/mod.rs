@@ -12,6 +12,7 @@ pub mod coverage;
 pub mod demo;
 pub mod doctor;
 pub mod explain;
+pub mod fix;
 pub mod import;
 pub mod init;
 pub mod init_ci;
@@ -31,6 +32,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Run(args) => cmd_run(args, legacy_mode).await,
         Command::Ci(args) => cmd_ci(args, legacy_mode).await,
         Command::Validate(args) => validate::run(args, legacy_mode).await,
+        Command::Fix(args) => fix::run(args, legacy_mode).await,
         Command::Doctor(args) => doctor::run(args, legacy_mode).await,
         Command::Import(args) => import::cmd_import(args),
         Command::Quarantine(args) => cmd_quarantine(args).await,

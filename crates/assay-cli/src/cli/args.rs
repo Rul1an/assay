@@ -29,6 +29,7 @@ pub enum Command {
     Explain(super::commands::explain::ExplainArgs),
     Demo(DemoArgs),
     InitCi(InitCiArgs),
+    Fix(FixArgs),
     /// Experimental: MCP Process Wrapper
     #[command(hide = true)]
     Mcp(McpArgs),
@@ -641,4 +642,46 @@ pub struct McpWrapArgs {
     /// Command to wrap (use -- to separate args)
     #[arg(required = true, last = true, allow_hyphen_values = true)]
     pub command: Vec<String>,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MaxRisk {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct FixArgs {
+    #[arg(long, default_value = "assay.yaml")]
+    pub config: std::path::PathBuf,
+
+    #[arg(long)]
+    pub trace_file: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    pub baseline: Option<std::path::PathBuf>,
+
+    #[arg(long, default_value = "false")]
+    pub replay_strict: bool,
+
+    /// Apply all suggested patches without prompting
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Do not write files; show diffs of what would change
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Only apply patch(es) with these id(s). Can be repeated.
+    #[arg(long)]
+    pub only: Vec<String>,
+
+    /// Skip patches above this risk level
+    #[arg(long, value_enum, default_value_t = MaxRisk::High)]
+    pub max_risk: MaxRisk,
+
+    /// List suggested patches (after --only/--max-risk filtering) and exit
+    #[arg(long)]
+    pub list: bool,
 }
