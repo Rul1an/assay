@@ -257,11 +257,13 @@ jobs:
         run: cargo publish --package assay-core --verbose
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        continue-on-error: true
 
       - name: Publish assay-metrics
         run: cargo publish --package assay-metrics --verbose
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        continue-on-error: true
 
       - name: Publish assay-cli
         run: |
@@ -269,6 +271,7 @@ jobs:
           cargo publish --package assay-cli --verbose
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        continue-on-error: true
 
   # ============================================================
   # Build and Publish Python Wheels (PyPI)
