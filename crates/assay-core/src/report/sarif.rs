@@ -80,10 +80,7 @@ pub fn build_sarif_diagnostics(
             "results": sarif_results,
             "invocations": [{
                 "executionSuccessful": diagnostics.iter().all(|d| {
-                    match d.severity.as_str() {
-                         "error" | "ERROR" => false,
-                         _ => true
-                    }
+                    !matches!(d.severity.as_str(), "error" | "ERROR")
                 }),
                 "exitCode": 0 // Actual CLI exit code depends on policy, but tool invocation is "complete"
             }]

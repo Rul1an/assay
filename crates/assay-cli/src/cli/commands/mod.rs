@@ -60,7 +60,6 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     }
 }
 
-
 async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
 

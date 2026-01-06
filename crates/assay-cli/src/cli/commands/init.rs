@@ -15,8 +15,8 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         // Check standard macOS path
         let mac_path = home.join("Library/Application Support/Claude/claude_desktop_config.json");
         if mac_path.exists() {
-             println!("   ✨ Detected Claude Desktop config (global)");
-             // We could offer to import it, but for now just acknowledging it is good DX
+            println!("   ✨ Detected Claude Desktop config (global)");
+            // We could offer to import it, but for now just acknowledging it is good DX
         }
     }
 
@@ -46,28 +46,18 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         crate::templates::POLICY_DEFAULT_YAML,
     )?;
 
-    write_file_if_missing(
-        &args.config,
-        crate::templates::ASSAY_CONFIG_DEFAULT_YAML,
-    )?;
-
+    write_file_if_missing(&args.config, crate::templates::ASSAY_CONFIG_DEFAULT_YAML)?;
 
     // 2. Gitignore
     if args.gitignore {
-        write_file_if_missing(
-            Path::new(".gitignore"),
-            crate::templates::GITIGNORE,
-        )?;
+        write_file_if_missing(Path::new(".gitignore"), crate::templates::GITIGNORE)?;
     }
 
     // 3. CI Scaffolding
     // Handle the boolean flag or the provider string if we upgrade the arg
     if args.ci.is_some() {
-         println!("🏗️  Generating CI scaffolding...");
-         write_file_if_missing(
-            Path::new("ci-eval.yaml"),
-            crate::templates::CI_EVAL_YAML,
-        )?;
+        println!("🏗️  Generating CI scaffolding...");
+        write_file_if_missing(Path::new("ci-eval.yaml"), crate::templates::CI_EVAL_YAML)?;
         write_file_if_missing(
             Path::new("schemas/ci_answer.schema.json"),
             crate::templates::CI_SCHEMA_JSON,
@@ -100,5 +90,3 @@ fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
     }
     Ok(())
 }
-
-
