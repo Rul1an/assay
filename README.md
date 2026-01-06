@@ -1,71 +1,78 @@
 <h1 align="center">
   <br>
-  <img src="docs/assets/logo.svg" alt="Assay Logo" width="200">
+  <img src="docs/assets/logo.svg" alt="Assay Logo" width="120">
   <br>
   Assay
   <br>
 </h1>
 
-<h4 align="center">The CI/CD Standard for Agentic Systems</h4>
+<h4 align="center">Runtime Security for the Agentic Web</h4>
 
 <p align="center">
   <a href="https://github.com/Rul1an/assay/actions/workflows/ci.yml">
     <img src="https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg" alt="CI Status">
   </a>
-  <a href="https://crates.io/crates/assay">
-    <img src="https://img.shields.io/crates/v/assay.svg" alt="Crates.io">
+  <a href="https://crates.io/crates/assay-core">
+    <img src="https://img.shields.io/crates/v/assay-core.svg?color=10b981" alt="Crates.io">
   </a>
-  <a href="https://docs.assay.dev">
-    <img src="https://img.shields.io/badge/docs-assay.dev-blue" alt="Documentation">
+  <a href="https://github.com/Rul1an/assay#readme">
+    <img src="https://img.shields.io/badge/docs-github-blue" alt="Documentation">
   </a>
 </p>
 
 ---
 
-**Assay** is the missing link between your AI Agent and Production. It enforces **Policy-as-Code** on Model Context Protocol (MCP) tool usage, ensuring your agents behave safely and deterministically.
+**Assay** is a high-performance policy engine for AI Agents. It sits between your LLM and your MCP servers, enforcing strict **Policy-as-Code** to prevent unauthorized tool access, argument injection, and hallucinations.
 
-**For Vibecoders**: Connect your agent output, run `assay validate`, and see if it breaks the rules.
-**For Engineers**: High-performance Rust binary, rigid schema validation, and CI/CD integration.
+**For Engineers**: Rust-powered, sub-millisecond latency, strictly typed.
+**For Agents**: Deterministic environment, actionable error messages, self-healing config.
 
 ## 🚀 Features
 
--   **Policy Engine**: Enforce schema strictness and sequence ordering (`search_before_escalate`).
--   **The Doctor**: Smart diagnostics (`assay doctor`) that fix typo'd tool names and config issues automatically.
+-   **MCP Firewall**: Wraps any MCP server to enforce allowlists, argument regex, and rate limits.
+-   **Policy-as-Code**: Define security rules in simple, version-controlled YAML.
+-   **The Doctor**: Self-repairing CLI (`assay doctor`) that fixes drift and config errors automatically.
 -   **CI-Native**: Generates GitHub/GitLab workflows instantly (`assay init-ci`).
--   **Stateless Python SDK**: Validate traces directly in `pytest` without a database.
+-   **Python SDK**: Stateless validation for `pytest` and localized evaluation.
 
 ## ⚡ Quick Start
 
-### 1. Instant Verification
-Don't guess. Verify.
+### 1. Install (macOS / Linux / WSL)
 
 ```bash
-# Install (macOS/Linux)
-curl -sSL https://assay.dev/install.sh | sh
-
-# Generate a demo environment (policy + traces) and run checks
-assay demo
+curl -fsSL https://getassay.dev/install.sh | sh
 ```
 
-### 2. CI/CD in 10 Seconds
-Stop writing YAML manually.
+### 2. Protect an MCP Server
+
+Wrap your existing MCP server command with `assay mcp` to inject the security layer.
+
+```bash
+# Before:
+uvx project-mcp-server
+
+# After (Protected):
+assay mcp run --policy policy.yaml -- uvx project-mcp-server
+```
+
+### 3. Generate Config for Claude/Cursor
+
+Stop fighting JSON manually. Let Assay discover your local config and generate secure snippets.
+
+```bash
+assay mcp config-path
+```
+
+### 4. CI/CD Pipeline
 
 ```bash
 # Generate a ready-to-merge GitHub Actions workflow
 assay init-ci --provider github
 ```
 
-### 3. The Clinic (Debugging)
-Something wrong? Let the Doctor diagnose it.
-
-```bash
-# Analyzes your config, policies, and traces for common issues
-assay doctor
-```
-
 ## 🐍 Python SDK
 
-Integrate directly into your `pytest` suite. No server required.
+Integrate strictly typed validation into your `pytest` suite.
 
 ```bash
 pip install assay-it
@@ -87,22 +94,23 @@ def test_agent_compliance(traces):
     assert report["passed"], f"Policy Violation: {report['violations']}"
 ```
 
-> **Note**: Full docstrings and type hints included. Your IDE will love you.
+## 🛠️ Components
 
-## 🛠️ CLI Reference
-
-| Command | Purpose |
+| Crate | Description |
 | :--- | :--- |
-| `assay validate` | Run stateless validation on trace files. |
-| `assay doctor` | Diagnose config issues and fuzzy-match known errors. |
-| `assay init-ci` | Generate CI workflow templates (GitHub/GitLab). |
-| `assay run` | Execute and capture traces from an agent (Advanced). |
+| **`assay-core`** | The policy engine kernel. Zero dependencies, pure Rust. |
+| **`assay-cli`** | The developer experience. Logic, Doctor, and Init workflows. |
+| **`assay-mcp-server`** | The MITM proxy that secures MCP connections. |
+| **`assay-metrics`** | Telemetry and structured logging events. |
+| **`assay-python-sdk`** | PyO3 bindings for Python integrations. |
 
 ## 📚 Documentation
 
--   [**Getting Started**](https://docs.assay.dev/getting-started/)
--   [**Python Quickstart**](https://docs.assay.dev/python-quickstart/)
--   [**Configuration Schema**](https://docs.assay.dev/config/)
+Detailed guides and references are available in the [**docs/**](docs/) directory or on GitHub.
+
+-   [**Getting Started**](docs/getting-started.md)
+-   [**Configuration Schema**](docs/config.md)
+-   [**Python Reference**](docs/python-sdk.md)
 
 ## License
 
