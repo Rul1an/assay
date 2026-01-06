@@ -7,10 +7,11 @@ use assay_core::config::{load_config, path_resolver::PathResolver};
 use assay_core::validate::{validate, ValidateOptions};
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::cli::args::{FixArgs, MaxRisk};
 use crate::cli::commands::exit_codes;
+use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
 
 pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     // 1) Load config (must succeed for P1 fix)
@@ -165,7 +166,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     })?;
 
     let report2 = validate(&cfg2, &opts, &resolver).await?;
-    let exit2 = decide_exit_like_validate(&report2.diagnostics);
+    let exit2 = decide_exit(&report2.diagnostics);
 
     let error_count = report2
         .diagnostics
@@ -209,53 +210,11 @@ fn print_unified_diff(file: &str, patch_id: &str, before: &str, after: &str) {
     println!("--- end ---");
 }
 
+// Keep this aligned with validate.rs via helpers
 fn max_risk_to_agentic(r: MaxRisk) -> RiskLevel {
     match r {
         MaxRisk::Low => RiskLevel::Low,
         MaxRisk::Medium => RiskLevel::Medium,
         MaxRisk::High => RiskLevel::High,
     }
-}
-
-// Keep this aligned with validate.rs normalization
-fn normalize_severity(s: &str) -> &'static str {
-    match s {
-        "error" | "ERROR" => "error",
-        "warn" | "warning" | "WARN" | "WARNING" => "warn",
-        "note" | "info" | "INFO" => "note",
-        _ => "note",
-    }
-}
-
-// Minimal copy of your validate exit heuristic (so fix returns meaningful code)
-fn decide_exit_like_validate(diags: &[assay_core::errors::diagnostic::Diagnostic]) -> i32 {
-    let has_error = diags
-        .iter()
-        .any(|d| normalize_severity(d.severity.as_str()) == "error");
-    if !has_error {
-        return exit_codes::OK;
-    }
-
-    let is_config_like = diags.iter().any(|d| {
-        normalize_severity(d.severity.as_str()) == "error"
-            && (d.code.starts_with("E_CFG_")
-                || d.code.starts_with("E_PATH_")
-                || d.code.starts_with("E_TRACE_SCHEMA")
-                || d.code.starts_with("E_BASE_MISMATCH"))
-    });
-
-    if is_config_like {
-        exit_codes::CONFIG_ERROR
-    } else {
-        exit_codes::TEST_FAILED
-    }
-}
-
-fn infer_policy_path(assay_yaml: &Path) -> Option<PathBuf> {
-    let s = std::fs::read_to_string(assay_yaml).ok()?;
-    let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
-    let m = doc.as_mapping()?;
-    let v = m.get(serde_yaml::Value::String("policy".into()))?;
-    let p = v.as_str()?;
-    Some(PathBuf::from(p))
 }

@@ -16,7 +16,7 @@ deny:
   - "spawn"
   - "python_sandbox" # Unless explicitly authorized
 
-  # 2. Block sensitive filesystem ops implies manual review for standard "filesystem" server
+  # 2. Blocking sensitive filesystem ops implies manual review for standard "filesystem" server
   # (Assumes standard "filesystem" tool names, adjust if yours differ)
   # - "write_file"
   # - "delete_file"

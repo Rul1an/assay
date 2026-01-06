@@ -58,6 +58,10 @@ struct PolicyCacheEntry {
     shape: PolicyShape,
 }
 
+/// Context for Agentic suggestions.
+///
+/// This provides the "world view" needed to generate relevant fixes,
+/// such as where the policy file is located or what the assay config path is.
 pub struct AgenticCtx {
     /// Optional: path to the *policy* file (policy.yaml).
     /// If not set, we fall back to diagnostics.context.policy_file or "policy.yaml".
@@ -69,6 +73,12 @@ pub struct AgenticCtx {
 }
 
 /// Main entrypoint: build suggestions for any diagnostics list.
+///
+/// Analyzes a list of `Diagnostic` items and generates:
+/// 1. `SuggestedAction`: High-level commands (e.g., `assay fix`, `mkdir`).
+/// 2. `SuggestedPatch`: Concrete JSON Patch operations to apply to files.
+///
+/// The generation is deterministic and stateless (except for reading files referenced in context).
 pub fn build_suggestions(
     diags: &[Diagnostic],
     ctx: &AgenticCtx,

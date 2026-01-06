@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::cli::args::{ValidateArgs, ValidateOutputFormat};
 use crate::cli::commands::exit_codes;
+use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
 
 pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     // 1. Load Config
@@ -18,7 +19,6 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             .with_source("config")
             .with_context(json!({
                 "file": args.config,
-                "config_file": args.config
             }));
 
             let report = ValidateReport {
@@ -44,38 +44,12 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let report = validate(&cfg, &opts, &resolver).await?;
 
     // 4. Determine Exit Code
-    let exit_code = decide_validate_exit(&report);
+    let exit_code = decide_exit(&report.diagnostics);
 
     // 5. Print Report / Export
     print_report(&report, &args, exit_code)?;
 
     Ok(exit_code)
-}
-
-fn decide_validate_exit(report: &ValidateReport) -> i32 {
-    let has_error = report.diagnostics.iter().any(|d| d.severity == "error");
-    if !has_error {
-        return exit_codes::OK;
-    }
-
-    // Heuristic: E_CFG_*, E_PATH*, E_TRACE_SCHEMA* -> CONFIG_ERROR (2)
-    // Else -> TEST_FAILED (1)
-    let is_config_like = report.diagnostics.iter().any(|d| {
-        d.severity == "error"
-            && (d.code.starts_with("E_CFG_")
-                    || d.code.starts_with("E_PATH_")
-                    || d.code.starts_with("E_TRACE_SCHEMA")
-                    // E_BASE_MISMATCH is classified as a Config Error (2) because it typically
-                    // indicates a stale baseline file that needs explicit updating/approval,
-                    // rather than a logic regression in the agent itself. Use `assay baseline record` to fix.
-                    || d.code.starts_with("E_BASE_MISMATCH"))
-    });
-
-    if is_config_like {
-        exit_codes::CONFIG_ERROR
-    } else {
-        exit_codes::TEST_FAILED
-    }
 }
 
 fn print_report(
@@ -258,30 +232,12 @@ fn build_validate_json(
     })
 }
 
-fn infer_policy_path(assay_yaml: &std::path::Path) -> Option<std::path::PathBuf> {
-    let s = std::fs::read_to_string(assay_yaml).ok()?;
-    let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
-    let m = doc.as_mapping()?;
-    let v = m.get(serde_yaml::Value::String("policy".into()))?;
-    let p = v.as_str()?;
-    Some(std::path::PathBuf::from(p))
-}
-
 fn severity_rank(s: &str) -> u8 {
     match s {
         "error" => 0,
         "warn" => 1,
         "note" => 2,
         _ => 3,
-    }
-}
-
-fn normalize_severity(s: &str) -> &'static str {
-    match s {
-        "error" | "ERROR" => "error",
-        "warn" | "warning" | "WARN" | "WARNING" => "warn",
-        "note" | "info" | "INFO" => "note",
-        _ => "note",
     }
 }
 
