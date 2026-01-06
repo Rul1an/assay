@@ -1,3 +1,0 @@
-{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"Content blocked by policy"},{"type":"text","text":"{\"current\":3,\"error_code\":\"MCP_RATE_LIMIT\",\"limit\":2,\"reason\":\"Global tool call limit exceeded\",\"status\":\"deny\"}"}],"isError":true,"structuredContent":{"current":3,"error_code":"MCP_RATE_LIMIT","limit":2,"reason":"Global tool call limit exceeded","status":"deny"}}}
-{"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "Called tool"}]}}
-{"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "Called tool"}]}}
