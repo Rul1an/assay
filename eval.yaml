@@ -1,3 +1,0 @@
-version: 2
-policy: "policy.yaml"
-baseline: ".assay/baseline.json"

@@ -14,13 +14,11 @@ use crate::cli::commands::exit_codes;
 use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
 
 pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    // 1) Load config (must succeed for P1 fix)
     let cfg = load_config(&args.config, legacy_mode, true)
         .map_err(|e| anyhow!("failed to load config {}: {}", args.config.display(), e))?;
 
     let resolver = PathResolver::new(&args.config);
 
-    // 2) Validate
     let opts = ValidateOptions {
         trace_file: args.trace_file.clone(),
         baseline_file: args.baseline.clone(),
@@ -29,7 +27,6 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     let report = validate(&cfg, &opts, &resolver).await?;
 
-    // 3) Build suggested patches
     let inferred_policy = infer_policy_path(&args.config);
     let (_actions, mut patches) = build_suggestions(
         &report.diagnostics,
@@ -44,7 +41,6 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         return Ok(exit_codes::OK);
     }
 
-    // 4) Filters: only + max-risk
     let only_set: BTreeSet<String> = args.only.iter().cloned().collect();
     let max_risk = max_risk_to_agentic(args.max_risk);
 
@@ -73,7 +69,6 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         return Ok(exit_codes::OK);
     }
 
-    // 5) Group by file (deterministic)
     let mut by_file: BTreeMap<String, Vec<assay_core::agentic::SuggestedPatch>> = BTreeMap::new();
     for p in patches {
         by_file.entry(p.file.clone()).or_default().push(p);
@@ -151,8 +146,6 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         return Ok(exit_codes::OK);
     }
 
-    // 6) Re-run validate after modifications (nice feedback loop)
-    // Only if not dry-run
     if args.dry_run {
         return Ok(exit_codes::OK);
     }
