@@ -57,7 +57,6 @@ jobs:
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/assay\n";
 
-
 pub const ASSAY_CONFIG_DEFAULT_YAML: &str = r#"version: 2
 policy: "policy.yaml"
 baseline: ".assay/baseline.json"
