@@ -16,6 +16,14 @@ Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It
 
 <div class="grid cards" markdown>
 
+-   :material-flash:{ .lg .middle } __Install Now__
+
+    ---
+
+    Get the binary in seconds via our new installer.
+
+    [:octicons-arrow-right-24: getassay.dev](https://getassay.dev)
+
 -   :material-robot:{ .lg .middle } __For Vibecoders__
 
     ---
@@ -36,18 +44,11 @@ Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It
 
 ## How it Works
 
-### 1. Define Policy
-Create an `assay.yaml` that defines valid tool usage.
+### 1. Initialize
+Run the wizard to auto-detect your project type and generate secure defaults.
 
-```yaml
-version: 1
-tools:
-  deploy_service:
-    args:
-      properties:
-        env: { pattern: "^(staging|prod)$" } # Enforce regex
-    sequence:
-      before: ["run_tests"] # Must run tests before deploy
+```bash
+assay init
 ```
 
 ### 2. Capture Traces
@@ -59,22 +60,24 @@ Log your agent's MCP tool calls to a JSONL file.
 ```
 
 ### 3. Validate
-Run the validation engine (Stateless).
+Run the validation engine (Stateless). Supports **SARIF** for GitHub Advanced Security.
 
 ```bash
-assay validate --config assay.yaml --trace-file traces.jsonl
+assay validate --trace-file traces.jsonl --format sarif
 ```
 
-| Result | Status | Reason |
+| Result | Status | Output |
 | :--- | :--- | :--- |
-| **Pass** | ✅ | Schema matches, Sequence respected. |
-| **Fail** | ❌ | `env` was "dev" (pattern mismatch). |
+| **Pass** | ✅ | `exit code 0` |
+| **Fail** | ❌ | `exit code 1` + SARIF report |
+| **Error** | ⚠️ | `exit code 2` (Config/Schema validation) |
 
 ## Key Features
 
 - **Stateless**: No database required. Validate in GitHub Actions, GitLab CI, or local `pytest`.
-- **The Doctor**: `assay doctor` automatically diagnoses config errors and fixes typos.
-- **CI-Native**: `assay init-ci` generates workflow files for you.
+- **The Doctor**: `assay doctor` automatically diagnoses config errors.
+- **Agentic Contract**: JSON output optimized for AI agents (`--format json`).
+- **CI-Native**: `assay init --ci` generates GitHub Actions workflows.
 - **Fast**: Written in Rust. <10ms overhead.
 
 ## Next Steps

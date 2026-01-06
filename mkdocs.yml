@@ -117,6 +117,8 @@ extra:
       link: https://twitter.com/assay_dev
     - icon: fontawesome/brands/discord
       link: https://discord.gg/assay
+    - icon: material/download
+      link: https://getassay.dev
 
   analytics:
     provider: google
