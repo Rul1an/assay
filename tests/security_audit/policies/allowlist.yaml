@@ -1,0 +1,4 @@
+tools:
+  allow:
+    - read_file
+    - list_files

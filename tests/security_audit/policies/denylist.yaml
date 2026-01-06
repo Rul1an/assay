@@ -1,0 +1,5 @@
+tools:
+  deny:
+    - delete_file
+    - rm_rf
+    - exec_shell

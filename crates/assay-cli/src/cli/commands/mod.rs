@@ -7,12 +7,14 @@ pub mod baseline;
 pub mod calibrate;
 pub mod trace;
 
+pub mod config_path;
 pub mod coverage;
 pub mod demo;
 pub mod doctor;
 pub mod explain;
 pub mod import;
 pub mod init_ci;
+pub mod mcp;
 pub mod migrate;
 pub mod validate;
 
@@ -49,6 +51,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Explain(args) => explain::run(args).await,
         Command::Demo(args) => demo::cmd_demo(args).await,
         Command::InitCi(args) => init_ci::cmd_init_ci(args),
+        Command::Mcp(args) => mcp::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)

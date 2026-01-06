@@ -29,6 +29,9 @@ pub enum Command {
     Explain(super::commands::explain::ExplainArgs),
     Demo(DemoArgs),
     InitCi(InitCiArgs),
+    /// Experimental: MCP Process Wrapper
+    #[command(hide = true)]
+    Mcp(McpArgs),
     Version,
 }
 
@@ -571,4 +574,59 @@ pub struct InitCiArgs {
     /// Output path (default depends on provider)
     #[arg(long)]
     pub out: Option<PathBuf>,
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct McpArgs {
+    #[command(subcommand)]
+    pub cmd: McpSub,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum McpSub {
+    /// Wrap an MCP server process
+    Wrap(McpWrapArgs),
+    /// Detect config path and generate setup
+    ConfigPath(ConfigPathArgs),
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct ConfigPathArgs {
+    /// Client to configure: claude|cursor
+    pub client: String,
+
+    /// Policy path to include in config
+    #[arg(long)]
+    pub policy: Option<String>,
+
+    /// Wrapped server config (command)
+    #[arg(long)]
+    pub server: Option<String>,
+
+    /// Output JSON only
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Parser, Clone, Debug)]
+pub struct McpWrapArgs {
+    /// Policy file (default: assay.yaml)
+    #[arg(long, default_value = "assay.yaml")]
+    pub policy: PathBuf,
+
+    /// Log decisions but do not block
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Print decisions to stderr
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// Path to append-only audit log (JSONL)
+    #[arg(long)]
+    pub audit_log: Option<PathBuf>,
+
+    /// Command to wrap (use -- to separate args)
+    #[arg(required = true, last = true, allow_hyphen_values = true)]
+    pub command: Vec<String>,
 }

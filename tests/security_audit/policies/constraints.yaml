@@ -1,0 +1,13 @@
+tools:
+  allow:
+    - run_command
+    - write_file
+constraints:
+  run_command:
+    deny_patterns:
+      command: '^(rm|sudo|chmod|chown|dd|mkfs).*'
+      cwd: '^/(etc|root|sys|proc|boot)'
+  write_file:
+    deny_patterns:
+      file_path: '\.(exe|sh|bat|ps1)$'
+      file_path: '^/etc/.*'
