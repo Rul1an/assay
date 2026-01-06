@@ -152,9 +152,9 @@ impl McpProxy {
                                         contract,
                                     );
 
-                                    let mut out = stdout_b.lock().map_err(|e| {
-                                        io::Error::other(e.to_string())
-                                    })?;
+                                    let mut out = stdout_b
+                                        .lock()
+                                        .map_err(|e| io::Error::other(e.to_string()))?;
                                     out.write_all(response_json.as_bytes())?;
                                     out.flush()?;
 
@@ -186,9 +186,9 @@ impl McpProxy {
         });
 
         // Wacht tot client->server eindigt (stdin closed)
-        t_client_to_server.join().map_err(|_| {
-            io::Error::other("client->server thread panicked")
-        })??;
+        t_client_to_server
+            .join()
+            .map_err(|_| io::Error::other("client->server thread panicked"))??;
 
         // Server->client thread kan nog even lopen; join best-effort
         let _ = t_server_to_client.join();
