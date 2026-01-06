@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map as JsonMap, Value as JsonValue};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::agentic::JsonPatchOp;
 
@@ -95,11 +95,11 @@ fn is_index_token(tok: &str) -> bool {
 }
 
 /// Ensure the container for a child exists. Uses `next` token to decide array vs object.
-fn ensure_child_container(
-    parent: &mut JsonValue,
+fn ensure_child_container<'a>(
+    parent: &'a mut JsonValue,
     key: &str,
     next: Option<&str>,
-) -> Result<&mut JsonValue> {
+) -> Result<&'a mut JsonValue> {
     let want_array = next.map(is_index_token).unwrap_or(false);
 
     match parent {

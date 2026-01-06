@@ -1,0 +1,46 @@
+version: "1.0"
+name: "mcp-hardened-gate"
+allow:
+  - "*"
+deny:
+  # RCE / Process execution (hard deny)
+  - "exec"
+  - "shell"
+  - "bash"
+  - "cmd"
+  - "powershell"
+  - "spawn"
+  - "python_sandbox"
+
+  # Network / exfil (common MCP names; harmless if unused)
+  - "http"
+  - "http_request"
+  - "fetch"
+  - "web"
+  - "browser"
+  - "tcp"
+  - "udp"
+
+  # Write / delete (block mutation by default)
+  - "write_file"
+  - "append_file"
+  - "delete_file"
+  - "remove_file"
+  - "rename_file"
+  - "move_file"
+
+constraints:
+  # Read-only FS with tighter scope
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*|^/data/.*"
+
+  # If directory listing exists, keep it scoped too
+  - tool: "list_dir"
+    params:
+      path:
+        matches: "^/app/.*|^/data/.*"
+
+signatures:
+  check_descriptions: true

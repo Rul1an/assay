@@ -3,6 +3,13 @@ use crate::cli::commands::exit_codes;
 use std::path::Path;
 
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
+    if args.list_packs {
+        for p in crate::packs::list() {
+            println!("{}\t{}", p.name, p.description);
+        }
+        return Ok(exit_codes::OK);
+    }
+
     println!("🔍 Scanning project for MCP configurations...");
 
     let mut found_config = false;
@@ -40,11 +47,19 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
 
     println!("\n🏗️  Generating Assay Policy & Config...");
 
-    // Write Opinionated Defaults
-    write_file_if_missing(
-        Path::new("policy.yaml"),
-        crate::templates::POLICY_DEFAULT_YAML,
-    )?;
+    // Write Policy Pack
+    let pack = crate::packs::get(&args.pack)
+        .ok_or_else(|| anyhow::anyhow!("unknown pack '{}'. Use --list-packs.", args.pack))?;
+
+    // Write policy file (respecting existing)
+    let policy_path = Path::new("policy.yaml");
+    if policy_path.exists() {
+        println!("   Skipped {} (exists)", policy_path.display());
+    } else {
+        std::fs::write(policy_path, pack.policy_yaml)
+            .map_err(|e| anyhow::anyhow!("failed to write {}: {}", policy_path.display(), e))?;
+        println!("   Created {} (pack: {})", policy_path.display(), pack.name);
+    }
 
     write_file_if_missing(&args.config, crate::templates::ASSAY_CONFIG_DEFAULT_YAML)?;
 

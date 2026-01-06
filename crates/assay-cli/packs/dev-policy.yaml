@@ -1,0 +1,22 @@
+version: "1.0"
+name: "mcp-dev-gate"
+allow:
+  - "*"
+deny:
+  # Keep only the most dangerous defaults
+  - "exec"
+  - "shell"
+  - "bash"
+  - "cmd"
+  - "powershell"
+  - "spawn"
+
+constraints:
+  # Broader read scope for dev; still avoids totally wild paths
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*|^/data/.*|^\\./.*"
+
+signatures:
+  check_descriptions: true

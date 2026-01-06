@@ -350,6 +350,14 @@ pub struct InitArgs {
     /// generate .gitignore for artifacts/db
     #[arg(long)]
     pub gitignore: bool,
+
+    /// Policy pack to use: default | hardened | dev
+    #[arg(long, default_value = "default")]
+    pub pack: String,
+
+    /// List available packs and exit
+    #[arg(long)]
+    pub list_packs: bool,
 }
 
 #[derive(Parser, Clone)]
