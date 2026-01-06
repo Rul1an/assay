@@ -485,19 +485,19 @@ fn policy_pointers(shape: PolicyShape) -> (&'static str, &'static str) {
 
 fn detect_policy_shape(doc: &serde_yaml::Value) -> PolicyShape {
     // Check if `tools` key exists and is a mapping
-    let tools = doc
+    let tools_map_opt = doc
         .as_mapping()
-        .and_then(|m| m.get(&serde_yaml::Value::String("tools".into())))
+        .and_then(|m| m.get(serde_yaml::Value::String("tools".into())))
         .and_then(|v| v.as_mapping());
 
-    if let Some(tm) = tools {
+    if let Some(tm) = tools_map_opt {
         // Robust check: it's only the "ToolsMap" shape if allow/deny are SEQUENCES inside tools
         let has_allow = tm
-            .get(&serde_yaml::Value::String("allow".into()))
+            .get(serde_yaml::Value::String("allow".into()))
             .and_then(|v| v.as_sequence())
             .is_some();
         let has_deny = tm
-            .get(&serde_yaml::Value::String("deny".into()))
+            .get(serde_yaml::Value::String("deny".into()))
             .and_then(|v| v.as_sequence())
             .is_some();
 
@@ -561,16 +561,18 @@ fn find_in_seq(doc: &serde_yaml::Value, ptr: &str, target: &str) -> Option<usize
     None
 }
 
-fn yaml_ptr<'a>(root: &'a serde_yaml::Value, ptr: &str) -> Option<&'a serde_yaml::Value> {
-    if ptr == "" || ptr == "/" {
-        return Some(root);
+fn yaml_ptr<'a>(doc: &'a serde_yaml::Value, ptr: &str) -> Option<&'a serde_yaml::Value> {
+    // special case: root
+    if ptr.is_empty() || ptr == "/" {
+        return Some(doc);
     }
-    let mut cur = root;
-    for raw in ptr.trim_start_matches('/').split('/') {
-        let key = unescape_pointer(raw);
+
+    let mut cur = doc;
+    for token in ptr.split('/').skip(1) {
+        let key = unescape_pointer(token);
         match cur {
             serde_yaml::Value::Mapping(m) => {
-                cur = m.get(&serde_yaml::Value::String(key))?;
+                cur = m.get(serde_yaml::Value::String(key))?;
             }
             serde_yaml::Value::Sequence(seq) => {
                 let idx: usize = key.parse().ok()?;

@@ -66,7 +66,7 @@ impl McpProxy {
             while reader.read_line(&mut line)? > 0 {
                 let mut out = stdout_a
                     .lock()
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                    .map_err(|e| io::Error::other(e.to_string()))?;
                 out.write_all(line.as_bytes())?;
                 out.flush()?;
                 line.clear();
@@ -153,7 +153,7 @@ impl McpProxy {
                                     );
 
                                     let mut out = stdout_b.lock().map_err(|e| {
-                                        io::Error::new(io::ErrorKind::Other, e.to_string())
+                                        io::Error::other(e.to_string())
                                     })?;
                                     out.write_all(response_json.as_bytes())?;
                                     out.flush()?;
@@ -187,7 +187,7 @@ impl McpProxy {
 
         // Wacht tot client->server eindigt (stdin closed)
         t_client_to_server.join().map_err(|_| {
-            io::Error::new(io::ErrorKind::Other, "client->server thread panicked")
+            io::Error::other("client->server thread panicked")
         })??;
 
         // Server->client thread kan nog even lopen; join best-effort
