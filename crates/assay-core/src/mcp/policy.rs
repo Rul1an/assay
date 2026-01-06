@@ -63,10 +63,20 @@ impl McpPolicy {
         state.requests_count += 1;
 
         if let Some(limits) = &self.limits {
-            if let Some(_max) = limits.max_requests_total {
-                // TODO: Global request limiting via `max_requests_total` is not yet enforced.
-                // Currently only `max_tool_calls_total` is used to enforce limits.
-                // This field is kept for forward compatibility.
+            if let Some(max) = limits.max_requests_total {
+                if state.requests_count > max {
+                    return PolicyDecision::Deny {
+                        tool: "ALL".to_string(),
+                        reason: "Rate limit exceeded (total requests)".to_string(),
+                        contract: serde_json::json!({
+                            "status": "deny",
+                            "error_code": "MCP_RATE_LIMIT",
+                            "limit": max,
+                            "current": state.requests_count,
+                            "reason": "Global request limit exceeded"
+                        }),
+                    };
+                }
             }
         }
 

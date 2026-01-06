@@ -21,6 +21,13 @@ pub struct McpProxy {
     config: ProxyConfig,
 }
 
+impl Drop for McpProxy {
+    fn drop(&mut self) {
+        // Best-effort cleanup
+        let _ = self.child.kill();
+    }
+}
+
 impl McpProxy {
     pub fn spawn(
         command: &str,
@@ -57,7 +64,9 @@ impl McpProxy {
             let mut line = String::new();
 
             while reader.read_line(&mut line)? > 0 {
-                let mut out = stdout_a.lock().unwrap();
+                let mut out = stdout_a
+                    .lock()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
                 out.write_all(line.as_bytes())?;
                 out.flush()?;
                 line.clear();
@@ -143,7 +152,9 @@ impl McpProxy {
                                         contract,
                                     );
 
-                                    let mut out = stdout_b.lock().unwrap();
+                                    let mut out = stdout_b.lock().map_err(|e| {
+                                        io::Error::new(io::ErrorKind::Other, e.to_string())
+                                    })?;
                                     out.write_all(response_json.as_bytes())?;
                                     out.flush()?;
 
@@ -154,8 +165,15 @@ impl McpProxy {
                         }
                     }
                     Err(_) => {
-                        // Passthrough non-request (or parse error)
-                        // eprintln!("[assay] DEBUG: Parse failed for line: {}", line.trim());
+                        // Hardening: Suspicious Unparsable JSON
+                        let trimmed = line.trim();
+                        if trimmed.starts_with('{')
+                            && (trimmed.contains("\"method\"")
+                                || trimmed.contains("\"params\"")
+                                || trimmed.contains("\"tool\""))
+                        {
+                            eprintln!("[assay] WARNING: Suspicious unparsable JSON, forwarding anyway (potential bypass attempt?): {:.60}...", trimmed);
+                        }
                     }
                 }
 
@@ -168,7 +186,9 @@ impl McpProxy {
         });
 
         // Wacht tot client->server eindigt (stdin closed)
-        t_client_to_server.join().expect("client->server thread")?;
+        t_client_to_server.join().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "client->server thread panicked")
+        })??;
 
         // Server->client thread kan nog even lopen; join best-effort
         let _ = t_server_to_client.join();
