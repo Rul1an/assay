@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.3.0] - 2026-01-06
+
+### ✨ New Feature: `assay mcp config-path`
+Simplified 1-step setup for Claude Desktop, Cursor, and other MCP clients.
+-   **Auto-detection**: Automatically finds config files on macOS, Windows, and Linux.
+-   **Generation**: Generates secure JSON snippets for your `mcpServers` config.
+-   **Security**: Enforces policy file usage by default.
+
+### 🛡️ Security Hardening
+-   **Fail-Secure**: CLI now fatal-errors if specified policy file is missing (no insecure fallbacks).
+-   **Policy**: clarifications on rate limit fields.
+-   **Proxy**: Improved logging for unknown tool calls.
+
+### 🐛 CI Fixes
+-   **Python Wheels**: Fixed extensive artifact corruption issue in Release workflow (`release.yml`).
+-   **Linting**: Strict `clippy` and `rustfmt` compliance across the board.
+
 ## [v1.2.12] - 2026-01-05
 
 ### 🩹 Fix
