@@ -250,15 +250,20 @@ jobs:
         run: cargo --version
 
       - name: Authenticate with crates.io
+        id: auth
         uses: rust-lang/crates-io-auth-action@v1
 
       - name: Publish assay-core
         run: cargo publish --package assay-core --verbose
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       - name: Publish assay-cli
         run: |
           sleep 30  # Wait for crates.io to index assay-core
           cargo publish --package assay-cli --verbose
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   # ============================================================
   # Build and Publish Python Wheels (PyPI)
