@@ -152,6 +152,8 @@ fn print_report(
 
 use serde::Serialize;
 
+use assay_core::agentic::{build_suggestions, AgenticCtx};
+
 fn build_validate_json(
     report: &ValidateReport,
     args: &ValidateArgs,
@@ -209,6 +211,15 @@ fn build_validate_json(
         args_list.push(output.display().to_string());
     }
 
+    // Agentic Contract Integration
+    let inferred_policy = infer_policy_path(&args.config);
+    let (suggested_actions, suggested_patches) = build_suggestions(
+        &report.diagnostics,
+        &AgenticCtx {
+            policy_path: inferred_policy,
+        },
+    );
+
     json!({
         "schema_version": 1,
         "ok": error_count == 0,
@@ -229,9 +240,9 @@ fn build_validate_json(
 
         "diagnostics": diag_views,
 
-        // Agentic defaults (always present)
-        "suggested_actions": [],
-        "suggested_patches": [],
+        // Agentic Contract (always present)
+        "suggested_actions": suggested_actions,
+        "suggested_patches": suggested_patches,
 
         "summary": {
             "diagnostic_count": diag_views.len(),
@@ -241,6 +252,15 @@ fn build_validate_json(
             "replay_strict": args.replay_strict
         }
     })
+}
+
+fn infer_policy_path(assay_yaml: &std::path::Path) -> Option<std::path::PathBuf> {
+    let s = std::fs::read_to_string(assay_yaml).ok()?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
+    let m = doc.as_mapping()?;
+    let v = m.get(&serde_yaml::Value::String("policy".into()))?;
+    let p = v.as_str()?;
+    Some(std::path::PathBuf::from(p))
 }
 
 fn severity_rank(s: &str) -> u8 {

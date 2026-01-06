@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "assay.yaml"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Failed to load config: ConfigError: failed to read config assay.yaml: No such file or directory (os error 2)"
+          },
+          "ruleId": "E_CFG_PARSE"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "assay"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

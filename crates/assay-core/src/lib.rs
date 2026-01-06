@@ -26,6 +26,7 @@ pub mod validate;
 
 pub mod agent_assertions;
 
+pub mod agentic;
 pub mod report;
 pub mod storage;
 pub mod thresholds;
