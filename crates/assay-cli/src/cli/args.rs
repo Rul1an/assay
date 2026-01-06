@@ -331,8 +331,9 @@ pub struct InitArgs {
     pub config: PathBuf,
 
     /// generate CI scaffolding (smoke test, traces, workflow)
-    #[arg(long)]
-    pub ci: bool,
+    /// Pass a provider name (e.g. "github") or leave empty for default.
+    #[arg(long, num_args = 0..=1, default_missing_value = "github")]
+    pub ci: Option<String>,
 
     /// generate .gitignore for artifacts/db
     #[arg(long)]

@@ -13,6 +13,7 @@ pub mod demo;
 pub mod doctor;
 pub mod explain;
 pub mod import;
+pub mod init;
 pub mod init_ci;
 pub mod mcp;
 pub mod migrate;
@@ -26,7 +27,7 @@ pub mod exit_codes {
 
 pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     match cli.cmd {
-        Command::Init(args) => cmd_init(args).await,
+        Command::Init(args) => init::run(args).await,
         Command::Run(args) => cmd_run(args, legacy_mode).await,
         Command::Ci(args) => cmd_ci(args, legacy_mode).await,
         Command::Validate(args) => validate::run(args, legacy_mode).await,
@@ -59,66 +60,6 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     }
 }
 
-async fn cmd_init(args: InitArgs) -> anyhow::Result<i32> {
-    // 1. Basic Config
-    write_sample_config_if_missing(&args.config)?;
-
-    // 2. Gitignore
-    if args.gitignore {
-        write_file_if_missing(
-            std::path::Path::new(".gitignore"),
-            crate::templates::GITIGNORE,
-        )?;
-    }
-
-    // 3. CI Scaffolding
-    if args.ci {
-        write_file_if_missing(
-            std::path::Path::new("ci-eval.yaml"),
-            crate::templates::CI_EVAL_YAML,
-        )?;
-        write_file_if_missing(
-            std::path::Path::new("schemas/ci_answer.schema.json"),
-            crate::templates::CI_SCHEMA_JSON,
-        )?;
-        write_file_if_missing(
-            std::path::Path::new("traces/ci.jsonl"),
-            crate::templates::CI_TRACES_JSONL,
-        )?;
-        write_file_if_missing(
-            std::path::Path::new(".github/workflows/assay.yml"),
-            crate::templates::CI_WORKFLOW_YML,
-        )?;
-    }
-
-    Ok(exit_codes::OK)
-}
-
-fn write_file_if_missing(path: &std::path::Path, content: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if !path.exists() {
-        std::fs::write(path, content)?;
-        eprintln!("created {}", path.display());
-    } else {
-        eprintln!("note: {} already exists (skipped)", path.display());
-    }
-    Ok(())
-}
-
-fn write_sample_config_if_missing(path: &std::path::Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        assay_core::config::write_sample_config(path)?;
-        eprintln!("created {}", path.display());
-    } else {
-        eprintln!("note: {} already exists", path.display());
-    }
-    Ok(())
-}
 
 async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     ensure_parent_dir(&args.db)?;
