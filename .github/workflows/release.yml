@@ -265,6 +265,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         continue-on-error: true
 
+      - name: Publish assay-mcp-server
+        run: cargo publish --package assay-mcp-server --verbose
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        continue-on-error: true
+
       - name: Publish assay-cli
         run: |
           sleep 30  # Wait for crates.io to index dependencies
