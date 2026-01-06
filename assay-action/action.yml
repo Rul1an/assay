@@ -6,13 +6,13 @@
 #       traces: traces/
 #       min-coverage: 80
 
-name: 'Assay Policy Check'
-description: 'Deterministic policy enforcement for AI agent tool calls'
+name: 'Assay Policy Enforcement'
+description: 'Runtime security and policy-as-code enforcement for AI Agents & MCP.'
 author: 'Assay'
 
 branding:
   icon: 'shield'
-  color: 'blue'
+  color: 'green'
 
 inputs:
   policy:
@@ -91,15 +91,16 @@ runs:
         mkdir -p ~/.assay/bin
         VERSION="${{ inputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
+        REPO="Rul1an/assay"
 
         if [ "$VERSION" = "latest" ]; then
           # Get latest release tag
-          VERSION=$(curl -sL https://api.github.com/repos/assay-dev/assay/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          VERSION=$(curl -fsSL https://api.github.com/repos/$REPO/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
         fi
 
-        DOWNLOAD_URL="https://github.com/assay-dev/assay/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
+        DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
         echo "Downloading Assay ${VERSION} for ${TARGET}..."
-        curl -sL "$DOWNLOAD_URL" | tar xz -C ~/.assay/bin
+        curl -fsSL "$DOWNLOAD_URL" | tar xz -C ~/.assay/bin
         chmod +x ~/.assay/bin/assay
         ~/.assay/bin/assay --version
 

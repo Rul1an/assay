@@ -1,69 +1,42 @@
-# Assay Action
+# Assay GitHub Action
 
-Run Assay evaluations in CI/CD pipelines (GitHub Actions).
+**Runtime Security & Policy Enforcement for AI Agents.**
 
-Supports:
-- **Baseline Gating**: Fail PRs if metrics degrade compared to `main`.
-- **Replay**: Deterministic evaluation from trace files.
-- **Reporting**: SARIF (Code Scanning), JUnit, and Artifacts.
+Automatically validate agent traces against your security policy in CI/CD.
+
+## Usage
+
+```yaml
+- uses: Rul1an/assay/assay-action@v1
+  with:
+    # Security policy file (YAML)
+    policy: policies/agent.yaml
+
+    # Path to trace files (or directory)
+    traces: traces/
+
+    # Fail if coverage drops below 80%
+    min-coverage: 80
+```
 
 ## Inputs
 
-| Input | Default | Description |
-|------|---------|-------------|
-| `repo` | `Rul1an/assay` | GitHub repo hosting Assay releases |
-| `assay_version` | *(required)* | Release tag (e.g. `v0.4.0`) |
-| `config` | *(required)* | Config YAML path (relative to `workdir`) |
-| `workdir` | `.` | Working directory (monorepo support) |
-| `trace_file` | `""` | Trace JSONL (relative to `workdir`) |
-| `baseline` | `""` | Baseline JSON (relative to `workdir`) |
-| `export_baseline` | `""` | Export baseline to this path (relative to `workdir`) |
-| `sarif` | `auto` | `auto|true|false` — auto skips fork PRs |
-| `upload_baseline_artifact` | `true` | Upload exported baseline as an artifact |
-| `cache_mode` | `auto` | `auto` uses split caches (db + runtime) |
+| Input | Description | Required | Default |
+| :--- | :--- | :---: | :---: |
+| `policy` | Path to `policy.yaml` | Yes | - |
+| `traces` | Path to JSONL trace file(s) | Yes | - |
+| `min-coverage` | Fail if coverage % < threshold | No | `80` |
+| `fail-on-high-risk` | Fail if high-risk tools are uncovered | No | `true` |
+| `format` | Output format (`github`, `json`, `markdown`) | No | `github` |
+| `version` | Assay binary version to install | No | `latest` |
 
-### Optional Configuration
-| Input | Default | Description |
-|------|---------|-------------|
-| `strict` | `false` | If true, treat warnings as errors |
-| `junit` | `junit.xml` | JUnit report filename |
-| `otel_jsonl` | `""` | OpenTelemetry JSONL output filename |
-| `db` | `.eval/eval.db` | SQLite database path |
+## How it works
 
-### Deprecated aliases (backwards compatible)
+1.  Installs the ultra-fast `assay` Rust binary.
+2.  Runs `assay coverage` against your traces.
+3.  Reports violations and coverage gaps directly in GitHub Actions (annotations).
+4.  Fails the build if security policies are violated or coverage is too low.
 
-- `working_directory` → use `workdir`
-- `upload_sarif` → use `sarif`
-- `upload_exported_baseline` → use `upload_baseline_artifact`
+## License
 
-## Golden-path examples
-
-### 1. Gate PRs against baseline (Monorepo)
-```yaml
-- uses: Rul1an/assay/assay-action@v0.4.0
-  with:
-    assay_version: v0.4.0
-    workdir: packages/ai
-    config: eval.yaml
-    trace_file: traces/ci.jsonl
-    baseline: baseline.json
-    sarif: auto
-```
-
-### 2. Export baseline on main
-```yaml
-- uses: Rul1an/assay/assay-action@v0.4.0
-  with:
-    assay_version: v0.4.0
-    config: eval.yaml
-    trace_file: traces/main.jsonl
-    export_baseline: baseline.json
-    upload_baseline_artifact: true
-```
-
-### 3. Caching Behavior
-This action uses split caches to avoid "cache confusion":
-- **DB cache**: `workdir/.eval` (incremental skip history)
-- **Runtime caches**: `~/.assay/cache` + `~/.assay/embeddings` (precompute & performance)
-
-Cache keys include OS, assay version, and a hash of the workdir+config/trace to ensure safety.
+MIT
