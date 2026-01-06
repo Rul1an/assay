@@ -4,9 +4,18 @@ pub struct Pack {
     pub policy_yaml: &'static str,
 }
 
-const DEFAULT_POLICY: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/packs/default-policy.yaml"));
-const HARDENED_POLICY: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/packs/hardened-policy.yaml"));
-const DEV_POLICY: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/packs/dev-policy.yaml"));
+const DEFAULT_POLICY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/packs/default-policy.yaml"
+));
+const HARDENED_POLICY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/packs/hardened-policy.yaml"
+));
+const DEV_POLICY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/packs/dev-policy.yaml"
+));
 
 pub fn list() -> &'static [Pack] {
     &[

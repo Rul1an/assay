@@ -298,10 +298,9 @@ fn take(root: &mut JsonValue, ptr: &str) -> Result<JsonValue> {
 
     let parent = get_mut(root, parent_tokens)?;
     match parent {
-        JsonValue::Object(map) => {
-            map.remove(last)
-                .ok_or_else(|| anyhow!("move/from missing: {}", ptr))
-        }
+        JsonValue::Object(map) => map
+            .remove(last)
+            .ok_or_else(|| anyhow!("move/from missing: {}", ptr)),
         JsonValue::Array(arr) => {
             let idx: usize = last
                 .parse()

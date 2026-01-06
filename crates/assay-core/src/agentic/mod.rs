@@ -329,9 +329,7 @@ pub fn build_suggestions(
             // Tool poisoning -> Action only (Conservative for v1.5)
             // Avoids complex Replace/Add branching without EnsureObject
             // --------------------------------------------------
-            "E_TOOL_POISONING_PATTERN"
-            | "E_TOOL_DESC_SUSPICIOUS"
-            | "E_SIGNATURES_DISABLED" => {
+            "E_TOOL_POISONING_PATTERN" | "E_TOOL_DESC_SUSPICIOUS" | "E_SIGNATURES_DISABLED" => {
                 let id = "enable_tool_poisoning_checks".to_string();
                 actions_map.insert(
                     id.clone(),
@@ -628,7 +626,10 @@ mod tests {
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].id, "fix_unknown_tool:weird-tool");
-        assert!(patches.is_empty(), "UNKNOWN_TOOL should not generate patches");
+        assert!(
+            patches.is_empty(),
+            "UNKNOWN_TOOL should not generate patches"
+        );
     }
 
     #[test]

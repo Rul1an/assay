@@ -26,7 +26,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         replay_strict: args.replay_strict,
     };
 
-    let report = validate(&cfg, &resolver, opts).await?;
+    let report = validate(&cfg, &opts, &resolver).await?;
 
     // 3) Build suggested patches
     let inferred_policy = infer_policy_path(&args.config);
@@ -66,10 +66,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
         for p in ps {
             // format: <id>\t<risk>\t<file>\t<title>
-            println!(
-                "{}\t{:?}\t{}\t{}",
-                p.id, p.risk, p.file, p.title
-            );
+            println!("{}\t{:?}\t{}\t{}", p.id, p.risk, p.file, p.title);
         }
 
         return Ok(exit_codes::OK);
@@ -159,10 +156,15 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         return Ok(exit_codes::OK);
     }
 
-    let cfg2 = load_config(&args.config, legacy_mode, true)
-        .map_err(|e| anyhow!("after fixes, failed to load config {}: {}", args.config.display(), e))?;
+    let cfg2 = load_config(&args.config, legacy_mode, true).map_err(|e| {
+        anyhow!(
+            "after fixes, failed to load config {}: {}",
+            args.config.display(),
+            e
+        )
+    })?;
 
-    let report2 = validate(&cfg2, &resolver, opts).await?;
+    let report2 = validate(&cfg2, &opts, &resolver).await?;
     let exit2 = decide_exit_like_validate(&report2.diagnostics);
 
     let error_count = report2
@@ -230,7 +232,9 @@ fn normalize_severity(s: &str) -> &'static str {
 
 // Minimal copy of your validate exit heuristic (so fix returns meaningful code)
 fn decide_exit_like_validate(diags: &[assay_core::errors::diagnostic::Diagnostic]) -> i32 {
-    let has_error = diags.iter().any(|d| normalize_severity(d.severity.as_str()) == "error");
+    let has_error = diags
+        .iter()
+        .any(|d| normalize_severity(d.severity.as_str()) == "error");
     if !has_error {
         return exit_codes::OK;
     }
