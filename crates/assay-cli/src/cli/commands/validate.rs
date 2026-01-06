@@ -85,7 +85,7 @@ fn print_report(
             let doc = assay_core::report::sarif::build_sarif_diagnostics(
                 "assay",
                 &report.diagnostics,
-                Some(exit_code),
+                exit_code,
             );
             let s = serde_json::to_string_pretty(&doc)?;
 
@@ -113,12 +113,13 @@ fn print_report(
             let errors_count = report
                 .diagnostics
                 .iter()
-                .filter(|d| d.severity == "error")
+                .filter(|d| normalize_severity(d.severity.as_str()) == "error")
                 .count();
+
             let warnings_count = report
                 .diagnostics
                 .iter()
-                .filter(|d| d.severity == "warn")
+                .filter(|d| normalize_severity(d.severity.as_str()) == "warn")
                 .count();
 
             if errors_count > 0 {

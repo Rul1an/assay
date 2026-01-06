@@ -34,16 +34,20 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
 pub fn build_sarif_diagnostics(
     tool_name: &str,
     diagnostics: &[crate::errors::diagnostic::Diagnostic],
-    exit_code: Option<i32>,
+    exit_code: i32,
 ) -> serde_json::Value {
+    fn normalize_severity(s: &str) -> &str {
+        match s {
+            "error" | "ERROR" => "error",
+            "warn" | "warning" | "WARN" | "WARNING" => "warning",
+            _ => "note",
+        }
+    }
+
     let sarif_results: Vec<serde_json::Value> = diagnostics
         .iter()
         .map(|d| {
-            let level = match d.severity.as_str() {
-                "error" | "ERROR" => "error",
-                "warn" | "warning" | "WARN" | "WARNING" => "warning",
-                _ => "note",
-            };
+            let level = normalize_severity(d.severity.as_str());
 
             // Map code to ruleId (use simple code string for now)
             let rule_id = &d.code;
@@ -68,6 +72,11 @@ pub fn build_sarif_diagnostics(
         })
         .collect();
 
+    let execution_successful = !diagnostics.iter().any(|d| {
+        let s = normalize_severity(d.severity.as_str());
+        s == "error"
+    });
+
     serde_json::json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -80,10 +89,8 @@ pub fn build_sarif_diagnostics(
             },
             "results": sarif_results,
             "invocations": [{
-                "executionSuccessful": diagnostics.iter().all(|d| {
-                    !matches!(d.severity.as_str(), "error" | "ERROR")
-                }),
-                "exitCode": exit_code.unwrap_or(0)
+                "executionSuccessful": execution_successful,
+                "exitCode": exit_code
             }]
         }]
     })
@@ -96,8 +103,8 @@ pub fn write_sarif_diagnostics(
 ) -> anyhow::Result<()> {
     // For file dump, we assume exit code 0 or generic?
     // Actually, maybe we should let the caller pass it if they care.
-    // For now, defaulting to None (0) is safe for just "writing diagnostics".
-    let doc = build_sarif_diagnostics(tool_name, diagnostics, None);
+    // For now, defaulting to 0 is safe for just "writing diagnostics".
+    let doc = build_sarif_diagnostics(tool_name, diagnostics, 0);
     std::fs::write(out, serde_json::to_string_pretty(&doc)?)?;
     Ok(())
 }
@@ -114,7 +121,7 @@ mod tests {
             .with_severity("error")
             .with_context(json!({"file": "test.rs"}));
 
-        let sarif = build_sarif_diagnostics("assay-test", &[diag], Some(1));
+        let sarif = build_sarif_diagnostics("assay-test", &[diag], 1);
 
         let runs = sarif["runs"].as_array().unwrap();
         assert_eq!(runs.len(), 1);
