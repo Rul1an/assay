@@ -58,12 +58,14 @@ fn decide_validate_exit(report: &ValidateReport) -> i32 {
     // Heuristic: E_CFG_*, E_PATH*, E_TRACE_SCHEMA* -> CONFIG_ERROR (2)
     // Else -> TEST_FAILED (1)
     let is_config_like = report.diagnostics.iter().any(|d| {
-        d.severity == "error" && (
-            d.code.starts_with("E_CFG_") ||
-            d.code.starts_with("E_PATH_") ||
-            d.code.starts_with("E_TRACE_SCHEMA") ||
-            d.code.starts_with("E_BASE_MISMATCH") // Arguably test fail, but usually config/env issue
-        )
+        d.severity == "error"
+            && (
+                d.code.starts_with("E_CFG_")
+                    || d.code.starts_with("E_PATH_")
+                    || d.code.starts_with("E_TRACE_SCHEMA")
+                    || d.code.starts_with("E_BASE_MISMATCH")
+                // Arguably test fail, but usually config/env issue
+            )
     });
 
     if is_config_like {
@@ -76,11 +78,12 @@ fn decide_validate_exit(report: &ValidateReport) -> i32 {
 fn print_report(
     report: &ValidateReport,
     args: &ValidateArgs,
-    exit_code: i32
+    exit_code: i32,
 ) -> anyhow::Result<()> {
     match args.format {
         ValidateOutputFormat::Sarif => {
-            let doc = assay_core::report::sarif::build_sarif_diagnostics("assay", &report.diagnostics);
+            let doc =
+                assay_core::report::sarif::build_sarif_diagnostics("assay", &report.diagnostics);
             let s = serde_json::to_string_pretty(&doc)?;
 
             if let Some(path) = &args.output {
@@ -90,7 +93,7 @@ fn print_report(
             } else {
                 println!("{}", s);
             }
-        },
+        }
         ValidateOutputFormat::Json => {
             let output_json = build_validate_json(report, args, exit_code);
             let s = serde_json::to_string_pretty(&output_json)?;
@@ -101,7 +104,7 @@ fn print_report(
             } else {
                 println!("{}", s);
             }
-        },
+        }
         ValidateOutputFormat::Text => {
             // Text format is always printed to stderr (human-readable)
             let errors_count = report
@@ -145,7 +148,11 @@ fn print_report(
 
 use serde::Serialize;
 
-fn build_validate_json(report: &ValidateReport, args: &ValidateArgs, exit_code: i32) -> serde_json::Value {
+fn build_validate_json(
+    report: &ValidateReport,
+    args: &ValidateArgs,
+    exit_code: i32,
+) -> serde_json::Value {
     let mut diags: Vec<&Diagnostic> = report.diagnostics.iter().collect();
 
     // Deterministic sort: severity_rank > code > message > file
@@ -156,8 +163,12 @@ fn build_validate_json(report: &ValidateReport, args: &ValidateArgs, exit_code: 
         let sa = normalize_severity(a.severity.as_str());
         let sb = normalize_severity(b.severity.as_str());
 
-        (severity_rank(sa), a.code.as_str(), a.message.as_str(), af)
-            .cmp(&(severity_rank(sb), b.code.as_str(), b.message.as_str(), bf))
+        (severity_rank(sa), a.code.as_str(), a.message.as_str(), af).cmp(&(
+            severity_rank(sb),
+            b.code.as_str(),
+            b.message.as_str(),
+            bf,
+        ))
     });
 
     let diag_views: Vec<DiagView<'_>> = diags.iter().map(|d| DiagView::from(*d)).collect();
@@ -174,7 +185,8 @@ fn build_validate_json(report: &ValidateReport, args: &ValidateArgs, exit_code: 
             ValidateOutputFormat::Text => "text",
             ValidateOutputFormat::Json => "json",
             ValidateOutputFormat::Sarif => "sarif",
-        }.into(),
+        }
+        .into(),
     ];
 
     json!({
