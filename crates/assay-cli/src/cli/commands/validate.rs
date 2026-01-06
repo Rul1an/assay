@@ -16,7 +16,10 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                 format!("Failed to parse config: {}", e),
             )
             .with_source("config")
-            .with_context(json!({ "file": args.config }));
+            .with_context(json!({
+                "file": args.config,
+                "config_file": args.config
+            }));
 
             let report = ValidateReport {
                 diagnostics: vec![diag],
@@ -217,6 +220,7 @@ fn build_validate_json(
         &report.diagnostics,
         &AgenticCtx {
             policy_path: inferred_policy,
+            config_path: Some(args.config.clone()),
         },
     );
 
