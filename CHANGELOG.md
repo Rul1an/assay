@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 
 
+## [v1.4.0] - 2026-01-06
+
+### 🛡️ Agentic Security Edition
+The "CI Gate" release. This major update transforms Assay into a comprehensive CI/CD guardrail for Agentic systems.
+
+### ✨ Major Features
+-   **`assay init`**: Interactive wizard that auto-detects your project type (Python/Node/MCP) and generates secure policy + CI config in < 5s.
+-   **`assay validate`**: Dedicated CI command with strict exit codes (0=Pass, 1=Fail, 2=Error) and zero overhead.
+-   **Agentic Contract**: `--format json` output is now strictly typed, stable, and designed for AI self-correction loops.
+-   **GitHub Advanced Security**: `--format sarif` support for direct integration with GitHub Code Scanning.
+
+### 📚 Documentation
+-   **Overhaul**: Complete rewrite of `Quickstart`, `CLI Reference`, and `Architecture` guides.
+-   **GetAssay.dev**: One-line install script and landing page sync.
+
 ## [v1.3.0] - 2026-01-06
 
 ### ✨ New Feature: `assay mcp config-path`
