@@ -31,12 +31,10 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
     Ok(())
 }
 
-pub fn write_sarif_diagnostics(
+pub fn build_sarif_diagnostics(
     tool_name: &str,
     diagnostics: &[crate::errors::diagnostic::Diagnostic],
-    out: &Path,
-) -> anyhow::Result<()> {
-    // Collect diagnostics into SARIF results
+) -> serde_json::Value {
     let sarif_results: Vec<serde_json::Value> = diagnostics
         .iter()
         .map(|d| {
@@ -50,7 +48,6 @@ pub fn write_sarif_diagnostics(
             let rule_id = &d.code;
 
             // Optional: location (if context provides file/line)
-            // For now, simple result with no location (project scope) or check context
             let locations = if let Some(file) = d.context.get("file").and_then(|v| v.as_str()) {
                 vec![serde_json::json!({
                     "physicalLocation": {
@@ -70,15 +67,36 @@ pub fn write_sarif_diagnostics(
         })
         .collect();
 
-    let doc = serde_json::json!({
+    serde_json::json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [{
-            "tool": { "driver": { "name": tool_name } },
-            "results": sarif_results
+            "tool": {
+                "driver": {
+                    "name": tool_name,
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            },
+            "results": sarif_results,
+            "invocations": [{
+                "executionSuccessful": diagnostics.iter().all(|d| {
+                    match d.severity.as_str() {
+                         "error" | "ERROR" => false,
+                         _ => true
+                    }
+                }),
+                "exitCode": 0 // Actual CLI exit code depends on policy, but tool invocation is "complete"
+            }]
         }]
-    });
+    })
+}
 
+pub fn write_sarif_diagnostics(
+    tool_name: &str,
+    diagnostics: &[crate::errors::diagnostic::Diagnostic],
+    out: &Path,
+) -> anyhow::Result<()> {
+    let doc = build_sarif_diagnostics(tool_name, diagnostics);
     std::fs::write(out, serde_json::to_string_pretty(&doc)?)?;
     Ok(())
 }

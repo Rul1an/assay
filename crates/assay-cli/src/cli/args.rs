@@ -35,6 +35,14 @@ pub enum Command {
     Version,
 }
 
+#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
+pub enum ValidateOutputFormat {
+    #[default]
+    Text,
+    Json,
+    Sarif,
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct ValidateArgs {
     #[arg(long, default_value = "assay.yaml")]
@@ -49,8 +57,8 @@ pub struct ValidateArgs {
     #[arg(long, default_value = "false")]
     pub replay_strict: bool,
 
-    #[arg(long, default_value = "text")]
-    pub format: String, // text|json|sarif
+    #[arg(long, value_enum, default_value_t = ValidateOutputFormat::Text)]
+    pub format: ValidateOutputFormat,
 
     #[arg(long)]
     pub output: Option<std::path::PathBuf>,
