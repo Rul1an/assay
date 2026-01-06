@@ -82,8 +82,11 @@ fn print_report(
 ) -> anyhow::Result<()> {
     match args.format {
         ValidateOutputFormat::Sarif => {
-            let doc =
-                assay_core::report::sarif::build_sarif_diagnostics("assay", &report.diagnostics);
+            let doc = assay_core::report::sarif::build_sarif_diagnostics(
+                "assay",
+                &report.diagnostics,
+                Some(exit_code),
+            );
             let s = serde_json::to_string_pretty(&doc)?;
 
             if let Some(path) = &args.output {
@@ -177,7 +180,7 @@ fn build_validate_json(
     let warn_count = diag_views.iter().filter(|d| d.severity == "warn").count();
     let note_count = diag_views.len() - error_count - warn_count;
 
-    let args_list: Vec<String> = vec![
+    let mut args_list: Vec<String> = vec![
         "--config".into(),
         args.config.display().to_string(),
         "--format".into(),
@@ -188,6 +191,22 @@ fn build_validate_json(
         }
         .into(),
     ];
+
+    if let Some(trace) = &args.trace_file {
+        args_list.push("--trace-file".into());
+        args_list.push(trace.display().to_string());
+    }
+    if let Some(baseline) = &args.baseline {
+        args_list.push("--baseline".into());
+        args_list.push(baseline.display().to_string());
+    }
+    if args.replay_strict {
+        args_list.push("--replay-strict".into());
+    }
+    if let Some(output) = &args.output {
+        args_list.push("--output".into());
+        args_list.push(output.display().to_string());
+    }
 
     json!({
         "schema_version": 1,

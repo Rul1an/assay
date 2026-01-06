@@ -49,7 +49,7 @@ jobs:
       - name: Run Assay Smoke Test
         uses: Rul1an/assay-action@v1
         with:
-          assay_version: "v1.3.0" # Update to latest
+          assay_version: "v1.4.0" # Update to latest
           config: ci-eval.yaml
           trace_file: traces/ci.jsonl
           strict: "true"

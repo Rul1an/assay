@@ -34,13 +34,14 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
 pub fn build_sarif_diagnostics(
     tool_name: &str,
     diagnostics: &[crate::errors::diagnostic::Diagnostic],
+    exit_code: Option<i32>,
 ) -> serde_json::Value {
     let sarif_results: Vec<serde_json::Value> = diagnostics
         .iter()
         .map(|d| {
             let level = match d.severity.as_str() {
-                "error" => "error",
-                "warn" => "warning",
+                "error" | "ERROR" => "error",
+                "warn" | "warning" | "WARN" | "WARNING" => "warning",
                 _ => "note",
             };
 
@@ -82,7 +83,7 @@ pub fn build_sarif_diagnostics(
                 "executionSuccessful": diagnostics.iter().all(|d| {
                     !matches!(d.severity.as_str(), "error" | "ERROR")
                 }),
-                "exitCode": 0 // Actual CLI exit code depends on policy, but tool invocation is "complete"
+                "exitCode": exit_code.unwrap_or(0)
             }]
         }]
     })
@@ -91,9 +92,40 @@ pub fn build_sarif_diagnostics(
 pub fn write_sarif_diagnostics(
     tool_name: &str,
     diagnostics: &[crate::errors::diagnostic::Diagnostic],
-    out: &Path,
+    out: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let doc = build_sarif_diagnostics(tool_name, diagnostics);
+    // For file dump, we assume exit code 0 or generic?
+    // Actually, maybe we should let the caller pass it if they care.
+    // For now, defaulting to None (0) is safe for just "writing diagnostics".
+    let doc = build_sarif_diagnostics(tool_name, diagnostics, None);
     std::fs::write(out, serde_json::to_string_pretty(&doc)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::diagnostic::Diagnostic;
+    use serde_json::json;
+
+    #[test]
+    fn test_sarif_generation() {
+        let diag = Diagnostic::new("TEST001", "Test error".to_string())
+            .with_severity("error")
+            .with_context(json!({"file": "test.rs"}));
+
+        let sarif = build_sarif_diagnostics("assay-test", &[diag], Some(1));
+
+        let runs = sarif["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 1);
+
+        let results = runs[0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["level"], "error");
+        assert_eq!(results[0]["ruleId"], "TEST001");
+
+        let invocations = runs[0]["invocations"].as_array().unwrap();
+        assert!(!invocations[0]["executionSuccessful"].as_bool().unwrap());
+        assert_eq!(invocations[0]["exitCode"], 1);
+    }
 }
