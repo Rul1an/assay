@@ -247,7 +247,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Debug Cargo Version
-        run: cargo --version && cargo config list
+        run: cargo --version
 
       - name: Publish assay-core
         run: cargo publish --package assay-core --verbose
