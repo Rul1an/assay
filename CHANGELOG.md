@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.4.1] - 2026-01-06
+
+### 🩹 Consistency & SARIF Polish
+Post-release hardening for Agentic Contract and SARIF compliance.
+
+### 🛠️ Fixes
+-   **Contract Consistency**: Internal severity normalization (`warning` -> `warn`) now applied strictly to exit code logic and CLI text output logic.
+-   **SARIF**: `invocations.exitCode` now accurately reflects the CLI exit code (0/1/2).
+-   **Contract**: Text output summary counts now strictly match JSON output counts.
+
 
 
 ## [v1.4.0] - 2026-01-06
