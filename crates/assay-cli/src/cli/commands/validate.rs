@@ -63,8 +63,10 @@ fn decide_validate_exit(report: &ValidateReport) -> i32 {
                 d.code.starts_with("E_CFG_")
                     || d.code.starts_with("E_PATH_")
                     || d.code.starts_with("E_TRACE_SCHEMA")
+                    // E_BASE_MISMATCH is classified as a Config Error (2) because it typically
+                    // indicates a stale baseline file that needs explicit updating/approval,
+                    // rather than a logic regression in the agent itself. Use `assay baseline record` to fix.
                     || d.code.starts_with("E_BASE_MISMATCH")
-                // Arguably test fail, but usually config/env issue
             )
     });
 
