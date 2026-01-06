@@ -50,7 +50,10 @@ pub struct ValidateArgs {
     pub replay_strict: bool,
 
     #[arg(long, default_value = "text")]
-    pub format: String, // text|json
+    pub format: String, // text|json|sarif
+
+    #[arg(long)]
+    pub output: Option<std::path::PathBuf>,
 }
 
 #[derive(Parser, Clone)]

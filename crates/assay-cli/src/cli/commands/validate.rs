@@ -24,6 +24,7 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                     diagnostics: vec![diag],
                 },
                 &args.format,
+                args.output.as_deref(),
             );
             return Ok(2);
         }
@@ -43,7 +44,8 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let report = validate(&cfg, &opts, &resolver).await?;
 
     // 4. Print Report
-    print_report(&report, &args.format);
+    // 4. Print Report / Export
+    print_report(&report, &args.format, args.output.as_deref());
 
     // 5. Determine Exit Code
     // Any error severity -> 2. Warnings only -> 0.
@@ -54,8 +56,35 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     }
 }
 
-fn print_report(report: &ValidateReport, format: &str) {
-    if format == "json" {
+fn print_report(report: &ValidateReport, format: &str, output: Option<&std::path::Path>) {
+    if format == "sarif" {
+        use assay_core::report::sarif::write_sarif_diagnostics;
+        // Default to "results.sarif" if not specified? Or stdout?
+        // Roadmap says "--output results.sarif".
+        // If no output, we should probably output to stdout for piping.
+        // But `write_sarif_diagnostics` takes a path.
+        // Let's assume file output if provided, else output to stdout using a robust way.
+
+        if let Some(path) = output {
+             if let Err(e) = write_sarif_diagnostics("assay", &report.diagnostics, path) {
+                 eprintln!("Failed to write SARIF: {}", e);
+             } else {
+                 eprintln!("SARIF report written to {}", path.display());
+             }
+        } else {
+             // Hack: write to temp file then print? No, that's slow.
+             // Ideally we refactor `sarif.rs` to return String.
+             // For P0 MVP, let's write to "assay-report.sarif" by default and warn user.
+             let default_path = std::path::Path::new("assay-report.sarif");
+             if let Err(e) = write_sarif_diagnostics("assay", &report.diagnostics, default_path) {
+                 eprintln!("Failed to write SARIF: {}", e);
+             } else {
+                 // SARIF users expect silent stdout usually, but if we behave like a linter...
+                 println!("{}", default_path.display()); // Print filename for unix piping? No.
+                 eprintln!("SARIF report written to {} (use --output to specify)", default_path.display());
+             }
+        }
+    } else if format == "json" {
         let errors: Vec<&Diagnostic> = report
             .diagnostics
             .iter()
@@ -68,7 +97,7 @@ fn print_report(report: &ValidateReport, format: &str) {
             .collect();
         let ok = errors.is_empty();
 
-        let output = json!({
+        let output_json = json!({
             "schema_version": 1,
             "ok": ok,
             "errors": errors,
@@ -78,7 +107,12 @@ fn print_report(report: &ValidateReport, format: &str) {
                 "diagnostic_count": report.diagnostics.len()
             }
         });
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+
+        if let Some(path) = output {
+             std::fs::write(path, serde_json::to_string_pretty(&output_json).unwrap()).unwrap();
+        } else {
+             println!("{}", serde_json::to_string_pretty(&output_json).unwrap());
+        }
     } else {
         // Text format
         let errors_count = report
