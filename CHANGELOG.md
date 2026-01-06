@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.0] - 2026-01-06
+
+### 🛠️ Autofix & Policy Packs
+A major productivity release introducing automated self-repair (`assay fix`) and instant policy scaffolding (`assay init --pack`).
+
+### ✨ Major Features
+-   **`assay fix`**: Interactively repair configuration issues.
+    -   **Automated Patches**: Fixes config errors, schema violations, and missing policies based on diagnostics.
+    -   **Dry Run**: Preview changes before applying them.
+    -   **Atomic Writes**: Cross-platform safe file updates (Windows/Linux/macOS).
+-   **Policy Packs (`assay init --pack`)**:
+    -   `default`: Balanced security (blocks RCE, audits sensitive ops).
+    -   `hardened`: Maximum security (allowlist-only, strict args).
+    -   `dev`: Permissive for rapid prototyping (logs warnings).
+
+### 🛡️ Hardening
+-   **Patch Engine**: Strict traversal prevents partial mutations during `remove`/`replace` operations.
+-   **Module Cleanup**: Extracted shared logic to `assay-cli::util` for better maintainability.
+-   **Windows Support**: Robust atomic file replacement strategy.
+
 ## [v1.4.1] - 2026-01-06
 
 ### 🩹 Consistency & SARIF Polish
