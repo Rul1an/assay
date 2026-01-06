@@ -246,15 +246,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Debug Cargo Version
+        run: cargo --version && cargo config list
+
       - name: Publish assay-core
-        run: cargo publish --package assay-core
-        continue-on-error: true
+        run: cargo publish --package assay-core --verbose
 
       - name: Publish assay-cli
         run: |
           sleep 30  # Wait for crates.io to index assay-core
-          cargo publish --package assay-cli
-        continue-on-error: true
+          cargo publish --package assay-cli --verbose
 
   # ============================================================
   # Build and Publish Python Wheels (PyPI)
