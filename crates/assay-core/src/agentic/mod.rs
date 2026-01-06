@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::errors::diagnostic::Diagnostic;
@@ -61,28 +62,43 @@ pub fn build_suggestions(
     diags: &[Diagnostic],
     ctx: &AgenticCtx,
 ) -> (Vec<SuggestedAction>, Vec<SuggestedPatch>) {
-    let mut actions: Vec<SuggestedAction> = Vec::new();
-    let mut patches: Vec<SuggestedPatch> = Vec::new();
+    // Deduplication maps
+    let mut actions_map: BTreeMap<String, SuggestedAction> = BTreeMap::new();
+    let mut patches_map: BTreeMap<String, SuggestedPatch> = BTreeMap::new();
 
-    // If we need to compute deny index etc, we may need the parsed policy file.
-    let policy_path = ctx
+    // Default policy path lookup
+    let default_policy = ctx
         .policy_path
         .clone()
         .unwrap_or_else(|| PathBuf::from("policy.yaml"));
-    let policy_doc = read_yaml(&policy_path);
+
+    // We only read the policy once relative to CWD if possible,
+    // but individual diagnostics might point to other files.
+    // For shape detection, we rely on the default policy file.
+    let policy_doc = read_yaml(&default_policy);
     let policy_shape = policy_doc
         .as_ref()
         .map(|doc| detect_policy_shape(doc))
         .unwrap_or(PolicyShape::TopLevel);
 
     for d in diags {
+        // Resolve policy path for this specific diagnostic
+        // Priority: 1. diag.context.policy_file, 2. ctx.policy_path, 3. "policy.yaml"
+        let policy_path_str = d
+            .context
+            .get("policy_file")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| default_policy.display().to_string());
+
         match d.code.as_str() {
             // ----------------------------
             // YAML parse errors -> actions
             // ----------------------------
             "E_CFG_PARSE" | "E_POLICY_PARSE" => {
-                actions.push(SuggestedAction {
-                    id: "regen_config".into(),
+                let id = "regen_config".to_string();
+                actions_map.insert(id.clone(), SuggestedAction {
+                    id,
                     title: "Regenerate a clean config (does not overwrite existing files)".into(),
                     risk: RiskLevel::Low,
                     command: vec!["assay".into(), "init".into()],
@@ -91,11 +107,6 @@ pub fn build_suggestions(
 
             // --------------------------------
             // Unknown field -> rename via move
-            // Requires context fields:
-            //  - file
-            //  - json_pointer_parent
-            //  - unknown_field
-            //  - suggested_field
             // --------------------------------
             "E_CFG_SCHEMA_UNKNOWN_FIELD" | "E_POLICY_SCHEMA_UNKNOWN_FIELD" => {
                 let file = d.context.get("file").and_then(|v: &JsonValue| v.as_str());
@@ -115,7 +126,7 @@ pub fn build_suggestions(
                 if let (Some(file), Some(parent), Some(unknown), Some(suggested)) =
                     (file, parent, unknown, suggested)
                 {
-                    // JSON Patch "move" is perfect for rename without cloning values.
+                    let id = format!("rename_field:{}->{}", unknown, suggested);
                     let from = format!(
                         "{}/{}",
                         parent.trim_end_matches('/'),
@@ -127,8 +138,8 @@ pub fn build_suggestions(
                         escape_pointer(suggested)
                     );
 
-                    patches.push(SuggestedPatch {
-                        id: format!("rename_field:{}->{}", unknown, suggested),
+                    patches_map.insert(id.clone(), SuggestedPatch {
+                        id,
                         title: format!("Rename field '{}' to '{}'", unknown, suggested),
                         risk: RiskLevel::Low,
                         file: file.to_string(),
@@ -138,16 +149,33 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Tool not allowed -> add to allowlist
-            // Requires context:
-            //  - tool (string)
+            // Unknown tool -> Action only (no patch, safer)
             // --------------------------------------------------
-            "MCP_TOOL_NOT_ALLOWED" | "E_TOOL_NOT_ALLOWED" | "UNKNOWN_TOOL" => {
+            "UNKNOWN_TOOL" => {
+                if let Some(tool) = d.context.get("tool").and_then(|v: &JsonValue| v.as_str()) {
+                    let id = format!("fix_unknown_tool:{}", tool);
+                    actions_map.insert(id.clone(), SuggestedAction {
+                        id,
+                        title: format!("Verify if tool '{}' exists and is named correctly in policy", tool),
+                        risk: RiskLevel::Low,
+                        command: vec![
+                            "assay".into(),
+                            "doctor".into(),
+                            "--format".into(),
+                            "json".into()
+                        ],
+                    });
+                }
+            }
+
+            // --------------------------------------------------
+            // Tool not allowed -> add to allowlist (Patch)
+            // --------------------------------------------------
+            "MCP_TOOL_NOT_ALLOWED" | "E_TOOL_NOT_ALLOWED" => {
                 if let Some(tool) = d.context.get("tool").and_then(|v: &JsonValue| v.as_str()) {
                     let (allow_ptr, _) = policy_pointers(policy_shape);
 
                     // If allowlist is "*" then tool-not-allowed is likely not the issue.
-                    // We'll still propose patch, but only if allowlist isn't wildcard.
                     let allow_is_wildcard = policy_doc
                         .as_ref()
                         .and_then(|doc| get_seq_strings(doc, allow_ptr))
@@ -155,11 +183,12 @@ pub fn build_suggestions(
                         .unwrap_or(false);
 
                     if !allow_is_wildcard {
-                        patches.push(SuggestedPatch {
-                            id: format!("allow_tool:{}", tool),
+                        let id = format!("allow_tool:{}", tool);
+                        patches_map.insert(id.clone(), SuggestedPatch {
+                            id,
                             title: format!("Allow tool '{}'", tool),
                             risk: RiskLevel::High,
-                            file: policy_path.display().to_string(),
+                            file: policy_path_str.clone(),
                             ops: vec![JsonPatchOp::Add {
                                 path: format!("{}/-", allow_ptr),
                                 value: JsonValue::String(tool.to_string()),
@@ -170,9 +199,7 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Tool denied -> remove from denylist (high risk)
-            // Requires context:
-            //  - tool (string)
+            // Tool denied -> remove from denylist (High risk)
             // --------------------------------------------------
             "E_EXEC_DENIED" | "MCP_TOOL_DENIED" | "E_TOOL_DENIED" => {
                 if let Some(tool) = d.context.get("tool").and_then(|v: &JsonValue| v.as_str()) {
@@ -180,23 +207,24 @@ pub fn build_suggestions(
 
                     if let Some(doc) = policy_doc.as_ref() {
                         if let Some(idx) = find_in_seq(doc, deny_ptr, tool) {
-                            patches.push(SuggestedPatch {
-                                id: format!("remove_deny:{}", tool),
+                            let id = format!("remove_deny:{}", tool);
+                            patches_map.insert(id.clone(), SuggestedPatch {
+                                id,
                                 title: format!("Remove '{}' from denylist", tool),
                                 risk: RiskLevel::High,
-                                file: policy_path.display().to_string(),
+                                file: policy_path_str.clone(),
                                 ops: vec![JsonPatchOp::Remove {
                                     path: format!("{}/{}", deny_ptr, idx),
                                 }],
                             });
                         } else {
-                            // Can't find index deterministically -> suggest action instead
-                            actions.push(SuggestedAction {
-                                id: format!("manual_remove_deny:{}", tool),
+                            let id = format!("manual_remove_deny:{}", tool);
+                            actions_map.insert(id.clone(), SuggestedAction {
+                                id,
                                 title: format!(
                                     "Manually remove '{}' from denylist in {}",
                                     tool,
-                                    policy_path.display()
+                                    policy_path_str
                                 ),
                                 risk: RiskLevel::High,
                                 command: vec![
@@ -212,11 +240,7 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Path scope/arg blocked -> add a constraint (medium)
-            // Requires context (preferably):
-            //  - tool
-            //  - param
-            //  - recommended_matches (regex)
+            // Path scope/arg blocked -> add a constraint (Medium)
             // --------------------------------------------------
             "E_PATH_SCOPE_VIOLATION" | "E_ARG_PATTERN_BLOCKED" | "E_CONSTRAINT_MISSING" => {
                 let tool = d
@@ -235,12 +259,12 @@ pub fn build_suggestions(
                     .and_then(|v: &JsonValue| v.as_str())
                     .unwrap_or("^/app/.*|^/data/.*");
 
-                // Your current template uses constraints as a LIST at "/constraints".
-                patches.push(SuggestedPatch {
-                    id: format!("add_constraint:{}:{}", tool, param),
+                let id = format!("add_constraint:{}:{}", tool, param);
+                patches_map.insert(id.clone(), SuggestedPatch {
+                    id,
                     title: format!("Add constraint {}.{} matches {}", tool, param, re),
                     risk: RiskLevel::Medium,
-                    file: policy_path.display().to_string(),
+                    file: policy_path_str.clone(),
                     ops: vec![JsonPatchOp::Add {
                         path: "/constraints/-".into(),
                         value: serde_json::json!({
@@ -254,35 +278,26 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Tool poisoning checks -> enable signatures.check_descriptions (low)
+            // Tool poisoning -> Action only (Conservative for v1.5)
+            // Avoids complex Replace/Add branching without EnsureObject
             // --------------------------------------------------
             "E_TOOL_POISONING_PATTERN" | "E_TOOL_DESC_SUSPICIOUS" | "E_SIGNATURES_DISABLED" => {
-                // If /signatures doesn't exist, add it. If it exists, replace check_descriptions=true.
-                // We do not read YAML here; we can express as 2 alternative patches.
-                // For v1.5, emit one conservative patch: "replace" (will fail if missing),
-                // plus an action to run "assay fix" (which can do conditional apply).
-                patches.push(SuggestedPatch {
-                    id: "enable_tool_poisoning_checks".into(),
-                    title: "Enable tool poisoning heuristics (check tool descriptions)".into(),
+                let id = "enable_tool_poisoning_checks".to_string();
+                actions_map.insert(id.clone(), SuggestedAction {
+                    id,
+                    title: format!("Enable tool poisoning heuristics (check_descriptions) in {}", policy_path_str),
                     risk: RiskLevel::Low,
-                    file: policy_path.display().to_string(),
-                    ops: vec![
-                        JsonPatchOp::Add {
-                            path: "/signatures".into(),
-                            value: serde_json::json!({ "check_descriptions": true }),
-                        },
-                        JsonPatchOp::Replace {
-                            path: "/signatures/check_descriptions".into(),
-                            value: JsonValue::Bool(true),
-                        },
+                    command: vec![
+                        "assay".into(),
+                        "fix".into(),
+                        "--config".into(),
+                        policy_path_str.clone()
                     ],
                 });
             }
 
             // --------------------------------------------------
-            // Missing paths in assay.yaml -> fix policy/baseline pointers (low)
-            // Requires context:
-            //  - file, field, candidates[]
+            // Missing paths in assay.yaml
             // --------------------------------------------------
             "E_PATH_NOT_FOUND" | "E_CFG_REF_MISSING" | "E_BASELINE_NOT_FOUND" => {
                 let file = d
@@ -296,8 +311,9 @@ pub fn build_suggestions(
                     if let Some(field) = field {
                         if field == "policy" {
                             if let Some(best) = best_candidate(&d.context) {
-                                patches.push(SuggestedPatch {
-                                    id: "fix_assay_policy_path".into(),
+                                let id = "fix_assay_policy_path".to_string();
+                                patches_map.insert(id.clone(), SuggestedPatch {
+                                    id,
                                     title: format!("Update assay.yaml policy path → {}", best),
                                     risk: RiskLevel::Low,
                                     file: file.to_string(),
@@ -309,8 +325,9 @@ pub fn build_suggestions(
                             }
                         }
                         if field == "baseline" {
-                            patches.push(SuggestedPatch {
-                                id: "fix_baseline_path".into(),
+                            let id = "fix_baseline_path".to_string();
+                            patches_map.insert(id.clone(), SuggestedPatch {
+                                id,
                                 title: "Set baseline path to .assay/baseline.json".into(),
                                 risk: RiskLevel::Low,
                                 file: file.to_string(),
@@ -320,8 +337,9 @@ pub fn build_suggestions(
                                 }],
                             });
 
-                            actions.push(SuggestedAction {
-                                id: "create_baseline_dir".into(),
+                            let action_id = "create_baseline_dir".to_string();
+                            actions_map.insert(action_id.clone(), SuggestedAction {
+                                id: action_id,
                                 title: "Create baseline directory".into(),
                                 risk: RiskLevel::Low,
                                 command: vec!["mkdir".into(), "-p".into(), ".assay".into()],
@@ -332,11 +350,17 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Trace drift -> action only in v1.5
+            // Trace drift -> action with context-aware filename
             // --------------------------------------------------
             "E_TRACE_SCHEMA_DRIFT" | "E_TRACE_SCHEMA_INVALID" | "E_TRACE_LEGACY_FUNCTION_CALL" => {
-                actions.push(SuggestedAction {
-                    id: "normalize_trace".into(),
+                 let raw_trace_file = d.context
+                    .get("trace_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<raw.jsonl>");
+
+                let id = "normalize_trace".to_string();
+                actions_map.insert(id.clone(), SuggestedAction {
+                    id,
                     title: "Normalize traces to Assay V2 schema".into(),
                     risk: RiskLevel::Low,
                     command: vec![
@@ -344,7 +368,7 @@ pub fn build_suggestions(
                         "trace".into(),
                         "ingest".into(),
                         "--input".into(),
-                        "<raw.jsonl>".into(),
+                        raw_trace_file.to_string(),
                         "--output".into(),
                         "traces.jsonl".into(),
                     ],
@@ -352,11 +376,12 @@ pub fn build_suggestions(
             }
 
             // --------------------------------------------------
-            // Baseline mismatch -> action only
+            // Baseline mismatch
             // --------------------------------------------------
             "E_BASE_MISMATCH" | "E_BASELINE_SUITE_MISMATCH" => {
-                actions.push(SuggestedAction {
-                    id: "export_baseline".into(),
+                let id = "export_baseline".to_string();
+                actions_map.insert(id.clone(), SuggestedAction {
+                    id,
                     title: "Export a new baseline from the current run".into(),
                     risk: RiskLevel::Low,
                     command: vec![
@@ -372,11 +397,11 @@ pub fn build_suggestions(
         }
     }
 
-    // Deterministic order for agents
-    actions.sort_by(|a, b| a.id.cmp(&b.id));
-    patches.sort_by(|a, b| a.id.cmp(&b.id));
-
-    (actions, patches)
+    // Convert BTreeMaps to Vecs (already sorted by id key)
+    (
+        actions_map.into_values().collect(),
+        patches_map.into_values().collect(),
+    )
 }
 
 fn policy_pointers(shape: PolicyShape) -> (&'static str, &'static str) {
@@ -387,9 +412,24 @@ fn policy_pointers(shape: PolicyShape) -> (&'static str, &'static str) {
 }
 
 fn detect_policy_shape(doc: &serde_yaml::Value) -> PolicyShape {
-    // tools: { allow: [...], deny: [...] }
-    if let Some(m) = doc.as_mapping() {
-        if m.get(&serde_yaml::Value::String("tools".into())).is_some() {
+    // Check if `tools` key exists and is a mapping
+    let tools = doc
+        .as_mapping()
+        .and_then(|m| m.get(&serde_yaml::Value::String("tools".into())))
+        .and_then(|v| v.as_mapping());
+
+    if let Some(tm) = tools {
+        // Robust check: it's only the "ToolsMap" shape if allow/deny are SEQUENCES inside tools
+        let has_allow = tm
+            .get(&serde_yaml::Value::String("allow".into()))
+            .and_then(|v| v.as_sequence())
+            .is_some();
+        let has_deny = tm
+            .get(&serde_yaml::Value::String("deny".into()))
+            .and_then(|v| v.as_sequence())
+            .is_some();
+
+        if has_allow || has_deny {
             return PolicyShape::ToolsMap;
         }
     }
@@ -402,7 +442,6 @@ fn read_yaml(path: &Path) -> Option<serde_yaml::Value> {
 }
 
 fn best_candidate(ctx: &serde_json::Value) -> Option<String> {
-    // Prefer candidates[0] if present; else none.
     ctx.get("candidates")
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
@@ -462,4 +501,99 @@ fn escape_pointer(s: &str) -> String {
 }
 fn unescape_pointer(s: &str) -> String {
     s.replace("~1", "/").replace("~0", "~")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_deduplication() {
+        let diags = vec![
+            Diagnostic::new("E_CFG_PARSE", "Error 1"),
+            Diagnostic::new("E_CFG_PARSE", "Error 2"),
+        ];
+        let ctx = AgenticCtx { policy_path: None };
+        let (actions, patches) = build_suggestions(&diags, &ctx);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].id, "regen_config");
+        assert!(patches.is_empty());
+    }
+
+    #[test]
+    fn test_unknown_tool_action_only() {
+        let mut d = Diagnostic::new("UNKNOWN_TOOL", "Unknown tool");
+        d.context = json!({ "tool": "weird-tool" });
+
+        let diags = vec![d];
+        let ctx = AgenticCtx { policy_path: None };
+        let (actions, patches) = build_suggestions(&diags, &ctx);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].id, "fix_unknown_tool:weird-tool");
+        assert!(patches.is_empty(), "UNKNOWN_TOOL should not generate patches");
+    }
+
+    #[test]
+    fn test_rename_field_patch() {
+        let mut d = Diagnostic::new("E_CFG_SCHEMA_UNKNOWN_FIELD", "Unknown field");
+        d.context = json!({
+            "file": "assay.yaml",
+            "json_pointer_parent": "/config",
+            "unknown_field": "policcy",
+            "suggested_field": "policy"
+        });
+
+        let diags = vec![d];
+        let ctx = AgenticCtx { policy_path: None };
+        let (_, patches) = build_suggestions(&diags, &ctx);
+
+        assert_eq!(patches.len(), 1);
+        let p = &patches[0];
+        assert_eq!(p.id, "rename_field:policcy->policy");
+
+        match &p.ops[0] {
+            JsonPatchOp::Move { from, path } => {
+                assert_eq!(from, "/config/policcy");
+                assert_eq!(path, "/config/policy");
+            }
+            _ => panic!("Expected Move op"),
+        }
+    }
+
+    #[test]
+    fn test_detect_policy_shape() {
+        // Top Level
+        let doc1: serde_yaml::Value = serde_yaml::from_str("allow: []\ndeny: []").unwrap();
+        match detect_policy_shape(&doc1) {
+            PolicyShape::TopLevel => {},
+            _ => panic!("Expected TopLevel"),
+        }
+
+        // Tools Map (Legacy/Standard)
+        let doc2: serde_yaml::Value = serde_yaml::from_str(r#"
+tools:
+  allow: ["read_file"]
+  deny: []
+"#).unwrap();
+        match detect_policy_shape(&doc2) {
+            PolicyShape::ToolsMap => {},
+            _ => panic!("Expected ToolsMap"),
+        }
+
+        // Tools as explicit map (Bug regression check)
+        // If tools is just a map of definitions, it should NOT be detected as ToolsMap
+        // unless it has allow/deny sequences.
+        let doc3: serde_yaml::Value = serde_yaml::from_str(r#"
+tools:
+  my-tool:
+    image: python:3.9
+"#).unwrap();
+        match detect_policy_shape(&doc3) {
+            PolicyShape::TopLevel => {},
+            _ => panic!("Expected TopLevel for tools definition map"),
+        }
+    }
 }
