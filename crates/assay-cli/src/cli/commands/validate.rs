@@ -262,7 +262,7 @@ fn infer_policy_path(assay_yaml: &std::path::Path) -> Option<std::path::PathBuf>
     let s = std::fs::read_to_string(assay_yaml).ok()?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
     let m = doc.as_mapping()?;
-    let v = m.get(&serde_yaml::Value::String("policy".into()))?;
+    let v = m.get(serde_yaml::Value::String("policy".into()))?;
     let p = v.as_str()?;
     Some(std::path::PathBuf::from(p))
 }

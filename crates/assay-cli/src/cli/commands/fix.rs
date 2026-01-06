@@ -203,10 +203,7 @@ fn print_unified_diff(file: &str, patch_id: &str, before: &str, after: &str) {
     // (context radius = 3 lines)
     print!(
         "{}",
-        diff.unified_diff()
-            .context_radius(3)
-            .header(file, file)
-            .to_string()
+        diff.unified_diff().context_radius(3).header(file, file)
     );
 
     println!("--- end ---");
@@ -258,7 +255,7 @@ fn infer_policy_path(assay_yaml: &Path) -> Option<PathBuf> {
     let s = std::fs::read_to_string(assay_yaml).ok()?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
     let m = doc.as_mapping()?;
-    let v = m.get(&serde_yaml::Value::String("policy".into()))?;
+    let v = m.get(serde_yaml::Value::String("policy".into()))?;
     let p = v.as_str()?;
     Some(PathBuf::from(p))
 }
