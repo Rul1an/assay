@@ -1,0 +1,40 @@
+# Assay MCP Policy for Claude Desktop
+# Security Level: Production
+
+tools:
+  # Explicit deny for dangerous tools
+  deny:
+    - exec_shell
+    - run_bash
+    - system_command
+    - delete_file
+    - rm_file
+    - format_disk
+
+  # Optioneel: Alleen specifieke tools toestaan
+  # allow:
+  #   - read_file
+  #   - search_files
+  #   - list_directory
+
+# Argument constraints
+constraints:
+  # Blokkeer gevaarlijke shell commando's
+  run_command:
+    deny_patterns:
+      command: '^(rm|sudo|chmod|chown|dd|mkfs|curl.*\|.*sh|wget.*\|.*bash).*'
+      cwd: '^/(etc|root|sys|proc|boot|dev)'
+
+  # Blokkeer gevoelige paden
+  read_file:
+    deny_patterns:
+      path: '^/(etc/passwd|etc/shadow|root/|\.ssh/|\.aws/|\.env)'
+
+  write_file:
+    deny_patterns:
+      file_path: '\.(exe|sh|bat|ps1|app|dmg)$'
+      file_path: '^/(etc|usr|bin|sbin|System)/'
+
+# Rate limits voor productie
+limits:
+  max_tool_calls_total: 100

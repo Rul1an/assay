@@ -11,6 +11,7 @@ pub mod errors;
 pub mod explain;
 pub mod fingerprint;
 pub mod judge;
+pub mod mcp;
 pub mod metrics_api;
 pub mod model;
 pub mod on_error;
@@ -24,7 +25,7 @@ pub mod doctor;
 pub mod validate;
 
 pub mod agent_assertions;
-pub mod mcp;
+
 pub mod report;
 pub mod storage;
 pub mod thresholds;

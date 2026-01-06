@@ -1,0 +1,2 @@
+limits:
+  max_tool_calls_total: 2

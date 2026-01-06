@@ -108,16 +108,13 @@ pub async fn doctor(
     };
 
     let db_summary = match &opts.db_path {
-
         Some(p) => summarize_db(p, &mut diagnostics).ok(),
         None => None,
     };
 
     let caches = summarize_caches(&mut notes);
 
-
     let suggested_actions = suggest_from(&diagnostics, cfg, &trace_summary, &baseline_summary);
-
 
     Ok(DoctorReport {
         schema_version: 1,

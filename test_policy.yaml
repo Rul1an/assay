@@ -1,0 +1,7 @@
+tools:
+  allow:
+    - read_file
+    - list_directory
+    - get_file_info
+  deny:
+    - write_file  # We explicitly block this to test the "Shield"

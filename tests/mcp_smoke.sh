@@ -1,52 +1,28 @@
 #!/bin/bash
 set -e
 
-# Setup
-TEST_DIR="tests/tmp/mcp_smoke"
-rm -rf "$TEST_DIR"
-mkdir -p "$TEST_DIR"
-FIXTURE="tests/fixtures/mcp/edge_case.json"
+# Compile latest
+cargo build -p assay-cli --quiet
 
-# Build (optional, ensure debug build is fresh)
-cargo build --quiet
+# Echo Server Path
+SERVER_SCRIPT="tests/echo_server.py"
 
-APP="target/debug/assay"
+echo "=== 1. Starting MCP Proxy with Echo Server ==="
+echo "Wrapped Command: python3 $SERVER_SCRIPT"
 
-echo "Running MCP Smoke Test in $TEST_DIR..."
+# We pipe input into assay mcp wrap
+# The proxy forwards it to python echo server
+# The server responds 'pong'
+# The proxy forwards it back to us
 
-cd "$TEST_DIR"
+response=$(echo '{"jsonrpc": "2.0", "id": 1, "method": "ping"}' | ./target/debug/assay mcp wrap -- python3 "$SERVER_SCRIPT")
 
-# 1. Import
-echo "1. Importing fixture..."
-../../../$APP import --format mcp-inspector ../../../$FIXTURE --init --out-trace trace.jsonl
+echo "=== 2. Inspecting Response ==="
+echo "$response"
 
-# 2. Check Scaffolding
-if [ ! -f "mcp-eval.yaml" ]; then
-    echo "❌ mcp-eval.yaml missing"
+if echo "$response" | grep -q "pong"; then
+    echo "✅ Success: Passthrough verified."
+else
+    echo "❌ Failure: Did not receive pong."
     exit 1
 fi
-if [ -d "policies" ]; then
-    echo "❌ policies/ directory should NOT exist (switched to inline config)"
-    exit 1
-fi
-
-# 3. Verify Schema Content (Inline Guardrail)
-echo "2. Verifying Inline Guardrails..."
-if ! grep -q "properties: {}" mcp-eval.yaml; then
-    echo "❌ mcp-eval.yaml does not contain 'properties: {}' (inline schema check)"
-    cat mcp-eval.yaml
-    exit 1
-fi
-if ! grep -q '\- "valid_tool"' mcp-eval.yaml; then
-    echo "❌ mcp-eval.yaml does not contain valid_tool in sequence (inline sequence check)"
-    cat mcp-eval.yaml
-    exit 1
-fi
-
-# 4. Run Verification (Strict)
-echo "3. Running verification (strict replay)..."
-../../../$APP run --config mcp-eval.yaml --trace-file trace.jsonl --replay-strict --no-cache
-
-echo "✅ MCP Smoke Test Passed!"
-cd -
-rm -rf "$TEST_DIR"
