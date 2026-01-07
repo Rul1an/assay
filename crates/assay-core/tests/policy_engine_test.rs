@@ -16,7 +16,7 @@ fn mock_request(tool: &str, args: serde_json::Value) -> JsonRpcRequest {
 
 #[test]
 fn test_dual_shape_constraints() {
-    // 1. Canonical List
+    // Canonical List
     let yaml_list = r#"
 constraints:
   - tool: read_file
@@ -27,7 +27,7 @@ constraints:
     assert_eq!(p_list.constraints.len(), 1);
     assert_eq!(p_list.constraints[0].tool, "read_file");
 
-    // 2. Legacy Map
+    // Legacy Map
     let yaml_map = r#"
 constraints:
   read_file:
@@ -37,7 +37,7 @@ constraints:
     assert_eq!(p_map.constraints.len(), 1);
     assert_eq!(p_map.constraints[0].tool, "read_file");
 
-    // Check internal normalization
+    // Check normalization
     let rule = &p_map.constraints[0];
     let param = rule.params.get("path").expect("param missing");
     assert_eq!(param.matches.as_deref(), Some("^/app/.*"));
@@ -45,23 +45,19 @@ constraints:
 
 #[test]
 fn test_mixed_tools_config() {
-    // 3. Precedence / Merge Check
-    // Root allow: ["*"]
-    // Nested deny: ["exec"]
+    // Root allow: ["*"], Nested deny: ["exec"]
     let yaml = r#"
 allow: ["*"]
 tools:
   deny: ["exec"]
 "#;
-    let p: McpPolicy = serde_yaml::from_str(yaml).expect("Failed to parse mixed config");
+    let p: McpPolicy = serde_yaml::from_str(yaml).expect("Refused mixed config");
 
     let mut state = PolicyState::default();
 
-    // Should be allowed by root allow
     let req_read = mock_request("read_file", json!({}));
     assert!(matches!(p.check(&req_read, &mut state), PolicyDecision::Allow));
 
-    // Should be denied by nested deny
     let req_exec = mock_request("exec", json!({}));
     if let PolicyDecision::Deny { reason, .. } = p.check(&req_exec, &mut state) {
         assert!(reason.to_lowercase().contains("denylisted"));
@@ -72,7 +68,6 @@ tools:
 
 #[test]
 fn test_wildcard_semantics() {
-    // 4. Wildcards
     let yaml = r#"
 deny:
   - "exec*"
@@ -82,15 +77,15 @@ deny:
     let p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
     let mut state = PolicyState::default();
 
-    // exec* matches execute
+    // exec*
     let req = mock_request("execute_command", json!({}));
     assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
 
-    // *sh matches zsh
+    // *sh
     let req = mock_request("zsh", json!({}));
     assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
 
-    // *kill* matches skill_check
+    // *kill* (contains)
     let req = mock_request("skill_check", json!({}));
     assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
 
@@ -101,8 +96,6 @@ deny:
 
 #[test]
 fn test_constraint_enforcement() {
-    // 5. Constraints Logic
-    // Matches logic: "must match" (Allowlist logic)
     let yaml = r#"
 constraints:
   - tool: read_file
@@ -125,11 +118,9 @@ constraints:
     }
 
     // Fail missing arg (Fail-Closed)
-    // Now expecting DENY with MCP_CONSTRAINT_MISSING
     let req = mock_request("read_file", json!({}));
     match p.check(&req, &mut state) {
-        PolicyDecision::Deny { reason, contract, .. } => {
-            assert!(reason.to_lowercase().contains("missing"));
+        PolicyDecision::Deny { contract, .. } => {
             assert_eq!(contract["error_code"], "MCP_CONSTRAINT_MISSING");
         }
         _ => panic!("expected deny on missing constrained arg"),

@@ -8,14 +8,9 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpPolicy {
-    // Nested "tools: { ... }" legacy
     #[serde(default)]
     pub tools: ToolPolicy,
 
-    // Flattened root allow/deny (Canonical)
-    // We cannot use #[serde(flatten)] because we also want "tools" field to be available.
-    // Instead, we just define them as fields.
-    // NOTE: This means "allow" MUST be a top-level key. "tools: { allow: ... }" is separate.
     #[serde(default)]
     pub allow: Option<Vec<String>>,
     #[serde(default)]
@@ -66,8 +61,6 @@ pub struct ConstraintRule {
 pub struct ConstraintParam {
     #[serde(default)]
     pub matches: Option<String>,
-    // For legacy support, maybe map "deny_patterns" regex to something?
-    // The legacy code used deny_patterns. User wants "matches" (allowlist logic).
 }
 
 // Dual-Shape Deserializer Helper
@@ -76,21 +69,13 @@ pub struct ConstraintParam {
 enum ConstraintsCompat {
     List(Vec<ConstraintRule>),
     // Legacy: Map<ToolName, Map<ArgName, RegexString>>
-    // The previous implementation had ArgConstraints { deny_patterns: Map<String, String> }
-    // If we want to support that via "matches", we mapping "regex" to "matches".
-    // BUT legacy was DENY logic. "matches" is usually ALLOW logic.
-    // Let's assume for this transition that if user provided a map, they meant the new "matches" logic
-    // OR we can't support the logic inversion easily.
-    // Given we are cleaning up, maybe we just support the structure and map string -> matches?
     Map(BTreeMap<String, BTreeMap<String, InputParamConstraint>>),
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum InputParamConstraint {
-    // Handle "arg": "regex" (Legacy direct string)
     Direct(String),
-    // Handle "arg": { "matches": "regex" } (Future map)
     Object(ConstraintParam),
 }
 
@@ -108,8 +93,6 @@ where
                 .map(|(tool, params)| {
                     let new_params = params.into_iter().map(|(arg, val)| {
                         let param = match val {
-                            // Legacy: string was a deny regex? Or allow?
-                            // Based on context of "constraints", usually implies "must match".
                             InputParamConstraint::Direct(s) => ConstraintParam { matches: Some(s) },
                             InputParamConstraint::Object(o) => o,
                         };
@@ -259,7 +242,7 @@ impl McpPolicy {
                     "error_code": "MCP_TOOL_DENIED",
                     "tool": tool_name.clone(),
                     "reason": "Tool is denylisted",
-                    "did_you_mean": [], // TODO: Suggest similar tools
+                    "did_you_mean": [],
                     "suggested_patches": [
                         {"op":"remove","path":"/deny","value": tool_name}
                     ]
@@ -268,14 +251,6 @@ impl McpPolicy {
         }
 
         // 2. Allowlist Checks (Union of root.allow + tools.allow)
-        // If EITHER list exists, then allowlist mode is ON.
-        // If both exist, allow if matches EITHER.
-        // If neither exists, allow all (unless default is deny? No, "Allow standard tools" is default default.)
-        // Actually, if allow is Some, it means "Allowlist Only".
-        // What if root allow is Some(["read"]) and tools allow is None? => Allowlist=read.
-        // What if root allow is None and tools allow is Some(["read"])? => Allowlist=read.
-        // What if both None? => Allow All.
-
         let root_allow = self.allow.as_ref();
         let tools_allow = self.tools.allow.as_ref();
 
@@ -293,7 +268,7 @@ impl McpPolicy {
                         "error_code": "MCP_TOOL_NOT_ALLOWED",
                         "tool": tool_name.clone(),
                         "reason": "Tool is not in allowlist",
-                        "allowed_tools": root_allow.or(tools_allow), // Just show one for debug
+                        "allowed_tools": root_allow.or(tools_allow),
                         "suggested_patches": [
                             {"op":"add","path":"/allow/-","value": tool_name}
                         ]
@@ -302,7 +277,7 @@ impl McpPolicy {
             }
         }
 
-        // 3. Argument Constraints (Normalized List)
+        // 3. Argument Constraints
         if let Value::Object(args_map) = &params.arguments {
             for rule in &self.constraints {
                 if rule.tool != *tool_name {
