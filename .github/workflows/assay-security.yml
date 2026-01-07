@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assay validate --format sarif --output results.sarif
+          assay validate --config examples/demo/assay-safe.yaml --format sarif --output results.sarif
         continue-on-error: true
 
       - name: Upload SARIF to GitHub Security
@@ -47,4 +47,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assay validate --format text
+          assay validate --config examples/demo/assay-safe.yaml --format text

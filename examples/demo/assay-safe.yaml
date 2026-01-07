@@ -1,0 +1,4 @@
+version: 1
+suite: "demo-safe"
+policy: "safe-policy.yaml"
+tests: []
