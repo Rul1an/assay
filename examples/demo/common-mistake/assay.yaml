@@ -1,8 +1,7 @@
 version: 1
 suite: "demo-common-mistake"
 
-# Point to the policy in this demo folder
-policy: "policy.yaml"
+
 
 # Minimal stub so validate can load config; no traces required for policy validation.
 tests: []
