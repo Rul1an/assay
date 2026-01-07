@@ -116,6 +116,12 @@ where
     Ok(out)
 }
 
+#[derive(Debug, Default)]
+pub struct PolicyState {
+    pub requests_count: u64,
+    pub tool_calls_count: u64,
+}
+
 pub enum PolicyDecision {
     Allow,
     Deny {
