@@ -5,4 +5,8 @@ model: "dummy"
 
 
 # Minimal stub so validate can load config; no traces required for policy validation.
-tests: []
+tests:
+  - id: "placeholder-smoke"
+    input: "ignore"
+    expected:
+      must_contain: []

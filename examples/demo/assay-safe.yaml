@@ -2,4 +2,8 @@ version: 1
 suite: "demo-safe"
 model: "dummy"
 
-tests: []
+tests:
+  - id: "placeholder-smoke"
+    input: "ignore"
+    expected:
+      must_contain: []
