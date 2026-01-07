@@ -1,0 +1,50 @@
+name: MCP Security (Assay)
+
+on:
+  push:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "examples/**"
+      - "**/*.mcp.json"
+  pull_request:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "examples/**"
+      - "**/*.mcp.json"
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Assay
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://getassay.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Generate SARIF even if validate fails, so it shows up in GitHub Security tab.
+      - name: Validate (SARIF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          assay validate --format sarif --output results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+      # Final gate: fail the workflow if there are issues.
+      - name: Validate (gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          assay validate --format text

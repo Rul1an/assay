@@ -52,3 +52,29 @@ assay validate
 ```
 
 > **Note**: `assay fix` modifies your policy configuration (`assay.yaml`). It does *not* modify your server code. That is your responsibility.
+
+## Scenario 2: The realistic day-one mistake
+
+Developers often start with: “I only need files + maybe a command or two”.
+
+Try:
+
+```bash
+assay validate --config examples/demo/common-mistake/assay.yaml --format text
+```
+
+**Expected outcome:**
+- `run_command` is allowed (high risk): suggests denying it or tightening allow/deny.
+- `write_file` / `read_file` without path constraints: suggests adding constraints with `matches:` for safe roots.
+
+Then preview fixes:
+
+```bash
+assay fix --config examples/demo/common-mistake/assay.yaml --dry-run
+```
+
+Apply fixes:
+
+```bash
+assay fix --config examples/demo/common-mistake/assay.yaml --yes
+```

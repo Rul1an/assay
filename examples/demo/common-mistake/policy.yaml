@@ -1,0 +1,13 @@
+version: "1.0"
+name: "day-one-config"
+
+# "I just want my agent to read files and maybe run some commands"
+# This is what developers actually write on day 1.
+
+allow:
+  - read_file
+  - write_file
+  - list_directory
+  - run_command  # <- here's the footgun (command execution)
+
+# No constraints. What could go wrong?

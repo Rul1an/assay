@@ -39,24 +39,73 @@ assay fix --yes
 -   **Prompt Injection Defense**: Flags excessively long or vague tool descriptions.
 -   **Atomic Autofix**: Safely repairs config/code with zero corruption risk (atomic I/O).
 
-## CI Integration
+## CI: GitHub Actions (copy-paste)
 
-Add to your `.github/workflows/security.yml`:
+Want Assay as a security gate in your PRs immediately? Create this file:
+
+`.github/workflows/assay-security.yml`
 
 ```yaml
-name: MCP Security
-on: [push, pull_request]
+name: MCP Security (Assay)
+
+on:
+  push:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "**/*.mcp.json"
+  pull_request:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "**/*.mcp.json"
 
 jobs:
-  assay:
+  security-check:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://getassay.dev/install.sh | sh
-      - run: assay validate --format sarif > results.sarif
+
+      - name: Install Assay
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://getassay.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Generate SARIF even if validate fails, so findings show up in GitHub Security.
+      - name: Validate (SARIF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          assay validate --format sarif --output results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+      # Hard gate: fail the job if there are issues.
+      - name: Validate (gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          assay validate --format text
 ```
 
-> **Note**: Returns exit code `1` on policy violations to fail the build.
+### What you get
+-   **Annotations in PRs** + Visibility in Security Tab → Code scanning alerts (via SARIF upload)
+-   **Failing build** if there are policy/config issues
+
+### Tip (Optional)
+If your repo has multiple configs, you can explicitly pass a path:
+
+```bash
+assay validate --config path/to/assay.yaml --format sarif --output results.sarif
+```
 
 ## Output Formats
 
