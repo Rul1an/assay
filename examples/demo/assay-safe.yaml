@@ -1,4 +1,5 @@
 version: 1
 suite: "demo-safe"
+model: "dummy"
 
 tests: []
