@@ -140,6 +140,41 @@ pub enum PolicyDecision {
     },
 }
 
+fn matches_tool_pattern(tool_name: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return tool_name == pattern;
+    }
+
+    let starts_star = pattern.starts_with('*');
+    let ends_star = pattern.ends_with('*');
+
+    match (starts_star, ends_star) {
+        (true, true) => {
+            // *abc* => contains("abc")
+            let inner = pattern.trim_matches('*');
+            if inner.is_empty() {
+                true // pattern == "***" => match all
+            } else {
+                tool_name.contains(inner)
+            }
+        }
+        (false, true) => {
+            // abc* => starts_with("abc")
+            let prefix = pattern.trim_end_matches('*');
+            !prefix.is_empty() && tool_name.starts_with(prefix)
+        }
+        (true, false) => {
+            // *abc => ends_with("abc")
+            let suffix = pattern.trim_start_matches('*');
+            !suffix.is_empty() && tool_name.ends_with(suffix)
+        }
+        (false, false) => tool_name == pattern, // unreachable due to contains('*') check above
+    }
+}
+
 impl McpPolicy {
     pub fn new() -> Self {
         Self::default()
@@ -213,19 +248,7 @@ impl McpPolicy {
 
         let blocked = root_deny.iter().flat_map(|v| v.iter())
             .chain(tools_deny.iter().flat_map(|v| v.iter()))
-            .any(|pattern| {
-                 if pattern.contains('*') {
-                     if let Some(prefix) = pattern.strip_suffix('*') {
-                         tool_name.starts_with(prefix)
-                     } else if let Some(suffix) = pattern.strip_prefix('*') {
-                         tool_name.ends_with(suffix)
-                     } else {
-                         tool_name == pattern
-                     }
-                 } else {
-                     tool_name == pattern
-                 }
-            });
+            .any(|pattern| matches_tool_pattern(tool_name, pattern));
 
         if blocked {
             return PolicyDecision::Deny {
@@ -259,19 +282,7 @@ impl McpPolicy {
         if root_allow.is_some() || tools_allow.is_some() {
              let explicitly_allowed = root_allow.iter().flat_map(|v| v.iter())
                 .chain(tools_allow.iter().flat_map(|v| v.iter()))
-                .any(|pattern| {
-                     if pattern.contains('*') {
-                         if let Some(prefix) = pattern.strip_suffix('*') {
-                             tool_name.starts_with(prefix)
-                         } else if let Some(suffix) = pattern.strip_prefix('*') {
-                             tool_name.ends_with(suffix)
-                         } else {
-                             tool_name == pattern
-                         }
-                     } else {
-                         tool_name == pattern
-                     }
-                });
+                .any(|pattern| matches_tool_pattern(tool_name, pattern));
 
             if !explicitly_allowed {
                 return PolicyDecision::Deny {
@@ -299,37 +310,71 @@ impl McpPolicy {
                 }
 
                 for (arg_name, constraint) in &rule.params {
-                    if let Some(val) = args_map.get(arg_name).and_then(|v| v.as_str()) {
-                         if let Some(pattern) = &constraint.matches {
-                             // "matches": regex (ALLOWED pattern? or DENIED pattern?)
-                             // Wait, legacy ArgConstraints had deny_patterns. User example says constraints: matches: "^/app/.*".
-                             // Usually "matches" implies allow-list logic (must match).
-                             // But legacy code said "deny_patterns".
-                             // Let's assume standard behavior: if matches is present, value MUST match the regex. If it doesn't match -> DENY.
-                             // BUT wait, user said "constraints: ... matches: ^/app/.*" for "filesystem-readonly".
-                             // This implies: "Allow only if matches /app/.*".
-                             // So if !matches -> Deny.
+                    let Some(pattern) = &constraint.matches else {
+                        continue;
+                    };
 
-                             if let Ok(re) = regex::Regex::new(pattern) {
-                                 if !re.is_match(val) {
-                                      return PolicyDecision::Deny {
-                                         tool: tool_name.clone(),
-                                         reason: format!(
-                                             "Argument '{}' failed constraint (must match '{}')",
-                                             arg_name, pattern
-                                         ),
-                                         contract: serde_json::json!({
-                                             "status": "deny",
-                                             "error_code": "MCP_ARG_CONSTRAINT",
-                                             "tool": tool_name.clone(),
-                                             "argument": arg_name,
-                                             "pattern": pattern,
-                                             "value": val,
-                                             "violation": "must_match"
-                                         }),
-                                     };
-                                 }
+                    let arg_val = args_map.get(arg_name);
+
+                    let val_str = match arg_val.and_then(|v| v.as_str()) {
+                         Some(s) => s,
+                         None => {
+                             return PolicyDecision::Deny {
+                                 tool: tool_name.clone(),
+                                 reason: format!(
+                                     "Argument '{}' missing or not a string (required to match '{}')",
+                                     arg_name, pattern
+                                 ),
+                                 contract: serde_json::json!({
+                                     "status": "deny",
+                                     "error_code": "MCP_CONSTRAINT_MISSING",
+                                     "tool": tool_name.clone(),
+                                     "argument": arg_name,
+                                     "pattern": pattern,
+                                     "violation": "missing_or_non_string"
+                                 }),
+                             };
+                         }
+                    };
+
+                    match regex::Regex::new(pattern) {
+                         Ok(re) => {
+                             if !re.is_match(val_str) {
+                                  return PolicyDecision::Deny {
+                                     tool: tool_name.clone(),
+                                     reason: format!(
+                                         "Argument '{}' failed constraint (must match '{}')",
+                                         arg_name, pattern
+                                     ),
+                                     contract: serde_json::json!({
+                                         "status": "deny",
+                                         "error_code": "MCP_ARG_CONSTRAINT",
+                                         "tool": tool_name.clone(),
+                                         "argument": arg_name,
+                                         "pattern": pattern,
+                                         "value": val_str,
+                                         "violation": "must_match"
+                                     }),
+                                 };
                              }
+                         }
+                         Err(_) => {
+                            // Invalid regex in policy -> Deny safely
+                            return PolicyDecision::Deny {
+                                tool: tool_name.clone(),
+                                reason: format!(
+                                    "Invalid regex constraint for argument '{}' (pattern '{}')",
+                                    arg_name, pattern
+                                ),
+                                contract: serde_json::json!({
+                                    "status": "deny",
+                                    "error_code": "MCP_POLICY_INVALID_REGEX",
+                                    "tool": tool_name.clone(),
+                                    "argument": arg_name,
+                                    "pattern": pattern,
+                                    "violation": "invalid_regex"
+                                }),
+                            };
                          }
                     }
                 }

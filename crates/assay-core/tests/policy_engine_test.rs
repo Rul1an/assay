@@ -124,13 +124,14 @@ constraints:
         panic!("Should deny mismatch");
     }
 
-    // Fail missing arg? (Optional: assume safe defaults or deny?)
-    // Current loop logic: if arg is missing, it skips validaton. (Fail Open? or Safe?)
-    // User requested: decide what happens.
-    // Let's verify CURRENT logic.
+    // Fail missing arg (Fail-Closed)
+    // Now expecting DENY with MCP_CONSTRAINT_MISSING
     let req = mock_request("read_file", json!({}));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Allow));
-    // NOTE: This means missing args BYPASS constraints.
-    // This is arguably unsafe if the tool allows optional args that default to unsafe values!
-    // But for "read_file", path is usually required by the TOOL (server side).
+    match p.check(&req, &mut state) {
+        PolicyDecision::Deny { reason, contract, .. } => {
+            assert!(reason.to_lowercase().contains("missing"));
+            assert_eq!(contract["error_code"], "MCP_CONSTRAINT_MISSING");
+        }
+        _ => panic!("expected deny on missing constrained arg"),
+    }
 }
