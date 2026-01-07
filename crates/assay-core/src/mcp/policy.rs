@@ -3,14 +3,23 @@ use super::jsonrpc::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpPolicy {
-    #[serde(default, flatten)]
+    // Nested "tools: { ... }" legacy
+    #[serde(default)]
     pub tools: ToolPolicy,
+
+    // Flattened root allow/deny (Canonical)
+    // We cannot use #[serde(flatten)] because we also want "tools" field to be available.
+    // Instead, we just define them as fields.
+    // NOTE: This means "allow" MUST be a top-level key. "tools: { allow: ... }" is separate.
+    #[serde(default)]
+    pub allow: Option<Vec<String>>,
+    #[serde(default)]
+    pub deny: Option<Vec<String>>,
 
     #[serde(default, deserialize_with = "deserialize_constraints")]
     pub constraints: Vec<ConstraintRule>,
@@ -198,13 +207,14 @@ impl McpPolicy {
 
         let tool_name = &params.name;
 
-        // 1. Denylist
-        if let Some(deny) = &self.tools.deny {
-            // Check wildcards
-            let blocked = deny.iter().any(|pattern| {
+        // 1. Denylist Checks (Union of root.deny + tools.deny)
+        let root_deny = self.deny.as_ref();
+        let tools_deny = self.tools.deny.as_ref();
+
+        let blocked = root_deny.iter().flat_map(|v| v.iter())
+            .chain(tools_deny.iter().flat_map(|v| v.iter()))
+            .any(|pattern| {
                  if pattern.contains('*') {
-                     // Simple glob: literal prefix match if ends with *, or contains
-                     // For now, support "exec*"
                      if let Some(prefix) = pattern.strip_suffix('*') {
                          tool_name.starts_with(prefix)
                      } else if let Some(suffix) = pattern.strip_prefix('*') {
@@ -217,40 +227,51 @@ impl McpPolicy {
                  }
             });
 
-            if blocked {
-                return PolicyDecision::Deny {
-                    tool: tool_name.clone(),
-                    reason: "Tool is explicitly denylisted".to_string(),
-                    contract: serde_json::json!({
-                        "status": "deny",
-                        "error_code": "MCP_TOOL_DENIED",
-                        "tool": tool_name.clone(),
-                        "reason": "Tool is denylisted",
-                        "did_you_mean": [], // TODO: Suggest similar tools
-                        "suggested_patches": [
-                            {"op":"remove","path":"/deny","value": tool_name} // updated path due to flatten
-                        ]
-                    }),
-                };
-            }
+        if blocked {
+            return PolicyDecision::Deny {
+                tool: tool_name.clone(),
+                reason: "Tool is explicitly denylisted".to_string(),
+                contract: serde_json::json!({
+                    "status": "deny",
+                    "error_code": "MCP_TOOL_DENIED",
+                    "tool": tool_name.clone(),
+                    "reason": "Tool is denylisted",
+                    "did_you_mean": [], // TODO: Suggest similar tools
+                    "suggested_patches": [
+                        {"op":"remove","path":"/deny","value": tool_name}
+                    ]
+                }),
+            };
         }
 
-        // 2. Allowlist
-        if let Some(allow) = &self.tools.allow {
-             // Check wildcards
-            let explicitly_allowed = allow.iter().any(|pattern| {
-                 if pattern.contains('*') {
-                     if let Some(prefix) = pattern.strip_suffix('*') {
-                         tool_name.starts_with(prefix)
-                     } else if let Some(suffix) = pattern.strip_prefix('*') {
-                         tool_name.ends_with(suffix)
+        // 2. Allowlist Checks (Union of root.allow + tools.allow)
+        // If EITHER list exists, then allowlist mode is ON.
+        // If both exist, allow if matches EITHER.
+        // If neither exists, allow all (unless default is deny? No, "Allow standard tools" is default default.)
+        // Actually, if allow is Some, it means "Allowlist Only".
+        // What if root allow is Some(["read"]) and tools allow is None? => Allowlist=read.
+        // What if root allow is None and tools allow is Some(["read"])? => Allowlist=read.
+        // What if both None? => Allow All.
+
+        let root_allow = self.allow.as_ref();
+        let tools_allow = self.tools.allow.as_ref();
+
+        if root_allow.is_some() || tools_allow.is_some() {
+             let explicitly_allowed = root_allow.iter().flat_map(|v| v.iter())
+                .chain(tools_allow.iter().flat_map(|v| v.iter()))
+                .any(|pattern| {
+                     if pattern.contains('*') {
+                         if let Some(prefix) = pattern.strip_suffix('*') {
+                             tool_name.starts_with(prefix)
+                         } else if let Some(suffix) = pattern.strip_prefix('*') {
+                             tool_name.ends_with(suffix)
+                         } else {
+                             tool_name == pattern
+                         }
                      } else {
                          tool_name == pattern
                      }
-                 } else {
-                     tool_name == pattern
-                 }
-            });
+                });
 
             if !explicitly_allowed {
                 return PolicyDecision::Deny {
@@ -261,9 +282,9 @@ impl McpPolicy {
                         "error_code": "MCP_TOOL_NOT_ALLOWED",
                         "tool": tool_name.clone(),
                         "reason": "Tool is not in allowlist",
-                        "allowed_tools": allow,
+                        "allowed_tools": root_allow.or(tools_allow), // Just show one for debug
                         "suggested_patches": [
-                            {"op":"add","path":"/allow/-","value": tool_name} // updated path due to flatten
+                            {"op":"add","path":"/allow/-","value": tool_name}
                         ]
                     }),
                 };
