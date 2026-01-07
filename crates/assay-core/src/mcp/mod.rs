@@ -9,3 +9,6 @@ pub mod types;
 pub use mapper_v2::*;
 pub use parser::*;
 pub use types::*;
+
+#[cfg(test)]
+pub mod tests;

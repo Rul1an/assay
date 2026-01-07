@@ -51,15 +51,17 @@ allow: ["*"]
 tools:
   deny: ["exec"]
 "#;
-    let p: McpPolicy = serde_yaml::from_str(yaml).expect("Refused mixed config");
+    let mut p: McpPolicy = serde_yaml::from_str(yaml).expect("Refused mixed config");
+    p.normalize_legacy_shapes();
 
     let mut state = PolicyState::default();
 
     let req_read = mock_request("read_file", json!({}));
-    assert!(matches!(
-        p.check(&req_read, &mut state),
-        PolicyDecision::Allow
-    ));
+    // Should be AllowWithWarning because read_file has no schema
+    match p.check(&req_read, &mut state) {
+        PolicyDecision::Allow | PolicyDecision::AllowWithWarning { .. } => {}
+        d => panic!("Expected Allow/Warning, got {:?}", d),
+    }
 
     let req_exec = mock_request("exec", json!({}));
     if let PolicyDecision::Deny { reason, .. } = p.check(&req_exec, &mut state) {
@@ -77,7 +79,9 @@ deny:
   - "*sh"
   - "*kill*"
 "#;
-    let p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
+    let mut p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
+    p.normalize_legacy_shapes();
+
     let mut state = PolicyState::default();
 
     // exec*
@@ -103,7 +107,10 @@ deny:
 
     // No match
     let req = mock_request("read_file", json!({}));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Allow));
+    match p.check(&req, &mut state) {
+        PolicyDecision::Allow | PolicyDecision::AllowWithWarning { .. } => {}
+        d => panic!("Expected Allow/Warning, got {:?}", d),
+    }
 }
 
 #[test]
@@ -114,26 +121,37 @@ constraints:
     params:
       path: { matches: "^/app/.*" }
 "#;
-    let p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
+    let mut p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
+    p.migrate_constraints_to_schemas();
+
     let mut state = PolicyState::default();
 
     // Pass
     let req = mock_request("read_file", json!({ "path": "/app/config.json" }));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Allow));
+    match p.check(&req, &mut state) {
+        PolicyDecision::Allow => {} // Exact allow because schema exists and validates!
+        d => panic!("Expected Allow, got {:?}", d),
+    }
 
     // Fail mismatch
     let req = mock_request("read_file", json!({ "path": "/etc/passwd" }));
-    if let PolicyDecision::Deny { reason, .. } = p.check(&req, &mut state) {
-        assert!(reason.contains("failed constraint"));
+    if let PolicyDecision::Deny {
+        reason, contract, ..
+    } = p.check(&req, &mut state)
+    {
+        assert!(reason.contains("JSON Schema validation failed"));
+        assert_eq!(contract["error_code"], "E_ARG_SCHEMA");
     } else {
         panic!("Should deny mismatch");
     }
 
     // Fail missing arg (Fail-Closed)
+    // V2 auto-migrates constraints to "required" properties in generic migration logic
     let req = mock_request("read_file", json!({}));
     match p.check(&req, &mut state) {
         PolicyDecision::Deny { contract, .. } => {
-            assert_eq!(contract["error_code"], "MCP_CONSTRAINT_MISSING");
+            // New V2 Error Code
+            assert_eq!(contract["error_code"], "E_ARG_SCHEMA");
         }
         _ => panic!("expected deny on missing constrained arg"),
     }

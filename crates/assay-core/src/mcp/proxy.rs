@@ -91,30 +91,19 @@ impl McpProxy {
                         // 2. Check Policy
                         match policy.check(&req, &mut state) {
                             PolicyDecision::Allow => {
-                                // Log Allow
-                                if config.verbose && req.is_tool_call() {
-                                    let tool = req
-                                        .tool_params()
-                                        .map(|p| p.name)
-                                        .unwrap_or_else(|| "unknown".to_string());
-                                    eprintln!("[assay] ALLOW {}", tool);
-                                }
-
-                                if req.is_tool_call() {
-                                    let tool = req.tool_params().map(|p| p.name);
-                                    audit_log.log(&AuditEvent {
-                                        timestamp: chrono::Utc::now().to_rfc3339(),
-                                        decision: "allow".to_string(),
-                                        tool,
-                                        reason: None,
-                                        request_id: req.id.clone(),
-                                        agentic: None,
-                                    });
-                                }
-                                // forward
+                                Self::handle_allow(&req, &mut audit_log, config.verbose);
+                            }
+                            PolicyDecision::AllowWithWarning {
+                                tool: _,
+                                code: _,
+                                reason: _,
+                            } => {
+                                // Treat as Allow but maybe log warning could be added here
+                                Self::handle_allow(&req, &mut audit_log, config.verbose);
                             }
                             PolicyDecision::Deny {
                                 tool,
+                                code: _,
                                 reason,
                                 contract,
                             } => {
@@ -196,5 +185,27 @@ impl McpProxy {
         // Wacht op child exit
         let status = self.child.wait()?;
         Ok(status.code().unwrap_or(1))
+    }
+
+    fn handle_allow(req: &JsonRpcRequest, audit_log: &mut AuditLog, verbose: bool) {
+        if verbose && req.is_tool_call() {
+            let tool = req
+                .tool_params()
+                .map(|p| p.name)
+                .unwrap_or_else(|| "unknown".to_string());
+            eprintln!("[assay] ALLOW {}", tool);
+        }
+
+        if req.is_tool_call() {
+            let tool = req.tool_params().map(|p| p.name);
+            audit_log.log(&AuditEvent {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                decision: "allow".to_string(),
+                tool,
+                reason: None,
+                request_id: req.id.clone(),
+                agentic: None,
+            });
+        }
     }
 }
