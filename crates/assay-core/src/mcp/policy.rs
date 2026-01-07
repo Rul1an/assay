@@ -88,21 +88,26 @@ where
     let out = match c {
         None => vec![],
         Some(ConstraintsCompat::List(v)) => v,
-        Some(ConstraintsCompat::Map(m)) => {
-            m.into_iter()
-                .map(|(tool, params)| {
-                    let new_params = params.into_iter().map(|(arg, val)| {
+        Some(ConstraintsCompat::Map(m)) => m
+            .into_iter()
+            .map(|(tool, params)| {
+                let new_params = params
+                    .into_iter()
+                    .map(|(arg, val)| {
                         let param = match val {
                             InputParamConstraint::Direct(s) => ConstraintParam { matches: Some(s) },
                             InputParamConstraint::Object(o) => o,
                         };
                         (arg, param)
-                    }).collect();
+                    })
+                    .collect();
 
-                    ConstraintRule { tool, params: new_params }
-                })
-                .collect()
-        }
+                ConstraintRule {
+                    tool,
+                    params: new_params,
+                }
+            })
+            .collect(),
     };
 
     Ok(out)
@@ -229,7 +234,9 @@ impl McpPolicy {
         let root_deny = self.deny.as_ref();
         let tools_deny = self.tools.deny.as_ref();
 
-        let blocked = root_deny.iter().flat_map(|v| v.iter())
+        let blocked = root_deny
+            .iter()
+            .flat_map(|v| v.iter())
             .chain(tools_deny.iter().flat_map(|v| v.iter()))
             .any(|pattern| matches_tool_pattern(tool_name, pattern));
 
@@ -255,7 +262,9 @@ impl McpPolicy {
         let tools_allow = self.tools.allow.as_ref();
 
         if root_allow.is_some() || tools_allow.is_some() {
-             let explicitly_allowed = root_allow.iter().flat_map(|v| v.iter())
+            let explicitly_allowed = root_allow
+                .iter()
+                .flat_map(|v| v.iter())
                 .chain(tools_allow.iter().flat_map(|v| v.iter()))
                 .any(|pattern| matches_tool_pattern(tool_name, pattern));
 
@@ -292,9 +301,9 @@ impl McpPolicy {
                     let arg_val = args_map.get(arg_name);
 
                     let val_str = match arg_val.and_then(|v| v.as_str()) {
-                         Some(s) => s,
-                         None => {
-                             return PolicyDecision::Deny {
+                        Some(s) => s,
+                        None => {
+                            return PolicyDecision::Deny {
                                  tool: tool_name.clone(),
                                  reason: format!(
                                      "Argument '{}' missing or not a string (required to match '{}')",
@@ -309,31 +318,31 @@ impl McpPolicy {
                                      "violation": "missing_or_non_string"
                                  }),
                              };
-                         }
+                        }
                     };
 
                     match regex::Regex::new(pattern) {
-                         Ok(re) => {
-                             if !re.is_match(val_str) {
-                                  return PolicyDecision::Deny {
-                                     tool: tool_name.clone(),
-                                     reason: format!(
-                                         "Argument '{}' failed constraint (must match '{}')",
-                                         arg_name, pattern
-                                     ),
-                                     contract: serde_json::json!({
-                                         "status": "deny",
-                                         "error_code": "MCP_ARG_CONSTRAINT",
-                                         "tool": tool_name.clone(),
-                                         "argument": arg_name,
-                                         "pattern": pattern,
-                                         "value": val_str,
-                                         "violation": "must_match"
-                                     }),
-                                 };
-                             }
-                         }
-                         Err(_) => {
+                        Ok(re) => {
+                            if !re.is_match(val_str) {
+                                return PolicyDecision::Deny {
+                                    tool: tool_name.clone(),
+                                    reason: format!(
+                                        "Argument '{}' failed constraint (must match '{}')",
+                                        arg_name, pattern
+                                    ),
+                                    contract: serde_json::json!({
+                                        "status": "deny",
+                                        "error_code": "MCP_ARG_CONSTRAINT",
+                                        "tool": tool_name.clone(),
+                                        "argument": arg_name,
+                                        "pattern": pattern,
+                                        "value": val_str,
+                                        "violation": "must_match"
+                                    }),
+                                };
+                            }
+                        }
+                        Err(_) => {
                             // Invalid regex in policy -> Deny safely
                             return PolicyDecision::Deny {
                                 tool: tool_name.clone(),
@@ -350,7 +359,7 @@ impl McpPolicy {
                                     "violation": "invalid_regex"
                                 }),
                             };
-                         }
+                        }
                     }
                 }
             }
