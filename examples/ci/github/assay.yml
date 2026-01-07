@@ -1,0 +1,33 @@
+name: MCP Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  assay-validate:
+    name: Validate Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Install Assay
+      - name: Install Assay
+        run: curl -fsSL https://getassay.dev/install.sh | sh
+
+      # 2. Validate (Fail Fast)
+      # Blocks build if assay.yaml violates security rules (like RCE enabled)
+      - name: Validate Config
+        run: assay validate --format text
+
+      # 3. Optional: SARIF for GitHub Security Tab
+      - name: Validate (SARIF)
+        if: failure() || success()
+        run: assay validate --format sarif > results.sarif
+        continue-on-error: true
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: failure() || success()
+        with:
+          sarif_file: results.sarif

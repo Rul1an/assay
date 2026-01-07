@@ -1,0 +1,18 @@
+version: "1.0"
+name: "safe-demo"
+
+# FIXED: This config blocks RCE and restricts file access.
+
+allow:
+  - "*"
+
+deny:
+  - "exec"
+  - "shell"
+  - "spawn"
+
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"

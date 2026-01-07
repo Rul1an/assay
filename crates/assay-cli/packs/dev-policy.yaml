@@ -1,22 +1,28 @@
 version: "1.0"
-name: "mcp-dev-gate"
+name: "mcp-dev"
+
+# Setup: Permissive but sane.
+# Use this for local development.
+
 allow:
   - "*"
+
 deny:
-  # Keep only the most dangerous defaults
+  # RCE Prevention (Always block these)
   - "exec"
   - "shell"
   - "bash"
   - "cmd"
   - "powershell"
   - "spawn"
+  - "python_sandbox"
 
 constraints:
-  # Broader read scope for dev; still avoids totally wild paths
+  # Basic containment to project root
   - tool: "read_file"
     params:
       path:
-        matches: "^/app/.*|^/data/.*|^\\./.*"
+        matches: "^/app/.*|^/data/.*|^/workspace/.*"
 
 signatures:
   check_descriptions: true

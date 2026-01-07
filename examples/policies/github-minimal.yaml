@@ -1,0 +1,32 @@
+version: "1.0"
+name: "github-minimal"
+
+# Strategy: Allowlist functionality. Implicitly blocks everything else.
+
+allow:
+  # Core Utils
+  - "get_time"
+  - "echo"
+
+  # GitHub Read Operations
+  - "search_issues"
+  - "list_pull_requests"
+  - "get_issue"
+  - "get_pull_request"
+
+  # GitHub Write Operations (Controlled)
+  - "create_issue"
+  - "create_issue_comment"
+
+deny:
+  # Explicitly block high-risk GitHub actions even if added to allowlist by accident
+  - "delete_repo"
+  - "create_repo"
+  - "push"
+
+constraints:
+  # Prevent massive automated commenting
+  - tool: "create_issue_comment"
+    params:
+      body:
+        matches: "^.{1,1000}$" # Max 1000 chars

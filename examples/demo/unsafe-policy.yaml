@@ -1,0 +1,11 @@
+version: "1.0"
+name: "unsafe-demo"
+
+# DANGEROUS: This config allows everything.
+# Use `assay validate` to see why this is bad.
+
+allow:
+  - "*"
+
+deny: []
+# Missing: exec, shell, spawn blocks!

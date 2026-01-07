@@ -1,0 +1,14 @@
+version: "1.0"
+name: "shell-safe"
+
+# Strategy: Just the blocks. Good for layering on top of permissive configs.
+
+deny:
+  - "exec*"
+  - "shell*"
+  - "*bash*"
+  - "*cmd*"
+  - "*powershell*"
+  - "python_sandbox"
+  - "eval"
+  - "spawn"
