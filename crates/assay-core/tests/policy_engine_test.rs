@@ -1,6 +1,6 @@
-use assay_core::mcp::policy::{McpPolicy, PolicyState, PolicyDecision};
-use serde_json::json;
 use assay_core::mcp::jsonrpc::JsonRpcRequest;
+use assay_core::mcp::policy::{McpPolicy, PolicyDecision, PolicyState};
+use serde_json::json;
 
 fn mock_request(tool: &str, args: serde_json::Value) -> JsonRpcRequest {
     JsonRpcRequest {
@@ -56,7 +56,10 @@ tools:
     let mut state = PolicyState::default();
 
     let req_read = mock_request("read_file", json!({}));
-    assert!(matches!(p.check(&req_read, &mut state), PolicyDecision::Allow));
+    assert!(matches!(
+        p.check(&req_read, &mut state),
+        PolicyDecision::Allow
+    ));
 
     let req_exec = mock_request("exec", json!({}));
     if let PolicyDecision::Deny { reason, .. } = p.check(&req_exec, &mut state) {
@@ -79,15 +82,24 @@ deny:
 
     // exec*
     let req = mock_request("execute_command", json!({}));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
+    assert!(matches!(
+        p.check(&req, &mut state),
+        PolicyDecision::Deny { .. }
+    ));
 
     // *sh
     let req = mock_request("zsh", json!({}));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
+    assert!(matches!(
+        p.check(&req, &mut state),
+        PolicyDecision::Deny { .. }
+    ));
 
     // *kill* (contains)
     let req = mock_request("skill_check", json!({}));
-    assert!(matches!(p.check(&req, &mut state), PolicyDecision::Deny { .. }));
+    assert!(matches!(
+        p.check(&req, &mut state),
+        PolicyDecision::Deny { .. }
+    ));
 
     // No match
     let req = mock_request("read_file", json!({}));
