@@ -71,7 +71,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://getassay.dev/install.sh | sh
+          # Security: Download first to avoid pipe-to-shell
+          curl -fsSL https://getassay.dev/install.sh -o install-assay.sh
+          sh install-assay.sh
+          rm install-assay.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Generate SARIF even if validate fails, so findings show up in GitHub Security.
