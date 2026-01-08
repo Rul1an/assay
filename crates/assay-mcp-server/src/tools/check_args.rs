@@ -59,13 +59,12 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
                     "E_POLICY_NOT_FOUND",
                     &format!("Policy not found: {}", policy_rel_path),
                  ).result();
-             } else if msg.to_lowercase().contains("yaml")
-                 || msg.to_lowercase().contains("parse")
-                 || msg.to_lowercase().contains("mapping")
-                 || msg.to_lowercase().contains("eof") {
-                 return ToolError::new("E_POLICY_PARSE", &msg).result();
+             } else if msg.to_lowercase().contains("permission denied")
+                 || msg.to_lowercase().contains("is a directory") {
+                 return ToolError::new("E_POLICY_READ", &msg).result();
              }
-             return ToolError::new("E_POLICY_READ", &msg).result();
+             // Default to PARSE error for any other failure (likely YAML syntax or structure)
+             return ToolError::new("E_POLICY_PARSE", &msg).result();
         }
     };
 
