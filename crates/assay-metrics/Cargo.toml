@@ -11,7 +11,7 @@ description = "Metrics library for Assay"
 anyhow = "1"
 async-trait = "0.1"
 serde_json = "1"
-assay-core = { path = "../assay-core", version = "1.5.1" }
+assay-core = { path = "../assay-core", version = "1.6.0" }
 regex = "1"
 jsonschema = "0.19"
 serde_yaml = "0.9"
