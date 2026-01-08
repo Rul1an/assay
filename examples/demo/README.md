@@ -1,80 +1,99 @@
-# Assay Demo: Break & Fix
+# Demo: Break & Fix
 
-This directory demonstrates the **Autofix** workflow. You don't need to write YAML; let Assay do it.
+Deze demo laat zien hoe Assay **realistische** policy mistakes detecteert en hoe je naar een veilige policy toe werkt.
 
-## The Story
-You have an MCP server. You started with a permissive config (`unsafe-policy.yaml`). Now you want to secure it.
+> Tip: begin met `enforcement.unconstrained_tools: warn` om gaps te zien zonder direct alles te breken.
 
-## 1. The Problem
-Run validation on the unsafe policy:
+---
 
-```bash
-assay validate --config unsafe-policy.yaml
-```
+## Scenario 1 — Te breed (unsafe allow-all)
 
-**Output:**
-```text
-✗ tool "exec" is allowed
-  → potential RCE vulnerability
-```
-
-## 2. The Fix (Preview)
-Ask Assay to suggest fixes without applying them:
+Run:
 
 ```bash
-assay fix --config unsafe-policy.yaml --dry-run
+assay validate --config examples/demo/unsafe-policy.yaml --format text
 ```
 
-**Output:**
-```diff
-- deny: []
-+ deny: ["exec", "shell", "spawn"]
-```
+Expected:
+- findings over tools die te veel permissies geven
+- suggested patches / actions (afhankelijk van je setup)
 
-## 3. Apply Fix
-Apply the changes:
+---
+
+## Scenario 2 — The realistic mistake (day-one-config)
+
+Veel developers starten met "ik wil files lezen/schrijven en soms een command runnen".
+
+Run:
 
 ```bash
-cp unsafe-policy.yaml assay.yaml
-assay fix --yes
+assay validate --config examples/demo/common-mistake.yaml --format text
 ```
 
-## 4. Verify
-Run validation again:
+Expected (high-level):
+- `run_command` zonder schema → `E_TOOL_UNCONSTRAINED` warning (of deny als je enforcement op deny zet)
+- `write_file` zonder schema → idem
+- geen schema’s = geen argument constraints (paden, patterns, etc.)
+
+---
+
+## Make it safe (v2 schemas)
+
+Maak (of kopieer) een policy met schemas:
+
+```yaml
+version: "2.0"
+name: "demo-safe"
+
+tools:
+  allow: ["read_file", "list_directory"]
+  deny: ["run_command", "execute_*", "spawn*"]
+
+schemas:
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        type: string
+        pattern: "^/workspace/.*"
+        minLength: 1
+        maxLength: 4096
+    required: ["path"]
+
+  list_directory:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        type: string
+        pattern: "^/workspace/.*"
+        minLength: 1
+        maxLength: 4096
+    required: ["path"]
+
+enforcement:
+  unconstrained_tools: deny
+```
+
+Run:
 
 ```bash
-assay validate
+assay validate --config /path/to/your-policy.yaml --format text
 ```
 
-**Output:**
-```text
-✓ Policy is secure
-```
+---
 
-> **Note**: `assay fix` modifies your policy configuration (`assay.yaml`). It does *not* modify your server code. That is your responsibility.
+## Migrating legacy v1 policies
 
-## Scenario 2: The realistic day-one mistake
-
-Developers often start with: “I only need files + maybe a command or two”.
-
-Try:
+Preview:
 
 ```bash
-assay validate --config examples/demo/common-mistake/assay.yaml --format text
+assay policy migrate --input examples/demo/unsafe-policy.yaml --dry-run
 ```
 
-**Expected outcome:**
-- `run_command` is allowed (high risk): suggests denying it or tightening allow/deny.
-- `write_file` / `read_file` without path constraints: suggests adding constraints with `matches:` for safe roots.
-
-Then preview fixes:
+Apply:
 
 ```bash
-assay fix --config examples/demo/common-mistake/assay.yaml --dry-run
-```
-
-Apply fixes:
-
-```bash
-assay fix --config examples/demo/common-mistake/assay.yaml --yes
+assay policy migrate --input examples/demo/unsafe-policy.yaml
 ```

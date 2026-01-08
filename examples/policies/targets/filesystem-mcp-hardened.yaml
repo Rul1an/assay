@@ -1,0 +1,100 @@
+# Assay v1.5.1 Policy: Filesystem MCP Server - Hardened
+# 
+# Defense-in-depth for CVE-2025-53109 (symlink bypass) and CVE-2025-53110 (prefix bypass)
+# Format: tool_name -> JSON Schema
+#
+# ALLOWED TOOLS: read_file, read_multiple_files, list_directory, 
+#                search_files, get_file_info, list_allowed_directories
+# BLOCKED TOOLS: write_file, create_directory, move_file, create_symlink, read_symlink
+#                (blocked by not defining a schema - will fail with E_POLICY_MISSING_TOOL)
+
+# =============================================================================
+# READ OPERATIONS - Allowed with path constraints
+# =============================================================================
+
+read_file:
+  type: object
+  properties:
+    path:
+      type: string
+      # Allow only specific safe directories, block sensitive patterns
+      # CVE-2025-53110: Use start anchor + explicit paths (not prefix matching)
+      pattern: "^(/workspace/[^.][^/]*(/[^.][^/]*)*|/home/[^/]+/projects/[^.][^/]*(/[^.][^/]*)*|/Users/[^/]+/Developer/[^.][^/]*(/[^.][^/]*)*|/tmp/assay-[^/]+(/[^.][^/]*)*)$"
+      # Block patterns via negative lookahead would be ideal but JSON Schema 
+      # pattern doesn't support it. We rely on the positive pattern above.
+  required:
+    - path
+  additionalProperties: false
+
+read_multiple_files:
+  type: object
+  properties:
+    paths:
+      type: array
+      items:
+        type: string
+        # Same pattern as read_file
+        pattern: "^(/workspace/[^.][^/]*(/[^.][^/]*)*|/home/[^/]+/projects/[^.][^/]*(/[^.][^/]*)*|/Users/[^/]+/Developer/[^.][^/]*(/[^.][^/]*)*|/tmp/assay-[^/]+(/[^.][^/]*)*)$"
+      minItems: 1
+      maxItems: 10
+  required:
+    - paths
+  additionalProperties: false
+
+list_directory:
+  type: object
+  properties:
+    path:
+      type: string
+      pattern: "^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer|/tmp/assay-[^/]+)(/[^.][^/]*)*$"
+  required:
+    - path
+  additionalProperties: false
+
+search_files:
+  type: object
+  properties:
+    path:
+      type: string
+      pattern: "^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer)(/[^.][^/]*)*$"
+    pattern:
+      type: string
+      # Block searching for sensitive file patterns
+      not:
+        pattern: "\\.(env|pem|key|p12|pfx|jks)$"
+    excludePatterns:
+      type: array
+      items:
+        type: string
+  required:
+    - path
+    - pattern
+  additionalProperties: false
+
+get_file_info:
+  type: object
+  properties:
+    path:
+      type: string
+      pattern: "^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer|/tmp/assay-[^/]+)(/[^.][^/]*)*$"
+  required:
+    - path
+  additionalProperties: false
+
+list_allowed_directories:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+# =============================================================================
+# WRITE OPERATIONS - Not defined = blocked with E_POLICY_MISSING_TOOL
+# =============================================================================
+# write_file: NOT DEFINED - blocked
+# create_directory: NOT DEFINED - blocked  
+# move_file: NOT DEFINED - blocked
+
+# =============================================================================
+# SYMLINK OPERATIONS - Not defined = blocked (CVE-2025-53109 mitigation)
+# =============================================================================
+# create_symlink: NOT DEFINED - blocked
+# read_symlink: NOT DEFINED - blocked

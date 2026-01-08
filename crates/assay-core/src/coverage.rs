@@ -8,28 +8,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Coverage analysis result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoverageReport {
-    /// Tool coverage metrics
-    pub tool_coverage: ToolCoverage,
-
-    /// Rule coverage metrics
-    pub rule_coverage: RuleCoverage,
-
-    /// High-risk gaps (blocklisted tools never seen)
-    pub high_risk_gaps: Vec<HighRiskGap>,
-
-    /// Overall coverage percentage
-    pub overall_coverage_pct: f64,
-
-    /// Whether coverage meets threshold
-    pub meets_threshold: bool,
-
-    /// Threshold that was checked
-    pub threshold: f64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCoverage {
     /// Total unique tools referenced in policy
@@ -46,6 +24,52 @@ pub struct ToolCoverage {
 
     /// Tools seen in traces but not in policy (potential gaps)
     pub unexpected_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyViolation {
+    pub trace_id: String,
+    pub tool: String,
+    pub error_code: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyWarning {
+    pub trace_id: String,
+    pub tool: String,
+    pub warning_code: String,
+    pub reason: String,
+}
+
+/// Coverage analysis result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageReport {
+    /// Tool coverage metrics
+    pub tool_coverage: ToolCoverage,
+
+    /// Rule coverage metrics
+    pub rule_coverage: RuleCoverage,
+
+    /// High-risk gaps (blocklisted tools never seen)
+    pub high_risk_gaps: Vec<HighRiskGap>,
+
+    /// Policy violations found during analysis
+    #[serde(default)]
+    pub policy_violations: Vec<PolicyViolation>,
+
+    /// Policy warnings (e.g. unconstrained tools)
+    #[serde(default)]
+    pub policy_warnings: Vec<PolicyWarning>,
+
+    /// Overall coverage percentage
+    pub overall_coverage_pct: f64,
+
+    /// Whether coverage meets threshold
+    pub meets_threshold: bool,
+
+    /// Threshold that was checked
+    pub threshold: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -317,6 +341,8 @@ impl CoverageAnalyzer {
                 untriggered_rules,
             },
             high_risk_gaps,
+            policy_violations: Vec::new(),
+            policy_warnings: Vec::new(),
             overall_coverage_pct,
             meets_threshold,
             threshold,
@@ -573,6 +599,8 @@ mod tests {
                 reason: "Never tested".to_string(),
                 severity: "high".to_string(),
             }],
+            policy_violations: vec![],
+            policy_warnings: vec![],
             overall_coverage_pct: 50.0,
             meets_threshold: false,
             threshold: 80.0,

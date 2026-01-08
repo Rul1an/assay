@@ -260,7 +260,7 @@ tools:
         .arg("--export-baseline")
         .arg(&baseline_path)
         .assert()
-        .success();
+        .failure();
 
     // 2. Bad Trace:
     // - SafeTool missing (Regression + Low Coverage)

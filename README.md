@@ -39,14 +39,18 @@ assay fix --yes
 -   **Prompt Injection Defense**: Flags excessively long or vague tool descriptions.
 -   **Atomic Autofix**: Safely repairs config/code with zero corruption risk (atomic I/O).
 
-## CI: GitHub Actions (copy-paste)
+## CI: Validate your MCP policy on every PR (GitHub Actions)
 
-Want Assay as a security gate in your PRs immediately? Create this file:
+Copy this workflow to `.github/workflows/assay-security.yml`.
 
-`.github/workflows/assay-security.yml`
+It does two things:
+1) Validates your **policy file** (syntax + JSON Schema compilation)
+2) Runs full **assay validate** and uploads SARIF to GitHub Code Scanning
+
+> Tip: pin a specific Assay version for reproducible CI results.
 
 ```yaml
-name: MCP Security (Assay)
+name: Assay MCP Security
 
 on:
   push:
@@ -54,34 +58,42 @@ on:
       - "assay.yaml"
       - "policy.yaml"
       - "**/*.mcp.json"
+      - ".github/workflows/assay-security.yml"
   pull_request:
     paths:
       - "assay.yaml"
       - "policy.yaml"
       - "**/*.mcp.json"
+      - ".github/workflows/assay-security.yml"
 
 jobs:
-  security-check:
+  assay:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # required for SARIF upload
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Assay
-        shell: bash
         run: |
-          set -euo pipefail
-          # Security: Download first to avoid pipe-to-shell
-          curl -fsSL https://getassay.dev/install.sh -o install-assay.sh
-          sh install-assay.sh
-          rm install-assay.sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://getassay.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      # Generate SARIF even if validate fails, so findings show up in GitHub Security.
-      - name: Validate (SARIF)
-        shell: bash
+          # Optional: pin a specific version for stable CI
+          # assay --version
+          # If your installer supports version pinning, use it here.
+
+      # Fast check: policy syntax + schema compilation
+      - name: Validate policy file
         run: |
-          set -euo pipefail
+          # Adjust to your policy path:
+          assay policy validate --input policy.yaml
+
+      # Full check: emits SARIF for GitHub Code Scanning
+      - name: Assay validate (SARIF)
+        run: |
           assay validate --format sarif --output results.sarif
         continue-on-error: true
 
@@ -91,24 +103,16 @@ jobs:
         with:
           sarif_file: results.sarif
 
-      # Hard gate: fail the job if there are issues.
-      - name: Validate (gate)
-        shell: bash
+      # Hard fail for PR gating (human-readable output)
+      - name: Fail on issues
         run: |
-          set -euo pipefail
           assay validate --format text
 ```
 
-### What you get
--   **Annotations in PRs** + Visibility in Security Tab → Code scanning alerts (via SARIF upload)
--   **Failing build** if there are policy/config issues
+**Recommended:** pin Assay to a specific release in CI to keep behavior stable across time.
+When upgrading, run the workflow on a branch and review any new warnings/errors before merging.
 
-### Tip (Optional)
-If your repo has multiple configs, you can explicitly pass a path:
 
-```bash
-assay validate --config path/to/assay.yaml --format sarif --output results.sarif
-```
 
 ## Output Formats
 
@@ -140,10 +144,31 @@ constraints:
         matches: "^/app/.*|^/data/.*"
 ```
 
+## Migration to v2.0 (JSON Schema)
+
+Assay v1.6.0 introduces JSON Schema based policies for stricter validation.
+
+1. **Auto-migrate (Preview)**:
+   ```bash
+   assay policy migrate --input v1-policy.yaml --dry-run
+   ```
+2. **Apply migration**:
+   ```bash
+   assay policy migrate --input v1-policy.yaml
+   ```
+3. **Verify**:
+   ```bash
+   assay validate --input v1-policy.yaml
+   ```
+
+See `docs/policies.md` for full syntax reference.
+
 ## Documentation
 
 Full documentation available at [getassay.dev](https://getassay.dev).
 
+-   [Policy Syntax (v2.0)](docs/policies.md)
+-   [Runtime Enforcement](docs/runtime.md)
 -   [Policy Packs](https://getassay.dev/docs/packs)
 -   [CI Recipes](https://getassay.dev/docs/ci)
 -   [Configuration Reference](https://getassay.dev/docs/config)
@@ -154,6 +179,58 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 ```bash
 cargo test --workspace
+```
+
+## CI: Build & Test (GitHub Actions)
+
+Copy-paste this into `.github/workflows/ci.yml` to build the workspace (including binaries)
+and run the crate test suites on Linux/macOS/Windows:
+
+```yaml
+# (see .github/workflows/ci.yml)
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    name: Build + Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # cache all workspace crates
+          workspaces: |
+            . -> target
+
+      # IMPORTANT: build binaries first so assert_cmd E2E tests can find them
+      - name: Build workspace (binaries)
+        run: cargo build --workspace
+
+      - name: Test assay-core
+        run: cargo test -p assay-core
+
+      - name: Test assay-cli
+        run: cargo test -p assay-cli
+
+      - name: Test assay-mcp-server
+        run: cargo test -p assay-mcp-server
 ```
 
 ## License

@@ -1,0 +1,39 @@
+# Assay MCP Policy: Filesystem MCP Server - Hardened (Corrected for v1.5.1)
+version: "1.0"
+name: "filesystem-mcp-hardened"
+metadata:
+  description: "Defense-in-depth for official Filesystem MCP - addresses CVE-2025-53109/53110"
+  original_author: "Jan 2026 Policy Pack"
+
+tools:
+  allow:
+    - read_file
+    - read_multiple_files
+    - list_directory
+    - search_files
+    - get_file_info
+    - list_allowed_directories
+
+  deny:
+    - write_file
+    - create_directory
+    - move_file
+    - create_symlink
+    - read_symlink
+
+constraints:
+  - tool: read_file
+    params:
+      path:
+        matches: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/assay-).*"
+
+  - tool: list_directory
+    params:
+      path:
+        matches: "^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer).*"
+
+# NOTE: 'audit' field is not supported in policy.yaml (configure in runner).
+# NOTE: Granular limits (per-tool) are not yet supported in engine.
+limits:
+  max_requests_total: 200
+  # max_calls_per_tool: 50  <-- Unsupported

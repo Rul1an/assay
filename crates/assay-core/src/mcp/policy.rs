@@ -40,9 +40,9 @@ pub struct McpPolicy {
     #[serde(default)]
     pub signatures: Option<SignaturePolicy>,
 
-    /// Compiled schemas (lazy, thread-safe)
+    /// Compiled schemas (lazy, thread-safe, shared across clones)
     #[serde(skip)]
-    pub(crate) compiled: OnceLock<HashMap<String, Arc<jsonschema::JSONSchema>>>,
+    pub(crate) compiled: Arc<OnceLock<HashMap<String, Arc<jsonschema::JSONSchema>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +222,7 @@ impl McpPolicy {
         Ok(policy)
     }
 
+    /// Normalize legacy root-level allow/deny into tools.allow/deny.
     pub fn normalize_legacy_shapes(&mut self) {
         if let Some(allow) = self.allow.take() {
             let mut current = self.tools.allow.take().unwrap_or_default();
@@ -235,19 +236,23 @@ impl McpPolicy {
         }
     }
 
+    /// Migrate V1 regex constraints to V2 JSON Schemas.
+    /// Warning: This clears the `constraints` field.
     pub fn migrate_constraints_to_schemas(&mut self) {
         for constraint in std::mem::take(&mut self.constraints) {
             let schema = constraint_to_schema(&constraint);
             self.schemas.insert(constraint.tool.clone(), schema);
         }
-        self.version = "2.0".to_string();
+        if self.version.is_empty() || self.version == "1.0" {
+            self.version = "2.0".to_string();
+        }
     }
 
     fn compiled_schemas(&self) -> &HashMap<String, Arc<jsonschema::JSONSchema>> {
         self.compiled.get_or_init(|| self.compile_all_schemas())
     }
 
-    fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::JSONSchema>> {
+    pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::JSONSchema>> {
         // Option 1: Inline $defs into every schema to support relative #/$defs/... refs
         let root_defs = self.schemas.get("$defs").cloned();
 
@@ -274,6 +279,11 @@ impl McpPolicy {
                 }
                 Err(e) => {
                     tracing::error!("Failed to compile schema for tool {}: {}", tool_name, e);
+                    // Fail securely: do not allow tools with broken schemas to load.
+                    panic!(
+                        "Failed to compile JSON schema for tool '{}': {}",
+                        tool_name, e
+                    );
                 }
             }
         }
@@ -389,6 +399,17 @@ impl McpPolicy {
                     });
                 }
             }
+
+            if let Some(max) = limits.max_tool_calls_total {
+                if state.tool_calls_count > max {
+                    return Some(PolicyDecision::Deny {
+                        tool: "ALL".to_string(),
+                        code: "E_RATE_LIMIT".to_string(),
+                        reason: "Rate limit exceeded (tool calls)".to_string(),
+                        contract: json!({ "status": "deny", "error_code": "E_RATE_LIMIT" }),
+                    });
+                }
+            }
         }
         None
     }
@@ -433,8 +454,11 @@ impl McpPolicy {
             return PolicyDecision::Allow;
         }
         if let Some(params) = request.tool_params() {
+            // evaluate() increments counts, so we don't need to increment requests_count here
             self.evaluate(&params.name, &params.arguments, state)
         } else {
+            // Ordinary request, just count it
+            state.requests_count += 1;
             PolicyDecision::Allow
         }
     }
@@ -449,8 +473,8 @@ fn constraint_to_schema(constraint: &ConstraintRule) -> Value {
             properties[param_name] = json!({
                 "type": "string",
                 "pattern": pattern,
-                "minLength": 1,
-                "maxLength": 4096
+                "minLength": 1
+                // No maxLength restriction for V1 backward compatibility
             });
             required.push(param_name.clone());
         }
@@ -458,7 +482,8 @@ fn constraint_to_schema(constraint: &ConstraintRule) -> Value {
 
     json!({
         "type": "object",
-        "additionalProperties": false,
+        // Allow additional properties for V1 backward compatibility
+        "additionalProperties": true,
         "properties": properties,
         "required": required,
     })

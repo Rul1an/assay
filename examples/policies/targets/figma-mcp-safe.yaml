@@ -1,0 +1,37 @@
+# Assay v1.5.1 Policy: Figma Context MCP - Safe
+#
+# Mitigates CVE-2025-53967: Command injection via fileKey parameter
+# Attack vector: fileKey="$(id>/tmp/pwned)" triggers shell execution
+#
+# Format: tool_name -> JSON Schema
+
+# =============================================================================
+# FIGMA DATA RETRIEVAL - With strict input validation
+# =============================================================================
+
+get_figma_data:
+  type: object
+  properties:
+    fileKey:
+      type: string
+      # Only allow alphanumeric + hyphen + underscore
+      # Blocks: $, `, ;, |, &, >, <, ', ", (, ), /, \, spaces, newlines
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{5,50}$"
+      minLength: 6
+      maxLength: 51
+    nodeId:
+      type: string
+      # Node IDs are typically like "123:456" or "0:1"
+      pattern: "^[0-9]+:[0-9]+$"
+    depth:
+      type: integer
+      minimum: 0
+      maximum: 10
+  required:
+    - fileKey
+  additionalProperties: false
+
+# =============================================================================
+# IMAGE DOWNLOAD - Blocked (additional attack surface)
+# =============================================================================
+# download_figma_images: NOT DEFINED - blocked

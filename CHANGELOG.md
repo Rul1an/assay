@@ -1,8 +1,27 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v1.6.0] - 2026-XX-XX
 
-## [v1.5.0] - 2026-01-06
+### Added
+- **Policy v2.0 (JSON Schema)**: Official support for JSON Schema constraints (`schemas:`) replacing regex loops.
+- **Unified Policy Engine**: `assay-core`, `assay-cli`, and `assay-mcp-server` now share the exact same evaluation logic (`McpPolicy::evaluate`).
+- **New Commands**: `assay policy validate`, `migrate`, and `fmt`.
+- **Enforcement Modes**: `enforcement.unconstrained_tools: warn|deny|allow` for finer control over headless/legacy tools.
+- **Scoped Refs**: `$ref` support within single policy documents (`#/schemas/$defs/...`).
+
+### Changed
+- **Runtime Consistency**: `assay mcp wrap` (proxy) and `assay-mcp-server` enforce the exact same rules as `assay coverage`.
+- **Auto-Migration**: Legacy v1 policies (`constraints:`) are auto-migrated in-memory with deprecation warnings.
+
+### Deprecated
+- **v1 Constraints**: The `constraints:` syntax is deprecated and will be removed in Assay v2.0.0. Use `assay policy migrate` to upgrade.
+
+### Fixed
+- **JSON Casing**: Stabilized `structuredContent` vs `structured_content` in error contracts.
+- **Symlink Resolution**: Fixed policy resolution issues on macOS `/tmp`.
+
+
 
 ### 🛠️ Autofix & Policy Packs
 A major productivity release introducing automated self-repair (`assay fix`) and instant policy scaffolding (`assay init --pack`).

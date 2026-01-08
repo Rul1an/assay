@@ -54,8 +54,40 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         .await
         .with_context(|| format!("failed to read policy file: {}", policy_path.display()))?;
 
-    let policy: assay_core::model::Policy =
+    // Compliance Check runs on V2 engine (McpPolicy)
+    let mut policy_v2: assay_core::mcp::policy::McpPolicy =
         serde_yaml::from_str(&policy_content).context("failed to parse policy yaml")?;
+
+    // Normalize shapes (e.g. root allow/deny -> tools.allow/deny)
+    policy_v2.normalize_legacy_shapes();
+
+    // Auto-migrate v1 constraints if present (critical for hybrid policies)
+    if !policy_v2.constraints.is_empty() {
+        policy_v2.migrate_constraints_to_schemas();
+    }
+
+    // Coverage Analysis runs on Legacy engine (model::Policy)
+    // Try to parse strictly as Legacy Policy. If fail, synthesize from V2.
+    let policy: assay_core::model::Policy = match serde_yaml::from_str(&policy_content) {
+        Ok(p) => p,
+        Err(_) => {
+            // Synthesize legacy policy for CoverageAnalyzer
+            assay_core::model::Policy {
+                version: policy_v2.version.clone(),
+                name: policy_v2.name.clone(),
+                metadata: None,
+                tools: assay_core::model::ToolsPolicy {
+                    allow: policy_v2.tools.allow.clone(),
+                    deny: policy_v2.tools.deny.clone(),
+                    require_args: None,
+                    arg_constraints: None,
+                },
+                sequences: vec![],
+                aliases: std::collections::HashMap::new(),
+                on_error: assay_core::on_error::ErrorPolicy::default(),
+            }
+        }
+    };
 
     // 3. Load Traces
     let file_content: String = tokio::fs::read_to_string(&args.trace_file)
@@ -63,6 +95,13 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         .context("failed to read trace file")?;
 
     let mut trace_records = Vec::new();
+
+    // Prepare for validation
+    policy_v2.compile_all_schemas();
+    let mut state = assay_core::mcp::policy::PolicyState::default();
+
+    let mut violations = Vec::new();
+    let mut warnings = Vec::new();
 
     // Parse all lines as Value
     let mut events_by_id: std::collections::HashMap<String, Vec<serde_json::Value>> =
@@ -96,12 +135,41 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         for event in events {
             if let Some(typ) = event.get("type").and_then(|s| s.as_str()) {
                 if typ == "call_tool" {
-                    if let Some(tool) = event
-                        .get("tool_name")
+                    let tool_opt = event.get("tool_name")
                         .or_else(|| event.get("tool"))
-                        .and_then(|s| s.as_str())
-                    {
-                        tools_called.push(tool.to_string());
+                        .and_then(|s| s.as_str());
+
+                    if let Some(tool) = tool_opt {
+                        let tool_name = tool.to_string();
+                        tools_called.push(tool_name.clone());
+
+                        // Validate compliance (Unified V2)
+                        let args_default = serde_json::json!({});
+                        let args = event.get("arguments")
+                             .or_else(|| event.get("input")) // fallback for some formats
+                             .unwrap_or(&args_default);
+
+                        let decision = policy_v2.evaluate(&tool_name, args, &mut state);
+
+                        match decision {
+                            assay_core::mcp::policy::PolicyDecision::Allow => {}
+                            assay_core::mcp::policy::PolicyDecision::AllowWithWarning { code, reason, .. } => {
+                                warnings.push(assay_core::coverage::PolicyWarning {
+                                    trace_id: id.clone(),
+                                    tool: tool_name.clone(),
+                                    warning_code: code,
+                                    reason,
+                                });
+                            }
+                            assay_core::mcp::policy::PolicyDecision::Deny { code, reason, .. } => {
+                                violations.push(assay_core::coverage::PolicyViolation {
+                                    trace_id: id.clone(),
+                                    tool: tool_name.clone(),
+                                    error_code: code,
+                                    reason,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -129,7 +197,11 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
 
     // 4. Analyze
     let analyzer = assay_core::coverage::CoverageAnalyzer::from_policy(&policy);
-    let report = analyzer.analyze(&trace_records, args.min_coverage);
+    let mut report = analyzer.analyze(&trace_records, args.min_coverage);
+
+    // Attach discovered violations/warnings
+    report.policy_violations = violations;
+    report.policy_warnings = warnings;
 
     // 5. Output
     match args.format.as_str() {
@@ -199,7 +271,23 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
 
     // 8. Exit checks
 
-    // Check 1: High Risk Gaps
+    // Check 1: Policy Violations
+    if !report.policy_violations.is_empty() {
+        eprintln!("\n🚨 ERROR: Policy Violations Detected in Traces!");
+        for v in &report.policy_violations {
+            eprintln!("  - [{}][{}] {} ({})", v.trace_id, v.tool, v.reason, v.error_code);
+        }
+        clean_pass = false;
+    }
+
+    if !report.policy_warnings.is_empty() {
+         eprintln!("\n⚠️ Policy Warnings:");
+         for w in &report.policy_warnings {
+            eprintln!("  - [{}][{}] {} ({})", w.trace_id, w.tool, w.reason, w.warning_code);
+         }
+    }
+
+    // Check 2: High Risk Gaps
     if !report.high_risk_gaps.is_empty() {
         eprintln!("\n🚨 ERROR: High Risk Gaps Detected!");
         eprintln!("The following DENY-listed tools were not tested:");
@@ -254,6 +342,22 @@ fn print_text_report(report: &assay_core::coverage::CoverageReport) {
             println!("  [!] {}: {}", gap.tool, gap.reason);
         }
     }
+
+    if !report.policy_violations.is_empty() {
+        println!();
+        println!("POLICY VIOLATIONS:");
+        for v in &report.policy_violations {
+            println!("  [x] {} {}: {}", v.trace_id, v.tool, v.reason);
+        }
+    }
+
+    if !report.policy_warnings.is_empty() {
+        println!();
+        println!("POLICY WARNINGS:");
+        for w in &report.policy_warnings {
+            println!("  [!] {} {}: {}", w.trace_id, w.tool, w.reason);
+        }
+    }
 }
 
 fn print_markdown_report(report: &assay_core::coverage::CoverageReport) {
@@ -283,6 +387,20 @@ fn print_markdown_report(report: &assay_core::coverage::CoverageReport) {
         println!("## 🚨 High Risk Gaps in Coverage");
         for gap in &report.high_risk_gaps {
             println!("- **{}**: {}", gap.tool, gap.reason);
+        }
+    }
+
+    if !report.policy_violations.is_empty() {
+        println!("## ❌ Policy Violations");
+        for v in &report.policy_violations {
+            println!("- {}: **{}** - {} (`{}`)", v.trace_id, v.tool, v.reason, v.error_code);
+        }
+    }
+
+    if !report.policy_warnings.is_empty() {
+        println!("## ⚠️ Policy Warnings");
+        for w in &report.policy_warnings {
+            println!("- {}: **{}** - {} (`{}`)", w.trace_id, w.tool, w.reason, w.warning_code);
         }
     }
 }

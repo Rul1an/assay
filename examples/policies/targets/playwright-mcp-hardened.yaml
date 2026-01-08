@@ -1,0 +1,201 @@
+# Assay v1.5.1 Policy: Playwright MCP - Hardened
+#
+# Security controls for browser automation:
+# - Blocks JavaScript execution (RCE vector)
+# - Blocks cookie/storage access (session hijacking)
+# - Blocks SSRF to internal networks
+# - Blocks dangerous protocols
+#
+# Format: tool_name -> JSON Schema
+
+# =============================================================================
+# NAVIGATION - With URL restrictions
+# =============================================================================
+
+browser_navigate:
+  type: object
+  properties:
+    url:
+      type: string
+      # Only allow https:// URLs, block internal IPs and dangerous protocols
+      # This pattern requires https:// and a domain that's not localhost/internal
+      pattern: "^https://[a-zA-Z][a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/.*)?$"
+      minLength: 10
+      maxLength: 2048
+  required:
+    - url
+  additionalProperties: false
+
+# =============================================================================
+# SAFE INSPECTION TOOLS - Allowed
+# =============================================================================
+
+browser_snapshot:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_take_screenshot:
+  type: object
+  properties:
+    name:
+      type: string
+      pattern: "^[a-zA-Z0-9_-]+$"
+      maxLength: 100
+    fullPage:
+      type: boolean
+  additionalProperties: false
+
+browser_get_text:
+  type: object
+  properties:
+    selector:
+      type: string
+      maxLength: 500
+  additionalProperties: false
+
+# =============================================================================
+# INTERACTION TOOLS - Allowed with constraints
+# =============================================================================
+
+browser_click:
+  type: object
+  properties:
+    element:
+      type: string
+      maxLength: 500
+    ref:
+      type: string
+      maxLength: 100
+  additionalProperties: false
+
+browser_type:
+  type: object
+  properties:
+    element:
+      type: string
+      maxLength: 500
+    ref:
+      type: string
+      maxLength: 100
+    text:
+      type: string
+      maxLength: 1000
+      # Block typing of obvious secrets (API keys, SSNs, credit cards)
+      # Note: This is defense-in-depth, not foolproof
+      not:
+        anyOf:
+          - pattern: "sk-[a-zA-Z0-9]{20,}"
+          - pattern: "^[0-9]{3}-[0-9]{2}-[0-9]{4}$"
+          - pattern: "^[0-9]{13,19}$"
+    slowly:
+      type: boolean
+  required:
+    - text
+  additionalProperties: false
+
+browser_fill:
+  type: object
+  properties:
+    element:
+      type: string
+      maxLength: 500
+    ref:
+      type: string
+      maxLength: 100
+    value:
+      type: string
+      maxLength: 1000
+  required:
+    - value
+  additionalProperties: false
+
+browser_select:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+    values:
+      type: array
+      items:
+        type: string
+  required:
+    - values
+  additionalProperties: false
+
+browser_hover:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+  additionalProperties: false
+
+browser_scroll:
+  type: object
+  properties:
+    direction:
+      type: string
+      enum: ["up", "down", "left", "right"]
+    amount:
+      type: integer
+      minimum: 0
+      maximum: 10000
+  additionalProperties: false
+
+browser_wait:
+  type: object
+  properties:
+    time:
+      type: integer
+      minimum: 0
+      maximum: 30000
+  required:
+    - time
+  additionalProperties: false
+
+browser_press_key:
+  type: object
+  properties:
+    key:
+      type: string
+      maxLength: 50
+  required:
+    - key
+  additionalProperties: false
+
+browser_go_back:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_go_forward:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_tab_close:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_tab_new:
+  type: object
+  properties:
+    url:
+      type: string
+      pattern: "^https://[a-zA-Z][a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/.*)?$"
+  additionalProperties: false
+
+# =============================================================================
+# DANGEROUS TOOLS - Not defined = blocked
+# =============================================================================
+# browser_execute_javascript: NOT DEFINED - blocked (RCE)
+# browser_evaluate: NOT DEFINED - blocked (RCE)
+# browser_cookies: NOT DEFINED - blocked (session hijacking)
+# browser_storage_state: NOT DEFINED - blocked (credential theft)
+# browser_pdf_save: NOT DEFINED - blocked (file system access)
+# browser_file_upload: NOT DEFINED - blocked (file system access)

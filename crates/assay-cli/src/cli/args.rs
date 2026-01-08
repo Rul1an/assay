@@ -34,6 +34,7 @@ pub enum Command {
     #[command(hide = true)]
     Mcp(McpArgs),
     Version,
+    Policy(PolicyArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
@@ -692,4 +693,55 @@ pub struct FixArgs {
     /// List suggested patches (after --only/--max-risk filtering) and exit
     #[arg(long)]
     pub list: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct PolicyArgs {
+    #[command(subcommand)]
+    pub cmd: PolicyCommand,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum PolicyCommand {
+    /// Validate policy syntax and (v2) JSON Schemas
+    Validate(PolicyValidateArgs),
+
+    /// Migrate v1.x constraints policy to v2.0 schemas
+    Migrate(PolicyMigrateArgs),
+
+    /// Format policy YAML (normalizes formatting)
+    Fmt(PolicyFmtArgs),
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct PolicyValidateArgs {
+    /// Policy file path (YAML)
+    #[arg(short, long)]
+    pub input: PathBuf,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct PolicyMigrateArgs {
+    /// Input policy file (v1.x or v2.0)
+    #[arg(short, long)]
+    pub input: PathBuf,
+
+    /// Output file (default: overwrite input)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Preview only (no write)
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct PolicyFmtArgs {
+    /// Policy file path (YAML)
+    #[arg(short, long)]
+    pub input: PathBuf,
+
+    /// Output file (default: overwrite input)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }

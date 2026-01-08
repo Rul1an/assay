@@ -1,0 +1,130 @@
+# Assay v1.5.1 Policy: Filesystem MCP Server - Development
+#
+# More permissive for development, but still blocks:
+# - Symlink operations (CVE-2025-53109 vector)
+# - Writing to sensitive paths
+#
+# Format: tool_name -> JSON Schema
+
+# =============================================================================
+# READ OPERATIONS - Broadly allowed
+# =============================================================================
+
+read_file:
+  type: object
+  properties:
+    path:
+      type: string
+      minLength: 1
+      maxLength: 4096
+  required:
+    - path
+  additionalProperties: false
+
+read_multiple_files:
+  type: object
+  properties:
+    paths:
+      type: array
+      items:
+        type: string
+        minLength: 1
+      minItems: 1
+      maxItems: 50
+  required:
+    - paths
+  additionalProperties: false
+
+list_directory:
+  type: object
+  properties:
+    path:
+      type: string
+      minLength: 1
+  required:
+    - path
+  additionalProperties: false
+
+search_files:
+  type: object
+  properties:
+    path:
+      type: string
+      minLength: 1
+    pattern:
+      type: string
+      minLength: 1
+    excludePatterns:
+      type: array
+      items:
+        type: string
+  required:
+    - path
+    - pattern
+  additionalProperties: false
+
+get_file_info:
+  type: object
+  properties:
+    path:
+      type: string
+      minLength: 1
+  required:
+    - path
+  additionalProperties: false
+
+list_allowed_directories:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+# =============================================================================
+# WRITE OPERATIONS - Allowed in dev (except sensitive paths)
+# =============================================================================
+
+write_file:
+  type: object
+  properties:
+    path:
+      type: string
+      minLength: 1
+      maxLength: 4096
+      # Block writing to common sensitive locations
+      # Note: This is a positive pattern for allowed paths
+      pattern: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/)"
+    content:
+      type: string
+  required:
+    - path
+    - content
+  additionalProperties: false
+
+create_directory:
+  type: object
+  properties:
+    path:
+      type: string
+      pattern: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/)"
+  required:
+    - path
+  additionalProperties: false
+
+move_file:
+  type: object
+  properties:
+    source:
+      type: string
+      pattern: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/)"
+    destination:
+      type: string
+      pattern: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/)"
+  required:
+    - source
+    - destination
+  additionalProperties: false
+
+# =============================================================================
+# SYMLINK OPERATIONS - Always blocked (CVE-2025-53109)
+# =============================================================================
+# create_symlink: NOT DEFINED - blocked
+# read_symlink: NOT DEFINED - blocked

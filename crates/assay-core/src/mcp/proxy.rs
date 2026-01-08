@@ -93,13 +93,26 @@ impl McpProxy {
                             PolicyDecision::Allow => {
                                 Self::handle_allow(&req, &mut audit_log, config.verbose);
                             }
-                            PolicyDecision::AllowWithWarning {
-                                tool: _,
-                                code: _,
-                                reason: _,
-                            } => {
-                                // Treat as Allow but maybe log warning could be added here
-                                Self::handle_allow(&req, &mut audit_log, config.verbose);
+                            PolicyDecision::AllowWithWarning { tool, code, reason } => {
+                                // Log warning about allowing a tool invocation with issues
+                                if config.verbose {
+                                    eprintln!(
+                                        "[assay] WARNING: Allowing tool '{}' with warning (code: {}, reason: {}).",
+                                        tool,
+                                        code,
+                                        reason
+                                    );
+                                }
+                                audit_log.log(&AuditEvent {
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    decision: "allow_with_warning".to_string(),
+                                    tool: Some(tool.clone()),
+                                    reason: Some(reason.clone()),
+                                    request_id: req.id.clone(),
+                                    agentic: None,
+                                });
+                                // Then proceed as a normal allow
+                                Self::handle_allow(&req, &mut audit_log, false); // false = don't double log ALLOW
                             }
                             PolicyDecision::Deny {
                                 tool,

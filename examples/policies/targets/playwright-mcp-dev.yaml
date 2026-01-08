@@ -1,0 +1,200 @@
+# Assay v1.5.1 Policy: Playwright MCP - Development
+#
+# More permissive for testing, but still blocks:
+# - Cookie/storage access
+# - Dangerous file operations
+#
+# Format: tool_name -> JSON Schema
+
+# =============================================================================
+# NAVIGATION - Broader access (localhost allowed)
+# =============================================================================
+
+browser_navigate:
+  type: object
+  properties:
+    url:
+      type: string
+      # Allow http:// and https://, but still block file://, data://, javascript://
+      pattern: "^https?://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]+)?(/.*)?$"
+      minLength: 7
+      maxLength: 2048
+  required:
+    - url
+  additionalProperties: false
+
+# =============================================================================
+# ALL INSPECTION TOOLS - Allowed
+# =============================================================================
+
+browser_snapshot:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_take_screenshot:
+  type: object
+  properties:
+    name:
+      type: string
+      maxLength: 100
+    fullPage:
+      type: boolean
+  additionalProperties: false
+
+browser_get_text:
+  type: object
+  properties:
+    selector:
+      type: string
+  additionalProperties: false
+
+# =============================================================================
+# INTERACTION TOOLS - All allowed
+# =============================================================================
+
+browser_click:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+  additionalProperties: false
+
+browser_type:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+    text:
+      type: string
+      maxLength: 10000
+    slowly:
+      type: boolean
+  required:
+    - text
+  additionalProperties: false
+
+browser_fill:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+    value:
+      type: string
+  required:
+    - value
+  additionalProperties: false
+
+browser_select:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+    values:
+      type: array
+      items:
+        type: string
+  required:
+    - values
+  additionalProperties: false
+
+browser_hover:
+  type: object
+  properties:
+    element:
+      type: string
+    ref:
+      type: string
+  additionalProperties: false
+
+browser_scroll:
+  type: object
+  properties:
+    direction:
+      type: string
+    amount:
+      type: integer
+  additionalProperties: false
+
+browser_wait:
+  type: object
+  properties:
+    time:
+      type: integer
+      minimum: 0
+      maximum: 60000
+  required:
+    - time
+  additionalProperties: false
+
+browser_press_key:
+  type: object
+  properties:
+    key:
+      type: string
+  required:
+    - key
+  additionalProperties: false
+
+browser_go_back:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_go_forward:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_tab_close:
+  type: object
+  properties: {}
+  additionalProperties: false
+
+browser_tab_new:
+  type: object
+  properties:
+    url:
+      type: string
+      pattern: "^https?://"
+  additionalProperties: false
+
+# =============================================================================
+# JAVASCRIPT - Allowed in dev with basic constraints
+# =============================================================================
+
+browser_execute_javascript:
+  type: object
+  properties:
+    script:
+      type: string
+      maxLength: 50000
+  required:
+    - script
+  additionalProperties: false
+
+browser_evaluate:
+  type: object
+  properties:
+    expression:
+      type: string
+      maxLength: 50000
+  required:
+    - expression
+  additionalProperties: false
+
+# =============================================================================
+# STILL BLOCKED - Even in dev
+# =============================================================================
+# browser_cookies: NOT DEFINED - blocked (session hijacking)
+# browser_storage_state: NOT DEFINED - blocked (credential theft)
+# browser_pdf_save: NOT DEFINED - blocked
+# browser_file_upload: NOT DEFINED - blocked
