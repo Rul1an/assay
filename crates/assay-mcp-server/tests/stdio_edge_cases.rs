@@ -196,7 +196,7 @@ fn test_edge_cases() {
     // Additional properties not allowed
     assert!(
         violations.iter().any(|v| {
-            let s = v["constraint"].as_str().unwrap_or("").to_lowercase();
+            let s = v["message"].as_str().unwrap_or("").to_lowercase();
             s.contains("additional") || s.contains("extra")
         }),
         "Should fail additional props. Got: {:?}",
