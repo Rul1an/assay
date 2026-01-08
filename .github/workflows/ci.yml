@@ -37,11 +37,10 @@ jobs:
             . -> target
 
       # IMPORTANT: build binaries first so assert_cmd E2E tests can find them
-      - name: Build workspace (binaries)
-        run: cargo build --workspace
-
-      - name: Test assay-core
-        run: cargo test -p assay-core
+      - name: Build and Test Workspace
+        run: |
+          cargo build --workspace
+          cargo test --workspace --exclude assay-ity-core
 
       - name: Test assay-cli
         run: cargo test -p assay-cli

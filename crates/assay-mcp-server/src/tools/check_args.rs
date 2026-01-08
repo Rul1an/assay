@@ -60,7 +60,8 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
                     &format!("Policy not found: {}", policy_rel_path),
                  ).result();
              } else if msg.to_lowercase().contains("permission denied")
-                 || msg.to_lowercase().contains("is a directory") {
+                 || msg.to_lowercase().contains("is a directory")
+                 || msg.to_lowercase().contains("system cannot find") {
                  return ToolError::new("E_POLICY_READ", &msg).result();
              }
              // Default to PARSE error for any other failure (likely YAML syntax or structure)
