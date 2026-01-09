@@ -1,39 +1,46 @@
-# Assay MCP Policy: Filesystem MCP Server - Hardened (Corrected for v1.5.1)
-version: "1.0"
-name: "filesystem-mcp-hardened"
-metadata:
-  description: "Defense-in-depth for official Filesystem MCP - addresses CVE-2025-53109/53110"
-  original_author: "Jan 2026 Policy Pack"
-
+version: '2.0'
+name: filesystem-mcp-hardened
 tools:
   allow:
-    - read_file
-    - read_multiple_files
-    - list_directory
-    - search_files
-    - get_file_info
-    - list_allowed_directories
-
+  - read_file
+  - read_multiple_files
+  - list_directory
+  - search_files
+  - get_file_info
+  - list_allowed_directories
   deny:
-    - write_file
-    - create_directory
-    - move_file
-    - create_symlink
-    - read_symlink
-
-constraints:
-  - tool: read_file
-    params:
+  - write_file
+  - create_directory
+  - move_file
+  - create_symlink
+  - read_symlink
+allow: null
+deny: null
+schemas:
+  list_directory:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/assay-).*"
-
-  - tool: list_directory
-    params:
+        minLength: 1
+        pattern: ^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer).*
+        type: string
+    required:
+    - path
+    type: object
+  read_file:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer).*"
-
-# NOTE: 'audit' field is not supported in policy.yaml (configure in runner).
-# NOTE: Granular limits (per-tool) are not yet supported in engine.
+        minLength: 1
+        pattern: ^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/assay-).*
+        type: string
+    required:
+    - path
+    type: object
+constraints: []
+enforcement:
+  unconstrained_tools: warn
 limits:
   max_requests_total: 200
-  # max_calls_per_tool: 50  <-- Unsupported
+  max_tool_calls_total: null
+signatures: null

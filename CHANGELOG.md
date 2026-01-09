@@ -1,7 +1,19 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [v1.6.0] - 2026-XX-XX
+## [v1.7.0] - 2026-01-09
+
+### 🛡️ Strict Deprecation Mode
+- **Refined Deprecations**: Formal deprecation of v1.x constraints syntax.
+- **Strict Mode**: New `--deny-deprecations` flag (and `ASSAY_STRICT_DEPRECATIONS=1` env var) to enforce strict compliance in CI.
+- **Migration Guide**: New detailed [v1-to-v2 Migration Guide](docs/migration/v1-to-v2.md).
+- **Startup Warnings**: Server/Proxy now emit clear warnings when loading legacy policies.
+
+### Added
+- **CLI**: `assay policy validate --deny-deprecations` (and for `run`/`wrap` modes).
+- **Docs**: Comprehensive `docs/migration/v1-to-v2.md`.
+
+## [v1.6.0] - 2026-01-09
 
 ### Added
 - **Policy v2.0 (JSON Schema)**: Official support for JSON Schema constraints (`schemas:`) replacing regex loops.

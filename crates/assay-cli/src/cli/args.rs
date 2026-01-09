@@ -64,6 +64,10 @@ pub struct ValidateArgs {
 
     #[arg(long)]
     pub output: Option<std::path::PathBuf>,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -224,6 +228,10 @@ pub struct RunArgs {
     /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
     #[arg(long)]
     pub replay_strict: bool,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -293,6 +301,10 @@ pub struct CiArgs {
     /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
     #[arg(long)]
     pub replay_strict: bool,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
 }
 
 #[derive(clap::Args, Clone)]
@@ -651,6 +663,10 @@ pub struct McpWrapArgs {
     /// Command to wrap (use -- to separate args)
     #[arg(required = true, last = true, allow_hyphen_values = true)]
     pub command: Vec<String>,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -718,6 +734,10 @@ pub struct PolicyValidateArgs {
     /// Policy file path (YAML)
     #[arg(short, long)]
     pub input: PathBuf,
+
+    /// Fail if deprecated v1 policy format is detected
+    #[arg(long)]
+    pub deny_deprecations: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]

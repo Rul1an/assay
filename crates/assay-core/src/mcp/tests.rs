@@ -190,3 +190,33 @@ fn test_defs_resolution() {
         panic!("Expected Deny for ref violation");
     }
 }
+
+#[test]
+fn test_is_v1_format() {
+    // V1 Explicit
+    let v1 = McpPolicy {
+        version: "1.0".to_string(),
+        ..Default::default()
+    };
+    assert!(v1.is_v1_format());
+
+    // V1 Implied by constraints
+    let v1_implied = McpPolicy {
+        constraints: vec![ConstraintRule {
+            tool: "t".into(),
+            params: std::collections::BTreeMap::new(),
+        }],
+        ..Default::default()
+    };
+    assert!(v1_implied.is_v1_format());
+
+    // V2
+    let v2 = McpPolicy {
+        version: "2.0".to_string(),
+        ..Default::default()
+    };
+    assert!(!v2.is_v1_format());
+
+    let empty = McpPolicy::default();
+    assert!(!empty.is_v1_format());
+}

@@ -211,6 +211,14 @@ impl McpPolicy {
         let content = std::fs::read_to_string(path)?;
         let mut policy: McpPolicy = serde_yaml::from_str(&content)?;
 
+        // Check for v1 format and warn if necessary
+        if policy.is_v1_format() {
+            if std::env::var("ASSAY_STRICT_DEPRECATIONS").ok().as_deref() == Some("1") {
+                anyhow::bail!("Strict mode: v1 policy format (constraints) is not allowed.");
+            }
+            emit_deprecation_warning();
+        }
+
         // Normalize legacy shapes
         policy.normalize_legacy_shapes();
 
@@ -219,7 +227,13 @@ impl McpPolicy {
             policy.migrate_constraints_to_schemas();
         }
 
+
         Ok(policy)
+    }
+
+    pub fn is_v1_format(&self) -> bool {
+        // v1 if constraints are present OR version is explicitly "1.0"
+        !self.constraints.is_empty() || self.version == "1.0"
     }
 
     /// Normalize legacy root-level allow/deny into tools.allow/deny.
@@ -503,4 +517,17 @@ pub fn make_deny_response(id: Value, msg: &str, contract: Value) -> String {
         payload: ToolCallResult { result: body },
     };
     serde_json::to_string(&resp).unwrap_or_default() + "\n"
+}
+
+fn emit_deprecation_warning() {
+    static WARNED: OnceLock<()> = OnceLock::new();
+    WARNED.get_or_init(|| {
+        eprintln!(
+            "\n\x1b[33m⚠️  DEPRECATED: v1 policy format detected\x1b[0m\n\
+             \x1b[33m   The 'constraints:' syntax is deprecated and will be removed in Assay v2.0.0.\x1b[0m\n\
+             \x1b[33m   Migrate now:\x1b[0m\n\
+             \x1b[33m     assay policy migrate --input <file>\x1b[0m\n\
+             \x1b[33m   See: https://docs.assay.dev/migration/v1-to-v2\x1b[0m\n"
+        );
+    });
 }

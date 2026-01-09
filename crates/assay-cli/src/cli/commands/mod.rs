@@ -65,6 +65,9 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
 }
 
 async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    if args.deny_deprecations {
+        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
+    }
     ensure_parent_dir(&args.db)?;
 
     // Argument validation
@@ -136,6 +139,9 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 }
 
 async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    if args.deny_deprecations {
+        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
+    }
     ensure_parent_dir(&args.db)?;
 
     // Argument Validation

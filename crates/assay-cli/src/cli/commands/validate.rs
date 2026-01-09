@@ -8,6 +8,10 @@ use crate::cli::commands::exit_codes;
 use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
 
 pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    if args.deny_deprecations {
+        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
+    }
+
     // 1. Load Config
     let cfg = match load_config(&args.config, legacy_mode, true) {
         Ok(c) => c,

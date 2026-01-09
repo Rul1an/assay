@@ -14,6 +14,10 @@ pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
 }
 
 async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
+    if args.deny_deprecations {
+        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
+    }
+
     if args.command.is_empty() {
         anyhow::bail!("No command specified. Usage: assay mcp wrap -- <cmd> [args]");
     }

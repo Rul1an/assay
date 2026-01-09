@@ -1,29 +1,41 @@
-version: "1.0"
-name: "filesystem-readonly"
-
-# Strategy: Allow everything, but lock down the dangerous parts.
-
-deny:
-  # RCE Prevention
-  - "exec"
-  - "shell"
-  - "bash"
-  - "spawn"
-
-  # Mutation Prevention (Read-Only)
-  - "write_file"
-  - "append_file"
-  - "delete_file"
-  - "move_file"
-
-constraints:
-  # Scope validation: Only allow reads in safe directories
-  - tool: "read_file"
-    params:
+version: '2.0'
+name: filesystem-readonly
+tools:
+  allow: null
+  deny:
+  - exec
+  - shell
+  - bash
+  - spawn
+  - write_file
+  - append_file
+  - delete_file
+  - move_file
+allow: null
+deny: null
+schemas:
+  list_dir:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^/app/.*|^/data/.*"
-
-  - tool: "list_dir"
-    params:
+        minLength: 1
+        pattern: ^/app/.*|^/data/.*
+        type: string
+    required:
+    - path
+    type: object
+  read_file:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^/app/.*|^/data/.*"
+        minLength: 1
+        pattern: ^/app/.*|^/data/.*
+        type: string
+    required:
+    - path
+    type: object
+constraints: []
+enforcement:
+  unconstrained_tools: warn
+limits: null
+signatures: null

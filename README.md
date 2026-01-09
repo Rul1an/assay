@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write  # required for SARIF upload
+      security-events: write
 
     steps:
       - uses: actions/checkout@v4
@@ -80,18 +80,13 @@ jobs:
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+          # Optional: pin version if supported by installer
 
-          # Optional: pin a specific version for stable CI
-          # assay --version
-          # If your installer supports version pinning, use it here.
-
-      # Fast check: policy syntax + schema compilation
-      - name: Validate policy file
+      - name: Validate policy file (syntax + schema compile)
         run: |
           # Adjust to your policy path:
-          assay policy validate --input policy.yaml
+          assay policy validate --input policy.yaml --deny-deprecations
 
-      # Full check: emits SARIF for GitHub Code Scanning
       - name: Assay validate (SARIF)
         run: |
           assay validate --format sarif --output results.sarif
@@ -103,8 +98,7 @@ jobs:
         with:
           sarif_file: results.sarif
 
-      # Hard fail for PR gating (human-readable output)
-      - name: Fail on issues
+      - name: Fail on issues (PR gating)
         run: |
           assay validate --format text
 ```
@@ -146,22 +140,18 @@ constraints:
 
 ## Migration to v2.0 (JSON Schema)
 
-Assay v1.6.0 introduces JSON Schema based policies for stricter validation.
+Assay v1.7.0 formally deprecates the v1.x constraints syntax in favor of standard JSON Schema.
 
-1. **Auto-migrate (Preview)**:
-   ```bash
-   assay policy migrate --input v1-policy.yaml --dry-run
-   ```
-2. **Apply migration**:
+1. **Auto-migrate**:
    ```bash
    assay policy migrate --input v1-policy.yaml
    ```
-3. **Verify**:
+2. **Verify usage**:
    ```bash
-   assay validate --input v1-policy.yaml
+   assay policy validate --input v1-policy.yaml --deny-deprecations
    ```
 
-See `docs/policies.md` for full syntax reference.
+See the full [Migration Guide](docs/migration/v1-to-v2.md) for details.
 
 ## Documentation
 

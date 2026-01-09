@@ -1,36 +1,44 @@
-version: "1.0"
-name: "mcp-hardened"
-
-# Setup: Allowlist only. Strict containment.
-# Use this for CI or Production Agent Gates.
-
-allow:
-  # Essential Tools Only (Explicit Allow)
-  - "read_file"
-  - "list_directory"
-  - "search_files"
-  - "get_time"
-
-deny:
-  # Explicit deny for high-risk categories (redundant but safe)
-  - "exec*"
-  - "shell*"
-  - "write_file"
-  - "delete_file"
-  - "replace_file"
-  - "move_file"
-
-constraints:
-  # Strict containment (No /workspace root access)
-  - tool: "read_file"
-    params:
+version: '2.0'
+name: mcp-hardened
+tools:
+  allow:
+  - read_file
+  - list_directory
+  - search_files
+  - get_time
+  deny:
+  - exec*
+  - shell*
+  - write_file
+  - delete_file
+  - replace_file
+  - move_file
+allow: null
+deny: null
+schemas:
+  list_directory:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^/app/.*|^/data/.*"
-
-  - tool: "list_directory"
-    params:
+        minLength: 1
+        pattern: ^/app/.*|^/data/.*
+        type: string
+    required:
+    - path
+    type: object
+  read_file:
+    additionalProperties: true
+    properties:
       path:
-        matches: "^/app/.*|^/data/.*"
-
+        minLength: 1
+        pattern: ^/app/.*|^/data/.*
+        type: string
+    required:
+    - path
+    type: object
+constraints: []
+enforcement:
+  unconstrained_tools: warn
+limits: null
 signatures:
   check_descriptions: true
