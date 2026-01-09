@@ -227,7 +227,6 @@ impl McpPolicy {
             policy.migrate_constraints_to_schemas();
         }
 
-
         Ok(policy)
     }
 

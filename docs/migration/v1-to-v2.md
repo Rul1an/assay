@@ -47,30 +47,35 @@ constraints:
 ### v2.0 (New)
 
 ```yaml
-version: "2.0-schema"
+```yaml
+version: "2.0"
 tools:
   deny: ["exec_command"]
-  arg_constraints:
-    read_file:
+schemas:
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
       path:
         type: string
         pattern: "^/data/.*"
+    required: ["path"]
 ```
 
 Alternatively, you can provide a full schema for the tool arguments:
 
 ```yaml
-version: "2.0-schema"
-tools:
-  arg_constraints:
-    read_file:
-      type: object
-      properties:
-        path:
-          type: string
-          pattern: "^/data/.*"
-      required: ["path"]
-      additionalProperties: false
+```yaml
+version: "2.0"
+schemas:
+  read_file:
+    type: object
+    properties:
+      path:
+        type: string
+        pattern: "^/data/.*"
+    required: ["path"]
+    additionalProperties: false
 ```
 
 ## Strict Mode (CI/CD)

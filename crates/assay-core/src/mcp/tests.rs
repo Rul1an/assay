@@ -220,3 +220,25 @@ fn test_is_v1_format() {
     let empty = McpPolicy::default();
     assert!(!empty.is_v1_format());
 }
+
+#[test]
+#[serial_test::serial]
+fn test_strict_deprecation_env_var() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path();
+    std::fs::write(path, "version: '1.0'\nconstraints: []").unwrap();
+
+    // Case 1: No env var -> OK (but warns)
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS"); }
+    let res = McpPolicy::from_file(path);
+    assert!(res.is_ok());
+
+    // Case 2: Env var set -> Error
+    unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1"); }
+    let res_strict = McpPolicy::from_file(path);
+    assert!(res_strict.is_err());
+    assert!(res_strict.unwrap_err().to_string().contains("Strict mode"));
+
+    // Cleanup
+    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS"); }
+}
