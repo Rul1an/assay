@@ -176,18 +176,10 @@ fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
 
         Ok(killed)
     }
-            #[cfg(unix)]
-            {
-                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), nix::sys::signal::Signal::SIGKILL);
-                killed.push(pid);
-            }
-        }
-
-        Ok(killed)
-    }
     #[cfg(not(feature = "kill-switch"))]
     {
         let _ = parent_pid;
         Ok(vec![])
     }
 }
+
