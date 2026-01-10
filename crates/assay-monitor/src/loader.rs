@@ -68,14 +68,15 @@ impl LinuxMonitor {
     }
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
+        // Take ownership of the map so we can move it into the thread
         let map = self
             .bpf
-            .map_mut("EVENTS")
+            .take_map("EVENTS")
             .ok_or(MonitorError::MapNotFound { name: "EVENTS" })?;
 
         let mut rb = RingBuf::try_from(map)?;
 
-        // Manual thread spawn with channel (as per 'start now' instruction)
+        // Manual thread spawn with channel
         let (tx, rx) = mpsc::channel(1024);
 
         std::thread::spawn(move || {
