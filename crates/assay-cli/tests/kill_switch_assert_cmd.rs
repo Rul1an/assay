@@ -1,6 +1,7 @@
 use assert_cmd::prelude::*;
 use std::process::Command;
 
+#[cfg(unix)]
 #[test]
 fn kill_by_proc_id_works() {
     // Start a long-running process
