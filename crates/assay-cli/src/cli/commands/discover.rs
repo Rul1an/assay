@@ -1,10 +1,8 @@
 use crate::cli::args::DiscoverArgs;
-use assay_core::discovery::{
     config_files::scan_config_files,
     processes::scan_processes,
-    types::{DiscoveredServer, Inventory, InventorySummary, HostInfo},
+    types::{Inventory, InventorySummary, HostInfo},
 };
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
