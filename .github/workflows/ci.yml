@@ -58,7 +58,7 @@ jobs:
       # Stable toolchain for normal workspace builds
       - uses: dtolnay/rust-toolchain@stable
 
-      # Nightly needed because xtask builds eBPF with `cargo +nightly ... -Z build-std=core`
+      # Nightly + rust-src needed for -Z build-std
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
@@ -68,33 +68,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm clang
 
+      - name: Install bpf-linker
+        run: |
+          cargo install bpf-linker --locked
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Build assay CLI (release)
         run: cargo build -p assay-cli --release
 
-      - name: Build eBPF artifact (prefer Docker if available)
+      - name: Build eBPF artifact (native)
         run: |
           set -euxo pipefail
-          # Try Docker build, fallback to local nightly
-          cargo xtask build-ebpf --release --docker || cargo xtask build-ebpf --release
+          cargo xtask build-ebpf --release --no-docker
 
-          # Ensure deterministic output path exists (xtask should have done this)
-          if [ ! -f target/assay-ebpf.o ]; then
-            echo "target/assay-ebpf.o missing; attempting fallback copy..."
-            CANDIDATES=(
-              "target-ebpf/bpfel-unknown-none/release/assay-ebpf"
-              "target-ebpf/bpfel-unknown-none/debug/assay-ebpf"
-              "target/bpfel-unknown-none/release/assay-ebpf"
-            )
-            for c in "${CANDIDATES[@]}"; do
-              if [ -f "$c" ]; then
-                mkdir -p target
-                cp "$c" target/assay-ebpf.o
-                break
-              fi
-            done
-          fi
-
-          test -f target/assay-ebpf.o
+          # Ensure artifact exists
+          ls -la target/assay-ebpf.o
           file target/assay-ebpf.o
 
       - name: Verify eBPF symbols exist
