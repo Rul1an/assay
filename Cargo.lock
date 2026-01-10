@@ -152,8 +152,10 @@ dependencies = [
  "strsim",
  "sysinfo",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

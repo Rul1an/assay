@@ -21,6 +21,7 @@ pub mod migrate;
 pub mod policy;
 pub mod validate;
 pub mod discover;
+pub mod kill;
 
 pub mod exit_codes {
     pub const OK: i32 = 0;
@@ -58,6 +59,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::InitCi(args) => init_ci::cmd_init_ci(args),
         Command::Mcp(args) => mcp::run(args).await,
         Command::Discover(args) => discover::run(args).await,
+        Command::Kill(args) => kill::run(args).await,
         Command::Policy(args) => policy::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

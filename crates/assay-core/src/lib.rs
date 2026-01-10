@@ -20,7 +20,7 @@ pub mod policy_engine;
 pub mod providers;
 pub mod quarantine;
 pub mod redaction;
-pub mod discovery;
+
 
 pub mod doctor;
 pub mod validate;
@@ -33,3 +33,8 @@ pub mod report;
 pub mod storage;
 pub mod thresholds;
 pub mod trace;
+
+#[cfg(feature = "discovery")]
+pub mod discovery;
+#[cfg(feature = "kill-switch")]
+pub mod kill_switch;

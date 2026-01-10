@@ -8,23 +8,26 @@ readme.workspace = true
 description = "High-performance evaluation framework for LLM agents (Core)"
 
 [features]
-experimental = []
 default = ["discovery", "kill-switch"]
-discovery = ["sysinfo", "dirs"]
-kill-switch = []
-# P1 features (opt-in, Linux only)
+experimental = []
+discovery = ["dep:sysinfo", "dep:dirs"]
+kill-switch = ["dep:nix", "dep:sysinfo"]
+kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
+thiserror = "1.0"
+tracing = "0.1"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["sync", "time", "macros", "rt-multi-thread"] }
-chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12.26", default-features = false, features = ["json", "rustls-tls"] }
 hex = "0.4.3"
 md5 = "0.8.0"
@@ -32,20 +35,21 @@ strsim = "0.11.1"
 serde_ignored = "0.1.14"
 jsonschema = "0.19"
 regex = "1.5"
-tracing = "0.1.44"
 tempfile = "3.23.0"
 
 # Discovery dependencies
 sysinfo = { version = "0.30", optional = true }
 dirs = { version = "5", optional = true }
+nix = { version = "0.27", features = ["signal", "process"], optional = true }
 
 # Unix-specifics for Kill Switch P0
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.27", features = ["signal", "process"] }
+# nix moved to main dependencies to satisfy dep:nix feature
+# [target.'cfg(unix)'.dependencies]
+# nix = { ... }
 
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.16"
+procfs = { version = "0.16", optional = true }
 
 [dev-dependencies]
 tempfile = "3.23.0"

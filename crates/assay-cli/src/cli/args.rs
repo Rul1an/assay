@@ -37,6 +37,8 @@ pub enum Command {
     Policy(PolicyArgs),
     /// Discover MCP servers on this machine (v1.8)
     Discover(DiscoverArgs),
+    /// Kill/Terminate MCP servers (v1.8)
+    Kill(super::commands::kill::KillArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]

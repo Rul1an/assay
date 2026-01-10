@@ -10,7 +10,8 @@ pub fn scan_processes() -> Vec<DiscoveredServer> {
     let users = Users::new_with_refreshed_list();
 
     for (pid, process) in sys.processes() {
-        let cmdline = process.cmd().join(" ");
+        let cmd_slice: &[String] = process.cmd();
+        let cmdline: String = cmd_slice.join(" ");
         let msg = cmdline.to_lowercase();
 
         let is_mcp = msg.contains("mcp-server") ||
@@ -18,7 +19,7 @@ pub fn scan_processes() -> Vec<DiscoveredServer> {
                      msg.contains("mcp_server");
 
         if is_mcp {
-            let pid_u32 = pid.as_u32();
+            let pid_u32: u32 = pid.as_u32();
             let started = Some(process.start_time().to_string());
 
             let uid_opt = process.user_id();
