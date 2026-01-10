@@ -64,6 +64,3 @@ pub fn send_parsed(
     let _ = tx.blocking_send(ev);
 }
 
-#[cfg(target_os = "linux")]
-pub fn spawn_ringbuf_reader(
-// spawn_ringbuf_reader logic moved to loader.rs to manage ownership
