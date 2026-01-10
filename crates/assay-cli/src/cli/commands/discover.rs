@@ -1,9 +1,11 @@
 use crate::cli::args::DiscoverArgs;
+use assay_core::discovery::{
     config_files::scan_config_files,
     processes::scan_processes,
     types::{Inventory, InventorySummary, HostInfo},
 };
 use std::path::PathBuf;
+use sysinfo::System;
 
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     // 1. Gather servers
@@ -20,7 +22,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
 
     // 2. Build Inventory struct
     let host_info = HostInfo {
-        hostname: sysinfo::System::host_name().unwrap_or_else(|| "unknown".to_string()),
+        hostname: System::host_name().unwrap_or_else(|| "unknown".to_string()),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
     };
