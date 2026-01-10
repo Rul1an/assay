@@ -8,6 +8,16 @@ members = [
   "crates/assay-ebpf", "crates/assay-common",
   "assay-python-sdk",
 ]
+default-members = [
+  "crates/assay-core",
+  "crates/assay-metrics",
+  "crates/assay-cli",
+  "crates/assay-mcp-server",
+  "crates/assay-xtask",
+  "crates/assay-monitor",
+  "crates/assay-common",
+  "assay-python-sdk",
+]
 
 [workspace.package]
 version = "1.7.0"
