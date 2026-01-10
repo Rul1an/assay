@@ -34,6 +34,7 @@ dirs = "5.0"
 sysinfo = "0.30"
 humantime = "2"
 tokio-stream = "0.1"
+futures = "0.3"
 
 
 

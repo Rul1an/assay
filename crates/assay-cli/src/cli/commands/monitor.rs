@@ -71,7 +71,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
-    use assay_monitor::{Monitor, MonitorError};
+    use assay_monitor::Monitor;
     use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
 
     // 1. Resolve eBPF path

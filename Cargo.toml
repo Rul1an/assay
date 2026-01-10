@@ -20,3 +20,9 @@ readme = "README.md"
 [patch.crates-io]
 assay-core = { path = "crates/assay-core" }
 assay-metrics = { path = "crates/assay-metrics" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
