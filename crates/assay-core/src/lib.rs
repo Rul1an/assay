@@ -20,6 +20,7 @@ pub mod policy_engine;
 pub mod providers;
 pub mod quarantine;
 pub mod redaction;
+pub mod discovery;
 
 pub mod doctor;
 pub mod validate;

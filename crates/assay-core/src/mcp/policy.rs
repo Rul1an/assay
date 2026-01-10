@@ -281,7 +281,6 @@ impl McpPolicy {
                 if let Value::Object(map) = &mut schema_to_compile {
                     // Only insert if not already present to allow overrides (or just overwrite?)
                     // For now, insert if missing or overwrite to ensure global defs availability.
-                    // The user plan suggests: "kopieer $defs naar elk tool schema".
                     map.insert("$defs".to_string(), defs.clone());
                 }
             }
