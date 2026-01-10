@@ -34,7 +34,7 @@ jobs:
           JSONL
 
       - name: Build Verdict (Current Commit)
-        run: cargo build --release
+        run: cargo build --release --workspace --exclude assay-ebpf
 
       - name: Run action (workdir)
         env:
@@ -80,7 +80,7 @@ jobs:
           JSONL
 
       - name: Build Verdict (Current Commit)
-        run: cargo build --release
+        run: cargo build --release --workspace --exclude assay-ebpf
 
       - name: Export baseline
         env:
