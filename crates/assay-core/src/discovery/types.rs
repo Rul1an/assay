@@ -64,19 +64,10 @@ pub enum DiscoverySource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Transport {
-    Stdio {
-        command: String,
-        args: Vec<String>,
-    },
-    Http {
-        url: String,
-    },
-    Sse {
-        url: String,
-    },
-    WebSocket {
-        url: String,
-    },
+    Stdio { command: String, args: Vec<String> },
+    Http { url: String },
+    Sse { url: String },
+    WebSocket { url: String },
     Unknown,
 }
 
@@ -164,12 +155,14 @@ impl Inventory {
             .iter()
             .filter(|s| s.status == ServerStatus::Running)
             .filter_map(|s| match &s.source {
-                DiscoverySource::RunningProcess { pid, cmdline, .. } => Some(RunningProcessServer {
-                    id: s.id.clone(),
-                    name: s.name.clone(),
-                    pid: *pid,
-                    cmdline: cmdline.clone(),
-                }),
+                DiscoverySource::RunningProcess { pid, cmdline, .. } => {
+                    Some(RunningProcessServer {
+                        id: s.id.clone(),
+                        name: s.name.clone(),
+                        pid: *pid,
+                        cmdline: cmdline.clone(),
+                    })
+                }
                 _ => None,
             })
             .collect();

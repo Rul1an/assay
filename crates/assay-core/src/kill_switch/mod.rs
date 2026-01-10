@@ -1,6 +1,6 @@
-pub mod killer;
 pub mod capture;
 pub mod incident;
+pub mod killer;
 
 use std::path::PathBuf;
 use std::time::Duration;

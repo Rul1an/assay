@@ -112,7 +112,8 @@ impl McpProxy {
                                     agentic: None,
                                 });
                                 // Then proceed as a normal allow
-                                Self::handle_allow(&req, &mut audit_log, false); // false = don't double log ALLOW
+                                Self::handle_allow(&req, &mut audit_log, false);
+                                // false = don't double log ALLOW
                             }
                             PolicyDecision::Deny {
                                 tool,

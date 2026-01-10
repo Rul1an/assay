@@ -6,6 +6,11 @@ pub fn write_incident_bundle_pre_kill(_req: &KillRequest) -> anyhow::Result<Opti
     Ok(None)
 }
 
-pub fn write_incident_bundle_post_kill(_dir: &PathBuf, _req: &KillRequest, _success: bool, _children: &[u32]) -> anyhow::Result<()> {
+pub fn write_incident_bundle_post_kill(
+    _dir: &PathBuf,
+    _req: &KillRequest,
+    _success: bool,
+    _children: &[u32],
+) -> anyhow::Result<()> {
     Ok(())
 }

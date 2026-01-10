@@ -10,18 +10,19 @@ pub mod trace;
 pub mod config_path;
 pub mod coverage;
 pub mod demo;
+pub mod discover;
 pub mod doctor;
 pub mod explain;
 pub mod fix;
 pub mod import;
 pub mod init;
 pub mod init_ci;
+pub mod kill;
 pub mod mcp;
 pub mod migrate;
+pub mod monitor;
 pub mod policy;
 pub mod validate;
-pub mod discover;
-pub mod kill;
 
 pub mod exit_codes {
     pub const OK: i32 = 0;
@@ -60,6 +61,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Mcp(args) => mcp::run(args).await,
         Command::Discover(args) => discover::run(args).await,
         Command::Kill(args) => kill::run(args).await,
+        Command::Monitor(args) => monitor::run(args).await,
         Command::Policy(args) => policy::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

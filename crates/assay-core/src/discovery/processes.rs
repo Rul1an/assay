@@ -1,4 +1,6 @@
-use super::types::{DiscoveredServer, DiscoverySource, Transport, ServerStatus, PolicyStatus, AuthStatus};
+use super::types::{
+    AuthStatus, DiscoveredServer, DiscoverySource, PolicyStatus, ServerStatus, Transport,
+};
 use sysinfo::{System, Users};
 
 pub fn scan_processes() -> Vec<DiscoveredServer> {
@@ -14,9 +16,9 @@ pub fn scan_processes() -> Vec<DiscoveredServer> {
         let cmdline: String = cmd_slice.join(" ");
         let msg = cmdline.to_lowercase();
 
-        let is_mcp = msg.contains("mcp-server") ||
-                     msg.contains("@modelcontextprotocol/server") ||
-                     msg.contains("mcp_server");
+        let is_mcp = msg.contains("mcp-server")
+            || msg.contains("@modelcontextprotocol/server")
+            || msg.contains("mcp_server");
 
         if is_mcp {
             let pid_u32: u32 = pid.as_u32();

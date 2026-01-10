@@ -5,6 +5,7 @@ members = [
   "crates/assay-metrics",
   "crates/assay-cli", "crates/assay-mcp-server",
   "crates/assay-xtask", "crates/assay-monitor",
+  "crates/assay-ebpf", "crates/assay-common",
   "assay-python-sdk",
 ]
 

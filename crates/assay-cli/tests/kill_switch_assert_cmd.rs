@@ -6,7 +6,11 @@ use std::process::Command;
 fn kill_by_proc_id_works() {
     // Start a long-running process
     let mut child = Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
-        .args(if cfg!(windows) { &["/C", "timeout", "/T", "300"][..] } else { &["300"][..] })
+        .args(if cfg!(windows) {
+            &["/C", "timeout", "/T", "300"][..]
+        } else {
+            &["300"][..]
+        })
         .spawn()
         .expect("spawn");
 
@@ -41,7 +45,7 @@ fn kill_by_proc_id_works() {
                 // Note: If kill logic uses graceful (SIGTERM), it might be 15.
                 // Default is immediate (SIGKILL).
             }
-        },
+        }
         Err(e) => panic!("wait failed: {}", e),
     }
 }

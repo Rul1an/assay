@@ -38,7 +38,10 @@ pub enum Command {
     /// Discover MCP servers on this machine (v1.8)
     Discover(DiscoverArgs),
     /// Kill/Terminate MCP servers (v1.8)
+    /// Kill/Terminate MCP servers (v1.8)
     Kill(super::commands::kill::KillArgs),
+    /// Runtime eBPF Monitor (Linux only)
+    Monitor(super::commands::monitor::MonitorArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]

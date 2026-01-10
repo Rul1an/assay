@@ -52,20 +52,23 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
     let policy = match McpPolicy::from_file(&policy_path) {
         Ok(p) => p,
         Err(e) => {
-             let msg = e.to_string();
-             // Handle Not Found specifically if possible, otherwise generic read error
-             if msg.to_lowercase().contains("no such file")
-                || msg.to_lowercase().contains("system cannot find") {
-                 return ToolError::new(
+            let msg = e.to_string();
+            // Handle Not Found specifically if possible, otherwise generic read error
+            if msg.to_lowercase().contains("no such file")
+                || msg.to_lowercase().contains("system cannot find")
+            {
+                return ToolError::new(
                     "E_POLICY_NOT_FOUND",
                     &format!("Policy not found: {}", policy_rel_path),
-                 ).result();
-             } else if msg.to_lowercase().contains("permission denied")
-                 || msg.to_lowercase().contains("is a directory") {
-                 return ToolError::new("E_POLICY_READ", &msg).result();
-             }
-             // Default to PARSE error for any other failure (likely YAML syntax or structure)
-             return ToolError::new("E_POLICY_PARSE", &msg).result();
+                )
+                .result();
+            } else if msg.to_lowercase().contains("permission denied")
+                || msg.to_lowercase().contains("is a directory")
+            {
+                return ToolError::new("E_POLICY_READ", &msg).result();
+            }
+            // Default to PARSE error for any other failure (likely YAML syntax or structure)
+            return ToolError::new("E_POLICY_PARSE", &msg).result();
         }
     };
 
@@ -85,11 +88,19 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
             "violations": [],
             "suggested_fix": null
         })),
-        PolicyDecision::Deny { code, reason, contract, .. } => {
+        PolicyDecision::Deny {
+            code,
+            reason,
+            contract,
+            ..
+        } => {
             // Map unified contract back to expected format if needed, or pass through.
             // Current CLI expects "violations" in a specific way for schema errors.
             // If contract contains violations, use them.
-            let violations = contract.get("violations").cloned().unwrap_or(serde_json::json!([]));
+            let violations = contract
+                .get("violations")
+                .cloned()
+                .unwrap_or(serde_json::json!([]));
             Ok(serde_json::json!({
                 "allowed": false,
                 "code": code,
@@ -131,7 +142,9 @@ schemas:
         pattern: "^/tmp/.*"
     required: ["path"]
 "#;
-        tokio::fs::write(&policy_path, yaml).await.expect("write failed");
+        tokio::fs::write(&policy_path, yaml)
+            .await
+            .expect("write failed");
 
         let cfg = ServerConfig::default();
         let caches = PolicyCaches::new(100); // Unused but required by struct
@@ -155,13 +168,19 @@ schemas:
 
         let code = if let Some(c) = res.get("code").and_then(|v| v.as_str()) {
             c.to_string()
-        } else if let Some(e) = res.get("error").and_then(|v| v.get("code")).and_then(|v| v.as_str()) {
+        } else if let Some(e) = res
+            .get("error")
+            .and_then(|v| v.get("code"))
+            .and_then(|v| v.as_str())
+        {
             e.to_string()
         } else {
             panic!("No code found in response: {}", res);
         };
 
-        assert!(code == "E_ARG_SCHEMA" || code == "MCP_ARG_CONSTRAINT" || code == "E_POLICY_NOT_FOUND");
+        assert!(
+            code == "E_ARG_SCHEMA" || code == "MCP_ARG_CONSTRAINT" || code == "E_POLICY_NOT_FOUND"
+        );
 
         // Case 2: Allowed
         let args_ok = serde_json::json!({

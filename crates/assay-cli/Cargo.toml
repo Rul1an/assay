@@ -21,8 +21,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "fs"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "fs", "signal"] }
 assay-core = { path = "../assay-core", version = "1.7.0" }
+assay-monitor = { path = "../assay-monitor", version = "1.8.0" }
+assay-common = { path = "../assay-common", version = "0.1.0" }
 dialoguer = "0.11"
 similar = "2"
 serde_yaml = "0.9"
@@ -30,6 +32,10 @@ assay-metrics = { path = "../assay-metrics", version = "1.7.0" }
 chrono = "0.4.42"
 dirs = "5.0"
 sysinfo = "0.30"
+humantime = "2"
+tokio-stream = "0.1"
+
+
 
 [dev-dependencies]
 tempfile = "3"

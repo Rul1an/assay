@@ -135,7 +135,8 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         for event in events {
             if let Some(typ) = event.get("type").and_then(|s| s.as_str()) {
                 if typ == "call_tool" {
-                    let tool_opt = event.get("tool_name")
+                    let tool_opt = event
+                        .get("tool_name")
                         .or_else(|| event.get("tool"))
                         .and_then(|s| s.as_str());
 
@@ -145,15 +146,20 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
 
                         // Validate compliance (Unified V2)
                         let args_default = serde_json::json!({});
-                        let args = event.get("arguments")
-                             .or_else(|| event.get("input")) // fallback for some formats
-                             .unwrap_or(&args_default);
+                        let args = event
+                            .get("arguments")
+                            .or_else(|| event.get("input")) // fallback for some formats
+                            .unwrap_or(&args_default);
 
                         let decision = policy_v2.evaluate(&tool_name, args, &mut state);
 
                         match decision {
                             assay_core::mcp::policy::PolicyDecision::Allow => {}
-                            assay_core::mcp::policy::PolicyDecision::AllowWithWarning { code, reason, .. } => {
+                            assay_core::mcp::policy::PolicyDecision::AllowWithWarning {
+                                code,
+                                reason,
+                                ..
+                            } => {
                                 warnings.push(assay_core::coverage::PolicyWarning {
                                     trace_id: id.clone(),
                                     tool: tool_name.clone(),
@@ -161,7 +167,9 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
                                     reason,
                                 });
                             }
-                            assay_core::mcp::policy::PolicyDecision::Deny { code, reason, .. } => {
+                            assay_core::mcp::policy::PolicyDecision::Deny {
+                                code, reason, ..
+                            } => {
                                 violations.push(assay_core::coverage::PolicyViolation {
                                     trace_id: id.clone(),
                                     tool: tool_name.clone(),
@@ -275,16 +283,22 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     if !report.policy_violations.is_empty() {
         eprintln!("\n🚨 ERROR: Policy Violations Detected in Traces!");
         for v in &report.policy_violations {
-            eprintln!("  - [{}][{}] {} ({})", v.trace_id, v.tool, v.reason, v.error_code);
+            eprintln!(
+                "  - [{}][{}] {} ({})",
+                v.trace_id, v.tool, v.reason, v.error_code
+            );
         }
         clean_pass = false;
     }
 
     if !report.policy_warnings.is_empty() {
-         eprintln!("\n⚠️ Policy Warnings:");
-         for w in &report.policy_warnings {
-            eprintln!("  - [{}][{}] {} ({})", w.trace_id, w.tool, w.reason, w.warning_code);
-         }
+        eprintln!("\n⚠️ Policy Warnings:");
+        for w in &report.policy_warnings {
+            eprintln!(
+                "  - [{}][{}] {} ({})",
+                w.trace_id, w.tool, w.reason, w.warning_code
+            );
+        }
     }
 
     // Check 2: High Risk Gaps
@@ -393,14 +407,20 @@ fn print_markdown_report(report: &assay_core::coverage::CoverageReport) {
     if !report.policy_violations.is_empty() {
         println!("## ❌ Policy Violations");
         for v in &report.policy_violations {
-            println!("- {}: **{}** - {} (`{}`)", v.trace_id, v.tool, v.reason, v.error_code);
+            println!(
+                "- {}: **{}** - {} (`{}`)",
+                v.trace_id, v.tool, v.reason, v.error_code
+            );
         }
     }
 
     if !report.policy_warnings.is_empty() {
         println!("## ⚠️ Policy Warnings");
         for w in &report.policy_warnings {
-            println!("- {}: **{}** - {} (`{}`)", w.trace_id, w.tool, w.reason, w.warning_code);
+            println!(
+                "- {}: **{}** - {} (`{}`)",
+                w.trace_id, w.tool, w.reason, w.warning_code
+            );
         }
     }
 }

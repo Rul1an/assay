@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
 use crate::cli::args::PolicyMigrateArgs;
 use crate::cli::commands::exit_codes;
+use anyhow::{Context, Result};
 
 pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     let mut policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
@@ -21,11 +21,9 @@ pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     }
 
     let out_path = args.output.clone().unwrap_or_else(|| args.input.clone());
-    std::fs::write(&out_path, yaml).with_context(|| format!("failed to write {}", out_path.display()))?;
+    std::fs::write(&out_path, yaml)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
 
-    eprintln!(
-        "✔ Migrated policy written: {}",
-        out_path.display()
-    );
+    eprintln!("✔ Migrated policy written: {}", out_path.display());
     Ok(exit_codes::OK)
 }

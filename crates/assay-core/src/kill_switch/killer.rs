@@ -40,7 +40,11 @@ pub fn kill_pid(req: KillRequest) -> anyhow::Result<KillReport> {
         success,
         children_killed,
         incident_dir,
-        error: if success { None } else { Some("failed to terminate process".into()) },
+        error: if success {
+            None
+        } else {
+            Some("failed to terminate process".into())
+        },
     })
 }
 
@@ -112,7 +116,7 @@ fn is_running(pid: u32) -> bool {
 fn is_running_sysinfo(pid: u32) -> bool {
     #[cfg(feature = "kill-switch")]
     {
-        use sysinfo::{System, Pid as SPid};
+        use sysinfo::{Pid as SPid, System};
         let mut sys = System::new();
         sys.refresh_processes();
         sys.process(SPid::from_u32(pid)).is_some()
@@ -127,7 +131,7 @@ fn is_running_sysinfo(pid: u32) -> bool {
 fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
     #[cfg(feature = "kill-switch")]
     {
-        use sysinfo::{System, Pid as SPid};
+        use sysinfo::{Pid as SPid, System};
 
         let mut sys = System::new_all();
         sys.refresh_processes();
@@ -166,7 +170,10 @@ fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
         for pid in to_kill {
             #[cfg(unix)]
             {
-                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), nix::sys::signal::Signal::SIGKILL);
+                let _ = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid as i32),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
                 killed.push(pid);
             }
             #[cfg(not(unix))]
@@ -183,4 +190,3 @@ fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
         Ok(vec![])
     }
 }
-

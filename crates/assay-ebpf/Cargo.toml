@@ -5,9 +5,18 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aya-bpf = "0.1"
-aya-log-ebpf = "0.1"
+aya-ebpf = { git = "https://github.com/aya-rs/aya" }
+aya-log-ebpf = { git = "https://github.com/aya-rs/aya" }
+assay-common = { path = "../assay-common" }
 
 [[bin]]
 name = "assay-ebpf"
 path = "src/main.rs"
+
+[profile.dev]
+panic = "abort"
+lto = true
+
+[profile.release]
+panic = "abort"
+lto = true

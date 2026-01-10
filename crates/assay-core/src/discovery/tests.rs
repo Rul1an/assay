@@ -32,14 +32,26 @@ mod tests {
 
         assert_eq!(servers.len(), 2);
 
-        let filesystem = servers.iter().find(|s| s.name == Some("filesystem".to_string())).unwrap();
+        let filesystem = servers
+            .iter()
+            .find(|s| s.name == Some("filesystem".to_string()))
+            .unwrap();
         assert_eq!(filesystem.id, "claude_desktop-filesystem");
         // Check auth status
-        assert!(matches!(filesystem.auth, crate::discovery::types::AuthStatus::None));
+        assert!(matches!(
+            filesystem.auth,
+            crate::discovery::types::AuthStatus::None
+        ));
 
-        let github = servers.iter().find(|s| s.name == Some("github".to_string())).unwrap();
+        let github = servers
+            .iter()
+            .find(|s| s.name == Some("github".to_string()))
+            .unwrap();
         // Check auth status inferred from env
-        assert!(matches!(github.auth, crate::discovery::types::AuthStatus::ApiKey));
+        assert!(matches!(
+            github.auth,
+            crate::discovery::types::AuthStatus::ApiKey
+        ));
         assert!(github.env_vars.contains(&"GITHUB_TOKEN".to_string()));
     }
 

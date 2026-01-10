@@ -2,7 +2,6 @@ use clap::Args;
 use std::path::PathBuf;
 use std::time::Duration;
 
-
 #[derive(Args, Debug)]
 pub struct KillArgs {
     /// Targets: proc-12345, 12345, server_id, or name
@@ -46,7 +45,7 @@ pub struct KillArgs {
 }
 
 pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
-    use assay_core::kill_switch::{KillMode, KillRequest, parse_target_to_pid};
+    use assay_core::kill_switch::{parse_target_to_pid, KillMode, KillRequest};
 
     if args.all && !args.yes {
         anyhow::bail!("Refusing to --all without --yes (safety).");
@@ -82,13 +81,16 @@ pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
                 // Try to load inventory, but don't fail hard if it doesn't exist?
                 // The spec implies we should load it.
                 // If file missing and user supplied ID, we probably error out or warn.
-                 match load_inventory(&args.inventory) {
+                match load_inventory(&args.inventory) {
                     Ok(inv) => inventory_loaded = Some(inv),
                     Err(e) => {
-                         eprintln!("Warning: could not load inventory to resolve target '{}': {}", t, e);
-                         continue;
+                        eprintln!(
+                            "Warning: could not load inventory to resolve target '{}': {}",
+                            t, e
+                        );
+                        continue;
                     }
-                 }
+                }
             }
 
             if let Some(inv) = &inventory_loaded {
@@ -103,7 +105,9 @@ pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
 
     let mode = match args.mode.as_str() {
         "immediate" => KillMode::Immediate,
-        "graceful" => KillMode::Graceful { grace: parse_duration(&args.grace)? },
+        "graceful" => KillMode::Graceful {
+            grace: parse_duration(&args.grace)?,
+        },
         other => anyhow::bail!("unknown --mode: {other}"),
     };
 
@@ -131,7 +135,11 @@ pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
             }
             Ok(rep) => {
                 failed = true;
-                eprintln!("✗ failed to kill pid={} ({})", rep.pid, rep.error.unwrap_or_default());
+                eprintln!(
+                    "✗ failed to kill pid={} ({})",
+                    rep.pid,
+                    rep.error.unwrap_or_default()
+                );
             }
             Err(e) => {
                 failed = true;
@@ -145,14 +153,15 @@ pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
 
 fn load_inventory(path: &PathBuf) -> anyhow::Result<assay_core::discovery::types::Inventory> {
     // try to read file
-    let bytes = std::fs::read(path).map_err(|e| anyhow::anyhow!("Failed to read inventory at {:?}: {}", path, e))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read inventory at {:?}: {}", path, e))?;
 
     // simple heuristic: if extension is json, parse json. else yaml.
     // Spec said default is .assay/inventory.yaml
     if path.extension().and_then(|s| s.to_str()) == Some("json") {
-         Ok(serde_json::from_slice(&bytes)?)
+        Ok(serde_json::from_slice(&bytes)?)
     } else {
-         Ok(serde_yaml::from_slice(&bytes)?)
+        Ok(serde_yaml::from_slice(&bytes)?)
     }
 }
 
@@ -169,7 +178,7 @@ fn parse_duration(s: &str) -> anyhow::Result<Duration> {
         return Ok(Duration::from_millis(ms.parse()?));
     }
     if let Some(sec) = s.strip_suffix("s") {
-         return Ok(Duration::from_secs(sec.parse()?));
+        return Ok(Duration::from_secs(sec.parse()?));
     }
     // Fallback: assume seconds
     Ok(Duration::from_secs(s.parse()?))

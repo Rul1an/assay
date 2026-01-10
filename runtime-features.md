@@ -312,7 +312,7 @@ Ensure `uriBaseId` consistency to avoid broken links in GitHub.
 
 ### Phase 2: Kill Switch (Wk 2-3)
 - [x] Implement `assay-core/kill_switch/` (Unix signals).
-- [ ] Implement state capture (env, open files - best effort).
+- [x] Implement state capture (env, open files - best effort).
 - [x] Create `assay kill` CLI command.
 
 ### Phase 3: Runtime Monitor (Wk 3-4)

@@ -56,7 +56,10 @@ fn send_line(stdin: &mut dyn Write, v: &Value) -> anyhow::Result<()> {
 }
 
 /// Read one JSON line from stdout with timeout (best-effort).
-fn read_json_line(reader: &mut BufReader<std::process::ChildStdout>, timeout: Duration) -> anyhow::Result<Value> {
+fn read_json_line(
+    reader: &mut BufReader<std::process::ChildStdout>,
+    timeout: Duration,
+) -> anyhow::Result<Value> {
     let start = Instant::now();
     loop {
         if start.elapsed() > timeout {
@@ -81,11 +84,17 @@ fn read_json_line(reader: &mut BufReader<std::process::ChildStdout>, timeout: Du
 
 fn extract_structured_contract(resp: &Value) -> Option<&Value> {
     resp.get("result")
-        .and_then(|r| r.get("structuredContent").or_else(|| r.get("structured_content")))
+        .and_then(|r| {
+            r.get("structuredContent")
+                .or_else(|| r.get("structured_content"))
+        })
         .or_else(|| {
             resp.get("payload")
                 .and_then(|p| p.get("result"))
-                .and_then(|r| r.get("structuredContent").or_else(|| r.get("structured_content")))
+                .and_then(|r| {
+                    r.get("structuredContent")
+                        .or_else(|| r.get("structured_content"))
+                })
         })
 }
 

@@ -1,7 +1,9 @@
-use super::types::{DiscoveredServer, DiscoverySource, ServerStatus, Transport, PolicyStatus, AuthStatus};
-use std::path::PathBuf;
-use std::collections::HashMap;
+use super::types::{
+    AuthStatus, DiscoveredServer, DiscoverySource, PolicyStatus, ServerStatus, Transport,
+};
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Deserialize)]
 struct ClaudeDesktopConfig {
@@ -25,45 +27,63 @@ pub fn scan_config_files(search_paths: Vec<PathBuf>) -> Vec<DiscoveredServer> {
         }
 
         // Determine client type mainly by filename/path heuristics
-        let client_type = if path.to_string_lossy().contains("claude_desktop_config.json") {
+        let client_type = if path
+            .to_string_lossy()
+            .contains("claude_desktop_config.json")
+        {
             "claude_desktop"
         } else if path.to_string_lossy().contains("cursor") {
-             "cursor" // Cursor often uses same format as Claude
+            "cursor" // Cursor often uses same format as Claude
         } else {
             "generic"
         };
 
         // Try parsing as Claude-style config (most common standard)
         if let Ok(content) = std::fs::read_to_string(&path) {
-             if let Ok(config) = serde_json::from_str::<ClaudeDesktopConfig>(&content) {
-                 if let Some(mcp_servers) = config.mcp_servers {
-                     for (name, srv) in mcp_servers {
-                         let has_key = srv.env.as_ref().map(|e|
-                            e.keys().any(|k| k.to_uppercase().contains("KEY") || k.to_uppercase().contains("TOKEN"))
-                         ).unwrap_or(false);
+            if let Ok(config) = serde_json::from_str::<ClaudeDesktopConfig>(&content) {
+                if let Some(mcp_servers) = config.mcp_servers {
+                    for (name, srv) in mcp_servers {
+                        let has_key = srv
+                            .env
+                            .as_ref()
+                            .map(|e| {
+                                e.keys().any(|k| {
+                                    k.to_uppercase().contains("KEY")
+                                        || k.to_uppercase().contains("TOKEN")
+                                })
+                            })
+                            .unwrap_or(false);
 
-                         let env_keys = srv.env.as_ref().map(|e| e.keys().cloned().collect()).unwrap_or_default();
+                        let env_keys = srv
+                            .env
+                            .as_ref()
+                            .map(|e| e.keys().cloned().collect())
+                            .unwrap_or_default();
 
-                         servers.push(DiscoveredServer {
-                             id: format!("{}-{}", client_type, name),
-                             name: Some(name),
-                             source: DiscoverySource::ConfigFile {
-                                 path: path.clone(),
-                                 client: client_type.to_string(),
-                             },
-                             transport: Transport::Stdio {
-                                 command: srv.command,
-                                 args: srv.args.unwrap_or_default(),
-                             },
-                             status: ServerStatus::Configured,
-                             policy_status: PolicyStatus::Unmanaged, // Default until we check policies
-                             auth: if has_key { AuthStatus::ApiKey } else { AuthStatus::None },
-                             env_vars: env_keys,
-                             risk_hints: vec![],
-                         });
-                     }
-                 }
-             }
+                        servers.push(DiscoveredServer {
+                            id: format!("{}-{}", client_type, name),
+                            name: Some(name),
+                            source: DiscoverySource::ConfigFile {
+                                path: path.clone(),
+                                client: client_type.to_string(),
+                            },
+                            transport: Transport::Stdio {
+                                command: srv.command,
+                                args: srv.args.unwrap_or_default(),
+                            },
+                            status: ServerStatus::Configured,
+                            policy_status: PolicyStatus::Unmanaged, // Default until we check policies
+                            auth: if has_key {
+                                AuthStatus::ApiKey
+                            } else {
+                                AuthStatus::None
+                            },
+                            env_vars: env_keys,
+                            risk_hints: vec![],
+                        });
+                    }
+                }
+            }
         }
     }
     servers

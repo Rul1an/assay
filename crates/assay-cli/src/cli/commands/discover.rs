@@ -2,7 +2,7 @@ use crate::cli::args::DiscoverArgs;
 use assay_core::discovery::{
     config_files::scan_config_files,
     processes::scan_processes,
-    types::{Inventory, InventorySummary, HostInfo},
+    types::{HostInfo, Inventory, InventorySummary},
 };
 use std::path::PathBuf;
 use sysinfo::System;
@@ -29,12 +29,39 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
 
     let summary = InventorySummary {
         total: servers.len(),
-        configured: servers.iter().filter(|s| s.status == assay_core::discovery::types::ServerStatus::Configured).count(),
-        running: servers.iter().filter(|s| s.status == assay_core::discovery::types::ServerStatus::Running).count(),
-        managed: servers.iter().filter(|s| match s.policy_status { assay_core::discovery::types::PolicyStatus::Managed{..} => true, _ => false }).count(),
-        unmanaged: servers.iter().filter(|s| match s.policy_status { assay_core::discovery::types::PolicyStatus::Unmanaged => true, _ => false }).count(),
-        with_auth: servers.iter().filter(|s| s.auth != assay_core::discovery::types::AuthStatus::None && s.auth != assay_core::discovery::types::AuthStatus::Unknown).count(),
-        without_auth: servers.iter().filter(|s| s.auth == assay_core::discovery::types::AuthStatus::None).count(),
+        configured: servers
+            .iter()
+            .filter(|s| s.status == assay_core::discovery::types::ServerStatus::Configured)
+            .count(),
+        running: servers
+            .iter()
+            .filter(|s| s.status == assay_core::discovery::types::ServerStatus::Running)
+            .count(),
+        managed: servers
+            .iter()
+            .filter(|s| match s.policy_status {
+                assay_core::discovery::types::PolicyStatus::Managed { .. } => true,
+                _ => false,
+            })
+            .count(),
+        unmanaged: servers
+            .iter()
+            .filter(|s| match s.policy_status {
+                assay_core::discovery::types::PolicyStatus::Unmanaged => true,
+                _ => false,
+            })
+            .count(),
+        with_auth: servers
+            .iter()
+            .filter(|s| {
+                s.auth != assay_core::discovery::types::AuthStatus::None
+                    && s.auth != assay_core::discovery::types::AuthStatus::Unknown
+            })
+            .count(),
+        without_auth: servers
+            .iter()
+            .filter(|s| s.auth == assay_core::discovery::types::AuthStatus::None)
+            .count(),
     };
 
     let inventory = Inventory {
@@ -48,11 +75,12 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     match args.format.as_str() {
         "json" => {
             println!("{}", serde_json::to_string_pretty(&inventory)?);
-        },
+        }
         "yaml" => {
             println!("{}", serde_yaml::to_string(&inventory)?);
-        },
-        _ => { // table/text
+        }
+        _ => {
+            // table/text
             print_table(&inventory);
         }
     }
@@ -60,11 +88,17 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     // 4. Fail-on check
     if let Some(fail_check) = args.fail_on {
         if fail_check == "unmanaged" && inventory.summary.unmanaged > 0 {
-            eprintln!("Error: Found {} unmanaged servers.", inventory.summary.unmanaged);
+            eprintln!(
+                "Error: Found {} unmanaged servers.",
+                inventory.summary.unmanaged
+            );
             return Ok(10); // DISCOVERY_UNMANAGED
         }
         if fail_check == "no_auth" && inventory.summary.without_auth > 0 {
-             eprintln!("Error: Found {} servers without authentication.", inventory.summary.without_auth);
+            eprintln!(
+                "Error: Found {} servers without authentication.",
+                inventory.summary.without_auth
+            );
             return Ok(11); // DISCOVERY_NO_AUTH
         }
     }
@@ -75,7 +109,10 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
 fn print_table(inv: &Inventory) {
     println!("🔍 MCP Server Discovery Report");
     println!("   Generated: {}", inv.generated_at);
-    println!("   Host: {} ({}/{})", inv.host.hostname, inv.host.os, inv.host.arch);
+    println!(
+        "   Host: {} ({}/{})",
+        inv.host.hostname, inv.host.os, inv.host.arch
+    );
     println!();
 
     if inv.servers.is_empty() {
@@ -84,17 +121,28 @@ fn print_table(inv: &Inventory) {
     }
 
     // Simple manual table alignment
-    println!("{:<30} {:<15} {:<15} {:<15}", "SERVER ID", "CLIENT", "STATUS", "AUTH");
-    println!("{:<30} {:<15} {:<15} {:<15}", "---------", "------", "------", "----");
+    println!(
+        "{:<30} {:<15} {:<15} {:<15}",
+        "SERVER ID", "CLIENT", "STATUS", "AUTH"
+    );
+    println!(
+        "{:<30} {:<15} {:<15} {:<15}",
+        "---------", "------", "------", "----"
+    );
 
     for s in &inv.servers {
         let source_client = match &s.source {
-            assay_core::discovery::types::DiscoverySource::ConfigFile { client, .. } => client.clone(),
-            assay_core::discovery::types::DiscoverySource::RunningProcess { .. } => "process".to_string(),
+            assay_core::discovery::types::DiscoverySource::ConfigFile { client, .. } => {
+                client.clone()
+            }
+            assay_core::discovery::types::DiscoverySource::RunningProcess { .. } => {
+                "process".to_string()
+            }
             _ => "network".to_string(),
         };
 
-        println!("{:<30} {:<15} {:<15?} {:<15?}",
+        println!(
+            "{:<30} {:<15} {:<15?} {:<15?}",
             s.id.chars().take(29).collect::<String>(),
             source_client,
             s.status,
@@ -102,7 +150,10 @@ fn print_table(inv: &Inventory) {
         );
     }
     println!();
-    println!("Summary: Total={}, Unmanaged={}, NoAuth={}", inv.summary.total, inv.summary.unmanaged, inv.summary.without_auth);
+    println!(
+        "Summary: Total={}, Unmanaged={}, NoAuth={}",
+        inv.summary.total, inv.summary.unmanaged, inv.summary.without_auth
+    );
 }
 
 fn get_config_search_paths() -> Vec<PathBuf> {
