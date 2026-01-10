@@ -1,4 +1,5 @@
 use super::{KillMode, KillReport, KillRequest};
+#[allow(unused_imports)]
 use anyhow::Context;
 
 #[cfg(unix)]
@@ -50,6 +51,11 @@ fn kill_immediate(pid: u32) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+#[cfg(not(unix))]
+fn kill_immediate(_pid: u32) -> anyhow::Result<bool> {
+    anyhow::bail!("Kill Switch is not supported on this platform in v1.8 (Windows coming in v1.9)")
+}
+
 #[cfg(unix)]
 fn kill_graceful(pid: u32, grace: std::time::Duration) -> anyhow::Result<bool> {
     let target = Pid::from_raw(pid as i32);
@@ -69,6 +75,11 @@ fn kill_graceful(pid: u32, grace: std::time::Duration) -> anyhow::Result<bool> {
     // SIGKILL
     let _ = kill(target, Signal::SIGKILL);
     Ok(!is_running(pid))
+}
+
+#[cfg(not(unix))]
+fn kill_graceful(_pid: u32, _grace: std::time::Duration) -> anyhow::Result<bool> {
+    anyhow::bail!("Kill Switch is not supported on this platform in v1.8 (Windows coming in v1.9)")
 }
 
 fn is_running(pid: u32) -> bool {
@@ -91,6 +102,8 @@ fn is_running(pid: u32) -> bool {
     }
 }
 
+// Suppress dead code warning on Linux where this might not be called if /proc is used exclusively
+#[allow(dead_code)]
 fn is_running_sysinfo(pid: u32) -> bool {
     #[cfg(feature = "kill-switch")]
     {

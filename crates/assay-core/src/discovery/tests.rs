@@ -45,10 +45,11 @@ mod tests {
 
     #[test]
     fn test_scan_processes_integration() {
-        use std::process::{Command, Stdio};
-        use std::thread;
-        use std::time::Duration;
-        use crate::discovery::processes::scan_processes;
+        use std::process::Command;
+        // use std::process::Stdio;
+        // use std::thread;
+        // use std::time::Duration;
+        // use crate::discovery::processes::scan_processes;
 
         // Spawn a dummy process that looks like an MCP server
         let mut child = Command::new("sleep")
