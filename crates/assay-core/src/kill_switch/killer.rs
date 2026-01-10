@@ -82,6 +82,7 @@ fn kill_graceful(_pid: u32, _grace: std::time::Duration) -> anyhow::Result<bool>
     anyhow::bail!("Kill Switch is not supported on this platform in v1.8 (Windows coming in v1.9)")
 }
 
+#[allow(dead_code)]
 fn is_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
