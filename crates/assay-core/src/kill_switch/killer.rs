@@ -98,7 +98,11 @@ fn is_running(pid: u32) -> bool {
     }
     #[cfg(not(unix))]
     {
-        is_running_sysinfo(pid)
+        // Suppress unused warning for the argument when this branch is taken
+        let _ = pid;
+        // Logic for Windows is technically not supported yet, so this function returning false is fine/irrelevant
+        // since kill_graceful (the only caller) bails out early anyway.
+        false
     }
 }
 
@@ -127,6 +131,7 @@ fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
         let mut sys = System::new_all();
         sys.refresh_processes();
 
+        #[allow(unused_mut)]
         let mut killed = vec![];
         let parent = SPid::from_u32(parent_pid);
 
@@ -158,6 +163,19 @@ fn kill_descendants(parent_pid: u32) -> anyhow::Result<Vec<u32>> {
         to_kill.reverse();
 
         for pid in to_kill {
+            #[cfg(unix)]
+            {
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), nix::sys::signal::Signal::SIGKILL);
+                killed.push(pid);
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = pid; // Suppress unused variable on Windows
+            }
+        }
+
+        Ok(killed)
+    }
             #[cfg(unix)]
             {
                 let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), nix::sys::signal::Signal::SIGKILL);
