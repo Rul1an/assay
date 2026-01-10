@@ -771,7 +771,7 @@ pub struct PolicyFmtArgs {
 #[derive(clap::Args, Debug, Clone)]
 pub struct DiscoverArgs {
     /// Scan local machine (config files & processes)
-    #[clap(long, default_value = "true")]
+    #[clap(long, default_value_t = true)]
     pub local: bool,
 
     /// Output format (table, json, yaml)

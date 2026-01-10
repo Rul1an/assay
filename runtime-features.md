@@ -275,7 +275,7 @@ Ensure `uriBaseId` consistency to avoid broken links in GitHub.
 *   **Process Enum**: Mock `sysinfo` data structures.
 
 ### Integration Tests
-*   **Discovery**: Create a temp directory stricture mimicking `$HOME/.config` and verify `assay discover` finds mock servers.
+*   **Discovery**: Create a temp directory structure mimicking `$HOME/.config` and verify `assay discover` finds mock servers.
 *   **Kill Switch (Cross-platform correctness)**:
     ```rust
     #[test]
