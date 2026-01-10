@@ -50,13 +50,23 @@ pub fn cstr_from_data(data: &[u8]) -> Result<&str, MonitorError> {
 
     core::str::from_utf8(&data[..nul_pos]).map_err(|_| MonitorError::InvalidEvent {
         got: data.len(),
-        need: data.len(), // reuse error type; if you want, introduce MonitorError::Utf8
+        need: data.len(),
     })
 }
 
 #[cfg(target_os = "linux")]
+pub fn send_parsed(
+    tx: &tokio::sync::mpsc::Sender<Result<MonitorEvent, MonitorError>>,
+    data: &[u8],
+) {
+    let ev = parse_event(data);
+    // best-effort send
+    let _ = tx.blocking_send(ev);
+}
+
+#[cfg(target_os = "linux")]
 pub fn spawn_ringbuf_reader(
-    mut ringbuf: aya::maps::ringbuf::RingBuf,
+    mut ringbuf: aya::maps::ring_buf::RingBuf<aya::maps::MapData>,
 ) -> (
     mpsc::Receiver<Result<MonitorEvent, MonitorError>>,
     std::thread::JoinHandle<()>,

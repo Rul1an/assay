@@ -29,4 +29,7 @@ pub enum MonitorError {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("ringbuf error: {0}")]
+    RingBuf(String),
 }

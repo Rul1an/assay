@@ -6,7 +6,7 @@ use aya::{
     programs::TracePoint,
     Bpf,
 };
-use std::{path::Path, time::Duration};
+use std::path::Path;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -82,12 +82,8 @@ impl LinuxMonitor {
             loop {
                 // Using Iterator interface for RingBuf
                 match rb.next() {
-                    Some(Ok(item)) => {
+                    Some(item) => {
                         events::send_parsed(&tx, &item);
-                    }
-                    Some(Err(e)) => {
-                        let _ = tx.blocking_send(Err(MonitorError::from(e)));
-                        break;
                     }
                     None => {
                         // Stream ended
