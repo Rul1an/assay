@@ -305,15 +305,15 @@ Ensure `uriBaseId` consistency to avoid broken links in GitHub.
 ## 8. Implementation Checklist
 
 ### Phase 1: Infrastructure & Discovery (Wk 1-2)
-- [ ] Set up `xtask` for eBPF (even if empty initially).
-- [ ] Implement `assay-core/discovery/` modules (Config parsers).
-- [ ] Implement `sysinfo` based process scanning.
-- [ ] Create `assay discover` CLI command.
+- [x] Set up `xtask` for eBPF (even if empty initially).
+- [x] Implement `assay-core/discovery/` modules (Config parsers).
+- [x] Implement `sysinfo` based process scanning.
+- [x] Create `assay discover` CLI command.
 
 ### Phase 2: Kill Switch (Wk 2-3)
-- [ ] Implement `assay-core/kill_switch/` (Unix signals).
+- [x] Implement `assay-core/kill_switch/` (Unix signals).
 - [ ] Implement state capture (env, open files - best effort).
-- [ ] Create `assay kill` CLI command.
+- [x] Create `assay kill` CLI command.
 
 ### Phase 3: Runtime Monitor (Wk 3-4)
 - [ ] Implement `assay-ebpf` probes (openat, connect).
