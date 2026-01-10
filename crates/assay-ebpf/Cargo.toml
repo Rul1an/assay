@@ -1,0 +1,13 @@
+[package]
+name = "assay-ebpf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya-bpf = "0.1"
+aya-log-ebpf = "0.1"
+
+[[bin]]
+name = "assay-ebpf"
+path = "src/main.rs"

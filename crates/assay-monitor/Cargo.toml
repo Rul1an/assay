@@ -1,0 +1,15 @@
+[package]
+name = "assay-monitor"
+version = "1.8.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
+
+# Linux-only dependencies for eBPF
+[target.'cfg(target_os = "linux")'.dependencies]
+aya = "0.12"
+aya-log = "0.2"

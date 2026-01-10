@@ -35,6 +35,8 @@ pub enum Command {
     Mcp(McpArgs),
     Version,
     Policy(PolicyArgs),
+    /// Discover MCP servers on this machine (v1.8)
+    Discover(DiscoverArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
@@ -764,4 +766,19 @@ pub struct PolicyFmtArgs {
     /// Output file (default: overwrite input)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DiscoverArgs {
+    /// Scan local machine (config files & processes)
+    #[clap(long, default_value_t = true)]
+    pub local: bool,
+
+    /// Output format (table, json, yaml)
+    #[clap(long, default_value = "table")]
+    pub format: String,
+
+    /// Fail if unmanaged servers are found
+    #[clap(long)]
+    pub fail_on: Option<String>, // "unmanaged", "no_auth"
 }

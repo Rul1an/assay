@@ -9,6 +9,11 @@ description = "High-performance evaluation framework for LLM agents (Core)"
 
 [features]
 experimental = []
+default = ["discovery", "kill-switch"]
+discovery = ["sysinfo", "dirs"]
+kill-switch = []
+# P1 features (opt-in, Linux only)
+runtime-monitor = []
 
 [dependencies]
 anyhow = "1"
@@ -29,6 +34,18 @@ jsonschema = "0.19"
 regex = "1.5"
 tracing = "0.1.44"
 tempfile = "3.23.0"
+
+# Discovery dependencies
+sysinfo = { version = "0.30", optional = true }
+dirs = { version = "5", optional = true }
+
+# Unix-specifics for Kill Switch P0
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["signal", "process"] }
+
+# Linux-specifics for process inspection
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.16"
 
 [dev-dependencies]
 tempfile = "3.23.0"
