@@ -3,6 +3,7 @@ use crate::cli::commands::exit_codes;
 use clap::Args;
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
 use tokio_stream::StreamExt;
 
 #[derive(Args, Debug, Clone)]

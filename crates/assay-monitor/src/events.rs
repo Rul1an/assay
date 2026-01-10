@@ -1,6 +1,8 @@
 use crate::MonitorError;
 use assay_common::MonitorEvent;
+#[cfg(target_os = "linux")]
 use tokio::sync::mpsc;
+// ReceiverStream is used in type alias, kept.
 use tokio_stream::wrappers::ReceiverStream;
 
 pub type EventStream = ReceiverStream<Result<MonitorEvent, MonitorError>>;

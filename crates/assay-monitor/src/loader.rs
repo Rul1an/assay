@@ -80,17 +80,21 @@ impl LinuxMonitor {
 
         std::thread::spawn(move || {
             loop {
-                let poll_res = rb.poll(Duration::from_millis(200), |data| {
-                    events::send_parsed(&tx, data);
-                });
-
-                if let Err(e) = poll_res {
-                    // Send error and exit
-                    let _ = tx.blocking_send(Err(MonitorError::from(e)));
-                    break;
+                // Using Iterator interface for RingBuf
+                match rb.next() {
+                    Some(Ok(item)) => {
+                        events::send_parsed(&tx, &item);
+                    }
+                    Some(Err(e)) => {
+                        let _ = tx.blocking_send(Err(MonitorError::from(e)));
+                        break;
+                    }
+                    None => {
+                        // Stream ended
+                        break;
+                    }
                 }
 
-                // If tx closed, stop polling
                 if tx.is_closed() {
                     break;
                 }
