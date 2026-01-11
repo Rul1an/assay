@@ -85,41 +85,26 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
     const SOCKADDR_OFFSET: usize = 24;
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(SOCKADDR_OFFSET).map_err(|_| 1u32)? };
 
-        let slot: &mut MaybeUninit<MonitorEvent> = &mut *entry;
-        let ev = slot.as_mut_ptr();
+    // We can't easily read indefinite structs, so we read a fixed chunk (e.g. 128 bytes)
+    // to cover sockaddr_in / sockaddr_in6.
+    let mut raw_sockaddr = [0u8; 128];
+    unsafe {
+        let _ = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const [u8; 128])
+            .map(|x| raw_sockaddr = x);
+    }
 
+    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
+        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            (*ev).pid = tgid;
-            (*ev).event_type = EVENT_CONNECT;
-            core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
+            write_event_header(ev, pid, EVENT_CONNECT);
 
-            // Store family in first 2 bytes (little sanity)
-            let fb = family.to_ne_bytes();
-            core::ptr::copy_nonoverlapping(fb.as_ptr(), (*ev).data.as_mut_ptr(), 2);
-
-            if family == AF_INET {
-                if let Ok(sa) = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const SockAddrIn) {
-                    let n = core::mem::size_of::<SockAddrIn>();
-                    core::ptr::copy_nonoverlapping(
-                        &sa as *const SockAddrIn as *const u8,
-                        (*ev).data.as_mut_ptr(),
-                        n.min((*ev).data.len()),
-                    );
-                }
-            } else if family == AF_INET6 {
-                if let Ok(sa6) = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const SockAddrIn6) {
-                    let n = core::mem::size_of::<SockAddrIn6>();
-                    core::ptr::copy_nonoverlapping(
-                        &sa6 as *const SockAddrIn6 as *const u8,
-                        (*ev).data.as_mut_ptr(),
-                        n.min((*ev).data.len()),
-                    );
-                }
-            }
-            // else: leave payload mostly zeroed (no early return; no leaked reservation)
+            // Copy pre-read stack buffer into ringbuf payload
+            let data_ptr = (*ev).data.as_mut_ptr();
+            let n = if raw_sockaddr.len() < DATA_LEN { raw_sockaddr.len() } else { DATA_LEN };
+            core::ptr::copy_nonoverlapping(raw_sockaddr.as_ptr(), data_ptr, n);
         }
-
         entry.submit(0);
+    }
     }
 
     Ok(0)

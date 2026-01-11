@@ -144,7 +144,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     struct ActiveRule {
         id: String,
         action: assay_core::mcp::runtime_features::MonitorAction,
-        kind: assay_core::mcp::runtime_features::MonitorRuleType,
+
         allow: globset::GlobSet,
         deny: Option<globset::GlobSet>, // for match.not
     }
@@ -206,7 +206,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                      rules.push(ActiveRule {
                         id: r.id.clone(),
                         action: r.action.clone(),
-                        kind,
                         allow,
                         deny,
                     });

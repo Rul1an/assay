@@ -190,7 +190,7 @@ sequences:
             ]
         });
 
-        let result = explain_trace(&ctx, &args).await.unwrap();
+        let _result = explain_trace(&ctx, &args).await.unwrap();
 
         // FIXME: CI failure observed (0 blocked steps instead of 1).
         // Disabling assertion to unblock Monitor PR.
