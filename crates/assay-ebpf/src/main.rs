@@ -32,23 +32,25 @@ fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
     const FILENAME_OFFSET: usize = 24;
     let filename_ptr: u64 = unsafe { ctx.read_at(FILENAME_OFFSET).map_err(|_| 1u32)? };
 
-    // Read first into a bounded stack buffer, then reserve + submit.
-    // This avoids holding a RingBuf reservation across fallible reads.
-    let mut data = [0u8; 256];
-    unsafe {
-        let _ = aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-            filename_ptr as *const u8,
-            &mut data,
-        );
-    }
-
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let slot: &mut MaybeUninit<MonitorEvent> = &mut *entry;
-        slot.write(MonitorEvent {
-            pid: tgid,
-            event_type: EVENT_OPENAT,
-            data,
-        });
+        let ev = slot.as_mut_ptr();
+
+        unsafe {
+            // Write scalar fields directly (no stack struct literal)
+            (*ev).pid = tgid;
+            (*ev).event_type = EVENT_OPENAT;
+
+            // Zero payload in-place (no `[0u8;256]` temp on stack)
+            core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
+
+            // Fill payload directly into ringbuf memory
+            let _ = aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
+                filename_ptr as *const u8,
+                &mut (*ev).data,
+            );
+        }
+
         entry.submit(0);
     }
 
@@ -69,30 +71,80 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
         return Ok(0);
     }
 
-    // sys_connect(fd, uservaddr, addrlen)
-    // uservaddr is 2nd arg -> offset 24
     const SOCKADDR_OFFSET: usize = 24;
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(SOCKADDR_OFFSET).map_err(|_| 1u32)? };
 
-    // Read first (may fail) BEFORE reserving ringbuf memory.
-    // This prevents verifier "unreleased reference" on error paths.
-    let raw: [u8; 128] = match unsafe {
-        aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const [u8; 128])
+    // Read small, bounded structs onto stack (OK), avoid `[u8;128]`/`[u8;256]` temps.
+    const AF_INET: u16 = 2;
+    const AF_INET6: u16 = 10;
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct SockAddrIn {
+        sin_family: u16,
+        sin_port: u16,
+        sin_addr: u32,
+        sin_zero: [u8; 8],
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct In6Addr {
+        s6_addr: [u8; 16],
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct SockAddrIn6 {
+        sin6_family: u16,
+        sin6_port: u16,
+        sin6_flowinfo: u32,
+        sin6_addr: In6Addr,
+        sin6_scope_id: u32,
+    }
+
+    // family read is tiny
+    let family: u16 = match unsafe {
+        aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const u16)
     } {
         Ok(v) => v,
         Err(_) => return Ok(0),
     };
 
-    let mut data = [0u8; 256];
-    data[..128].copy_from_slice(&raw);
-
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let slot: &mut MaybeUninit<MonitorEvent> = &mut *entry;
-        slot.write(MonitorEvent {
-            pid: tgid,
-            event_type: EVENT_CONNECT,
-            data,
-        });
+        let ev = slot.as_mut_ptr();
+
+        unsafe {
+            (*ev).pid = tgid;
+            (*ev).event_type = EVENT_CONNECT;
+            core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
+
+            // Store family in first 2 bytes (little sanity)
+            (*ev).data[0..2].copy_from_slice(&family.to_ne_bytes());
+
+            if family == AF_INET {
+                if let Ok(sa) = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const SockAddrIn) {
+                    let n = core::mem::size_of::<SockAddrIn>();
+                    core::ptr::copy_nonoverlapping(
+                        &sa as *const SockAddrIn as *const u8,
+                        (*ev).data.as_mut_ptr(),
+                        n.min((*ev).data.len()),
+                    );
+                }
+            } else if family == AF_INET6 {
+                if let Ok(sa6) = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const SockAddrIn6) {
+                    let n = core::mem::size_of::<SockAddrIn6>();
+                    core::ptr::copy_nonoverlapping(
+                        &sa6 as *const SockAddrIn6 as *const u8,
+                        (*ev).data.as_mut_ptr(),
+                        n.min((*ev).data.len()),
+                    );
+                }
+            }
+            // else: leave payload mostly zeroed (no early return; no leaked reservation)
+        }
+
         entry.submit(0);
     }
 
