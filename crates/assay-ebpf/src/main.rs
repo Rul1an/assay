@@ -121,7 +121,8 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
             core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
 
             // Store family in first 2 bytes (little sanity)
-            (*ev).data[0..2].copy_from_slice(&family.to_ne_bytes());
+            let fb = family.to_ne_bytes();
+            core::ptr::copy_nonoverlapping(fb.as_ptr(), (*ev).data.as_mut_ptr(), 2);
 
             if family == AF_INET {
                 if let Ok(sa) = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const SockAddrIn) {
