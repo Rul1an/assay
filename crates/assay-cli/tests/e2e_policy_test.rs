@@ -99,6 +99,8 @@ fn test_discovery_respects_policy_fail_on_unmanaged() {
         // Make discovery resolve “home” into the temp dir on Windows
         .env("HOME", temp.path())
         .env("USERPROFILE", temp.path())
+        .env("HOMEDRIVE", "C:")
+        .env("HOMEPATH", r"\") // not strictly required if USERPROFILE is set, but harmless
         // Make config_dir() resolve into the temp dir on Windows
         .env("APPDATA", &appdata)
         // Make XDG lookups deterministic too
