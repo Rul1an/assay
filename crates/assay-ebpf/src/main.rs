@@ -19,7 +19,7 @@ const DATA_LEN: usize = 256;
 
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
     (*ev).pid = pid;
-    (*ev).event_type = event_type as u8;
+    (*ev).event_type = event_type;
     // Zero payload in-place
     core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
 }
@@ -47,7 +47,7 @@ fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_OPENAT as u32);
+            write_event_header(ev, pid, EVENT_OPENAT);
 
             // Safe slice construction from raw pointer to avoid implicit autoref issues
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -96,7 +96,7 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_CONNECT as u32);
+            write_event_header(ev, pid, EVENT_CONNECT);
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
