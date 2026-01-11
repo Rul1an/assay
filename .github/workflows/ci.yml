@@ -38,8 +38,8 @@ jobs:
       # Exclude assay-ebpf to prevent host-target mismatch errors
       - name: Build and Test Workspace
         run: |
-          cargo build --workspace --exclude assay-ebpf --exclude assay-it
-          cargo test --workspace --exclude assay-ebpf --exclude assay-it
+          cargo build --workspace --exclude assay-ebpf
+          cargo test --workspace --exclude assay-ebpf
 
       - name: Test assay-cli
         run: cargo test -p assay-cli
@@ -81,30 +81,20 @@ jobs:
           # 1) wait for monitor to attach
           # 2) open /etc/hosts (openat in same PID)
           # 3) connect to example.com's IP (connect in same PID)
-          python3 - <<'PY' &
-          import time, socket
-          time.sleep(2)
-          open("/etc/hosts","rb").read()
-          s = socket.socket()
-          s.settimeout(2)
-          try:
-              s.connect(("93.184.216.34", 80))  # example.com IP, avoids DNS variability
-          except Exception:
-              pass
-          time.sleep(2)
-          PY
+          # Spawn a target process that will do openat + connect
+          bash -lc 'sleep 1; cat /etc/hosts >/dev/null; curl -s https://example.com >/dev/null || true; sleep 1' &
           TARGET_PID=$!
           echo "Target PID: $TARGET_PID"
 
-          # Run monitor in foreground and capture output
+          # Monitor that PID (needs sudo)
           sudo -E ./target/debug/assay monitor \
             --pid "$TARGET_PID" \
-            --duration 6s \
+            --duration 5s \
             --ebpf target/assay-ebpf.o \
             --print | tee monitor.log
 
-          # Helper may exit non-zero depending on networking; don't fail on that
+          # Ensure the target process ended (it should)
           wait "$TARGET_PID" || true
 
-          # Assert we saw at least one event
-          grep -E 'openat:|connect' monitor.log
+          # Now assert we captured something
+          grep -E 'openat|connect' monitor.log

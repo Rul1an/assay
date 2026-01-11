@@ -80,23 +80,25 @@ impl LinuxMonitor {
         let (tx, rx) = mpsc::channel(1024);
 
         std::thread::spawn(move || {
-            loop {
-                // Using Iterator interface for RingBuf
-                match rb.next() {
-                    Some(item) => {
-                        events::send_parsed(&tx, &item);
+            let _ = std::panic::catch_unwind(|| {
+                loop {
+                    if tx.is_closed() {
+                        break;
                     }
-                    None => {
-                        // Buffer is empty, wait a bit before polling again
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                        continue;
-                    }
-                }
 
-                if tx.is_closed() {
-                    break;
+                    // Using Iterator interface for RingBuf
+                    match rb.next() {
+                        Some(item) => {
+                            events::send_parsed(&tx, &item);
+                        }
+                        None => {
+                            // Buffer is empty, wait a bit before polling again
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            continue;
+                        }
+                    }
                 }
-            }
+            });
         });
 
         Ok(ReceiverStream::new(rx))
