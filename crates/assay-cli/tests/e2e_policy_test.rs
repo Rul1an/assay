@@ -56,12 +56,25 @@ fn setup_fake_unmanaged_config(root: &std::path::Path) {
     )
     .unwrap();
 
-    // Windows-style path: %APPDATA%\Claude\claude_desktop_config.json
-    let appdata = root.join("AppData").join("Roaming");
-    let claude_win = appdata.join("Claude");
-    std::fs::create_dir_all(&claude_win).unwrap();
+    // Windows-style paths (AppData/Roaming and AppData/Local)
+    let appdata_roaming = root.join("AppData").join("Roaming");
+    let claude_roaming = appdata_roaming.join("Claude");
+    std::fs::create_dir_all(&claude_roaming).unwrap();
     std::fs::write(
-        claude_win.join("claude_desktop_config.json"),
+        claude_roaming.join("claude_desktop_config.json"),
+        r#"{
+          "mcpServers": {
+            "unmanaged-server": { "command": "echo", "args": ["hello"] }
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let appdata_local = root.join("AppData").join("Local");
+    let claude_local = appdata_local.join("Claude");
+    std::fs::create_dir_all(&claude_local).unwrap();
+    std::fs::write(
+        claude_local.join("claude_desktop_config.json"),
         r#"{
           "mcpServers": {
             "unmanaged-server": { "command": "echo", "args": ["hello"] }
