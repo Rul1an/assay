@@ -1,6 +1,33 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v1.8.0] - 2026-01-11
+
+### 🚀 Runtime Features (System 2 Security)
+
+This release transforms Assay from a static analyzer into a complete **Runtime Security Platform**. It introduces the "System 2" capabilities: detecting and stopping dangerous behavior as it happens.
+
+### ✨ Major Features
+-   **Runtime Monitor (`assay monitor`)** *(Linux Only)*:
+    -   Uses **eBPF** (extended Berkeley Packet Filter) to trace process behavior safely in kernel space.
+    -   Detects file access (`openat`) and network connections (`connect`) in real-time.
+    -   **Zero-Overhead**: Highly optimized "Read-First" ring buffer implementation.
+-   **Discovery (`assay discover`)**:
+    -   Automatically inventory running MCP servers and local configurations.
+    -   Detects unmanaged servers and security gaps.
+-   **Kill Switch (`assay kill`)**:
+    -   Emergency termination of rogue agent processes.
+    -   Supports graceful shutdown (SIGTERM) and immediate kill (SIGKILL).
+
+### 🛡️ Hardening
+-   **Native eBPF Builds**: CI now builds eBPF artifacts natively (no Docker required), ensuring determinism and stability.
+-   **Host Build Protection**: The `assay-ebpf` crate is feature-gated to prevent accidental linking on non-Linux hosts.
+-   **Strict Dependencies**: All upstream dependencies are strictly pinned for reproducibility.
+
+### 📚 Documentation
+-   **Unified Reference**: Consolidated runtime documentation into `docs/runtime-monitor.md`.
+-   **Handoff**: Comprehensive architecture & maintenance guide available for contributors.
+
 ## [v1.7.0] - 2026-01-09
 
 ### 🛡️ Strict Deprecation Mode
