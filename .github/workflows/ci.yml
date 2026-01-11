@@ -77,30 +77,25 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Start a target process that keeps running and generates syscalls
-          bash -lc '
-            set -euo pipefail
-            sleep 1
-            for i in 1 2 3 4 5; do
-              cat /etc/hosts >/dev/null
-              curl -s https://example.com >/dev/null || true
-              sleep 0.2
-            done
-            sleep 2
-          ' &
+          # Start a target process that will:
+          #  - wait 1s for monitor to attach
+          #  - trigger openat in *the bash process* via redirection
+          #  - trigger connect in *the bash process* via /dev/tcp
+          #  - stay alive long enough for monitor duration
+          bash -lc 'sleep 1; : </etc/hosts; echo -n > /dev/tcp/1.1.1.1/80 || true; sleep 3' &
           TARGET_PID=$!
-          echo "Target PID: ${TARGET_PID}"
+          echo "Target PID: $TARGET_PID"
 
-          # Run monitor against that PID (foreground) and capture logs
+          # Run monitor and capture BOTH stdout+stderr for debugging
           sudo -E ./target/debug/assay monitor \
-            --pid "${TARGET_PID}" \
-            --duration 6s \
+            --pid "$TARGET_PID" \
+            --duration 5s \
             --ebpf target/assay-ebpf.o \
-            --print | tee monitor.log
+            --print \
+            2>&1 | tee monitor.log
 
-          # Ensure the target is gone
-          kill "${TARGET_PID}" 2>/dev/null || true
-          wait "${TARGET_PID}" 2>/dev/null || true
+          # Ensure target finished
+          wait "$TARGET_PID" || true
 
-          # Assert we saw events
+          # Assert we saw at least one event line
           grep -E 'openat|connect' monitor.log
