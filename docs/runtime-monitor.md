@@ -1,85 +1,110 @@
-## Runtime Monitor (assay-monitor) — Linux eBPF (Experimental / P1)
+# Runtime Monitor Reference (v1.8)
 
-`assay-monitor` is the user-space component that streams runtime events from eBPF probes
-(e.g. file opens and network connects) and can trigger alerts / kill switch actions.
+**Status:** Production Ready (Linux), Stubs (macOS/Windows)
 
-### Key Properties
+## 1. System Overview
 
-- **Cross-platform build**
-  - On **Linux**, eBPF is enabled via `aya`.
-  - On **macOS/Windows**, the crate compiles but all methods return `MonitorError::NotSupported`.
-  - This avoids sprinkling `#[cfg(target_os = "linux")]` guards across the workspace.
+Assay v1.8 introduces the **Runtime Monitor**, a subsystem designed to capture granular runtime events (File I/O, Network) from processes under test. This allows `assay` to verify not just the *output* of a program, but its *behavior* (side-effects).
 
-- **Stable event streaming**
-  - Uses a **threaded RingBuf reader** for maximum compatibility across Aya versions.
-  - Events are bridged into `tokio::mpsc` and exposed as a `Stream`.
+The system uses **eBPF (Extended Berkeley Packet Filter)** for safe, high-performance kernel tracing on Linux.
 
-- **Hardened ABI**
-  - `assay-common` contains `MonitorEvent` with **compile-time layout assertions**.
-  - `assay-monitor` parses events via **MaybeUninit + memcpy**, avoiding UB.
+## 2. Architecture
 
-### Usage (Linux)
+The architecture follows a producer-consumer model bridging Kernel Space and User Space.
 
-```rust
-use assay_monitor::Monitor;
-use tokio_stream::StreamExt;
+```mermaid
+flowchart TD
+  subgraph KS["Kernel Space (eBPF)"]
+    K["Kernel Tracepoints"] -->|Trigger| P["Probes (assay-ebpf)"]
+    P -->|Write| RB["RingBuf Map"]
+  end
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 1) Load the eBPF bytecode
-    let mut monitor = Monitor::load_file("/path/to/assay_ebpf.o")?;
-
-    // 2) Configure which PIDs are monitored (optional)
-    monitor.set_monitored_pids(&[1234, 5678])?;
-
-    // 3) Attach probes (sys_enter_openat / sys_enter_connect)
-    monitor.attach()?;
-
-    // 4) Consume events
-    let mut stream = monitor.listen()?;
-    while let Some(ev) = stream.next().await {
-        match ev {
-            Ok(e) => println!("Event: pid={} type={}", e.pid, e.event_type),
-            Err(err) => eprintln!("Monitor error: {err}"),
-        }
-    }
-
-    Ok(())
-}
+  subgraph US["User Space (Rust)"]
+    RB -->|Poll| L["Loader Thread (assay-monitor)"]
+    L -->|mpsc channel| S["Async Stream"]
+    S -->|Consume| CLI["Assay CLI: monitor command"]
+  end
 ```
 
-### macOS / Windows behavior
+**Notes:**
+*   **Linux-only**: requires eBPF-capable kernel + elevated privileges (sudo recommended).
+*   **Feature Gated**: `assay-ebpf` is gated behind the `ebpf` feature to prevent host linker errors; build it only via `cargo xtask build-ebpf` (which enables this feature).
 
-On non-Linux hosts, Monitor exists but returns MonitorError::NotSupported for all runtime methods.
-This allows builds/tests on dev laptops while runtime execution remains Linux-only.
+### Key Components
 
-### Notes
-- Running requires elevated privileges (root / CAP_BPF / CAP_PERFMON).
-- Building the eBPF object is Linux-first. Non-Linux hosts should use Docker/CI to produce assay_ebpf.o.
+| Component | Path | Responsibility |
+|-----------|------|----------------|
+| **assay-ebpf** | `crates/assay-ebpf` | Kernel probes written in `no_std` Rust. Hooks `sys_enter_openat` and `sys_enter_connect`. |
+| **assay-monitor** | `crates/assay-monitor` | User-space library. Loads eBPF objects, attaches probes, and streams parsed events. |
+| **assay-cli** | `crates/assay-cli` | Provides the `assay monitor` subcommand. Handles PID filtering and user output. |
+| **assay-xtask** | `crates/assay-xtask` | Build automation. Compiles `assay-ebpf` using `nightly` Rust (native or Docker). |
 
-### Advanced Troubleshooting (Linux)
+## 3. Workflows
 
-If `assay monitor` fails on Linux:
+### A. Building (Hybrid Model)
 
-**A. Missing Artifact**
-- **Error**: "eBPF object not found"
-- **Fix**: Run `cargo xtask build-ebpf --release`. Check `target/assay-ebpf.o`.
+Because eBPF requires a specific nightly toolchain and linker, we use a split build strategy:
 
-**B. Attach Failed**
-- **Check Symbols**: `llvm-objdump -t target/assay-ebpf.o | egrep 'assay_monitor_(openat|connect)'` (Must see both).
-- **Check Tracepoints**:
-  - `ls /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat`
-  - If missing, try mounting: `sudo mount -t tracefs nodev /sys/kernel/tracing`
+1.  **Host Bins (`assay`)**: Built with standard `cargo build`.
+    *   *Note*: `assay-ebpf` is explicitly excluded from standard workspace builds via feature gating.
+    *   *Rule*: Host builds (`cargo build --workspace`) must **not** attempt to link the eBPF binary.
+2.  **eBPF Artifact (`assay-ebpf.o`)**: Built via `cargo xtask build-ebpf`.
+    *   **Native**: Uses local `rust-src` and `bpf-linker` (Primary CI path).
+    *   **Docker (Optional)**: Can build in a container using `ghcr.io/aya-rs/aya`, but may require registry access/auth. CI uses the native build path for determinism.
 
-**C. No Events**
-- **Check PID**: Ensure `--pid` is a living process (TGID).
-- **Privileges**: Use `sudo` or set caps:
-  `sudo setcap cap_bpf,cap_perfmon,cap_sys_admin+ep ./target/release/assay`
+### B. Running (Linux Only)
 
-### CI Automation
+The monitor requires elevated privileges (`CAP_BPF`, `CAP_PERFMON`).
+*Note: Some distros still require `CAP_SYS_ADMIN` for certain attach modes; use `sudo` if in doubt.*
 
-The `.github/workflows/ci.yml` includes an `ebpf-smoke` job that:
-- Runs on `ubuntu-latest` (native Linux).
-- Builds `assay-cli` and `assay-ebpf`.
-- Verifies symbol presence with `llvm-objdump`.
-- Runs a **smoke test** using a Python helper to trigger verified events (`openat`) under `sudo`.
+```bash
+# 1. Build eBPF (one-time)
+cargo xtask build-ebpf --release
+
+# 2. Run Monitor
+sudo assay monitor --pid <TARGET_PID> --duration 10s
+```
+
+On **macOS**, the `monitor` command exists but will exit with code `40` (Not Supported).
+
+## 4. Technical Deep Dive
+
+### eBPF Probes (`assay-ebpf`)
+*   **Safety**: Uses a "Read-First" pattern. Data is read into a local stack buffer *before* reserving a RingBuf slot.
+    *   **Invariant**: never return/? after `RingBuf::reserve()` unless you `submit()` or `discard()` the reservation. This prevents "unreleased reference" verifier errors.
+*   **Stack Optimization**: Uses direct pointer writes (`core::ptr::write`) to fill the RingBuf, avoiding large stack allocations that violate the 512-byte eBPF stack limit.
+*   **No-Std**: Uses `core::ptr::copy_nonoverlapping` to avoid implicit mutable references (`dangerous_implicit_autorefs` lint).
+
+### Event Streaming (`assay-monitor`)
+*   **Protocol**: Events are defined in `assay-common` as `#[repr(C)]` POD structs.
+*   **Parsing**: Uses `MaybeUninit` + `memcpy` for zero-overhead, safe parsing of raw bytes from the ring buffer.
+*   **Threading**: A dedicated OS thread polls the RingBuf to avoid blocking the async runtime or conflicting with Aya's internals.
+
+### CI/CD Pipeline
+
+The `ebpf_smoke` job in CI ensures stability by isolating the nightly/eBPF build steps:
+
+```bash
+# Workflow steps for reliable eBPF builds:
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+cargo install bpf-linker --locked
+cargo xtask build-ebpf --release
+sudo ./target/debug/assay monitor --pid $$ --duration 5s --ebpf target/assay-ebpf.o --print
+```
+
+## 5. Maintenance & Troubleshooting
+
+### Common Issues
+
+1.  **"Target not found" / Linker Errors on Host**
+    *   *Cause*: Trying to build `assay-ebpf` with standard generic `cargo build`.
+    *   *Fix*: The binary is gated behind `required-features = ["ebpf"]`. Do not enable this feature on host builds.
+
+2.  **"Verifier Error: unreleased reference"**
+    *   *Cause*: Returning early (e.g. `?` operator) while holding a `ringbuf.reserve()` slot.
+    *   *Fix*: Always read data to stack *before* calling `reserve()`.
+
+3.  **"BPF stack limit exceeded"**
+    *   *Cause*: Creating large structs (e.g. `MonitorEvent` ~260 bytes) on the stack.
+    *   *Fix*: Write directly to the ring buffer pointer.
