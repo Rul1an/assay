@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = []
+ebpf = []
+
 [dependencies]
 aya-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
@@ -12,6 +16,7 @@ assay-common = { path = "../assay-common" }
 [[bin]]
 name = "assay-ebpf"
 path = "src/main.rs"
+required-features = ["ebpf"]
 
 [profile.dev]
 panic = "abort"

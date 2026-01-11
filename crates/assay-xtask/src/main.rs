@@ -114,6 +114,9 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
         &target_flag,
         "-Z",
         "build-std=core",
+        "--features",
+        "ebpf",
+    ];
     ];
 
     if opts.release {
@@ -237,6 +240,7 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     script.push_str("cargo +nightly build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));
     script.push_str("-Z build-std=core ");
+    script.push_str("--features ebpf ");
     if opts.release {
         script.push_str("--release ");
     }
