@@ -113,7 +113,10 @@ pub struct ConstraintParam {
 }
 
 pub use super::runtime_features::{
-    DiscoveryConfig, KillSwitchConfig, RuntimeMonitorConfig, DiscoveryMethod, DiscoveryActions, MonitorProvider, MonitorRule, MonitorRuleType, MonitorMatch, MonitorAction, KillMode, KillTrigger, ActionLevel
+    ActionLevel, DiscoveryActions, DiscoveryConfig, DiscoveryMethod,
+    KillMode, KillSwitchConfig, KillTrigger,
+    MonitorAction, MonitorMatch, MonitorProvider, MonitorRule,
+    MonitorRuleType, RuntimeMonitorConfig,
 };
 
 #[derive(Debug, Default)]

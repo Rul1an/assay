@@ -22,7 +22,7 @@ This document summarizes research into bleeding-edge runtime security practices 
 
 ### 3. Policy Bypass by Non-Enforcement
 **Risk Level**: Catastrophic
-**Description**: A common implementation failure is loading a policy but failing to wiring it effectively into the blocking path.
+**Description**: A common implementation failure is loading a policy but failing to wire it effectively into the blocking path.
 **Assay Finding**: `assay monitor` currently loads V2 policy config validation (`runtime_monitor.rules`) into memory but **fails to apply these rules** against the incoming event stream in the main loop. This renders the runtime protection ineffective.
 
 ### 4. Edge Cases in Path Matching

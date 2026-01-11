@@ -133,13 +133,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         _ => {
             // table/text - usually stdout only
             print_table(&inventory);
-             if let Some(_out_path) = &args.output {
-                // Also write generic JSON if asked to file? Or text logic?
-                // Convention: --output usually implies machine readable, but let's write table if they asked for text.
-                // Or maybe just warn. For now, ignoring file output for table mode or writing text.
-                // Let's write text representation.
-                // For simplicity, just skip file write for table mode unless valid format.
-             }
+
         }
     }
 

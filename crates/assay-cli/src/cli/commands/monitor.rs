@@ -146,6 +146,9 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         id: String,
         action: assay_core::mcp::runtime_features::MonitorAction,
 
+        // NOTE: Despite the name, `allow` represents the set of glob patterns whose
+        // matches cause this rule to fire (i.e., be treated as a violation). A path
+        // that matches `allow` and is *not* matched by `deny` will trigger the rule.
         allow: globset::GlobSet,
         deny: Option<globset::GlobSet>, // for match.not
     }
@@ -165,6 +168,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         // - collapse '//' -> '/'
         // - remove '/./'
         // - resolve '/../' in-place
+        let is_absolute = input.starts_with('/');
         let mut parts = Vec::new();
         for part in input.split('/') {
             match part {
@@ -173,9 +177,15 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                 x => parts.push(x),
             }
         }
-        let mut out = String::from("/");
-        out.push_str(&parts.join("/"));
-        out
+        if is_absolute {
+            if parts.is_empty() {
+                "/".to_string()
+            } else {
+                format!("/{}", parts.join("/"))
+            }
+        } else {
+            parts.join("/")
+        }
     }
 
     #[cfg(target_os="linux")]
@@ -218,10 +228,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 6. Stream and Enforce (Wait, we need monitor!)
-    // The previous snippet reused 'monitor' which was moved/consumed by 'monitor.listen()'.
-    // 'monitor.listen()' consumes 'self'.
-    // So 'monitor' is gone. We used 'stream' from Step 5.
+    // 6. Stream and Enforce
 
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
 
@@ -286,7 +293,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                  // Logic:
                                  // 1. Is Kill Switch enabled globally?
                                  // 2. Is there a specific trigger override for this rule? (Not implemented in snippet, user asked for Phase 4 compliance)
-                                 // User said: "respecteer kill_switch.enabled, mode + eventuele override".
+                                 // Requirement: respect kill_switch.enabled, mode, and any possible override.
 
                                  // Default fallback
                                  let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;

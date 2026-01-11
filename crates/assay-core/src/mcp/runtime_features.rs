@@ -85,7 +85,7 @@ impl Default for MonitorProvider {
     }
 }
 
-/// Als je al een Severity type hebt in assay-core: vervang dit door jouw bestaande Severity.
+/// If you already have a Severity type in assay-core: replace this with your existing Severity.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
