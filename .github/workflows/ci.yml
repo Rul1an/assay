@@ -38,8 +38,8 @@ jobs:
       # Exclude assay-ebpf to prevent host-target mismatch errors
       - name: Build and Test Workspace
         run: |
-          cargo build --workspace --exclude assay-it --exclude assay-ebpf
-          cargo test --workspace --exclude assay-ity-core --exclude assay-ebpf
+          cargo build --workspace --exclude assay-ebpf
+          cargo test --workspace --exclude assay-ebpf
 
       - name: Test assay-cli
         run: cargo test -p assay-cli
@@ -50,89 +50,46 @@ jobs:
   ebpf-smoke:
     name: eBPF monitor smoke (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      # Stable toolchain for normal workspace builds
-      - uses: dtolnay/rust-toolchain@stable
-
-      # Nightly + rust-src needed for -Z build-std
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-
-      - name: Install system deps (llvm tools for objdump)
+      - name: Install nightly + rust-src
         run: |
-          sudo apt-get update
-          sudo apt-get install -y llvm clang
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
 
       - name: Install bpf-linker
         run: |
-          cargo install bpf-linker --locked
+          cargo +nightly install bpf-linker --locked
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build assay CLI (release)
-        run: cargo build -p assay-cli --release
-
-      - name: Build eBPF artifact (native)
+      - name: Build eBPF object
         run: |
-          set -euxo pipefail
-          cargo xtask build-ebpf --release --no-docker
+          cargo +nightly xtask build-ebpf --release --no-docker
 
-          # Ensure artifact exists
-          ls -la target/assay-ebpf.o
-          file target/assay-ebpf.o
-
-      - name: Verify eBPF symbols exist
+      - name: Build assay CLI
         run: |
-          set -euxo pipefail
-          llvm-objdump -t target/assay-ebpf.o | egrep 'assay_monitor_(openat|connect)'
+          cargo build -p assay-cli
 
-      - name: Ensure tracefs available (best effort)
-        run: |
-          set -euxo pipefail
-          if [ ! -d /sys/kernel/tracing/events ]; then
-            sudo mount -t tracefs nodev /sys/kernel/tracing || true
-          fi
-          ls /sys/kernel/tracing/events/syscalls/sys_enter_openat >/dev/null
-
-      - name: Smoke test monitor (sudo)
+      - name: Smoke test (needs sudo)
         run: |
           set -euxo pipefail
 
-          # Start a Python process that stays alive and triggers events
-          # This ensures the PID we monitor is the one doing the work (TGID match)
-          python3 -c "import time, os; print(f'Python PID: {os.getpid()}'); time.sleep(2); f=open('/etc/hosts'); f.close(); time.sleep(5)" &
-          PID=$!
-          echo "Monitoring PID=$PID"
+          # Start background target that does work after a delay
+          bash -lc 'sleep 1; cat /etc/hosts >/dev/null; curl -s https://example.com >/dev/null || true; sleep 1' &
+          TARGET_PID=$!
+          echo "Target PID: $TARGET_PID"
 
-          # Run monitor in background for 8s
-          sudo ./target/release/assay monitor \
-            --pid "$PID" \
-            --duration 8s \
+          # Run monitor attached to TARGET_PID
+          sudo -E ./target/debug/assay monitor \
+            --pid "$TARGET_PID" \
+            --duration 5s \
             --ebpf target/assay-ebpf.o \
-            > monitor.out 2> monitor.err &
+            --print | tee monitor.log
 
-          MON_PID=$!
+          # Assert events found
+          grep -E "openat|connect" monitor.log
 
-          # Wait for python process to finish (approx 7s)
-          wait $PID || true
-
-          # Wait for monitor to finish duration (8s)
-          wait $MON_PID || true
-
-          echo "=== monitor.err ==="
-          cat monitor.err || true
-          echo "=== monitor.out ==="
-          cat monitor.out || true
-
-          # Assertions
-          if grep -qiE "attach failed|failed to attach|failed to load|not supported|EPERM" monitor.err; then
-             echo "Monitor failed (see monitor.err)"
-             exit 1
-          fi
-
-          # Optional: Assert we saw the openat event
-          # grep -q "openat" monitor.out || echo "WARNING: No openat event seen (might be unrelated)"
+          wait "$TARGET_PID" || true

@@ -782,7 +782,15 @@ pub struct DiscoverArgs {
     #[clap(long, default_value = "table")]
     pub format: String,
 
-    /// Fail if unmanaged servers are found
-    #[clap(long)]
-    pub fail_on: Option<String>, // "unmanaged", "no_auth"
+    /// Write output to file
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Fail if specific conditions met (comma separated): unmanaged, no_auth
+    #[arg(long, value_delimiter = ',')]
+    pub fail_on: Option<Vec<String>>,
+
+    /// Policy file to use for configuration
+    #[arg(long)]
+    pub policy: Option<PathBuf>,
 }

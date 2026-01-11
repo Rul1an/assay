@@ -8,19 +8,60 @@ use std::path::PathBuf;
 use sysinfo::System;
 
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
-    // 1. Gather servers
-    let mut servers = Vec::new();
+    // 1. Load Policy (Optional)
+    let policy_config = if let Some(path) = &args.policy {
+        let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
+        p.discovery.unwrap_or(assay_core::mcp::policy::DiscoveryConfig {
+            enabled: true,
+             // If policy present but discovery block missing, default enabled? Or respect schema default?
+             // Schema default is `enabled: false`. But if user explicitly runs `assay discover`?
+             // CLI command overrides "enabled: false".
+             // Use other defaults (methods, etc)
+            ..Default::default()
+        })
+    } else {
+        // No policy? Use defaults tailored for CLI usage
+        assay_core::mcp::policy::DiscoveryConfig {
+            enabled: true,
+            ..Default::default() // Default methods
+        }
+    };
 
-    if args.local {
-        // Config files
-        let search_paths = get_config_search_paths();
-        servers.extend(scan_config_files(search_paths));
-
-        // Processes
-        servers.extend(scan_processes());
+    // CLI overrides
+    if !args.local {
+        // If user said --no-local (doesn't exist yet but hypothetically), disabling.
+        // But here `local` defaults to true.
     }
 
-    // 2. Build Inventory struct
+    // 2. Gather servers
+    let mut servers = Vec::new();
+
+    if policy_config.enabled {
+        // Use methods from policy, or default if empty
+        let methods = if policy_config.methods.is_empty() {
+             vec![
+                assay_core::mcp::policy::DiscoveryMethod::ConfigFiles,
+                assay_core::mcp::policy::DiscoveryMethod::Processes
+             ]
+        } else {
+            policy_config.methods.clone()
+        };
+
+        for method in methods {
+            match method {
+                assay_core::mcp::policy::DiscoveryMethod::ConfigFiles => {
+                    let search_paths = get_config_search_paths();
+                    servers.extend(scan_config_files(search_paths));
+                }
+                assay_core::mcp::policy::DiscoveryMethod::Processes => {
+                    servers.extend(scan_processes());
+                }
+                _ => {} // Network/DNS/WellKnown not implemented yet
+            }
+        }
+    }
+
+    // 3. Build Inventory struct
     let host_info = HostInfo {
         hostname: System::host_name().unwrap_or_else(|| "unknown".to_string()),
         os: std::env::consts::OS.to_string(),
@@ -68,42 +109,89 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         generated_at: chrono::Utc::now(),
         host: host_info,
         servers: servers.clone(),
-        summary,
+        summary: summary.clone(),
     };
 
-    // 3. Output
+    // 4. Output
     match args.format.as_str() {
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&inventory)?);
+            let json_out = serde_json::to_string_pretty(&inventory)?;
+            if let Some(out_path) = &args.output {
+                std::fs::write(out_path, json_out)?;
+            } else {
+                println!("{}", json_out);
+            }
         }
         "yaml" => {
-            println!("{}", serde_yaml::to_string(&inventory)?);
+            let yaml_out = serde_yaml::to_string(&inventory)?;
+            if let Some(out_path) = &args.output {
+                std::fs::write(out_path, yaml_out)?;
+            } else {
+                println!("{}", yaml_out);
+            }
         }
         _ => {
-            // table/text
+            // table/text - usually stdout only
             print_table(&inventory);
+             if let Some(_out_path) = &args.output {
+                // Also write generic JSON if asked to file? Or text logic?
+                // Convention: --output usually implies machine readable, but let's write table if they asked for text.
+                // Or maybe just warn. For now, ignoring file output for table mode or writing text.
+                // Let's write text representation.
+                // For simplicity, just skip file write for table mode unless valid format.
+             }
         }
     }
 
-    // 4. Fail-on check
-    if let Some(fail_check) = args.fail_on {
-        if fail_check == "unmanaged" && inventory.summary.unmanaged > 0 {
-            eprintln!(
-                "Error: Found {} unmanaged servers.",
-                inventory.summary.unmanaged
-            );
-            return Ok(10); // DISCOVERY_UNMANAGED
-        }
-        if fail_check == "no_auth" && inventory.summary.without_auth > 0 {
-            eprintln!(
-                "Error: Found {} servers without authentication.",
-                inventory.summary.without_auth
-            );
-            return Ok(11); // DISCOVERY_NO_AUTH
+    // 5. Fail-on check (Merge Policy + CLI)
+    // CLI args take precedence or extend? Commonly extend fail conditions.
+
+    use assay_core::mcp::policy::ActionLevel;
+
+    let mut exit_code = 0;
+
+    // Check Unmanaged
+    let unmanaged_action = if args.fail_on.as_ref().map(|v| v.contains(&"unmanaged".to_string())).unwrap_or(false) {
+        ActionLevel::Fail
+    } else {
+        policy_config.on_findings.unmanaged_server.clone()
+    };
+
+    if summary.unmanaged > 0 {
+        match unmanaged_action {
+            ActionLevel::Fail => {
+                eprintln!("Error: Found {} unmanaged servers.", summary.unmanaged);
+                exit_code = 10;
+            }
+            ActionLevel::Warn => {
+                eprintln!("Warning: Found {} unmanaged servers.", summary.unmanaged);
+            }
+            ActionLevel::Log => {}
         }
     }
 
-    Ok(0)
+    // Check No Auth
+    let no_auth_action = if args.fail_on.as_ref().map(|v| v.contains(&"no_auth".to_string())).unwrap_or(false) {
+        ActionLevel::Fail
+    } else {
+        policy_config.on_findings.no_auth.clone()
+    };
+
+    if summary.without_auth > 0 {
+        match no_auth_action {
+            ActionLevel::Fail => {
+                 eprintln!("Error: Found {} servers without authentication.", summary.without_auth);
+                 // Keep highest specific error code or just return failure?
+                 if exit_code == 0 { exit_code = 11; }
+            }
+             ActionLevel::Warn => {
+                 eprintln!("Warning: Found {} servers without authentication.", summary.without_auth);
+             }
+             ActionLevel::Log => {}
+        }
+    }
+
+    Ok(exit_code)
 }
 
 fn print_table(inv: &Inventory) {

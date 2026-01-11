@@ -40,6 +40,14 @@ pub struct McpPolicy {
     #[serde(default)]
     pub signatures: Option<SignaturePolicy>,
 
+    // Phase 4: Runtime Features
+    #[serde(default)]
+    pub discovery: Option<DiscoveryConfig>,
+    #[serde(default)]
+    pub runtime_monitor: Option<RuntimeMonitorConfig>,
+    #[serde(default)]
+    pub kill_switch: Option<KillSwitchConfig>,
+
     /// Compiled schemas (lazy, thread-safe, shared across clones)
     #[serde(skip)]
     pub(crate) compiled: Arc<OnceLock<HashMap<String, Arc<jsonschema::JSONSchema>>>>,
@@ -103,6 +111,10 @@ pub struct ConstraintParam {
     #[serde(default)]
     pub matches: Option<String>,
 }
+
+pub use super::runtime_features::{
+    DiscoveryConfig, KillSwitchConfig, RuntimeMonitorConfig, DiscoveryMethod, DiscoveryActions, MonitorProvider, MonitorRule, MonitorRuleType, MonitorMatch, MonitorAction, KillMode, KillTrigger, ActionLevel
+};
 
 #[derive(Debug, Default)]
 pub struct PolicyState {
@@ -209,7 +221,17 @@ impl McpPolicy {
 
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let mut policy: McpPolicy = serde_yaml::from_str(&content)?;
+
+        let mut unknown = Vec::new();
+        let de = serde_yaml::Deserializer::from_str(&content);
+        let mut policy: McpPolicy = serde_ignored::deserialize(de, |path| {
+            unknown.push(path.to_string());
+        }).map_err(anyhow::Error::from)?;
+
+        if !unknown.is_empty() {
+            // Filter out transient/internal fields if any. For now, log all.
+            tracing::warn!(?unknown, "Unknown fields in policy (ignored)");
+        }
 
         // Check for v1 format and warn if necessary
         if policy.is_v1_format() {
@@ -227,7 +249,27 @@ impl McpPolicy {
             policy.migrate_constraints_to_schemas();
         }
 
+        policy.validate()?;
+
         Ok(policy)
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        // Cross-validation: Kill triggers must reference valid rules
+        if let (Some(rm), Some(ks)) = (&self.runtime_monitor, &self.kill_switch) {
+             let rule_ids: std::collections::HashSet<&str> =
+                rm.rules.iter().map(|r| r.id.as_str()).collect();
+
+            for t in &ks.triggers {
+                if !rule_ids.contains(t.on_rule.as_str()) {
+                    anyhow::bail!(
+                        "kill_switch.triggers references unknown rule id: {}",
+                        t.on_rule
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn is_v1_format(&self) -> bool {

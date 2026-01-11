@@ -1,4 +1,4 @@
-#[allow(unused_imports)]
+
 use crate::cli::commands::exit_codes;
 use clap::Args;
 use std::path::PathBuf;
@@ -52,6 +52,10 @@ pub struct MonitorArgs {
     /// Duration to run (e.g. "60s"). If omitted, runs until Ctrl-C.
     #[arg(long)]
     pub duration: Option<humantime::Duration>,
+
+    /// Policy file to enable runtime enforcement rules
+    #[arg(long)]
+    pub policy: Option<PathBuf>,
 }
 
 
@@ -73,6 +77,21 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
     use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
+
+    // 0. Load Policy (Optional)
+    let mut runtime_config = None;
+    let mut kill_config = None;
+    if let Some(path) = &args.policy {
+        let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
+        if let Some(rm) = p.runtime_monitor {
+            if !rm.enabled {
+                if !args.quiet { eprintln!("Runtime monitor disabled by policy."); }
+                return Ok(0);
+            }
+            runtime_config = Some(rm);
+        }
+        kill_config = p.kill_switch;
+    }
 
     // 1. Resolve eBPF path
     let ebpf_path = match args.ebpf {
@@ -119,7 +138,91 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 5. Stream
+    // 5. Build Matchers
+    #[cfg(target_os = "linux")]
+    #[derive(Debug)]
+    struct ActiveRule {
+        id: String,
+        action: assay_core::mcp::runtime_features::MonitorAction,
+        kind: assay_core::mcp::runtime_features::MonitorRuleType,
+        allow: globset::GlobSet,
+        deny: Option<globset::GlobSet>, // for match.not
+    }
+
+    #[cfg(target_os = "linux")]
+    fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobSet> {
+        let mut b = globset::GlobSetBuilder::new();
+        for g in globs {
+            b.add(globset::Glob::new(g)?);
+        }
+        Ok(b.build()?)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn normalize_path_syntactic(input: &str) -> String {
+        // Syntactic normalization (no filesystem canonicalize -> less TOCTOU)
+        // - collapse '//' -> '/'
+        // - remove '/./'
+        // - resolve '/../' in-place
+        let mut parts = Vec::new();
+        for part in input.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => { parts.pop(); }
+                x => parts.push(x),
+            }
+        }
+        let mut out = String::from("/");
+        out.push_str(&parts.join("/"));
+        out
+    }
+
+    #[cfg(target_os="linux")]
+    async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
+        unsafe {
+            libc::kill(pid as i32, if mode == assay_core::mcp::runtime_features::KillMode::Immediate { libc::SIGKILL } else { libc::SIGTERM });
+        }
+        if mode == assay_core::mcp::runtime_features::KillMode::Graceful {
+            tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
+            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        }
+    }
+
+    let mut rules = Vec::new();
+    if let Some(cfg) = &runtime_config {
+        for r in &cfg.rules {
+            let kind = r.rule_type.clone();
+            let mc = &r.match_config;
+
+            // support only file_open for now (openat)
+            // Note: need to import MonitorRuleType or use full path
+            if !matches!(kind, assay_core::mcp::runtime_features::MonitorRuleType::FileOpen) {
+                continue;
+            }
+
+            match compile_globset(&mc.path_globs) {
+                Ok(allow) => {
+                     let deny = mc.not.as_ref().map(|n| compile_globset(&n.path_globs)).transpose().unwrap_or(None);
+                     rules.push(ActiveRule {
+                        id: r.id.clone(),
+                        action: r.action.clone(),
+                        kind,
+                        allow,
+                        deny,
+                    });
+                }
+                Err(e) => {
+                     eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
+                }
+            }
+        }
+    }
+
+    // 6. Stream and Enforce (Wait, we need monitor!)
+    // The previous snippet reused 'monitor' which was moved/consumed by 'monitor.listen()'.
+    // 'monitor.listen()' consumes 'self'.
+    // So 'monitor' is gone. We used 'stream' from Step 5.
+
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
 
     // Ctrl-C handler
@@ -150,14 +253,63 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             event_res = stream.next() => {
                 match event_res {
                     Some(Ok(event)) => {
-                        // Logic: if quiet -> skip.
-                        // else if print OR it's enabled by default (?) -> print.
-                        // User said: "anders als print OR “geen outputs gespecificeerd” => print"
-                        // But since print default is now FALSE, we must assume default behavior implies printing?
-                        // "implied if no other output specified" -> usually implies print is TRUE by default if nothing else.
-                        // But user set default to false.
-                        // Let's assume: if !quiet => print.
-                        if !args.quiet {
+                        let mut violation_rule: Option<&ActiveRule> = None;
+
+                        // ENFORCEMENT LOGIC (Linux Only)
+                        if !rules.is_empty() && event.event_type == EVENT_OPENAT {
+                             let raw = decode_utf8_cstr(&event.data);
+                             let path = normalize_path_syntactic(&raw);
+
+                             for r in &rules {
+                                 if r.allow.is_match(&path) {
+                                     // Check deny list (not)
+                                     let blocked = r.deny.as_ref().map(|d| d.is_match(&path)).unwrap_or(false);
+                                     if !blocked {
+                                         violation_rule = Some(r);
+                                         break; // First match triggers
+                                     }
+                                 }
+                             }
+                        }
+
+                        // REACT
+                        if let Some(rule) = violation_rule {
+                             if args.print && !args.quiet {
+                                 println!("[PID {}] 🚨 VIOLATION: Rule '{}' matched file access", event.pid, rule.id);
+                             }
+
+                             if rule.action == assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
+                                 // Check Kill Switch Configuration
+                                 // Default to SAFE defaults if config missing (though it shouldn't be null if policy loaded)
+                                 // But 'kill_config' is Option<KillSwitchConfig>.
+
+                                 // Logic:
+                                 // 1. Is Kill Switch enabled globally?
+                                 // 2. Is there a specific trigger override for this rule? (Not implemented in snippet, user asked for Phase 4 compliance)
+                                 // User said: "respecteer kill_switch.enabled, mode + eventuele override".
+
+                                 // Default fallback
+                                 let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;
+                                 let default_grace = 3000;
+
+                                 let (enabled, mode, grace) = if let Some(kc) = &kill_config {
+                                     // Check for specific trigger override
+                                     let trigger = kc.triggers.iter().find(|t| t.on_rule == rule.id);
+                                     let mode = trigger.and_then(|t| t.mode.clone()).unwrap_or(kc.mode.clone());
+                                     (kc.enabled, mode, kc.grace_period_ms)
+                                 } else {
+                                     (false, default_mode, default_grace)
+                                 };
+
+                                 if enabled {
+                                      if args.print && !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
+                                      kill_pid(event.pid, mode, grace).await;
+                                 }
+                             }
+                        }
+
+                        // LOGGING
+                        if args.print && !args.quiet {
                              match event.event_type {
                                 EVENT_OPENAT => println!("[PID {}] openat: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 EVENT_CONNECT => println!("[PID {}] connect sockaddr[0..32]=0x{}", event.pid, dump_prefix_hex(&event.data, 32)),
