@@ -6,8 +6,8 @@ use aya_ebpf::{
     macros::{map, tracepoint},
     maps::{HashMap, RingBuf},
     programs::TracePointContext,
+    EbpfContext,
 };
-use core::mem::MaybeUninit;
 
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
@@ -17,9 +17,9 @@ static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 
 const DATA_LEN: usize = 256;
 
-unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u8) {
+unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
     (*ev).pid = pid;
-    (*ev).event_type = event_type;
+    (*ev).event_type = event_type as u8;
     // Zero payload in-place
     core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
 }
@@ -33,7 +33,7 @@ pub fn assay_monitor_openat(ctx: TracePointContext) -> u32 {
 }
 
 fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid = (ctx.pid() >> 32) as u32;
+    let pid = ctx.pid();
 
     if unsafe { MONITORED_PIDS.get(&pid) }.is_none() {
         return Ok(0);
@@ -47,7 +47,7 @@ fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_OPENAT);
+            write_event_header(ev, pid, EVENT_OPENAT as u32);
 
             // Safe slice construction from raw pointer to avoid implicit autoref issues
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -74,7 +74,7 @@ pub fn assay_monitor_connect(ctx: TracePointContext) -> u32 {
 }
 
 fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid = (ctx.pid() >> 32) as u32;
+    let pid = ctx.pid();
 
     if unsafe { MONITORED_PIDS.get(&pid) }.is_none() {
         return Ok(0);
@@ -96,7 +96,7 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_CONNECT);
+            write_event_header(ev, pid, EVENT_CONNECT as u32);
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
