@@ -72,7 +72,7 @@ mod tests {
             // But `sleep 10` won't match.
             // We need to run something that will match the heuristic: msg.contains("mcp-server")
             // A simple trick is to run `sh -c 'sleep 10 # mcp-server'`
-            .args(&["10"])
+            .args(["10"])
             .spawn()
             .expect("failed to spawn sleep");
 
@@ -87,6 +87,7 @@ mod tests {
         // I'll add a comment about this constraint.
 
         let _ = child.kill();
+        let _ = child.wait();
     }
 
     // Note: Testing scan_processes requires mocking sysinfo::System which is difficult

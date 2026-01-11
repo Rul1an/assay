@@ -104,7 +104,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "assay-cli"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -140,7 +140,7 @@ version = "0.1.0"
 
 [[package]]
 name = "assay-core"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "assay-core",

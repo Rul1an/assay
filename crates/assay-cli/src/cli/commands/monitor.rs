@@ -79,7 +79,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
     use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
 
-    // 0. Load Policy (Optional)
     let mut runtime_config = None;
     let mut kill_config = None;
     if let Some(path) = &args.policy {
@@ -94,7 +93,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         kill_config = p.kill_switch;
     }
 
-    // 1. Resolve eBPF path
     let ebpf_path = match args.ebpf {
         Some(p) => p,
         None => {
@@ -109,7 +107,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         return Ok(40);
     }
 
-    // 2. Load
     let mut monitor = match Monitor::load_file(&ebpf_path) {
         Ok(m) => m,
         Err(e) => {
@@ -118,7 +115,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     };
 
-    // 3. Configure
     if !args.pid.is_empty() {
         if let Err(e) = monitor.set_monitored_pids(&args.pid) {
             eprintln!("Failed to set monitored PIDs: {}", e);
@@ -126,7 +122,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 4. Attach
     if let Err(e) = monitor.attach() {
         eprintln!("Failed to attach probes: {}", e);
         return Ok(40);
@@ -139,7 +134,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 5. Build Matchers
     #[cfg(target_os = "linux")]
     #[derive(Debug)]
     struct ActiveRule {
@@ -228,8 +222,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 6. Stream and Enforce
-
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
 
     // Ctrl-C handler
@@ -289,11 +281,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                  // Check Kill Switch Configuration
                                  // Default to SAFE defaults if config missing (though it shouldn't be null if policy loaded)
                                  // But 'kill_config' is Option<KillSwitchConfig>.
-
-                                 // Logic:
-                                 // 1. Is Kill Switch enabled globally?
-                                 // 2. Is there a specific trigger override for this rule? (Not implemented in snippet, user asked for Phase 4 compliance)
-                                 // Requirement: respect kill_switch.enabled, mode, and any possible override.
 
                                  // Default fallback
                                  let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;

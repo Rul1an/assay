@@ -8,15 +8,10 @@ use std::path::PathBuf;
 use sysinfo::System;
 
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
-    // 1. Load Policy (Optional)
     let policy_config = if let Some(path) = &args.policy {
         let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
         p.discovery.unwrap_or(assay_core::mcp::policy::DiscoveryConfig {
             enabled: true,
-             // If policy present but discovery block missing, default enabled? Or respect schema default?
-             // Schema default is `enabled: false`. But if user explicitly runs `assay discover`?
-             // CLI command overrides "enabled: false".
-             // Use other defaults (methods, etc)
             ..Default::default()
         })
     } else {
@@ -27,13 +22,8 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         }
     };
 
-    // CLI overrides
-    if !args.local {
-        // If user said --no-local (doesn't exist yet but hypothetically), disabling.
-        // But here `local` defaults to true.
-    }
 
-    // 2. Gather servers
+
     let mut servers = Vec::new();
 
     if policy_config.enabled {
@@ -61,7 +51,6 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // 3. Build Inventory struct
     let host_info = HostInfo {
         hostname: System::host_name().unwrap_or_else(|| "unknown".to_string()),
         os: std::env::consts::OS.to_string(),
@@ -112,7 +101,6 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         summary: summary.clone(),
     };
 
-    // 4. Output
     match args.format.as_str() {
         "json" => {
             let json_out = serde_json::to_string_pretty(&inventory)?;
@@ -136,9 +124,6 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
 
         }
     }
-
-    // 5. Fail-on check (Merge Policy + CLI)
-    // CLI args take precedence or extend? Commonly extend fail conditions.
 
     use assay_core::mcp::policy::ActionLevel;
 
