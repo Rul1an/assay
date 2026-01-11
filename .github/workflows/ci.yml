@@ -38,8 +38,8 @@ jobs:
       # Exclude assay-ebpf to prevent host-target mismatch errors
       - name: Build and Test Workspace
         run: |
-          cargo build --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-ity-core
-          cargo test --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-ity-core
+          cargo build --workspace --exclude assay-ebpf --exclude assay-it
+          cargo test --workspace --exclude assay-ebpf --exclude assay-it
 
       - name: Test assay-cli
         run: cargo test -p assay-cli
@@ -77,25 +77,34 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Start a target process that will:
-          #  - wait 1s for monitor to attach
-          #  - trigger openat in *the bash process* via redirection
-          #  - trigger connect in *the bash process* via /dev/tcp
-          #  - stay alive long enough for monitor duration
-          bash -lc 'sleep 1; : </etc/hosts; echo -n > /dev/tcp/1.1.1.1/80 || true; sleep 3' &
+          # Spawn a single process that will:
+          # 1) wait for monitor to attach
+          # 2) open /etc/hosts (openat in same PID)
+          # 3) connect to example.com's IP (connect in same PID)
+          python3 - <<'PY' &
+          import time, socket
+          time.sleep(2)
+          open("/etc/hosts","rb").read()
+          s = socket.socket()
+          s.settimeout(2)
+          try:
+              s.connect(("93.184.216.34", 80))  # example.com IP, avoids DNS variability
+          except Exception:
+              pass
+          time.sleep(2)
+          PY
           TARGET_PID=$!
           echo "Target PID: $TARGET_PID"
 
-          # Run monitor and capture BOTH stdout+stderr for debugging
+          # Run monitor in foreground and capture output
           sudo -E ./target/debug/assay monitor \
             --pid "$TARGET_PID" \
-            --duration 5s \
+            --duration 6s \
             --ebpf target/assay-ebpf.o \
-            --print \
-            2>&1 | tee monitor.log
+            --print | tee monitor.log
 
-          # Ensure target finished
+          # Helper may exit non-zero depending on networking; don't fail on that
           wait "$TARGET_PID" || true
 
-          # Assert we saw at least one event line
-          grep -E 'openat|connect' monitor.log
+          # Assert we saw at least one event
+          grep -E 'openat:|connect' monitor.log

@@ -40,12 +40,14 @@ fn test_policy_parses_all_blocks() {
     assert!(policy.kill_switch.is_some());
 }
 
-fn write_unmanaged_config(path: std::path::PathBuf) {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
+
+
+fn setup_fake_unmanaged_config(root: &std::path::Path) {
+    // Unix-style path (Linux/macOS + sometimes used cross-platform)
+    let claude_unix = root.join(".config/claude");
+    std::fs::create_dir_all(&claude_unix).unwrap();
     std::fs::write(
-        path,
+        claude_unix.join("claude_desktop_config.json"),
         r#"{
           "mcpServers": {
             "unmanaged-server": { "command": "echo", "args": ["hello"] }
@@ -53,27 +55,20 @@ fn write_unmanaged_config(path: std::path::PathBuf) {
         }"#,
     )
     .unwrap();
-}
 
-fn setup_fake_unmanaged_config(home: &std::path::Path) {
-    // Linux
-    write_unmanaged_config(home.join(".config/claude/claude_desktop_config.json"));
-
-    // macOS
-    write_unmanaged_config(
-        home.join("Library")
-            .join("Application Support")
-            .join("Claude")
-            .join("claude_desktop_config.json"),
-    );
-
-    // Windows (most common)
-    write_unmanaged_config(
-        home.join("AppData")
-            .join("Roaming")
-            .join("Claude")
-            .join("claude_desktop_config.json"),
-    );
+    // Windows-style path: %APPDATA%\Claude\claude_desktop_config.json
+    let appdata = root.join("AppData").join("Roaming");
+    let claude_win = appdata.join("Claude");
+    std::fs::create_dir_all(&claude_win).unwrap();
+    std::fs::write(
+        claude_win.join("claude_desktop_config.json"),
+        r#"{
+          "mcpServers": {
+            "unmanaged-server": { "command": "echo", "args": ["hello"] }
+          }
+        }"#,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -84,25 +79,28 @@ fn test_discovery_respects_policy_fail_on_unmanaged() {
 
     setup_fake_unmanaged_config(temp.path());
 
-    // Make Windows happy: many libs use USERPROFILE/APPDATA, not HOME.
     let appdata = temp.path().join("AppData").join("Roaming");
-    let localappdata = temp.path().join("AppData").join("Local");
+    let xdg_config_home = temp.path().join(".config");
 
     let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        // Make discovery resolve “home” into the temp dir on Windows
         .env("HOME", temp.path())
         .env("USERPROFILE", temp.path())
+        // Make config_dir() resolve into the temp dir on Windows
         .env("APPDATA", &appdata)
-        .env("LOCALAPPDATA", &localappdata)
+        // Make XDG lookups deterministic too
+        .env("XDG_CONFIG_HOME", &xdg_config_home)
         .args(["discover", "--policy", policy_path.to_str().unwrap()])
         .output()
         .unwrap();
 
-    assert!(
-        !out.status.success(),
-        "expected discovery to fail; stdout={}\nstderr={}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr),
-    );
+    if out.status.success() {
+        panic!(
+            "expected discovery to fail; stdout={}\nstderr={}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
 }
 
 #[test]
