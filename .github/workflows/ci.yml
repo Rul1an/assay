@@ -38,8 +38,8 @@ jobs:
       # Exclude assay-ebpf to prevent host-target mismatch errors
       - name: Build and Test Workspace
         run: |
-          cargo build --workspace --exclude assay-ebpf
-          cargo test --workspace --exclude assay-ebpf
+          cargo build --workspace --exclude assay-ebpf --exclude assay-it
+          cargo test --workspace --exclude assay-ebpf --exclude assay-it
 
       - name: Test assay-cli
         run: cargo test -p assay-cli

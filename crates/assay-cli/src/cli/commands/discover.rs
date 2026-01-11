@@ -255,7 +255,12 @@ fn get_config_search_paths() -> Vec<PathBuf> {
 
         // Windows path
         if cfg!(target_os = "windows") {
-             paths.push(home.join("AppData/Roaming/Claude/claude_desktop_config.json"));
+             // Prefer %APPDATA% if set (Standard & Testable), else fallback to home/AppData/Roaming
+             if let Ok(appdata) = std::env::var("APPDATA") {
+                 paths.push(PathBuf::from(appdata).join("Claude/claude_desktop_config.json"));
+             } else {
+                 paths.push(home.join("AppData/Roaming/Claude/claude_desktop_config.json"));
+             }
         }
     }
     paths
