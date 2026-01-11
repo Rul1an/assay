@@ -6,7 +6,6 @@ use aya_ebpf::{
     macros::{map, tracepoint},
     maps::{HashMap, RingBuf},
     programs::TracePointContext,
-    EbpfContext,
 };
 
 #[map]
@@ -15,8 +14,14 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 #[map]
 static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 
+#[inline(always)]
+fn current_tgid() -> u32 {
+    (aya_ebpf::helpers::bpf_get_current_pid_tgid() >> 32) as u32
+}
+
 const DATA_LEN: usize = 256;
 
+#[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
     (*ev).pid = pid;
     (*ev).event_type = event_type;
@@ -26,16 +31,16 @@ unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
 
 #[tracepoint]
 pub fn assay_monitor_openat(ctx: TracePointContext) -> u32 {
-    match try_assay_monitor_openat(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
+    match try_openat(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
     }
 }
 
-fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid = ctx.pid();
+fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
+    let tgid = current_tgid();
 
-    if unsafe { MONITORED_PIDS.get(&pid) }.is_none() {
+    if unsafe { MONITORED_PIDS.get(&tgid) }.is_none() {
         return Ok(0);
     }
 
@@ -47,7 +52,7 @@ fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_OPENAT);
+            write_event_header(ev, tgid, EVENT_OPENAT);
 
             // Safe slice construction from raw pointer to avoid implicit autoref issues
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -67,16 +72,16 @@ fn try_assay_monitor_openat(ctx: TracePointContext) -> Result<u32, u32> {
 
 #[tracepoint]
 pub fn assay_monitor_connect(ctx: TracePointContext) -> u32 {
-    match try_assay_monitor_connect(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
+    match try_connect(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
     }
 }
 
-fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid = ctx.pid();
+fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
+    let tgid = current_tgid();
 
-    if unsafe { MONITORED_PIDS.get(&pid) }.is_none() {
+    if unsafe { MONITORED_PIDS.get(&tgid) }.is_none() {
         return Ok(0);
     }
 
@@ -96,7 +101,7 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, pid, EVENT_CONNECT);
+            write_event_header(ev, tgid, EVENT_CONNECT);
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
