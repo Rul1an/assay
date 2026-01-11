@@ -80,7 +80,9 @@ impl LinuxMonitor {
         let (tx, rx) = mpsc::channel(1024);
 
         std::thread::spawn(move || {
-            let _ = std::panic::catch_unwind(|| {
+            // AssertUnwindSafe is required because RingBuf isn't strictly UnwindSafe,
+            // but we are just polling it in a loop and if we panic we exit the thread anyway.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 loop {
                     if tx.is_closed() {
                         break;
@@ -98,7 +100,7 @@ impl LinuxMonitor {
                         }
                     }
                 }
-            });
+            }));
         });
 
         Ok(ReceiverStream::new(rx))
