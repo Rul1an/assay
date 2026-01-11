@@ -117,7 +117,6 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
         "--features",
         "ebpf",
     ];
-    ];
 
     if opts.release {
         args.push("--release");
