@@ -105,7 +105,6 @@ fn try_assay_monitor_connect(ctx: TracePointContext) -> Result<u32, u32> {
         }
         entry.submit(0);
     }
-    }
 
     Ok(0)
 }
