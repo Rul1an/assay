@@ -77,19 +77,30 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Start background target that does work after a delay
-          bash -lc 'sleep 1; cat /etc/hosts >/dev/null; curl -s https://example.com >/dev/null || true; sleep 1' &
+          # Start a target process that keeps running and generates syscalls
+          bash -lc '
+            set -euo pipefail
+            sleep 1
+            for i in 1 2 3 4 5; do
+              cat /etc/hosts >/dev/null
+              curl -s https://example.com >/dev/null || true
+              sleep 0.2
+            done
+            sleep 2
+          ' &
           TARGET_PID=$!
-          echo "Target PID: $TARGET_PID"
+          echo "Target PID: ${TARGET_PID}"
 
-          # Run monitor attached to TARGET_PID
+          # Run monitor against that PID (foreground) and capture logs
           sudo -E ./target/debug/assay monitor \
-            --pid "$TARGET_PID" \
-            --duration 5s \
+            --pid "${TARGET_PID}" \
+            --duration 6s \
             --ebpf target/assay-ebpf.o \
             --print | tee monitor.log
 
-          # Assert events found
-          grep -E "openat|connect" monitor.log
+          # Ensure the target is gone
+          kill "${TARGET_PID}" 2>/dev/null || true
+          wait "${TARGET_PID}" 2>/dev/null || true
 
-          wait "$TARGET_PID" || true
+          # Assert we saw events
+          grep -E 'openat|connect' monitor.log

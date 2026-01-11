@@ -87,8 +87,9 @@ impl LinuxMonitor {
                         events::send_parsed(&tx, &item);
                     }
                     None => {
-                        // Stream ended
-                        break;
+                        // Buffer is empty, wait a bit before polling again
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        continue;
                     }
                 }
 

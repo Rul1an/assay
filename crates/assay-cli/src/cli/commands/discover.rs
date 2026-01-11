@@ -252,6 +252,11 @@ fn get_config_search_paths() -> Vec<PathBuf> {
         paths.push(home.join("Library/Application Support/Claude/claude_desktop_config.json"));
         paths.push(home.join(".cursor/mcp.json"));
         paths.push(home.join(".vscode/mcp-settings.json"));
+
+        // Windows path
+        if cfg!(target_os = "windows") {
+             paths.push(home.join("AppData/Roaming/Claude/claude_desktop_config.json"));
+        }
     }
     paths
 }

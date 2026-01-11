@@ -41,7 +41,11 @@ fn test_policy_parses_all_blocks() {
 }
 
 fn setup_fake_unmanaged_config(home: &std::path::Path) {
+    #[cfg(not(windows))]
     let claude_dir = home.join(".config/claude");
+    #[cfg(windows)]
+    let claude_dir = home.join("AppData/Roaming/Claude");
+
     std::fs::create_dir_all(&claude_dir).unwrap();
 
     std::fs::write(
