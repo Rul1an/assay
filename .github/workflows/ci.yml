@@ -113,7 +113,6 @@ jobs:
             --pid "$PID" \
             --duration 8s \
             --ebpf target/assay-ebpf.o \
-            --print \
             > monitor.out 2> monitor.err &
 
           MON_PID=$!

@@ -5,10 +5,6 @@ use tokio_stream::wrappers::ReceiverStream;
 
 pub type EventStream = ReceiverStream<Result<MonitorEvent, MonitorError>>;
 
-thread_local! {
-    // Per-thread scratch buffer (optional). Not strictly necessary.
-    static _SCRATCH: core::cell::Cell<u8> = core::cell::Cell::new(0);
-}
 
 /// Parse fixed-size MonitorEvent from ringbuf bytes.
 /// Safe pattern: MaybeUninit + memcpy into repr(C) POD.

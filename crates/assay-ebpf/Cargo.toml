@@ -5,8 +5,8 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aya-ebpf = { git = "https://github.com/aya-rs/aya" }
-aya-log-ebpf = { git = "https://github.com/aya-rs/aya" }
+aya-ebpf = { git = "https://github.com/aya-rs/aya", tag = "v0.13.0" }
+aya-log-ebpf = { git = "https://github.com/aya-rs/aya", tag = "v0.13.0" }
 assay-common = { path = "../assay-common" }
 
 [[bin]]

@@ -234,7 +234,7 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
 
     script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
 
-    script.push_str("cargo build --package assay-ebpf ");
+    script.push_str("cargo +nightly build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));
     script.push_str("-Z build-std=core ");
     if opts.release {
