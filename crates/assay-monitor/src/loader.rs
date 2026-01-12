@@ -86,12 +86,11 @@ impl LinuxMonitor {
             .try_into()?;
 
         openat.load()?;
-        openat.load()?;
         openat.attach("syscalls", "sys_enter_openat")?;
 
         // SOTA: Try to attach openat2 (best effort, modern kernels only)
         if let Some(openat2) = self.bpf.program_mut("assay_monitor_openat2") {
-            if let Ok(mut link) = openat2.try_into() as Result<TracePoint, _> {
+            if let Ok(link) = openat2.try_into() as Result<&mut TracePoint, _> {
                 let _ = link.load();
                 // If this fails (kernel too old), we just continue
                 let _ = link.attach("syscalls", "sys_enter_openat2");
