@@ -38,8 +38,21 @@ impl TracepointResolver {
         map
     }
 
-    /// Reads /sys/kernel/debug/tracing/events/<category>/<name>/format and finds the offset of <field>.
-        Self::parse_format_file(&path, field)
+    /// Reads tracepoint format file, checking tracefs first then debugfs.
+    pub fn find_offset(category: &str, event: &str, field: &str) -> Result<u32> {
+        let potential_roots = [
+            "/sys/kernel/tracing",
+            "/sys/kernel/debug/tracing",
+        ];
+
+        for root in potential_roots {
+            let path = format!("{}/events/{}/{}/format", root, category, event);
+            if Path::new(&path).exists() {
+                return Self::parse_format_file(&path, field);
+            }
+        }
+
+        Err(anyhow::anyhow!("Tracepoint format file not found for {}/{}", category, event))
     }
 
     fn parse_format_file(path: &str, field_name: &str) -> Result<u32> {
