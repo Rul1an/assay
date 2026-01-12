@@ -78,7 +78,7 @@ impl CgroupManager {
         #[cfg(unix)]
         let id = meta.ino();
         #[cfg(not(unix))]
-        let id = 0; // Stub for non-Unix
+        let id = { let _ = meta; 0 }; // Stub for non-Unix
         Ok(SessionCgroup { path, id })
     }
 }

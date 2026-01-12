@@ -12,11 +12,30 @@ use aya_ebpf::{
     },
 };
 
+
+#[map]
+static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+
+#[map]
+static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
+
+/// Map of Cgroup IDs (inodes) we're monitoring.
+/// Key: Cgroup ID (u64), Value: 1 (present)
+#[map]
+static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0);
+
+/// Configuration Map for dynamic offsets.
+/// Key 0: openat filename offset (default 24)
+/// Key 1: connect sockaddr offset (default 24)
+#[map]
+static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
 const KEY_OFFSET_FORK_PARENT: u32 = 2;
 const KEY_OFFSET_FORK_CHILD: u32 = 3;
 const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
+const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
@@ -198,8 +217,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
 
-const KEY_OFFSET_FORK_PARENT: u32 = 2;
-const KEY_OFFSET_FORK_CHILD: u32 = 3;
 
 #[tracepoint]
 pub fn assay_monitor_fork(ctx: TracePointContext) -> u32 {
