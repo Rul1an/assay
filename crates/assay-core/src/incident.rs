@@ -79,8 +79,6 @@ impl IncidentBuilder {
     /// Enforces 0700 on directory and 0600 on file.
     #[cfg(unix)]
     pub fn atomic_write(&self, output_dir: &Path) -> Result<PathBuf> {
-        use std::os::unix::io::FromRawFd;
-
         let dir_path_str = output_dir.to_str().ok_or_else(|| anyhow!("Invalid path"))?;
 
         // 1. Ensure directory exists
