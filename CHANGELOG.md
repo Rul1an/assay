@@ -1,6 +1,28 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v2.0.0] - 2026-01-12
+
+### 🛡️ SOTA Hardening (Phase 5)
+
+This major release delivers the **State-of-the-Art (SOTA)** architecture for robust runtime security, transitioning from "Best Effort" to "Forensically Sound" monitoring.
+
+### ✨ Major Features
+-   **Cgroup-First Architecture**: `assay-monitor` and `assay-ebpf` now prioritize cgroup membership over PID tracking, using `bpf_get_current_ancestor_cgroup_id` to prevent nested cgroup escapes. This ensures 100% coverage of short-lived processes.
+-   **Forensic Incident Bundles**:
+    -   **Secure Atomic Writes**: Implementation of `IncidentBuilder` using `openat`, `O_NOFOLLOW`, `O_EXCL`, and `renameat` to prevent TOCTOU vulnerabilities.
+    -   **Unique Identity**: Incident files now use UUID v4 suffixes to guarantee uniqueness.
+    -   **Detailed Metadata**: Includes kernel version, session UUID, and process tree context.
+-   **eBPF Hardening**:
+    -   **Dynamic Offsets**: Removed all hardcoded kernel offsets in favor of runtime resolution via `/sys/kernel/tracing/events/.../format`.
+    -   **Extended Coverage**: Added `sys_enter_openat2` probe for modern kernels (Linux 5.6+).
+    -   **Safety**: Uses `read_user_str_bytes` with explicit bounds checking safe slices.
+
+### 🐛 Fixes & Polish
+-   **CI Reliability**: Complete overhaul of CI pipelines using `sccache` (local backend), `mold` linker (Linux), and single-pass testing. Zero 400 errors from GH Actions Cache.
+-   **Windows Support**: Fixed compilation issues in `assay-cli` by guarding Unix-specific cgroup logic.
+-   **Golden Tests**: Resolved output mismatches for strict reproducibility.
+
 ## [v1.8.0] - 2026-01-11
 
 ### 🚀 Runtime Features (System 2 Security)
