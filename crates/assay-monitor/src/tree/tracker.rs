@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::{RwLock};
 use assay_common::exports::ProcessTreeExport;
 use super::node::{ProcessNode, read_children};
