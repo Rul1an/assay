@@ -37,8 +37,6 @@ jobs:
           sudo apt-get install -y mold clang
 
       - name: Sccache
-        id: sccache
-        continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.6
 
       - name: Rust cache
@@ -46,21 +44,16 @@ jobs:
         with:
           workspaces: |
             . -> target
+          cache-directories: |
+            ~/.sccache
           cache-on-failure: true
 
       - name: Configure Environment
         shell: bash
         run: |
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "SCCACHE_DIR=$HOME/.sccache" >> $GITHUB_ENV
           echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse" >> $GITHUB_ENV
-
-      - name: Disable Sccache if unavailable
-        if: steps.sccache.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=false" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
 
       - name: Configure Linker (Linux)
         if: runner.os == 'Linux'
