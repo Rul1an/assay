@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
@@ -74,7 +75,11 @@ impl CgroupManager {
         }
 
         let meta = fs::metadata(&path)?;
-        Ok(SessionCgroup { path, id: meta.ino() })
+        #[cfg(unix)]
+        let id = meta.ino();
+        #[cfg(not(unix))]
+        let id = 0; // Stub for non-Unix
+        Ok(SessionCgroup { path, id })
     }
 }
 
@@ -139,11 +144,18 @@ impl SessionCgroup {
                 }
             }
 
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(all(unix, not(target_os = "linux")))]
             {
                use nix::sys::signal::{kill, Signal};
                use nix::unistd::Pid;
                let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+            }
+            #[cfg(not(unix))]
+            {
+                // Windows/Other: No-op or standard process kill if we had handle
+                // Since this uses PIDs from cgroup.procs (Linux concept), this code is unreachable logic-wise
+                // but must compile.
+                let _ = pid;
             }
         }
 
