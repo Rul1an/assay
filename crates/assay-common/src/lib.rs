@@ -1,7 +1,16 @@
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(feature = "std")]
+pub mod exports;
+
 pub const EVENT_OPENAT: u32 = 1;
 pub const EVENT_CONNECT: u32 = 2;
+pub const EVENT_FORK: u32 = 3;
+pub const EVENT_EXEC: u32 = 4;
+pub const EVENT_EXIT: u32 = 5;
 
 pub const DATA_LEN: usize = 256;
 

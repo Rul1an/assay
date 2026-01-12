@@ -69,8 +69,82 @@ pub struct RuntimeMonitorConfig {
     #[serde(default)]
     pub provider: MonitorProvider,
 
+    /// SOTA Phase 5: Cgroup Scope Configuration
+    #[serde(default)]
+    pub scope: MonitorScopeConfig,
+
     #[serde(default)]
     pub rules: Vec<MonitorRule>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct MonitorScopeConfig {
+    #[serde(default)]
+    pub mode: MonitorMode,
+
+    #[serde(default)]
+    pub cgroup: CgroupConfig,
+}
+
+impl Default for MonitorScopeConfig {
+    fn default() -> Self {
+        Self {
+            mode: MonitorMode::CgroupV2,
+            cgroup: CgroupConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorMode {
+    CgroupV2,
+    PidSet, // Legacy
+}
+
+impl Default for MonitorMode {
+    fn default() -> Self {
+        MonitorMode::CgroupV2
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct CgroupConfig {
+    #[serde(default = "default_true")]
+    pub freeze_on_incident: bool,
+
+    #[serde(default = "default_true")]
+    pub create_leaf: bool,
+
+    #[serde(default = "default_assay_prefix")]
+    pub name_prefix: String,
+
+    #[serde(default = "default_true")]
+    pub cleanup: bool,
+
+    #[serde(default = "default_pids_max")]
+    pub pids_max: u32,
+}
+
+impl Default for CgroupConfig {
+    fn default() -> Self {
+        Self {
+            freeze_on_incident: true,
+            create_leaf: true,
+            name_prefix: default_assay_prefix(),
+            cleanup: true,
+            pids_max: default_pids_max(),
+        }
+    }
+}
+
+fn default_assay_prefix() -> String {
+    "assay".to_string()
+}
+
+fn default_pids_max() -> u32 {
+    2048
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -164,6 +238,9 @@ pub struct KillSwitchConfig {
     #[serde(default)]
     pub mode: KillMode,
 
+    #[serde(default)]
+    pub kill_scope: KillScope,
+
     #[serde(default = "default_grace_period")]
     pub grace_period_ms: u64,
 
@@ -184,6 +261,7 @@ impl Default for KillSwitchConfig {
         Self {
             enabled: true,
             mode: KillMode::Graceful,
+            kill_scope: KillScope::default(),
             grace_period_ms: default_grace_period(),
             kill_children: true,
             capture_state: false,
@@ -203,6 +281,20 @@ pub enum KillMode {
 impl Default for KillMode {
     fn default() -> Self {
         KillMode::Graceful
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KillScope {
+    Cgroup,
+    PidFd,
+    LegacyPid,
+}
+
+impl Default for KillScope {
+    fn default() -> Self {
+        KillScope::Cgroup
     }
 }
 

@@ -121,6 +121,7 @@ dependencies = [
  "globset",
  "humantime",
  "libc",
+ "nix",
  "predicates",
  "regex",
  "serde",
@@ -137,18 +138,25 @@ dependencies = [
 [[package]]
 name = "assay-common"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "assay-core"
 version = "1.9.0"
 dependencies = [
  "anyhow",
+ "assay-common",
  "async-trait",
  "chrono",
  "dirs",
  "globset",
  "hex",
  "jsonschema",
+ "libc",
  "md5",
  "nix",
  "procfs",
@@ -231,6 +239,7 @@ dependencies = [
 name = "assay-monitor"
 version = "1.8.0"
 dependencies = [
+ "anyhow",
  "assay-common",
  "aya",
  "thiserror 1.0.69",

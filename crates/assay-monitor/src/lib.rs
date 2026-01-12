@@ -5,6 +5,8 @@ pub mod events;
 
 #[cfg(target_os = "linux")]
 mod loader;
+#[cfg(target_os = "linux")]
+pub mod tracepoint;
 
 use assay_common::MonitorEvent;
 
@@ -58,6 +60,25 @@ impl Monitor {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = pids;
+            Err(MonitorError::NotSupported)
+        }
+    }
+
+    pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.configure_defaults();
+
+        #[cfg(not(target_os = "linux"))]
+        Ok(())
+    }
+
+    pub fn set_monitored_cgroups(&mut self, cgroups: &[u64]) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.set_monitored_cgroups(cgroups);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = cgroups;
             Err(MonitorError::NotSupported)
         }
     }

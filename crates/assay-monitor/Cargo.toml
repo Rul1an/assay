@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 assay-common = { path = "../assay-common" }
 thiserror = "1"
+anyhow = "1"
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
 

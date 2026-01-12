@@ -40,6 +40,41 @@ impl LinuxMonitor {
         Ok(())
     }
 
+    pub fn set_monitored_cgroups(&mut self, cgroups: &[u64]) -> Result<(), MonitorError> {
+        let map = self
+            .bpf
+            .map_mut("MONITORED_CGROUPS")
+            .ok_or(MonitorError::MapNotFound {
+                name: "MONITORED_CGROUPS",
+            })?;
+
+        let mut hm: AyaHashMap<_, u64, u8> = AyaHashMap::try_from(map)?;
+        for &cg in cgroups {
+            hm.insert(cg, 1, 0)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_config(&mut self, config: &std::collections::HashMap<u32, u32>) -> Result<(), MonitorError> {
+        let map = self
+            .bpf
+            .map_mut("CONFIG")
+            .ok_or(MonitorError::MapNotFound {
+                name: "CONFIG",
+            })?;
+
+        let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+        for (&k, &v) in config {
+            hm.insert(k, v, 0)?;
+        }
+        Ok(())
+    }
+
+    pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
+        let config = crate::tracepoint::TracepointResolver::resolve_default_offsets();
+        self.set_config(&config)
+    }
+
     pub fn attach(&mut self) -> Result<(), MonitorError> {
         // Program names must match your ebpf #[tracepoint] function names.
         let openat: &mut TracePoint = self
@@ -51,7 +86,17 @@ impl LinuxMonitor {
             .try_into()?;
 
         openat.load()?;
+        openat.load()?;
         openat.attach("syscalls", "sys_enter_openat")?;
+
+        // SOTA: Try to attach openat2 (best effort, modern kernels only)
+        if let Some(openat2) = self.bpf.program_mut("assay_monitor_openat2") {
+            if let Ok(mut link) = openat2.try_into() as Result<TracePoint, _> {
+                let _ = link.load();
+                // If this fails (kernel too old), we just continue
+                let _ = link.attach("syscalls", "sys_enter_openat2");
+            }
+        }
 
         let connect: &mut TracePoint = self
             .bpf
@@ -63,6 +108,17 @@ impl LinuxMonitor {
 
         connect.load()?;
         connect.attach("syscalls", "sys_enter_connect")?;
+
+        let fork: &mut TracePoint = self
+            .bpf
+            .program_mut("assay_monitor_fork")
+            .ok_or(MonitorError::MapNotFound {
+                name: "program assay_monitor_fork",
+            })?
+            .try_into()?;
+
+        fork.load()?;
+        fork.attach("sched", "sched_process_fork")?;
 
         Ok(())
     }

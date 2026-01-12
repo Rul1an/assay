@@ -3,6 +3,7 @@ use clap::Parser;
 mod cli;
 pub mod packs;
 mod templates;
+pub mod cgroup;
 
 use cli::args::Cli;
 use cli::commands::dispatch;

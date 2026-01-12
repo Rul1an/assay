@@ -6,17 +6,55 @@ use aya_ebpf::{
     macros::{map, tracepoint},
     maps::{HashMap, RingBuf},
     programs::TracePointContext,
+    helpers::{
+        bpf_get_current_cgroup_id,
+        bpf_get_current_ancestor_cgroup_id,
+    },
 };
 
-#[map]
-static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+const KEY_OFFSET_FILENAME: u32 = 0;
+const KEY_OFFSET_SOCKADDR: u32 = 1;
+const KEY_OFFSET_FORK_PARENT: u32 = 2;
+const KEY_OFFSET_FORK_CHILD: u32 = 3;
+const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 
-#[map]
-static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
+const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
+const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
-fn current_tgid() -> u32 {
-    (aya_ebpf::helpers::bpf_get_current_pid_tgid() >> 32) as u32
+fn max_ancestor_depth() -> usize {
+    let v = unsafe { CONFIG.get(&KEY_MAX_ANCESTOR_DEPTH) }.copied().unwrap_or(8);
+    let v = v as usize;
+    if v > MAX_ANCESTOR_DEPTH_HARD { MAX_ANCESTOR_DEPTH_HARD } else { v }
+}
+
+#[inline(always)]
+fn is_monitored() -> bool {
+    // 1. Check PID (Legacy/Override)
+    if unsafe { MONITORED_PIDS.get(&current_tgid()) }.is_some() {
+        return true;
+    }
+
+    // 2. Check current cgroup
+    let current_id = unsafe { bpf_get_current_cgroup_id() };
+    if unsafe { MONITORED_CGROUPS.get(&current_id) }.is_some() {
+        return true;
+    }
+
+    // 3. Scan Ancestors (prevent nested cgroup escape)
+    let depth = max_ancestor_depth();
+    for i in 0..MAX_ANCESTOR_DEPTH_HARD {
+        if i >= depth { break; }
+
+        let ancestor_id = unsafe { bpf_get_current_ancestor_cgroup_id(i as i32) };
+        if ancestor_id == 0 { break; } // Root or error
+
+        if unsafe { MONITORED_CGROUPS.get(&ancestor_id) }.is_some() {
+            return true;
+        }
+    }
+
+    false
 }
 
 const DATA_LEN: usize = 256;
@@ -37,22 +75,63 @@ pub fn assay_monitor_openat(ctx: TracePointContext) -> u32 {
     }
 }
 
-fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
-    let tgid = current_tgid();
+/// SOTA Coverage: Also monitor openat2 (modern Linux)
+#[tracepoint]
+pub fn assay_monitor_openat2(ctx: TracePointContext) -> u32 {
+    match try_openat2(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
 
-    if unsafe { MONITORED_PIDS.get(&tgid) }.is_none() {
+fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
+    if !is_monitored() {
         return Ok(0);
     }
 
-    // filename is the 2nd argument (offset 24 for x86_64)
-    // const char *filename
-    const FILENAME_OFFSET: usize = 24;
-    let filename_ptr: u64 = unsafe { ctx.read_at(FILENAME_OFFSET).map_err(|_| 1u32)? };
+    // Dynamic offset resolution specific to openat2
+    let filename_offset = unsafe { CONFIG.get(&KEY_OFFSET_FILENAME_OPENAT2) }
+        .map(|v| *v as usize)
+        .unwrap_or(24); // Default might differ, but 24 is common assumption
+
+    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
 
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, tgid, EVENT_OPENAT);
+            write_event_header(ev, current_tgid(), EVENT_OPENAT); // We map openat2 to same logical event
+
+            let data_ptr = (*ev).data.as_mut_ptr();
+            let data_len = (*ev).data.len();
+            let data = core::slice::from_raw_parts_mut(data_ptr, data_len);
+
+            let _ = aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
+                filename_ptr as *const u8,
+                data,
+            );
+        }
+        entry.submit(0);
+    }
+
+    Ok(0)
+}
+
+fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
+    if !is_monitored() {
+        return Ok(0);
+    }
+
+    // Dynamic offset resolution
+    let filename_offset = unsafe { CONFIG.get(&KEY_OFFSET_FILENAME) }
+        .map(|v| *v as usize)
+        .unwrap_or(DEFAULT_OFFSET as usize);
+
+    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
+
+    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
+        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
+        unsafe {
+            write_event_header(ev, current_tgid(), EVENT_OPENAT);
 
             // Safe slice construction from raw pointer to avoid implicit autoref issues
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -79,16 +158,16 @@ pub fn assay_monitor_connect(ctx: TracePointContext) -> u32 {
 }
 
 fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
-    let tgid = current_tgid();
-
-    if unsafe { MONITORED_PIDS.get(&tgid) }.is_none() {
+    if !is_monitored() {
         return Ok(0);
     }
 
-    // sockaddr is the 2nd argument (offset 24 for x86_64)
-    // struct sockaddr *uservaddr
-    const SOCKADDR_OFFSET: usize = 24;
-    let sockaddr_ptr: u64 = unsafe { ctx.read_at(SOCKADDR_OFFSET).map_err(|_| 1u32)? };
+    // Dynamic offset resolution
+    let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SOCKADDR) }
+        .map(|v| *v as usize)
+        .unwrap_or(DEFAULT_OFFSET as usize);
+
+    let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
 
     // We can't easily read indefinite structs, so we read a fixed chunk (e.g. 128 bytes)
     // to cover sockaddr_in / sockaddr_in6.
@@ -101,7 +180,7 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, tgid, EVENT_CONNECT);
+            write_event_header(ev, current_tgid(), EVENT_CONNECT);
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -117,4 +196,51 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
+}
+
+const KEY_OFFSET_FORK_PARENT: u32 = 2;
+const KEY_OFFSET_FORK_CHILD: u32 = 3;
+
+#[tracepoint]
+pub fn assay_monitor_fork(ctx: TracePointContext) -> u32 {
+    match try_fork(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
+fn try_fork(ctx: TracePointContext) -> Result<u32, u32> {
+    // Only trace if parent is monitored.
+    // NOTE: Cgroup inheritance means child is AUTOMATICALLY in the cgroup.
+    // So if parent is in cgroup, child is too.
+    // We check `is_monitored()` which checks current (parent) cgroup.
+    if !is_monitored() {
+        return Ok(0);
+    }
+
+    let parent_offset = unsafe { CONFIG.get(&KEY_OFFSET_FORK_PARENT) }
+        .map(|v| *v as usize)
+        .unwrap_or(24); // Common default for parent_pid
+
+    let child_offset = unsafe { CONFIG.get(&KEY_OFFSET_FORK_CHILD) }
+        .map(|v| *v as usize)
+        .unwrap_or(44); // Common default for child_pid
+
+    let parent_pid: u32 = unsafe { ctx.read_at(parent_offset).map_err(|_| 1u32)? };
+    let child_pid: u32 = unsafe { ctx.read_at(child_offset).map_err(|_| 1u32)? };
+
+    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
+        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
+        unsafe {
+            use assay_common::EVENT_FORK;
+            write_event_header(ev, parent_pid, EVENT_FORK);
+
+            // Payload: child_pid (4 bytes)
+            let data_ptr = (*ev).data.as_mut_ptr();
+            core::ptr::write(data_ptr as *mut u32, child_pid);
+        }
+        entry.submit(0);
+    }
+
+    Ok(0)
 }

@@ -16,6 +16,7 @@ kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
+assay-common = { path = "../assay-common", version = "0.1.0" }
 anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -46,8 +47,9 @@ schemars = "1.2.0"
 
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature
-# [target.'cfg(unix)'.dependencies]
-# nix = { ... }
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["fs"] }
+libc = "0.2"
 
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]

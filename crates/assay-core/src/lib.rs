@@ -37,3 +37,6 @@ pub mod trace;
 pub mod discovery;
 #[cfg(feature = "kill-switch")]
 pub mod kill_switch;
+
+#[cfg(unix)]
+pub mod incident;
