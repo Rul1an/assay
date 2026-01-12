@@ -1,10 +1,10 @@
 [package]
 name = "assay-monitor"
-version = "1.8.0"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
-assay-common = { path = "../assay-common" }
+assay-common = { path = "../assay-common", version = "2.0.0" }
 thiserror = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["sync"] }
