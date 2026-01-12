@@ -29,6 +29,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install mold (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold clang
+
       - name: Sccache
         uses: mozilla-actions/sccache-action@v0.0.6
 
@@ -45,6 +52,12 @@ jobs:
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
           echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
           echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse" >> $GITHUB_ENV
+
+      - name: Configure Linker (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
       # Optimized single-pass test (builds implicitly)
       - name: Test Workspace
