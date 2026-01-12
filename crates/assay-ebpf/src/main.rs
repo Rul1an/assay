@@ -9,8 +9,14 @@ use aya_ebpf::{
     helpers::{
         bpf_get_current_cgroup_id,
         bpf_get_current_ancestor_cgroup_id,
+        bpf_get_current_pid_tgid,
     },
 };
+
+#[inline(always)]
+fn current_tgid() -> u32 {
+    unsafe { (bpf_get_current_pid_tgid() >> 32) as u32 }
+}
 
 
 #[map]
