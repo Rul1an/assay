@@ -84,6 +84,39 @@ impl Monitor {
         }
     }
 
+    pub fn set_tier1_rules(&mut self, compiled: &assay_policy::tiers::CompiledPolicy) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.set_tier1_rules(compiled);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = compiled;
+            Ok(())
+        }
+    }
+
+    pub fn attach_network_cgroup(&mut self, cgroup_file: &std::fs::File) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.attach_network_cgroup(cgroup_file);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = cgroup_file;
+            Err(MonitorError::NotSupported)
+        }
+    }
+
+    pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.set_monitor_all(enabled);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = enabled;
+            Ok(())
+        }
+    }
+
     /// Attach probes/tracepoints.
     pub fn attach(&mut self) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]

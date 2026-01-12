@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std"
 assay-core = { path = "../assay-core", version = "2.0.0" }
 assay-monitor = { path = "../assay-monitor", version = "2.0.0" }
 assay-common = { path = "../assay-common", version = "2.0.0" }
+assay-policy = { path = "../assay-policy", version = "2.0.0" }
 dialoguer = "0.11"
 similar = "2"
 serde_yaml = "0.9"

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 assay-common = { path = "../assay-common", version = "2.0.0" }
+assay-policy = { path = "../assay-policy", version = "2.0.0" }
 thiserror = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["sync"] }

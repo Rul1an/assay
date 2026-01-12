@@ -1,110 +1,74 @@
-# Runtime Monitor Reference (v1.8)
+# Runtime Monitor Reference
 
-**Status:** Production Ready (Linux), Stubs (macOS/Windows)
+**Status**: Production Ready (Linux / BPF LSM)
 
-## 1. System Overview
+Assay's Runtime Monitor provides kernel-level enforcement for MCP security policies. Unlike traditional tracepoints which are detect-only and vulnerable to TOCTOU (Time-of-Check Time-of-Use) attacks, Assay uses **BPF LSM** to block unauthorized operations *before* they occur.
 
-Assay v1.8 introduces the **Runtime Monitor**, a subsystem designed to capture granular runtime events (File I/O, Network) from processes under test. This allows `assay` to verify not just the *output* of a program, but its *behavior* (side-effects).
+## 1. Architecture
 
-The system uses **eBPF (Extended Berkeley Packet Filter)** for safe, high-performance kernel tracing on Linux.
-
-## 2. Architecture
-
-The architecture follows a producer-consumer model bridging Kernel Space and User Space.
+The monitor bridges kernel space and user space using a producer-consumer model over a high-performance BPF Ring Buffer.
 
 ```mermaid
 flowchart TD
   subgraph KS["Kernel Space (eBPF)"]
-    K["Kernel Tracepoints"] -->|Trigger| P["Probes (assay-ebpf)"]
-    P -->|Write| RB["RingBuf Map"]
+    LSM["LSM Hooks (file_open)"] -->|Match| BLK["Block (-EPERM)"]
+    LSM -->|Log| RB["RingBuf Map"]
+    SOCK["Socket Hooks (connect)"] -->|Match| RB
   end
 
   subgraph US["User Space (Rust)"]
-    RB -->|Poll| L["Loader Thread (assay-monitor)"]
-    L -->|mpsc channel| S["Async Stream"]
-    S -->|Consume| CLI["Assay CLI: monitor command"]
+    RB -->|Poll| L["LinuxMonitor (assay-monitor)"]
+    L -->|EventStream| CLI["Assay CLI (monitor)"]
   end
 ```
 
-**Notes:**
-*   **Linux-only**: requires eBPF-capable kernel + elevated privileges (sudo recommended).
-*   **Feature Gated**: `assay-ebpf` is gated behind the `ebpf` feature to prevent host linker errors; build it only via `cargo xtask build-ebpf` (which enables this feature).
-
 ### Key Components
 
-| Component | Path | Responsibility |
-|-----------|------|----------------|
-| **assay-ebpf** | `crates/assay-ebpf` | Kernel probes written in `no_std` Rust. Hooks `sys_enter_openat` and `sys_enter_connect`. |
-| **assay-monitor** | `crates/assay-monitor` | User-space library. Loads eBPF objects, attaches probes, and streams parsed events. |
-| **assay-cli** | `crates/assay-cli` | Provides the `assay monitor` subcommand. Handles PID filtering and user output. |
-| **assay-xtask** | `crates/assay-xtask` | Build automation. Compiles `assay-ebpf` using `nightly` Rust (native or Docker). |
+- **`assay-ebpf`**: Native BPF programs. Implements prefix/exact path matching and CIDR-based network blocking.
+- **`assay-monitor`**: Orchestrates BPF lifecycle. Implements **RAII Link Persistence** to ensure programs remain attached.
+- **`assay-xtask`**: Unified build automation. Supports building eBPF via a dedicated Docker toolchain.
 
-## 3. Workflows
+## 2. Technical Capabilities
 
-### A. Building (Hybrid Model)
+### LSM File Prevention
+Assay hooks the `file_open` LSM gate. It allows or denies access based on:
+- **Exact Path Matches**: High-performance hash-based lookup for files like `/etc/shadow`.
+- **Cgroup Scoping**: Automatically monitors only the processes within the target MCP sandbox.
 
-Because eBPF requires a specific nightly toolchain and linker, we use a split build strategy:
+### Network Egress Control
+Uses Cgroup `connect4` and `connect6` hooks to enforce:
+- **Port Blocklists**: Block SSH, Telnet, or internal databases.
+- **CIDR Allowlists**: Restrict outbound traffic to known safe endpoints (e.g., API gateways).
 
-1.  **Host Bins (`assay`)**: Built with standard `cargo build`.
-    *   *Note*: `assay-ebpf` is explicitly excluded from standard workspace builds via feature gating.
-    *   *Rule*: Host builds (`cargo build --workspace`) must **not** attempt to link the eBPF binary.
-2.  **eBPF Artifact (`assay-ebpf.o`)**: Built via `cargo xtask build-ebpf`.
-    *   **Native**: Uses local `rust-src` and `bpf-linker` (Primary CI path).
-    *   **Docker (Optional)**: Can build in a container using `ghcr.io/aya-rs/aya`, but may require registry access/auth. CI uses the native build path for determinism.
+## 3. Developer Workflow
 
-### B. Running (Linux Only)
-
-The monitor requires elevated privileges (`CAP_BPF`, `CAP_PERFMON`).
-*Note: Some distros still require `CAP_SYS_ADMIN` for certain attach modes; use `sudo` if in doubt.*
+### Environment Setup
+eBPF development requires a specific toolchain (LLVM, nightly Rust, bpf-linker). Assay automates this via Docker:
 
 ```bash
-# 1. Build eBPF (one-time)
-cargo xtask build-ebpf --release
+# 1. Build the builder image (one-time)
+cargo xtask build-image
 
-# 2. Run Monitor
-sudo assay monitor --pid <TARGET_PID> --duration 10s
+# 2. Compile eBPF bytecode
+cargo xtask build-ebpf --docker
 ```
 
-On **macOS**, the `monitor` command exists but will exit with code `40` (Not Supported).
-
-## 4. Technical Deep Dive
-
-### eBPF Probes (`assay-ebpf`)
-*   **Safety**: Uses a "Read-First" pattern. Data is read into a local stack buffer *before* reserving a RingBuf slot.
-    *   **Invariant**: never return/? after `RingBuf::reserve()` unless you `submit()` or `discard()` the reservation. This prevents "unreleased reference" verifier errors.
-*   **Stack Optimization**: Uses direct pointer writes (`core::ptr::write`) to fill the RingBuf, avoiding large stack allocations that violate the 512-byte eBPF stack limit.
-*   **No-Std**: Uses `core::ptr::copy_nonoverlapping` to avoid implicit mutable references (`dangerous_implicit_autorefs` lint).
-
-### Event Streaming (`assay-monitor`)
-*   **Protocol**: Events are defined in `assay-common` as `#[repr(C)]` POD structs.
-*   **Parsing**: Uses `MaybeUninit` + `memcpy` for zero-overhead, safe parsing of raw bytes from the ring buffer.
-*   **Threading**: A dedicated OS thread polls the RingBuf to avoid blocking the async runtime or conflicting with Aya's internals.
-
-### CI/CD Pipeline
-
-The `ebpf_smoke` job in CI ensures stability by isolating the nightly/eBPF build steps:
+### Verification
+Local verification is best done via **Lima VM** on macOS or directly on **Linux**:
 
 ```bash
-# Workflow steps for reliable eBPF builds:
-rustup toolchain install nightly
-rustup component add rust-src --toolchain nightly
-cargo install bpf-linker --locked
-cargo xtask build-ebpf --release
-sudo ./target/debug/assay monitor --pid $$ --duration 5s --ebpf target/assay-ebpf.o --print
+# Full E2E verification (LSM block check)
+./scripts/verify_lsm_docker.sh
 ```
 
-## 5. Maintenance & Troubleshooting
+## 4. Production Deployment
 
-### Common Issues
+The monitor requires `CAP_BPF` and `CAP_PERFMON` (or `sudo`).
 
-1.  **"Target not found" / Linker Errors on Host**
-    *   *Cause*: Trying to build `assay-ebpf` with standard generic `cargo build`.
-    *   *Fix*: The binary is gated behind `required-features = ["ebpf"]`. Do not enable this feature on host builds.
+```bash
+# Run monitor with a specific policy
+sudo assay monitor --ebpf ./target/assay-ebpf.o --policy policy.yaml
+```
 
-2.  **"Verifier Error: unreleased reference"**
-    *   *Cause*: Returning early (e.g. `?` operator) while holding a `ringbuf.reserve()` slot.
-    *   *Fix*: Always read data to stack *before* calling `reserve()`.
-
-3.  **"BPF stack limit exceeded"**
-    *   *Cause*: Creating large structs (e.g. `MonitorEvent` ~260 bytes) on the stack.
-    *   *Fix*: Write directly to the ring buffer pointer.
+> [!IMPORTANT]
+> Ensure your kernel is booted with `lsm=...,bpf` in the command line parameters to enable BPF LSM support.

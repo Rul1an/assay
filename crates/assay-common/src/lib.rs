@@ -12,7 +12,10 @@ pub const EVENT_FORK: u32 = 3;
 pub const EVENT_EXEC: u32 = 4;
 pub const EVENT_EXIT: u32 = 5;
 
-pub const DATA_LEN: usize = 256;
+pub const EVENT_FILE_BLOCKED: u32 = 10;
+pub const EVENT_CONNECT_BLOCKED: u32 = 20;
+
+pub const DATA_LEN: usize = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,8 +45,8 @@ impl Default for MonitorEvent {
 // Compile-time ABI/layout checks
 // -----------------------------
 
-// Exact size: 4 + 4 + 256 = 264 bytes
-const _: [(); 264] = [(); core::mem::size_of::<MonitorEvent>()];
+// Exact size: 4 + 4 + 512 = 520 bytes
+const _: [(); 520] = [(); core::mem::size_of::<MonitorEvent>()];
 
 // Alignment should be 4 on all sane targets; if this fails, your ABI is different.
 const _: [(); 4] = [(); core::mem::align_of::<MonitorEvent>()];

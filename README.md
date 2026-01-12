@@ -34,8 +34,9 @@ assay fix --yes
 
 ## Core Features
 
--   **RCE Prevention**: Blocks `exec`, `shell`, `spawn`, `bash`, `powershell`.
--   **Path Containment**: Enforces file access strictly within `/app` and `/data`.
+-   **Kernel Enforcement (LSM)**: Blocks syscalls (e.g., `open`, `connect`) before they execute. No TOCTOU.
+-   **Path Containment**: Enforces file access strictly within allowed directories in-kernel.
+-   **RCE Prevention**: Blocks `exec`, `shell`, `spawn` via tracepoint & LSM hooks.
 -   **Prompt Injection Defense**: Flags excessively long or vague tool descriptions.
 -   **Atomic Autofix**: Safely repairs config/code with zero corruption risk (atomic I/O).
 

@@ -111,6 +111,7 @@ dependencies = [
  "assay-core",
  "assay-metrics",
  "assay-monitor",
+ "assay-policy",
  "assert_cmd",
  "async-trait",
  "chrono",
@@ -185,7 +186,6 @@ version = "0.1.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
- "aya-log-ebpf",
 ]
 
 [[package]]
@@ -241,10 +241,23 @@ version = "2.0.0"
 dependencies = [
  "anyhow",
  "assay-common",
+ "assay-policy",
  "aya",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "assay-policy"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "ipnet",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -349,44 +362,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "aya-log-common"
-version = "0.1.14"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
-dependencies = [
- "num_enum",
-]
-
-[[package]]
-name = "aya-log-ebpf"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
-dependencies = [
- "aya-ebpf",
- "aya-log-common",
- "aya-log-ebpf-macros",
-]
-
-[[package]]
-name = "aya-log-ebpf-macros"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
-dependencies = [
- "aya-log-common",
- "aya-log-parser",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "aya-log-parser"
-version = "0.1.13"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
-dependencies = [
- "aya-log-common",
 ]
 
 [[package]]
@@ -1250,6 +1225,9 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "iri-string"
@@ -1588,27 +1566,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1207a7e20ad57b847bbddc6776b968420d38292bbfe2089accff5e19e82454c"
-dependencies = [
- "num_enum_derive",
- "rustversion",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
