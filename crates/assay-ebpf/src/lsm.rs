@@ -1,5 +1,3 @@
-#![no_std]
-#![no_main]
 
 use aya_ebpf::{
     macros::{lsm, map},
@@ -131,7 +129,7 @@ fn inc_stat(index: u32) {
 #[inline(always)]
 fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_len: usize, action: u32) {
     if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
-        let ev = unsafe { event.as_mut() };
+        let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
         ev.pid = (unsafe { bpf_get_current_pid_tgid() } >> 32) as u32;
         ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
@@ -167,7 +165,7 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8; MAX_PATH_LEN]) -> Resu
         aya_ebpf::helpers::bpf_d_path(
             path_ptr,
             buf.as_mut_ptr() as *mut i8,
-            MAX_PATH_LEN as i32,
+            MAX_PATH_LEN as u32,
         )
     };
 

@@ -1,5 +1,3 @@
-#![no_std]
-#![no_main]
 
 use aya_ebpf::{
     macros::{cgroup_sock_addr, map},
@@ -192,7 +190,7 @@ fn emit_socket_event(
     action: u32,
 ) {
     if let Some(mut event) = SOCKET_EVENTS.reserve::<SocketEvent>(0) {
-        let ev = unsafe { event.as_mut() };
+        let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
         ev.pid = (unsafe { bpf_get_current_pid_tgid() } >> 32) as u32;
         ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };

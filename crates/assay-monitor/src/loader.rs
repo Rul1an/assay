@@ -140,10 +140,7 @@ impl LinuxMonitor {
         Ok(())
     }
 
-    fn attach_socket_hooks(&mut self) -> Result<(), MonitorError> {
-        let cgroup_file = std::fs::File::open("/sys/fs/cgroup")
-            .map_err(|e| MonitorError::IoError(e))?;
-
+    pub fn attach_network_cgroup(&mut self, cgroup_file: &std::fs::File) -> Result<(), MonitorError> {
         let progs = [
             ("connect4_hook", "assay_monitor_connect4"),
             ("connect6_hook", "assay_monitor_connect6"),
@@ -153,24 +150,33 @@ impl LinuxMonitor {
             if let Some(prog) = self.bpf.program_mut(name) {
                 let hooks: &mut CgroupSockAddr = prog.try_into()?;
                 hooks.load()?;
-                let link = hooks.attach(&cgroup_file)?;
+                let link = hooks.attach(cgroup_file)?;
                 self.links.push(MonitorLink::CgroupSockAddr(link));
             }
         }
         Ok(())
     }
 
-    pub fn events(&mut self) -> Result<EventStream, MonitorError> {
+    fn attach_socket_hooks(&mut self) -> Result<(), MonitorError> {
+        let cgroup_file = std::fs::File::open("/sys/fs/cgroup")
+            .map_err(|e| MonitorError::Io(e))?;
+        self.attach_network_cgroup(&cgroup_file)
+    }
+
+    pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
         let map = self.bpf.map_mut("LSM_EVENTS").ok_or(MonitorError::MapNotFound { name: "LSM_EVENTS" })?;
         let ring_buf = RingBuf::try_from(map)?;
         let (tx, rx) = mpsc::channel(1024);
 
         std::thread::spawn(move || {
             loop {
-                if let Some(event) = ring_buf.read() {
-                    let ev = events::parse_event(&event);
+                // Read from ring buffer. Aya 0.12+ uses an iterator or specific read method.
+                // For simplicity in this fix, we assume next() yields the data.
+                while let Some(item) = ring_buf.next() {
+                    let ev = events::parse_event(&item);
                     if tx.blocking_send(ev).is_err() { break; }
                 }
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         });
 
