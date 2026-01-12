@@ -2,6 +2,7 @@ mod error;
 pub use error::MonitorError;
 
 pub mod events;
+pub mod tree;
 
 #[cfg(target_os = "linux")]
 mod loader;

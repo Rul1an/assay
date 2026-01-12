@@ -96,7 +96,7 @@ impl IncidentBuilder {
             Mode::empty()
         ).context("Failed to open output directory securely")?;
 
-        // SAFTEY: We wrap the raw FD immediately to ensure RAII closure.
+        // SAFETY: We wrap the raw FD immediately to ensure RAII closure.
         let dir_file = unsafe { std::fs::File::from_raw_fd(dir_raw_fd) };
 
         // 3. Verify Directory Permissions (fstat on fd)

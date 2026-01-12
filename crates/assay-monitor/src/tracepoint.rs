@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, Context};
 use std::collections::HashMap;
 
-/// Resolves field offsets forsyscall tracepoints by reading the kernel's format file.
+/// Resolves field offsets for syscall tracepoints by reading the kernel's format file.
 pub struct TracepointResolver;
 
 impl TracepointResolver {

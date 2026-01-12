@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{RwLock};
 use assay_common::exports::ProcessTreeExport;
-use super::node::{ProcessNode, ProcessNodeExport, read_children};
+use super::node::{ProcessNode, read_children};
 
 /// Configuration for the tracker
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ impl ProcessTreeTracker {
 
         if self.config.scan_existing_children {
             drop(inner);
-            self.scan_children(pid)?;
+            self.scan_children(pid, 0)?;
         }
         Ok(())
     }
@@ -140,13 +140,17 @@ impl ProcessTreeTracker {
     }
 
     /// Scan existing children (recursive)
-    fn scan_children(&self, pid: u32) -> TrackerResult<()> {
+    fn scan_children(&self, pid: u32, current_depth: u32) -> TrackerResult<()> {
+        if current_depth >= self.config.max_depth {
+            return Ok(());
+        }
+
         let children = read_children(pid).unwrap_or_default();
         for child_pid in children {
             if let Err(_) = self.on_fork(pid, child_pid) {
                 continue;
             }
-            let _ = self.scan_children(child_pid);
+            let _ = self.scan_children(child_pid, current_depth + 1);
         }
         Ok(())
     }
