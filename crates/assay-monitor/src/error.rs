@@ -7,7 +7,7 @@ pub enum MonitorError {
 
     #[cfg(target_os = "linux")]
     #[error("aya error: {0}")]
-    Aya(#[from] aya::BpfError),
+    Aya(#[from] aya::EbpfError),
 
     #[cfg(target_os = "linux")]
     #[error("map error: {0}")]

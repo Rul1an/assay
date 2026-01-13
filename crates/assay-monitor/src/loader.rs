@@ -4,8 +4,9 @@ use crate::{events, EventStream, MonitorError};
 use aya::{
     maps::{ring_buf::RingBuf, HashMap as AyaHashMap, LpmTrie, lpm_trie::Key},
     programs::{TracePoint, Lsm, CgroupSockAddr},
-    Bpf, Btf,
+    Ebpf, Btf,
 };
+use aya::programs::CgroupAttachMode;
 use std::path::Path;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -21,18 +22,18 @@ pub enum MonitorLink {
 }
 
 pub struct LinuxMonitor {
-    bpf: std::sync::Arc<std::sync::Mutex<Bpf>>,
+    bpf: std::sync::Arc<std::sync::Mutex<Ebpf>>,
     links: Vec<MonitorLink>,
 }
 
 impl LinuxMonitor {
     pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Self, MonitorError> {
-        let bpf = Bpf::load_file(path)?;
+        let bpf = Ebpf::load_file(path)?;
         Ok(Self { bpf: std::sync::Arc::new(std::sync::Mutex::new(bpf)), links: Vec::new() })
     }
 
     pub fn load_bytes(bytes: &[u8]) -> Result<Self, MonitorError> {
-        let bpf = Bpf::load(bytes)?;
+        let bpf = Ebpf::load(bytes)?;
         Ok(Self { bpf: std::sync::Arc::new(std::sync::Mutex::new(bpf)), links: Vec::new() })
     }
 
@@ -166,7 +167,7 @@ impl LinuxMonitor {
             if let Some(prog) = bpf.program_mut(name) {
                 let hooks: &mut CgroupSockAddr = prog.try_into()?;
                 hooks.load()?;
-                let link = hooks.attach(cgroup_file)?;
+                let link = hooks.attach(cgroup_file, CgroupAttachMode::Multi)?;
                 self.links.push(MonitorLink::CgroupSockAddr(link));
             }
         }
