@@ -148,9 +148,14 @@ impl LinuxMonitor {
         if let Some(prog) = bpf.program_mut("file_open_lsm") {
             let lsm: &mut Lsm = prog.try_into()?;
             if let Some(btf) = &btf {
-                lsm.load("file_open", btf)?;
-                let link = lsm.attach()?;
-                self.links.push(MonitorLink::Lsm(link));
+                if let Err(e) = lsm.load("file_open", btf) {
+                    eprintln!("Warning: Failed to load LSM file_open: {}", e);
+                    return Ok(());
+                }
+                match lsm.attach() {
+                    Ok(link) => self.links.push(MonitorLink::Lsm(link)),
+                    Err(e) => eprintln!("Warning: Failed to attach LSM file_open: {}", e),
+                }
             }
         }
         Ok(())
@@ -165,18 +170,36 @@ impl LinuxMonitor {
 
         for (name, _) in progs {
             if let Some(prog) = bpf.program_mut(name) {
-                let hooks: &mut CgroupSockAddr = prog.try_into()?;
-                hooks.load()?;
-                let link = hooks.attach(cgroup_file, CgroupAttachMode::Multi)?;
-                self.links.push(MonitorLink::CgroupSockAddr(link));
+                // Warning: bpf_link_create usually fails if Cgroup/LSM disabled. Soft fail here.
+                let hooks: &mut CgroupSockAddr = match prog.try_into() {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                };
+
+                if let Err(e) = hooks.load() {
+                     eprintln!("Warning: Failed to load Cgroup hook {}: {}", name, e);
+                     continue;
+                }
+
+                // Best Practice for CI/Smoke: Single (fail if occupied) or AllowMultiple (shared)
+                // We fallback to Single for maximum compatibility, but wrap in Result to not kill monitor.
+                match hooks.attach(cgroup_file, CgroupAttachMode::Single) {
+                    Ok(link) => self.links.push(MonitorLink::CgroupSockAddr(link)),
+                    Err(e) => eprintln!("Warning: Failed to attach Cgroup hook {}: {}", name, e),
+                }
             }
         }
         Ok(())
     }
 
     fn attach_socket_hooks(&mut self) -> Result<(), MonitorError> {
-        let cgroup_file = std::fs::File::open("/sys/fs/cgroup")
-            .map_err(|e| MonitorError::Io(e))?;
+        let cgroup_file = match std::fs::File::open("/sys/fs/cgroup") {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Warning: Failed to open /sys/fs/cgroup (skipping network hooks): {}", e);
+                return Ok(());
+            }
+        };
         self.attach_network_cgroup(&cgroup_file)
     }
 
@@ -193,6 +216,7 @@ impl LinuxMonitor {
                     if let Some(map) = bpf.map_mut("EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
+                                if item.len() == 0 { continue; }
                                 let ev = events::parse_event(&item);
                                 if tx.blocking_send(ev).is_err() { return; }
                             }

@@ -379,7 +379,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                         // But for now, rigorous enforcement is safer.
 
                         if let Some(rule) = violation_rule {
-                             if args.print && !args.quiet {
+                             if !args.quiet {
                                  println!("[PID {}] 🚨 VIOLATION: Rule '{}' matched file access", event.pid, rule.id);
                              }
 
@@ -397,14 +397,14 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                  };
 
                                  if enabled {
-                                      if args.print && !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
+                                      if !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
                                       kill_pid(event.pid, mode, grace).await;
                                  }
                              }
                         }
 
                         // LOGGING
-                        if args.print && !args.quiet {
+                        if !args.quiet {
                              // Import from assay-common required?
                              // We use literal values or import
                              match event.event_type {

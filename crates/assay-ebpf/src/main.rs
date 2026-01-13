@@ -2,6 +2,8 @@
 #![no_main]
 
 
+// Force rebuild for CI
+
 
 #[no_mangle]
 #[link_section = "license"]

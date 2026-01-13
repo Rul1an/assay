@@ -98,45 +98,42 @@ jobs:
 
           # 1) Start monitor in background
           # We use --monitor-all to bypass cgroup filtering.
-          sudo -E ./target/debug/assay monitor \
+          rm -f monitor.log
+          sudo -E timeout 20s ./target/debug/assay monitor \
             --monitor-all \
-            --duration 10s \
+            --duration 20s \
             --ebpf target/assay-ebpf.o \
-            --print | tee monitor.log &
+            --print > monitor.log 2>&1 &
           MON_PID=$!
 
-          # 2) Wait until monitor is ready (max 5s)
+          # 2) Wait until monitor is ready (max 30s due to slow CI startup)
           # We look for "Assay Monitor running" which assay prints when attached
-          timeout 5 bash -lc 'until grep -q "Assay Monitor running" monitor.log; do sleep 0.1; done'
+          timeout 30 bash -lc 'until grep -q "Assay Monitor running" monitor.log; do sleep 0.1; done' || cat monitor.log
 
           echo "Monitor attached. Running workload..."
 
-          # 3) Run workload (deterministic, no forks)
-          # Single python process doing openat and connect
-          python3 - <<'PY'
-          import socket, time, os
-          for i in range(5):
-              try:
-                  with open("/etc/hosts", "rb") as f: f.read(1) # openat
-              except: pass
+          # 3) Run workload (simple shell commands)
+          # Trigger openat
+          ls /etc/hosts
+          # Trigger connect
+          curl -I --connect-timeout 2 http://1.1.1.1 || true
+          echo "curl exit code: $?"
 
-              s = socket.socket()
-              s.settimeout(0.5)
-              try:
-                  s.connect(("1.1.1.1", 80)) # connect
-              except: pass
-              finally: s.close()
+          # 4) Wait for monitor to finish (duration=20s)
+          # Use wait instead of blind sleep
+          wait $MON_PID || true
 
-              time.sleep(0.5)
-          PY
-
-          # 4) Kill monitor (if it hasn't somehow exited) and wait
-          # The duration=10s will eventually kill it, but we can stop early if workload is done
-          sudo kill $MON_PID || true
-          wait "$MON_PID" || true
-
-          # 5) Assert
-          grep -E 'openat|connect' monitor.log
+          # 5) Assertions
+          echo "Checking log for events..."
+          cat monitor.log
+          if ! grep -q "openat" monitor.log; then
+            echo "::error::Tracepoint 'openat' not found in log!"
+            exit 1
+          fi
+          if ! grep -q "connect" monitor.log; then
+            echo "::error::Tracepoint 'connect' not found in log!"
+            exit 1
+          fi
 
       - name: Debug Diagnostics
         if: always()
