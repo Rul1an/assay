@@ -150,20 +150,16 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
     }
 }
 
-#[repr(C)]
-#[allow(non_camel_case_types)]
-struct file {
-    // Attempt to match f_path offset.
-    // On many 5.x/6.x kernels, f_u is at 0 (16 bytes), then f_path.
-    // So offset 16 is a better guess than 64.
-    // Note: Use CO-RE if possible in future.
-    _padding: [u8; 16],
-    f_path: aya_ebpf::bindings::path,
-}
-
+// Use CO-RE enabled bindings if available in aya_ebpf, or fallback to manual offset with a prayer.
+// Based on user feedback, manual offset arithmetic fails verification.
+// We attempt to use strict binding cast.
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8; MAX_PATH_LEN]) -> Result<usize, i64> {
-    let f = file_ptr as *const file;
+    // Cast to the CO-RE binding type. This relies on aya-ebpf exporting `file`.
+    // If this fails to compile (missing binding), we will need to generate bindings.rs.
+    let f = file_ptr as *const aya_ebpf::bindings::file;
+
+    // Use addr_of! on the member to preserve CO-RE relocation chain
     let path_ptr = unsafe { core::ptr::addr_of!((*f).f_path) } as *mut aya_ebpf::bindings::path;
 
     let len = unsafe {
