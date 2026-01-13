@@ -151,7 +151,8 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
 }
 
 #[repr(C)]
-struct PartialFile {
+#[allow(non_camel_case_types)]
+struct file {
     // Attempt to match f_path offset.
     // On many 5.x/6.x kernels, f_u is at 0 (16 bytes), then f_path.
     // So offset 16 is a better guess than 64.
@@ -162,8 +163,8 @@ struct PartialFile {
 
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8; MAX_PATH_LEN]) -> Result<usize, i64> {
-    let file = file_ptr as *const PartialFile;
-    let path_ptr = unsafe { core::ptr::addr_of!((*file).f_path) } as *mut aya_ebpf::bindings::path;
+    let f = file_ptr as *const file;
+    let path_ptr = unsafe { core::ptr::addr_of!((*f).f_path) } as *mut aya_ebpf::bindings::path;
 
     let len = unsafe {
         aya_ebpf::helpers::bpf_d_path(
