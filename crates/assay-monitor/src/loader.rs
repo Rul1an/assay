@@ -12,8 +12,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use assay_policy::tiers::CompiledPolicy;
 
 pub enum MonitorLink {
+    #[allow(dead_code)]
     TracePoint(aya::programs::trace_point::TracePointLinkId),
+    #[allow(dead_code)]
     Lsm(aya::programs::lsm::LsmLinkId),
+    #[allow(dead_code)]
     CgroupSockAddr(aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId),
 }
 

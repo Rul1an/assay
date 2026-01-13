@@ -152,7 +152,11 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
 
 #[repr(C)]
 struct PartialFile {
-    _padding: [u8; 64],
+    // Attempt to match f_path offset.
+    // On many 5.x/6.x kernels, f_u is at 0 (16 bytes), then f_path.
+    // So offset 16 is a better guess than 64.
+    // Note: Use CO-RE if possible in future.
+    _padding: [u8; 16],
     f_path: aya_ebpf::bindings::path,
 }
 
