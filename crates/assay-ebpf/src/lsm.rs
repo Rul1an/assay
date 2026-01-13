@@ -150,21 +150,32 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
     }
 }
 
-// Use CO-RE enabled bindings if available in aya_ebpf, or fallback to manual offset with a prayer.
-// Based on user feedback, manual offset arithmetic fails verification.
-// We attempt to use strict binding cast.
+// Minimal vmlinux subset for CO-RE
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct path {
+    pub mnt: *mut c_void,
+    pub dentry: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub struct file {
+    // union f_u matches 16 bytes on 64-bit
+    pub f_u: [u8; 16],
+    pub f_path: path,
+}
+
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8; MAX_PATH_LEN]) -> Result<usize, i64> {
-    // Cast to the CO-RE binding type. This relies on aya-ebpf exporting `file`.
-    // If this fails to compile (missing binding), we will need to generate bindings.rs.
-    let f = file_ptr as *const aya_ebpf::bindings::file;
-
-    // Use addr_of! on the member to preserve CO-RE relocation chain
-    let path_ptr = unsafe { core::ptr::addr_of!((*f).f_path) } as *mut aya_ebpf::bindings::path;
+    let f = file_ptr as *const file;
+    // CO-RE path resolution via manual binding
+    let path_ptr = unsafe { core::ptr::addr_of!((*f).f_path) } as *mut path;
 
     let len = unsafe {
         aya_ebpf::helpers::bpf_d_path(
-            path_ptr,
+            path_ptr as *mut aya_ebpf::bindings::path, // Cast to expected aya type to satisfy helper signature
             buf.as_mut_ptr() as *mut i8,
             MAX_PATH_LEN as u32,
         )
