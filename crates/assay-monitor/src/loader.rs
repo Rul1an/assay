@@ -187,6 +187,18 @@ impl LinuxMonitor {
             loop {
                 {
                     let mut bpf = bpf_shared.lock().unwrap();
+
+                    // Poll Tracepoint Events
+                    if let Some(map) = bpf.map_mut("EVENTS") {
+                        if let Ok(mut ring_buf) = RingBuf::try_from(map) {
+                            while let Some(item) = ring_buf.next() {
+                                let ev = events::parse_event(&item);
+                                if tx.blocking_send(ev).is_err() { return; }
+                            }
+                        }
+                    }
+
+                    // Poll LSM Events
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
