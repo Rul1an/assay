@@ -14,8 +14,7 @@ static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
 const MAX_DENY_PATHS: u32 = 256;
 const MAX_PATH_LEN: usize = 256;
 
-mod vmlinux;
-use vmlinux::{file, path};
+use crate::vmlinux::{file, path};
 
 // Redeclare helper to match our local vmlinux types
 #[link_name = "bpf_d_path"]
@@ -130,7 +129,7 @@ fn fnv1a_hash(data: &[u8]) -> u64 {
 
 #[inline(always)]
 fn inc_stat(index: u32) {
-    if let Some(val) = unsafe { LSM_STATS.get_ptr_mut(index) } {
+    if let Some(val) = LSM_STATS.get_ptr_mut(index) {
         unsafe { *val += 1 };
     }
 }
@@ -140,7 +139,7 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
     if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
-        ev.pid = (unsafe { bpf_get_current_pid_tgid() } >> 32) as u32;
+        ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
         ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
         ev.cgroup_id = cgroup_id;
         ev.rule_id = rule_id;
