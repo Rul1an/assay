@@ -6,7 +6,7 @@ use aya::{
     programs::{TracePoint, Lsm, CgroupSockAddr},
     Ebpf, Btf,
 };
-use aya::programs::cgroup_sock_addr::CgroupAttachMode;
+use aya::programs::links::CgroupAttachMode;
 use std::path::Path;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
