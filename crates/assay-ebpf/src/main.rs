@@ -54,6 +54,7 @@ const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
+const KEY_MONITOR_ALL: u32 = 100;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
@@ -65,6 +66,11 @@ fn max_ancestor_depth() -> usize {
 
 #[inline(always)]
 fn is_monitored() -> bool {
+    // 0. Global Monitor-All Override
+    if unsafe { CONFIG.get(&KEY_MONITOR_ALL) }.copied().unwrap_or(0) != 0 {
+        return true;
+    }
+
     // 1. Check PID (Legacy/Override)
     if unsafe { MONITORED_PIDS.get(&current_tgid()) }.is_some() {
         return true;

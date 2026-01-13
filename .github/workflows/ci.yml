@@ -116,7 +116,7 @@ jobs:
 
           # Monitor that PID (needs sudo)
           sudo -E ./target/debug/assay monitor \
-            --pid "$TARGET_PID" \
+            --monitor-all \
             --duration 5s \
             --ebpf target/assay-ebpf.o \
             --print | tee monitor.log

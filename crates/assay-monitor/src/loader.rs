@@ -110,6 +110,11 @@ impl LinuxMonitor {
             let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
             hm.insert(0, if enabled { 1 } else { 0 }, 0)?;
         }
+
+        if let Some(map) = bpf.map_mut("CONFIG") {
+            let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+            hm.insert(100, if enabled { 1 } else { 0 }, 0)?;
+        }
         Ok(())
     }
 
