@@ -14,14 +14,6 @@ static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
 const MAX_DENY_PATHS: u32 = 256;
 const MAX_PATH_LEN: usize = 256;
 
-use crate::vmlinux::{file, path};
-
-// Redeclare helper to match our local vmlinux types
-#[link_name = "bpf_d_path"]
-extern "C" {
-    fn bpf_d_path(path: *const path, buf: *mut i8, sz: i32) -> i64;
-}
-
 const EVENT_FILE_BLOCKED: u32 = 10;
 const EVENT_FILE_ALLOWED: u32 = 11;
 
