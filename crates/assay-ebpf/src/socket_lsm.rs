@@ -90,7 +90,7 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
     }
 
     let key = Key::new(32, sock_addr.user_ip4.to_ne_bytes());
-    if let Some(&action) = unsafe { CIDR_RULES_V4.get(&key) } {
+    if let Some(&action) = CIDR_RULES_V4.get(&key) {
         if action == ACTION_DENY {
             emit_socket_event(
                 EVENT_CONNECT_BLOCKED,
@@ -126,7 +126,7 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
     let sock_addr = unsafe { &*(ctx.as_ptr() as *const bpf_sock_addr) };
     let dst_port = u16::from_be(sock_addr.user_port as u16);
-    let dst_addr = unsafe { sock_addr.user_ip6 };
+    let dst_addr = sock_addr.user_ip6;
 
     if let Some(&rule_id) = unsafe { DENY_PORTS.get(&dst_port) } {
         emit_socket_event(
@@ -150,7 +150,7 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
 
     let ip6_bytes = unsafe { core::mem::transmute::<[u32; 4], [u8; 16]>(dst_addr) };
     let key = Key::new(128, ip6_bytes);
-    if let Some(&action) = unsafe { CIDR_RULES_V6.get(&key) } {
+    if let Some(&action) = CIDR_RULES_V6.get(&key) {
         if action == ACTION_DENY {
             emit_socket_event(
                 EVENT_CONNECT_BLOCKED,
@@ -173,7 +173,7 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
 
 #[inline(always)]
 fn inc_stat(index: u32) {
-    if let Some(val) = unsafe { SOCKET_STATS.get_ptr_mut(index) } {
+    if let Some(val) = SOCKET_STATS.get_ptr_mut(index) {
         unsafe { *val += 1 };
     }
 }
@@ -192,7 +192,7 @@ fn emit_socket_event(
     if let Some(mut event) = SOCKET_EVENTS.reserve::<SocketEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
-        ev.pid = (unsafe { bpf_get_current_pid_tgid() } >> 32) as u32;
+        ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
         ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
         ev.cgroup_id = cgroup_id;
         ev.family = family;

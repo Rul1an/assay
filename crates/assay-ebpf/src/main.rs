@@ -10,7 +10,6 @@ pub static _LICENSE: [u8; 4] = *b"GPL\0";
 
 pub mod lsm;
 pub mod socket_lsm;
-pub mod vmlinux;
 
 use assay_common::{MonitorEvent, EVENT_CONNECT, EVENT_OPENAT};
 use aya_ebpf::{
