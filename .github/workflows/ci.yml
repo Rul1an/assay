@@ -101,7 +101,16 @@ jobs:
           # 2) open /etc/hosts (openat in same PID)
           # 3) connect to example.com's IP (connect in same PID)
           # Spawn a target process that will do openat + connect
-          bash -lc 'sleep 1; cat /etc/hosts >/dev/null; curl -s https://example.com >/dev/null || true; sleep 1' &
+          # Spawn a target process that will loop openat + connect
+          bash -lc '
+            sleep 2
+            end=$((SECONDS+6))
+            while [ $SECONDS -lt $end ]; do
+              cat /etc/hosts >/dev/null
+              curl -s https://example.com >/dev/null || true
+              sleep 0.1
+            done
+          ' &
           TARGET_PID=$!
           echo "Target PID: $TARGET_PID"
 
