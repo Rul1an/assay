@@ -98,7 +98,7 @@ fn is_monitored() -> bool {
     false
 }
 
-const DATA_LEN: usize = 256;
+const DATA_LEN: usize = 512;
 
 #[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {

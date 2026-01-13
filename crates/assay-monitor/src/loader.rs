@@ -199,6 +199,8 @@ impl LinuxMonitor {
                     }
 
                     // Poll LSM Events
+                    // TODO: Implement distinct parsing for LsmEvent (struct mismatch vs MonitorEvent)
+                    /*
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
@@ -207,6 +209,7 @@ impl LinuxMonitor {
                             }
                         }
                     }
+                    */
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
