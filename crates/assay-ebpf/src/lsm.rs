@@ -138,12 +138,12 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
         ev.action = action;
         ev.path_len = path_len as u32;
 
+        // Optimized copy/clear to avoid verifier loop complexity limit
         let len = if path_len < MAX_PATH_LEN { path_len } else { MAX_PATH_LEN };
-        for i in 0..MAX_PATH_LEN {
-            if i < len {
-                ev.path[i] = path[i];
-            } else {
-                ev.path[i] = 0;
+        unsafe {
+            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), len);
+            if len < MAX_PATH_LEN {
+                core::ptr::write_bytes(ev.path.as_mut_ptr().add(len), 0, MAX_PATH_LEN - len);
             }
         }
         event.submit(0);
