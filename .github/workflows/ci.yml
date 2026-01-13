@@ -96,33 +96,63 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Spawn a single process that will:
-          # 1) wait for monitor to attach
-          # 2) open /etc/hosts (openat in same PID)
-          # 3) connect to example.com's IP (connect in same PID)
-          # Spawn a target process that will do openat + connect
-          # Spawn a target process that will loop openat + connect
-          bash -lc '
-            sleep 2
-            end=$((SECONDS+6))
-            while [ $SECONDS -lt $end ]; do
-              cat /etc/hosts >/dev/null
-              curl -s https://example.com >/dev/null || true
-              sleep 0.1
-            done
-          ' &
-          TARGET_PID=$!
-          echo "Target PID: $TARGET_PID"
-
-          # Monitor that PID (needs sudo)
+          # 1) Start monitor in background
+          # We use --monitor-all to bypass cgroup filtering.
           sudo -E ./target/debug/assay monitor \
             --monitor-all \
-            --duration 5s \
+            --duration 10s \
             --ebpf target/assay-ebpf.o \
-            --print | tee monitor.log
+            --print | tee monitor.log &
+          MON_PID=$!
 
-          # Ensure the target process ended (it should)
-          wait "$TARGET_PID" || true
+          # 2) Wait until monitor is ready (max 5s)
+          # We look for "Assay Monitor running" which assay prints when attached
+          timeout 5 bash -lc 'until grep -q "Assay Monitor running" monitor.log; do sleep 0.1; done'
 
-          # Now assert we captured something
+          echo "Monitor attached. Running workload..."
+
+          # 3) Run workload (deterministic, no forks)
+          # Single python process doing openat and connect
+          python3 - <<'PY'
+          import socket, time, os
+          for i in range(5):
+              try:
+                  with open("/etc/hosts", "rb") as f: f.read(1) # openat
+              except: pass
+
+              s = socket.socket()
+              s.settimeout(0.5)
+              try:
+                  s.connect(("1.1.1.1", 80)) # connect
+              except: pass
+              finally: s.close()
+
+              time.sleep(0.5)
+          PY
+
+          # 4) Kill monitor (if it hasn't somehow exited) and wait
+          # The duration=10s will eventually kill it, but we can stop early if workload is done
+          sudo kill $MON_PID || true
+          wait "$MON_PID" || true
+
+          # 5) Assert
           grep -E 'openat|connect' monitor.log
+
+      - name: Debug Diagnostics
+        if: always()
+        run: |
+           {
+             echo "## eBPF Smoke Test Results"
+             echo ""
+             echo "### monitor.log (tail 200)"
+             echo '```'
+             tail -n 200 monitor.log || echo "No log found"
+             echo '```'
+           } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload monitor log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log
+          path: monitor.log
