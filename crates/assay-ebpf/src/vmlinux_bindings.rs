@@ -116,7 +116,7 @@ pub struct path {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct file {
-    pub f_u: [u8; 16usize],
+    pub _pad: [u8; 16usize],
     pub f_path: path,
     pub f_inode: *mut ::core::ffi::c_void,
     pub f_op: *mut ::core::ffi::c_void,
