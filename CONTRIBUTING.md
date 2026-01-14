@@ -1,75 +1,41 @@
-# Contributing
+# Contributing to Assay
 
-We appreciate your interest in contributing to Assay! This document outlines our conventions and standards. As a security-critical tool for AI agents, we enforce strict quality gates.
+Assay is a security-critical tool. We maintain high standards for code quality, safety, and performance.
 
-## Development Workflow
+## 1. Development Environment
 
-### 1. Prerequisites
-*   **Rust**: Latest stable.
-*   **Python**: v3.10+ (for SDK bindings).
-*   **Tools**: `cargo-deny`, `cargo-nextest` (optional but recommended).
+Assay uses a hybrid build model (Safe Rust + eBPF).
 
-### 2. Workspace Structure
-Assay is a Cargo workspace divided into:
-*   **`crates/assay-core`**: Pure Rust business logic. Zero IO where possible.
-*   **`crates/assay-cli`**: The CLI binary. Handles IO, config parsing, and user interaction.
-*   **`crates/assay-mcp-server`**: The MCP protocol implementation.
-*   **`assay-python-sdk`**: PyO3 bindings for Python integration.
+- **Rust**: Latest stable (for host).
+- **Nightly Rust**: Specifically for eBPF bytecode generation (managed via Docker).
+- **Docker**: Required for eBPF builds on macOS/Windows.
 
-### 3. Guidelines
+### The Build Toolchain (`xtask`)
+We use `cargo xtask` to abstract complex build requirements:
 
-#### Code Quality
-*   **Strict Clippy**: We run clippy with `-D warnings`.
-    ```bash
-    cargo clippy --workspace --all-targets -- -D warnings
-    ```
-*   **Formatting**: `cargo fmt` is enforced in CI.
-*   **No Unwraps**: Avoid `.unwrap()` in `assay-core`. Use `?` propagation or `.expect("invariant: explanation")` only if mathematically impossible to fail.
+```bash
+# 1. Prepare the build environment
+cargo xtask build-image
 
-#### Testing
-*   **Unit Tests**: Co-located in `src/`.
-*   **Integration Tests**: Located in `tests/`. We use `try-cmd` or `assert_cmd` for CLI snapshot testing.
-*   **Determinism**: Policy decisions MUST be deterministic.
+# 2. Build eBPF programs
+cargo xtask build-ebpf --docker
+```
 
-#### Commits
-We use [Conventional Commits](https://www.conventionalcommits.org/):
-*   `feat(core): add new validator`
-*   `fix(cli): resolve path expansion bug`
-*   `docs: update README`
-*   `chore: bump dependencies`
+## 2. Workspace Structure
 
-## Pull Request Process
+- `crates/assay-core`: Policy engine and business logic (no-std compatible where possible).
+- `crates/assay-ebpf`: Kernel-space programs (LSM, Tracepoints).
+- `crates/assay-monitor`: BPF loader and event streamer.
+- `crates/assay-cli`: Main entry point.
 
-1.  **Fork & Branch**: Create a feature branch (`feat/my-feature`).
-2.  **Test Locally**: Ensure `cargo test` passes.
-3.  **Submit PR**: Open a PR against `main`.
-4.  **CI Gates**:
-    *   `fmt`: formatting check.
-    *   `clippy`: lint check.
-    *   `test`: unit/integration tests (`linux`, `macos`, `windows`).
-    *   `audit`: `cargo deny` check (licenses/advisories).
+## 3. Standards
 
-## Python SDK
+- **Zero Unwraps**: Use `?` or `Result`. Panics are unacceptable in `assay-core`.
+- **Clippy**: Must pass `-D warnings`.
+- **LSM Verification**: If you touch `assay-ebpf`, you must run `./scripts/verify_lsm_docker.sh`.
 
-If modifying `assay-python-sdk`:
+## 4. Pull Request Process
 
-1.  Setup typical venv: `python -m venv .venv && source .venv/bin/activate`
-2.  Install `maturin`: `pip install maturin`
-3.  Build & Install dev version:
-    ```bash
-    maturin develop --manifest-path assay-python-sdk/Cargo.toml
-    ```
-4.  Run tests: `pytest`
-
-## Release Process
-
-Releases are automated via GitHub Actions on `v*` tags.
-1.  Update `CHANGELOG.md`.
-2.  Bump versions in `Cargo.toml`.
-3.  Tag (e.g., `git tag v1.3.1`).
-4.  Push tag.
-
-CI will automatically:
-*   Build binaries (Linux/macOS/Windows).
-*   Publish to Crates.io (Trusted Publishing).
-*   Publish to PyPI (`assay-it`).
+1. Feature branch: `feat/description` or `fix/description`.
+2. Clean commits using [Conventional Commits](https://www.conventionalcommits.org/).
+3. All CI gates (Linux/macOS/Windows) must be green.

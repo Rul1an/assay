@@ -13,6 +13,8 @@ struct Opts {
 enum Cmd {
     /// Build the eBPF bytecode
     BuildEbpf(BuildEbpfOpts),
+    /// Build the Docker builder image
+    BuildImage,
 }
 
 #[derive(Parser)]
@@ -34,7 +36,7 @@ struct BuildEbpfOpts {
     no_docker: bool,
 
     /// Docker image to use for eBPF builds
-    #[clap(long, default_value = "ghcr.io/aya-rs/aya:latest")]
+    #[clap(long, default_value = "assay-ebpf-builder:latest")]
     docker_image: String,
 }
 
@@ -42,6 +44,7 @@ fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     match opts.cmd {
         Cmd::BuildEbpf(opts) => build_ebpf(opts),
+        Cmd::BuildImage => build_image(),
     }
 }
 
@@ -73,8 +76,11 @@ fn build_ebpf(opts: BuildEbpfOpts) -> anyhow::Result<()> {
 
     // Non-Linux hosts: default to Docker if available, otherwise skip (unless user forced docker)
     if !on_linux {
+        if opts.no_docker {
+            return build_ebpf_local(&root, &opts);
+        }
         if opts.docker || can_use_docker {
-            if !can_use_docker {
+             if !can_use_docker {
                 anyhow::bail!(
                     "Docker build requested but Docker is not available/running. \
                      Start Docker Desktop and retry."
@@ -230,23 +236,33 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     // Ensure cargo is in PATH (standard rust image location)
     script.push_str("export PATH=\"/usr/local/cargo/bin:$PATH\"; ");
 
-    // Setup dependencies (using cache)
-    script.push_str("rustup component add rust-src >/dev/null 2>&1 || true; ");
-    script.push_str("if ! command -v bpf-linker > /dev/null; then echo 'Installing bpf-linker...'; cargo install bpf-linker; fi; ");
+    // Setup dependencies (using cache) - SKIP if using builder image
+    if !opts.docker_image.contains("assay-ebpf-builder") {
+        // We need nightly for -Z build-std, so install it first
+        script.push_str("rustup toolchain install nightly; ");
+        script.push_str("rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true; ");
+        script.push_str("if ! command -v bpf-linker > /dev/null; then echo 'Installing bpf-linker...'; ");
+
+        // Install dependencies for bpf-linker
+        script.push_str("apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ");
+
+        script.push_str("cargo install bpf-linker --locked; fi; ");
+    }
 
     script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
 
+
+
     script.push_str("cargo +nightly build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));
+    script.push_str("--release "); // Force release build for eBPF (LLVM strictness)
     script.push_str("-Z build-std=core ");
     script.push_str("--features ebpf ");
-    if opts.release {
-        script.push_str("--release ");
-    }
+    // if opts.release { ... } - Removed check, always release
     script.push_str("; "); // End cargo build command
 
     // ✅ Deterministic copy inside Docker
-    let profile = if opts.release { "release" } else { "debug" };
+    let profile = "release"; // We forced --release above
     script.push_str(&format!(
         r#"OUT="/work/target-ebpf/{t}/{p}/assay-ebpf"; "#,
         t = opts.target,
@@ -264,7 +280,7 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     // Copy to host volume mapping
     script.push_str(r#"mkdir -p /work/target; "#);
     script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
-    script.push_str(r#"echo "Wrote target/assay-ebpf.o (from Docker)"; "#);
+    script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
 
     let status = Command::new("docker")
         .args([
@@ -291,5 +307,27 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     }
 
     println!("eBPF build successful (docker) for target {}", opts.target);
+    Ok(())
+}
+
+fn build_image() -> anyhow::Result<()> {
+    let root = workspace_root()?;
+    let status = Command::new("docker")
+        .current_dir(&root)
+        .args([
+            "build",
+            "-t",
+            "assay-ebpf-builder:latest",
+            "-f",
+            "docker/Dockerfile.ebpf-builder",
+            ".",
+        ])
+        .status()
+        .context("Failed to run docker build")?;
+
+    if !status.success() {
+        anyhow::bail!("Docker build failed");
+    }
+    println!("Successfully built assay-ebpf-builder:latest");
     Ok(())
 }

@@ -6,7 +6,7 @@ members = [
   "crates/assay-cli", "crates/assay-mcp-server",
   "crates/assay-xtask", "crates/assay-monitor",
   "crates/assay-ebpf", "crates/assay-common",
-  "assay-python-sdk",
+  "assay-python-sdk", "crates/assay-policy",
 ]
 default-members = [
   "crates/assay-core",
@@ -36,3 +36,14 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+# eBPF MUST be optimized, even in dev profile
+[profile.dev.package.assay-ebpf]
+opt-level = 2
+debug = false
+codegen-units = 1
+
+[profile.release.package.assay-ebpf]
+opt-level = 3
+debug = false
+codegen-units = 1

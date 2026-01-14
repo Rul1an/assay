@@ -57,6 +57,10 @@ pub struct MonitorArgs {
     /// Policy file to enable runtime enforcement rules
     #[arg(long)]
     pub policy: Option<PathBuf>,
+
+    /// Monitor ALL cgroups (bypass filtering, useful for debugging)
+    #[arg(long)]
+    pub monitor_all: bool,
 }
 
 
@@ -65,7 +69,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
     {
         let _ = args;
         eprintln!("Error: 'assay monitor' is only supported on Linux.");
-        return Ok(40); // MONITOR_NOT_SUPPORTED code
+        Ok(40) // MONITOR_NOT_SUPPORTED code
     }
 
     #[cfg(target_os = "linux")]
@@ -116,11 +120,37 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     };
 
     if !args.pid.is_empty() {
+        // Compatibility: Populate Legacy PID Map (for Tracepoints if they use it)
         if let Err(e) = monitor.set_monitored_pids(&args.pid) {
-            eprintln!("Failed to set monitored PIDs: {}", e);
-            return Ok(40);
+             eprintln!("Warning: Failed to populate PID map: {}", e);
+        }
+
+        // Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
+        let mut cgroups = Vec::new();
+        for &pid in &args.pid {
+            // Cgroup V2 ID Resolution
+            // ID = Inode of /sys/fs/cgroup/unified/<path> or just /proc/<pid>/cgroup path mapping
+            // Robust way: readlink /proc/<pid>/ns/cgroup? No, that's namespace.
+            // Correct way: open /proc/<pid>/cgroup, parse 0::/path, stat /sys/fs/cgroup/path
+
+            // Simplified for verification (assuming /sys/fs/cgroup mount):
+            match resolve_cgroup_id(pid) {
+                Ok(id) => cgroups.push(id),
+                Err(e) => eprintln!("Warning: Failed to resolve cgroup for PID {}: {}", pid, e),
+            }
+        }
+
+        if !cgroups.is_empty() {
+             if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
+                 eprintln!("Error: Failed to populate Cgroup map: {}", e);
+                 return Ok(40);
+             }
+             if !args.quiet { eprintln!("Monitored Cgroups: {:?}", cgroups); }
+        } else {
+             eprintln!("Warning: No valid cgroups resolved. Rules will not match.");
         }
     }
+
 
     if let Err(e) = monitor.attach() {
         eprintln!("Failed to attach probes: {}", e);
@@ -222,6 +252,80 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
+    // --- Tier 1 Policy Compilation ---
+    if let Some(cfg) = &runtime_config {
+        let mut t1_policy = assay_policy::tiers::Policy::default();
+
+        for r in &cfg.rules {
+            // Assume TriggerKill means "Block if possible"
+            // If action is purely Log/Alert, technically we shouldn't block kernel-side.
+            // But for "Shield" implementation, we usually map "Deny/Kill" rules matchers.
+            // The McpPolicy separates "Action" from "Rule".
+            // If action is Log, we shouldn't put it in Tier 1 Deny.
+            let is_enforcement = matches!(r.action, assay_core::mcp::runtime_features::MonitorAction::TriggerKill);
+
+            if !is_enforcement { continue; }
+
+            match r.rule_type {
+                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
+                     // Map to file deny
+                     for glob in &r.match_config.path_globs {
+                         t1_policy.files.deny.push(glob.clone());
+                     }
+                     // Map exceptions
+                     if let Some(not) = &r.match_config.not {
+                         for glob in &not.path_globs {
+                             t1_policy.files.allow.push(glob.clone());
+                         }
+                     }
+                }
+                assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
+                    for dest in &r.match_config.dest_globs {
+                        // Attempt to parse as CIDR, otherwise Glob
+                        // Heuristic: Check if "IP/Prefix" format
+                        let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
+                             // Check if left side is IP and right side is number
+                             ip_part.parse::<std::net::IpAddr>().is_ok() && prefix_part.parse::<u8>().is_ok()
+                        } else {
+                             false
+                        };
+
+                        if is_cidr {
+                             t1_policy.network.deny_cidrs.push(dest.clone());
+                        } else if let Ok(port) = dest.parse::<u16>() {
+                             t1_policy.network.deny_ports.push(port);
+                        } else {
+                             t1_policy.network.deny_destinations.push(dest.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let compiled = assay_policy::tiers::compile(&t1_policy);
+
+        if !args.quiet {
+            eprintln!("Locked & Loaded Assurance Policy 🛡️");
+            eprintln!("  • Tier 1 (Kernel): {} rules", compiled.stats.tier1_rules);
+            eprintln!("  • Tier 2 (User):   {} rules", compiled.stats.tier2_rules);
+            if !compiled.stats.warnings.is_empty() {
+                for w in &compiled.stats.warnings {
+                    eprintln!("    ⚠️  {}", w);
+                }
+            }
+        }
+
+        if let Err(e) = monitor.set_tier1_rules(&compiled) {
+            eprintln!("Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}", e);
+        }
+    }
+
+    if args.monitor_all {
+        if !args.quiet { println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering."); }
+        monitor.set_monitor_all(true)?;
+    }
+
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
 
     // Ctrl-C handler
@@ -254,7 +358,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                     Some(Ok(event)) => {
                         let mut violation_rule: Option<&ActiveRule> = None;
 
-                        // ENFORCEMENT LOGIC (Linux Only)
+                        // ENFORCEMENT LOGIC (Linux Only) - Tier 2
                         if !rules.is_empty() && event.event_type == EVENT_OPENAT {
                              let raw = decode_utf8_cstr(&event.data);
                              let path = normalize_path_syntactic(&raw);
@@ -271,23 +375,26 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                              }
                         }
 
-                        // REACT
+                        // REACT (Tier 2)
+                        // Note: If Kernel blocked it (Tier 1), we get EVENT_FILE_BLOCKED instead of openat?
+                        // Actually, lsm_file_open returns EPERM.
+                        // Does tracepoint sys_enter_openat still fire? Yes.
+                        // So we might technically double-match here.
+                        // But since it's already blocked, 'kill' is redundant but harmless (process might be handling error).
+                        // If we want to avoid killing blocked processes, we need coordination.
+                        // But for now, rigorous enforcement is safer.
+
                         if let Some(rule) = violation_rule {
-                             if args.print && !args.quiet {
+                             if !args.quiet {
                                  println!("[PID {}] 🚨 VIOLATION: Rule '{}' matched file access", event.pid, rule.id);
                              }
 
                              if rule.action == assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
                                  // Check Kill Switch Configuration
-                                 // Default to SAFE defaults if config missing (though it shouldn't be null if policy loaded)
-                                 // But 'kill_config' is Option<KillSwitchConfig>.
-
-                                 // Default fallback
                                  let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;
                                  let default_grace = 3000;
 
                                  let (enabled, mode, grace) = if let Some(kc) = &kill_config {
-                                     // Check for specific trigger override
                                      let trigger = kc.triggers.iter().find(|t| t.on_rule == rule.id);
                                      let mode = trigger.and_then(|t| t.mode.clone()).unwrap_or(kc.mode.clone());
                                      (kc.enabled, mode, kc.grace_period_ms)
@@ -296,17 +403,29 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                  };
 
                                  if enabled {
-                                      if args.print && !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
+                                      if !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
                                       kill_pid(event.pid, mode, grace).await;
                                  }
                              }
                         }
 
                         // LOGGING
-                        if args.print && !args.quiet {
+                        if !args.quiet {
+                             // Import from assay-common required?
+                             // We use literal values or import
                              match event.event_type {
                                 EVENT_OPENAT => println!("[PID {}] openat: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 EVENT_CONNECT => println!("[PID {}] connect sockaddr[0..32]=0x{}", event.pid, dump_prefix_hex(&event.data, 32)),
+                                10 /* EVENT_FILE_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
+                                11 /* EVENT_FILE_ALLOWED */ => println!("[PID {}] 🟢 ALLOWED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
+                                20 /* EVENT_CONNECT_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED NET : {}", event.pid, dump_prefix_hex(&event.data, 20)), // IP/Port packed
+                                99 => {
+                                     // Debug Cgroup Mismatch
+                                     let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
+                                     let cgroup_id = u64::from_ne_bytes(cg_bytes);
+                                     let path_part = decode_utf8_cstr(&event.data[8..]);
+                                     println!("[PID {}] 🐛 LSM DEBUG: Cgroup={} Path={}", event.pid, cgroup_id, path_part);
+                                }
                                 _ => println!("[PID {}] event {} len={}", event.pid, event.event_type, event.data.len()),
                             }
                         }
@@ -329,3 +448,32 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
 #[cfg(target_os = "linux")]
 use futures::FutureExt; // for .boxed()
+
+#[cfg(target_os="linux")]
+fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
+    use std::io::BufRead;
+    use std::os::linux::fs::MetadataExt; // for st_ino
+
+    let cgroup_path = format!("/proc/{}/cgroup", pid);
+    let file = std::fs::File::open(&cgroup_path)?;
+    let reader = std::io::BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line?;
+        // V2 format: "0::/user.slice/..."
+        // Hybrid might have "1:name=systemd:..."
+        // We look for "0::" (V2 unified)
+        if line.starts_with("0::") {
+            let path = line.trim_start_matches("0::");
+            let path = if path.is_empty() { "/" } else { path }; // Root cgroup
+
+            let full_path = format!("/sys/fs/cgroup{}", path);
+            let metadata = std::fs::metadata(&full_path).map_err(|e| anyhow::anyhow!("Failed to stat {}: {}", full_path, e))?;
+            return Ok(metadata.st_ino());
+        }
+    }
+
+    // Fallback: If no V2 entry, maybe use /proc/self/cgroup inode?
+    // Or just fail.
+    Err(anyhow::anyhow!("No Cgroup V2 entry found in {}", cgroup_path))
+}

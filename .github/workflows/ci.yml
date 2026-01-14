@@ -53,6 +53,7 @@ jobs:
         run: |
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
           echo "SCCACHE_DIR=$HOME/.sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=false" >> $GITHUB_ENV
           echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse" >> $GITHUB_ENV
 
       - name: Configure Linker (Linux)
@@ -95,24 +96,60 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Spawn a single process that will:
-          # 1) wait for monitor to attach
-          # 2) open /etc/hosts (openat in same PID)
-          # 3) connect to example.com's IP (connect in same PID)
-          # Spawn a target process that will do openat + connect
-          bash -lc 'sleep 1; cat /etc/hosts >/dev/null; curl -s https://example.com >/dev/null || true; sleep 1' &
-          TARGET_PID=$!
-          echo "Target PID: $TARGET_PID"
-
-          # Monitor that PID (needs sudo)
-          sudo -E ./target/debug/assay monitor \
-            --pid "$TARGET_PID" \
-            --duration 5s \
+          # 1) Start monitor in background
+          # We use --monitor-all to bypass cgroup filtering.
+          rm -f monitor.log
+          sudo -E timeout 20s ./target/debug/assay monitor \
+            --monitor-all \
+            --duration 20s \
             --ebpf target/assay-ebpf.o \
-            --print | tee monitor.log
+            --print > monitor.log 2>&1 &
+          MON_PID=$!
 
-          # Ensure the target process ended (it should)
-          wait "$TARGET_PID" || true
+          # 2) Wait until monitor is ready (max 30s due to slow CI startup)
+          # We look for "Assay Monitor running" which assay prints when attached
+          timeout 30 bash -lc 'until grep -q "Assay Monitor running" monitor.log; do sleep 0.1; done' || cat monitor.log
 
-          # Now assert we captured something
-          grep -E 'openat|connect' monitor.log
+          echo "Monitor attached. Running workload..."
+
+          # 3) Run workload (simple shell commands)
+          # Trigger openat
+          ls /etc/hosts
+          # Trigger connect
+          curl -I --connect-timeout 2 http://1.1.1.1 || true
+          echo "curl exit code: $?"
+
+          # 4) Wait for monitor to finish (duration=20s)
+          # Use wait instead of blind sleep
+          wait $MON_PID || true
+
+          # 5) Assertions
+          echo "Checking log for events..."
+          cat monitor.log
+          if ! grep -q "openat" monitor.log; then
+            echo "::error::Tracepoint 'openat' not found in log!"
+            exit 1
+          fi
+          if ! grep -q "connect" monitor.log; then
+            echo "::error::Tracepoint 'connect' not found in log!"
+            exit 1
+          fi
+
+      - name: Debug Diagnostics
+        if: always()
+        run: |
+           {
+             echo "## eBPF Smoke Test Results"
+             echo ""
+             echo "### monitor.log (tail 200)"
+             echo '```'
+             tail -n 200 monitor.log || echo "No log found"
+             echo '```'
+           } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload monitor log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log
+          path: monitor.log

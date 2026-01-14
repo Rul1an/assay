@@ -69,17 +69,11 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
             .count(),
         managed: servers
             .iter()
-            .filter(|s| match s.policy_status {
-                assay_core::discovery::types::PolicyStatus::Managed { .. } => true,
-                _ => false,
-            })
+            .filter(|s| matches!(s.policy_status, assay_core::discovery::types::PolicyStatus::Managed { .. }))
             .count(),
         unmanaged: servers
             .iter()
-            .filter(|s| match s.policy_status {
-                assay_core::discovery::types::PolicyStatus::Unmanaged => true,
-                _ => false,
-            })
+            .filter(|s| matches!(s.policy_status, assay_core::discovery::types::PolicyStatus::Unmanaged))
             .count(),
         with_auth: servers
             .iter()

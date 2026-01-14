@@ -21,9 +21,9 @@ impl TracepointResolver {
         let openat_fn = Self::find_offset("syscalls", "sys_enter_openat", "filename").unwrap_or(24);
         map.insert(0, openat_fn);
 
-        let connect_sa = Self::find_offset("syscalls", "sys_enter_connect", "uservaddr").unwrap_or(24);
-        // Note: Field name for connect might be different on some kernels (uservaddr vs addr)
-        // If uservaddr fails, try addr? For now keep simple fallback.
+        let connect_sa = Self::find_offset("syscalls", "sys_enter_connect", "uservaddr")
+            .or_else(|_| Self::find_offset("syscalls", "sys_enter_connect", "addr"))
+            .unwrap_or(24);
         map.insert(1, connect_sa);
 
         let fork_parent = Self::find_offset("sched", "sched_process_fork", "parent_pid").unwrap_or(24);

@@ -43,18 +43,13 @@ pub struct DiscoveryActions {
     pub no_auth: ActionLevel,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionLevel {
+    #[default]
     Log,
     Warn,
     Fail,
-}
-
-impl Default for ActionLevel {
-    fn default() -> Self {
-        ActionLevel::Log
-    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -96,17 +91,12 @@ impl Default for MonitorScopeConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorMode {
+    #[default]
     CgroupV2,
     PidSet, // Legacy
-}
-
-impl Default for MonitorMode {
-    fn default() -> Self {
-        MonitorMode::CgroupV2
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -147,32 +137,22 @@ fn default_pids_max() -> u32 {
     2048
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorProvider {
+    #[default]
     Ebpf,
 }
 
-impl Default for MonitorProvider {
-    fn default() -> Self {
-        MonitorProvider::Ebpf
-    }
-}
-
 /// If you already have a Severity type in assay-core: replace this with your existing Severity.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Low,
+    #[default]
     Medium,
     High,
     Critical,
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Severity::Medium
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -212,18 +192,13 @@ pub struct MonitorMatch {
     pub not: Option<Box<MonitorMatch>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorAction {
+    #[default]
     Log,
     Alert,
     TriggerKill,
-}
-
-impl Default for MonitorAction {
-    fn default() -> Self {
-        MonitorAction::Log
-    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -271,31 +246,21 @@ impl Default for KillSwitchConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum KillMode {
+    #[default]
     Graceful,
     Immediate,
 }
 
-impl Default for KillMode {
-    fn default() -> Self {
-        KillMode::Graceful
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum KillScope {
+    #[default]
     Cgroup,
     PidFd,
     LegacyPid,
-}
-
-impl Default for KillScope {
-    fn default() -> Self {
-        KillScope::Cgroup
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

@@ -7,7 +7,7 @@ pub enum MonitorError {
 
     #[cfg(target_os = "linux")]
     #[error("aya error: {0}")]
-    Aya(#[from] aya::BpfError),
+    Aya(#[from] aya::EbpfError),
 
     #[cfg(target_os = "linux")]
     #[error("map error: {0}")]
@@ -16,6 +16,10 @@ pub enum MonitorError {
     #[cfg(target_os = "linux")]
     #[error("program error: {0}")]
     Program(#[from] aya::programs::ProgramError),
+
+    #[cfg(target_os = "linux")]
+    #[error("btf error: {0}")]
+    Btf(#[from] aya::BtfError),
 
     #[cfg(target_os = "linux")]
     #[error("map '{name}' not found")]

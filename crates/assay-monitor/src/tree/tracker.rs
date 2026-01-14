@@ -147,7 +147,7 @@ impl ProcessTreeTracker {
 
         let children = read_children(pid).unwrap_or_default();
         for child_pid in children {
-            if let Err(_) = self.on_fork(pid, child_pid) {
+            if self.on_fork(pid, child_pid).is_err() {
                 continue;
             }
             let _ = self.scan_children(child_pid, current_depth + 1);

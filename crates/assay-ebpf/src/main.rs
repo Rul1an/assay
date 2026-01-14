@@ -1,6 +1,18 @@
 #![no_std]
 #![no_main]
 
+
+
+
+
+#[no_mangle]
+#[link_section = "license"]
+pub static _LICENSE: [u8; 4] = *b"GPL\0";
+
+
+pub mod lsm;
+pub mod socket_lsm;
+
 use assay_common::{MonitorEvent, EVENT_CONNECT, EVENT_OPENAT};
 use aya_ebpf::{
     macros::{map, tracepoint},
@@ -15,7 +27,7 @@ use aya_ebpf::{
 
 #[inline(always)]
 fn current_tgid() -> u32 {
-    unsafe { (bpf_get_current_pid_tgid() >> 32) as u32 }
+    (bpf_get_current_pid_tgid() >> 32) as u32
 }
 
 
@@ -28,7 +40,7 @@ static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 /// Map of Cgroup IDs (inodes) we're monitoring.
 /// Key: Cgroup ID (u64), Value: 1 (present)
 #[map]
-static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0);
+pub static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0);
 
 /// Configuration Map for dynamic offsets.
 /// Key 0: openat filename offset (default 24)
@@ -44,6 +56,7 @@ const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
+const KEY_MONITOR_ALL: u32 = 100;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
@@ -55,6 +68,11 @@ fn max_ancestor_depth() -> usize {
 
 #[inline(always)]
 fn is_monitored() -> bool {
+    // 0. Global Monitor-All Override
+    if unsafe { CONFIG.get(&KEY_MONITOR_ALL) }.copied().unwrap_or(0) != 0 {
+        return true;
+    }
+
     // 1. Check PID (Legacy/Override)
     if unsafe { MONITORED_PIDS.get(&current_tgid()) }.is_some() {
         return true;
@@ -82,7 +100,7 @@ fn is_monitored() -> bool {
     false
 }
 
-const DATA_LEN: usize = 256;
+const DATA_LEN: usize = 512;
 
 #[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {

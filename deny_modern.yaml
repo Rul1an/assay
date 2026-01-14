@@ -1,0 +1,15 @@
+version: "2.0"
+name: "Assay Shield Test"
+runtime_monitor:
+  enabled: true
+  rules:
+    - id: "block-secret"
+      type: "file_open"
+      match:
+        path_globs: ["/tmp/assay-test/secret.txt"]
+      severity: "critical"
+      action: "trigger_kill"
+kill_switch:
+  enabled: true
+  triggers:
+    - on_rule: "block-secret"
