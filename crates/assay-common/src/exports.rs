@@ -31,6 +31,7 @@ pub enum ProcessStateExport {
 
 /// Exported process tree
 #[derive(Debug, Clone, Serialize)]
+#[derive(Default)]
 pub struct ProcessTreeExport {
     /// Root PIDs (explicitly monitored)
     pub roots: Vec<u32>,
@@ -42,15 +43,7 @@ pub struct ProcessTreeExport {
     pub total_count: usize,
 }
 
-impl Default for ProcessTreeExport {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            nodes: HashMap::new(),
-            total_count: 0,
-        }
-    }
-}
+
 
 /// Kill result export (from kill_tree)
 #[derive(Debug, Clone, Serialize)]

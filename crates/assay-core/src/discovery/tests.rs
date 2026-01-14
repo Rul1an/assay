@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod test_suite {
     use crate::discovery::config_files::scan_config_files;
     use std::fs;
     use tempfile::TempDir;

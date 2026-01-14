@@ -18,6 +18,10 @@ pub enum MonitorError {
     Program(#[from] aya::programs::ProgramError),
 
     #[cfg(target_os = "linux")]
+    #[error("btf error: {0}")]
+    Btf(#[from] aya::BtfError),
+
+    #[cfg(target_os = "linux")]
     #[error("map '{name}' not found")]
     MapNotFound { name: &'static str },
 

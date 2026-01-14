@@ -2,14 +2,15 @@
 set -e
 
 # ==============================================================================
-# SOTA Verification Runner (Polyglot)
+# ==============================================================================
+# Assay Verification Runner (Polyglot)
 # Supports:
 # 1. Native Linux (Direct Execution) - Best for CI/Production
 # 2. macOS + Lima VM (Option B) - Best for Local Dev
 # 3. macOS + Docker (Option C) - Fallback (Skipped if tracefs missing)
 # ==============================================================================
 
-echo "🚀 Starting Assay SOTA Verification..."
+echo "🚀 Starting Assay Verification..."
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR"
 
@@ -32,10 +33,12 @@ echo "----------------------------------------------------------------"
 ARCH=$(uname -m)
 if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
   TARGET="aarch64-unknown-linux-musl"
-  BUILDER_IMAGE="messense/rust-musl-cross:aarch64-musl"
+  # Pin SHA for security (Verified 2026-01-14)
+  BUILDER_IMAGE="messense/rust-musl-cross@sha256:8ce9001cba339adabb99bfc06184b4da8d7fcdf381883279a35a5ec396a3f476"
   echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
 else
   TARGET="x86_64-unknown-linux-musl"
+  # TODO: Pin SHA for x86_64 once verified
   BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
   echo "💻 Detected x86_64. Building for target: $TARGET"
 fi
@@ -51,20 +54,20 @@ echo "📝 [3/3] Generating Test Policy (deny.yaml)..."
 echo "----------------------------------------------------------------"
 cat > deny.yaml <<EOF
 files:
-  deny: ["/secret.txt"]
+  deny: ["/tmp/assay-test/secret.txt"]
 EOF
 
 # Modern Policy for Shield/LSM enforcement
 cat > deny_modern.yaml <<EOF
 version: "2.0"
-name: "SOTA Shield Test"
+name: "Assay Shield Test"
 runtime_monitor:
   enabled: true
   rules:
     - id: "block-secret"
       type: "file_open"
       match:
-        path_globs: ["/secret.txt"]
+        path_globs: ["/tmp/assay-test/secret.txt"]
       severity: "critical"
       action: "trigger_kill"
 kill_switch:
@@ -82,6 +85,10 @@ echo "----------------------------------------------------------------"
 
 RUN_TEST_CMD='
 set -e
+# Cleanup any stale monitors
+pkill -f assay || true
+rm -f /tmp/assay-test/secret.txt || true
+
 echo ">> [Diag] Kernel: $(uname -r)"
 echo ">> [Diag] Active LSMs: $(cat /sys/kernel/security/lsm 2>/dev/null || echo "N/A")"
 echo ">> [Diag] Tracefs: $(mount | grep tracefs || echo "Missing")"
@@ -93,8 +100,8 @@ if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
 fi
 
 echo ">> [Test] Setting up test files..."
-echo "TOP SECRET DATA" > /secret.txt
-chmod 600 /secret.txt
+echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
+chmod 600 /tmp/assay-test/secret.txt
 
 # Start Monitor
 RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print > monitor.log 2>&1 &
@@ -104,9 +111,11 @@ sleep 5 # Wait for attachment
 
 
 # Run the Victim Process (cat) SYNCHRONOUSLY to ensure it shares the Cgroup of $$
-echo ">> [Test] Attempting Access (cat /secret.txt)..."
-cat /secret.txt
+echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
+set +e
+cat /tmp/assay-test/secret.txt
 EXIT_CODE=$?
+set -e
 
 # Kill monitor
 kill $MONITOR_PID
@@ -141,7 +150,7 @@ if [ "$(uname -s)" == "Linux" ]; then
     exit 0
 fi
 
-# --- Strategy B: macOS + Lima (The "SOTA Dev" Way) ---
+# --- Strategy B: macOS + Lima (The "Assay Dev" Way) ---
 if command -v limactl >/dev/null 2>&1; then
     LIMA_INSTANCE="default"
     if limactl list | grep -q "$LIMA_INSTANCE.*Running"; then
@@ -185,7 +194,7 @@ fi
 DOCKER_ARGS=(run --rm --privileged --pid=host --cgroupns=host)
 DOCKER_ARGS+=(-v "${WORKDIR}/target/$TARGET/release/assay:/usr/local/bin/assay")
 DOCKER_ARGS+=(-v "${WORKDIR}/target/assay-ebpf.o:/assay-ebpf.o")
-DOCKER_ARGS+=(-v "${WORKDIR}/deny.yaml:/deny.yaml")
+DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml") # Fix: Mount modern policy
 
 # Mounts if present
 [ -d /sys/fs/bpf ] && DOCKER_ARGS+=(-v /sys/fs/bpf:/sys/fs/bpf)
@@ -225,7 +234,7 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   chmod 600 /secret.txt
 
   echo "1. Starting Assay Monitor..."
-  RUST_LOG=info assay monitor --ebpf /assay-ebpf.o --policy /deny.yaml --print &
+  RUST_LOG=info assay monitor --ebpf /assay-ebpf.o --policy /deny_modern.yaml --print &
   MONITOR_PID=$!
   sleep 3
 

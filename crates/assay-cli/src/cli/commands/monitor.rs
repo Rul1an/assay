@@ -69,7 +69,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
     {
         let _ = args;
         eprintln!("Error: 'assay monitor' is only supported on Linux.");
-        return Ok(40); // MONITOR_NOT_SUPPORTED code
+        Ok(40) // MONITOR_NOT_SUPPORTED code
     }
 
     #[cfg(target_os = "linux")]
@@ -125,7 +125,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
              eprintln!("Warning: Failed to populate PID map: {}", e);
         }
 
-        // SOTA: Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
+        // Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
         let mut cgroups = Vec::new();
         for &pid in &args.pid {
             // Cgroup V2 ID Resolution
@@ -252,7 +252,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // --- SOTA PHASE 6: Tier 1 Policy Compilation ---
+    // --- Tier 1 Policy Compilation ---
     if let Some(cfg) = &runtime_config {
         let mut t1_policy = assay_policy::tiers::Policy::default();
 
@@ -282,9 +282,15 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                 assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
                     for dest in &r.match_config.dest_globs {
                         // Attempt to parse as CIDR, otherwise Glob
-                        // Note: MonitorMatch doesn't distinguish CIDR vs Glob explicitly yet.
-                        // We use a heuristic.
-                        if dest.contains('/') { // Likely CIDR
+                        // Heuristic: Check if "IP/Prefix" format
+                        let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
+                             // Check if left side is IP and right side is number
+                             ip_part.parse::<std::net::IpAddr>().is_ok() && prefix_part.parse::<u8>().is_ok()
+                        } else {
+                             false
+                        };
+
+                        if is_cidr {
                              t1_policy.network.deny_cidrs.push(dest.clone());
                         } else if let Ok(port) = dest.parse::<u16>() {
                              t1_policy.network.deny_ports.push(port);
@@ -300,7 +306,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         let compiled = assay_policy::tiers::compile(&t1_policy);
 
         if !args.quiet {
-            eprintln!("Locked & Loaded SOTA Policy 🛡️");
+            eprintln!("Locked & Loaded Assurance Policy 🛡️");
             eprintln!("  • Tier 1 (Kernel): {} rules", compiled.stats.tier1_rules);
             eprintln!("  • Tier 2 (User):   {} rules", compiled.stats.tier2_rules);
             if !compiled.stats.warnings.is_empty() {
