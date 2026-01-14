@@ -13,8 +13,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use assay_policy::tiers::CompiledPolicy;
 
 pub enum MonitorLink {
+    #[allow(dead_code)]
     TracePoint(aya::programs::trace_point::TracePointLinkId),
+    #[allow(dead_code)]
     Lsm(aya::programs::lsm::LsmLinkId),
+    #[allow(dead_code)]
     CgroupSockAddr(aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId),
 }
 
@@ -111,24 +114,24 @@ impl LinuxMonitor {
         let mut bpf = self.bpf.lock().unwrap();
 
         // 1. Open
-        if let Some(mut prog) = bpf.program_mut("assay_monitor_openat") {
-             if let Ok(mut tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+        if let Some(prog) = bpf.program_mut("assay_monitor_openat") {
+             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                   tp.load()?;
                   let link = tp.attach("syscalls", "sys_enter_openat")?;
                   self.links.push(MonitorLink::TracePoint(link));
              }
         }
 
-        if let Some(mut prog) = bpf.program_mut("assay_monitor_openat2") {
-             if let Ok(mut tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+        if let Some(prog) = bpf.program_mut("assay_monitor_openat2") {
+             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                   tp.load()?;
                   let link = tp.attach("syscalls", "sys_enter_openat2")?;
                   self.links.push(MonitorLink::TracePoint(link));
              }
         }
 
-        if let Some(mut prog) = bpf.program_mut("assay_monitor_connect") {
-             if let Ok(mut tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+        if let Some(prog) = bpf.program_mut("assay_monitor_connect") {
+             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                   tp.load()?;
                   let link = tp.attach("syscalls", "sys_enter_connect")?;
                   self.links.push(MonitorLink::TracePoint(link));
@@ -136,8 +139,8 @@ impl LinuxMonitor {
         }
 
         // 2. LSM
-        if let Some(mut prog) = bpf.program_mut("lsm_file_open") {
-             if let Ok(mut lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
+        if let Some(prog) = bpf.program_mut("lsm_file_open") {
+             if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
                   let btf = Btf::from_sys_fs()?;
                   lsm.load("file_open", &btf)?;
                   let link = lsm.attach()?;
