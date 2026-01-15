@@ -183,16 +183,22 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
     }
 
     // Define local CO-RE struct to access f_path.
-    // Aya/LLVM will relocate the field offset to match the running kernel.
+    // WARNING: We MUST have a non-zero offset to force the compiler to emit
+    // an pointer arithmetic instruction (add) that CO-RE can relocate.
+    // If f_path is at offset 0, compiler uses original pointer, preventing relocation patch.
     #[repr(C)]
     struct file {
+        // Force offset > 0. Size doesn't matter, CO-RE patches the access.
+        // Using u64 to arguably align with 'f_header' or similar conceptual fields.
+        _pad: u64,
         pub f_path: path,
     }
 
     // Cast void ptr to our local CO-RE definition
     let f = unsafe { &*(file_ptr as *const file) };
 
-    // This address computation '&f.f_path' should be CO-RE relocated.
+    // This address computation '&f.f_path' generates 'ptr + 8' (or similar).
+    // The Loader patches '8' to the ACTUAL kernel offset (e.g. 64).
     let path_ptr = &f.f_path as *const path as *mut path;
 
     // Use *mut i8 cast strictly
