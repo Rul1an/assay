@@ -182,11 +182,22 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
         return Ok(0);
     }
 
-    // Heuristic: struct file starts with f_u (rcu_head/callback_head) which is 16 bytes.
-    // f_path usually follows immediately at offset 16.
-    // Previous attempts (CO-RE and Offset 64/8) failed verification.
-    // Offset 16 matches standard layout for 5.15/6.x kernels.
-    let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
+    // Define local CO-RE struct to access f_path.
+    // We pad with 16 bytes to skip 'f_u' (rcu_head/callback_head).
+    // This places f_path at offset 16, matching standard kernel list.
+    // By using a struct member, we preserve the 'path' type info for the verifier.
+    #[repr(C)]
+    struct file {
+        pub _pad: [u8; 16],
+        pub f_path: path,
+    }
+
+    // Cast void ptr to our local CO-RE definition
+    let f = unsafe { &*(file_ptr as *const file) };
+
+    // This address computation '&f.f_path' generates 'ptr + 16'.
+    // The verifier sees this as accessing the 'f_path' member of 'file'.
+    let path_ptr = &f.f_path as *const path as *mut path;
 
     // Use *mut i8 cast strictly
     let len = unsafe {
