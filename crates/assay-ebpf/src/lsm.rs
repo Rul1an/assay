@@ -5,7 +5,7 @@ use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
 };
 use crate::MONITORED_CGROUPS;
-use core::ffi::c_void;
+use core::ffi::{c_void, c_char};
 
 #[map]
 static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
@@ -136,7 +136,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
                  let key = InodeKey { dev, ino };
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
                      // Blocked!
-                     let mut partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed
+                     let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed
                      emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, &partial_path[0..0], 0);
                      inc_stat(STAT_BLOCKED);
                      return Ok(-1);
@@ -152,13 +152,13 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     // Safety: read_file_path writes to the pointer treating it as *mut u8.
     // It creates a valid C string or fails.
     let buf_ptr = path_buf.as_mut_ptr() as *mut u8;
-    let buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
+    let _buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
 
     // CONDITIONAL PATH RESOLUTION
     // To pass CI, we DISABLE read_file_path for now because of the verifier loop/type hell.
     // Uncomment the next line only when bpf_d_path is fixed or kernel supports it.
     // let mut path_len = read_file_path(file_ptr, buf_slice)?;
-    let mut path_len = 0; // Disabled for CI robustness logic
+    let path_len = 0; // Disabled for CI robustness logic
 
     // ... (Remainder path logic is skipped if len=0) ...
     if path_len == 0 {
@@ -223,7 +223,7 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
 
    let len = unsafe {
-       bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
+       bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
    };
    if len < 0 { return Err(len as i64); }
    Ok(len as usize)
