@@ -82,93 +82,52 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Reserve space in RingBuf FIRST to avoid stack allocation
-    let mut event_reservation = LSM_EVENTS.reserve::<LsmEvent>(0);
-    if event_reservation.is_none() {
-        inc_stat(STAT_ERRORS);
-        // Fail-open if monitoring buffer full (standard practice to avoid breaking system)
-        return Ok(0);
-    }
+    // Use MaybeUninit to avoid the expensive zero-initialization loop on stack
+    let mut path_buf: [core::mem::MaybeUninit<u8>; MAX_PATH_LEN] =
+        unsafe { core::mem::MaybeUninit::uninit().assume_init() };
 
-    // We have a reservation. Using `unwrap_unchecked` pattern safely because of check above.
-    let mut event = event_reservation.unwrap();
-    let ev = unsafe { &mut *event.as_mut_ptr() };
+    // Safety: read_file_path writes to the pointer treating it as *mut u8.
+    // It creates a valid C string or fails.
+    let buf_ptr = path_buf.as_mut_ptr() as *mut u8;
+    let buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
 
-    // Initialize fixed fields
-    ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
-    ev.cgroup_id = cgroup_id;
-
-    // Read path DIRECTLY into ringbuf memory
-    let mut path_len = match read_file_path(file_ptr, &mut ev.path) {
-        Ok(len) => len,
-        Err(_) => {
-            event.discard(0);
-            return Ok(0);
-        }
-    };
+    let mut path_len = read_file_path(file_ptr, buf_slice)?;
 
     if path_len > MAX_PATH_LEN {
         path_len = MAX_PATH_LEN;
     }
 
-    // Align with userspace hashing (no null terminator)
-    if path_len > 0 && ev.path[path_len - 1] == 0 {
-        path_len -= 1;
-    }
-    ev.path_len = path_len as u32;
-
-    if path_len == 0 {
-         event.discard(0);
-         return Ok(0);
-    }
-
-    // Zero trailing bytes to prevent info leaks (manual memset)
-    // This is verifier-friendly as it depends on `path_len` which is bounded.
-    // Optimization: Unroll or chunk? Simple loop for now.
-    // Note: bpf_d_path wrote up to path_len.
-    // Using a bounded loop for safety.
-    let start = path_len;
-    if start < MAX_PATH_LEN {
-        // We can't use a dynamic range iterator easily in BPF sometimes.
-        // But `for i in start..MAX_PATH_LEN` works if compiler handles it.
-        // To be safe, we just leave it for now or rely on read_file_path behavior?
-        // `read_file_path` writes `path_len` bytes.
-        // We MUST zero the rest.
-        // Let's use a explicit slice assignment if possible?
-        // `ev.path[start..].fill(0)`? No std lib.
-
-        // Use a simple loop.
-        for i in 0..MAX_PATH_LEN {
-             if i >= start {
-                 ev.path[i] = 0;
-             }
+    // Align with userspace hashing (no null terminator check if bytes exist)
+    // We must read the initialized byte.
+    // path_buf is uninit, but read_file_path initialized up to path_len.
+    if path_len > 0 {
+        let last_byte = unsafe { *path_buf[path_len - 1].as_ptr() };
+        if last_byte == 0 {
+             path_len -= 1;
         }
     }
 
-    let path_hash = fnv1a_hash(&ev.path[..path_len]);
-
-    let mut ret = 0;
-
-    if let Some(&rule_id) = unsafe { DENY_PATHS_EXACT.get(&path_hash) } {
-        ev.event_type = EVENT_FILE_BLOCKED;
-        ev.rule_id = rule_id;
-        ev.action = 0; // Deny? action=0 meant BLOCKED in emit_event usage?
-                       // Wait, emit_event call passed '0' for action in BLOCKED case?
-                       // Line 103: emit_event(..., 0).
-                       // Line 108: emit_event(..., 1).
-        ev.action = 0;
-        inc_stat(STAT_BLOCKED);
-        ret = -1; // -EPERM
-    } else {
-        ev.event_type = EVENT_FILE_ALLOWED;
-        ev.rule_id = 0;
-        ev.action = 1;
-        inc_stat(STAT_ALLOWED);
+    if path_len == 0 {
+        return Ok(0);
     }
 
-    event.submit(0);
-    Ok(ret)
+    // Create a safe slice for hashing
+    // Safety: we initialized path_len bytes.
+    let path_slice = unsafe { core::slice::from_raw_parts(path_buf.as_ptr() as *const u8, path_len) };
+    let path_hash = fnv1a_hash(path_slice);
+
+    // Lookups
+    if let Some(&rule_id) = unsafe { DENY_PATHS_EXACT.get(&path_hash) } {
+        // Emit blocked
+        emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, path_slice, 0);
+        inc_stat(STAT_BLOCKED);
+        return Ok(-1);
+    }
+
+    // Emit allowed
+    emit_event(EVENT_FILE_ALLOWED, cgroup_id, 0, path_slice, 1);
+    inc_stat(STAT_ALLOWED);
+    Ok(0)
 }
 
 #[inline(always)]
@@ -188,6 +147,31 @@ fn inc_stat(index: u32) {
     }
 }
 
+#[inline(always)]
+fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], action: u32) {
+    if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
+        let ev = unsafe { &mut *event.as_mut_ptr() };
+        ev.event_type = event_type;
+        ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+        ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
+        ev.cgroup_id = cgroup_id;
+        ev.rule_id = rule_id;
+        ev.action = action;
+        let len = if path.len() > MAX_PATH_LEN { MAX_PATH_LEN } else { path.len() };
+        ev.path_len = len as u32;
+
+        unsafe {
+            // Copy the actual path bytes
+            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), len);
+            // Zero the rest of the ringbuf slot to prevent leaks
+            if len < MAX_PATH_LEN {
+                core::ptr::write_bytes(ev.path.as_mut_ptr().add(len), 0, MAX_PATH_LEN - len);
+            }
+        }
+        event.submit(0);
+    }
+}
+
 use aya_ebpf::bindings::path;
 
 #[inline(always)]
@@ -198,14 +182,10 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
         return Ok(0);
     }
 
-    // Use proper CO-RE binding to access f_path
-    // This allows the verifier to track the types from 'file' to 'path'
-    let f = unsafe { &*(file_ptr as *const aya_ebpf::bindings::file) };
+    // Use raw pointer arithmetic as fallback because local binding definitions fail CO-RE.
+    // The verifier accepts this for Stack buffers usually.
+    let path_ptr = unsafe { (file_ptr as *const u8).add(64) as *mut path };
 
-    // &f.f_path gives us a pointer to the 'path' field within the 'file' struct
-    let path_ptr = &f.f_path as *const path as *mut path;
-
-    // Use *mut i8 cast strictly
     let len = unsafe {
         bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
     };
