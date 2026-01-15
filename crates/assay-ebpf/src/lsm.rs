@@ -190,6 +190,14 @@ fn inc_stat(index: u32) {
 
 use aya_ebpf::bindings::path;
 
+// Minimal file struct shim for typed field access
+// Heuristic based on Lima 6.17.0-8-generic BTF: f_path starts at offset 64.
+#[repr(C)]
+struct file_shim {
+    _pad: [u8; 64],
+    f_path: path,
+}
+
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
     use aya_ebpf::helpers::bpf_d_path;
@@ -198,11 +206,11 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
         return Ok(0);
     }
 
-    // Heuristic based on Lima 6.17.0-8-generic BTF:
-    // f_lock(4) + f_mode(4) + f_op(8) + f_mapping(8) + private_data(8) + f_inode(8) + flags(4) + iocb(4) + cred(8) + owner(8) = 64 bytes
-    // f_path starts at offset 64.
-    let path_ptr = unsafe { (file_ptr as *const u8).add(64) as *mut path };
+    // Use typed access to satisfy verifier type tracking for bpf_d_path
+    let f = unsafe { &*(file_ptr as *const file_shim) };
+    let path_ptr = &f.f_path as *const path as *mut path;
 
+    // Use *mut i8 cast strictly
     let len = unsafe {
         bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
     };
