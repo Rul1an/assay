@@ -243,6 +243,12 @@ jobs:
           # Pass PATH so root can find cargo
           sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --enforce-lsm
 
+      - name: Fix Runner Permissions (Cleanup)
+        if: always()
+        run: |
+          echo "🧹 Cleaning up root-owned files..."
+          sudo chown -R $(whoami):$(id -gn) . || true
+
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@v4
