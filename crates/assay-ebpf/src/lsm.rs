@@ -2,7 +2,7 @@ use aya_ebpf::{
     macros::{lsm, map},
     maps::{HashMap, RingBuf, Array},
     programs::LsmContext,
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid},
+    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
 };
 use crate::MONITORED_CGROUPS;
 use core::ffi::c_void;
@@ -101,17 +101,10 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(32) as *const *const u8;
 
     // 2. Read the inode pointer
-    let mut inode_ptr: *const u8 = core::ptr::null();
-    unsafe {
-        match aya_ebpf::helpers::bpf_probe_read_kernel(
-            &mut inode_ptr as *mut *const u8 as *mut c_void,
-            core::mem::size_of::<*const u8>() as u32,
-            f_inode_ptr_addr as *const c_void
-        ) {
-            Ok(_) => {},
-            Err(_) => return Ok(0), // Failed to read f_inode
-        }
-    }
+    // aya-ebpf IO helper: unsafe fn bpf_probe_read_kernel<T>(src: *const T) -> Result<T, c_long>
+    let inode_ptr = unsafe {
+        bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
+    };
 
     if !inode_ptr.is_null() {
         // 3. Offsets for inode fields
@@ -121,40 +114,24 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         let i_ino_addr = inode_ptr.wrapping_add(64) as *const u64;
 
         // 4. Read i_ino
-        let mut ino: u64 = 0;
-        let ret_ino = unsafe {
-             aya_ebpf::helpers::bpf_probe_read_kernel(
-                 &mut ino as *mut u64 as *mut c_void,
-                 8,
-                 i_ino_addr as *const c_void
-             )
+        let ino = unsafe {
+             bpf_probe_read_kernel(i_ino_addr).unwrap_or(0)
         };
-        if ret_ino.is_err() { return Ok(0); } // Can't read inode
 
         // 5. Read i_sb (pointer to superblock)
-        let mut sb_ptr: *const c_void = core::ptr::null();
-        let ret_sb = unsafe {
-             aya_ebpf::helpers::bpf_probe_read_kernel(
-                 &mut sb_ptr as *mut *const c_void as *mut c_void,
-                 8,
-                 i_sb_addr as *const c_void
-             )
+        let sb_ptr = unsafe {
+             bpf_probe_read_kernel(i_sb_addr).unwrap_or(core::ptr::null())
         };
 
-        if ret_sb.is_ok() {
+        if !sb_ptr.is_null() {
             // 6. Read s_dev from superblock (Offset 16)
             // s_dev is u32 (dev_t)
             let s_dev_addr = (sb_ptr as *const u8).wrapping_add(16) as *const u32;
-            let mut s_dev: u32 = 0;
-            let ret_dev = unsafe {
-                aya_ebpf::helpers::bpf_probe_read_kernel(
-                    &mut s_dev as *mut u32 as *mut c_void,
-                    4,
-                    s_dev_addr as *const c_void
-                )
+            let s_dev = unsafe {
+                bpf_probe_read_kernel(s_dev_addr).unwrap_or(0)
             };
 
-            if ret_dev.is_ok() {
+            if s_dev != 0 {
                  let dev = s_dev as u64;
                  let key = InodeKey { dev, ino };
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
