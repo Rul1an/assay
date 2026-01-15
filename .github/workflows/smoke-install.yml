@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   checks: write
+  actions: read
 
 jobs:
   assay:
@@ -56,6 +57,7 @@ jobs:
       - name: Publish test report
         if: always()
         uses: dorny/test-reporter@v1
+        continue-on-error: true
         with:
           name: Assay (JUnit)
           path: reports/assay-junit.xml
