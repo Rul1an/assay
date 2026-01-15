@@ -232,6 +232,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Verify LSM blocking (CI gate)
         run: |
           chmod +x scripts/verify_lsm_docker.sh
