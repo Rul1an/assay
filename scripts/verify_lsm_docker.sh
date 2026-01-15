@@ -7,7 +7,7 @@ CI_MODE=0
 # Parse args
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-    case $1 in
+
         --release-tag) RELEASE_TAG="$2"; shift ;;
         --ci-mode) CI_MODE=1 ;;
         --enforce-lsm) ENFORCE_LSM=1 ;;
