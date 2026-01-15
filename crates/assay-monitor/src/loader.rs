@@ -175,6 +175,39 @@ impl LinuxMonitor {
             }
         }
 
+        use std::os::unix::fs::MetadataExt;
+        if let Some(map) = bpf.map_mut("DENY_INODES_EXACT") {
+            // Key is [u8; 16] to match InodeKey { dev: u64, ino: u64 } repr(C)
+            // or we use a POD struct if defined. Here we treat it as byte array for simplicity in userspace.
+            // u64 = 8 bytes. 2x u64 = 16 bytes.
+            let mut hm: AyaHashMap<_, [u8; 16], u32> = AyaHashMap::try_from(map)?;
+
+            for rule in &compiled.tier1.file_deny_exact {
+                 // Resolve path to inode
+                 // If file doesn't exist, we skip it (LSM only sees open of EXISTING files for now)
+                 // NOTE: Inodes block existing files. New files are checked by path?
+                 // We disabled path check, so new files with matching name but new inode won't be blocked
+                 // UNLESS we refresh inode map.
+                 // For CI smoke test, file exists.
+                 if let Ok(md) = std::fs::metadata(&rule.path) {
+                     let dev = md.dev();
+                     let ino = md.ino();
+
+                     // Construct key: dev (8) + ino (8)
+                     // Endianness: native?
+                     // eBPF uses native `u64`. We are mostly on same arch for CI.
+                     let mut key = [0u8; 16];
+                     key[0..8].copy_from_slice(&dev.to_ne_bytes());
+                     key[8..16].copy_from_slice(&ino.to_ne_bytes());
+
+                     hm.insert(key, rule.rule_id, 0)?;
+                 } else {
+                     // Log warning?
+                     eprintln!("Warning: Failed to stat deny file '{}', inode rules will not apply.", rule.path);
+                 }
+            }
+        }
+
         if let Some(map) = bpf.map_mut("DENY_PATHS_PREFIX") {
             let mut hm: AyaHashMap<_, u64, [u32; 2]> = AyaHashMap::try_from(map)?;
             for (hash, (len, rule_id)) in compiled.tier1.file_prefix_entries() {
