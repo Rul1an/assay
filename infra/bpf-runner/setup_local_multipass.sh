@@ -1,7 +1,10 @@
 #!/bin/bash
 # ==============================================================================
 # Setup Local BPF-LSM Runner (Multipass)
-# SOTA 2026 Best Practices
+# SOTA 2026 Best Practices:
+# - Uses separate VM for isolation
+# - Enables BPF-LSM in kernel via cloud-init
+# - Configures dedicated 'github-runner' user for service isolation
 # ==============================================================================
 set -e
 

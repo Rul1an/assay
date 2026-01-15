@@ -76,20 +76,27 @@ multipass exec "$VM" -- sudo bash -c '
     fi
 
     # ALWAYS Fix Permissions (Fixes UnauthorizedAccessException on re-runs)
-    chmod -R 777 /opt/actions-runner/_diag || true
+    # SOTA: Fix Permissions strictly for github-runner
+    echo "   -> Enforcing strict ownership (github-runner:github-runner)..."
     chown -R github-runner:github-runner /opt/actions-runner
 '
 
 # 1. Configure (Unattended)
 # Note: --labels bpf-lsm is CRITICAL for our workflow!
-# We allow this to fail if already configured (idempotent)
 multipass exec "$VM" -- sudo su - github-runner -c \
     "cd /opt/actions-runner && ./config.sh --url $REPO_URL --token $TOKEN --labels self-hosted,linux,x64,bpf-lsm --unattended --replace || echo '⚠️  Config skipped (already configured?)'"
 
-# 2. Install & Start Service
-# 2. Install & Start Service
-echo "🔌 Installing & Starting Service..."
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh install" || echo "⚠️  Service install skipped"
+# 2. Install & Start Service (SOTA: As Dedicated User)
+echo "🔌 Installing & Starting Service (User: github-runner)..."
+# Force stop/uninstall old service if it exists (e.g. running as root/ubuntu)
+multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh stop || true"
+multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh uninstall || true"
+
+# Re-fix ownership just in case uninstall messed with it
+multipass exec "$VM" -- sudo chown -R github-runner:github-runner /opt/actions-runner
+
+# Install as dedicated user
+multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh install github-runner" || echo "⚠️  Service install skipped"
 multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh start" || echo "⚠️  Service start skipped"
 multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh status" || true
 
