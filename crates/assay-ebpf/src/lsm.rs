@@ -64,6 +64,7 @@ pub fn file_open_lsm(ctx: LsmContext) -> i32 {
 }
 
 #[inline(always)]
+#[inline(always)]
 fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     inc_stat(STAT_CHECKS);
 
@@ -81,33 +82,93 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    let mut path_buf = [0u8; MAX_PATH_LEN];
-    let mut path_len = read_file_path(file_ptr, &mut path_buf)?;
+    // Reserve space in RingBuf FIRST to avoid stack allocation
+    let mut event_reservation = LSM_EVENTS.reserve::<LsmEvent>(0);
+    if event_reservation.is_none() {
+        inc_stat(STAT_ERRORS);
+        // Fail-open if monitoring buffer full (standard practice to avoid breaking system)
+        return Ok(0);
+    }
+
+    // We have a reservation. Using `unwrap_unchecked` pattern safely because of check above.
+    let mut event = event_reservation.unwrap();
+    let ev = unsafe { &mut *event.as_mut_ptr() };
+
+    // Initialize fixed fields
+    ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+    ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
+    ev.cgroup_id = cgroup_id;
+
+    // Read path DIRECTLY into ringbuf memory
+    let mut path_len = match read_file_path(file_ptr, &mut ev.path) {
+        Ok(len) => len,
+        Err(_) => {
+            event.discard(0);
+            return Ok(0);
+        }
+    };
 
     if path_len > MAX_PATH_LEN {
         path_len = MAX_PATH_LEN;
     }
 
     // Align with userspace hashing (no null terminator)
-    if path_len > 0 && path_buf[path_len - 1] == 0 {
+    if path_len > 0 && ev.path[path_len - 1] == 0 {
         path_len -= 1;
     }
+    ev.path_len = path_len as u32;
 
     if path_len == 0 {
-        return Ok(0);
+         event.discard(0);
+         return Ok(0);
     }
 
-    let path_hash = fnv1a_hash(&path_buf[..path_len]);
+    // Zero trailing bytes to prevent info leaks (manual memset)
+    // This is verifier-friendly as it depends on `path_len` which is bounded.
+    // Optimization: Unroll or chunk? Simple loop for now.
+    // Note: bpf_d_path wrote up to path_len.
+    // Using a bounded loop for safety.
+    let start = path_len;
+    if start < MAX_PATH_LEN {
+        // We can't use a dynamic range iterator easily in BPF sometimes.
+        // But `for i in start..MAX_PATH_LEN` works if compiler handles it.
+        // To be safe, we just leave it for now or rely on read_file_path behavior?
+        // `read_file_path` writes `path_len` bytes.
+        // We MUST zero the rest.
+        // Let's use a explicit slice assignment if possible?
+        // `ev.path[start..].fill(0)`? No std lib.
+
+        // Use a simple loop.
+        for i in 0..MAX_PATH_LEN {
+             if i >= start {
+                 ev.path[i] = 0;
+             }
+        }
+    }
+
+    let path_hash = fnv1a_hash(&ev.path[..path_len]);
+
+    let mut ret = 0;
 
     if let Some(&rule_id) = unsafe { DENY_PATHS_EXACT.get(&path_hash) } {
-        emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, &path_buf, path_len, 0);
+        ev.event_type = EVENT_FILE_BLOCKED;
+        ev.rule_id = rule_id;
+        ev.action = 0; // Deny? action=0 meant BLOCKED in emit_event usage?
+                       // Wait, emit_event call passed '0' for action in BLOCKED case?
+                       // Line 103: emit_event(..., 0).
+                       // Line 108: emit_event(..., 1).
+        ev.action = 0;
         inc_stat(STAT_BLOCKED);
-        return Ok(-1); // -EPERM
+        ret = -1; // -EPERM
+    } else {
+        ev.event_type = EVENT_FILE_ALLOWED;
+        ev.rule_id = 0;
+        ev.action = 1;
+        inc_stat(STAT_ALLOWED);
     }
 
-    emit_event(EVENT_FILE_ALLOWED, cgroup_id, 0, &path_buf, path_len, 1);
-    inc_stat(STAT_ALLOWED);
-    Ok(0)
+    event.submit(0);
+    Ok(ret)
 }
 
 #[inline(always)]
@@ -124,26 +185,6 @@ fn fnv1a_hash(data: &[u8]) -> u64 {
 fn inc_stat(index: u32) {
     if let Some(val) = LSM_STATS.get_ptr_mut(index) {
         unsafe { *val += 1 };
-    }
-}
-
-#[inline(always)]
-fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8; MAX_PATH_LEN], path_len: usize, action: u32) {
-    if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
-        let ev = unsafe { &mut *event.as_mut_ptr() };
-        ev.event_type = event_type;
-        ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-        ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
-        ev.cgroup_id = cgroup_id;
-        ev.rule_id = rule_id;
-        ev.action = action;
-        ev.path_len = path_len as u32;
-
-        unsafe {
-            // Secure copy: always copy full buffer to avoid uninitialized memory leak in RingBuf.
-            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), MAX_PATH_LEN);
-        }
-        event.submit(0);
     }
 }
 
