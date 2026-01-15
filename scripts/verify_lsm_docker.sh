@@ -7,12 +7,16 @@ CI_MODE=0
 # Parse args
 while [[ "$#" -gt 0 ]]; do
     case $1 in
+    case $1 in
         --release-tag) RELEASE_TAG="$2"; shift ;;
         --ci-mode) CI_MODE=1 ;;
+        --enforce-lsm) ENFORCE_LSM=1 ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
 done
+
+ENFORCE_LSM=${ENFORCE_LSM:-0}
 
 # ==============================================================================
 # ==============================================================================
@@ -248,16 +252,19 @@ HOST_HAS_TRACEFS=0
 [ -d /sys/kernel/debug ] && HOST_HAS_DEBUGFS=1
 
 # Preflight Skip logic
-if [ "$(uname -s)" != "Linux" ]; then
     # We are on Mac/Windows, checking if we should skip
     echo "⚠️  Non-Linux Host + No Lima."
     echo "   Docker Desktop VM often lacks tracefs mounts."
+    if [ "$ENFORCE_LSM" -eq 1 ]; then
+        echo "❌ FAILURE: Enforcement required but environment incompatible."
+        exit 1
+    fi
     echo "   Proceeding with best-effort, but expecting SKIP."
-fi
 
 # Docker Args
 DOCKER_ARGS=(run --rm --privileged --pid=host --cgroupns=host)
 DOCKER_ARGS+=(-e CI_MODE="$CI_MODE")
+DOCKER_ARGS+=(-e ENFORCE_LSM="$ENFORCE_LSM")
 DOCKER_ARGS+=(-v "${WORKDIR}/assay:/usr/local/bin/assay")
 DOCKER_ARGS+=(-v "${WORKDIR}/target/assay-ebpf.o:/assay-ebpf.o")
 DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml") # Fix: Mount modern policy
@@ -279,6 +286,7 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   # Check availability
   if [ ! -d /sys/kernel/tracing ] && [ ! -d /sys/kernel/debug/tracing ]; then
     echo "⚠️  SKIP: tracefs not available (Docker Desktop limitation)."
+    if [ "${ENFORCE_LSM:-0}" -eq 1 ]; then echo "❌ Enforcement Active: TraceFS missing"; exit 1; fi
     exit 0
   fi
 
@@ -286,11 +294,13 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   if [ -r /sys/kernel/security/lsm ]; then
     if ! grep -q "bpf" /sys/kernel/security/lsm; then
        echo "⚠️  SKIP: BPF LSM not active in kernel (Docker Desktop limitation)."
+       if [ "${ENFORCE_LSM:-0}" -eq 1 ]; then echo "❌ Enforcement Active: BPF LSM missing in /sys/kernel/security/lsm"; exit 1; fi
        exit 0
     fi
   else
     # If securityfs is missing, we assume no LSM support
     echo "⚠️  SKIP: /sys/kernel/security/lsm missing (Docker Desktop limitation)."
+    if [ "${ENFORCE_LSM:-0}" -eq 1 ]; then echo "❌ Enforcement Active: /sys/kernel/security/lsm missing"; exit 1; fi
     exit 0
   fi
 

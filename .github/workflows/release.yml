@@ -227,7 +227,8 @@ jobs:
   verify-lsm-blocking:
     name: Verify LSM Enforcement
     needs: [build]
-    runs-on: ubuntu-latest
+    # SOTA 2026: Require explicit 'bpf-lsm' label for guaranteed kernel support
+    runs-on: [self-hosted, bpf-lsm]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -238,9 +239,9 @@ jobs:
       - name: Verify LSM blocking (CI gate)
         run: |
           chmod +x scripts/verify_lsm_docker.sh
-          # Use Standard Mode (Soft Skip if BPF LSM unavailable) to avoid blocking release on GitHub Runners
+          # Standard Mode + Enforcement: Will FAIL if BPF is missing.
           # Pass PATH so root can find cargo
-          sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh
+          sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --enforce-lsm
 
       - name: Upload verification logs
         if: always()
