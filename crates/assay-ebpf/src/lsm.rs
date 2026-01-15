@@ -1,3 +1,5 @@
+#![no_std]
+#![no_main]
 
 use aya_ebpf::{
     macros::{lsm, map},
@@ -74,7 +76,9 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     }
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
-    let monitor_all = unsafe { CONFIG_LSM.get(&0).copied().unwrap_or(0) != 0 };
+
+    let monitor_val = unsafe { CONFIG_LSM.get(&0).copied().unwrap_or(0) };
+    let monitor_all = monitor_val != 0;
 
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
         return Ok(0);
@@ -127,7 +131,7 @@ fn inc_stat(index: u32) {
 }
 
 #[inline(always)]
-fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_len: usize, action: u32) {
+fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8; MAX_PATH_LEN], path_len: usize, action: u32) {
     if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
@@ -138,23 +142,36 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], path_l
         ev.action = action;
         ev.path_len = path_len as u32;
 
-        // Optimized copy/clear to avoid verifier loop complexity limit
-        let len = if path_len < MAX_PATH_LEN { path_len } else { MAX_PATH_LEN };
         unsafe {
-            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), len);
-            if len < MAX_PATH_LEN {
-                core::ptr::write_bytes(ev.path.as_mut_ptr().add(len), 0, MAX_PATH_LEN - len);
-            }
+            // Secure copy: always copy full buffer to avoid uninitialized memory leak in RingBuf.
+            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), MAX_PATH_LEN);
         }
         event.submit(0);
     }
 }
 
+use aya_ebpf::bindings::{path, file};
+
 #[inline(always)]
-fn read_file_path(_file_ptr: *const c_void, _buf: &mut [u8; MAX_PATH_LEN]) -> Result<usize, i64> {
-    // bpf_d_path requires valid vmlinux bindings (CO-RE) which we cannot generate in this environment.
-    // Manual subset bindings failed relocation.
-    // We disable path resolution in LSM to ensure CI reliability.
-    // Inode blocking should be used for enforcement instead.
-    Ok(0)
+fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
+    use aya_ebpf::helpers::bpf_d_path;
+
+    if file_ptr.is_null() {
+        return Ok(0);
+    }
+
+    // Heuristic based on Lima 6.17.0-8-generic BTF:
+    // f_lock(4) + f_mode(4) + f_op(8) + f_mapping(8) + private_data(8) + f_inode(8) + flags(4) + iocb(4) + cred(8) + owner(8) = 64 bytes
+    // f_path starts at offset 64.
+    let path_ptr = unsafe { (file_ptr as *const u8).add(64) as *mut path };
+
+    let len = unsafe {
+        bpf_d_path(path_ptr, buf.as_mut_ptr(), MAX_PATH_LEN as u32)
+    };
+
+    if len < 0 {
+        return Err(len as i64);
+    }
+
+    Ok(len as usize)
 }

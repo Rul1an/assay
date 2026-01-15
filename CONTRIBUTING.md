@@ -39,3 +39,23 @@ cargo xtask build-ebpf --docker
 1. Feature branch: `feat/description` or `fix/description`.
 2. Clean commits using [Conventional Commits](https://www.conventionalcommits.org/).
 3. All CI gates (Linux/macOS/Windows) must be green.
+# Aya Upgrade Protocol
+- Sync  and  versions.
+- Run eBPF build successful (docker) for target bpfel-unknown-none.
+- Verify with 🚀 Starting Assay Verification...
+----------------------------------------------------------------
+🛠️  [1/3] Building eBPF bytecode (assay-ebpf)...
+----------------------------------------------------------------
+eBPF build successful (docker) for target bpfel-unknown-none
+----------------------------------------------------------------
+🛠️  [2/3] Building assay-cli (userspace)...
+----------------------------------------------------------------
+🍎 Detected ARM64 (Apple Silicon). Building for target: aarch64-unknown-linux-musl
+----------------------------------------------------------------
+📝 [3/3] Generating Test Policy (deny.yaml)...
+----------------------------------------------------------------
+----------------------------------------------------------------
+🧪 Starting Runtime Verification...
+----------------------------------------------------------------
+🍋 Lima VM 'default' detected.
+   Running test inside Lima....

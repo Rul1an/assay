@@ -8,7 +8,7 @@ runtime_monitor:
       match:
         path_globs: ["/tmp/assay-test/secret.txt"]
       severity: "critical"
-      action: "trigger_kill"
+      action: "deny"
 kill_switch:
   enabled: true
   triggers:

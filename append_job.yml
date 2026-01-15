@@ -1,0 +1,41 @@
+
+  # ============================================================
+  # Verify LSM Enforcement (Self-Hosted Gate)
+  # ============================================================
+  verify-lsm-blocking:
+    name: Verify LSM Enforcement
+    needs: [build]
+    runs-on: [self-hosted, bpf-lsm]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Only needed if building locally, but 'build' job artifacts aren't automatically shared unless uploaded.
+      # The user implies 'build' job artifact usage or rebuilding?
+      # The script 'verify_lsm_docker.sh' handles download/build.
+      # If 'needs: [build]', do we download artifacts?
+      # The matrix produces multiple artifacts.
+      # The user's snippet uses './scripts/verify_lsm_docker.sh --ci-mode'.
+      # This script builds CLI and eBPF locally if not provided.
+      # Strategy A (Native Linux) builds CLI via cargo build (if not Release Tag download).
+      # But self-hosted runner might not have Rust?
+      # User said "Add verify-lsm-blocking job... run verify_lsm_docker.sh".
+      # I should probably assume the runner has Rust or the script handles it.
+      # Or I should download artifacts from 'build' job.
+      # Since the script builds via Docker (Strategy C) or Musl Cross (Strategy A via Docker), `verify_lsm_docker.sh` is self-contained for building.
+      # But Strategy A (Native) assumes local cargo if no release tag.
+      # I'll stick to user's snippet.
+
+      - name: Verify LSM blocking (CI gate)
+        run: |
+          chmod +x scripts/verify_lsm_docker.sh
+          # CI_MODE ensures hard failure on SKIP
+          sudo ./scripts/verify_lsm_docker.sh --ci-mode
+
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsm-verification-logs
+          path: /tmp/assay-lsm-verify/

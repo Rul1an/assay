@@ -198,6 +198,7 @@ pub enum MonitorAction {
     #[default]
     Log,
     Alert,
+    Deny,
     TriggerKill,
 }
 

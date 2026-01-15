@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v2.1.1] - 2026-01-15
+
+### 🛡️ LSM Hardening & Safety
+
+Critical release hardening the BPF-LSM implementation for production readiness.
+
+-   **Verifier Fix**: Resolved BPF verifier rejection (exit code 40) by optimizing `emit_event` (removed zeroing loop).
+-   **RingBuf Safety**: Implemented secure, full-buffer copy to prevent uninitialized memory leakage to userspace.
+-   **Explicit Deny**: Validated E2E `action: "deny"` enforcement (EPERM blocking).
+-   **CI Gate**: Hardened `verify_lsm_docker.sh` to enforce hard failures on blocking misses.
+
 ## [v2.0.0] - 2026-01-12
 
 ### 🛡️ SOTA Hardening (Phase 5)

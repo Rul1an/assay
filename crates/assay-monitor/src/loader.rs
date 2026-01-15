@@ -59,11 +59,24 @@ impl LinuxMonitor {
 
     pub fn set_config(&mut self, config: &std::collections::HashMap<u32, u32>) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        let map = bpf.map_mut("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
-        let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
-        for (&k, &v) in config {
-            hm.insert(k, v, 0)?;
+
+        // Update CONFIG (Tracepoints)
+        if let Some(map) = bpf.map_mut("CONFIG") {
+             let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+             for (&k, &v) in config {
+                 hm.insert(k, v, 0)?;
+             }
         }
+
+        // Update CONFIG_LSM (LSM)
+        if true {
+             let map = bpf.map_mut("CONFIG_LSM").expect("Failed to find CONFIG_LSM map");
+             let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+             for (&k, &v) in config {
+                 hm.insert(k, v, 0)?;
+             }
+        }
+
         Ok(())
     }
 
@@ -79,7 +92,8 @@ impl LinuxMonitor {
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         let val = if enabled { 1 } else { 0 };
         let config = std::collections::HashMap::from([
-             (100, val), // KEY_MONITOR_ALL = 100
+             (100, val), // KEY_MONITOR_ALL
+             (0, val),   // CONFIG_LSM expects key 0
         ]);
         self.set_config(&config)
     }
@@ -139,7 +153,8 @@ impl LinuxMonitor {
         }
 
         // 2. LSM
-        if let Some(prog) = bpf.program_mut("lsm_file_open") {
+        if true {
+             let prog = bpf.program_mut("file_open_lsm").expect("Failed to find LSM program 'file_open_lsm'");
              if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
                   let btf = Btf::from_sys_fs()?;
                   lsm.load("file_open", &btf)?;

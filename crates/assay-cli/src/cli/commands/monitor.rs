@@ -258,11 +258,14 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
         for r in &cfg.rules {
             // Assume TriggerKill means "Block if possible"
-            // If action is purely Log/Alert, technically we shouldn't block kernel-side.
+            // If action is Log/Alert, technically we shouldn't block kernel-side.
             // But for "Shield" implementation, we usually map "Deny/Kill" rules matchers.
             // The McpPolicy separates "Action" from "Rule".
             // If action is Log, we shouldn't put it in Tier 1 Deny.
-            let is_enforcement = matches!(r.action, assay_core::mcp::runtime_features::MonitorAction::TriggerKill);
+            let is_enforcement = matches!(r.action,
+                assay_core::mcp::runtime_features::MonitorAction::TriggerKill |
+                assay_core::mcp::runtime_features::MonitorAction::Deny
+            );
 
             if !is_enforcement { continue; }
 

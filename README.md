@@ -19,6 +19,15 @@ curl -fsSL https://getassay.dev/install.sh | sh
 cargo install assay-cli
 ```
 
+## Quick Verify
+
+Validate the release integrity in a secure Docker environment:
+
+```bash
+curl -o verify.sh https://raw.githubusercontent.com/Rul1an/assay/main/scripts/verify_lsm_docker.sh
+chmod +x verify.sh
+./verify.sh --release-tag v2.1
+```
 ## Quick Start
 
 ```bash
@@ -39,6 +48,14 @@ assay fix --yes
 -   **RCE Prevention**: Blocks `exec`, `shell`, `spawn` via tracepoint & LSM hooks.
 -   **Prompt Injection Defense**: Flags excessively long or vague tool descriptions.
 -   **Atomic Autofix**: Safely repairs config/code with zero corruption risk (atomic I/O).
+
+## Compatibility Matrix
+
+| Requirement | Min Version | Note |
+| :--- | :--- | :--- |
+| Linux Kernel | 5.8+ | `CONFIG_BPF_LSM=y` required |
+| BTF Support | required | `CONFIG_DEBUG_INFO_BTF=y` |
+| Filesystem | bpf, tracefs | Automatically mounted by Assay |
 
 ## CI: Validate your MCP policy on every PR (GitHub Actions)
 

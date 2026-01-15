@@ -1,5 +1,18 @@
 #!/bin/bash
 set -e
+RELEASE_TAG=""
+
+CI_MODE=0
+
+# Parse args
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --release-tag) RELEASE_TAG="$2"; shift ;;
+        --ci-mode) CI_MODE=1 ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
 
 # ==============================================================================
 # ==============================================================================
@@ -24,29 +37,67 @@ echo "🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
 cargo xtask build-ebpf --docker
 
-# Build CLI (User Space) via Musl Cross (Static Binary)
-echo "----------------------------------------------------------------"
-echo "🛠️  [2/3] Building assay-cli (userspace)..."
-echo "----------------------------------------------------------------"
 
-# Detect Architecture
-ARCH=$(uname -m)
-if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
-  TARGET="aarch64-unknown-linux-musl"
-  # Pin SHA for security (Verified 2026-01-14)
-  BUILDER_IMAGE="messense/rust-musl-cross@sha256:8ce9001cba339adabb99bfc06184b4da8d7fcdf381883279a35a5ec396a3f476"
-  echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
+
+
+if [ -n "$RELEASE_TAG" ]; then
+  # 1b. Download Mode
+  echo "----------------------------------------------------------------"
+  echo "⬇️  [1/3] Downloading Release Artifacts (${RELEASE_TAG})..."
+  echo "----------------------------------------------------------------"
+
+  # Determine arch for download
+  ARCH=$(uname -m)
+  if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
+    RELEASE_ARCH="aarch64-unknown-linux-gnu"
+  else
+    RELEASE_ARCH="x86_64-unknown-linux-gnu"
+  fi
+
+  URL="https://github.com/Rul1an/assay/releases/download/${RELEASE_TAG}/assay-${RELEASE_TAG}-${RELEASE_ARCH}.tar.gz"
+  echo "Downloading from: $URL"
+  curl -L -o assay.tar.gz "$URL"
+  tar -xzf assay.tar.gz
+  # Find binary in extracted folder (assay-v2.1-aarch64-.../assay)
+  EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "assay-${RELEASE_TAG}-*" | head -n 1)
+  cp "${EXTRACTED_DIR}/assay" ./assay
+  chmod +x assay
+  echo "✅ Downloaded and extracted release binary."
+
+
 else
-  TARGET="x86_64-unknown-linux-musl"
-  # TODO: Pin SHA for x86_64 once verified
-  BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
-  echo "💻 Detected x86_64. Building for target: $TARGET"
+  # 1a. Build Mode (Existing logic)
+  # Build CLI (User Space) via Musl Cross (Static Binary)
+  echo "----------------------------------------------------------------"
+  echo "🛠️  [2/3] Building assay-cli (userspace)..."
+  echo "----------------------------------------------------------------"
+
+  # Detect Architecture
+  ARCH=$(uname -m)
+  if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
+    TARGET="aarch64-unknown-linux-musl"
+    # Pin SHA for security (Verified 2026-01-14)
+    BUILDER_IMAGE="messense/rust-musl-cross@sha256:8ce9001cba339adabb99bfc06184b4da8d7fcdf381883279a35a5ec396a3f476"
+    echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
+  else
+    TARGET="x86_64-unknown-linux-musl"
+    # TODO: Pin SHA for x86_64 once verified
+    BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
+    echo "💻 Detected x86_64. Building for target: $TARGET"
+  fi
+
+  docker run --rm -v "${WORKDIR}:/code" -w /code \
+    -e CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+    "$BUILDER_IMAGE" \
+    cargo build --package assay-cli --bin assay --release --target "$TARGET"
+
+  # Move binary to root for parity with download mode
+  cp "target/${TARGET}/release/assay" ./assay
 fi
 
-docker run --rm -v "${WORKDIR}:/code" -w /code \
-  -e CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
-  "$BUILDER_IMAGE" \
-  cargo build --package assay-cli --bin assay --release --target "$TARGET"
+# Create structured log directory for CI
+mkdir -p /tmp/assay-lsm-verify
+LOG_DIR="/tmp/assay-lsm-verify"
 
 # Generate Policy (Legacy format for reference, but we use deny_modern.yaml)
 echo "----------------------------------------------------------------"
@@ -69,7 +120,7 @@ runtime_monitor:
       match:
         path_globs: ["/tmp/assay-test/secret.txt"]
       severity: "critical"
-      action: "trigger_kill"
+      action: "deny"
 kill_switch:
   enabled: true
   triggers:
@@ -79,14 +130,10 @@ EOF
 # ------------------------------------------------------------------------------
 # 2. Runtime Verification Phase (Smart Runner)
 # ------------------------------------------------------------------------------
-echo "----------------------------------------------------------------"
-echo "🧪 Starting Runtime Verification..."
-echo "----------------------------------------------------------------"
-
 RUN_TEST_CMD='
 set -e
 # Cleanup any stale monitors
-pkill -f assay || true
+pkill -x assay || true
 rm -f /tmp/assay-test/secret.txt || true
 
 echo ">> [Diag] Kernel: $(uname -r)"
@@ -96,6 +143,10 @@ echo ">> [Diag] BPFFS: $(mount | grep bpf || echo "Missing")"
 
 if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
   echo "⚠️  SKIP: 'bpf' not found in Active LSMs. Kernel cmdline needs 'lsm=...,bpf'."
+  if [ "${CI_MODE:-0}" -eq 1 ]; then
+      echo "❌ FAILURE: CI Mode requires BPF LSM support."
+      exit 1
+  fi
   exit 0
 fi
 
@@ -104,11 +155,11 @@ echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
 chmod 600 /tmp/assay-test/secret.txt
 
 # Start Monitor
-RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print > monitor.log 2>&1 &
+# Use specific log location for CI collection
+mkdir -p /tmp/assay-lsm-verify
+RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print > /tmp/assay-lsm-verify/monitor.log 2>&1 &
 MONITOR_PID=$!
 sleep 5 # Wait for attachment
-
-
 
 # Run the Victim Process (cat) SYNCHRONOUSLY to ensure it shares the Cgroup of $$
 echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
@@ -117,16 +168,21 @@ cat /tmp/assay-test/secret.txt
 EXIT_CODE=$?
 set -e
 
-# Kill monitor
-kill $MONITOR_PID
-wait $MONITOR_PID 2>/dev/null
+echo ">> [Result] cat exit: $EXIT_CODE"
 
-tail -n 20 monitor.log
+# Kill monitor (ignore exit code 143/SIGTERM)
+kill $MONITOR_PID 2>/dev/null || true
+wait $MONITOR_PID 2>/dev/null || true
+
+echo ">> [Logs] Last 20 lines of monitor.log:"
+tail -n 20 /tmp/assay-lsm-verify/monitor.log
 
 if [ $EXIT_CODE -ne 0 ]; then
     echo "✅ SUCCESS: Access Blocked (Exit code $EXIT_CODE)"
+    exit 0
 else
     echo "❌ FAILURE: Access Succeeded"
+    exit 1
 fi
 '
 
@@ -139,15 +195,19 @@ if [ "$(uname -s)" == "Linux" ]; then
     fi
 
     # Copy artifacts to temp dir to avoid pollution
+    # Always copy from ./assay (downloaded or built) + eBPF object + modern policy
     TMP_DIR=$(mktemp -d)
-    cp target/$TARGET/release/assay "$TMP_DIR/"
+    cp ./assay "$TMP_DIR/"
     cp target/assay-ebpf.o "$TMP_DIR/"
-    cp deny.yaml "$TMP_DIR/"
+    cp deny_modern.yaml "$TMP_DIR/"
 
     cd "$TMP_DIR"
-    bash -c "$RUN_TEST_CMD"
+    # Propagate CI_MODE to inner shell
+    CI_MODE=$CI_MODE bash -c "$RUN_TEST_CMD"
+    rc=$?
+    cd /
     rm -rf "$TMP_DIR"
-    exit 0
+    exit $rc
 fi
 
 # --- Strategy B: macOS + Lima (The "Assay Dev" Way) ---
@@ -162,13 +222,13 @@ if command -v limactl >/dev/null 2>&1; then
         limactl shell "$LIMA_INSTANCE" -- rm -rf /tmp/assay-test
         limactl shell "$LIMA_INSTANCE" -- mkdir -p /tmp/assay-test
 
-        limactl cp target/$TARGET/release/assay "$LIMA_INSTANCE":/tmp/assay-test/
+        limactl cp ./assay "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp target/assay-ebpf.o "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp deny.yaml "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp deny_modern.yaml "$LIMA_INSTANCE":/tmp/assay-test/
 
         # Run test inside Lima (sudo required)
-        limactl shell "$LIMA_INSTANCE" -- sudo bash -c "cd /tmp/assay-test && $RUN_TEST_CMD"
+        limactl shell "$LIMA_INSTANCE" -- sudo bash -c "export CI_MODE=$CI_MODE; cd /tmp/assay-test && $RUN_TEST_CMD"
         exit $?
     else
         echo "⚠️  Lima installed but '$LIMA_INSTANCE' not running. Skipping Strategy B."
@@ -192,7 +252,8 @@ fi
 
 # Docker Args
 DOCKER_ARGS=(run --rm --privileged --pid=host --cgroupns=host)
-DOCKER_ARGS+=(-v "${WORKDIR}/target/$TARGET/release/assay:/usr/local/bin/assay")
+DOCKER_ARGS+=(-e CI_MODE="$CI_MODE")
+DOCKER_ARGS+=(-v "${WORKDIR}/assay:/usr/local/bin/assay")
 DOCKER_ARGS+=(-v "${WORKDIR}/target/assay-ebpf.o:/assay-ebpf.o")
 DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml") # Fix: Mount modern policy
 
@@ -255,3 +316,4 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
 ')
 
 docker "${DOCKER_ARGS[@]}"
+PASS
