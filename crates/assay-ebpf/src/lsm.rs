@@ -182,10 +182,20 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
         return Ok(0);
     }
 
-    // Use raw pointer arithmetic as fallback because local binding definitions fail CO-RE.
-    // The verifier accepts this for Stack buffers usually.
-    let path_ptr = unsafe { (file_ptr as *const u8).add(64) as *mut path };
+    // Define local CO-RE struct to access f_path.
+    // Aya/LLVM will relocate the field offset to match the running kernel.
+    #[repr(C)]
+    struct file {
+        pub f_path: path,
+    }
 
+    // Cast void ptr to our local CO-RE definition
+    let f = unsafe { &*(file_ptr as *const file) };
+
+    // This address computation '&f.f_path' should be CO-RE relocated.
+    let path_ptr = &f.f_path as *const path as *mut path;
+
+    // Use *mut i8 cast strictly
     let len = unsafe {
         bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
     };
