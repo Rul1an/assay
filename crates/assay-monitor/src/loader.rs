@@ -69,7 +69,7 @@ impl LinuxMonitor {
         }
 
         // Update CONFIG_LSM (LSM)
-        if true {
+        {
              let map = bpf.map_mut("CONFIG_LSM").expect("Failed to find CONFIG_LSM map");
              let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
              for (&k, &v) in config {
@@ -153,7 +153,7 @@ impl LinuxMonitor {
         }
 
         // 2. LSM
-        if true {
+        {
              let prog = bpf.program_mut("file_open_lsm").expect("Failed to find LSM program 'file_open_lsm'");
              if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
                   let btf = Btf::from_sys_fs()?;
@@ -162,6 +162,7 @@ impl LinuxMonitor {
                   self.links.push(MonitorLink::Lsm(link));
              }
         }
+
 
         Ok(())
     }

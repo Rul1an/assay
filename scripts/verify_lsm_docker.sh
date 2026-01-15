@@ -316,4 +316,3 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
 ')
 
 docker "${DOCKER_ARGS[@]}"
-PASS

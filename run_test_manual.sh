@@ -1,7 +1,7 @@
 
 set -e
 # Cleanup any stale monitors
-pkill -x assay || true || true
+pkill -x assay || true
 rm -f /tmp/assay-test/secret.txt || true
 
 echo ">> [Diag] Kernel: $(uname -r)"

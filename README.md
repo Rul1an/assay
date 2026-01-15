@@ -26,7 +26,7 @@ Validate the release integrity in a secure Docker environment:
 ```bash
 curl -o verify.sh https://raw.githubusercontent.com/Rul1an/assay/main/scripts/verify_lsm_docker.sh
 chmod +x verify.sh
-./verify.sh --release-tag v2.1
+./verify.sh --release-tag v2.1.1
 ```
 ## Quick Start
 
