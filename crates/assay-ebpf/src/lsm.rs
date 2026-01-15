@@ -182,24 +182,11 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
         return Ok(0);
     }
 
-    // Define local CO-RE struct to access f_path.
-    // WARNING: We MUST have a non-zero offset to force the compiler to emit
-    // an pointer arithmetic instruction (add) that CO-RE can relocate.
-    // If f_path is at offset 0, compiler uses original pointer, preventing relocation patch.
-    #[repr(C)]
-    struct file {
-        // Force offset > 0. Size doesn't matter, CO-RE patches the access.
-        // Using u64 to arguably align with 'f_header' or similar conceptual fields.
-        _pad: u64,
-        pub f_path: path,
-    }
-
-    // Cast void ptr to our local CO-RE definition
-    let f = unsafe { &*(file_ptr as *const file) };
-
-    // This address computation '&f.f_path' generates 'ptr + 8' (or similar).
-    // The Loader patches '8' to the ACTUAL kernel offset (e.g. 64).
-    let path_ptr = &f.f_path as *const path as *mut path;
+    // Heuristic: struct file starts with f_u (rcu_head/callback_head) which is 16 bytes.
+    // f_path usually follows immediately at offset 16.
+    // Previous attempts (CO-RE and Offset 64/8) failed verification.
+    // Offset 16 matches standard layout for 5.15/6.x kernels.
+    let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
 
     // Use *mut i8 cast strictly
     let len = unsafe {
