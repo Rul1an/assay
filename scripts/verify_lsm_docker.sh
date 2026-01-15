@@ -33,7 +33,12 @@ cd "$WORKDIR"
 
 # Build eBPF (Kernel Space) via Builder Image
 echo "----------------------------------------------------------------"
-echo "🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
+echo "� [0/3] Preparing Docker Builder Image..."
+echo "----------------------------------------------------------------"
+cargo xtask build-image
+
+echo "----------------------------------------------------------------"
+echo "�🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
 cargo xtask build-ebpf --docker
 
