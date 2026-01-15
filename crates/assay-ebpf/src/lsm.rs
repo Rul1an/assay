@@ -1,6 +1,3 @@
-#![no_std]
-#![no_main]
-
 use aya_ebpf::{
     macros::{lsm, map},
     maps::{HashMap, RingBuf, Array},
@@ -150,7 +147,7 @@ fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8; MAX_PAT
     }
 }
 
-use aya_ebpf::bindings::{path, file};
+use aya_ebpf::bindings::path;
 
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
@@ -166,7 +163,7 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
     let path_ptr = unsafe { (file_ptr as *const u8).add(64) as *mut path };
 
     let len = unsafe {
-        bpf_d_path(path_ptr, buf.as_mut_ptr(), MAX_PATH_LEN as u32)
+        bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
     };
 
     if len < 0 {
