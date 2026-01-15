@@ -215,16 +215,17 @@ use aya_ebpf::bindings::path;
 // Keep read_file_path for future, but it's unused if disabled in try_file_open
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
-   use aya_ebpf::helpers::bpf_d_path;
+   // use aya_ebpf::helpers::bpf_d_path;
    if file_ptr.is_null() { return Ok(0); }
 
    // Heuristic: struct file starts with f_u (rcu_head/callback_head) which is 16 bytes.
    // f_path usually follows immediately at offset 16.
-   let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
+   // let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
 
-   let len = unsafe {
-       bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
-   };
-   if len < 0 { return Err(len as i64); }
-   Ok(len as usize)
+   // let len = unsafe {
+   //    bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
+   // };
+   // if len < 0 { return Err(len as i64); }
+   // Ok(len as usize)
+   Ok(0)
 }
