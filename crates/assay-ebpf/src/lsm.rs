@@ -63,8 +63,6 @@ pub fn file_open_lsm(ctx: LsmContext) -> i32 {
     }
 }
 
-#[inline(always)]
-#[inline(always)]
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct InodeKey {
@@ -95,11 +93,31 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     // Inode Blocking Logic (Verifier Safe)
     // Offset 32 for f_inode (after f_u[16] + f_path[16])
-    let inode_ptr = unsafe { *( (file_ptr as *const u8).add(32) as *const *const aya_ebpf::bindings::inode ) };
+    // file_ptr + 32 is a pointer to f_inode (which is struct inode *).
+    // So we cast (file_ptr + 32) to *const *const u8, and deref to get the inode pointer.
+    let inode_ptr_ptr = unsafe { (file_ptr as *const u8).add(32) as *const *const u8 };
+    let inode_ptr = unsafe { *inode_ptr_ptr };
 
     if !inode_ptr.is_null() {
-        use aya_ebpf::bindings::{inode, super_block};
-        let i = unsafe { &*inode_ptr };
+        // Define local structs for CO-RE/Offset access
+        // We use explicit offsets matching 5.15+ kernels to ensure correctness
+        // if CO-RE isn't fully active for local types.
+        #[repr(C)]
+        struct super_block {
+             pub _pad: [u8; 16], // s_list (16 bytes)
+             pub s_dev: u32,     // dev_t (u32) at offset 16
+        }
+
+        #[repr(C)]
+        struct inode {
+             pub _pad1: [u8; 40], // i_mode..i_op
+             pub i_sb: *mut super_block, // Offset 40
+             pub _pad2: [u8; 16], // i_mapping, i_security
+             pub i_ino: u64,      // Offset 64
+        }
+
+        // Cast to local struct
+        let i = unsafe { &*(inode_ptr as *const inode) };
         let ino = i.i_ino;
 
         let sb_ptr = i.i_sb;
