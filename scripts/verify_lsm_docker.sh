@@ -160,6 +160,7 @@ if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
 fi
 
 echo ">> [Test] Setting up test files..."
+mkdir -p /tmp/assay-test
 echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
 chmod 600 /tmp/assay-test/secret.txt
 
