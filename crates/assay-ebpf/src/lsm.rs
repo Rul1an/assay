@@ -131,20 +131,20 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
                 bpf_probe_read_kernel(s_dev_addr).unwrap_or(0)
             };
 
-            if s_dev != 0 {
-                 let dev = s_dev as u64;
-                 let key = InodeKey { dev, ino };
+             // DEBUG: Always emit kernel-side values for diagnosis
+             // Event 100 = Debug Inode
+             // Data: dev (8 bytes) + ino (8 bytes) = 16 bytes
+             let dev = s_dev as u64;
+             let key = InodeKey { dev, ino };
 
-                 // DEBUG: Emit RingBuf event with kernel-side values
-                 // Event 100 = Debug Inode
-                 // Data: dev (8 bytes) + ino (8 bytes) = 16 bytes
-                 let mut debug_data = [0u8; 16];
-                 unsafe {
-                     core::ptr::copy_nonoverlapping(&dev as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-                     core::ptr::copy_nonoverlapping(&ino as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
-                 }
-                 emit_event(100, cgroup_id, 0, &debug_data, 0);
+             let mut debug_data = [0u8; 16];
+             unsafe {
+                 core::ptr::copy_nonoverlapping(&dev as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+                 core::ptr::copy_nonoverlapping(&ino as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
+             }
+             emit_event(100, cgroup_id, 0, &debug_data, 0);
 
+             if s_dev != 0 {
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
                      // Blocked!
                      let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed
