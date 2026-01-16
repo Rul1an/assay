@@ -177,8 +177,8 @@ dmesg -T | grep -Ei "bpf|verifier|lsm|aya" | tail -n 300 > /tmp/assay-lsm-verify
 # Check if monitor died prematurely (Verifier error or crash)
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   echo "❌ FAILURE: Monitor exited before test began!"
-  echo ">> Monitor Logs (Last 50 lines):"
-  tail -n 50 /tmp/assay-lsm-verify/monitor.log
+  echo ">> Monitor Logs:"
+  cat /tmp/assay-lsm-verify/monitor.log
   exit 1
 fi
 
@@ -194,8 +194,12 @@ echo ">> [Result] cat exit: $EXIT_CODE"
 kill $MONITOR_PID 2>/dev/null || true
 wait $MONITOR_PID 2>/dev/null || true
 
-echo ">> [Logs] Last 20 lines of monitor.log:"
-tail -n 20 /tmp/assay-lsm-verify/monitor.log
+echo ">> [Logs] Monitor Log (DEBUG):"
+grep "DEBUG" /tmp/assay-lsm-verify/monitor.log || echo "No DEBUG lines found."
+echo ">> [Logs] Monitor Log (Warning):"
+grep "Warning" /tmp/assay-lsm-verify/monitor.log || echo "No Warning lines found."
+echo ">> [Logs] Last 50 lines of monitor.log:"
+tail -n 50 /tmp/assay-lsm-verify/monitor.log
 
 if [ $EXIT_CODE -ne 0 ]; then
     echo "✅ SUCCESS: Access Blocked (Exit code $EXIT_CODE)"
