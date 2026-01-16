@@ -2,6 +2,10 @@
 name = "assay-common"
 version = "2.0.0"
 edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Common shared types and utilities for the Assay framework."
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"], default-features = false }
