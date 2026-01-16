@@ -1,6 +1,6 @@
 [package]
 name = "assay-common"
-version = "2.0.0"
+version.workspace = true
 edition = "2021"
 license.workspace = true
 repository.workspace = true
