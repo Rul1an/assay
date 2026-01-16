@@ -134,6 +134,23 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
             if s_dev != 0 {
                  let dev = s_dev as u64;
                  let key = InodeKey { dev, ino };
+
+                 // DEBUG: Trace kernel-side values using a safe wrapper or raw helper
+                 // We use a small buffer and hardcoded format to avoid verifier string issues
+                 // 2049 = 0x801. If kernel sees 0, it's reading wrong.
+                 let _ = unsafe {
+                      let fmt = b"k_dev=%llu k_ino=%llu\0";
+                      // Use generic trace_printk if available, or just skip if too hard to link
+                      // Fixing the build is priority.
+                      // Let's try matching purely on INODE if Dev is mismatching frequently in OverlayFS.
+                      // Temporary fix: If dev mismatch, try 0? No.
+
+                      // Using trace_printk is tricky without aya-log.
+                      // We will TRUST verify_lsm_docker.sh captures dmesg if we use bpf_trace_printk.
+                      // We must use the helper correctly.
+                      aya_ebpf::helpers::bpf_trace_printk(fmt.as_ptr() as *const _, 20, dev, ino, 0)
+                 };
+
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
                      // Blocked!
                      let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed

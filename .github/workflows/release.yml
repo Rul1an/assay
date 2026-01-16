@@ -301,6 +301,13 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+      - name: Publish assay-policy
+        run: |
+          cargo publish --package assay-policy --verbose
+          sleep 45 # Allow indexing
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
       - name: Publish assay-mcp-server
         run: cargo publish --package assay-mcp-server --verbose
         env:
