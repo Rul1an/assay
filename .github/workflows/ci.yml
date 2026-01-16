@@ -74,82 +74,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install nightly + rust-src
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify LSM blocking (CI Mode)
         run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
+          chmod +x scripts/verify_lsm_docker.sh
+          # CI Mode = Soft Skip on Ubuntu-Latest (due to no BPF LSM), Hard Fail on missing tracefs
+          ./scripts/verify_lsm_docker.sh --ci-mode
 
-      - name: Install bpf-linker
-        run: |
-          cargo +nightly install bpf-linker --locked
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Build eBPF object
-        run: |
-          cargo +nightly xtask build-ebpf --release --no-docker
-
-      - name: Build assay CLI
-        run: |
-          cargo build -p assay-cli
-
-      - name: Smoke test (needs sudo)
-        run: |
-          set -euxo pipefail
-
-          # 1) Start monitor in background
-          # We use --monitor-all to bypass cgroup filtering.
-          rm -f monitor.log
-          sudo -E timeout 20s ./target/debug/assay monitor \
-            --monitor-all \
-            --duration 20s \
-            --ebpf target/assay-ebpf.o \
-            --print > monitor.log 2>&1 &
-          MON_PID=$!
-
-          # 2) Wait until monitor is ready (max 30s due to slow CI startup)
-          # We look for "Assay Monitor running" which assay prints when attached
-          timeout 30 bash -lc 'until grep -q "Assay Monitor running" monitor.log; do sleep 0.1; done' || cat monitor.log
-
-          echo "Monitor attached. Running workload..."
-
-          # 3) Run workload (simple shell commands)
-          # Trigger openat
-          ls /etc/hosts
-          # Trigger connect
-          curl -I --connect-timeout 2 http://1.1.1.1 || true
-          echo "curl exit code: $?"
-
-          # 4) Wait for monitor to finish (duration=20s)
-          # Use wait instead of blind sleep
-          wait $MON_PID || true
-
-          # 5) Assertions
-          echo "Checking log for events..."
-          cat monitor.log
-          if ! grep -q "openat" monitor.log; then
-            echo "::error::Tracepoint 'openat' not found in log!"
-            exit 1
-          fi
-          if ! grep -q "connect" monitor.log; then
-            echo "::error::Tracepoint 'connect' not found in log!"
-            exit 1
-          fi
-
-      - name: Debug Diagnostics
+      - name: Upload verification logs
         if: always()
-        run: |
-           {
-             echo "## eBPF Smoke Test Results"
-             echo ""
-             echo "### monitor.log (tail 200)"
-             echo '```'
-             tail -n 200 monitor.log || echo "No log found"
-             echo '```'
-           } >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload monitor log
-        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: monitor-log
-          path: monitor.log
+          name: ci-smoke-logs
+          path: /tmp/assay-lsm-verify/

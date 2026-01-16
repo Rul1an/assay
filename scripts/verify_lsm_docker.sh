@@ -170,7 +170,17 @@ RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml 
 MONITOR_PID=$!
 sleep 5 # Wait for attachment
 
-# Run the Victim Process (cat) SYNCHRONOUSLY to ensure it shares the Cgroup of $$
+# Collect dmesg logs for debugging verifier issues
+dmesg -T | grep -Ei "bpf|verifier|lsm|aya" | tail -n 300 > /tmp/assay-lsm-verify/dmesg_bpf.log 2>&1 || true
+
+# Check if monitor died prematurely (Verifier error or crash)
+if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+  echo "❌ FAILURE: Monitor exited before test began!"
+  echo ">> Monitor Logs (Last 50 lines):"
+  tail -n 50 /tmp/assay-lsm-verify/monitor.log
+  exit 1
+fi
+
 echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
 set +e
 cat /tmp/assay-test/secret.txt
