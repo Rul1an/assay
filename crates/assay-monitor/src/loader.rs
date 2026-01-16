@@ -201,6 +201,10 @@ impl LinuxMonitor {
                      key[0..8].copy_from_slice(&dev.to_ne_bytes());
                      key[8..16].copy_from_slice(&ino.to_ne_bytes());
 
+                     // DEBUG: Trace inode insertion
+                     eprintln!("DEBUG: Inserted Inode Rule: path='{}' dev={} ino={} rule_id={}",
+                         rule.path, dev, ino, rule.rule_id);
+
                      hm.insert(key, rule.rule_id, 0)?;
                  } else {
                      // Log warning?
