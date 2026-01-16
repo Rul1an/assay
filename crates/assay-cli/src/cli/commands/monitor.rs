@@ -422,6 +422,14 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 10 /* EVENT_FILE_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 11 /* EVENT_FILE_ALLOWED */ => println!("[PID {}] 🟢 ALLOWED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 20 /* EVENT_CONNECT_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED NET : {}", event.pid, dump_prefix_hex(&event.data, 20)), // IP/Port packed
+                                100 => {
+                                     // Debug Inode Event
+                                     let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
+                                     let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
+                                     let dev = u64::from_ne_bytes(dev_bytes);
+                                     let ino = u64::from_ne_bytes(ino_bytes);
+                                     println!("[PID {}] DEBUG: Kernel Saw dev={} ino={}", event.pid, dev, ino);
+                                }
                                 99 => {
                                      // Debug Cgroup Mismatch
                                      let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
