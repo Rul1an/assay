@@ -131,6 +131,19 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
                 bpf_probe_read_kernel(s_dev_addr).unwrap_or(0)
             };
 
+            // DEBUG: Trace inode info
+            // safety: string is null terminated
+            let fmt = b"LSM Check: dev=%u ino=%lu rule=%d\0";
+            unsafe {
+                aya_ebpf::helpers::bpf_trace_printk(
+                    fmt.as_ptr() as *const _,
+                    1024,
+                    s_dev as u64,
+                    ino,
+                    if unsafe { DENY_INODES_EXACT.get(&InodeKey{dev: s_dev as u64, ino}).is_some() } { 1 } else { 0 },
+                );
+            }
+
             if s_dev != 0 {
                  let dev = s_dev as u64;
                  let key = InodeKey { dev, ino };
