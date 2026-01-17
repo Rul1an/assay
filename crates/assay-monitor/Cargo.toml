@@ -2,6 +2,9 @@
 name = "assay-monitor"
 version = "2.1.15"
 edition = "2021"
+description = "Userspace monitor for Assay eBPF programs"
+license = "MIT"
+repository = "https://github.com/Rul1an/assay"
 
 [dependencies]
 assay-common = { path = "../assay-common", version = "2.0.0" }

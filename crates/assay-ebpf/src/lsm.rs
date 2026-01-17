@@ -109,7 +109,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     // -------------------------------------------------------------------------
     // Since offsets 32, 24, 48 are failing, we dump the first 64 bytes of struct file.
     // We will analyze the hex dump to find the pointers.
-    let mut inode_ptr = core::ptr::null(); // Declare inode_ptr here for later use
+    let inode_ptr: *const u8 = core::ptr::null(); // Explicit type to satisfy compiler
     {
          let file_ptr: *const c_void = unsafe { ctx.arg(0) };
          let mut file_dump = [0u8; 64];
@@ -192,7 +192,7 @@ fn inc_stat(index: u32) {
 
 #[inline(always)]
 #[inline(always)]
-fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], action: u32) {
+fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _action: u32) {
     if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
@@ -233,7 +233,7 @@ use aya_ebpf::bindings::path;
 
 // Keep read_file_path for future, but it's unused if disabled in try_file_open
 #[inline(always)]
-fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
+fn read_file_path(file_ptr: *const c_void, _buf: &mut [u8]) -> Result<usize, i64> {
    // use aya_ebpf::helpers::bpf_d_path;
    if file_ptr.is_null() { return Ok(0); }
 
