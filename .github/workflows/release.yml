@@ -53,22 +53,22 @@ jobs:
             cross: true
 
           # macOS x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: assay
-            archive: tar.gz
+          # - os: macos-latest
+          #   target: x86_64-apple-darwin
+          #   artifact: assay
+          #   archive: tar.gz
 
           # macOS aarch64 (Apple Silicon)
-          - os: macos-14
-            target: aarch64-apple-darwin
-            artifact: assay
-            archive: tar.gz
+          # - os: macos-14
+          #   target: aarch64-apple-darwin
+          #   artifact: assay
+          #   archive: tar.gz
 
           # Windows x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: assay.exe
-            archive: zip
+          # - os: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   artifact: assay.exe
+          #   archive: zip
 
     steps:
       - name: Checkout
