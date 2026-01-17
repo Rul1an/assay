@@ -99,28 +99,37 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
          // -------------------------------------------------------------------------
          if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
             let ev = unsafe { &mut *event.as_mut_ptr() };
-            ev.event_type = 101;
-            ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+            // -------------------------------------------------------------------------
+            // DEBUG: Struct Scanner (Event 101: 0-128, Event 102: 128-256)
+            // -------------------------------------------------------------------------
 
-            // Chunk 1: Read first 128 bytes
-            {
-                let src_ptr = file_ptr as *const [u8; 128];
-                let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                unsafe {
-                    core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
-                }
+            // Event 101: First 128 bytes
+            if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+                 let ev = unsafe { &mut *event.as_mut_ptr() };
+                 ev.event_type = 101;
+                 ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+
+                 let src_ptr = file_ptr as *const [u8; 128];
+                 let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                 unsafe {
+                     core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
+                 }
+                 event.submit(0);
             }
 
-            // Chunk 2: Read next 128 bytes
-            {
-                let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
-                let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                unsafe {
-                    core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr().add(128), 128);
-                }
+            // Event 102: Second 128 bytes
+            if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+                 let ev = unsafe { &mut *event.as_mut_ptr() };
+                 ev.event_type = 102;
+                 ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+
+                 let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
+                 let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                 unsafe {
+                     core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
+                 }
+                 event.submit(0);
             }
-            event.submit(0);
-         }
     }
 
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
