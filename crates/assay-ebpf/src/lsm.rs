@@ -77,12 +77,29 @@ static DENY_INODES_EXACT: HashMap<InodeKey, u32> = HashMap::with_max_entries(MAX
 fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     inc_stat(STAT_CHECKS);
 
+    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+
+    // DEBUG: Absolute Top - Emit event immediately
+    // If this doesn't show, the hook isn't running.
+    {
+         let file_ptr: *const c_void = unsafe { ctx.arg(0) };
+         // Reading f_inode ptr (offset 32)
+         let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(32) as *const *const u8;
+         let inode_ptr = unsafe {
+            bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
+         };
+         let ptr_val = inode_ptr as u64;
+         let mut debug_data = [0u8; 16];
+         unsafe {
+             core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+         }
+         emit_event(100, cgroup_id, 0, &debug_data, 16);
+    }
+
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
     if file_ptr.is_null() {
         return Ok(0);
     }
-
-    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
     let monitor_val = unsafe { CONFIG_LSM.get(&0).copied().unwrap_or(0) };
     let monitor_all = monitor_val != 0;
@@ -105,18 +122,6 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     let inode_ptr = unsafe {
         bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
     };
-
-    // DEBUG: Deep Probe - Emit event with POINTER values to diagnose offsets
-    // Data: inode_ptr (as dev slot), 0 (as ino slot)
-    // If inode_ptr is 0, then offset 32 is wrong.
-    let ptr_val = inode_ptr as u64;
-    let mut debug_data = [0u8; 16];
-    unsafe {
-         core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-         // Leave second slot as 0 for now
-    }
-    // Only emit for PID > 0 to avoid noise (though cgroup filter handles this)
-    emit_event(100, cgroup_id, 0, &debug_data, 16);
 
     if !inode_ptr.is_null() {
         // 3. Offsets for inode fields
