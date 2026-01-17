@@ -79,8 +79,8 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     // If this doesn't show, the hook isn't running.
     {
          let file_ptr: *const c_void = unsafe { ctx.arg(0) };
-         // Reading f_inode ptr (offset 64)
-         let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(64) as *const *const u8;
+         // Reading f_inode ptr (offset 120)
+         let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(120) as *const *const u8;
          let inode_ptr = unsafe {
             bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
          };
