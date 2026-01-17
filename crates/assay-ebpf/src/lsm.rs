@@ -1,6 +1,6 @@
 use aya_ebpf::{
     bindings::t_bpf_context,
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel, gen},
+    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
@@ -106,7 +106,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
             unsafe {
                 // Direct read into RingBuf to avoid stack overflow
                 // ev.data is [u8; 512], reading 256 bytes is safe.
-                gen::bpf_probe_read_kernel(
+                gen_helpers::bpf_probe_read_kernel(
                     ev.data.as_mut_ptr() as *mut _,
                     256,
                     file_ptr as *const _
