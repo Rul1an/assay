@@ -166,15 +166,29 @@ chmod 600 /tmp/assay-test/secret.txt
 
 # Debug: Check binary
 echo ">> [Debug] Checking binary..."
-ls -l ./assay
-file ./assay || true
-./assay --version || echo "Failed to run --version"
+{
+    echo "--- LS ---"
+    ls -l ./assay
+    echo "--- FILE ---"
+    file ./assay || true
+    echo "--- LDD ---"
+    ldd ./assay || true
+    echo "--- PERMISSONS ---"
+    chmod +x ./assay
+    echo "--- VERSION ---"
+    ./assay --version || echo "Failed to run --version"
+} > /tmp/assay-lsm-verify/debug_binary.txt 2>&1
 
 # Start Monitor
 # Use specific log location for CI collection
 mkdir -p /tmp/assay-lsm-verify
-RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print > /tmp/assay-lsm-verify/monitor.log 2>&1 &
+echo "Starting monitor..."
+# Capture the launch output specifically
+(
+  RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print
+) > /tmp/assay-lsm-verify/monitor.log 2>&1 &
 MONITOR_PID=$!
+echo "Monitor PID: $MONITOR_PID" >> /tmp/assay-lsm-verify/debug_binary.txt
 sleep 5 # Wait for attachment
 
 # Collect dmesg logs for debugging verifier issues
