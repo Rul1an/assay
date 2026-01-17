@@ -1,5 +1,5 @@
 use aya_ebpf::{
-    bindings::t_bpf_context,
+    // bindings::t_bpf_context removed
     helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
     maps::{Array, HashMap, RingBuf},
@@ -7,7 +7,7 @@ use aya_ebpf::{
 };
 // gen import removed
 use crate::MONITORED_CGROUPS;
-use core::ffi::{c_void, c_char};
+use core::ffi::c_void;
 
 #[map]
 static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
@@ -231,12 +231,11 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    // f_path usually follows immediately at offset 16.
    // POINTER MATH: file_ptr + 16 = address of f_path (struct path) inside struct file.
    // We cast this to *const path to read the DATA of the struct path.
-   let f_path_src = unsafe { (file_ptr as *const u8).add(16) as *const path };
+   // verify file_ptr + 16 offset logic
+   let f_path_src = unsafe { (file_ptr as *const u8).add(16) as *const aya_ebpf::bindings::path };
 
    // STACK COPY: We create a local 'struct path' on the stack and copy the kernel data into it.
-   // This creates a "safe" object with a known type for the verifier, disconnecting it from
-   // the provenance of the file_ptr (which the verifier was confused about).
-   let mut local_path: path = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+   let mut local_path: aya_ebpf::bindings::path = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
 
    unsafe {
        bpf_probe_read_kernel(f_path_src as *const _, &mut local_path as *mut _ as *mut _)
@@ -244,10 +243,8 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    };
 
    // Now we pass the pointer to our LOCAL stack object to bpf_d_path.
-   // The verifier sees: R1 = ptr_to_stack (which contains a struct path).
-   // This matches the expected arg type for bpf_d_path.
    let len = unsafe {
-       bpf_d_path(&mut local_path as *mut path, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
+       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
    };
 
    if len < 0 { return Err(len as i64); }
