@@ -272,11 +272,15 @@ impl LinuxMonitor {
                     }
 
                     // Poll LSM Events
-                    /*
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
-                         // ...
+                        if let Ok(mut ring_buf) = RingBuf::try_from(map) {
+                             while let Some(item) = ring_buf.next() {
+                                 if item.len() == 0 { continue; }
+                                 let ev = events::parse_event(&item);
+                                 if tx.blocking_send(ev).is_err() { break 'outer; }
+                             }
+                        }
                     }
-                    */
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
