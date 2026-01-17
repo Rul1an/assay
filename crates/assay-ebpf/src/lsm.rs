@@ -89,7 +89,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
          unsafe {
              core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
          }
-         emit_event(100, cgroup_id, 0, &debug_data, 16);
+         // emit_event(100, cgroup_id, 0, &debug_data, 16);
 
 
          // -------------------------------------------------------------------------
@@ -206,8 +206,8 @@ fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _act
                  let len = if path.len() > 16 { 16 } else { path.len() };
                  core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
             } else if event_type == 101 {
-                 // Struct Dump: Copy up to 64 bytes (or full slice if larger)
-                 let len = if path.len() > 64 { 64 } else { path.len() };
+                 // Struct Dump: Copy up to 128 bytes (or full slice if larger)
+                 let len = if path.len() > 128 { 128 } else { path.len() };
                  core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
             } else {
                  // Regular event (File Blocked/Allowed)
