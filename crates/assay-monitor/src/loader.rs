@@ -274,6 +274,7 @@ impl LinuxMonitor {
                     // Poll LSM Events
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
+                             eprintln!("DEBUG: Userspace Polling LSM_EVENTS RingBuf...");
                              while let Some(item) = ring_buf.next() {
                                  if item.len() == 0 { continue; }
                                  let ev = events::parse_event(&item);
