@@ -186,21 +186,28 @@ echo ">> [Debug] Checking binary..."
 
 echo "Starting monitor..."
 # Capture the launch output specifically
+# Capture the launch output specifically
 (
+  echo ">>> [Monitor Wrapper] Launching..."
+  # Explicitly list the binary to prove it exists inside subshell
+  ls -l ./assay
   RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print
+  echo ">>> [Monitor Wrapper] Exited with code $?"
 ) > /tmp/assay-lsm-verify/monitor.log 2>&1 &
 MONITOR_PID=$!
 echo "Monitor PID: $MONITOR_PID" >> /tmp/assay-lsm-verify/debug_binary.txt
 sleep 5 # Wait for attachment
 
-# Collect dmesg logs for debugging verifier issues
-dmesg -T | grep -Ei "bpf|verifier|lsm|aya" | tail -n 300 > /tmp/assay-lsm-verify/dmesg_bpf.log 2>&1 || true
+# Collect dmesg logs (including segfaults)
+dmesg -T | grep -Ei "bpf|verifier|lsm|aya|segfault" | tail -n 300 > /tmp/assay-lsm-verify/dmesg_bpf.log 2>&1 || true
 
 # Check if monitor died prematurely (Verifier error or crash)
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   echo "❌ FAILURE: Monitor exited before test began!"
   echo ">> Monitor Logs (Last 50 lines):"
-  tail -n 50 /tmp/assay-lsm-verify/monitor.log
+  cat /tmp/assay-lsm-verify/monitor.log
+  echo ">> Debug Binary Info:"
+  cat /tmp/assay-lsm-verify/debug_binary.txt || echo "debug_binary.txt missing"
   exit 1
 fi
 
@@ -213,9 +220,9 @@ if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
     if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
         echo "❌ FAILURE: Monitor running but NOT attached (Verifier rejection?)"
         echo ">> Monitor Logs (Last 50 lines):"
-        tail -n 50 /tmp/assay-lsm-verify/monitor.log
+        cat /tmp/assay-lsm-verify/monitor.log
         echo ">> DMESG (Verifier Debug):"
-        dmesg | tail -n 20
+        cat /tmp/assay-lsm-verify/dmesg_bpf.log
         # Kill it to be safe
         kill $MONITOR_PID 2>/dev/null || true
         exit 1
