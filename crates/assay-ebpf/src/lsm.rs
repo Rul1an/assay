@@ -7,7 +7,7 @@ use aya_ebpf::{
 };
 // gen import removed
 use crate::MONITORED_CGROUPS;
-use core::ffi::c_void;
+use core::ffi::{c_void, c_char};
 
 #[map]
 static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
@@ -140,7 +140,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     // CONDITIONAL PATH RESOLUTION
     // Re-enabled with Stack Copy Fix for Verifier
-    let mut path_len = read_file_path(file_ptr, buf_slice).unwrap_or(0);
+    let path_len = read_file_path(file_ptr, buf_slice).unwrap_or(0);
 
     // ... (Remainder path logic is skipped if len=0) ...
     if path_len == 0 {
@@ -234,17 +234,17 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    // verify file_ptr + 16 offset logic
    let f_path_src = unsafe { (file_ptr as *const u8).add(16) as *const aya_ebpf::bindings::path };
 
-   // STACK COPY: We create a local 'struct path' on the stack and copy the kernel data into it.
-   let mut local_path: aya_ebpf::bindings::path = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
-
-   unsafe {
-       bpf_probe_read_kernel(f_path_src as *const _, &mut local_path as *mut _ as *mut _)
-            .map_err(|e| e as i64)?
+   // STACK COPY: Read the struct path from kernel memory directly onto the stack.
+   // bpf_probe_read_kernel returns the value read.
+   let mut local_path: aya_ebpf::bindings::path = unsafe {
+       bpf_probe_read_kernel(f_path_src).map_err(|e| e as i64)?
    };
 
    // Now we pass the pointer to our LOCAL stack object to bpf_d_path.
+   // buf.as_mut_ptr() is *mut u8. On ARM64 (Linux), c_char is u8.
+   // We cast to *mut c_char (u8) to match the signature.
    let len = unsafe {
-       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
+       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
    };
 
    if len < 0 { return Err(len as i64); }
