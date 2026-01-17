@@ -87,8 +87,10 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y build-essential libssl-dev pkg-config llvm-dev libclang-dev clang
+          # Fix persistent runner permissions if needed
+          sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
           if ! command -v bpf-linker &> /dev/null; then
-            cargo install bpf-linker --no-default-features --features system-llvm
+            cargo install bpf-linker
           fi
 
       - name: Verify LSM blocking (CI Mode)
