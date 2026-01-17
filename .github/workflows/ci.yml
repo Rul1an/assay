@@ -68,7 +68,7 @@ jobs:
 
   ebpf-smoke:
     name: eBPF monitor smoke (Linux)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, bpf-lsm]
     permissions:
       contents: read
     steps:

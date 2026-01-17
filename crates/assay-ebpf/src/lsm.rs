@@ -92,10 +92,10 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
          emit_event(100, cgroup_id, 0, &debug_data, 16);
 
          // -------------------------------------------------------------------------
-         // DEBUG: Struct Scanner (Event 101)
+         // DEBUG: Struct Scanner (Event 101 - CANARY MODE)
          // -------------------------------------------------------------------------
-         // Unconditional dump of struct file to debug offsets.
-         let mut file_dump = [0u8; 64];
+         // CANARY 0xAA: Initialize with pattern to detect if read didn't happen vs read zeros
+         let mut file_dump = [0xAAu8; 64];
          unsafe {
              bpf_probe_read_kernel(file_ptr as *const [u8; 64]).map(|d| file_dump = d).ok();
          }
