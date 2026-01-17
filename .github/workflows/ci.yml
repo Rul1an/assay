@@ -99,6 +99,13 @@ jobs:
           # CI Mode = Soft Skip on Ubuntu-Latest (due to no BPF LSM), Hard Fail on missing tracefs
           sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
 
+      - name: Fix log permissions
+        if: always()
+        run: |
+          echo "Fixing permissions for /tmp/assay-lsm-verify"
+          sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
+          ls -l /tmp/assay-lsm-verify || true
+
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@v4
