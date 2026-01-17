@@ -42,6 +42,9 @@ const STAT_BLOCKED: u32 = 1;
 const STAT_ALLOWED: u32 = 2;
 const STAT_ERRORS: u32 = 3;
 
+#[map]
+static DUMP_DONE: Array<u32> = Array::with_max_entries(1, 0);
+
 const DATA_LEN: usize = 512;
 
 #[repr(C)]
@@ -80,56 +83,68 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     // If this doesn't show, the hook isn't running.
     {
-         let file_ptr: *const c_void = unsafe { ctx.arg(0) };
-         // Reading f_inode ptr (offset 120)
-         let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(120) as *const *const u8;
-         let inode_ptr = unsafe {
-            bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
+         // DUMP ONCE LOGIC
+         let dump_idx = 0;
+         let should_dump = if let Some(ptr) = DUMP_DONE.get_ptr_mut(dump_idx) {
+             unsafe {
+                 if *ptr == 0 {
+                     *ptr = 1;
+                     true
+                 } else {
+                     false
+                 }
+             }
+         } else {
+             false
          };
-         let ptr_val = inode_ptr as u64;
-         let mut debug_data = [0u8; 16];
-         unsafe {
-             core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+
+         if should_dump {
+             let file_ptr: *const c_void = unsafe { ctx.arg(0) };
+             // Reading f_inode ptr (offset 120)
+             let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(120) as *const *const u8;
+             let inode_ptr = unsafe {
+                bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
+             };
+             let ptr_val = inode_ptr as u64;
+             let mut debug_data = [0u8; 16];
+             unsafe {
+                 core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+             }
+             emit_event(100, cgroup_id, 0, &debug_data, 16);
+
+
+             // -------------------------------------------------------------------------
+             // DEBUG: Struct Scanner (Event 101: 0-128, Event 102: 128-256)
+             // -------------------------------------------------------------------------
+
+             // Event 101: First 128 bytes
+             if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+                  let ev = unsafe { &mut *event.as_mut_ptr() };
+                  ev.event_type = 101;
+                  ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+
+                  let src_ptr = file_ptr as *const [u8; 128];
+                  let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                  unsafe {
+                      core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
+                  }
+                  event.submit(0);
+             }
+
+             // Event 102: Second 128 bytes
+             if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+                  let ev = unsafe { &mut *event.as_mut_ptr() };
+                  ev.event_type = 102;
+                  ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+
+                  let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
+                  let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                  unsafe {
+                      core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
+                  }
+                  event.submit(0);
+             }
          }
-         emit_event(100, cgroup_id, 0, &debug_data, 16);
-
-
-         // -------------------------------------------------------------------------
-         // DEBUG: Struct Scanner (Event 101 - DIRECT RINGBUF READ - 256 Bytes)
-         // -------------------------------------------------------------------------
-         if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-            let ev = unsafe { &mut *event.as_mut_ptr() };
-            // -------------------------------------------------------------------------
-            // DEBUG: Struct Scanner (Event 101: 0-128, Event 102: 128-256)
-            // -------------------------------------------------------------------------
-
-            // Event 101: First 128 bytes
-            if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-                 let ev = unsafe { &mut *event.as_mut_ptr() };
-                 ev.event_type = 101;
-                 ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-
-                 let src_ptr = file_ptr as *const [u8; 128];
-                 let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                 unsafe {
-                     core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
-                 }
-                 event.submit(0);
-            }
-
-            // Event 102: Second 128 bytes
-            if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-                 let ev = unsafe { &mut *event.as_mut_ptr() };
-                 ev.event_type = 102;
-                 ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-
-                 let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
-                 let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                 unsafe {
-                     core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
-                 }
-                 event.submit(0);
-            }
     }
 
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
