@@ -430,6 +430,13 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                      let ino = u64::from_ne_bytes(ino_bytes);
                                      println!("[PID {}] DEBUG: Kernel Saw dev={} ino={}", event.pid, dev, ino);
                                 }
+                                101 => {
+                                    // Struct Dump
+                                    let dump = dump_prefix_hex(&event.data, 64);
+                                    println!("[PID {}] 🔍 STRUCT DUMP: {}", event.pid, dump);
+                                    // Optional: Chunk it for readability? "aa bb cc dd ..."
+                                    // dump_prefix_hex returns joined hex string.
+                                }
                                 99 => {
                                      // Debug Cgroup Mismatch
                                      let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
