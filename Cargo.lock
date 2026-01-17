@@ -104,7 +104,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "assay-cli"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "chrono",
  "serde",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "2.1.2"
+version = "2.1.21"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "2.0.0"
+version = "2.1.15"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "2.0.0"
+version = "2.0.4"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -314,8 +314,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "aya"
-version = "0.13.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d18bc4e506fbb85ab7392ed993a7db4d1a452c71b75a246af4a80ab8c9d2dd50"
 dependencies = [
  "assert_matches",
  "aya-obj",
@@ -365,8 +366,9 @@ dependencies = [
 
 [[package]]
 name = "aya-obj"
-version = "0.2.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51b96c5a8ed8705b40d655273bc4212cbbf38d4e3be2788f36306f154523ec7"
 dependencies = [
  "bytes",
  "core-error",
