@@ -40,16 +40,13 @@ const STAT_BLOCKED: u32 = 1;
 const STAT_ALLOWED: u32 = 2;
 const STAT_ERRORS: u32 = 3;
 
+const DATA_LEN: usize = 512;
+
 #[repr(C)]
-struct LsmEvent {
-    event_type: u32,
+struct MonitorEvent {
     pid: u32,
-    timestamp_ns: u64,
-    cgroup_id: u64,
-    rule_id: u32,
-    action: u32,
-    path: [u8; MAX_PATH_LEN],
-    path_len: u32,
+    event_type: u32,
+    data: [u8; DATA_LEN],
 }
 
 #[lsm(hook = "file_open")]
@@ -204,24 +201,34 @@ fn inc_stat(index: u32) {
 }
 
 #[inline(always)]
+#[inline(always)]
 fn emit_event(event_type: u32, cgroup_id: u64, rule_id: u32, path: &[u8], action: u32) {
-    if let Some(mut event) = LSM_EVENTS.reserve::<LsmEvent>(0) {
+    if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
         ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-        ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
-        ev.cgroup_id = cgroup_id;
-        ev.rule_id = rule_id;
-        ev.action = action;
-        let len = if path.len() > MAX_PATH_LEN { MAX_PATH_LEN } else { path.len() };
-        ev.path_len = len as u32;
 
         unsafe {
-            // Copy the actual path bytes
-            core::ptr::copy_nonoverlapping(path.as_ptr(), ev.path.as_mut_ptr(), len);
-            // Zero the rest of the ringbuf slot to prevent leaks
-            if len < MAX_PATH_LEN {
-                core::ptr::write_bytes(ev.path.as_mut_ptr().add(len), 0, MAX_PATH_LEN - len);
+            // Pack data for Event 100/99 (Debug) specially, or standard packing
+            // For now, if event_type == 100, we just assume `path` contains the 16 bytes of debug data.
+            // For standard blocking events, we might want to pack cgroup/rule_id?
+            // Current userspace expects:
+            // Event 100: [dev(8), ino(8)]
+            // Event BLOCKED: path string
+
+            if event_type == 100 {
+                 let len = if path.len() > 16 { 16 } else { path.len() };
+                 core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
+            } else {
+                 // Regular event (File Blocked/Allowed)
+                 // Just copy path for now to match userspace expectation for OPENAT-like events
+                 // TODO: If we need rule_id, we need to pack it. But userspace monitor.rs line 422 just prints string.
+                 let len = if path.len() > DATA_LEN { DATA_LEN } else { path.len() };
+                 core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
+                 // Null terminate if space allows?
+                 if len < DATA_LEN {
+                     *ev.data.as_mut_ptr().add(len) = 0;
+                 }
             }
         }
         event.submit(0);
