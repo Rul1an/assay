@@ -180,7 +180,7 @@ fn inc_stat(index: u32) {
 }
 
 #[inline(always)]
-#[inline(always)]
+// #[inline(always)] removed
 fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _action: u32) {
     if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
         let ev = unsafe { &mut *event.as_mut_ptr() };
@@ -244,7 +244,7 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    // buf.as_mut_ptr() is *mut u8. On ARM64 (Linux), c_char is u8.
    // We cast to *mut c_char (u8) to match the signature.
    let len = unsafe {
-       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
+       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut u8, MAX_PATH_LEN as u32)
    };
 
    if len < 0 { return Err(len as i64); }
