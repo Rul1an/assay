@@ -95,10 +95,10 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
          // -------------------------------------------------------------------------
          // DEBUG: Struct Scanner (Event 101 - CANARY MODE - 128 Bytes)
          // -------------------------------------------------------------------------
-         // CANARY 0xAA: Initialize with pattern to detect if read didn't happen vs read zeros
-         let mut file_dump = [0xAAu8; 128];
+         // CANARY 0xAA
+         let mut file_dump = [0xAAu8; 256];
          unsafe {
-             bpf_probe_read_kernel(file_ptr as *const [u8; 128]).map(|d| file_dump = d).ok();
+             bpf_probe_read_kernel(file_ptr as *const [u8; 256]).map(|d| file_dump = d).ok();
          }
          emit_event(101, cgroup_id, 0, &file_dump, 0);
     }

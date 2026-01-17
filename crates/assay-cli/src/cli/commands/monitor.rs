@@ -432,7 +432,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 }
                                 101 => {
                                     // Struct Dump
-                                    let dump = dump_prefix_hex(&event.data, 128);
+                                    let dump = dump_prefix_hex(&event.data, 256);
                                     println!("[PID {}] 🔍 STRUCT DUMP: {}", event.pid, dump);
                                     // Optional: Chunk it for readability? "aa bb cc dd ..."
                                     // dump_prefix_hex returns joined hex string.
