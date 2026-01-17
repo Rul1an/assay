@@ -81,71 +81,10 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
-    // If this doesn't show, the hook isn't running.
-    {
-         // DUMP ONCE LOGIC
-         let dump_idx = 0;
-         let should_dump = if let Some(ptr) = DUMP_DONE.get_ptr_mut(dump_idx) {
-             unsafe {
-                 if *ptr == 0 {
-                     *ptr = 1;
-                     true
-                 } else {
-                     false
-                 }
-             }
-         } else {
-             false
-         };
-
-         if should_dump {
-             let file_ptr: *const c_void = unsafe { ctx.arg(0) };
-             // Reading f_inode ptr (offset 120)
-             let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(120) as *const *const u8;
-             let inode_ptr = unsafe {
-                bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
-             };
-             let ptr_val = inode_ptr as u64;
-             let mut debug_data = [0u8; 16];
-             unsafe {
-                 core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-             }
-             emit_event(100, cgroup_id, 0, &debug_data, 16);
-
-
-             // -------------------------------------------------------------------------
-             // DEBUG: Struct Scanner (Event 101: 0-128, Event 102: 128-256)
-             // -------------------------------------------------------------------------
-
-             // Event 101: First 128 bytes
-             if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-                  let ev = unsafe { &mut *event.as_mut_ptr() };
-                  ev.event_type = 101;
-                  ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-
-                  let src_ptr = file_ptr as *const [u8; 128];
-                  let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                  unsafe {
-                      core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
-                  }
-                  event.submit(0);
-             }
-
-             // Event 102: Second 128 bytes
-             if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-                  let ev = unsafe { &mut *event.as_mut_ptr() };
-                  ev.event_type = 102;
-                  ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-
-                  let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
-                  let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
-                  unsafe {
-                      core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
-                  }
-                  event.submit(0);
-             }
-         }
-    }
+     // If this doesn't show, the hook isn't running.
+     {
+         // DUMP LOGIC REMOVED (Focusing on verifier-safe bpf_d_path)
+     }
 
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
     if file_ptr.is_null() {
@@ -197,17 +136,27 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     // Safety: read_file_path writes to the pointer treating it as *mut u8.
     // It creates a valid C string or fails.
     let buf_ptr = path_buf.as_mut_ptr() as *mut u8;
-    let _buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
+    let buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
 
     // CONDITIONAL PATH RESOLUTION
-    // To pass CI, we DISABLE read_file_path for now because of the verifier loop/type hell.
-    // Uncomment the next line only when bpf_d_path is fixed or kernel supports it.
-    // let mut path_len = read_file_path(file_ptr, buf_slice)?;
-    let path_len = 0; // Disabled for CI robustness logic
+    // Re-enabled with Stack Copy Fix for Verifier
+    let mut path_len = read_file_path(file_ptr, buf_slice).unwrap_or(0);
 
     // ... (Remainder path logic is skipped if len=0) ...
     if path_len == 0 {
         return Ok(0);
+    }
+
+    // Null terminate if needed (bpf_d_path usually does, but we ensure sanity)
+    // We treat the buffer as a slice of u8 for hash/match
+    let path_bytes = &buf_slice[..path_len];
+
+    // Check deny list (Exact)
+    let hash = fnv1a_hash(path_bytes);
+    if let Some(&rule_id) = unsafe { DENY_PATHS_EXACT.get(&hash) } {
+        emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, path_bytes, 0);
+        inc_stat(STAT_BLOCKED);
+        return Ok(-1);
     }
 
     Ok(0)
@@ -272,19 +221,35 @@ fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _act
 use aya_ebpf::bindings::path;
 
 // Keep read_file_path for future, but it's unused if disabled in try_file_open
+// Keep read_file_path for future, but it's unused if disabled in try_file_open
 #[inline(always)]
-fn read_file_path(file_ptr: *const c_void, _buf: &mut [u8]) -> Result<usize, i64> {
-   // use aya_ebpf::helpers::bpf_d_path;
+fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
+   use aya_ebpf::helpers::bpf_d_path;
    if file_ptr.is_null() { return Ok(0); }
 
    // Heuristic: struct file starts with f_u (rcu_head/callback_head) which is 16 bytes.
    // f_path usually follows immediately at offset 16.
-   // let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
+   // POINTER MATH: file_ptr + 16 = address of f_path (struct path) inside struct file.
+   // We cast this to *const path to read the DATA of the struct path.
+   let f_path_src = unsafe { (file_ptr as *const u8).add(16) as *const path };
 
-   // let len = unsafe {
-   //    bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
-   // };
-   // if len < 0 { return Err(len as i64); }
-   // Ok(len as usize)
-   Ok(0)
+   // STACK COPY: We create a local 'struct path' on the stack and copy the kernel data into it.
+   // This creates a "safe" object with a known type for the verifier, disconnecting it from
+   // the provenance of the file_ptr (which the verifier was confused about).
+   let mut local_path: path = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+
+   unsafe {
+       bpf_probe_read_kernel(f_path_src as *const _, &mut local_path as *mut _ as *mut _)
+            .map_err(|e| e as i64)?
+   };
+
+   // Now we pass the pointer to our LOCAL stack object to bpf_d_path.
+   // The verifier sees: R1 = ptr_to_stack (which contains a struct path).
+   // This matches the expected arg type for bpf_d_path.
+   let len = unsafe {
+       bpf_d_path(&mut local_path as *mut path, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
+   };
+
+   if len < 0 { return Err(len as i64); }
+   Ok(len as usize)
 }

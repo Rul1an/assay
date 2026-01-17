@@ -199,10 +199,29 @@ dmesg -T | grep -Ei "bpf|verifier|lsm|aya" | tail -n 300 > /tmp/assay-lsm-verify
 # Check if monitor died prematurely (Verifier error or crash)
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   echo "❌ FAILURE: Monitor exited before test began!"
-  echo ">> Monitor Logs:"
-  cat /tmp/assay-lsm-verify/monitor.log
+  echo ">> Monitor Logs (Last 50 lines):"
+  tail -n 50 /tmp/assay-lsm-verify/monitor.log
   exit 1
 fi
+
+# 2026 HARDENING: Ensure we are actually attached!
+# Grep for the specific log line that confirms the BPF program was loaded/attached.
+# "Assay Monitor running" is printed after successful attach() in monitor.rs.
+if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
+    echo "⚠️  WARNING: 'Assay Monitor running' not found in logs yet. Giving it 5 more seconds..."
+    sleep 5
+    if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
+        echo "❌ FAILURE: Monitor running but NOT attached (Verifier rejection?)"
+        echo ">> Monitor Logs (Last 50 lines):"
+        tail -n 50 /tmp/assay-lsm-verify/monitor.log
+        echo ">> DMESG (Verifier Debug):"
+        dmesg | tail -n 20
+        # Kill it to be safe
+        kill $MONITOR_PID 2>/dev/null || true
+        exit 1
+    fi
+fi
+echo "✅ Monitor Attached (Wait complete)"
 
 echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
 set +e
