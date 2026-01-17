@@ -5,8 +5,7 @@ use aya_ebpf::{
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
-#[allow(unused_imports)]
-use aya_ebpf::helpers::gen as gen_helpers; // Try alias just in case
+// gen import removed
 use crate::MONITORED_CGROUPS;
 use core::ffi::{c_void, c_char};
 
@@ -103,14 +102,22 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
             ev.event_type = 101;
             ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
 
-            unsafe {
-                // Direct read into RingBuf to avoid stack overflow
-                // ev.data is [u8; 512], reading 256 bytes is safe.
-                gen_helpers::bpf_probe_read_kernel(
-                    ev.data.as_mut_ptr() as *mut _,
-                    256,
-                    file_ptr as *const _
-                );
+            // Chunk 1: Read first 128 bytes
+            {
+                let src_ptr = file_ptr as *const [u8; 128];
+                let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                unsafe {
+                    core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr(), 128);
+                }
+            }
+
+            // Chunk 2: Read next 128 bytes
+            {
+                let src_ptr = (file_ptr as *const u8).wrapping_add(128) as *const [u8; 128];
+                let chunk = unsafe { bpf_probe_read_kernel(src_ptr).unwrap_or([0u8; 128]) };
+                unsafe {
+                    core::ptr::copy_nonoverlapping(chunk.as_ptr(), ev.data.as_mut_ptr().add(128), 128);
+                }
             }
             event.submit(0);
          }
