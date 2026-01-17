@@ -76,7 +76,6 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
-    // DEBUG: Absolute Top - Emit event immediately
     // If this doesn't show, the hook isn't running.
     {
          let file_ptr: *const c_void = unsafe { ctx.arg(0) };
@@ -105,53 +104,72 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // Inode Blocking Logic (Verifier Safe with Probe Read)
-    // Offset 32 for f_inode (after f_u[16] + f_path[16])
-    // Since the verifier treats our calculated pointers as scalars, we use bpf_probe_read_kernel
-    // to safely read the memory at runtime.
+    // -------------------------------------------------------------------------
+    // Inode Resolution: file -> f_path.dentry -> d_inode
+    // -------------------------------------------------------------------------
 
-    // 1. Calculate address of f_inode pointer
-    // f_inode is at offset 32. It is a pointer to struct inode.
-    let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(32) as *const *const u8;
+    // 1. Get Dentry Address (file + 16 (f_path) + 8 (mnt) = 24?)
+    // Actually, struct file {
+    //    union f_u; // 16 bytes?
+    //    struct path f_path; // 16 bytes
+    // }
+    // f_path starts at 16. struct path { mnt, dentry }. dentry is at +8 inside path.
+    // So file + 16 + 8 = 24.
 
-    // 2. Read the inode pointer
-    // aya-ebpf IO helper: unsafe fn bpf_probe_read_kernel<T>(src: *const T) -> Result<T, c_long>
-    let inode_ptr = unsafe {
-        bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
+    let f_path_dentry_addr = (file_ptr as *const u8).wrapping_add(24) as *const *const u8;
+    let dentry_ptr = unsafe {
+        bpf_probe_read_kernel(f_path_dentry_addr).unwrap_or(core::ptr::null())
     };
 
+    let mut debug_data = [0u8; 16];
+    let mut inode_ptr = core::ptr::null();
+
+    if !dentry_ptr.is_null() {
+        // 2. Get Inode from Dentry
+        // struct dentry {
+        //    d_flags; // 4
+        //    d_seq;   // 4
+        //    d_hash;  // 8
+        //    d_parent; // 8
+        //    d_name;   // 16
+        //    d_inode;  // Offset 48? (0x30)
+        // }
+        // Let's try offset 48 for d_inode.
+        let d_inode_addr = (dentry_ptr as *const u8).wrapping_add(48) as *const *const u8;
+        inode_ptr = unsafe {
+             bpf_probe_read_kernel(d_inode_addr).unwrap_or(core::ptr::null())
+        };
+    }
+
+    // DEBUG: Chain
+    // Data: [dentry_ptr_low(8), inode_ptr_low(8)]
+    unsafe {
+        let d_val = dentry_ptr as u64;
+        let i_val = inode_ptr as u64;
+        core::ptr::copy_nonoverlapping(&d_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+        core::ptr::copy_nonoverlapping(&i_val as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
+    }
+    emit_event(100, cgroup_id, 0, &debug_data, 16);
+
     if !inode_ptr.is_null() {
-        // 3. Offsets for inode fields
-        // i_sb is at offset 40 (0x28)
-        // i_ino is at offset 64 (0x40)
-        let i_sb_addr = inode_ptr.wrapping_add(40) as *const *const c_void;
-        let i_ino_addr = inode_ptr.wrapping_add(64) as *const u64;
+        // 3. Read Inode Fields
+        // i_sb at 40 (0x28), i_ino at 64 (0x40)
+        let i_sb_addr = (inode_ptr as *const u8).wrapping_add(40) as *const *const c_void;
+        let i_ino_addr = (inode_ptr as *const u8).wrapping_add(64) as *const u64;
 
-        // 4. Read i_ino
-        let ino = unsafe {
-             bpf_probe_read_kernel(i_ino_addr).unwrap_or(0)
-        };
-
-        // 5. Read i_sb (pointer to superblock)
-        let sb_ptr = unsafe {
-             bpf_probe_read_kernel(i_sb_addr).unwrap_or(core::ptr::null())
-        };
+        let ino = unsafe { bpf_probe_read_kernel(i_ino_addr).unwrap_or(0) };
+        let sb_ptr = unsafe { bpf_probe_read_kernel(i_sb_addr).unwrap_or(core::ptr::null()) };
 
         if !sb_ptr.is_null() {
-            // 6. Read s_dev from superblock (Offset 16)
-            // s_dev is u32 (dev_t)
+            // s_dev at 16 (0x10)
             let s_dev_addr = (sb_ptr as *const u8).wrapping_add(16) as *const u32;
-            let s_dev = unsafe {
-                bpf_probe_read_kernel(s_dev_addr).unwrap_or(0)
-            };
-
-            let dev = s_dev as u64;
-            let key = InodeKey { dev, ino };
+            let s_dev = unsafe { bpf_probe_read_kernel(s_dev_addr).unwrap_or(0) };
 
             if s_dev != 0 {
+                let key = InodeKey { dev: s_dev as u64, ino };
+                // ... map lookup ...
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
-                     // Blocked!
-                     let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed
+                     let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN];
                      emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, &partial_path[0..0], 0);
                      inc_stat(STAT_BLOCKED);
                      return Ok(-1);
