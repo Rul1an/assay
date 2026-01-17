@@ -106,6 +106,18 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
     };
 
+    // DEBUG: Deep Probe - Emit event with POINTER values to diagnose offsets
+    // Data: inode_ptr (as dev slot), 0 (as ino slot)
+    // If inode_ptr is 0, then offset 32 is wrong.
+    let ptr_val = inode_ptr as u64;
+    let mut debug_data = [0u8; 16];
+    unsafe {
+         core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
+         // Leave second slot as 0 for now
+    }
+    // Only emit for PID > 0 to avoid noise (though cgroup filter handles this)
+    emit_event(100, cgroup_id, 0, &debug_data, 16);
+
     if !inode_ptr.is_null() {
         // 3. Offsets for inode fields
         // i_sb is at offset 40 (0x28)
@@ -131,20 +143,10 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
                 bpf_probe_read_kernel(s_dev_addr).unwrap_or(0)
             };
 
-             // DEBUG: Always emit kernel-side values for diagnosis
-             // Event 100 = Debug Inode
-             // Data: dev (8 bytes) + ino (8 bytes) = 16 bytes
-             let dev = s_dev as u64;
-             let key = InodeKey { dev, ino };
+            let dev = s_dev as u64;
+            let key = InodeKey { dev, ino };
 
-             let mut debug_data = [0u8; 16];
-             unsafe {
-                 core::ptr::copy_nonoverlapping(&dev as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-                 core::ptr::copy_nonoverlapping(&ino as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
-             }
-             emit_event(100, cgroup_id, 0, &debug_data, 16);
-
-             if s_dev != 0 {
+            if s_dev != 0 {
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
                      // Blocked!
                      let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN]; // Zeroed
