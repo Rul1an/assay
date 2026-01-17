@@ -164,6 +164,11 @@ mkdir -p /tmp/assay-test
 echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
 chmod 600 /tmp/assay-test/secret.txt
 
+# Start Monitor
+# Use specific log location for CI collection
+rm -rf /tmp/assay-lsm-verify
+mkdir -p /tmp/assay-lsm-verify
+
 # Debug: Check binary
 echo ">> [Debug] Checking binary..."
 {
@@ -179,9 +184,6 @@ echo ">> [Debug] Checking binary..."
     ./assay --version || echo "Failed to run --version"
 } > /tmp/assay-lsm-verify/debug_binary.txt 2>&1
 
-# Start Monitor
-# Use specific log location for CI collection
-mkdir -p /tmp/assay-lsm-verify
 echo "Starting monitor..."
 # Capture the launch output specifically
 (
