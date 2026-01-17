@@ -5,6 +5,8 @@ use aya_ebpf::{
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
+#[allow(unused_imports)]
+use aya_ebpf::helpers::gen as gen_helpers; // Try alias just in case
 use crate::MONITORED_CGROUPS;
 use core::ffi::{c_void, c_char};
 
