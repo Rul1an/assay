@@ -1,8 +1,9 @@
 use aya_ebpf::{
+    bindings::t_bpf_context,
+    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel, gen},
     macros::{lsm, map},
-    maps::{HashMap, RingBuf, Array},
+    maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
 };
 use crate::MONITORED_CGROUPS;
 use core::ffi::{c_void, c_char};
@@ -93,14 +94,24 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
 
          // -------------------------------------------------------------------------
-         // DEBUG: Struct Scanner (Event 101 - CANARY MODE - 128 Bytes)
+         // DEBUG: Struct Scanner (Event 101 - DIRECT RINGBUF READ - 256 Bytes)
          // -------------------------------------------------------------------------
-         // CANARY 0xAA
-         let mut file_dump = [0xAAu8; 256];
-         unsafe {
-             bpf_probe_read_kernel(file_ptr as *const [u8; 256]).map(|d| file_dump = d).ok();
+         if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+            let ev = unsafe { &mut *event.as_mut_ptr() };
+            ev.event_type = 101;
+            ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+
+            unsafe {
+                // Direct read into RingBuf to avoid stack overflow
+                // ev.data is [u8; 512], reading 256 bytes is safe.
+                gen::bpf_probe_read_kernel(
+                    ev.data.as_mut_ptr() as *mut _,
+                    256,
+                    file_ptr as *const _
+                );
+            }
+            event.submit(0);
          }
-         emit_event(101, cgroup_id, 0, &file_dump, 0);
     }
 
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
