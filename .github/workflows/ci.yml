@@ -72,6 +72,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Pre-clean workspace ownership
+        run: |
+          sudo chown -R "$(whoami)":"$(id -gn)" "$GITHUB_WORKSPACE" || true
+          sudo chown -R "$(whoami)":"$(id -gn)" "$(dirname "$GITHUB_WORKSPACE")" || true
+
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
