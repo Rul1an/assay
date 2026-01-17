@@ -142,7 +142,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
                  core::ptr::copy_nonoverlapping(&dev as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
                  core::ptr::copy_nonoverlapping(&ino as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
              }
-             emit_event(100, cgroup_id, 0, &debug_data, 0);
+             emit_event(100, cgroup_id, 0, &debug_data, 16);
 
              if s_dev != 0 {
                  if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
