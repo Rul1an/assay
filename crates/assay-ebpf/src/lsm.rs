@@ -105,51 +105,23 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     }
 
     // -------------------------------------------------------------------------
-    // Inode Resolution: file -> f_path.dentry -> d_inode
+    // DEBUG: Struct Scanner (Event 101)
     // -------------------------------------------------------------------------
+    // Since offsets 32, 24, 48 are failing, we dump the first 64 bytes of struct file.
+    // We will analyze the hex dump to find the pointers.
+    let mut inode_ptr = core::ptr::null(); // Declare inode_ptr here for later use
+    {
+         let file_ptr: *const c_void = unsafe { ctx.arg(0) };
+         let mut file_dump = [0u8; 64];
 
-    // 1. Get Dentry Address (file + 16 (f_path) + 8 (mnt) = 24?)
-    // Actually, struct file {
-    //    union f_u; // 16 bytes?
-    //    struct path f_path; // 16 bytes
-    // }
-    // f_path starts at 16. struct path { mnt, dentry }. dentry is at +8 inside path.
-    // So file + 16 + 8 = 24.
+         // Read 64 bytes from file_ptr
+         unsafe {
+             bpf_probe_read_kernel(file_ptr as *const [u8; 64]).map(|d| file_dump = d).ok();
+         }
 
-    let f_path_dentry_addr = (file_ptr as *const u8).wrapping_add(24) as *const *const u8;
-    let dentry_ptr = unsafe {
-        bpf_probe_read_kernel(f_path_dentry_addr).unwrap_or(core::ptr::null())
-    };
-
-    let mut debug_data = [0u8; 16];
-    let mut inode_ptr = core::ptr::null();
-
-    if !dentry_ptr.is_null() {
-        // 2. Get Inode from Dentry
-        // struct dentry {
-        //    d_flags; // 4
-        //    d_seq;   // 4
-        //    d_hash;  // 8
-        //    d_parent; // 8
-        //    d_name;   // 16
-        //    d_inode;  // Offset 48? (0x30)
-        // }
-        // Let's try offset 48 for d_inode.
-        let d_inode_addr = (dentry_ptr as *const u8).wrapping_add(48) as *const *const u8;
-        inode_ptr = unsafe {
-             bpf_probe_read_kernel(d_inode_addr).unwrap_or(core::ptr::null())
-        };
+         // Emit Event 101 with the dump
+         emit_event(101, cgroup_id, 0, &file_dump, 0);
     }
-
-    // DEBUG: Chain
-    // Data: [dentry_ptr_low(8), inode_ptr_low(8)]
-    unsafe {
-        let d_val = dentry_ptr as u64;
-        let i_val = inode_ptr as u64;
-        core::ptr::copy_nonoverlapping(&d_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-        core::ptr::copy_nonoverlapping(&i_val as *const u64 as *const u8, debug_data.as_mut_ptr().add(8), 8);
-    }
-    emit_event(100, cgroup_id, 0, &debug_data, 16);
 
     if !inode_ptr.is_null() {
         // 3. Read Inode Fields
