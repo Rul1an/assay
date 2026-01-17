@@ -90,6 +90,16 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
              core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
          }
          emit_event(100, cgroup_id, 0, &debug_data, 16);
+
+         // -------------------------------------------------------------------------
+         // DEBUG: Struct Scanner (Event 101)
+         // -------------------------------------------------------------------------
+         // Unconditional dump of struct file to debug offsets.
+         let mut file_dump = [0u8; 64];
+         unsafe {
+             bpf_probe_read_kernel(file_ptr as *const [u8; 64]).map(|d| file_dump = d).ok();
+         }
+         emit_event(101, cgroup_id, 0, &file_dump, 0);
     }
 
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
@@ -104,24 +114,9 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // -------------------------------------------------------------------------
-    // DEBUG: Struct Scanner (Event 101)
-    // -------------------------------------------------------------------------
-    // Since offsets 32, 24, 48 are failing, we dump the first 64 bytes of struct file.
-    // We will analyze the hex dump to find the pointers.
-    let inode_ptr: *const u8 = core::ptr::null(); // Explicit type to satisfy compiler
-    {
-         let file_ptr: *const c_void = unsafe { ctx.arg(0) };
-         let mut file_dump = [0u8; 64];
+    let inode_ptr: *const u8 = core::ptr::null();
 
-         // Read 64 bytes from file_ptr
-         unsafe {
-             bpf_probe_read_kernel(file_ptr as *const [u8; 64]).map(|d| file_dump = d).ok();
-         }
 
-         // Emit Event 101 with the dump
-         emit_event(101, cgroup_id, 0, &file_dump, 0);
-    }
 
     if !inode_ptr.is_null() {
         // 3. Read Inode Fields
