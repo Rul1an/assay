@@ -164,6 +164,12 @@ mkdir -p /tmp/assay-test
 echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
 chmod 600 /tmp/assay-test/secret.txt
 
+# Debug: Check binary
+echo ">> [Debug] Checking binary..."
+ls -l ./assay
+file ./assay || true
+./assay --version || echo "Failed to run --version"
+
 # Start Monitor
 # Use specific log location for CI collection
 mkdir -p /tmp/assay-lsm-verify
