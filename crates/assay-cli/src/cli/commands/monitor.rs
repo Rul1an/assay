@@ -436,6 +436,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                     let dump = dump_prefix_hex(&event.data, 64);
                                     println!("[PID {}] 🔍 STRUCT DUMP Part {} (Offset {}-{}): {}", event.pid, chunk_idx+1, start_offset, start_offset+64, dump);
                                 }
+                                105 => {
+                                    let path = decode_utf8_cstr(&event.data);
+                                    println!("[PID {}] 📂 FILE OPEN (Manual Resolution): {}", event.pid, path);
+                                }
                                 99 => {
                                      // Debug Cgroup Mismatch
                                      let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
