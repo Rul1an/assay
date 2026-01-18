@@ -19,8 +19,11 @@ pub struct LinuxMonitor {
 
 #[cfg(target_os = "linux")]
 enum MonitorLink {
+    #[allow(dead_code)]
     TracePoint(#[allow(dead_code)] aya::programs::trace_point::TracePointLink),
+    #[allow(dead_code)]
     Lsm(#[allow(dead_code)] aya::programs::lsm::LsmLink),
+    #[allow(dead_code)]
     KProbe(#[allow(dead_code)] aya::programs::kprobe::KProbeLink),
 }
 
