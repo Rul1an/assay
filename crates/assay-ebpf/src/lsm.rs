@@ -32,30 +32,34 @@ static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(1024 * 1024, 0); // Increas
 #[map]
 static STATS: Array<u32> = Array::with_max_entries(10, 0);
 
-// Helper to emit events
-fn emit_event(event_id: u32, cgroup_id: u64, rule_id: u32, data: &[u8], path_len: u32) {
-    // Layout:
-    // u32 event_id
-    // u64 cgroup_id
-    // u32 rule_id
-    // u32 path_len
-    // [u8; 64] data (payload)
+// Helper to emit events matching MonitorEvent ABI
+fn emit_event(event_id: u32, _cgroup_id: u64, _rule_id: u32, data: &[u8], _path_len: u32) {
+    // MonitorEvent Layout (assay-common):
+    // offset 0: pid (u32)
+    // offset 4: event_type (u32)
+    // offset 8: data ([u8; 512])
 
-    if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 84]>(0) {
+    if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 520]>(0) {
         let buf = entry.as_mut_ptr() as *mut u8;
         unsafe {
-            *(buf as *mut u32) = event_id;
-            *(buf.add(4) as *mut u64) = cgroup_id;
-            *(buf.add(12) as *mut u32) = rule_id;
-            *(buf.add(16) as *mut u32) = path_len; // length or extra check
+            // Write PID
+            let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+            *(buf as *mut u32) = pid;
 
-            // data (max 64 bytes)
-            let data_ptr = buf.add(20);
-            let len = if data.len() > 64 { 64 } else { data.len() };
+            // Write Event Type
+            *(buf.add(4) as *mut u32) = event_id;
+
+            // Write Data
+            // We strip cgroup_id/rule_id/path_len headers for now to match
+            // the simple decoder in cli/monitor.rs which expects payload at data[0].
+            // (We can re-add them as a header inside data later if needed).
+            let data_ptr = buf.add(8);
+            let len = if data.len() > 512 { 512 } else { data.len() };
             core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
-            // zero pad
-            if len < 64 {
-                core::ptr::write_bytes(data_ptr.add(len), 0, 64 - len);
+
+            // Zero pad the rest if needed, but not strictly required for viewing
+             if len < 512 {
+                core::ptr::write_bytes(data_ptr.add(len), 0, 512 - len);
             }
         }
         entry.submit(0);
