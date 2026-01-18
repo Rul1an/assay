@@ -60,17 +60,8 @@ impl LinuxMonitor {
     pub fn set_config(&mut self, config: &std::collections::HashMap<u32, u32>) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
 
-        // Update CONFIG (Tracepoints)
+        // Update CONFIG (Tracepoints & LSM)
         if let Some(map) = bpf.map_mut("CONFIG") {
-             let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
-             for (&k, &v) in config {
-                 hm.insert(k, v, 0)?;
-             }
-        }
-
-        // Update CONFIG_LSM (LSM)
-        {
-             let map = bpf.map_mut("CONFIG_LSM").expect("Failed to find CONFIG_LSM map");
              let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
              for (&k, &v) in config {
                  hm.insert(k, v, 0)?;
@@ -81,8 +72,6 @@ impl LinuxMonitor {
     }
 
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
-         // Set default offsets if needed, but resolved via tracepoint.rs usually.
-         // We can set default MAX_ANCESTOR_DEPTH (10) here.
          let defaults = std::collections::HashMap::from([
              (10, 8), // KEY_MAX_ANCESTOR_DEPTH
          ]);
@@ -93,7 +82,6 @@ impl LinuxMonitor {
         let val = if enabled { 1 } else { 0 };
         let config = std::collections::HashMap::from([
              (100, val), // KEY_MONITOR_ALL
-             (0, val),   // CONFIG_LSM expects key 0
         ]);
         self.set_config(&config)
     }
