@@ -344,20 +344,25 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let dev = stat.st_dev;
             let ino = stat.st_ino;
 
-            // Re-encode and mask dev_t to match Kernel internal format (Major << 20 | Minor)
-            let major = libc::major(dev) as u64;
-            let minor = libc::minor(dev) as u64;
-            let kernel_dev = ((major & 0xfff) << 20) | (minor & 0xfffff);
+            // Use the OS-provided device ID directly.
+            // CAUTION: We assume `stat.st_dev` (userspace) aligns with `super_block.s_dev` (kernel).
+            // On standard Linux x86_64, this holds for the 32-bit dev_t (Major 12, Minor 20).
+            let kernel_dev = dev as u32;
+
+            // Log deconstructed values for debugging
+            if !args.quiet {
+                 let maj = unsafe { libc::major(dev) };
+                 let min = unsafe { libc::minor(dev) };
+                 eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
+                     rule.path, dev, maj, min, kernel_dev, ino);
+            }
 
             compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
                  rule_id: rule.rule_id,
-                 dev: kernel_dev as u32,
+                 dev: kernel_dev,
                  ino: ino as u64,
                  gen: 0, // Fallback if generation not resolved
             });
-            if !args.quiet {
-                eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
-                    rule.path, dev, major, minor, kernel_dev, ino);
             }
         }
 

@@ -25,6 +25,18 @@ pub struct MonitorEvent {
     pub data: [u8; DATA_LEN],
 }
 
+/// Key used to identify an inode in BPF maps.
+///
+/// # ABI and kernel assumptions
+///
+/// This struct is `#[repr(C)]` and used across the eBPF/userspace boundary,
+/// so its layout must remain in sync with the corresponding kernel/BPF-side
+/// definition.
+///
+/// The `dev` field stores the kernel's encoded `dev_t` value (e.g. from
+/// `super_block.s_dev`) as a `u32`. On modern Linux kernels, this is typically
+/// `MAJOR << 20 | MINOR`. This layout may not match kernels with different
+/// `dev_t` representations.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct InodeKey {

@@ -46,6 +46,10 @@ echo "�🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
 cargo clean -p assay-ebpf
 cargo xtask build-ebpf --docker
+if [ ! -f target/assay-ebpf.o ]; then
+    echo "❌ Build failed: target/assay-ebpf.o not found"
+    exit 1
+fi
 cp target/assay-ebpf.o ./assay-ebpf.o
 
 
