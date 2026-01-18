@@ -46,7 +46,7 @@ echo "�🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
 cargo clean -p assay-ebpf
 cargo xtask build-ebpf --docker
-cp target/bpfel-unknown-none/release/assay-ebpf ./assay-ebpf.o
+cp target/assay-ebpf.o ./assay-ebpf.o
 
 
 
