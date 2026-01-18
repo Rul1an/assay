@@ -17,9 +17,9 @@ pub struct LinuxMonitor {
 }
 
 enum MonitorLink {
-    TracePoint(aya::programs::trace_point::TracePointLink),
-    Lsm(aya::programs::lsm::LsmLink),
-    KProbe(aya::programs::kprobe::KProbeLink),
+    TracePoint(#[allow(dead_code)] aya::programs::trace_point::TracePointLink),
+    Lsm(#[allow(dead_code)] aya::programs::lsm::LsmLink),
+    KProbe(#[allow(dead_code)] aya::programs::kprobe::KProbeLink),
 }
 
 impl LinuxMonitor {

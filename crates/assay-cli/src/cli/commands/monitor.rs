@@ -345,8 +345,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let ino = stat.st_ino;
 
             // Re-encode and mask dev_t to match Kernel internal format (Major << 20 | Minor)
-            let major = unsafe { libc::major(dev) } as u64;
-            let minor = unsafe { libc::minor(dev) } as u64;
+            let major = libc::major(dev) as u64;
+            let minor = libc::minor(dev) as u64;
             let kernel_dev = ((major & 0xfff) << 20) | (minor & 0xfffff);
 
             compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
