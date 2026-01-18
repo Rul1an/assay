@@ -214,7 +214,7 @@ fi
 # Grep for the specific log line that confirms the BPF program was loaded/attached.
 # "Assay Monitor running" is printed after successful attach() in monitor.rs.
 if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
-    echo "Monitor: 'Assay Monitor running' not found in logs yet. Giving it 5 more seconds..."
+    echo "Monitor: Assay Monitor running not found in logs yet. Giving it 5 more seconds..."
     sleep 5
     if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
         echo "❌ FAILURE: Monitor running but NOT attached (Verifier rejection?)"
