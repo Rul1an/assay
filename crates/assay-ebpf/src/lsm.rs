@@ -93,9 +93,9 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     emit_event(108, cgroup_id, 0, &dbg, 0);
     let monitor_all = monitor_val != 0;
 
-    if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
-        return Ok(0);
-    }
+    // if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
+    //    return Ok(0);
+    // }
 
     // DEBUG: Passed Monitor Check
     let mut dbg = [0u8; 64];
