@@ -1,6 +1,6 @@
 use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
-    macros::{lsm, map},
+    macros::{lsm, map, PreserveAccessIndex},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
@@ -15,20 +15,20 @@ const EVENT_FILE_ALLOWED: u32 = 11;
 
 // SOTA: Inode Enforcement Keys
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PreserveAccessIndex)]
 pub struct super_block {
     pub s_dev: u32,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PreserveAccessIndex)]
 pub struct inode {
     pub i_ino: u64,
     pub i_sb: *mut super_block,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PreserveAccessIndex)]
 pub struct file {
     pub f_inode: *mut inode,
 }
