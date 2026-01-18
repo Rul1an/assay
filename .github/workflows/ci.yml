@@ -62,9 +62,15 @@ jobs:
         run: |
           echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
-      # Optimized single-pass test (builds implicitly)
-      - name: Test Workspace
+      # Linux: Test everything except eBPF and integration tests
+      - name: Test Workspace (Linux)
+        if: runner.os == 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
+
+      # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
+      - name: Test Workspace (Cross-Platform)
+        if: runner.os != 'Linux'
+        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli
 
   ebpf-smoke:
     name: eBPF monitor smoke (${{ matrix.os_name }})
