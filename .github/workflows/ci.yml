@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "debug/**" ]
   pull_request:
 
 jobs:
@@ -62,26 +62,65 @@ jobs:
         run: |
           echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
-      # Optimized single-pass test (builds implicitly)
-      - name: Test Workspace
+      # Linux: Test everything except eBPF and integration tests
+      - name: Test Workspace (Linux)
+        if: runner.os == 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
+      # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
+      - name: Test Workspace (Cross-Platform)
+        if: runner.os != 'Linux'
+        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli
+
   ebpf-smoke:
-    name: eBPF monitor smoke (Linux)
-    runs-on: ubuntu-latest
+    name: eBPF monitor smoke (${{ matrix.os_name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, bpf-lsm]
+            os_name: Linux (Self-Hosted)
+          - runner: ubuntu-latest
+            os_name: Linux (Ubuntu)
     permissions:
       contents: read
     steps:
+      - name: Pre-clean workspace ownership
+        run: |
+          sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
+          sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" || true
+
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y build-essential libssl-dev pkg-config llvm-dev libclang-dev clang
+          # Fix persistent runner permissions if needed
+          sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
+          if ! command -v bpf-linker &> /dev/null; then
+            cargo install bpf-linker
+          fi
 
       - name: Verify LSM blocking (CI Mode)
+        env:
+          STRICT_LSM_CHECK: ${{ matrix.runner != 'ubuntu-latest' && '1' || '0' }}
         run: |
           chmod +x scripts/verify_lsm_docker.sh
           # CI Mode = Soft Skip on Ubuntu-Latest (due to no BPF LSM), Hard Fail on missing tracefs
           sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
+
+      - name: Fix log permissions
+        if: always()
+        run: |
+          echo "Fixing permissions for /tmp/assay-lsm-verify"
+          sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
+          ls -l /tmp/assay-lsm-verify || true
 
       - name: Upload verification logs
         if: always()

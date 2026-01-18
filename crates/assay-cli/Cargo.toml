@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
+env_logger = "0.11"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "fs", "signal"] }
 assay-core = { path = "../assay-core", version = "2.0.0" }
 assay-monitor = { path = "../assay-monitor", version = "2.0.0" }

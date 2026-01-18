@@ -12,11 +12,17 @@ pub static _LICENSE: [u8; 4] = *b"GPL\0";
 
 pub mod lsm;
 pub mod socket_lsm;
+#[allow(dead_code)]
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+#[allow(non_upper_case_globals)]
+#[allow(clippy::all)]
+pub mod vmlinux;
 
-use assay_common::{MonitorEvent, EVENT_CONNECT, EVENT_OPENAT};
+use assay_common::{MonitorEvent, EVENT_CONNECT};
 use aya_ebpf::{
     macros::{map, tracepoint},
-    maps::{HashMap, RingBuf},
+    maps::{Array, HashMap, RingBuf},
     programs::TracePointContext,
     helpers::{
         bpf_get_current_cgroup_id,
@@ -35,7 +41,10 @@ fn current_tgid() -> u32 {
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 #[map]
-static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
+pub static TP_HIT: Array<u64> = Array::with_max_entries(1, 0);
+
+#[map]
+pub static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 
 /// Map of Cgroup IDs (inodes) we're monitoring.
 /// Key: Cgroup ID (u64), Value: 1 (present)
@@ -46,7 +55,19 @@ pub static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024,
 /// Key 0: openat filename offset (default 24)
 /// Key 1: connect sockaddr offset (default 24)
 #[map]
-static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+pub static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+
+#[map]
+pub static LSM_HIT: Array<u64> = Array::with_max_entries(1, 0);
+
+#[map]
+pub static DENY_INO: HashMap<assay_common::InodeKey, u32> = HashMap::with_max_entries(1024, 0);
+
+#[map]
+pub static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+
+#[map]
+pub static STATS: Array<u32> = Array::with_max_entries(10, 0);
 
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
@@ -56,7 +77,7 @@ const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
-const KEY_MONITOR_ALL: u32 = 100;
+pub const KEY_MONITOR_ALL: u32 = 100;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
@@ -128,67 +149,18 @@ pub fn assay_monitor_openat2(ctx: TracePointContext) -> u32 {
 }
 
 fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
+    if let Some(hits) = TP_HIT.get_ptr_mut(0) {
+        unsafe { *hits += 1 };
     }
-
-    // Dynamic offset resolution specific to openat2
-    let filename_offset = unsafe { CONFIG.get(&KEY_OFFSET_FILENAME_OPENAT2) }
-        .map(|v| *v as usize)
-        .unwrap_or(24); // Default might differ, but 24 is common assumption
-
-    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
-
-    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        unsafe {
-            write_event_header(ev, current_tgid(), EVENT_OPENAT); // We map openat2 to same logical event
-
-            let data_ptr = (*ev).data.as_mut_ptr();
-            let data_len = (*ev).data.len();
-            let data = core::slice::from_raw_parts_mut(data_ptr, data_len);
-
-            let _ = aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-                filename_ptr as *const u8,
-                data,
-            );
-        }
-        entry.submit(0);
-    }
-
+    unsafe { aya_ebpf::helpers::bpf_printk!(b"TP2 FIRE\0"); }
     Ok(0)
 }
 
 fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
+    if let Some(hits) = TP_HIT.get_ptr_mut(0) {
+        unsafe { *hits += 1 };
     }
-
-    // Dynamic offset resolution
-    let filename_offset = unsafe { CONFIG.get(&KEY_OFFSET_FILENAME) }
-        .map(|v| *v as usize)
-        .unwrap_or(DEFAULT_OFFSET as usize);
-
-    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
-
-    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        unsafe {
-            write_event_header(ev, current_tgid(), EVENT_OPENAT);
-
-            // Safe slice construction from raw pointer to avoid implicit autoref issues
-            let data_ptr = (*ev).data.as_mut_ptr();
-            let data_len = (*ev).data.len();
-            let data = core::slice::from_raw_parts_mut(data_ptr, data_len);
-
-            let _ = aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-                filename_ptr as *const u8,
-                data,
-            );
-        }
-        entry.submit(0);
-    }
-
+    unsafe { aya_ebpf::helpers::bpf_printk!(b"TP FIRE\0"); }
     Ok(0)
 }
 

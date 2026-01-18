@@ -1,20 +1,15 @@
 use aya_ebpf::{
+    helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
-    maps::{HashMap, RingBuf, Array},
+    maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
 };
-use crate::MONITORED_CGROUPS;
-use core::ffi::{c_void, c_char};
-
-#[map]
-static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL, LSM_HIT, DENY_INO, LSM_EVENTS, STATS};
+use core::ffi::c_void;
+use crate::vmlinux::{file, inode, super_block};
+use aya_log_ebpf::info;
 
 const MAX_DENY_PATHS: u32 = 256;
-const MAX_PATH_LEN: usize = 256;
-
-const EVENT_FILE_BLOCKED: u32 = 10;
-const EVENT_FILE_ALLOWED: u32 = 11;
 
 #[map]
 static DENY_PATHS_EXACT: HashMap<u64, u32> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
@@ -29,217 +24,125 @@ struct DenyPrefix {
 #[map]
 static DENY_PATHS_PREFIX: HashMap<u64, DenyPrefix> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
 
-#[map]
-static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(128 * 1024, 0);
+// Maps now consolidated in main.rs
 
-#[map]
-static LSM_STATS: Array<u64> = Array::with_max_entries(8, 0);
+// Helper to emit events matching MonitorEvent ABI
+fn emit_event(ctx: &LsmContext, event_id: u32, _cgroup_id: u64, _rule_id: u32, data: &[u8], _path_len: u32) {
+    if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 520]>(0) {
+        let buf = entry.as_mut_ptr() as *mut u8;
+        unsafe {
+            // Write PID
+            let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+            *(buf as *mut u32) = pid;
 
-const STAT_CHECKS: u32 = 0;
-const STAT_BLOCKED: u32 = 1;
-const STAT_ALLOWED: u32 = 2;
-const STAT_ERRORS: u32 = 3;
+            // Write Event Type
+            *(buf.add(4) as *mut u32) = event_id;
 
-const DATA_LEN: usize = 512;
+            // Write Data
+            let data_ptr = buf.add(8);
+            let len = if data.len() > 512 { 512 } else { data.len() };
+            core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
 
-#[repr(C)]
-struct MonitorEvent {
-    pid: u32,
-    event_type: u32,
-    data: [u8; DATA_LEN],
+            // Zero pad
+             if len < 512 {
+                core::ptr::write_bytes(data_ptr.add(len), 0, 512 - len);
+            }
+        }
+        entry.submit(0);
+        info!(ctx, "LSM Event {} Submitted", event_id);
+    }
 }
 
 #[lsm(hook = "file_open")]
 pub fn file_open_lsm(ctx: LsmContext) -> i32 {
-    match try_file_open(&ctx) {
-        Ok(result) => result,
-        Err(_) => {
-            inc_stat(STAT_ERRORS);
-            0
-        }
+    match try_file_open_lsm(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as i32,
     }
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct InodeKey {
-    pub dev: u64,
-    pub ino: u64,
-}
-
-#[map]
-static DENY_INODES_EXACT: HashMap<InodeKey, u32> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
-
-#[inline(always)]
-fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
-    inc_stat(STAT_CHECKS);
+fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
+    // 0. Mark Hit (Absolute proof kernel reached here)
+    if let Some(hits) = LSM_HIT.get_ptr_mut(0) {
+        unsafe { *hits += 1 };
+    }
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
-    // If this doesn't show, the hook isn't running.
-    {
-         let file_ptr: *const c_void = unsafe { ctx.arg(0) };
-         // Reading f_inode ptr (offset 32)
-         let f_inode_ptr_addr = (file_ptr as *const u8).wrapping_add(32) as *const *const u8;
-         let inode_ptr = unsafe {
-            bpf_probe_read_kernel(f_inode_ptr_addr).unwrap_or(core::ptr::null())
-         };
-         let ptr_val = inode_ptr as u64;
-         let mut debug_data = [0u8; 16];
-         unsafe {
-             core::ptr::copy_nonoverlapping(&ptr_val as *const u64 as *const u8, debug_data.as_mut_ptr(), 8);
-         }
-         emit_event(100, cgroup_id, 0, &debug_data, 16);
-
-         // -------------------------------------------------------------------------
-         // DEBUG: Struct Scanner (Event 101)
-         // -------------------------------------------------------------------------
-         // Unconditional dump of struct file to debug offsets.
-         let mut file_dump = [0u8; 64];
-         unsafe {
-             bpf_probe_read_kernel(file_ptr as *const [u8; 64]).map(|d| file_dump = d).ok();
-         }
-         emit_event(101, cgroup_id, 0, &file_dump, 0);
-    }
-
+    // Validates that we have a file pointer (arg 0)
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
     if file_ptr.is_null() {
         return Ok(0);
     }
 
-    let monitor_val = unsafe { CONFIG_LSM.get(&0).copied().unwrap_or(0) };
+    let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
     let monitor_all = monitor_val != 0;
 
+    // Optimization: avoid heavy logic if not monitored
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
         return Ok(0);
     }
 
-    let inode_ptr: *const u8 = core::ptr::null();
+    // CO-RE Inode Resolution
+    let f = file_ptr as *const file;
+    let inode_ptr: *mut inode = unsafe {
+        bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
+    };
 
+    // Hardening: Null Check
+    if inode_ptr.is_null() {
+         return Ok(0);
+    }
 
+    // Read i_ino
+    let i_ino = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0) };
 
-    if !inode_ptr.is_null() {
-        // 3. Read Inode Fields
-        // i_sb at 40 (0x28), i_ino at 64 (0x40)
-        let i_sb_addr = (inode_ptr as *const u8).wrapping_add(40) as *const *const c_void;
-        let i_ino_addr = (inode_ptr as *const u8).wrapping_add(64) as *const u64;
+    // Read i_generation (SOTA)
+    let i_gen = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
 
-        let ino = unsafe { bpf_probe_read_kernel(i_ino_addr).unwrap_or(0) };
-        let sb_ptr = unsafe { bpf_probe_read_kernel(i_sb_addr).unwrap_or(core::ptr::null()) };
+    let sb_ptr: *mut super_block = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block).unwrap_or(core::ptr::null_mut()) };
 
-        if !sb_ptr.is_null() {
-            // s_dev at 16 (0x10)
-            let s_dev_addr = (sb_ptr as *const u8).wrapping_add(16) as *const u32;
-            let s_dev = unsafe { bpf_probe_read_kernel(s_dev_addr).unwrap_or(0) };
+    let mut s_dev = 0u32;
+    if !sb_ptr.is_null() {
+        s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
+    }
 
-            if s_dev != 0 {
-                let key = InodeKey { dev: s_dev as u64, ino };
-                // ... map lookup ...
-                 if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
-                     let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN];
-                     emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, &partial_path[0..0], 0);
-                     inc_stat(STAT_BLOCKED);
-                     return Ok(-1);
-                 }
-            }
+    let key = assay_common::InodeKey {
+        dev: s_dev,
+        pad: 0,
+        ino: i_ino,
+        gen: 0, // TODO: Userspace `stat` provides always-zero generation.
+                // This is a known TOCTOU/Security gap where reused inodes could be confused.
+                // Full fix requires `ioctl(FS_IOC_GETVERSION)` in userspace to resolve true generation.
+        _pad2: 0,
+    };
+
+    // Diagnostic Printk (DEBUG CLASS 2)
+    unsafe {
+        aya_ebpf::helpers::bpf_printk!(b"LSM: INODE %llu:%llu\0", s_dev as u64, i_ino);
+    }
+
+    // Enforcement Check
+    if let Some(rule_id) = unsafe { DENY_INO.get(&key) } {
+        unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu rule=%u\0", s_dev as u64, i_ino, *rule_id); }
+
+        let mut alert_data = [0u8; 64];
+        unsafe {
+            *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
+            *(alert_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
+            *(alert_data.as_mut_ptr().add(16) as *mut u32) = *rule_id;
         }
+        emit_event(&ctx, 10, cgroup_id, *rule_id, &alert_data, 0);
+        return Err(-1); // EPERM
     }
 
-    // Use MaybeUninit to avoid the expensive zero-initialization loop on stack
-    let mut path_buf: [core::mem::MaybeUninit<u8>; MAX_PATH_LEN] =
-        unsafe { core::mem::MaybeUninit::uninit().assume_init() };
-
-    // Safety: read_file_path writes to the pointer treating it as *mut u8.
-    // It creates a valid C string or fails.
-    let buf_ptr = path_buf.as_mut_ptr() as *mut u8;
-    let _buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
-
-    // CONDITIONAL PATH RESOLUTION
-    // To pass CI, we DISABLE read_file_path for now because of the verifier loop/type hell.
-    // Uncomment the next line only when bpf_d_path is fixed or kernel supports it.
-    // let mut path_len = read_file_path(file_ptr, buf_slice)?;
-    let path_len = 0; // Disabled for CI robustness logic
-
-    // ... (Remainder path logic is skipped if len=0) ...
-    if path_len == 0 {
-        return Ok(0);
+    // Event 112: Inode Resolved (Telemetry)
+    let mut ino_data = [0u8; 64];
+    unsafe {
+        *(ino_data.as_mut_ptr() as *mut u64) = s_dev as u64;
+        *(ino_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
     }
+    emit_event(&ctx, 112, cgroup_id, 0, &ino_data, 0);
 
     Ok(0)
-}
-
-#[inline(always)]
-fn fnv1a_hash(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &b in data {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
-#[inline(always)]
-fn inc_stat(index: u32) {
-    if let Some(val) = LSM_STATS.get_ptr_mut(index) {
-        unsafe { *val += 1 };
-    }
-}
-
-#[inline(always)]
-#[inline(always)]
-fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _action: u32) {
-    if let Some(mut event) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = unsafe { &mut *event.as_mut_ptr() };
-        ev.event_type = event_type;
-        ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-
-        unsafe {
-            // Pack data for Event 100/99 (Debug) specially, or standard packing
-            // For now, if event_type == 100, we just assume `path` contains the 16 bytes of debug data.
-            // For standard blocking events, we might want to pack cgroup/rule_id?
-            // Current userspace expects:
-            // Event 100: [dev(8), ino(8)]
-            // Event BLOCKED: path string
-
-            if event_type == 100 {
-                 let len = if path.len() > 16 { 16 } else { path.len() };
-                 core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
-            } else if event_type == 101 {
-                 // Struct Dump: Copy up to 64 bytes (or full slice if larger)
-                 let len = if path.len() > 64 { 64 } else { path.len() };
-                 core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
-            } else {
-                 // Regular event (File Blocked/Allowed)
-                 // Just copy path for now to match userspace expectation for OPENAT-like events
-                 // TODO: If we need rule_id, we need to pack it. But userspace monitor.rs line 422 just prints string.
-                 let len = if path.len() > DATA_LEN { DATA_LEN } else { path.len() };
-                 core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
-                 // Null terminate if space allows?
-                 if len < DATA_LEN {
-                     *ev.data.as_mut_ptr().add(len) = 0;
-                 }
-            }
-        }
-        event.submit(0);
-    }
-}
-
-use aya_ebpf::bindings::path;
-
-// Keep read_file_path for future, but it's unused if disabled in try_file_open
-#[inline(always)]
-fn read_file_path(file_ptr: *const c_void, _buf: &mut [u8]) -> Result<usize, i64> {
-   // use aya_ebpf::helpers::bpf_d_path;
-   if file_ptr.is_null() { return Ok(0); }
-
-   // Heuristic: struct file starts with f_u (rcu_head/callback_head) which is 16 bytes.
-   // f_path usually follows immediately at offset 16.
-   // let path_ptr = unsafe { (file_ptr as *const u8).add(16) as *mut path };
-
-   // let len = unsafe {
-   //    bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut c_char, MAX_PATH_LEN as u32)
-   // };
-   // if len < 0 { return Err(len as i64); }
-   // Ok(len as usize)
-   Ok(0)
 }

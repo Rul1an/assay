@@ -306,7 +306,63 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             }
         }
 
-        let compiled = assay_policy::tiers::compile(&t1_policy);
+        let mut compiled = assay_policy::tiers::compile(&t1_policy);
+
+        // RESOLVE INODES (Tier 1 SOTA)
+        // Convert exact path rules to inode rules
+        for rule in &compiled.tier1.file_deny_exact {
+            use std::ffi::CString;
+            use std::os::unix::ffi::OsStrExt;
+
+            let path_c = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes()) {
+                Ok(c) => c,
+                Err(e) => {
+                     eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
+                     continue;
+                }
+            };
+
+            // Hardening: open(O_PATH | O_NOFOLLOW | O_CLOEXEC) + fstat
+            // Prevents TOCTOU and symlink traversal
+            let fd = unsafe { libc::open(path_c.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+            if fd < 0 {
+                 let err = std::io::Error::last_os_error();
+                 eprintln!("Warning: Could not open denied path {} (skipping): {}", rule.path, err);
+                 continue;
+            }
+
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            let res = unsafe { libc::fstat(fd, &mut stat) };
+            unsafe { libc::close(fd) };
+
+            if res < 0 {
+                let err = std::io::Error::last_os_error();
+                eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, err);
+                continue;
+            }
+
+            let dev = stat.st_dev;
+            let ino = stat.st_ino;
+
+            // Re-encode dev_t to match Kernel internal format (Major << 20 | Minor).
+            // Userspace dev_t (u64) structure differs from kernel internal dev_t (u32).
+            let maj = libc::major(dev) as u32;
+            let min = libc::minor(dev) as u32;
+            let kernel_dev = ((maj & 0xfff) << 20) | (min & 0xfffff);
+
+            // Log deconstructed values for debugging
+            if !args.quiet {
+                 eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
+                     rule.path, dev, maj, min, kernel_dev, ino);
+            }
+
+            compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
+                 rule_id: rule.rule_id,
+                 dev: kernel_dev,
+                 ino: ino as u64,
+                 gen: 0, // Fallback if generation not resolved
+            });
+        }
 
         if !args.quiet {
             eprintln!("Locked & Loaded Assurance Policy 🛡️");
@@ -422,20 +478,43 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 10 /* EVENT_FILE_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 11 /* EVENT_FILE_ALLOWED */ => println!("[PID {}] 🟢 ALLOWED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 20 /* EVENT_CONNECT_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED NET : {}", event.pid, dump_prefix_hex(&event.data, 20)), // IP/Port packed
-                                100 => {
-                                     // Debug Inode Event
+                                112 => {
+                                     // SOTA Inode Resolution Event
                                      let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
                                      let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
                                      let dev = u64::from_ne_bytes(dev_bytes);
                                      let ino = u64::from_ne_bytes(ino_bytes);
-                                     println!("[PID {}] DEBUG: Kernel Saw dev={} ino={}", event.pid, dev, ino);
+                                     println!("[PID {}] 🔒 INODE RESOLVED: dev={} ino={}", event.pid, dev, ino);
                                 }
-                                101 => {
-                                    // Struct Dump
+                                101 | 102 | 103 | 104 => {
+                                    let chunk_idx = event.event_type - 101;
+                                    let start_offset = chunk_idx * 64;
                                     let dump = dump_prefix_hex(&event.data, 64);
-                                    println!("[PID {}] 🔍 STRUCT DUMP: {}", event.pid, dump);
-                                    // Optional: Chunk it for readability? "aa bb cc dd ..."
-                                    // dump_prefix_hex returns joined hex string.
+                                    println!("[PID {}] 🔍 STRUCT DUMP Part {} (Offset {}-{}): {}", event.pid, chunk_idx+1, start_offset, start_offset+64, dump);
+                                }
+                                105 => {
+                                    let path = decode_utf8_cstr(&event.data);
+                                    println!("[PID {}] 📂 FILE OPEN (Manual Resolution): {}", event.pid, path);
+                                }
+                                106 => {
+                                    println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
+                                }
+                                107 => {
+                                    println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
+                                }
+                                108 => {
+                                    println!("[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})", event.pid, event.data[0]);
+                                }
+                                109 => {
+                                    println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
+                                }
+                                110 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
+                                }
+                                111 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
                                 }
                                 99 => {
                                      // Debug Cgroup Mismatch
