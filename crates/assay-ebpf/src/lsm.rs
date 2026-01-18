@@ -9,6 +9,7 @@ use core::ffi::c_void;
 
 // Use generated bindings
 use crate::vmlinux::{file, inode, super_block};
+use aya_log_ebpf::info;
 
 const MAX_DENY_PATHS: u32 = 256;
 
@@ -108,7 +109,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i64> {
     };
 
     if inode_ptr.is_null() {
-         let mut err_data = [0u8; 64];
+         let err_data = [0u8; 64];
          emit_event(&ctx, 106, cgroup_id, 0, &err_data, 0);
          return Ok(0);
     }
