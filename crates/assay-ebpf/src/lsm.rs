@@ -81,11 +81,6 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
-     // If this doesn't show, the hook isn't running.
-     {
-         // DUMP LOGIC REMOVED (Focusing on verifier-safe bpf_d_path)
-     }
-
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
     if file_ptr.is_null() {
         return Ok(0);
@@ -98,66 +93,48 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    let inode_ptr: *const u8 = core::ptr::null();
+    // --- STRUCT FILE DUMP STRATEGY ---
+    // Dump 256 bytes of struct file to find f_path offset
+    let done = unsafe { DUMP_DONE.get(&0).copied().unwrap_or(0) };
+    if done == 0 {
+        // Read 256 bytes (raw struct file)
+        // We read it as chunks or a single array. Array[u8; 256] might be too big for stack if eager?
+        // But bpf_probe_read_kernel reads into return value.
+        // Let's try reading [u8; 256] directly.
+        let dump_data: [u8; 256] = unsafe {
+            bpf_probe_read_kernel(file_ptr as *const [u8; 256]).unwrap_or([0; 256])
+        };
 
+        // Emit Event 101 (Struct Dump)
+        emit_event(101, cgroup_id, 0, &dump_data, 0);
 
-
-    if !inode_ptr.is_null() {
-        // 3. Read Inode Fields
-        // i_sb at 40 (0x28), i_ino at 64 (0x40)
-        let i_sb_addr = (inode_ptr as *const u8).wrapping_add(40) as *const *const c_void;
-        let i_ino_addr = (inode_ptr as *const u8).wrapping_add(64) as *const u64;
-
-        let ino = unsafe { bpf_probe_read_kernel(i_ino_addr).unwrap_or(0) };
-        let sb_ptr = unsafe { bpf_probe_read_kernel(i_sb_addr).unwrap_or(core::ptr::null()) };
-
-        if !sb_ptr.is_null() {
-            // s_dev at 16 (0x10)
-            let s_dev_addr = (sb_ptr as *const u8).wrapping_add(16) as *const u32;
-            let s_dev = unsafe { bpf_probe_read_kernel(s_dev_addr).unwrap_or(0) };
-
-            if s_dev != 0 {
-                let key = InodeKey { dev: s_dev as u64, ino };
-                // ... map lookup ...
-                 if let Some(&rule_id) = unsafe { DENY_INODES_EXACT.get(&key) } {
-                     let partial_path: [u8; MAX_PATH_LEN] = [0; MAX_PATH_LEN];
-                     emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, &partial_path[0..0], 0);
-                     inc_stat(STAT_BLOCKED);
-                     return Ok(-1);
-                 }
-            }
+        // Mark Done
+        if let Some(val) = DUMP_DONE.get_ptr_mut(0) {
+            unsafe { *val = 1 };
         }
     }
+    // -------------------------------
 
-    // Use MaybeUninit to avoid the expensive zero-initialization loop on stack
+    // Disable Path Resolution for now (Verifier issue with bpf_d_path stack ptr)
+    /*
     let mut path_buf: [core::mem::MaybeUninit<u8>; MAX_PATH_LEN] =
         unsafe { core::mem::MaybeUninit::uninit().assume_init() };
-
-    // Safety: read_file_path writes to the pointer treating it as *mut u8.
-    // It creates a valid C string or fails.
     let buf_ptr = path_buf.as_mut_ptr() as *mut u8;
     let buf_slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr, MAX_PATH_LEN) };
 
-    // CONDITIONAL PATH RESOLUTION
-    // Re-enabled with Stack Copy Fix for Verifier
     let path_len = read_file_path(file_ptr, buf_slice).unwrap_or(0);
-
-    // ... (Remainder path logic is skipped if len=0) ...
     if path_len == 0 {
         return Ok(0);
     }
 
-    // Null terminate if needed (bpf_d_path usually does, but we ensure sanity)
-    // We treat the buffer as a slice of u8 for hash/match
     let path_bytes = &buf_slice[..path_len];
-
-    // Check deny list (Exact)
     let hash = fnv1a_hash(path_bytes);
     if let Some(&rule_id) = unsafe { DENY_PATHS_EXACT.get(&hash) } {
         emit_event(EVENT_FILE_BLOCKED, cgroup_id, rule_id, path_bytes, 0);
         inc_stat(STAT_BLOCKED);
         return Ok(-1);
     }
+    */
 
     Ok(0)
 }

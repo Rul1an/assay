@@ -431,13 +431,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                      println!("[PID {}] DEBUG: Kernel Saw dev={} ino={}", event.pid, dev, ino);
                                 }
                                 101 => {
-                                    let dump = dump_prefix_hex(&event.data, 128);
-                                    println!("[PID {}] 🔍 STRUCT DUMP (0-128): {}", event.pid, dump);
-                                }
-                                102 => {
-                                    // Struct Dump Part 2
-                                    let dump = dump_prefix_hex(&event.data, 128);
-                                    println!("[PID {}] 🔍 STRUCT DUMP (128-256): {}", event.pid, dump);
+                                    let dump = dump_prefix_hex(&event.data, 256);
+                                    println!("[PID {}] 🔍 STRUCT DUMP (256 bytes): {}", event.pid, dump);
                                 }
                                 99 => {
                                      // Debug Cgroup Mismatch
