@@ -271,7 +271,7 @@ if [ "$(uname -s)" == "Linux" ]; then
     # Always copy from ./assay (downloaded or built) + eBPF object + modern policy
     TMP_DIR=$(mktemp -d)
     cp ./assay "$TMP_DIR/"
-    cp target/assay-ebpf.o "$TMP_DIR/"
+    cp ./assay-ebpf.o "$TMP_DIR/"
     cp deny_modern.yaml "$TMP_DIR/"
 
     cd "$TMP_DIR"
@@ -296,7 +296,7 @@ if command -v limactl >/dev/null 2>&1; then
         limactl shell "$LIMA_INSTANCE" -- mkdir -p /tmp/assay-test
 
         limactl cp ./assay "$LIMA_INSTANCE":/tmp/assay-test/
-        limactl cp target/assay-ebpf.o "$LIMA_INSTANCE":/tmp/assay-test/
+        limactl cp ./assay-ebpf.o "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp deny.yaml "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp deny_modern.yaml "$LIMA_INSTANCE":/tmp/assay-test/
 
@@ -330,7 +330,7 @@ DOCKER_ARGS=(run --rm --privileged --pid=host --cgroupns=host)
 DOCKER_ARGS+=(-e CI_MODE="$CI_MODE")
 DOCKER_ARGS+=(-e ENFORCE_LSM="$ENFORCE_LSM")
 DOCKER_ARGS+=(-v "${WORKDIR}/assay:/usr/local/bin/assay")
-DOCKER_ARGS+=(-v "${WORKDIR}/target/assay-ebpf.o:/assay-ebpf.o")
+DOCKER_ARGS+=(-v "${WORKDIR}/assay-ebpf.o:/assay-ebpf.o")
 DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml") # Fix: Mount modern policy
 
 # Mounts if present
