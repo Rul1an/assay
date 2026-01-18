@@ -87,7 +87,15 @@ assay init --ci
 
 This creates `.github/workflows/assay.yml`. Now, any PR that violates your policy will be blocked automatically.
 
+## 6. Runtime Security (Linux)
 
+For production environments, enable kernel-level enforcement to block unauthorized access in real-time.
+
+```bash
+sudo assay monitor --policy policy.yaml
+```
+
+*Requires Linux kernel 5.8+ with BPF LSM support.*
 ---
 
 ## Next Steps

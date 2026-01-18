@@ -43,19 +43,19 @@ assay fix --yes
 
 ## Core Features
 
--   **Kernel Enforcement (LSM)**: Blocks syscalls (e.g., `open`, `connect`) before they execute. No TOCTOU.
--   **Path Containment**: Enforces file access strictly within allowed directories in-kernel.
--   **RCE Prevention**: Blocks `exec`, `shell`, `spawn` via tracepoint & LSM hooks.
--   **Prompt Injection Defense**: Flags excessively long or vague tool descriptions.
--   **Atomic Autofix**: Safely repairs config/code with zero corruption risk (atomic I/O).
+-   **SOTA Inode Enforcement**: Kernel-level TOCTOU prevention using `open(O_PATH)` + eBPF LSM.
+-   **Path Containment**: strictly limits file access to allowed directories.
+-   **RCE Prevention**: Blocks `exec`, `shell`, `spawn` via minimal overhead hooks.
+-   **Atomic Autofix**: Safely repairs config/code with zero corruption risk.
+-   **Zero-Latency**: Built in Rust. Microsecond-scale overhead.
 
-## Compatibility Matrix
+## Compatibility
 
 | Requirement | Min Version | Note |
 | :--- | :--- | :--- |
-| Linux Kernel | 5.8+ | `CONFIG_BPF_LSM=y` required |
+| Linux Kernel | 5.8+ | `CONFIG_BPF_LSM=y` |
 | BTF Support | required | `CONFIG_DEBUG_INFO_BTF=y` |
-| Filesystem | bpf, tracefs | Automatically mounted by Assay |
+| Filesystem | bpf, tracefs | Automatically mounted |
 
 ## CI: Validate your MCP policy on every PR (GitHub Actions)
 
@@ -156,20 +156,16 @@ constraints:
         matches: "^/app/.*|^/data/.*"
 ```
 
-## Migration to v2.0 (JSON Schema)
+## Configuration (v2.0)
 
-Assay v1.7.0 formally deprecates the v1.x constraints syntax in favor of standard JSON Schema.
+Assay uses standard JSON Schema for policies.
+To migrate from v1.x:
 
-1. **Auto-migrate**:
-   ```bash
-   assay policy migrate --input v1-policy.yaml
-   ```
-2. **Verify usage**:
-   ```bash
-   assay policy validate --input v1-policy.yaml --deny-deprecations
-   ```
+```bash
+assay policy migrate --input v1-policy.yaml
+```
 
-See the full [Migration Guide](docs/migration/v1-to-v2.md) for details.
+See [Migration Guide](docs/migration/v1-to-v2.md).
 
 ## Documentation
 

@@ -32,6 +32,7 @@ flowchart TD
 
 ### LSM File Prevention
 Assay hooks the `file_open` LSM gate. It allows or denies access based on:
+- **SOTA Inode Resolution**: Resolves paths to `(dev, ino)` pairs securely using `open(O_PATH | O_NOFOLLOW)` to prevent TOCTOU/symlink attacks.
 - **Exact Path Matches**: High-performance hash-based lookup for files like `/etc/shadow`.
 - **Cgroup Scoping**: Automatically monitors only the processes within the target MCP sandbox.
 

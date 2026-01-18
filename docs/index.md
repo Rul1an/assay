@@ -14,8 +14,6 @@ Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It
 
 ## What is Assay?
 
-<div class="grid cards" markdown>
-
 -   :material-flash:{ .lg .middle } __Install Now__
 
     ---
@@ -24,13 +22,13 @@ Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It
 
     [:octicons-arrow-right-24: getassay.dev](https://getassay.dev)
 
--   :material-robot:{ .lg .middle } __For Vibecoders__
+-   :material-robot:{ .lg .middle } __For Agent Developers__
 
     ---
 
-    You build agents with natural language. Assay is your **Guardrail**. Connect your traces, run `assay validate`, and see if your agent is trying to delete the production database.
+    You build agents with natural language. Assay is your **Guardrail**. Connect your traces, run `assay validate`, or use `assay monitor` to block attacks at the kernel level.
 
-    [:octicons-arrow-right-24: Python Quickstart](python-quickstart.md)
+    [:octicons-arrow-right-24: Getting Started](getting-started/index.md)
 
 -   :material-console:{ .lg .middle } __For Engineers__
 
@@ -64,6 +62,13 @@ Run the validation engine (Stateless). Supports **SARIF** for GitHub Advanced Se
 
 ```bash
 assay validate --trace-file traces.jsonl --format sarif
+```
+
+### 4. Enable Runtime Security (Linux)
+Block IO and Network access at the kernel level.
+
+```bash
+sudo assay monitor --policy policy.yaml
 ```
 
 | Result | Status | Output |

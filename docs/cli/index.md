@@ -7,11 +7,9 @@ Complete documentation for all Assay commands.
 ## Installation
 
 ```bash
-# Python
-pip install assay
-
 # Rust
-cargo install assay
+cargo install assay-cli
+# Or via installer scripts (see Home)
 ```
 
 Verify installation:
@@ -31,6 +29,7 @@ assay --version
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
 | [`assay replay`](replay.md) | Interactive trace replay |
+| [`assay monitor`](../runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
 | [`assay mcp-server`](mcp-server.md) | Start Assay as MCP tool server |
 
 ---
@@ -191,5 +190,13 @@ See [Configuration](../config/index.md) for full reference.
     Start Assay as an MCP tool server for agent self-correction.
 
     [:octicons-arrow-right-24: Full reference](mcp-server.md)
+
+-   :material-shield-lock:{ .lg .middle } __assay monitor__
+
+    ---
+
+    Real-time kernel enforcement (SOTA). Blocks attacks before they happen.
+
+    [:octicons-arrow-right-24: Runtime Reference](../runtime-monitor.md)
 
 </div>
