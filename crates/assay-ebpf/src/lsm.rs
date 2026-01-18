@@ -93,40 +93,59 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // --- STRUCT FILE DUMP STRATEGY ---
-    // Dump 256 bytes of struct file to find f_path offset
-    let done = unsafe { DUMP_DONE.get(0).copied().unwrap_or(0) }; // Fixed: get(0) not get(&0)
-    if done == 0 {
-        // Chunk 1 (0-64)
-        let chunk1: [u8; 64] = unsafe {
-            bpf_probe_read_kernel(file_ptr as *const [u8; 64]).unwrap_or([0; 64])
-        };
-        emit_event(101, cgroup_id, 0, &chunk1, 0);
+    // --- MANUAL PATH RESOLUTION (OFFSET GUESSING) ---
+    // STRUCT FILE: f_path.dentry (pointer) at offset 56 (derived from dump)
+    // STRUCT DENTRY: d_name.name (pointer) at offset 32 (standard 64-bit layout)
 
-        // Chunk 2 (64-128)
-        let ptr2 = unsafe { (file_ptr as *const u8).add(64) };
-        let chunk2: [u8; 64] = unsafe {
-            bpf_probe_read_kernel(ptr2 as *const [u8; 64]).unwrap_or([0; 64])
-        };
-        emit_event(102, cgroup_id, 0, &chunk2, 0);
+    let dentry_ptr_loc = unsafe { (file_ptr as *const u8).add(56) };
+    let dentry_ptr_val: u64 = unsafe {
+        bpf_probe_read_kernel(dentry_ptr_loc as *const u64).unwrap_or(0)
+    };
 
-        // Chunk 3 (128-192)
-        let ptr3 = unsafe { (file_ptr as *const u8).add(128) };
-        let chunk3: [u8; 64] = unsafe {
-            bpf_probe_read_kernel(ptr3 as *const [u8; 64]).unwrap_or([0; 64])
-        };
-        emit_event(103, cgroup_id, 0, &chunk3, 0);
+    if dentry_ptr_val != 0 {
+        let dentry_ptr = dentry_ptr_val as *const u8;
 
-        // Chunk 4 (192-256)
-        let ptr4 = unsafe { (file_ptr as *const u8).add(192) };
-        let chunk4: [u8; 64] = unsafe {
-            bpf_probe_read_kernel(ptr4 as *const [u8; 64]).unwrap_or([0; 64])
+        // Offset 32 for d_name.name
+        let name_ptr_loc = unsafe { dentry_ptr.add(32) };
+        let name_ptr_val: u64 = unsafe {
+             bpf_probe_read_kernel(name_ptr_loc as *const u64).unwrap_or(0)
         };
-        emit_event(104, cgroup_id, 0, &chunk4, 0);
 
-        // Mark Done
-        if let Some(val) = DUMP_DONE.get_ptr_mut(0) {
-            unsafe { *val = 1 };
+        if name_ptr_val != 0 {
+            let name_ptr = name_ptr_val as *const u8;
+
+            // Read Name
+            let mut name_buf = [0u8; 64];
+            // Use aya helper if available, or direct probe
+            // But aya_ebpf::helpers::bpf_probe_read_kernel_str takes *const c_void
+
+            // We use generic read for string bytes if wrapper not imported,
+            // but we likely need bpf_probe_read_kernel_str.
+            // Assuming it's imported or available via helpers.
+            // If not, we use raw read loop? No, use helper.
+
+            // Function `bpf_probe_read_kernel_str` is usually available.
+            // Let's assume we can use `bpf_probe_read_kernel` to fill buffer for now if str helper tricky?
+            // No, strings must be null terminated or length known.
+            // But we don't know length.
+            // `bpf_probe_read_user_str`? No, kernel.
+
+            // We'll try to read 64 bytes raw.
+            let _ = unsafe {
+                bpf_probe_read_kernel(name_ptr as *const [u8; 64]).map(|b| name_buf = b)
+            };
+
+            // Parse for first NULL
+            let mut len = 64;
+            for (i, b) in name_buf.iter().enumerate() {
+                if *b == 0 {
+                    len = i;
+                    break;
+                }
+            }
+
+            // Emit Event 105 (Resolved Name)
+            emit_event(105, cgroup_id, 0, &name_buf, 0);
         }
     }
     // -------------------------------
