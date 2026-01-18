@@ -1,6 +1,6 @@
 use aya_ebpf::{
     // bindings::t_bpf_context removed
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
+    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_get_current_comm},
     macros::{lsm, map},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
