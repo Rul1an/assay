@@ -449,6 +449,17 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 108 => {
                                     println!("[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})", event.pid, event.data[0]);
                                 }
+                                109 => {
+                                    println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
+                                }
+                                110 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
+                                }
+                                111 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
+                                }
                                 99 => {
                                      // Debug Cgroup Mismatch
                                      let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);

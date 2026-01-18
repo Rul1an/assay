@@ -97,14 +97,20 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    // --- MANUAL PATH RESOLUTION (OFFSET GUESSING) ---
-    // STRUCT FILE: f_path.dentry (pointer) at offset 56 (derived from dump)
-    // STRUCT DENTRY: d_name.name (pointer) at offset 32 (standard 64-bit layout)
+    // DEBUG: Passed Monitor Check
+    let mut dbg = [0u8; 64];
+    emit_event(109, cgroup_id, 0, &dbg, 0);
 
+    // --- MANUAL PATH RESOLUTION (OFFSET GUESSING) ---
     let dentry_ptr_loc = unsafe { (file_ptr as *const u8).add(56) };
     let dentry_ptr_val: u64 = unsafe {
         bpf_probe_read_kernel(dentry_ptr_loc as *const u64).unwrap_or(0)
     };
+
+    // DEBUG: Read Dentry
+    let mut dbg = [0u8; 64];
+    dbg[0..8].copy_from_slice(&dentry_ptr_val.to_ne_bytes());
+    emit_event(110, cgroup_id, 0, &dbg, 0);
 
     if dentry_ptr_val != 0 {
         let dentry_ptr = dentry_ptr_val as *const u8;
@@ -115,48 +121,29 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
              bpf_probe_read_kernel(name_ptr_loc as *const u64).unwrap_or(0)
         };
 
+        // DEBUG: Read Name Ptr
+        let mut dbg = [0u8; 64];
+        dbg[0..8].copy_from_slice(&name_ptr_val.to_ne_bytes());
+        emit_event(111, cgroup_id, 0, &dbg, 0);
+
         if name_ptr_val != 0 {
             let name_ptr = name_ptr_val as *const u8;
 
             // Read Name
             let mut name_buf = [0u8; 64];
-            // Use aya helper if available, or direct probe
-            // But aya_ebpf::helpers::bpf_probe_read_kernel_str takes *const c_void
-
-            // We use generic read for string bytes if wrapper not imported,
-            // but we likely need bpf_probe_read_kernel_str.
-            // Assuming it's imported or available via helpers.
-            // If not, we use raw read loop? No, use helper.
-
-            // Function `bpf_probe_read_kernel_str` is usually available.
-            // Let's assume we can use `bpf_probe_read_kernel` to fill buffer for now if str helper tricky?
-            // No, strings must be null terminated or length known.
-            // But we don't know length.
-            // `bpf_probe_read_user_str`? No, kernel.
-
-            // We'll try to read 64 bytes raw.
             let _ = unsafe {
                 bpf_probe_read_kernel(name_ptr as *const [u8; 64]).map(|b| name_buf = b)
             };
 
-            // Parse for first NULL
-            let mut len = 64;
-            for (i, b) in name_buf.iter().enumerate() {
-                if *b == 0 {
-                    len = i;
-                    break;
-                }
-            }
-
             // Emit Event 105 (Resolved Name)
             emit_event(105, cgroup_id, 0, &name_buf, 0);
         } else {
-            // Event 107: Name Ptr NULL
+            // Event 107
              let mut dbg = [0u8; 64];
              emit_event(107, cgroup_id, 0, &dbg, 0);
         }
     } else {
-        // Event 106: Dentry Ptr NULL
+        // Event 106
         let mut dbg = [0u8; 64];
         emit_event(106, cgroup_id, 0, &dbg, 0);
     }
