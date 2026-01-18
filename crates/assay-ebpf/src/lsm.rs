@@ -85,6 +85,16 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
+    // Filter for "cat" only to debug
+    let mut comm = [0u8; 16];
+    let _ = unsafe { bpf_get_current_comm(&mut comm as *mut _ as *mut c_void, 16) };
+    // "cat" is [99, 97, 116, 0]
+    let is_cat = comm[0] == 99 && comm[1] == 97 && comm[2] == 116 && comm[3] == 0;
+
+    if !is_cat {
+        return Ok(0);
+    }
+
     let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
 
     // DEBUG: Hook Entry
