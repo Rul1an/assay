@@ -1,10 +1,175 @@
 use aya_ebpf::{
-    // bindings::t_bpf_context removed
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_get_current_comm},
+    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
+use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL};
+use core::ffi::{c_void, c_char, c_long};
+
+const MAX_DENY_PATHS: u32 = 256;
+const MAX_PATH_LEN: usize = 256;
+
+const EVENT_FILE_BLOCKED: u32 = 10;
+const EVENT_FILE_ALLOWED: u32 = 11;
+
+// SOTA: Inode Enforcement Keys
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct super_block {
+    pub s_dev: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct inode {
+    pub i_ino: u64,
+    pub i_sb: *mut super_block,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct file {
+    pub f_inode: *mut inode,
+}
+
+#[map]
+static DENY_PATHS_EXACT: HashMap<u64, u32> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DenyPrefix {
+    prefix_len: u32,
+    rule_id: u32,
+}
+
+#[map]
+static DENY_PATHS_PREFIX: HashMap<u64, DenyPrefix> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
+
+#[map]
+static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(1024 * 1024, 0); // Increased buffer
+
+// Statistics
+#[map]
+static STATS: Array<u32> = Array::with_max_entries(10, 0);
+
+fn inc_stat(idx: u32) {
+    if let Some(val) = STATS.get_ptr_mut(idx) {
+        unsafe { *val += 1 };
+    }
+}
+
+// Helper to emit events
+fn emit_event(event_id: u32, cgroup_id: u64, rule_id: u32, data: &[u8], path_len: u32) {
+    // Layout:
+    // u32 event_id
+    // u64 cgroup_id
+    // u32 rule_id
+    // u32 path_len
+    // [u8; 64] data (payload)
+
+    // Using a fixed size struct for RingBuf reservation might be safer,
+    // but here we pack manually.
+    if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 84]>(0) {
+        let buf = entry.as_mut_ptr() as *mut u8;
+        unsafe {
+            *(buf as *mut u32) = event_id;
+            *(buf.add(4) as *mut u64) = cgroup_id;
+            *(buf.add(12) as *mut u32) = rule_id;
+            *(buf.add(16) as *mut u32) = path_len; // length or extra check
+
+            // data (max 64 bytes)
+            let data_ptr = buf.add(20);
+            let len = if data.len() > 64 { 64 } else { data.len() };
+            core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
+            // zero pad
+            if len < 64 {
+                core::ptr::write_bytes(data_ptr.add(len), 0, 64 - len);
+            }
+        }
+        entry.submit(0);
+    }
+}
+
+#[lsm(hook = "file_open")]
+pub fn file_open_lsm(ctx: LsmContext) -> i32 {
+    match try_file_open_lsm(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as i32,
+    }
+}
+
+fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i64> {
+    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+
+    // Validates that we have a file pointer (arg 0)
+    let file_ptr: *const c_void = unsafe { ctx.arg(0) };
+    if file_ptr.is_null() {
+        return Ok(0);
+    }
+
+    // We do NOT use bpf_get_current_comm here to avoid build errors and overhead.
+    // Instead we rely on the monitor check momentarily,
+    // BUT we emit a debug event 108 unconditionally first (careful with flood).
+
+    // DEBUG: Hook Entry (108)
+    // Payload: monitor_all flag (u64)
+    let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
+    let mut dbg_entry = [0u8; 64];
+    unsafe { *(dbg_entry.as_mut_ptr() as *mut u64) = monitor_val as u64 };
+
+    // Check monitor flag
+    let monitor_all = monitor_val != 0;
+    if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
+        return Ok(0);
+    }
+
+    emit_event(108, cgroup_id, 0, &dbg_entry, 0);
+
+    // CO-RE Inode Resolution
+    // Instead of offsets 56/32, we verify logic by reading inode and dev.
+    let f = file_ptr as *const file;
+
+    // Read f_inode
+    let inode_ptr = unsafe {
+        bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
+    };
+
+    if inode_ptr.is_null() {
+         let mut err_data = [0u8; 64]; // Event 106 reusing ID for inode null
+         emit_event(106, cgroup_id, 0, &err_data, 0);
+         return Ok(0);
+    }
+
+    // Read i_ino
+    let i_ino = unsafe {
+        bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0)
+    };
+
+    // Read i_sb
+    let sb_ptr = unsafe {
+        bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block).unwrap_or(core::ptr::null_mut())
+    };
+
+    let mut s_dev = 0u32;
+    if !sb_ptr.is_null() {
+        s_dev = unsafe {
+            bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0)
+        };
+    }
+
+    // Event 112: Inode Resolved
+    // Payload: [dev(u64), ino(u64)]
+    let mut ino_data = [0u8; 64];
+    unsafe {
+        *(ino_data.as_mut_ptr() as *mut u64) = s_dev as u64;
+        *(ino_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
+    }
+    emit_event(112, cgroup_id, 0, &ino_data, 0);
+
+    Ok(0)
+}
+
 // gen import removed
 use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL};
 use core::ffi::{c_void, c_char};
