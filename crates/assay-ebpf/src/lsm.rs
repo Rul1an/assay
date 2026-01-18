@@ -95,12 +95,9 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     // --- STRUCT FILE DUMP STRATEGY ---
     // Dump 256 bytes of struct file to find f_path offset
-    let done = unsafe { DUMP_DONE.get(&0).copied().unwrap_or(0) };
+    let done = unsafe { DUMP_DONE.get(0).copied().unwrap_or(0) }; // Fixed: get(0) not get(&0)
     if done == 0 {
         // Read 256 bytes (raw struct file)
-        // We read it as chunks or a single array. Array[u8; 256] might be too big for stack if eager?
-        // But bpf_probe_read_kernel reads into return value.
-        // Let's try reading [u8; 256] directly.
         let dump_data: [u8; 256] = unsafe {
             bpf_probe_read_kernel(file_ptr as *const [u8; 256]).unwrap_or([0; 256])
         };
@@ -166,12 +163,6 @@ fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _act
 
         unsafe {
             // Pack data for Event 100/99 (Debug) specially, or standard packing
-            // For now, if event_type == 100, we just assume `path` contains the 16 bytes of debug data.
-            // For standard blocking events, we might want to pack cgroup/rule_id?
-            // Current userspace expects:
-            // Event 100: [dev(8), ino(8)]
-            // Event BLOCKED: path string
-
             if event_type == 100 {
                  let len = if path.len() > 16 { 16 } else { path.len() };
                  core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
@@ -181,11 +172,8 @@ fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _act
                  core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
             } else {
                  // Regular event (File Blocked/Allowed)
-                 // Just copy path for now to match userspace expectation for OPENAT-like events
-                 // TODO: If we need rule_id, we need to pack it. But userspace monitor.rs line 422 just prints string.
                  let len = if path.len() > DATA_LEN { DATA_LEN } else { path.len() };
                  core::ptr::copy_nonoverlapping(path.as_ptr(), ev.data.as_mut_ptr(), len);
-                 // Null terminate if space allows?
                  if len < DATA_LEN {
                      *ev.data.as_mut_ptr().add(len) = 0;
                  }
@@ -197,7 +185,6 @@ fn emit_event(event_type: u32, _cgroup_id: u64, _rule_id: u32, path: &[u8], _act
 
 use aya_ebpf::bindings::path;
 
-// Keep read_file_path for future, but it's unused if disabled in try_file_open
 // Keep read_file_path for future, but it's unused if disabled in try_file_open
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
@@ -220,8 +207,9 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
    // Now we pass the pointer to our LOCAL stack object to bpf_d_path.
    // buf.as_mut_ptr() is *mut u8. On ARM64 (Linux), c_char is u8.
    // We cast to *mut c_char (u8) to match the signature.
+   // FIXED: Cast to *mut i8 to satisfy the signature if needed
    let len = unsafe {
-       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut u8, MAX_PATH_LEN as u32)
+       bpf_d_path(&mut local_path as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut i8, MAX_PATH_LEN as u32)
    };
 
    if len < 0 { return Err(len as i64); }
