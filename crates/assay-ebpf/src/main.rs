@@ -12,6 +12,11 @@ pub static _LICENSE: [u8; 4] = *b"GPL\0";
 
 pub mod lsm;
 pub mod socket_lsm;
+#[allow(dead_code)]
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+#[allow(non_upper_case_globals)]
+pub mod vmlinux;
 
 use assay_common::{MonitorEvent, EVENT_CONNECT, EVENT_OPENAT};
 use aya_ebpf::{
