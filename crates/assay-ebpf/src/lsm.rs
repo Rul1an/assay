@@ -146,7 +146,15 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
             // Emit Event 105 (Resolved Name)
             emit_event(105, cgroup_id, 0, &name_buf, 0);
+        } else {
+            // Event 107: Name Ptr NULL
+             let mut dbg = [0u8; 64];
+             emit_event(107, cgroup_id, 0, &dbg, 0);
         }
+    } else {
+        // Event 106: Dentry Ptr NULL
+        let mut dbg = [0u8; 64];
+        emit_event(106, cgroup_id, 0, &dbg, 0);
     }
     // -------------------------------
 

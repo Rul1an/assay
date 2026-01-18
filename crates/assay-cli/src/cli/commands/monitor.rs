@@ -440,6 +440,12 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                     let path = decode_utf8_cstr(&event.data);
                                     println!("[PID {}] 📂 FILE OPEN (Manual Resolution): {}", event.pid, path);
                                 }
+                                106 => {
+                                    println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
+                                }
+                                107 => {
+                                    println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
+                                }
                                 99 => {
                                      // Debug Cgroup Mismatch
                                      let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
