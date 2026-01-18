@@ -2,6 +2,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum MonitorError {
+    #[error("failed to load BPF object: {0}")]
+    LoadError(String),
+
+    #[error("failed to read BPF file: {0}")]
+    FileError(String),
+
     #[error("runtime monitor is not supported on this OS")]
     NotSupported,
 
@@ -24,6 +30,9 @@ pub enum MonitorError {
     #[cfg(target_os = "linux")]
     #[error("map '{name}' not found")]
     MapNotFound { name: &'static str },
+
+    #[error("config verification failed for key {key}: expected {expected}, got {got}")]
+    ConfigVerification { key: u32, expected: u32, got: u32 },
 
     #[error("invalid event size (got={got}, need={need})")]
     InvalidEvent { got: usize, need: usize },

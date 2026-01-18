@@ -16,6 +16,7 @@ tokio-stream = "0.1"
 
 # Linux-only eBPF stack
 [target.'cfg(target_os = "linux")'.dependencies]
-aya = { version = "0.13.0" }
+aya = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
+aya-log = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
 
 

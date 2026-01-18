@@ -10,6 +10,10 @@ use cli::commands::dispatch;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
+    env_logger::init();
     let cli = Cli::parse();
     let legacy_mode = std::env::var("MCP_CONFIG_LEGACY").ok().as_deref() == Some("1");
     let code = match dispatch(cli, legacy_mode).await {
