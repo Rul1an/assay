@@ -6,11 +6,10 @@ use aya_ebpf::{
     programs::LsmContext,
 };
 // gen import removed
-use crate::MONITORED_CGROUPS;
+use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL};
 use core::ffi::{c_void, c_char};
 
-#[map]
-static CONFIG_LSM: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+// CONFIG_LSM removed in favor of shared CONFIG
 
 const MAX_DENY_PATHS: u32 = 256;
 const MAX_PATH_LEN: usize = 256;
@@ -86,7 +85,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
-    let monitor_val = unsafe { CONFIG_LSM.get(&0).copied().unwrap_or(0) };
+    let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
     let monitor_all = monitor_val != 0;
 
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {

@@ -46,7 +46,7 @@ pub static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024,
 /// Key 0: openat filename offset (default 24)
 /// Key 1: connect sockaddr offset (default 24)
 #[map]
-static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+pub static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
 
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
@@ -56,7 +56,7 @@ const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
-const KEY_MONITOR_ALL: u32 = 100;
+pub const KEY_MONITOR_ALL: u32 = 100;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
