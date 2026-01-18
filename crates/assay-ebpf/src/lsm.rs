@@ -85,11 +85,12 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
         return Ok(0);
     }
 
+    let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
+
     // DEBUG: Hook Entry
     let mut dbg = [0u8; 64];
+    dbg[0] = monitor_val as u8;
     emit_event(108, cgroup_id, 0, &dbg, 0);
-
-    let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
     let monitor_all = monitor_val != 0;
 
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {

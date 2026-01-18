@@ -447,7 +447,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                     println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
                                 }
                                 108 => {
-                                    println!("[PID {}] 🐛 DEBUG: LSM Hook Entry", event.pid);
+                                    println!("[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})", event.pid, event.data[0]);
                                 }
                                 99 => {
                                      // Debug Cgroup Mismatch
