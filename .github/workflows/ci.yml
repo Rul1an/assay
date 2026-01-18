@@ -67,8 +67,16 @@ jobs:
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
   ebpf-smoke:
-    name: eBPF monitor smoke (Linux)
-    runs-on: [self-hosted, bpf-lsm]
+    name: eBPF monitor smoke (${{ matrix.os_name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, bpf-lsm]
+            os_name: Linux (Self-Hosted)
+          - runner: ubuntu-latest
+            os_name: Linux (Ubuntu)
     permissions:
       contents: read
     steps:
