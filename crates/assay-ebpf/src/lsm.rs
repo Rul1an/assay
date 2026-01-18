@@ -188,6 +188,7 @@ use aya_ebpf::bindings::path;
 // Keep read_file_path for future, but it's unused if disabled in try_file_open
 #[inline(always)]
 fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64> {
+   /*
    use aya_ebpf::helpers::bpf_d_path;
    if file_ptr.is_null() { return Ok(0); }
 
@@ -214,4 +215,6 @@ fn read_file_path(file_ptr: *const c_void, buf: &mut [u8]) -> Result<usize, i64>
 
    if len < 0 { return Err(len as i64); }
    Ok(len as usize)
+   */
+   Ok(0)
 }
