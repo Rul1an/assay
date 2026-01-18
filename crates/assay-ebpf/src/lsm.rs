@@ -87,7 +87,7 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
 
     // Filter for "cat" only to debug
     let mut comm = [0u8; 16];
-    let _ = unsafe { bpf_get_current_comm(&mut comm as *mut _ as *mut c_void, 16) };
+    let _ = unsafe { bpf_get_current_comm(&mut comm as *mut _ as *mut c_void, 16u32) };
     // "cat" is [99, 97, 116, 0]
     let is_cat = comm[0] == 99 && comm[1] == 97 && comm[2] == 116 && comm[3] == 0;
 
