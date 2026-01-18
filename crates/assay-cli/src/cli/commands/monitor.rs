@@ -306,7 +306,60 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             }
         }
 
-        let compiled = assay_policy::tiers::compile(&t1_policy);
+        let mut compiled = assay_policy::tiers::compile(&t1_policy);
+
+        // RESOLVE INODES (Tier 1 SOTA)
+        // Convert exact path rules to inode rules
+        for rule in &compiled.tier1.file_deny_exact {
+            use std::ffi::CString;
+            use std::os::unix::ffi::OsStrExt;
+
+            let path_c = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes()) {
+                Ok(c) => c,
+                Err(e) => {
+                     eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
+                     continue;
+                }
+            };
+
+            // Hardening: open(O_PATH | O_NOFOLLOW | O_CLOEXEC) + fstat
+            // Prevents TOCTOU and symlink traversal
+            let fd = unsafe { libc::open(path_c.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+            if fd < 0 {
+                 let err = std::io::Error::last_os_error();
+                 eprintln!("Warning: Could not open denied path {} (skipping): {}", rule.path, err);
+                 continue;
+            }
+
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            let res = unsafe { libc::fstat(fd, &mut stat) };
+            unsafe { libc::close(fd) };
+
+            if res < 0 {
+                let err = std::io::Error::last_os_error();
+                eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, err);
+                continue;
+            }
+
+            let dev = stat.st_dev;
+            let ino = stat.st_ino;
+
+            // Re-encode and mask dev_t to match Kernel internal format (Major << 20 | Minor)
+            let major = unsafe { libc::major(dev) } as u64;
+            let minor = unsafe { libc::minor(dev) } as u64;
+            let kernel_dev = ((major & 0xfff) << 20) | (minor & 0xfffff);
+
+            compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
+                 rule_id: rule.rule_id,
+                 dev: kernel_dev as u32,
+                 ino: ino as u64,
+                 gen: 0, // Fallback if generation not resolved
+            });
+            if !args.quiet {
+                eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
+                    rule.path, dev, major, minor, kernel_dev, ino);
+            }
+        }
 
         if !args.quiet {
             eprintln!("Locked & Loaded Assurance Policy 🛡️");

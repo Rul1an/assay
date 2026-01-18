@@ -133,6 +133,9 @@ pub struct Tier1Rules {
 
     /// Port allow list (bypass CIDR check)
     pub network_allow_ports: Vec<u16>,
+
+    /// Inode exact deny list (SOTA)
+    pub inode_deny_exact: Vec<InodeRule>,
 }
 
 /// Tier 2: Complex rules for userspace evaluation
@@ -169,6 +172,14 @@ pub struct CidrRule {
 pub struct PortRule {
     pub rule_id: u32,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InodeRule {
+    pub rule_id: u32,
+    pub dev: u32,
+    pub ino: u64,
+    pub gen: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -455,6 +466,14 @@ impl Tier1Rules {
         self.network_deny_ports
             .iter()
             .map(|r| (r.port, r.rule_id))
+            .collect()
+    }
+
+    /// Generate entries for DENY_INO map (SOTA)
+    pub fn inode_exact_entries(&self) -> Vec<(String, InodeRule)> {
+        self.inode_deny_exact
+            .iter()
+            .map(|r| (format!("{}:{}", r.dev, r.ino), r.clone()))
             .collect()
     }
 }

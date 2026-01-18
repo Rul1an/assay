@@ -25,6 +25,19 @@ pub struct MonitorEvent {
     pub data: [u8; DATA_LEN],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct InodeKey {
+    pub dev: u32,
+    pub pad: u32,
+    pub ino: u64,
+    pub gen: u32,
+    pub _pad2: u32,
+}
+
+#[cfg(feature = "aya")]
+unsafe impl aya::Pod for InodeKey {}
+
 impl MonitorEvent {
     pub const fn zeroed() -> Self {
         Self {
