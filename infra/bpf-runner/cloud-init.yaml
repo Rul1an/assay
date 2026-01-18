@@ -1,0 +1,59 @@
+#cloud-config
+# ==============================================================================
+# Assay BPF-LSM Runner - Cloud-Init (Ubuntu 24.04 LTS)
+# SOTA 2026: Auto-provisioning for GitHub Actions
+# ==============================================================================
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - git
+  - build-essential
+  - linux-tools-common
+  - linux-tools-generic
+  - linux-headers-generic
+  - llvm
+  - clang
+  - libclang-dev
+  - jq
+  - docker.io
+
+# Enable BPF LSM in Kernel Boot Parameters
+write_files:
+  - path: /etc/default/grub.d/99-bpf-lsm.cfg
+    content: |
+      GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+
+runcmd:
+  # 1. Update GRUB and verify
+  - update-grub
+
+  # 2. Config Docker
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+
+  # 3. Install Rust (System-wide)
+  - export RUSTUP_HOME=/opt/rust
+  - export CARGO_HOME=/opt/rust
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  - chmod -R 777 /opt/rust
+  - ln -s /opt/rust/bin/cargo /usr/local/bin/cargo
+  - ln -s /opt/rust/bin/rustc /usr/local/bin/rustc
+
+  # 4. Prepare Runner User
+  - useradd -m -s /bin/bash github-runner
+  - usermod -aG docker github-runner
+  - echo "github-runner ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/github-runner
+
+  # 5. NOTE: runner registration requires secrets (GITHUB_TOKEN)
+  # We cannot bake secrets here safely.
+  # The user must SSH in and run the registration one-liner.
+
+output: {all: '| tee -a /var/log/cloud-init-output.log'}
+
+power_state:
+  mode: reboot
+  message: Rebooting to enable BPF LSM
+  timeout: 10

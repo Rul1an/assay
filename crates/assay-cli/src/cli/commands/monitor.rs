@@ -128,12 +128,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         // Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
         let mut cgroups = Vec::new();
         for &pid in &args.pid {
-            // Cgroup V2 ID Resolution
-            // ID = Inode of /sys/fs/cgroup/unified/<path> or just /proc/<pid>/cgroup path mapping
-            // Robust way: readlink /proc/<pid>/ns/cgroup? No, that's namespace.
-            // Correct way: open /proc/<pid>/cgroup, parse 0::/path, stat /sys/fs/cgroup/path
-
-            // Simplified for verification (assuming /sys/fs/cgroup mount):
+            // Cgroup V2 ID Resolution:
+            // Match PID to cgroup inode by parsing /proc/<pid>/cgroup and stat'ing the result.
             match resolve_cgroup_id(pid) {
                 Ok(id) => cgroups.push(id),
                 Err(e) => eprintln!("Warning: Failed to resolve cgroup for PID {}: {}", pid, e),
@@ -515,15 +511,12 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 111 => {
                                     let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
                                     println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
+                                    // Ignore debug events
                                 }
-                                99 => {
-                                     // Debug Cgroup Mismatch
-                                     let cg_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
-                                     let cgroup_id = u64::from_ne_bytes(cg_bytes);
-                                     let path_part = decode_utf8_cstr(&event.data[8..]);
-                                     println!("[PID {}] 🐛 LSM DEBUG: Cgroup={} Path={}", event.pid, cgroup_id, path_part);
+                                _ => if args.monitor_all || !args.quiet {
+                                     // Optional: Log unknown events via `log` crate, or just ignore in clean CLI.
+                                     // println!("[PID {}] Unknown event type {} len={}", event.pid, event.event_type, event.data.len());
                                 }
-                                _ => println!("[PID {}] event {} len={}", event.pid, event.event_type, event.data.len()),
                             }
                         }
                     }
