@@ -1,7 +1,7 @@
 # Assay
 
 [![Crates.io](https://img.shields.io/crates/v/assay-cli.svg)](https://crates.io/crates/assay-cli)
-[![CI](https://github.com/Rul1an/assay/actions/workflows/release.yml/badge.svg)](https://github.com/Rul1an/assay/actions)
+[![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
 
 **Runtime security & linting for MCP servers.**
