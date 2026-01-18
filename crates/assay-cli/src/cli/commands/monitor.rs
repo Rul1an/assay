@@ -344,15 +344,14 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let dev = stat.st_dev;
             let ino = stat.st_ino;
 
-            // Use the OS-provided device ID directly.
-            // CAUTION: We assume `stat.st_dev` (userspace) aligns with `super_block.s_dev` (kernel).
-            // On standard Linux x86_64, this holds for the 32-bit dev_t (Major 12, Minor 20).
-            let kernel_dev = dev as u32;
+            // Re-encode dev_t to match Kernel internal format (Major << 20 | Minor).
+            // Userspace dev_t (u64) structure differs from kernel internal dev_t (u32).
+            let maj = libc::major(dev) as u32;
+            let min = libc::minor(dev) as u32;
+            let kernel_dev = ((maj & 0xfff) << 20) | (min & 0xfffff);
 
             // Log deconstructed values for debugging
             if !args.quiet {
-                 let maj = unsafe { libc::major(dev) };
-                 let min = unsafe { libc::minor(dev) };
                  eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
                      rule.path, dev, maj, min, kernel_dev, ino);
             }
