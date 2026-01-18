@@ -170,19 +170,18 @@ rm -rf /tmp/assay-lsm-verify
 mkdir -p /tmp/assay-lsm-verify
 
 # Debug: Check binary
-echo ">> [Debug] Checking binary..."
+# Debug: Check binary DIRECTLY to stdout
+echo ">> [Debug] Checking binary (STDOUT)..."
+ls -l ./assay
+file ./assay || echo "file command missing"
+chmod +x ./assay
+./assay --version || echo "❌ Failed to run ./assay --version"
+
+# Backup debug info to file (ignoring failure)
 {
-    echo "--- LS ---"
-    ls -l ./assay
-    echo "--- FILE ---"
-    file ./assay || true
     echo "--- LDD ---"
     ldd ./assay || true
-    echo "--- PERMISSONS ---"
-    chmod +x ./assay
-    echo "--- VERSION ---"
-    ./assay --version || echo "Failed to run --version"
-} > /tmp/assay-lsm-verify/debug_binary.txt 2>&1
+} > /tmp/assay-lsm-verify/debug_binary.txt 2>&1 || true
 
 echo "Starting monitor..."
 # Capture the launch output specifically
