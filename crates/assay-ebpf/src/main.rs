@@ -152,6 +152,7 @@ fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
         unsafe { *hits += 1 };
     }
+
     Ok(0)
 }
 
@@ -159,6 +160,7 @@ fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
         unsafe { *hits += 1 };
     }
+
     Ok(0)
 }
 

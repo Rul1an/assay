@@ -340,21 +340,24 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let dev = stat.st_dev;
             let ino = stat.st_ino;
 
-            // Re-encode and mask dev_t to match Kernel internal format (Major << 20 | Minor)
-            let major = libc::major(dev) as u64;
-            let minor = libc::minor(dev) as u64;
-            let kernel_dev = ((major & 0xfff) << 20) | (minor & 0xfffff);
+            // Re-encode dev_t to match Kernel internal format (Major << 20 | Minor).
+            // Userspace dev_t (u64) structure differs from kernel internal dev_t (u32).
+            let maj = libc::major(dev) as u32;
+            let min = libc::minor(dev) as u32;
+            let kernel_dev = ((maj & 0xfff) << 20) | (min & 0xfffff);
+
+            // Log deconstructed values for debugging
+            if !args.quiet {
+                 eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
+                     rule.path, dev, maj, min, kernel_dev, ino);
+            }
 
             compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
                  rule_id: rule.rule_id,
-                 dev: kernel_dev as u32,
+                 dev: kernel_dev,
                  ino: ino as u64,
                  gen: 0, // Fallback if generation not resolved
             });
-            if !args.quiet {
-                eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
-                    rule.path, dev, major, minor, kernel_dev, ino);
-            }
         }
 
         if !args.quiet {
@@ -489,7 +492,25 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                     let path = decode_utf8_cstr(&event.data);
                                     println!("[PID {}] 📂 FILE OPEN (Manual Resolution): {}", event.pid, path);
                                 }
-                                106 | 107 | 108 | 109 | 110 | 111 | 99 => {
+                                106 => {
+                                    println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
+                                }
+                                107 => {
+                                    println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
+                                }
+                                108 => {
+                                    println!("[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})", event.pid, event.data[0]);
+                                }
+                                109 => {
+                                    println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
+                                }
+                                110 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
+                                }
+                                111 => {
+                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+                                    println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
                                     // Ignore debug events
                                 }
                                 _ => if args.monitor_all || !args.quiet {

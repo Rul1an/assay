@@ -38,7 +38,8 @@ impl LinuxMonitor {
     }
 
     pub fn load_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, MonitorError> {
-        let data = std::fs::read(path).map_err(|e| MonitorError::FileError(e.to_string()))?;
+        let path_ref = path.as_ref();
+        let data = std::fs::read(path_ref).map_err(|e| MonitorError::FileError(format!("{}: {}", path_ref.display(), e)))?;
         Self::new(&data)
     }
 
@@ -226,7 +227,7 @@ impl LinuxMonitor {
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
         let bpf_shared = self.bpf.clone();
-        let (tx, rx): (mpsc::Sender<Result<assay_common::MonitorEvent, MonitorError>>, mpsc::Receiver<Result<assay_common::MonitorEvent, MonitorError>>) = mpsc::channel(1024);
+        let (tx, rx) = mpsc::channel(1024);
 
         std::thread::spawn(move || {
             'outer: loop {
