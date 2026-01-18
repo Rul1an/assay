@@ -97,13 +97,32 @@ fn try_file_open(ctx: &LsmContext) -> Result<i32, i64> {
     // Dump 256 bytes of struct file to find f_path offset
     let done = unsafe { DUMP_DONE.get(0).copied().unwrap_or(0) }; // Fixed: get(0) not get(&0)
     if done == 0 {
-        // Read 256 bytes (raw struct file)
-        let dump_data: [u8; 256] = unsafe {
-            bpf_probe_read_kernel(file_ptr as *const [u8; 256]).unwrap_or([0; 256])
+        // Chunk 1 (0-64)
+        let chunk1: [u8; 64] = unsafe {
+            bpf_probe_read_kernel(file_ptr as *const [u8; 64]).unwrap_or([0; 64])
         };
+        emit_event(101, cgroup_id, 0, &chunk1, 0);
 
-        // Emit Event 101 (Struct Dump)
-        emit_event(101, cgroup_id, 0, &dump_data, 0);
+        // Chunk 2 (64-128)
+        let ptr2 = unsafe { (file_ptr as *const u8).add(64) };
+        let chunk2: [u8; 64] = unsafe {
+            bpf_probe_read_kernel(ptr2 as *const [u8; 64]).unwrap_or([0; 64])
+        };
+        emit_event(102, cgroup_id, 0, &chunk2, 0);
+
+        // Chunk 3 (128-192)
+        let ptr3 = unsafe { (file_ptr as *const u8).add(128) };
+        let chunk3: [u8; 64] = unsafe {
+            bpf_probe_read_kernel(ptr3 as *const [u8; 64]).unwrap_or([0; 64])
+        };
+        emit_event(103, cgroup_id, 0, &chunk3, 0);
+
+        // Chunk 4 (192-256)
+        let ptr4 = unsafe { (file_ptr as *const u8).add(192) };
+        let chunk4: [u8; 64] = unsafe {
+            bpf_probe_read_kernel(ptr4 as *const [u8; 64]).unwrap_or([0; 64])
+        };
+        emit_event(104, cgroup_id, 0, &chunk4, 0);
 
         // Mark Done
         if let Some(val) = DUMP_DONE.get_ptr_mut(0) {
