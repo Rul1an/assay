@@ -363,7 +363,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                  ino: ino as u64,
                  gen: 0, // Fallback if generation not resolved
             });
-            }
         }
 
         if !args.quiet {
