@@ -115,15 +115,8 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         _pad2: 0,
     };
 
-    // Diagnostic Printk (DEBUG CLASS 2)
-    unsafe {
-        aya_ebpf::helpers::bpf_printk!(b"LSM: INODE %llu:%llu\0", s_dev as u64, i_ino);
-    }
-
     // Enforcement Check
     if let Some(rule_id) = unsafe { DENY_INO.get(&key) } {
-        unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu rule=%u\0", s_dev as u64, i_ino, *rule_id); }
-
         let mut alert_data = [0u8; 64];
         unsafe {
             *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
@@ -133,14 +126,6 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         emit_event(&ctx, 10, cgroup_id, *rule_id, &alert_data, 0);
         return Err(-1); // EPERM
     }
-
-    // Event 112: Inode Resolved (Telemetry)
-    let mut ino_data = [0u8; 64];
-    unsafe {
-        *(ino_data.as_mut_ptr() as *mut u64) = s_dev as u64;
-        *(ino_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
-    }
-    emit_event(&ctx, 112, cgroup_id, 0, &ino_data, 0);
 
     Ok(0)
 }

@@ -152,7 +152,6 @@ fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
         unsafe { *hits += 1 };
     }
-    unsafe { aya_ebpf::helpers::bpf_printk!(b"TP2 FIRE\0"); }
     Ok(0)
 }
 
@@ -160,7 +159,6 @@ fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
         unsafe { *hits += 1 };
     }
-    unsafe { aya_ebpf::helpers::bpf_printk!(b"TP FIRE\0"); }
     Ok(0)
 }
 

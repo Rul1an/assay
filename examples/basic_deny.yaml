@@ -1,0 +1,9 @@
+runtime_monitor:
+  enabled: true
+  provider: "ebpf"
+  rules:
+    - id: "deny-test"
+      type: "file_open"
+      match:
+        path_globs: ["/tmp/assay-deny-test"]
+      action: "deny"
