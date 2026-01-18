@@ -11,17 +11,20 @@ use crate::events::{self, EventStream};
 use crate::MonitorError;
 use assay_policy::tiers::CompiledPolicy;
 
+#[cfg(target_os = "linux")]
 pub struct LinuxMonitor {
     bpf: Arc<Mutex<Ebpf>>,
     links: Vec<MonitorLink>,
 }
 
+#[cfg(target_os = "linux")]
 enum MonitorLink {
     TracePoint(#[allow(dead_code)] aya::programs::trace_point::TracePointLink),
     Lsm(#[allow(dead_code)] aya::programs::lsm::LsmLink),
     KProbe(#[allow(dead_code)] aya::programs::kprobe::KProbeLink),
 }
 
+#[cfg(target_os = "linux")]
 impl LinuxMonitor {
     pub fn new(ebpf_data: &[u8]) -> Result<Self, MonitorError> {
         let bpf = Ebpf::load(ebpf_data).map_err(|e| MonitorError::LoadError(e.to_string()))?;

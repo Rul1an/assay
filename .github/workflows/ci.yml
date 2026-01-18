@@ -108,6 +108,8 @@ jobs:
           fi
 
       - name: Verify LSM blocking (CI Mode)
+        env:
+          STRICT_LSM_CHECK: ${{ matrix.runner != 'ubuntu-latest' && '1' || '0' }}
         run: |
           chmod +x scripts/verify_lsm_docker.sh
           # CI Mode = Soft Skip on Ubuntu-Latest (due to no BPF LSM), Hard Fail on missing tracefs

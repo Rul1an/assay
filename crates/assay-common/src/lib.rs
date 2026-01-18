@@ -35,7 +35,7 @@ pub struct InodeKey {
     pub _pad2: u32,
 }
 
-#[cfg(feature = "aya")]
+#[cfg(target_os = "linux")]
 unsafe impl aya::Pod for InodeKey {}
 
 impl MonitorEvent {
