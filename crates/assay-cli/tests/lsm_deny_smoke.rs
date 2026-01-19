@@ -26,6 +26,12 @@ fn test_lsm_deny_smoke_e2e() {
 
     eprintln!("Victim file: {}", victim_path_str);
 
+    // Diagnostic: Print victim file inode/dev from userspace perspective
+    if let Ok(meta) = std::fs::metadata(&victim_path) {
+        use std::os::unix::fs::MetadataExt;
+        eprintln!("Victim Stat: dev={} ino={}", meta.dev(), meta.ino());
+    }
+
     // 2. Create policy file
     // Syntax for policy.yaml depends on assay-policy crate.
     // Assuming structure based on previous context or knowledge:
@@ -100,16 +106,13 @@ spec:
     // 5. Verify LSM_HIT map (Optional/Hard requirement per user)
     // We use bpftool to check if the counter increased.
     // "sudo bpftool map dump name LSM_HIT"
-    // Output format: key: 00 00 00 00  value: 01 00 00 00 00 00 00 00
-    // If map exists and has value >= 1, good.
 
-    // Cleanup first
-    let _ = child.kill();
-    let _ = child.wait();
+    // Dump DENY_INO for diagnostics
+    eprintln!("--- Map Diagnostics ---");
+    let _ = Command::new("bpftool")
+        .args(&["map", "dump", "name", "DENY_INO"])
+        .status();
 
-    assert!(hit_confirmed, "Did not receive EPERM accessing denied file");
-
-    // Check Metrics (Best effort if bpftool is absent, but user asked for it)
     let bpftool_output = Command::new("bpftool")
         .args(&["map", "dump", "name", "LSM_HIT"])
         .output();
@@ -118,17 +121,16 @@ spec:
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             eprintln!("LSM_HIT Dump:\n{}", stdout);
-            // Rough check for non-zero value
-            if !stdout.contains("value: 00 00 00 00 00 00 00 00") && stdout.contains("value:") {
-                 eprintln!("Confirmed LSM_HIT map is non-zero.");
-            } else {
-                 eprintln!("WARNING: LSM_HIT map appears empty or zero.");
-                 // assert!(false, "LSM_HIT counter check failed"); // Can uncomment if strict
-            }
         } else {
-            eprintln!("bpftool failed: {}", String::from_utf8_lossy(&output.stderr));
+             eprintln!("bpftool failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-    } else {
-        eprintln!("bpftool not found, skipping metric verification");
     }
+
+    // Cleanup first
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(hit_confirmed, "Did not receive EPERM accessing denied file");
+
+    // Check Metrics (Best effort if bpftool is absent, but user asked for it)
 }
