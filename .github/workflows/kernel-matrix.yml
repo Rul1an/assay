@@ -27,6 +27,8 @@ jobs:
       run: |
         cargo clean || true
         sudo rm -rf target/
+        # Clean shared temp artifacts from other workflows preventing disk exhaustion
+        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test
 
     - name: Build eBPF (Release)
       run: cargo xtask build-ebpf --release
