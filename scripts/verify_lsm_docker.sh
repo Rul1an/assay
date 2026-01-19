@@ -31,6 +31,10 @@ echo "🚀 Starting Assay Verification..."
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR"
 
+# Cleanup stale artifacts immediately to free disk space
+echo "🧹 [Init] Cleaning up stale verification artifacts..."
+sudo rm -rf /tmp/assay-lsm-verify || true
+
 # ------------------------------------------------------------------------------
 # 1. Build Phase (Consistent across all envs via Docker)
 # ------------------------------------------------------------------------------
