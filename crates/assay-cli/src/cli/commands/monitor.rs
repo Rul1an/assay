@@ -346,8 +346,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
             // Re-encode dev_t to match Kernel internal format via robust helper
             let kernel_dev = encode_kernel_dev(dev);
-            let maj = unsafe { libc::major(dev) };
-            let min = unsafe { libc::minor(dev) };
+            let maj = libc::major(dev);
+            let min = libc::minor(dev);
 
             // Log deconstructed values for debugging
             if !args.quiet {
@@ -572,6 +572,7 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
 }
 
 // Generic helper, compiled on all platforms for testing
+#[allow(dead_code)]
 fn encode_kernel_dev(dev: u64) -> u32 {
     let maj = libc::major(dev as libc::dev_t) as u32;
     let min = libc::minor(dev as libc::dev_t) as u32;
