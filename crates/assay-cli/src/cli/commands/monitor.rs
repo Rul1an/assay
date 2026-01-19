@@ -208,6 +208,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
+
+
     #[cfg(target_os="linux")]
     async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
         unsafe {
@@ -218,6 +220,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             unsafe { libc::kill(pid as i32, libc::SIGKILL); }
         }
     }
+
+
 
     let mut rules = Vec::new();
     if let Some(cfg) = &runtime_config {
@@ -340,11 +344,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let dev = stat.st_dev;
             let ino = stat.st_ino;
 
-            // Re-encode dev_t to match Kernel internal format (Major << 20 | Minor).
-            // Userspace dev_t (u64) structure differs from kernel internal dev_t (u32).
-            let maj = libc::major(dev) as u32;
-            let min = libc::minor(dev) as u32;
-            let kernel_dev = ((maj & 0xfff) << 20) | (min & 0xfffff);
+            // Re-encode dev_t to match Kernel internal format via robust helper
+            let kernel_dev = encode_kernel_dev(dev);
+            let maj = unsafe { libc::major(dev) };
+            let min = unsafe { libc::minor(dev) };
 
             // Log deconstructed values for debugging
             if !args.quiet {
@@ -566,4 +569,52 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
     // Fallback: If no V2 entry, maybe use /proc/self/cgroup inode?
     // Or just fail.
     Err(anyhow::anyhow!("No Cgroup V2 entry found in {}", cgroup_path))
+}
+
+// Generic helper, compiled on all platforms for testing
+fn encode_kernel_dev(dev: u64) -> u32 {
+    let maj = libc::major(dev as libc::dev_t) as u32;
+    let min = libc::minor(dev as libc::dev_t) as u32;
+
+    // Kernel Internal "Old" / Standard Format:
+    // (major << 20) | minor
+    //
+    // This holds for major < 4096 (12 bits) and minor < 1048576 (20 bits).
+    // If values exceed this ("Huge Keys"), the kernel uses a different internal scheme,
+    // or effectively a different type (MKDEV macro behavior).
+    //
+    // SOTA 2026: Fail closed or warn on huge devices to avoid collision.
+    if maj > 0xfff || min > 0xfffff {
+        eprintln!("Warning: Device {}:{} exceeds standard kernel encoding limits (Maj: 12b, Min: 20b). Matching may fail.", maj, min);
+    }
+
+    ((maj & 0xfff) << 20) | (min & 0xfffff)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kernel_dev_encoding() {
+        // Case 1: Root device-like (8, 1) -> 0x00800001
+        // (8 << 20) | 1 = 0x800001
+        let maj = 8;
+        let min = 1;
+        // On macOS makedev returns i32, on Linux u64
+        let fake_dev = libc::makedev(maj, min);
+        let encoded = encode_kernel_dev(fake_dev as u64);
+        assert_eq!(encoded, 0x800001);
+
+        // Case 2: Max safely representable on macOS (Major=255/8-bit)
+        // Linux supports 12-bit major (4095), but macOS limit is 255.
+        // We test with 255 to verify the shift logic (20 bits) is correct.
+        // maj=255 (0xff), min=1048575 (0xfffff)
+        // (0xff << 20) | 0xfffff = 0x0ff00000 | 0x000fffff = 0x0fffffff
+        let maj = 0xff;
+        let min = 0xfffff;
+        let fake_dev = libc::makedev(maj, min);
+        let encoded = encode_kernel_dev(fake_dev as u64);
+        assert_eq!(encoded, 0x0FFFFFFF);
+    }
 }

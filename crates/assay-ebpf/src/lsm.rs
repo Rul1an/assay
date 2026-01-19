@@ -1,6 +1,6 @@
 use aya_ebpf::{
-    helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
-    macros::{lsm, map},
+    helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid},
+    macros::{lsm, map, bpf_core_read},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
@@ -86,7 +86,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // CO-RE Inode Resolution
     let f = file_ptr as *const file;
     let inode_ptr: *mut inode = unsafe {
-        bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
+        bpf_core_read!(f, f_inode).unwrap_or(core::ptr::null_mut())
     };
 
     // Hardening: Null Check
@@ -95,16 +95,16 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     }
 
     // Read i_ino
-    let i_ino = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0) };
+    let i_ino = unsafe { bpf_core_read!(inode_ptr, i_ino).unwrap_or(0) };
 
     // Read i_generation (SOTA)
-    let i_gen = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
+    let i_gen = unsafe { bpf_core_read!(inode_ptr, i_generation).unwrap_or(0) };
 
-    let sb_ptr: *mut super_block = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block).unwrap_or(core::ptr::null_mut()) };
+    let sb_ptr: *mut super_block = unsafe { bpf_core_read!(inode_ptr, i_sb).unwrap_or(core::ptr::null_mut()) };
 
     let mut s_dev = 0u32;
     if !sb_ptr.is_null() {
-        s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
+        s_dev = unsafe { bpf_core_read!(sb_ptr, s_dev).unwrap_or(0) };
     }
 
     let key = assay_common::InodeKey {
