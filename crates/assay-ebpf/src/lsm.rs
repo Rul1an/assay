@@ -83,7 +83,10 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         return Ok(0);
     }
 
-    // CO-RE Inode Resolution
+    // CO-RE Inode Resolution:
+    // We use bpf_probe_read_kernel to read pointers safely.
+    // The "CO-RE" magic happens because we are casting to pointers of `vmlinux::file`/`inode`
+    // which are generated with BTF relocations enabled.
     let f = file_ptr as *const file;
     let inode_ptr: *mut inode = unsafe {
         bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
