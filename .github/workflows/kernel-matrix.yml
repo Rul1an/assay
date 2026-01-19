@@ -48,15 +48,12 @@ jobs:
       # to log context.
       run: |
         echo "Running on Kernel: $(uname -r)"
-        sudo ./target/release/assay monitor --policy tests/policies/deny_all.yaml --duration 5s &
-        MONITOR_PID=$!
-        sleep 2
+        # P1.3 End-to-End Deny Smoke Test (Requires Root)
+        # We need to ensure 'assay' bin is available if the test spawns it using Command::cargo_bin.
+        # However, `cargo test` doesn't automatically install binaries for `cargo_bin` to find
+        # unless `cargo build` ran first (which it did).
 
-        # Trigger event
-        touch victim_file
-        cat victim_file || true
-
-        kill $MONITOR_PID || true
+        sudo -E cargo test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
       continue-on-error: true
 
     - name: Failure Artifacts (P1.2 Requirement)
