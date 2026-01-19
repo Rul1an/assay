@@ -1,7 +1,6 @@
 use assert_cmd::cargo::CommandCargoExt;
 use std::process::Command;
-use std::fs::File;
-use std::os::unix::prelude::AsRawFd;
+
 use std::thread;
 use std::time::Duration;
 use tempfile::NamedTempFile;

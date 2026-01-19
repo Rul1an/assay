@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 use tokio_stream::StreamExt;
+use assay_common::encode_kernel_dev;
 
 #[derive(Args, Debug, Clone)]
 #[command(
@@ -81,7 +82,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
-    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, encode_kernel_dev};
+    use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
 
     let mut runtime_config = None;
     let mut kill_config = None;
