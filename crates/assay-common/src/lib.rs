@@ -102,7 +102,8 @@ pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
 
     let mut out: libc::c_long = 0;
     // Safety: ioctl is unsafe, passing valid fd and pointer to initialized memory (0)
-    let rc = unsafe { libc::ioctl(fd, fs_ioc_getversion(), &mut out) };
+    // Cast request code to whatever the platform libc expects (c_ulong or c_int)
+    let rc = unsafe { libc::ioctl(fd, fs_ioc_getversion() as _, &mut out) };
     if rc < 0 {
         return Err(std::io::Error::last_os_error());
     }

@@ -385,8 +385,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let kernel_dev = encode_kernel_dev(dev);
 
             if !args.quiet {
-                let maj = unsafe { libc::major(stat.st_dev) };
-                let min = unsafe { libc::minor(stat.st_dev) };
+                let maj =  libc::major(stat.st_dev);
+                let min =  libc::minor(stat.st_dev);
                 eprintln!(
                     "Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={} gen={}",
                     rule.path, dev, maj, min, kernel_dev, ino, gen
