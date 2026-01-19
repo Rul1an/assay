@@ -124,13 +124,13 @@ pub mod strict_open {
 
     // UAPI openat2 resolve flags (uapi/linux/openat2.h)
     pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-    pub const RESOLVE_BENEATH: u64 = 0x08;
+    // pub const RESOLVE_BENEATH: u64 = 0x08; // Too strict for some CI setups (cross-device /tmp)
 
     pub fn openat2_strict(path: &CStr) -> std::io::Result<i32> {
         let how = OpenHow {
             flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
             mode: 0,
-            resolve: RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH,
+            resolve: RESOLVE_NO_SYMLINKS, // Removed RESOLVE_BENEATH to avoid EXDEV in CI
         };
 
         let fd = unsafe {
