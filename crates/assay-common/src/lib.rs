@@ -128,7 +128,7 @@ pub mod strict_open {
 
     pub fn openat2_strict(path: &CStr) -> std::io::Result<i32> {
         let how = OpenHow {
-            flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
+            flags: (libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC) as u64,
             mode: 0,
             resolve: RESOLVE_NO_SYMLINKS, // Removed RESOLVE_BENEATH to avoid EXDEV in CI
         };
