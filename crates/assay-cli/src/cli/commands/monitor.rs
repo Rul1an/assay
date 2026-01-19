@@ -82,7 +82,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
-    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, get_inode_generation};
+    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, get_inode_generation, strict_open};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -312,7 +312,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             use std::ffi::CString;
             use std::os::unix::ffi::OsStrExt;
 
-            let path_c = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes()) {
+            let c_path = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes()) {
                 Ok(c) => c,
                 Err(e) => {
                      eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
@@ -320,27 +320,32 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                 }
             };
 
-            // 1) Strict open: openat2 + RESOLVE_NO_SYMLINKS (+ BENEATH)
-            // Fallback: open(O_PATH|O_NOFOLLOW) (best-effort, final component only!)
-            let fd = match strict_open::openat2_strict(&path_c) {
+            // 2) Strict Open (TOCTOU)
+            // If strict open fails (symlink or blocked by openat2 flags), we log and skip.
+            // If openat2 not supported (older kernel), we fallback gracefully?
+            // Currently fallback logic is: if error, warn and skip (fail-closed implementation).
+            let guard_fd_res = strict_open::openat2_strict(&c_path);
+            let guard_fd = match guard_fd_res {
                 Ok(fd) => fd,
                 Err(e) => {
-                    // openat2 may be unavailable (ENOSYS) or reject flags (EINVAL)
-                    let eno = e.raw_os_error().unwrap_or(0);
-                    if eno == libc::ENOSYS || eno == libc::EINVAL {
-                        let fd2 = unsafe {
-                            libc::open(
-                                path_c.as_ptr(),
-                                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                            )
-                        };
-                        if fd2 < 0 {
-                            eprintln!("Warning: Could not open denied path {} (skipping): {}", rule.path, std::io::Error::last_os_error());
-                            continue;
+                    // ELOOP = Symlink blocked by RESOLVE_NO_SYMLINKS
+                    // EXDEV = Path breakout blocked by RESOLVE_BENEATH
+                    // ENOSYS = openat2 not supported
+                    if e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error() == Some(libc::ENOSYS) {
+                        // Fallback to O_PATH | O_NOFOLLOW
+                        // TODO: Log warning "Strict open unavailable"
+                        match unsafe { libc::open(c_path.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) } {
+                             ok if ok >= 0 => ok,
+                             _ => {
+                                 eprintln!("Warning: Fallback open failed for {}: {}", rule.path, std::io::Error::last_os_error());
+                                 continue;
+                             }
                         }
-                        fd2
+                    } else if e.raw_os_error() == Some(libc::ELOOP) || e.raw_os_error() == Some(libc::EXDEV) {
+                        eprintln!("Warning: Strict open blocked access to {} (Symlink/Breakout detected): {}", rule.path, e);
+                        continue;
                     } else {
-                        eprintln!("Warning: openat2 failed for {} (skipping): {}", rule.path, e);
+                        eprintln!("Warning: Failed to open denied path {}: {}", rule.path, e);
                         continue;
                     }
                 }
@@ -348,9 +353,9 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
             // 2) fstat(fd) for dev/ino (fd-based, race-free after successful open*)
             let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-            let res = unsafe { libc::fstat(fd, &mut stat) };
+            let res = unsafe { libc::fstat(guard_fd, &mut stat) };
             if res < 0 {
-                unsafe { libc::close(fd) };
+                unsafe { libc::close(guard_fd) };
                 eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, std::io::Error::last_os_error());
                 continue;
             }
@@ -655,44 +660,6 @@ mod tests {
     }
 }
 
-#[cfg(target_os = "linux")]
-mod strict_open {
-    use std::{ffi::CStr, mem::size_of};
-    use libc::{c_long, AT_FDCWD};
 
-    #[repr(C)]
-    pub struct OpenHow {
-        pub flags: u64,
-        pub mode: u64,
-        pub resolve: u64,
-    }
-
-    // UAPI openat2 resolve flags (uapi/linux/openat2.h)
-    pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-    pub const RESOLVE_BENEATH: u64 = 0x08;
-
-    pub fn openat2_strict(path: &CStr) -> std::io::Result<i32> {
-        let how = OpenHow {
-            flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
-            mode: 0,
-            resolve: RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH,
-        };
-
-        let fd = unsafe {
-            libc::syscall(
-                libc::SYS_openat2,
-                AT_FDCWD,
-                path.as_ptr(),
-                &how as *const OpenHow,
-                size_of::<OpenHow>(),
-            ) as c_long
-        };
-
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(fd as i32)
-    }
-}
 
 

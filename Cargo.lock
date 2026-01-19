@@ -145,6 +145,7 @@ dependencies = [
  "aya",
  "chrono",
  "libc",
+ "nix",
  "serde",
  "serde_json",
 ]

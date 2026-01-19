@@ -108,3 +108,43 @@ pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
     }
     Ok(out as u32)
 }
+
+#[cfg(target_os = "linux")]
+pub mod strict_open {
+    use std::{ffi::CStr, mem::size_of};
+    use libc::{c_long, AT_FDCWD};
+
+    #[repr(C)]
+    pub struct OpenHow {
+        pub flags: u64,
+        pub mode: u64,
+        pub resolve: u64,
+    }
+
+    // UAPI openat2 resolve flags (uapi/linux/openat2.h)
+    pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+    pub const RESOLVE_BENEATH: u64 = 0x08;
+
+    pub fn openat2_strict(path: &CStr) -> std::io::Result<i32> {
+        let how = OpenHow {
+            flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
+            mode: 0,
+            resolve: RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH,
+        };
+
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_openat2,
+                libc::AT_FDCWD,
+                path.as_ptr(),
+                &how as *const OpenHow,
+                size_of::<OpenHow>(),
+            ) as c_long
+        };
+
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(fd as i32)
+    }
+}
