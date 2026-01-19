@@ -361,7 +361,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             }
 
             // 3) best-effort generation via FS_IOC_GETVERSION
-            let gen = match get_inode_generation(fd) {
+            let gen = match get_inode_generation(guard_fd) {
                 Ok(g) => g,
                 Err(e) => {
                     let eno = e.raw_os_error().unwrap_or(0);
@@ -376,7 +376,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                 }
             };
 
-            unsafe { libc::close(fd) };
+            unsafe { libc::close(guard_fd) };
 
             let dev = stat.st_dev as u64;
             let ino = stat.st_ino as u64;
