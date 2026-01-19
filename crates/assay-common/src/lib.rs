@@ -85,3 +85,26 @@ const _: [(); 520] = [(); core::mem::size_of::<MonitorEvent>()];
 
 // Alignment should be 4 on all sane targets; if this fails, your ABI is different.
 const _: [(); 4] = [(); core::mem::align_of::<MonitorEvent>()];
+
+#[cfg(all(target_os = "linux", feature = "std"))]
+pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
+    use nix::libc;
+    use nix::request_code_read;
+
+    // FS_IOC_GETVERSION is defined as _IOR('v', 1, long) in uapi/linux/fs.h
+    // Kernel returns i_generation (32-bit value).
+    // Best-effort: read into libc::c_long and cast to u32.
+
+    // build ioctl request code: _IOR('v', 1, long)
+    const fn fs_ioc_getversion() -> libc::c_ulong {
+        request_code_read!(b'v', 1, core::mem::size_of::<libc::c_long>()) as libc::c_ulong
+    }
+
+    let mut out: libc::c_long = 0;
+    // Safety: ioctl is unsafe, passing valid fd and pointer to initialized memory (0)
+    let rc = unsafe { libc::ioctl(fd, fs_ioc_getversion(), &mut out) };
+    if rc < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(out as u32)
+}

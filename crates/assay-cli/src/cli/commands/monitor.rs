@@ -82,7 +82,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
-    use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
+    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, get_inode_generation};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -356,7 +356,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             }
 
             // 3) best-effort generation via FS_IOC_GETVERSION
-            let gen = match inode_gen::get_generation(fd) {
+            let gen = match get_inode_generation(fd) {
                 Ok(g) => g,
                 Err(e) => {
                     let eno = e.raw_os_error().unwrap_or(0);
@@ -695,28 +695,4 @@ mod strict_open {
     }
 }
 
-#[cfg(target_os = "linux")]
-mod inode_gen {
-    use std::os::fd::RawFd;
 
-    // FS_IOC_GETVERSION is defined as _IOR('v', 1, long) in uapi/linux/fs.h
-    // Kernel returns i_generation (32-bit value), but header types are historically messy.
-    // Best-effort: read into libc::c_long and cast to u32.
-    // (We avoid hardcoding numeric ioctl values.)
-    pub fn get_generation(fd: RawFd) -> std::io::Result<u32> {
-        use nix::libc;
-        use nix::request_code_read;
-
-        // build ioctl request code: _IOR('v', 1, long)
-        const fn fs_ioc_getversion() -> libc::c_ulong {
-            request_code_read!(b'v', 1, core::mem::size_of::<libc::c_long>()) as libc::c_ulong
-        }
-
-        let mut out: libc::c_long = 0;
-        let rc = unsafe { libc::ioctl(fd, fs_ioc_getversion(), &mut out) };
-        if rc < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(out as u32)
-    }
-}
