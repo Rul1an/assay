@@ -11,6 +11,7 @@ use tempfile::NamedTempFile;
 // 3. bpftool installed (for verifying map counters)
 
 #[test]
+#[allow(deprecated)]
 fn test_lsm_deny_smoke_e2e() {
     // 0. Pre-flight check for root
     if unsafe { libc::geteuid() } != 0 {

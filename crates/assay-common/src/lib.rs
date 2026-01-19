@@ -113,7 +113,7 @@ pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
 #[cfg(target_os = "linux")]
 pub mod strict_open {
     use std::{ffi::CStr, mem::size_of};
-    use libc::{c_long, AT_FDCWD};
+    use libc::c_long;
 
     #[repr(C)]
     pub struct OpenHow {
