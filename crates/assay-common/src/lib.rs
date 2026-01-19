@@ -47,6 +47,15 @@ pub struct InodeKey {
     pub _pad2: u32,
 }
 
+/// Helper to encode userspace dev_t into Linux Kernel internal `s_dev` format.
+/// Matches `new_encode_dev` in `include/linux/kdev_t.h`.
+/// Format: (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+pub fn encode_kernel_dev(dev: u64) -> u32 {
+    let major = libc::major(dev as libc::dev_t) as u32;
+    let minor = libc::minor(dev as libc::dev_t) as u32;
+    (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+}
+
 #[cfg(target_os = "linux")]
 unsafe impl aya::Pod for InodeKey {}
 

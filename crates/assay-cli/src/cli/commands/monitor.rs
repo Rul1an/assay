@@ -81,7 +81,7 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
-    use assay_common::{EVENT_OPENAT, EVENT_CONNECT};
+    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, encode_kernel_dev};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -604,19 +604,6 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
     // Fallback: If no V2 entry, maybe use /proc/self/cgroup inode?
     // Or just fail.
     Err(anyhow::anyhow!("No Cgroup V2 entry found in {}", cgroup_path))
-}
-
-// Generic helper, compiled on all platforms for testing
-#[allow(dead_code)]
-fn encode_kernel_dev(dev: u64) -> u32 {
-    let maj = libc::major(dev as libc::dev_t) as u32;
-    let min = libc::minor(dev as libc::dev_t) as u32;
-
-    // Kernel Internal "new_encode_dev" (Linux 2.6+):
-    // (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12)
-    //
-    // This matches include/linux/kdev_t.h behavior used by `s_dev`.
-    (min & 0xff) | (maj << 8) | ((min & !0xff) << 12)
 }
 
 #[cfg(test)]
