@@ -197,7 +197,7 @@ echo "Starting monitor..."
   echo ">>> [Monitor Wrapper] Launching..."
   # Explicitly list the binary to prove it exists inside subshell
   ls -l ./assay
-  RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all
+  RUST_LOG=warn ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all
   echo ">>> [Monitor Wrapper] Exited with code $?"
 ) > /tmp/assay-lsm-verify/monitor.log 2>&1 &
 MONITOR_PID=$!
