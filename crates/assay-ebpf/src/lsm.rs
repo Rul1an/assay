@@ -110,24 +110,43 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
     }
 
-    let key = assay_common::InodeKey {
+    // Enforcement Check
+    // 1. Exact Match (if gen != 0 or strictly enforced)
+    if i_gen != 0 {
+        let key_exact = assay_common::InodeKey {
+            dev: s_dev,
+            pad: 0,
+            ino: i_ino,
+            gen: i_gen,
+            _pad2: 0,
+        };
+        if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
+            unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0", s_dev as u64, i_ino, i_gen, *rule_id); }
+
+            let mut alert_data = [0u8; 64];
+            unsafe {
+                *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
+                *(alert_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
+                *(alert_data.as_mut_ptr().add(16) as *mut u32) = *rule_id;
+            }
+            emit_event(&ctx, 10, cgroup_id, *rule_id, &alert_data, 0);
+            return Err(-1); // EPERM matched exact
+        }
+    }
+
+    // 2. Fallback Match (Gen 0 / Unknown)
+    // This catches cases where userspace couldn't resolve generation (e.g. tmpfs or failed ioctl)
+    // but correctly resolved dev/ino.
+    let key_fallback = assay_common::InodeKey {
         dev: s_dev,
         pad: 0,
         ino: i_ino,
-        gen: 0, // TODO: Userspace `stat` provides always-zero generation.
-                // This is a known TOCTOU/Security gap where reused inodes could be confused.
-                // Full fix requires `ioctl(FS_IOC_GETVERSION)` in userspace to resolve true generation.
+        gen: 0,
         _pad2: 0,
     };
 
-    // Diagnostic Printk (DEBUG CLASS 2)
-    unsafe {
-        aya_ebpf::helpers::bpf_printk!(b"LSM: INODE %llu:%llu\0", s_dev as u64, i_ino);
-    }
-
-    // Enforcement Check
-    if let Some(rule_id) = unsafe { DENY_INO.get(&key) } {
-        unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu rule=%u\0", s_dev as u64, i_ino, *rule_id); }
+    if let Some(rule_id) = unsafe { DENY_INO.get(&key_fallback) } {
+        unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0", s_dev as u64, i_ino, *rule_id); }
 
         let mut alert_data = [0u8; 64];
         unsafe {

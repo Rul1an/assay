@@ -305,7 +305,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         let mut compiled = assay_policy::tiers::compile(&t1_policy);
 
         // RESOLVE INODES (Tier 1 SOTA)
-        // Convert exact path rules to inode rules
+        let mut inode_rules = Vec::with_capacity(compiled.tier1.file_deny_exact.len());
+
         for rule in &compiled.tier1.file_deny_exact {
             use std::ffi::CString;
             use std::os::unix::ffi::OsStrExt;
@@ -318,46 +319,84 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                 }
             };
 
-            // Hardening: open(O_PATH | O_NOFOLLOW | O_CLOEXEC) + fstat
-            // Prevents TOCTOU and symlink traversal
-            let fd = unsafe { libc::open(path_c.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
-            if fd < 0 {
-                 let err = std::io::Error::last_os_error();
-                 eprintln!("Warning: Could not open denied path {} (skipping): {}", rule.path, err);
-                 continue;
-            }
+            // 1) Strict open: openat2 + RESOLVE_NO_SYMLINKS (+ BENEATH)
+            // Fallback: open(O_PATH|O_NOFOLLOW) (best-effort, final component only!)
+            let fd = match strict_open::openat2_strict(&path_c) {
+                Ok(fd) => fd,
+                Err(e) => {
+                    // openat2 may be unavailable (ENOSYS) or reject flags (EINVAL)
+                    let eno = e.raw_os_error().unwrap_or(0);
+                    if eno == libc::ENOSYS || eno == libc::EINVAL {
+                        let fd2 = unsafe {
+                            libc::open(
+                                path_c.as_ptr(),
+                                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            )
+                        };
+                        if fd2 < 0 {
+                            eprintln!("Warning: Could not open denied path {} (skipping): {}", rule.path, std::io::Error::last_os_error());
+                            continue;
+                        }
+                        fd2
+                    } else {
+                        eprintln!("Warning: openat2 failed for {} (skipping): {}", rule.path, e);
+                        continue;
+                    }
+                }
+            };
 
+            // 2) fstat(fd) for dev/ino (fd-based, race-free after successful open*)
             let mut stat: libc::stat = unsafe { std::mem::zeroed() };
             let res = unsafe { libc::fstat(fd, &mut stat) };
-            unsafe { libc::close(fd) };
-
             if res < 0 {
-                let err = std::io::Error::last_os_error();
-                eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, err);
+                unsafe { libc::close(fd) };
+                eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, std::io::Error::last_os_error());
                 continue;
             }
 
-            let dev = stat.st_dev;
-            let ino = stat.st_ino;
+            // 3) best-effort generation via FS_IOC_GETVERSION
+            let gen = match inode_gen::get_generation(fd) {
+                Ok(g) => g,
+                Err(e) => {
+                    let eno = e.raw_os_error().unwrap_or(0);
+                    // unsupported on some FS (e.g., tmpfs -> ENOTTY)
+                    if eno == libc::ENOTTY || eno == libc::EINVAL {
+                        0
+                    } else {
+                        // In fail-closed, one might abort. Here we warn.
+                        eprintln!("Warning: Could not get inode generation for {} (using gen=0): {}", rule.path, e);
+                        0
+                    }
+                }
+            };
 
-            // Re-encode dev_t to match Kernel internal format via robust helper
+            unsafe { libc::close(fd) };
+
+            let dev = stat.st_dev as u64;
+            let ino = stat.st_ino as u64;
+
+            // 4) Re-encode dev_t to match kernel s_dev (new_encode_dev)
             let kernel_dev = encode_kernel_dev(dev);
-            let maj = libc::major(dev);
-            let min = libc::minor(dev);
 
-            // Log deconstructed values for debugging
             if !args.quiet {
-                 eprintln!("Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={}",
-                     rule.path, dev, maj, min, kernel_dev, ino);
+                let maj = unsafe { libc::major(stat.st_dev) };
+                let min = unsafe { libc::minor(stat.st_dev) };
+                eprintln!(
+                    "Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={} gen={}",
+                    rule.path, dev, maj, min, kernel_dev, ino, gen
+                );
             }
 
-            compiled.tier1.inode_deny_exact.push(assay_policy::tiers::InodeRule {
-                 rule_id: rule.rule_id,
-                 dev: kernel_dev,
-                 ino: ino as u64,
-                 gen: 0, // Fallback if generation not resolved
+            inode_rules.push(assay_policy::tiers::InodeRule {
+                rule_id: rule.rule_id,
+                dev: kernel_dev,
+                ino,
+                gen, // now best-effort filled
             });
         }
+
+        // Extend the compiled policy with the resolved rules
+        compiled.tier1.inode_deny_exact.extend(inode_rules);
 
         if !args.quiet {
             eprintln!("Locked & Loaded Assurance Policy 🛡️");
@@ -573,19 +612,11 @@ fn encode_kernel_dev(dev: u64) -> u32 {
     let maj = libc::major(dev as libc::dev_t) as u32;
     let min = libc::minor(dev as libc::dev_t) as u32;
 
-    // Kernel Internal "Old" / Standard Format:
-    // (major << 20) | minor
+    // Kernel Internal "new_encode_dev" (Linux 2.6+):
+    // (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12)
     //
-    // This holds for major < 4096 (12 bits) and minor < 1048576 (20 bits).
-    // If values exceed this ("Huge Keys"), the kernel uses a different internal scheme,
-    // or effectively a different type (MKDEV macro behavior).
-    //
-    // Modern best practice: Fail closed or warn on huge devices to avoid collision.
-    if maj > 0xfff || min > 0xfffff {
-        eprintln!("Warning: Device {}:{} exceeds standard kernel encoding limits (Maj: 12b, Min: 20b). Matching may fail.", maj, min);
-    }
-
-    ((maj & 0xfff) << 20) | (min & 0xfffff)
+    // This matches include/linux/kdev_t.h behavior used by `s_dev`.
+    (min & 0xff) | (maj << 8) | ((min & !0xff) << 12)
 }
 
 #[cfg(test)]
@@ -594,25 +625,27 @@ mod tests {
 
     #[test]
     fn test_kernel_dev_encoding() {
-        // Case 1: Root device-like (8, 1) -> 0x00800001
-        // (8 << 20) | 1 = 0x800001
+        // Case 1: Root device-like (8, 1) -> 0x801
+        // (1 & 0xff) | (8 << 8) | 0
+        // 0x01 | 0x800 = 0x801
         let maj = 8;
         let min = 1;
         // On macOS makedev returns i32, on Linux u64
         let fake_dev = libc::makedev(maj, min);
         let encoded = encode_kernel_dev(fake_dev as u64);
-        assert_eq!(encoded, 0x800001);
+        assert_eq!(encoded, 0x801);
 
         // Case 2: Max safely representable on macOS (Major=255/8-bit)
-        // Linux supports 12-bit major (4095), but macOS limit is 255.
-        // We test with 255 to verify the shift logic (20 bits) is correct.
         // maj=255 (0xff), min=1048575 (0xfffff)
-        // (0xff << 20) | 0xfffff = 0x0ff00000 | 0x000fffff = 0x0fffffff
+        // (0xfffff & 0xff) | (0xff << 8) | ((0xfffff & !0xff) << 12)
+        // (0xff) | (0xff00) | ((0xfff00) << 12)
+        // 0xff | 0xff00 | 0xfff00000
+        // = 0xfff0ffff
         let maj = 0xff;
-        let min = 0xfffff;
+        let min = 0xfffff; // 20 bits
         let fake_dev = libc::makedev(maj, min);
         let encoded = encode_kernel_dev(fake_dev as u64);
-        assert_eq!(encoded, 0x0FFFFFFF);
+        assert_eq!(encoded, 0xfff0ffff);
     }
 
     #[test]
@@ -620,28 +653,82 @@ mod tests {
         // Case 3: Overflow (Maj 4096 / Min 1M)
         let _maj = 4096; // 12-bit max is 4095
         let _min = 0;
-        // On Linux/macOS this creates a dev_t that requires >32 bits or special encoding
-        // But our helper takes u64.
-        // We simulate the overflow check.
-        // We can't easily construct a native dev_t > 32bits on macOS (it's i32),
-        // so we test the helper logic by manually constructing a "huge" u64 if needed,
-        // but `libc::major` might mask it.
-        //
-        // Instead, we trust the logic:
-        // maj=4096 (0x1000) -> 0x1000 > 0xfff -> Warning printed
-        // Encoded = ((0x1000 & 0xfff) << 20) | 0
-        //         = (0x000 << 20) | 0
-        //         = 0
-        //
-        // NOTE: This test relies on libc::major() behaving correctly for input.
-        // For unit testing the *logic* of encode_kernel_dev, we need to pass a raw dev_t.
-        // But encode_kernel_dev takes u64 and calls libc::major/minor.
-        // We can't inject specific major/minor values easily without a mock or a huge dev_t.
-        //
-        // On 64-bit systems, dev_t is u64.
-        // Let's try to construct a dev_t that yields maj=4096.
-        // On Linux: (12 << 20) | 20 is old. New is... complicated.
-        // Let's skip complex mock fabrication and just verify the helper signature exists.
+        // Verify we compile and run; correctness of huge values depends on exact platform `makedev`
+        // but our logic `(min & 0xff) | (maj << 8) | ...` handles large values structurally.
+        // assert_eq!(2 + 2, 4);
+
+        // Let's test "Huge Major" manually: Major 4096 (0x1000)
+        // (0 & 0xff) | (0x1000 << 8) | ...
+        // 0 | 0x100000 | 0 = 0x100000
+        // But wait, encode_kernel_dev takes u64 and extracts maj/min using libc::major/minor.
+        // We can't easily force libc::major to return 4096 from a u64 on all platforms.
+        // So we just stick to the dummy assertion for now.
         assert_eq!(2 + 2, 4);
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod strict_open {
+    use std::{ffi::CStr, mem::size_of};
+    use libc::{c_long, AT_FDCWD};
+
+    #[repr(C)]
+    pub struct OpenHow {
+        pub flags: u64,
+        pub mode: u64,
+        pub resolve: u64,
+    }
+
+    // UAPI openat2 resolve flags (uapi/linux/openat2.h)
+    pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+    pub const RESOLVE_BENEATH: u64 = 0x08;
+
+    pub fn openat2_strict(path: &CStr) -> std::io::Result<i32> {
+        let how = OpenHow {
+            flags: (libc::O_PATH | libc::O_CLOEXEC) as u64,
+            mode: 0,
+            resolve: RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH,
+        };
+
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_openat2,
+                AT_FDCWD,
+                path.as_ptr(),
+                &how as *const OpenHow,
+                size_of::<OpenHow>(),
+            ) as c_long
+        };
+
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(fd as i32)
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod inode_gen {
+    use std::os::fd::RawFd;
+
+    // FS_IOC_GETVERSION is defined as _IOR('v', 1, long) in uapi/linux/fs.h
+    // Kernel returns i_generation (32-bit value), but header types are historically messy.
+    // Best-effort: read into libc::c_long and cast to u32.
+    // (We avoid hardcoding numeric ioctl values.)
+    pub fn get_generation(fd: RawFd) -> std::io::Result<u32> {
+        use nix::libc;
+        use nix::request_code_read;
+
+        // build ioctl request code: _IOR('v', 1, long)
+        const fn fs_ioc_getversion() -> libc::c_ulong {
+            request_code_read!(b'v', 1, core::mem::size_of::<libc::c_long>()) as libc::c_ulong
+        }
+
+        let mut out: libc::c_long = 0;
+        let rc = unsafe { libc::ioctl(fd, fs_ioc_getversion(), &mut out) };
+        if rc < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(out as u32)
     }
 }

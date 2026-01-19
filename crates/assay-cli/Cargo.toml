@@ -39,7 +39,7 @@ tokio-stream = "0.1"
 futures = "0.3"
 globset = "0.4"
 libc = "0.2"
-nix = { version = "0.27", features = ["signal", "process"] }
+nix = { version = "0.27", features = ["signal", "process", "fs", "ioctl"] }
 
 
 
