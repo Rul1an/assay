@@ -20,12 +20,14 @@ jobs:
       matrix:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
-    env:
-      TMPDIR: ${{ github.workspace }}/.tmp
-
     steps:
     - name: Setup Rust Path
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Configure Local Temp Dir
+      run: |
+        mkdir -p .tmp
+        echo "TMPDIR=$PWD/.tmp" >> $GITHUB_ENV
 
     - name: Pre-Checkout Cleanup
       run: |
