@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 use tokio_stream::StreamExt;
+#[cfg(target_os = "linux")]
 use assay_common::encode_kernel_dev;
 
 #[derive(Args, Debug, Clone)]

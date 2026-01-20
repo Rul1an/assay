@@ -91,27 +91,33 @@ else
   echo "🛠️  [2/3] Building assay-cli (userspace)..."
   echo "----------------------------------------------------------------"
 
-  # Detect Architecture
-  ARCH=$(uname -m)
-  if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
-    TARGET="aarch64-unknown-linux-musl"
-    # Pin SHA for security (Verified 2026-01-14)
-    BUILDER_IMAGE="messense/rust-musl-cross@sha256:8ce9001cba339adabb99bfc06184b4da8d7fcdf381883279a35a5ec396a3f476"
-    echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
+  if [ "$(uname -s)" == "Linux" ] && command -v cargo >/dev/null 2>&1; then
+      echo "🐧 Linux detected with Cargo. Using Native Build (Skip Docker)..."
+      cargo build --package assay-cli --bin assay --release
+      cp target/release/assay ./assay
   else
-    TARGET="x86_64-unknown-linux-musl"
-    # TODO: Pin SHA for x86_64 once verified
-    BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
-    echo "💻 Detected x86_64. Building for target: $TARGET"
+      # Detect Architecture
+      ARCH=$(uname -m)
+      if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
+        TARGET="aarch64-unknown-linux-musl"
+        # Pin SHA for security (Verified 2026-01-14)
+        BUILDER_IMAGE="messense/rust-musl-cross@sha256:8ce9001cba339adabb99bfc06184b4da8d7fcdf381883279a35a5ec396a3f476"
+        echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
+      else
+        TARGET="x86_64-unknown-linux-musl"
+        # TODO: Pin SHA for x86_64 once verified
+        BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
+        echo "💻 Detected x86_64. Building for target: $TARGET"
+      fi
+
+      docker run --rm -v "${WORKDIR}:/code" -w /code \
+        -e CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+        "$BUILDER_IMAGE" \
+        cargo build --package assay-cli --bin assay --release --target "$TARGET"
+
+      # Move binary to root for parity with download mode
+      cp "target/${TARGET}/release/assay" ./assay
   fi
-
-  docker run --rm -v "${WORKDIR}:/code" -w /code \
-    -e CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
-    "$BUILDER_IMAGE" \
-    cargo build --package assay-cli --bin assay --release --target "$TARGET"
-
-  # Move binary to root for parity with download mode
-  cp "target/${TARGET}/release/assay" ./assay
 fi
 
 # Create structured log directory for CI
