@@ -21,7 +21,6 @@ jobs:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
     steps:
-    steps:
     - name: Pre-Checkout Cleanup
       run: |
         # Fix permissions from previous potential root runs before checkout tries to touch anything
