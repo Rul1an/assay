@@ -20,6 +20,9 @@ jobs:
       matrix:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
+    env:
+      TMPDIR: ${{ github.workspace }}/.tmp
+
     steps:
     - name: Setup Rust Path
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -31,6 +34,8 @@ jobs:
         # Clean build artifacts to prevent disk exhaustion and stale builds
         # cargo clean might fail if we don't have Cargo.toml yet (pre-checkout), so just rely on rm
         rm -rf target/
+        # Make sure our local temp dir exists and is clean
+        rm -rf .tmp && mkdir -p .tmp
         # Clean shared temp artifacts
         sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
 
