@@ -22,13 +22,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        clean: false
 
-    - name: Cleanup Workspace
+    - name: Fix Runner Permissions & Cleanup
       run: |
+        # Fix permissions from previous potential root runs
+        sudo chown -R "$(id -u):$(id -g)" . || true
+        # Clean build artifacts to prevent disk exhaustion and stale builds
         cargo clean || true
-        sudo rm -rf target/
-        # Clean shared temp artifacts from other workflows preventing disk exhaustion
-        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test
+        rm -rf target/
+        # Clean shared temp artifacts
+        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
 
     - name: Build eBPF (Release)
       run: cargo xtask build-ebpf --release
@@ -37,23 +42,11 @@ jobs:
       run: cargo build --release --package assay-cli
 
     - name: Run End-to-End Deny Smoke Test
-      # This assumes the self-hosted runner has sudo NOPASSWD or runs as root-capable user.
-      # The runners are expected to be booted into the target kernel via VM infra externally
-      # OR this job selects a runner with that kernel.
-      #
-      # Since we only have one 'assay-bpf-runner' currently active (likely one kernel),
-      # effectively this matrix will run twice on the SAME runner unless the runner
-      # dynamically provides kernels.
-      #
-      # Per P1.2 requirement: "Source of Truth: Kernels booted in VM infra; jobs run on assay-bpf-runner".
-      # We assume the runner environment manages the kernel or checking `uname -r` is sufficient
-      # to log context.
+      # Use isolated target dir for root actions to not pollute workspace
       run: |
         echo "Running on Kernel: $(uname -r)"
-        # P1.3 End-to-End Deny Smoke Test (Requires Root)
-        # We need to ensure 'assay' bin is available if the test spawns it using Command::cargo_bin.
-        # However, `cargo test` doesn't automatically install binaries for `cargo_bin` to find
-        # unless `cargo build` ran first (which it did).
+        export CARGO_TARGET_DIR=/tmp/assay-target
+        mkdir -p $CARGO_TARGET_DIR
 
         sudo -E cargo test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
       continue-on-error: true
