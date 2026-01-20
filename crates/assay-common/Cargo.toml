@@ -20,3 +20,4 @@ aya = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
 [features]
 default = ["std"]
 std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix"]
+user = []

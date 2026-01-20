@@ -21,19 +21,20 @@ jobs:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        clean: false
-
-    - name: Fix Runner Permissions & Cleanup
+    steps:
+    - name: Pre-Checkout Cleanup
       run: |
-        # Fix permissions from previous potential root runs
+        # Fix permissions from previous potential root runs before checkout tries to touch anything
         sudo chown -R "$(id -u):$(id -g)" . || true
         # Clean build artifacts to prevent disk exhaustion and stale builds
-        cargo clean || true
+        # cargo clean might fail if we don't have Cargo.toml yet (pre-checkout), so just rely on rm
         rm -rf target/
         # Clean shared temp artifacts
         sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
+
+    - uses: actions/checkout@v4
+      with:
+        clean: false
 
     - name: Build eBPF (Release)
       run: cargo xtask build-ebpf --release
