@@ -69,7 +69,8 @@ jobs:
         export CARGO_TARGET_DIR=/tmp/assay-target
         mkdir -p $CARGO_TARGET_DIR
 
-        sudo -E cargo test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
+        # Run cargo via absolute path because sudo secure_path often excludes ~/.cargo/bin
+        sudo -E "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
       continue-on-error: true
 
     - name: Failure Artifacts (P1.2 Requirement)
