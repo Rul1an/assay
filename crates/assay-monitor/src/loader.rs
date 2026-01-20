@@ -200,6 +200,23 @@ impl LinuxMonitor {
                 };
                 hm.insert(key, rule.rule_id, 0)?;
                 println!("DEBUG: Inserted Inode Rule: dev={} gen={} ino={} rule_id={}", rule.dev, rule.gen, rule.ino, rule.rule_id);
+
+                // SOTA Hardening: Always insert default-generation (0) rule as fallback
+                // This covers cases where:
+                // 1. Kernel logic falls back to checking gen=0
+                // 2. Filesystems report varying generations
+                // For a DENY rule, "Fail Closed" means we block the Inode ID even if generation mismatches (risk of collision is acceptable for safety).
+                if rule.gen != 0 {
+                    let key_fallback = InodeKey {
+                        dev: rule.dev,
+                        pad: 0,
+                        ino: rule.ino,
+                        gen: 0,
+                        _pad2: 0,
+                    };
+                    hm.insert(key_fallback, rule.rule_id, 0)?;
+                    println!("DEBUG: Inserted Fallback Rule: dev={} gen=0 ino={} rule_id={}", rule.dev, rule.ino, rule.rule_id);
+                }
             }
         }
 
