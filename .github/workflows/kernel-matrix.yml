@@ -32,7 +32,12 @@ jobs:
     - name: Pre-Checkout Cleanup
       run: |
         # Fix permissions from previous potential root runs before checkout tries to touch anything
+        # CRITITCAL: Fix ~/.rustup permissions which may be root-owned
+        sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
+
+        # Clean workspace permissions
         sudo chown -R "$(id -u):$(id -g)" . || true
+
         # Clean build artifacts to prevent disk exhaustion and stale builds
         # cargo clean might fail if we don't have Cargo.toml yet (pre-checkout), so just rely on rm
         rm -rf target/
@@ -40,6 +45,12 @@ jobs:
         rm -rf .tmp && mkdir -p .tmp
         # Clean shared temp artifacts
         sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
+
+    - name: Install Rust Toolchain (Recovery)
+      # In case rustup state was corrupted by previous runs
+      run: |
+        rustup toolchain install nightly --component rust-src
+        rustup default nightly
 
     - uses: actions/checkout@v4
       with:
