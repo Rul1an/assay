@@ -62,7 +62,7 @@ jobs:
       if: failure() || cancelled()
       run: |
         mkdir -p artifacts
-        dmesg > artifacts/dmesg.log
+        sudo dmesg > artifacts/dmesg.log
         sudo bpftool prog show > artifacts/bpftool_prog.log
         sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log
         # Copy any local assay logs if they exist (assuming stdout captured above or file logging)
