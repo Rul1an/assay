@@ -163,6 +163,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     unsafe {
         *(ino_data.as_mut_ptr() as *mut u64) = s_dev as u64;
         *(ino_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
+        *(ino_data.as_mut_ptr().add(16) as *mut u32) = i_gen;
     }
     emit_event(&ctx, 112, cgroup_id, 0, &ino_data, 0);
 

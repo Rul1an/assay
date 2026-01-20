@@ -522,6 +522,14 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                      // SOTA Inode Resolution Event
                                      let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
                                      let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
+                                     let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]); // Expect lsm.rs to send 20 bytes now? Wait, lsm.rs sends 64 bytes.
+                                     // Check lsm.rs emit_event call for 112.
+                                     // lsm.rs:
+                                     // let mut ino_data = [0u8; 64];
+                                     // *(ino_data... as *mut u64) = s_dev as u64;
+                                     // *(... .add(8) as *mut u64) = i_ino;
+                                     // It does NOT currently send gen. I must update lsm.rs too.
+
                                      let dev = u64::from_ne_bytes(dev_bytes);
                                      let ino = u64::from_ne_bytes(ino_bytes);
                                      println!("[PID {}] 🔒 INODE RESOLVED: dev={} ino={}", event.pid, dev, ino);

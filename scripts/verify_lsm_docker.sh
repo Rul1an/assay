@@ -241,6 +241,11 @@ fi
 echo "✅ Monitor Attached (Wait complete)"
 
 echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
+echo ">> [Debug] File Stat:"
+stat /tmp/assay-test/secret.txt || echo "stat failed"
+stat -c "Dev: %d (0x%x) Ino: %i" /tmp/assay-test/secret.txt || true
+ls -ln /tmp/assay-test/secret.txt
+
 set +e
 cat /tmp/assay-test/secret.txt
 EXIT_CODE=$?
