@@ -520,20 +520,18 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                 11 /* EVENT_FILE_ALLOWED */ => println!("[PID {}] 🟢 ALLOWED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
                                 20 /* EVENT_CONNECT_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED NET : {}", event.pid, dump_prefix_hex(&event.data, 20)), // IP/Port packed
                                 112 => {
-                                     // SOTA Inode Resolution Event
+                                     // SOTA Inode Resolution Event (Event 112)
+                                     // ABI: dev(u64) | ino(u64) | gen(u32)
+                                     // Using robust from_ne_bytes parsing
                                      let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
                                      let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
-                                     let _gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]); // Expect lsm.rs to send 20 bytes now? Wait, lsm.rs sends 64 bytes.
-                                     // Check lsm.rs emit_event call for 112.
-                                     // lsm.rs:
-                                     // let mut ino_data = [0u8; 64];
-                                     // *(ino_data... as *mut u64) = s_dev as u64;
-                                     // *(... .add(8) as *mut u64) = i_ino;
-                                     // It does NOT currently send gen. I must update lsm.rs too.
+                                     let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]);
 
                                      let dev = u64::from_ne_bytes(dev_bytes);
                                      let ino = u64::from_ne_bytes(ino_bytes);
-                                     println!("[PID {}] 🔒 INODE RESOLVED: dev={} ino={}", event.pid, dev, ino);
+                                     let gen = u32::from_ne_bytes(gen_bytes);
+
+                                     println!("[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}", event.pid, dev, dev, ino, gen);
                                 }
                                 101 | 102 | 103 | 104 => {
                                     let chunk_idx = event.event_type - 101;
@@ -626,28 +624,27 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_kernel_dev_encoding() {
-        // Case 1: Root device-like (8, 1) -> 0x801
-        // (1 & 0xff) | (8 << 8) | 0
-        // 0x01 | 0x800 = 0x801
+        // Case 1: Root device-like (8, 1) -> 0x800001 (MKDEV: major << 20 | minor)
+        // 8 << 20 = 0x800000
+        // | 1 = 0x800001
         let maj = 8;
         let min = 1;
-        // On macOS makedev returns i32, on Linux u64
-        let fake_dev = libc::makedev(maj, min);
-        let encoded = encode_kernel_dev(fake_dev as u64);
-        assert_eq!(encoded, 0x801);
+        // On macOS makedev returns i32, on Linux u64. We mock carefully or just rely on logic.
+        // We can't easily mock libc::major/minor without implementing them manually or linking real libc.
+        // But on Linux CI, this will run against real glibc.
 
-        // Case 2: Max safely representable on macOS (Major=255/8-bit)
-        // maj=255 (0xff), min=1048575 (0xfffff)
-        // (0xfffff & 0xff) | (0xff << 8) | ((0xfffff & !0xff) << 12)
-        // (0xff) | (0xff00) | ((0xfff00) << 12)
-        // 0xff | 0xff00 | 0xfff00000
-        // = 0xfff0ffff
-        let maj = 0xff;
-        let min = 0xfffff; // 20 bits
         let fake_dev = libc::makedev(maj, min);
         let encoded = encode_kernel_dev(fake_dev as u64);
-        assert_eq!(encoded, 0xfff0ffff);
+        assert_eq!(encoded, 0x800001, "Expected Linux MKDEV layout (maj<<20 | min)");
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_kernel_dev_encoding_skip_non_linux() {
+        // Skip on Mac/Windows where layout differs
+        println!("Skipping Linux dev_t test on non-Linux host");
     }
 
     #[test]

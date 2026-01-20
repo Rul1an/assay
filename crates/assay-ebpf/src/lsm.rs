@@ -160,11 +160,18 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     // Event 112: Inode Resolved (Telemetry)
     let mut ino_data = [0u8; 64];
-    unsafe {
-        *(ino_data.as_mut_ptr() as *mut u64) = s_dev as u64;
-        *(ino_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
-        *(ino_data.as_mut_ptr().add(16) as *mut u32) = i_gen;
-    }
+
+    // ABI: s_dev(u64) | i_ino(u64) | i_gen(u32)
+    // Use copy_from_slice for safety (avoids pointer casts/unaligned writes)
+    let dev_bytes = (s_dev as u64).to_ne_bytes();
+    ino_data[0..8].copy_from_slice(&dev_bytes);
+
+    let ino_bytes = (i_ino as u64).to_ne_bytes();
+    ino_data[8..16].copy_from_slice(&ino_bytes);
+
+    let gen_bytes = (i_gen as u32).to_ne_bytes();
+    ino_data[16..20].copy_from_slice(&gen_bytes);
+
     emit_event(&ctx, 112, cgroup_id, 0, &ino_data, 0);
 
     Ok(0)

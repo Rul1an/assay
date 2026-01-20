@@ -48,14 +48,31 @@ pub struct InodeKey {
 }
 
 /// Helper to encode userspace dev_t into Linux Kernel internal `s_dev` format.
-/// Matches `new_encode_dev` in `include/linux/kdev_t.h`.
-/// Format: (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
-#[cfg(unix)]
+/// Matches `MKDEV` macro in Linux kernel (major << 20 | minor).
+/// This corresponds to `sb->s_dev` which we read in eBPF.
+#[cfg(target_os = "linux")]
 pub fn encode_kernel_dev(dev: u64) -> u32 {
     let major = libc::major(dev as libc::dev_t) as u32;
     let minor = libc::minor(dev as libc::dev_t) as u32;
-    (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12)
+    // MKDEV logic from include/linux/kdev_t.h (MINORBITS=20)
+    (major << 20) | minor
 }
+
+// Event ID for Inode Resolution telemetry
+pub const EVENT_INODE_RESOLVED: u32 = 112;
+
+// Shared ABI struct for Event 112
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct InodeResolved {
+    pub dev: u64, // s_dev cast to u64
+    pub ino: u64, // i_ino
+    pub gen: u32, // i_generation
+    pub _pad: u32,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for InodeResolved {}
 
 #[cfg(target_os = "linux")]
 unsafe impl aya::Pod for InodeKey {}
