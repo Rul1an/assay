@@ -523,7 +523,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                                      // SOTA Inode Resolution Event
                                      let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
                                      let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
-                                     let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]); // Expect lsm.rs to send 20 bytes now? Wait, lsm.rs sends 64 bytes.
+                                     let _gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]); // Expect lsm.rs to send 20 bytes now? Wait, lsm.rs sends 64 bytes.
                                      // Check lsm.rs emit_event call for 112.
                                      // lsm.rs:
                                      // let mut ino_data = [0u8; 64];

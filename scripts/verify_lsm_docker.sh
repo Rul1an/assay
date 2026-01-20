@@ -91,9 +91,15 @@ else
   echo "🛠️  [2/3] Building assay-cli (userspace)..."
   echo "----------------------------------------------------------------"
 
-  if [ "$(uname -s)" == "Linux" ] && command -v cargo >/dev/null 2>&1; then
-      echo "🐧 Linux detected with Cargo. Using Native Build (Skip Docker)..."
-      cargo build --package assay-cli --bin assay --release
+  # Robustly find cargo
+if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
+fi
+CARGO_BIN=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
+
+if [ "$(uname -s)" == "Linux" ] && [ -x "$CARGO_BIN" ]; then
+      echo "🐧 Linux detected with Cargo at $CARGO_BIN. Using Native Build (Skip Docker)..."
+      "$CARGO_BIN" build --package assay-cli --bin assay --release
       cp target/release/assay ./assay
   else
       # Detect Architecture
@@ -110,6 +116,7 @@ else
         echo "💻 Detected x86_64. Building for target: $TARGET"
       fi
 
+      echo "🐳 Falling back to Docker build (Cargo not found or non-Linux)..."
       docker run --rm -v "${WORKDIR}:/code" -w /code \
         -e CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
         "$BUILDER_IMAGE" \
