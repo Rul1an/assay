@@ -83,12 +83,20 @@ pub async fn explain_trace(ctx: &ToolContext, args: &Value) -> Result<Value> {
 
     // Format output
     match input.format.as_str() {
-        "markdown" | "md" => Ok(serde_json::json!({
-            "format": "markdown",
-            "content": explanation.to_markdown(),
-            "blocked_steps": explanation.blocked_steps,
-            "total_steps": explanation.total_steps
-        })),
+        "markdown" | "md" => {
+            let md = explanation.to_markdown();
+            Ok(serde_json::json!({
+                "format": "markdown",
+                "content": [{
+                    "type": "text",
+                    "text": md
+                }],
+                // Legacy field for backward compat (if needed by other tools)
+                "text": md,
+                "blocked_steps": explanation.blocked_steps,
+                "total_steps": explanation.total_steps
+            }))
+        }
         "html" => Ok(serde_json::json!({
             "format": "html",
             "content": explanation.to_html(),
@@ -218,11 +226,15 @@ sequences: []
 
         let result = explain_trace(&ctx, &args).await.unwrap();
 
+        // Verify strict schema contract
         assert_eq!(result["format"], "markdown");
-        assert!(result["content"]
-            .as_str()
-            .unwrap()
-            .contains("## Trace Explanation"));
+
+        // Verify MCP content array
+        let content_arr = result["content"].as_array().expect("content should be array");
+        assert_eq!(content_arr[0]["type"], "text");
+
+        let text = content_arr[0]["text"].as_str().expect("text should be string");
+        assert!(text.contains("## Trace Explanation"));
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
     }
