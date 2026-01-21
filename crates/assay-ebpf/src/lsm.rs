@@ -110,13 +110,6 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
     }
 
-    // DEBUG: Log first few accesses to diagnose smoke test failure
-    // We can't filter by rule easily here, so we log everything (noisy but necessary)
-    // Only logging if we have a valid inode to reduce spam slightly
-    if i_ino != 0 {
-         unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM DEBUG: dev=%u ino=%llu gen=%u\0", s_dev, i_ino, i_gen); }
-    }
-
     // Enforcement Check
     // 1. Exact Match (if gen != 0 or strictly enforced)
     if i_gen != 0 {
