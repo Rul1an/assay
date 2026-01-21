@@ -40,11 +40,9 @@ pub struct MonitorEvent {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct InodeKey {
-    pub dev: u32,
-    pub pad: u32,
     pub ino: u64,
+    pub dev: u32,
     pub gen: u32,
-    pub _pad2: u32,
 }
 
 /// Helper to encode userspace dev_t into Linux Kernel internal `s_dev` format.

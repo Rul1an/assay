@@ -192,11 +192,9 @@ impl LinuxMonitor {
             let mut hm: AyaHashMap<_, InodeKey, u32> = AyaHashMap::try_from(map)?;
             for rule in compiled.tier1.inode_deny_exact.iter() {
                 let key = InodeKey {
-                    dev: rule.dev, // u32
-                    pad: 0,
                     ino: rule.ino,
+                    dev: rule.dev,
                     gen: rule.gen,
-                    _pad2: 0,
                 };
                 hm.insert(key, rule.rule_id, 0)?;
                 println!("DEBUG: Inserted Inode Rule: dev={} gen={} ino={} rule_id={}", rule.dev, rule.gen, rule.ino, rule.rule_id);
@@ -208,11 +206,9 @@ impl LinuxMonitor {
                 // For a DENY rule, "Fail Closed" means we block the Inode ID even if generation mismatches (risk of collision is acceptable for safety).
                 if rule.gen != 0 {
                     let key_fallback = InodeKey {
-                        dev: rule.dev,
-                        pad: 0,
                         ino: rule.ino,
+                        dev: rule.dev,
                         gen: 0,
-                        _pad2: 0,
                     };
                     hm.insert(key_fallback, rule.rule_id, 0)?;
                     println!("DEBUG: Inserted Fallback Rule: dev={} gen=0 ino={} rule_id={}", rule.dev, rule.ino, rule.rule_id);

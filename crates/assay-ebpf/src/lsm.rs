@@ -114,11 +114,9 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // 1. Exact Match (if gen != 0 or strictly enforced)
     if i_gen != 0 {
         let key_exact = assay_common::InodeKey {
-            dev: s_dev,
-            pad: 0,
             ino: i_ino,
+            dev: s_dev,
             gen: i_gen,
-            _pad2: 0,
         };
         if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
             unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0", s_dev as u64, i_ino, i_gen, *rule_id); }
@@ -138,11 +136,9 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // This catches cases where userspace couldn't resolve generation (e.g. tmpfs or failed ioctl)
     // but correctly resolved dev/ino.
     let key_fallback = assay_common::InodeKey {
-        dev: s_dev,
-        pad: 0,
         ino: i_ino,
+        dev: s_dev,
         gen: 0,
-        _pad2: 0,
     };
 
     if let Some(rule_id) = unsafe { DENY_INO.get(&key_fallback) } {
