@@ -185,10 +185,14 @@ fn resolve_ebpf_output(
 ) -> anyhow::Result<PathBuf> {
     let profile = if release { "release" } else { "debug" };
 
+    // Support custom target dir (respecting CARGO_TARGET_DIR env var if set)
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| root.join("target"));
+
     // 1) Preferred: target/<triple>/<profile>/<bin-name>
     // Cargo bin name is usually "assay-ebpf" (package name).
-    let preferred = root
-        .join("target")
+    let preferred = target_dir
         .join(target)
         .join(profile)
         .join("assay-ebpf");
