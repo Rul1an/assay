@@ -52,6 +52,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
+
+    - name: Install Rust Toolchain (Recovery)
       # In case rustup state was corrupted by previous runs
       run: |
         rustup toolchain install nightly --component rust-src
