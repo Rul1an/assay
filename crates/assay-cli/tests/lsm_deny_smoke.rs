@@ -115,6 +115,12 @@ runtime_monitor:
 
     // Dump DENY_INO for diagnostics
     eprintln!("--- Map Diagnostics ---");
+    // Show map metadata (Verify key_size=16)
+    let _ = Command::new("bpftool")
+        .args(&["map", "show", "name", "DENY_INO"])
+        .status();
+
+    // Dump map contents
     let _ = Command::new("bpftool")
         .args(&["map", "dump", "name", "DENY_INO"])
         .status();

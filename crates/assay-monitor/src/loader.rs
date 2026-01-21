@@ -187,11 +187,12 @@ impl LinuxMonitor {
         }
 
         // 2. Inode Exact Matches (SOTA)
+        // 2. Inode Exact Matches (SOTA)
         if let Some(map) = bpf.map_mut("DENY_INO") {
-            use assay_common::InodeKey;
-            let mut hm: AyaHashMap<_, InodeKey, u32> = AyaHashMap::try_from(map)?;
+            use assay_common::InodeKeyMap;
+            let mut hm: AyaHashMap<_, InodeKeyMap, u32> = AyaHashMap::try_from(map)?;
             for rule in compiled.tier1.inode_deny_exact.iter() {
-                let key = InodeKey {
+                let key = InodeKeyMap {
                     ino: rule.ino,
                     dev: rule.dev,
                     gen: rule.gen,
@@ -205,7 +206,7 @@ impl LinuxMonitor {
                 // 2. Filesystems report varying generations
                 // For a DENY rule, "Fail Closed" means we block the Inode ID even if generation mismatches (risk of collision is acceptable for safety).
                 if rule.gen != 0 {
-                    let key_fallback = InodeKey {
+                    let key_fallback = InodeKeyMap {
                         ino: rule.ino,
                         dev: rule.dev,
                         gen: 0,

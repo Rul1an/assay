@@ -27,9 +27,9 @@ jobs:
     steps:
     - name: Configure Build Env
       run: |
-        # Set unique target dir per job using runner.temp (only available in steps)
-        echo "CARGO_TARGET_DIR=${{ runner.temp }}/assay-target-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
-        # Force rustc to use runner.temp for intermediate files (avoiding /tmp EPERM)
+        # Set unique target dir per job in WORKSPACE (larger partition than runner.temp)
+        echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/assay-target-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+        # Force rustc to use runner.temp for intermediate files (small, fast, avoiding /tmp EPERM)
         echo "TMPDIR=${{ runner.temp }}/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
     - name: Setup Rust Path
@@ -43,21 +43,15 @@ jobs:
         (test -f $HOME/.cargo/config.toml && sed -n '1,200p' $HOME/.cargo/config.toml) || true
         (test -f .cargo/config.toml && sed -n '1,200p' .cargo/config.toml) || true
 
-    - name: Setup TMPDIR (avoid /tmp EPERM)
+    - name: Disk Preflight
       run: |
         set -euo pipefail
-        mkdir -p "$TMPDIR"
-        chmod 1777 "$TMPDIR" || true
-        echo "TMPDIR is $TMPDIR"
-        # quick smoke write test
-        touch "$TMPDIR/assay-tmp-test" && rm -f "$TMPDIR/assay-tmp-test"
-
-    - name: Diagnose /tmp (optional)
-      run: |
-        ls -ld /tmp || true
-        stat -c "%A %a %U:%G %n" /tmp || true
-        mount | grep ' on /tmp ' || true
-        touch /tmp/assay-ci-write-test && rm -f /tmp/assay-ci-write-test || true
+        echo "=== DF -H (General) ==="
+        df -h
+        echo "=== Workspace Free Space ==="
+        df -h "$GITHUB_WORKSPACE" || true
+        echo "=== Runner Temp Free Space ==="
+        df -h "${{ runner.temp }}" || true
 
     - name: Install Dependencies
       run: |
@@ -70,8 +64,8 @@ jobs:
 
         # Try the exact kernel tools package first
         if ! sudo apt-get install -y "linux-tools-$KREL"; then
-          echo "linux-tools-$KREL not found. Falling back to linux-tools-generic..."
-          sudo apt-get install -y linux-tools-generic linux-tools-common || true
+          echo "linux-tools-$KREL not found. Falling back..."
+          sudo apt-get install -y linux-tools-common linux-tools-generic
         fi
 
         # Verify bpftool presence (best-effort)
@@ -98,38 +92,69 @@ jobs:
          # Ensure rustup/cargo dirs are user-owned
          sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
 
+    - name: Setup Build Dirs
+      run: |
+        set -euo pipefail
+        # Create unique build dirs (now that we own the workspace)
+        mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
+
+        # TMPDIR needs 1777 to behave like /tmp
+        chmod 1777 "$TMPDIR" || true
+
+        echo "Build Dirs Ready:"
+        ls -ld "$TMPDIR" "$CARGO_TARGET_DIR"
+
     - name: Build eBPF (Release)
       run: cargo +nightly xtask build-ebpf --release
 
     - name: Build CLI (Release)
       # Uses CARGO_TARGET_DIR from env (unique per job)
-      run: cargo build --release --package assay-cli
+      # Build the main binary only (no tests) to keep target dir clean
+      run: cargo build --release --package assay-cli --bin assay
 
-    - name: Run End-to-End Deny Smoke Test
-      # ISOLATION: Use a separate target dir for SUDO to prevent locking the main build dir
+    - name: Run End-to-End Deny Smoke Test (Script)
+      # ZERO-COMPILE STRATEGY: Run pre-built binary via shell script
       run: |
         set -euo pipefail
-        echo "Running on Kernel: $(uname -r)"
-        export CARGO_TARGET_DIR="${{ runner.temp }}/assay-target-root-${{ matrix.kernel }}-${{ github.run_id }}"
-        mkdir -p "$CARGO_TARGET_DIR"
 
-        # Robustly find the eBPF artifact (paths vary by build method)
-        ASSAY_EBPF_PATH=""
+        # Resolve Artifacts
+        BIN="$CARGO_TARGET_DIR/release/assay"
+
+        # Robust lookup for eBPF
         if [ -f "target/assay-ebpf.o" ]; then
-            ASSAY_EBPF_PATH="$PWD/target/assay-ebpf.o"
+             EBPF="$PWD/target/assay-ebpf.o"
         elif [ -n "$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)" ]; then
-            ASSAY_EBPF_PATH="$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)"
+             EBPF="$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)"
         else
-            echo "Error: Could not locate assay-ebpf.o"
-            exit 1
+             echo "Error: eBPF artifact not found"
+             exit 1
         fi
-        echo "Using ASSAY_EBPF_PATH=$ASSAY_EBPF_PATH"
-        export ASSAY_EBPF_PATH
 
-        # Run test as root, forcing it to use the ROOT specific target dir
-        # Note: continue-on-error removed for strict gating
-        sudo -E env TMPDIR="$TMPDIR" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
-      # continue-on-error: true # Removed for strict gating
+        echo "Binary: $BIN"
+        echo "eBPF:   $EBPF"
+
+        # Check binary exists
+        if [ ! -x "$BIN" ]; then
+             echo "Error: Binary not found or not executable at $BIN"
+             ls -R "$CARGO_TARGET_DIR" || true
+             exit 1
+        fi
+
+        # Execute Script as Root
+        # We pass the pre-built binary path env var
+        sudo -E env \
+          TMPDIR="$TMPDIR" \
+          ASSAY_BIN="$BIN" \
+          ASSAY_EBPF_PATH="$EBPF" \
+          bash scripts/ci/lsm_deny_smoke.sh
+
+    - name: Cleanup per-run dirs
+      if: always()
+      run: |
+        set +e
+        echo "Cleaning up build directories..."
+        rm -rf "$CARGO_TARGET_DIR" || true
+        rm -rf "$TMPDIR" || true
 
     - name: Failure Artifacts (P1.2 Requirement)
       if: failure() || cancelled()

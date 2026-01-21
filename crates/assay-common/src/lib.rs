@@ -45,6 +45,17 @@ pub struct InodeKey {
     pub gen: u32,
 }
 
+/// Explicit 16-byte key for BPF Map Lookups (ino + dev + gen).
+/// Layout: | ino (8) | dev (4) | gen (4) | = 16 bytes.
+/// Guarantees dense packing without padding issues.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct InodeKeyMap {
+    pub ino: u64,
+    pub dev: u32,
+    pub gen: u32,
+}
+
 /// Helper to encode userspace dev_t into Linux Kernel internal `s_dev` format.
 /// Matches `MKDEV` macro in Linux kernel (major << 20 | minor).
 /// This corresponds to `sb->s_dev` which we read in eBPF.

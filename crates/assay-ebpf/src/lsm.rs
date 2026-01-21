@@ -112,8 +112,10 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     // Enforcement Check
     // 1. Exact Match (if gen != 0 or strictly enforced)
+    // Enforcement Check
+    // 1. Exact Match (if gen != 0 or strictly enforced)
     if i_gen != 0 {
-        let key_exact = assay_common::InodeKey {
+        let key_exact = assay_common::InodeKeyMap {
             ino: i_ino,
             dev: s_dev,
             gen: i_gen,
@@ -135,7 +137,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // 2. Fallback Match (Gen 0 / Unknown)
     // This catches cases where userspace couldn't resolve generation (e.g. tmpfs or failed ioctl)
     // but correctly resolved dev/ino.
-    let key_fallback = assay_common::InodeKey {
+    let key_fallback = assay_common::InodeKeyMap {
         ino: i_ino,
         dev: s_dev,
         gen: 0,
