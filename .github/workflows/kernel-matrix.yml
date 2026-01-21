@@ -62,7 +62,21 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev bpftool
+        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
+
+        # bpftool on Ubuntu Noble is a virtual package; install the kernel-matched tools package
+        KREL="$(uname -r)"
+        echo "Kernel release: $KREL"
+
+        # Try the exact kernel tools package first
+        if ! sudo apt-get install -y "linux-tools-$KREL"; then
+          echo "linux-tools-$KREL not found. Falling back to linux-tools-generic..."
+          sudo apt-get install -y linux-tools-generic linux-tools-common || true
+        fi
+
+        # Verify bpftool presence (best-effort)
+        command -v bpftool || { echo "bpftool not found after install"; exit 1; }
+        bpftool version || true
 
     - name: Install Rust Toolchain (Nightly Component)
       run: |
@@ -120,11 +134,14 @@ jobs:
     - name: Failure Artifacts (P1.2 Requirement)
       if: failure() || cancelled()
       run: |
-        mkdir -p artifacts
-        sudo dmesg > artifacts/dmesg.log
-        sudo bpftool prog show > artifacts/bpftool_prog.log
-        sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log
-        # Copy any local assay logs if they exist (assuming stdout captured above or file logging)
+        set +e
+        mkdir -p artifacts || true
+        sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
+        sudo bpftool prog show > artifacts/bpftool_prog.log 2>&1 || true
+        sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log 2>&1 || true
+        echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
+        echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}" >> artifacts/kernel.txt || true
+        echo "TMPDIR=${TMPDIR:-}" >> artifacts/kernel.txt || true
 
     - uses: actions/upload-artifact@v4
       if: failure() || cancelled()
