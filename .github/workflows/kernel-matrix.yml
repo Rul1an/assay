@@ -36,16 +36,9 @@ jobs:
         (test -f $HOME/.cargo/config.toml && sed -n '1,200p' $HOME/.cargo/config.toml) || true
         (test -f .cargo/config.toml && sed -n '1,200p' .cargo/config.toml) || true
 
-    - name: Pre-Checkout Cleanup
+    - name: Cleanup Global Temp
       run: |
-        # Fix permissions from previous potential root runs
-        sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
-        sudo chown -R "$(id -u):$(id -g)" . || true
-
-        # Clean workspace artifacts
-        sudo rm -rf target/ target-root-build/
-
-        # Clean global temp artifacts (Best Effort)
+        # Best effort cleanup of global temp dirs from previous runs
         sudo rm -rf /tmp/assay-target* /tmp/assay-lsm-verify /tmp/assay-test || true
 
     - name: Install Dependencies
@@ -53,17 +46,28 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
 
-    - name: Install Rust Toolchain (Recovery)
+    - name: Install Rust Toolchain (Nightly Component)
       run: |
         rustup toolchain install nightly --component rust-src
-        rustup default nightly
+        # Do NOT set default nightly to avoid polluting runner state
 
     - uses: actions/checkout@v4
       with:
         clean: false
 
+    - name: Post-Checkout Permission Fix
+      run: |
+         # Fix workspace permissions now that checkout is done
+         sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+
+         # Clean previous build artifacts (workspace relative)
+         sudo rm -rf target/ target-root-build/
+
+         # Ensure rustup/cargo dirs are user-owned
+         sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
+
     - name: Build eBPF (Release)
-      run: cargo xtask build-ebpf --release
+      run: cargo +nightly xtask build-ebpf --release
 
     - name: Build CLI (Release)
       # Uses CARGO_TARGET_DIR from env (unique per job)
@@ -76,12 +80,22 @@ jobs:
         export CARGO_TARGET_DIR="${{ runner.temp }}/assay-target-root-${{ matrix.kernel }}-${{ github.run_id }}"
         mkdir -p "$CARGO_TARGET_DIR"
 
-        # Re-export necessary envs for sudo
-        export ASSAY_EBPF_PATH="$PWD/target/assay-ebpf.o"
+        # Robustly find the eBPF artifact (paths vary by build method)
+        ASSAY_EBPF_PATH=""
+        if [ -f "target/assay-ebpf.o" ]; then
+            ASSAY_EBPF_PATH="$PWD/target/assay-ebpf.o"
+        elif [ -n "$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)" ]; then
+            ASSAY_EBPF_PATH="$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)"
+        else
+            echo "Error: Could not locate assay-ebpf.o"
+            exit 1
+        fi
+        echo "Using ASSAY_EBPF_PATH=$ASSAY_EBPF_PATH"
+        export ASSAY_EBPF_PATH
 
         # Run test as root, forcing it to use the ROOT specific target dir
         sudo -E env CARGO_TARGET_DIR="$CARGO_TARGET_DIR" "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
-      continue-on-error: true
+      # continue-on-error: true # Removed for strict gating
 
     - name: Failure Artifacts (P1.2 Requirement)
       if: failure() || cancelled()
