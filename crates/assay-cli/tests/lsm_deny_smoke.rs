@@ -70,6 +70,12 @@ spec:
        .arg("--policy")
        .arg(policy_path.to_str().unwrap());
 
+    // Allow overriding eBPF path via env var (for CI where artifact is separate from test runner)
+    if let Ok(ebpf_path) = std::env::var("ASSAY_EBPF_PATH") {
+        eprintln!("Using eBPF override: {}", ebpf_path);
+        cmd.arg("--ebpf").arg(ebpf_path);
+    }
+
     // Run in background
     let mut child = cmd.spawn().expect("Failed to spawn assay monitor");
 
