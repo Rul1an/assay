@@ -1,6 +1,7 @@
 name: Kernel Matrix CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [ "main" ]
     paths:
@@ -8,7 +9,7 @@ on:
       - "crates/assay-cli/**"
       - ".github/workflows/kernel-matrix.yml"
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feat/*" ]
 
 jobs:
   matrix-test:
