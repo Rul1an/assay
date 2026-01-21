@@ -40,13 +40,13 @@ jobs:
 
         # Clean build artifacts to prevent disk exhaustion and stale builds
         # cargo clean might fail if we don't have Cargo.toml yet (pre-checkout), so just rely on rm
-        sudo rm -rf target/
+        sudo rm -rf target/ target-root-build/
         # Make sure our local temp dir exists and is clean
         rm -rf .tmp && mkdir -p .tmp
         # Clean shared temp artifacts
         # Nuke immutable flags if they exist (common cause of EPERM in CI)
-        sudo chattr -i -R /tmp/assay-target /tmp/assay-lsm-verify || true
-        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
+        sudo chattr -i -R /tmp/assay-lsm-verify || true
+        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test
 
     - name: Install Dependencies
       run: |
@@ -67,13 +67,16 @@ jobs:
       run: cargo xtask build-ebpf --release
 
     - name: Build CLI (Release)
-      run: cargo build --release --package assay-cli
+      # Explicitly unset CARGO_TARGET_DIR to ensure we use the workspace target dir (owned by user)
+      # and not any potentially leaked root-owned dir.
+      run: unset CARGO_TARGET_DIR && cargo build --release --package assay-cli
 
     - name: Run End-to-End Deny Smoke Test
-      # Use isolated target dir for root actions to not pollute workspace
+      # Use isolated target dir for root actions to not pollute workspace standard target dir
       run: |
         echo "Running on Kernel: $(uname -r)"
-        export CARGO_TARGET_DIR=/tmp/assay-target
+        # Use a subdirectory in workspace to keep cleanup easy, but separate from userspace target
+        export CARGO_TARGET_DIR="$PWD/target-root-build"
         mkdir -p $CARGO_TARGET_DIR
 
         # Run cargo via absolute path because sudo secure_path often excludes ~/.cargo/bin
