@@ -20,33 +20,33 @@ jobs:
       matrix:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
+    env:
+      CARGO_BUILD_JOBS: 2
+      # Unique target dir per job to avoid conflicts on self-hosted runner
+      CARGO_TARGET_DIR: ${{ runner.temp }}/assay-target-${{ matrix.kernel }}-${{ github.run_id }}
+
     steps:
     - name: Setup Rust Path
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-    - name: Configure Local Temp Dir
+    - name: Debug Env
       run: |
-        mkdir -p .tmp
-        echo "TMPDIR=$PWD/.tmp" >> $GITHUB_ENV
+        echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+        env | sort | grep -E 'CARGO_TARGET_DIR|RUST|TMPDIR' || true
+        (test -f $HOME/.cargo/config.toml && sed -n '1,200p' $HOME/.cargo/config.toml) || true
+        (test -f .cargo/config.toml && sed -n '1,200p' .cargo/config.toml) || true
 
     - name: Pre-Checkout Cleanup
       run: |
-        # Fix permissions from previous potential root runs before checkout tries to touch anything
-        # CRITITCAL: Fix ~/.rustup permissions which may be root-owned
+        # Fix permissions from previous potential root runs
         sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
-
-        # Clean workspace permissions
         sudo chown -R "$(id -u):$(id -g)" . || true
 
-        # Clean build artifacts to prevent disk exhaustion and stale builds
-        # cargo clean might fail if we don't have Cargo.toml yet (pre-checkout), so just rely on rm
+        # Clean workspace artifacts
         sudo rm -rf target/ target-root-build/
-        # Make sure our local temp dir exists and is clean
-        rm -rf .tmp && mkdir -p .tmp
-        # Clean shared temp artifacts
-        # Nuke immutable flags if they exist (common cause of EPERM in CI)
-        sudo chattr -i -R /tmp/assay-lsm-verify || true
-        sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test
+
+        # Clean global temp artifacts (Best Effort)
+        sudo rm -rf /tmp/assay-target* /tmp/assay-lsm-verify /tmp/assay-test || true
 
     - name: Install Dependencies
       run: |
@@ -54,7 +54,6 @@ jobs:
         sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
 
     - name: Install Rust Toolchain (Recovery)
-      # In case rustup state was corrupted by previous runs
       run: |
         rustup toolchain install nightly --component rust-src
         rustup default nightly
@@ -67,22 +66,21 @@ jobs:
       run: cargo xtask build-ebpf --release
 
     - name: Build CLI (Release)
-      # Explicitly unset CARGO_TARGET_DIR to ensure we use the workspace target dir (owned by user)
-      # and not any potentially leaked root-owned dir.
-      run: unset CARGO_TARGET_DIR && cargo build --release --package assay-cli
+      # Uses CARGO_TARGET_DIR from env (unique per job)
+      run: cargo build --release --package assay-cli
 
     - name: Run End-to-End Deny Smoke Test
-      # Use isolated target dir for root actions to not pollute workspace standard target dir
+      # ISOLATION: Use a separate target dir for SUDO to prevent locking the main build dir
       run: |
         echo "Running on Kernel: $(uname -r)"
-        # Use a subdirectory in workspace to keep cleanup easy, but separate from userspace target
-        export CARGO_TARGET_DIR="$PWD/target-root-build"
-        mkdir -p $CARGO_TARGET_DIR
+        export CARGO_TARGET_DIR="${{ runner.temp }}/assay-target-root-${{ matrix.kernel }}-${{ github.run_id }}"
+        mkdir -p "$CARGO_TARGET_DIR"
 
-        # Run cargo via absolute path because sudo secure_path often excludes ~/.cargo/bin
-        # Export eBPF path via env var so the test can pick it up without confusing libtest harness
+        # Re-export necessary envs for sudo
         export ASSAY_EBPF_PATH="$PWD/target/assay-ebpf.o"
-        sudo -E "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
+
+        # Run test as root, forcing it to use the ROOT specific target dir
+        sudo -E env CARGO_TARGET_DIR="$CARGO_TARGET_DIR" "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
       continue-on-error: true
 
     - name: Failure Artifacts (P1.2 Requirement)
