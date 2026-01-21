@@ -36,6 +36,7 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+strip = true
 
 # eBPF MUST be optimized, even in dev profile
 [profile.dev.package.assay-ebpf]
