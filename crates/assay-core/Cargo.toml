@@ -27,7 +27,6 @@ tracing = "0.1"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
-rusqlite = { version = "0.31", features = [] }
 tokio = { version = "1", features = ["sync", "time", "macros", "rt-multi-thread"] }
 reqwest = { version = "0.12.26", default-features = false, features = ["json", "rustls-tls"] }
 hex = "0.4.3"
@@ -54,8 +53,12 @@ libc = "0.2"
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", optional = true }
+rusqlite = { version = "0.31", features = [] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"
 serial_test = "3"
-rusqlite = { version = "0.31", features = [] }
+serial_test = "3"
