@@ -67,6 +67,19 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
+fn get_host_user_group() -> Option<(String, String)> {
+    #[cfg(target_os = "linux")]
+    {
+        let uid = Command::new("id").arg("-u").output().ok()?;
+        let gid = Command::new("id").arg("-g").output().ok()?;
+        let uid_str = String::from_utf8(uid.stdout).ok()?.trim().to_string();
+        let gid_str = String::from_utf8(gid.stdout).ok()?.trim().to_string();
+        Some((uid_str, gid_str))
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
 fn build_ebpf(opts: BuildEbpfOpts) -> anyhow::Result<()> {
     let root = workspace_root()?;
 
@@ -229,6 +242,13 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     let mut script = String::new();
     script.push_str("set -euo pipefail; ");
 
+    // Create target dir on host to ensure it is user-owned (not root-owned by docker mount)
+    std::fs::create_dir_all(root.join("target")).ok();
+
+    // Fix permissions: if we are on Linux, we want the container to write files as the host user
+    // or at least chown them back.
+    let (uid, gid) = get_host_user_group().unwrap_or(("0".into(), "0".into()));
+
     // Fix Docker IO/Storage issues by writing to host volume
     script.push_str("export TMPDIR=/work/.tmp; mkdir -p /work/.tmp; ");
     script.push_str("export CARGO_TARGET_DIR=/work/target-ebpf; ");
@@ -281,6 +301,10 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     script.push_str(r#"mkdir -p /work/target; "#);
     script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
     script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
+
+    // Chown the output file to match host user
+    script.push_str(&format!("chown {}:{} /work/target/assay-ebpf.o || true; ", uid, gid));
+    script.push_str(&format!("chown -R {}:{} /work/target-ebpf || true; ", uid, gid));
 
     let status = Command::new("docker")
         .args([
