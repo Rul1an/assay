@@ -48,7 +48,10 @@ jobs:
         sudo chattr -i -R /tmp/assay-target /tmp/assay-lsm-verify || true
         sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-target
 
-    - name: Install Rust Toolchain (Recovery)
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
       # In case rustup state was corrupted by previous runs
       run: |
         rustup toolchain install nightly --component rust-src
