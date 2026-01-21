@@ -70,7 +70,9 @@ jobs:
         mkdir -p $CARGO_TARGET_DIR
 
         # Run cargo via absolute path because sudo secure_path often excludes ~/.cargo/bin
-        sudo -E "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
+        # Pass explicit --ebpf path because the test binary is in /tmp (CARGO_TARGET_DIR)
+        # but the artifact is in the workspace target/
+        sudo -E "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture --ebpf "$PWD/target/assay-ebpf.o"
       continue-on-error: true
 
     - name: Failure Artifacts (P1.2 Requirement)
