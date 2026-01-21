@@ -29,6 +29,8 @@ jobs:
       run: |
         # Set unique target dir per job using runner.temp (only available in steps)
         echo "CARGO_TARGET_DIR=${{ runner.temp }}/assay-target-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+        # Force rustc to use runner.temp for intermediate files (avoiding /tmp EPERM)
+        echo "TMPDIR=${{ runner.temp }}/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
     - name: Setup Rust Path
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -36,19 +38,31 @@ jobs:
     - name: Debug Env
       run: |
         echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+        echo "TMPDIR=$TMPDIR"
         env | sort | grep -E 'CARGO_TARGET_DIR|RUST|TMPDIR' || true
         (test -f $HOME/.cargo/config.toml && sed -n '1,200p' $HOME/.cargo/config.toml) || true
         (test -f .cargo/config.toml && sed -n '1,200p' .cargo/config.toml) || true
 
-    - name: Cleanup Global Temp
+    - name: Setup TMPDIR (avoid /tmp EPERM)
       run: |
-        # Best effort cleanup of global temp dirs from previous runs
-        sudo rm -rf /tmp/assay-target* /tmp/assay-lsm-verify /tmp/assay-test || true
+        set -euo pipefail
+        mkdir -p "$TMPDIR"
+        chmod 1777 "$TMPDIR" || true
+        echo "TMPDIR is $TMPDIR"
+        # quick smoke write test
+        touch "$TMPDIR/assay-tmp-test" && rm -f "$TMPDIR/assay-tmp-test"
+
+    - name: Diagnose /tmp (optional)
+      run: |
+        ls -ld /tmp || true
+        stat -c "%A %a %U:%G %n" /tmp || true
+        mount | grep ' on /tmp ' || true
+        touch /tmp/assay-ci-write-test && rm -f /tmp/assay-ci-write-test || true
 
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
+        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev bpftool
 
     - name: Install Rust Toolchain (Nightly Component)
       run: |
@@ -80,6 +94,7 @@ jobs:
     - name: Run End-to-End Deny Smoke Test
       # ISOLATION: Use a separate target dir for SUDO to prevent locking the main build dir
       run: |
+        set -euo pipefail
         echo "Running on Kernel: $(uname -r)"
         export CARGO_TARGET_DIR="${{ runner.temp }}/assay-target-root-${{ matrix.kernel }}-${{ github.run_id }}"
         mkdir -p "$CARGO_TARGET_DIR"
@@ -98,7 +113,8 @@ jobs:
         export ASSAY_EBPF_PATH
 
         # Run test as root, forcing it to use the ROOT specific target dir
-        sudo -E env CARGO_TARGET_DIR="$CARGO_TARGET_DIR" "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
+        # Note: continue-on-error removed for strict gating
+        sudo -E env TMPDIR="$TMPDIR" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" "$HOME/.cargo/bin/cargo" test --release --package assay-cli --test lsm_deny_smoke -- --nocapture
       # continue-on-error: true # Removed for strict gating
 
     - name: Failure Artifacts (P1.2 Requirement)
