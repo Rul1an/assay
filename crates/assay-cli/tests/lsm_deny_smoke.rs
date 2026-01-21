@@ -41,18 +41,18 @@ fn test_lsm_deny_smoke_e2e() {
     //         path: "/path/to/victim"
 
     // Need to confirm policy format. Assuming standard YAML.
+    // Use correct McpPolicy v2 schema
     let policy_content = format!(
         r#"
-apiVersion: v1
-kind: Policy
-metadata:
-  name: deny-smoke-test
-spec:
+version: "2.0"
+runtime_monitor:
+  enabled: true
   rules:
-    - name: deny_victim
-      validate:
-        file_path: "{}"
-        action: Deny
+    - id: deny_victim
+      type: file_open
+      match:
+        path_globs: ["{}"]
+      action: deny
 "#,
         victim_path_str
     );
