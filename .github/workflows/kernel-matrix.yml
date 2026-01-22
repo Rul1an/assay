@@ -164,13 +164,15 @@ jobs:
             ART_ID="$(curl -fsSL \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "$API" | python3 - <<'PY' || true
+              "$API" | python3 -c '
           import json,sys
-          data=json.load(sys.stdin)
-          for a in data.get("artifacts",[]):
-            if a.get("name")=="assay-dist":
-              print(a["id"]); break
-          PY
+          try:
+            data=json.load(sys.stdin)
+            for a in data.get("artifacts",[]):
+              if a.get("name")=="assay-dist":
+                print(a["id"]); break
+          except: pass
+          ' || true
             )"
             if [ -n "${ART_ID:-}" ]; then break; fi
             echo "assay-dist not visible yet (attempt $i/5), retrying..."
