@@ -97,29 +97,25 @@ jobs:
       CARGO_INCREMENTAL: 0
 
     steps:
-      - name: Emergency cleanup (Manual, no actions/*)
+      - name: Emergency cleanup (FIX PERMS)
         shell: bash
         run: |
           set +e
           echo "=== Disk before ==="
           df -h || true
-          echo "=== Top 25 Root Directories ==="
-          sudo du -xhd 1 / | sort -hr | head -n 25 || true
 
-          # Clean runner internals if RUNNER_WORKDIR is available
-          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
-          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_tool" 2>/dev/null || true
-          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_temp" 2>/dev/null || true
+          # kill workspace no matter who owns it
+          sudo rm -rf "$GITHUB_WORKSPACE" || true
+          sudo mkdir -p "$GITHUB_WORKSPACE"
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
 
-          # Workspace cruft
-          rm -rf "$GITHUB_WORKSPACE"/* || true
+          # runner internals (best effort)
+          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_temp" "${RUNNER_WORKDIR}/_tool" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
 
-          # Cargo caches (aggressive; optional but helps)
-          rm -rf "$HOME/.cargo/registry/cache" || true
-          rm -rf "$HOME/.cargo/git/checkouts" || true
-
-          # Docker (if present)
+          # docker + apt caches (optional)
           sudo docker system prune -af --volumes || true
+          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
+          sudo apt-get clean || true
 
           echo "=== Disk after ==="
           df -h || true
