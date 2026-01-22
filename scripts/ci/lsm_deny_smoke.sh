@@ -121,9 +121,10 @@ if [ "$ATTACHED" -ne 1 ]; then
   exit 1
 fi
 echo "✅ Monitor attached"
+sleep 2 # Wait for userspace to resolve inodes and populate BPF maps
 
 # 4) Verify Map State (Diagnostics)
-echo "--- Map Status (Pre-Check) ---"
+echo "--- Map Status (Pre-Check: Verify 2049/0x801) ---"
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
   $BPFTOOL map show name DENY_INO || echo "Failed to show DENY_INO"
   $BPFTOOL map dump name DENY_INO || echo "Failed to dump DENY_INO"
