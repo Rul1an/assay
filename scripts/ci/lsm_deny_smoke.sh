@@ -80,10 +80,20 @@ cat "$POLICY"
 # 3) Start Monitor (capture logs)
 LOG="$(mktemp /tmp/assay-monitor.XXXXXX.log)"
 echo "=== Pre-Clean: Killing stale assay processes & BPF pins ==="
-pkill -x assay 2>/dev/null || true
+if [ "${KILL_STALE_ASSAY:-1}" -eq 1 ]; then
+  pkill -x assay 2>/dev/null || true
+fi
 # Clean up pinned objects if any
 rm -rf /sys/fs/bpf/assay 2>/dev/null || true
 rm -rf /sys/fs/bpf/assay-* 2>/dev/null || true
+
+echo "=== Pre-clean verification (should be empty) ==="
+if command -v "$BPFTOOL" >/dev/null 2>&1; then
+  echo "-- links containing 'assay' (if any) --"
+  $BPFTOOL link show | grep -i assay || true
+  echo "-- maps DENY_INO (should be none before start) --"
+  $BPFTOOL map show | grep -F "name DENY_INO" || true
+fi
 
 echo "Starting Monitor... (log: $LOG)"
 # Ensure no stale assay (Commented out: risky on shared runners)
@@ -99,6 +109,9 @@ cleanup() {
   kill "$MONITOR_PID" 2>/dev/null || true
   wait "$MONITOR_PID" 2>/dev/null || true
   rm -f "$VICTIM" "$POLICY" "$LOG"
+  # Final Cleanup of pins
+  rm -rf /sys/fs/bpf/assay 2>/dev/null || true
+  rm -rf /sys/fs/bpf/assay-* 2>/dev/null || true
 }
 trap cleanup EXIT
 
