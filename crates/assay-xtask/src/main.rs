@@ -31,7 +31,7 @@ struct BuildEbpfOpts {
     #[clap(long)]
     docker: bool,
 
-    /// Force skipping Docker even if available (non-Linux hosts)
+    /// Disable Docker builds and Docker fallback (forces local)
     #[clap(long)]
     no_docker: bool,
 
@@ -58,14 +58,7 @@ fn workspace_root() -> anyhow::Result<PathBuf> {
     Ok(root.to_path_buf())
 }
 
-fn docker_available() -> bool {
-    // Fast check: "docker version" should succeed if Docker is installed & running
-    Command::new("docker")
-        .args(["version"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+
 
 fn get_host_user_group() -> Option<(String, String)> {
     #[cfg(target_os = "linux")]
@@ -80,49 +73,49 @@ fn get_host_user_group() -> Option<(String, String)> {
     None
 }
 
+fn has_cmd(cmd: &str) -> bool {
+    Command::new("sh")
+        .arg("-lc")
+        .arg(format!("command -v {cmd} >/dev/null 2>&1"))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn docker_allowed(opts: &BuildEbpfOpts) -> bool {
+    // explicit override flags win
+    if opts.no_docker {
+        return false;
+    }
+    true
+}
+
 fn build_ebpf(opts: BuildEbpfOpts) -> anyhow::Result<()> {
     let root = workspace_root()?;
 
-    // Decide build mode
-    let on_linux = cfg!(target_os = "linux");
-    let can_use_docker = !opts.no_docker && docker_available();
-
-    // Non-Linux hosts: default to Docker if available, otherwise skip (unless user forced docker)
-    if !on_linux {
-        if opts.no_docker {
-            return build_ebpf_local(&root, &opts);
-        }
-        if opts.docker || can_use_docker {
-             if !can_use_docker {
-                anyhow::bail!(
-                    "Docker build requested but Docker is not available/running. \
-                     Start Docker Desktop and retry."
-                );
-            }
-            return build_ebpf_docker(&root, &opts);
-        }
-
-        eprintln!(
-            "Skipping eBPF build on non-Linux host (Docker not available).\n\
-             Hint: install/start Docker Desktop, then run:\n\
-             \n  cargo xtask build-ebpf --docker\n\
-             \nOr run this in Linux CI (ubuntu-latest)."
-        );
-        return Ok(());
-    }
-
-    // Linux: default local; allow --docker if desired
     if opts.docker {
-        if !can_use_docker {
-            anyhow::bail!("Docker build requested but Docker is not available/running.");
-        }
         return build_ebpf_docker(&root, &opts);
     }
 
+    // Default path: local build, with optional docker fallback
     build_ebpf_local(&root, &opts)
 }
 
 fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> {
+    // Auto-fallback only when allowed and docker exists
+    if !has_cmd("bpf-linker") {
+        if docker_allowed(opts) && has_cmd("docker") {
+            eprintln!("bpf-linker not found; falling back to docker build...");
+            return build_ebpf_docker(root.as_path(), opts);
+        }
+
+        anyhow::bail!(
+            "bpf-linker not found.\n\
+             Install it with: cargo install bpf-linker --locked\n\
+             Or rerun with --docker (or omit --no-docker to allow fallback)."
+        );
+    }
+
     let target_flag = format!("--target={}", opts.target);
 
     let mut args = vec![
@@ -272,6 +265,17 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
 
         script.push_str("cargo install bpf-linker --locked; fi; ");
     }
+
+    // Always ensure bpf-linker exists in-container (builder should already have it)
+    script.push_str("if ! command -v bpf-linker >/dev/null 2>&1; then ");
+    if opts.docker_image.contains("assay-ebpf-builder") {
+        script.push_str("echo 'ERROR: bpf-linker missing in builder image'; exit 1; ");
+    } else {
+        script.push_str("echo 'Installing bpf-linker...'; ");
+        script.push_str("apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ");
+        script.push_str("cargo install bpf-linker --locked; ");
+    }
+    script.push_str("fi; ");
 
     script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
 
