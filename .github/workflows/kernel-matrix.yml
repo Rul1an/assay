@@ -9,15 +9,15 @@ on:
       - "crates/assay-cli/**"
       - ".github/workflows/kernel-matrix.yml"
   push:
-    branches: [ "main", "feat/*" ]
-
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   build-artifacts:
+    permissions:
+      contents: read
+      actions: write
     name: Build Artifacts (Ubuntu ARM)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -80,6 +80,9 @@ jobs:
           if-no-files-found: error
 
   matrix-test:
+    permissions:
+      contents: read
+      actions: read
     name: Kernel Matrix (${{ matrix.kernel }})
     needs: build-artifacts
     runs-on: [self-hosted, linux, assay-bpf-runner]
@@ -209,7 +212,7 @@ jobs:
           ZIP_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ART_ID}/zip"
           rm -rf dist && mkdir -p dist
           curl -fL \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/octet-stream" \
             "$ZIP_URL" -o dist/assay-dist.zip
 
