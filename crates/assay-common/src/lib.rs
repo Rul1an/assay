@@ -34,9 +34,10 @@ pub struct MonitorEvent {
 /// definition.
 ///
 /// The `dev` field stores the kernel's encoded `dev_t` value (e.g. from
-/// `super_block.s_dev`) as a `u32`. On modern Linux kernels, this is typically
-/// `MAJOR << 20 | MINOR`. This layout may not match kernels with different
-/// `dev_t` representations.
+/// `super_block.s_dev`) as a `u32`. On modern Linux kernels, this uses the
+/// `new_encode_dev()` format:
+///   (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & 0xfffff00) << 12)
+/// This matches `sb->s_dev` seen by eBPF.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct InodeKey {
@@ -56,15 +57,17 @@ pub struct InodeKeyMap {
     pub gen: u32,
 }
 
-/// Helper to encode userspace dev_t into Linux Kernel internal `s_dev` format.
-/// Matches `MKDEV` macro in Linux kernel (major << 20 | minor).
-/// This corresponds to `sb->s_dev` which we read in eBPF.
+/// Encode userspace dev_t into Linux kernel's `new_encode_dev()` format (sb->s_dev).
+/// This matches include/linux/kdev_t.h:
+///   new_encode_dev(MKDEV(major,minor)) for 32-bit dev_t encoding used in-kernel.
 #[cfg(target_os = "linux")]
 pub fn encode_kernel_dev(dev: u64) -> u32 {
     let major = libc::major(dev as libc::dev_t) as u32;
     let minor = libc::minor(dev as libc::dev_t) as u32;
-    // MKDEV logic from include/linux/kdev_t.h (MINORBITS=20)
-    (major << 20) | minor
+
+    // new_encode_dev:
+    // (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & 0xfffff00) << 12)
+    (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & 0xfffff00) << 12)
 }
 
 // Event ID for Inode Resolution telemetry
