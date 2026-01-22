@@ -177,48 +177,15 @@ jobs:
 
           command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
 
-      - name: Download assay-dist artifact via API (Manual, Retry)
+      - uses: actions/download-artifact@v4
+        with:
+          name: assay-dist
+          path: dist
+
+      - name: Debug Artifacts
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-
-          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
-
-          ART_ID=""
-          for i in 1 2 3 4 5; do
-            ART_ID="$(curl -fsSL \
-              -H "Authorization: token ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "$API" | python3 -c '
-          import json,sys
-          try:
-            data=json.load(sys.stdin)
-            for a in data.get("artifacts",[]):
-              if a.get("name")=="assay-dist":
-                print(a["id"]); break
-          except: pass
-          ' || true
-            )"
-            if [ -n "${ART_ID:-}" ]; then break; fi
-            echo "assay-dist not visible yet (attempt $i/5), retrying..."
-            sleep 3
-          done
-
-          [ -n "${ART_ID:-}" ] || { echo "assay-dist artifact not found"; exit 1; }
-          echo "Artifact id: $ART_ID"
-
-          ZIP_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ART_ID}/zip"
-          rm -rf dist && mkdir -p dist
-          curl -fL \
-            -H "Authorization: token ${GH_TOKEN}" \
-            -H "Accept: application/octet-stream" \
-            "$ZIP_URL" -o dist/assay-dist.zip
-
-          unzip -o dist/assay-dist.zip -d dist
-          ls -lh dist
+          ls -lh dist/
 
       - name: Fix Permissions
         shell: bash
