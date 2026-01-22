@@ -14,11 +14,10 @@ fn decode_kernel_dev(dev: u32) -> (u32, u32) {
     (major, minor)
 }
 
-// Helper mimicking Linux kernel `MKDEV` macro (include/linux/kdev_t.h)
-// MINORBITS = 20
-// MKDEV(ma, mi) = (((ma) << MINORBITS) | (mi))
-fn mkdev_u32(major: u32, minor: u32) -> u32 {
-    ((major & 0xfff) << 20) | (minor & 0xfffff)
+// Helper mimicking Linux kernel `new_encode_dev` (include/linux/kdev_t.h)
+// (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & !0xff) << 12)
+fn expected_new_encode_dev(major: u32, minor: u32) -> u32 {
+    (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & !0xff) << 12)
 }
 
 #[test]
@@ -55,7 +54,7 @@ fn test_regression_pairs() {
 
         if extracted_maj == maj && extracted_min == min {
             let encoded = encode_kernel_dev(dev_t);
-            let expected = mkdev_u32(maj, min);
+            let expected = expected_new_encode_dev(maj, min);
             assert_eq!(encoded, expected, "Failed for ({}, {}) -> Expected {:#x}, Got {:#x}", maj, min, expected, encoded);
         } else {
              eprintln!("Skipping ({}, {}) - Platform makedev/major mismatch (Got {}, {})", maj, min, extracted_maj, extracted_min);
