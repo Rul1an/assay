@@ -14,7 +14,7 @@ serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"], optional = true }
 chrono = { version = "0.4", features = ["serde"], default-features = false, optional = true }
 
-aya = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0", optional = true }
+aya = { version = "0.13.0", optional = true }
 
 [features]
 default = ["std"]
