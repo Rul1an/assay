@@ -30,10 +30,10 @@ jobs:
           set -euo pipefail
           rustup toolchain install nightly --profile minimal --component rust-src
 
-      - name: Install bpf-linker
+      - name: Install bpf-linker (nightly)
         run: |
           set -euo pipefail
-          cargo install bpf-linker --locked
+          cargo +nightly install bpf-linker --locked
           command -v bpf-linker
 
       - name: Build eBPF (Release)
@@ -53,6 +53,9 @@ jobs:
 
           # Binary
           cp -v target/release/assay dist/
+
+          # Scripts (No-Clone Strategy)
+          cp -v scripts/ci/lsm_deny_smoke.sh dist/
 
           # Robust eBPF lookup (paths vary by build strategy)
           EBPF_PATH="$(find target -maxdepth 6 -name 'assay-ebpf.o' -type f -print -quit)"
@@ -92,54 +95,46 @@ jobs:
           echo "=== Disk before ==="
           df -h || true
 
-          # Big wins on self-hosted runners:
-          # If RUNNER_WORKDIR is empty/unset, these will fail safely or do nothing
-          # Note: We use sudo rm -rf to ensure we really kill everything.
-          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_actions" 2>/dev/null || true
-          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_tool" 2>/dev/null || true
-          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_temp" 2>/dev/null || true
+          # Clean runner internals if RUNNER_WORKDIR is available
+          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_tool" 2>/dev/null || true
+          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_temp" 2>/dev/null || true
 
           # Workspace cruft
           rm -rf "$GITHUB_WORKSPACE"/* || true
 
-          # Cargo caches (optional)
+          # Cargo caches (aggressive; optional but helps)
           rm -rf "$HOME/.cargo/registry/cache" || true
           rm -rf "$HOME/.cargo/git/checkouts" || true
 
-          # Docker (if you use it)
+          # Docker (if present)
           sudo docker system prune -af --volumes || true
 
           echo "=== Disk after ==="
           df -h || true
 
-      - name: Manual checkout (no actions/checkout)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          rm -rf repo
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
-          cd repo
-          git fetch origin "${GITHUB_SHA}"
-          git checkout --detach "${GITHUB_SHA}"
 
-      - name: Disk Threshold Gate (3.5GB)
+
+      - name: Disk Threshold Gate (2.5GB)
+        shell: bash
         run: |
           set -euo pipefail
           AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
           echo "Workspace available KB: $AVAIL_KB"
-          if [ "$AVAIL_KB" -lt 3670016 ]; then
-            echo "ERROR: Not enough free space (need >= ~3.5GiB)."
+          # Require at least ~2.5GiB free in workspace
+          if [ "$AVAIL_KB" -lt 2621440 ]; then
+            echo "ERROR: Not enough free space (need >= ~2.5GiB)."
             exit 1
           fi
 
-      - name: Configure Execution Env
+      - name: Configure Execution Env (TMPDIR in RAM)
+        shell: bash
         run: |
           set -euo pipefail
-          echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+          echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
       - name: Install Runtime Dependencies
+        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -149,35 +144,42 @@ jobs:
           if ! sudo apt-get install -y "linux-tools-$KREL"; then
             sudo apt-get install -y linux-tools-common linux-tools-generic || true
           fi
+
+          fi
+
           command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
 
-      - name: Download assay-dist artifact via API (Manual)
+      - name: Download assay-dist artifact via API (Manual, Retry)
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cd repo
+          cd "$GITHUB_WORKSPACE"
 
-          # List artifacts for this workflow run
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
-          ART_ID="$(curl -fsSL \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "$API" | python3 - <<'PY'
+
+          ART_ID=""
+          for i in 1 2 3 4 5; do
+            ART_ID="$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "$API" | python3 - <<'PY' || true
           import json,sys
           data=json.load(sys.stdin)
           for a in data.get("artifacts",[]):
             if a.get("name")=="assay-dist":
               print(a["id"]); break
-          else:
-            raise SystemExit("assay-dist artifact not found")
           PY
-          )"
+            )"
+            if [ -n "${ART_ID:-}" ]; then break; fi
+            echo "assay-dist not visible yet (attempt $i/5), retrying..."
+            sleep 3
+          done
 
+          [ -n "${ART_ID:-}" ] || { echo "assay-dist artifact not found"; exit 1; }
           echo "Artifact id: $ART_ID"
 
-          # Download zip
           ZIP_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ART_ID}/zip"
           rm -rf dist && mkdir -p dist
           curl -fL \
@@ -189,41 +191,47 @@ jobs:
           ls -lh dist
 
       - name: Fix Permissions
+        shell: bash
         run: |
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
-          cd repo
-          chmod +x dist/assay
+          cd "$GITHUB_WORKSPACE"
+          chmod +x dist/assay dist/lsm_deny_smoke.sh
 
       - name: Run End-to-End Deny Smoke Test
+        shell: bash
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
 
-          cd repo
           test -f dist/assay || { echo "Missing binary"; ls -R dist; exit 1; }
           test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
+          test -f dist/lsm_deny_smoke.sh || { echo "Missing script"; ls -R dist; exit 1; }
 
+          # Use RAM for tmp
           mkdir -p "$TMPDIR"
           chmod 1777 "$TMPDIR" || true
 
           sudo -E env \
             TMPDIR="$TMPDIR" \
-            # Note: repo/ is the checkout dir now
-            ASSAY_BIN="$PWD/repo/dist/assay" \
-            ASSAY_EBPF_PATH="$PWD/repo/dist/assay-ebpf.o" \
-            bash scripts/ci/lsm_deny_smoke.sh
+            ASSAY_BIN="$PWD/dist/assay" \
+            ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
+            bash "$PWD/dist/lsm_deny_smoke.sh"
 
       - name: Cleanup per-run dirs
         if: always()
+        shell: bash
         run: |
           set +e
           rm -rf "$TMPDIR" || true
-          rm -rf repo/dist/ || true
+          rm -rf "$GITHUB_WORKSPACE/dist" || true
 
       - name: Failure Artifacts
         if: failure()
+        shell: bash
         run: |
           set +e
+          cd "$GITHUB_WORKSPACE" || true
           mkdir -p artifacts
           sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
           if command -v bpftool >/dev/null 2>&1; then
