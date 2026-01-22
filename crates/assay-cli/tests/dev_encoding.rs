@@ -24,8 +24,8 @@ fn expected_new_encode_dev(major: u32, minor: u32) -> u32 {
 fn test_regression_pairs() {
     let pairs = vec![
         (0, 0),         // Zero
-        (1, 1),         // Basic (8, 1) -> 0x100001
-        (8, 1),         // SDA1 typical -> 0x800001
+        (1, 1),         // Basic (1, 1) -> 0x101
+        (8, 1),         // SDA1 typical -> 0x801
         (255, 255),     // Classic 8-bit limits
         (4095, 1048575),// Max standard (12-bit major, 20-bit minor)
         (0, 256),       // Minor > 255 (extended minor part usage)
@@ -46,11 +46,11 @@ fn test_regression_pairs() {
         //
         // Since this test runs on the Linux CI runner (or is gated), we can assume real Linux behavior.
 
-        let dev_t = unsafe { libc::makedev(maj as _, min as _) } as u64;
+        let dev_t = libc::makedev(maj as _, min as _) as u64;
 
         // Sanity check: does the platform libc agree with our inputs?
-        let extracted_maj = unsafe { libc::major(dev_t as _) } as u32;
-        let extracted_min = unsafe { libc::minor(dev_t as _) } as u32;
+        let extracted_maj = libc::major(dev_t as _) as u32;
+        let extracted_min = libc::minor(dev_t as _) as u32;
 
         if extracted_maj == maj && extracted_min == min {
             let encoded = encode_kernel_dev(dev_t);
