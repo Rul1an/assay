@@ -12,218 +12,149 @@ on:
     branches: [ "main", "feat/*" ]
 
 jobs:
+  build-artifacts:
+    name: Build Artifacts (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev
+
+      - name: Install Rust Toolchain
+        run: |
+          rustup toolchain install nightly --component rust-src
+          rustup default nightly
+
+      - name: Build eBPF
+        run: cargo xtask build-ebpf --release
+
+      - name: Build CLI
+        run: cargo build --release --package assay-cli --bin assay
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/assay dist/
+          cp target/assay-ebpf.o dist/
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assay-dist
+          path: dist/
+          if-no-files-found: error
+
   matrix-test:
     name: Kernel Matrix (${{ matrix.kernel }})
+    needs: build-artifacts
     runs-on: [self-hosted, linux, assay-bpf-runner]
-    timeout-minutes: 15
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
 
     env:
-      CARGO_BUILD_JOBS: 2
       CARGO_INCREMENTAL: 0
 
     steps:
-    - name: Configure Build Env
+    - name: Emergency Runner Cleanup (Pre-Flight)
       run: |
-        # Set unique target dir per job in WORKSPACE (larger partition than runner.temp)
-        echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/assay-target-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
-        # Force rustc to use WORKSPACE for intermediate files (avoiding runner.temp ENOSPC)
-        echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+        set +e
+        echo "=== Pruning workspace (emergency start) ==="
+        # Nuke current workspace content to ensure clean slate
+        rm -rf "$GITHUB_WORKSPACE"/* || true
 
-    - name: Setup Rust Path
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        echo "=== Pruning Cargo caches (hygiene) ==="
+        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+        find "$HOME/.cargo/registry/cache" -type f -mtime +14 -delete 2>/dev/null || true
+        find "$HOME/.cargo/registry/index" -type f -mtime +30 -delete 2>/dev/null || true
+        find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+        find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
 
-    - name: Debug Env
-      run: |
-        echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
-        echo "TMPDIR=$TMPDIR"
-        env | sort | grep -E 'CARGO_TARGET_DIR|RUST|TMPDIR' || true
-        (test -f $HOME/.cargo/config.toml && sed -n '1,200p' $HOME/.cargo/config.toml) || true
-        (test -f .cargo/config.toml && sed -n '1,200p' .cargo/config.toml) || true
+        echo "=== Docker Prune ==="
+        sudo docker system prune -af --volumes || true
 
-    - name: Disk Preflight
+        echo "=== Disk Usage After Prune ==="
+        df -h "$GITHUB_WORKSPACE" || true
+
+    - name: Disk Threshold Gate (3.5GB)
       run: |
         set -euo pipefail
-        echo "=== DF -H (General) ==="
-        df -h
-        echo "=== Workspace Free Space ==="
-        df -h "$GITHUB_WORKSPACE" || true
-        echo "=== Runner Temp Free Space ==="
-        df -h "${{ runner.temp }}" || true
+        # Require at least ~3.5GiB free in workspace
+        AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+        echo "Workspace available KB: $AVAIL_KB"
+        if [ "$AVAIL_KB" -lt 3670016 ]; then
+          echo "ERROR: Not enough free space (need >= ~3.5GiB)."
+          exit 1
+        fi
+
+    - name: Configure Execution Env
+      run: |
+        echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev libsqlite3-dev
+        sudo apt-get install -y libbpf-dev libsqlite3-dev
 
-        # bpftool on Ubuntu Noble is a virtual package; install the kernel-matched tools package
         KREL="$(uname -r)"
-        echo "Kernel release: $KREL"
-
-        # Try the exact kernel tools package first
         if ! sudo apt-get install -y "linux-tools-$KREL"; then
-          echo "linux-tools-$KREL not found. Falling back..."
-          sudo apt-get install -y linux-tools-common linux-tools-generic
+           sudo apt-get install -y linux-tools-common linux-tools-generic || true
         fi
 
-        # Verify bpftool presence (best-effort)
-        command -v bpftool || { echo "bpftool not found after install"; exit 1; }
-        bpftool version || true
-
-    - name: Install Rust Toolchain (Nightly Component)
-      run: |
-        rustup toolchain install nightly --component rust-src
-        # Do NOT set default nightly to avoid polluting runner state
+    - uses: actions/download-artifact@v4
+      with:
+        name: assay-dist
+        path: dist
 
     - uses: actions/checkout@v4
       with:
-        clean: false
+        clean: false # Managed by emergency cleanup
 
-    - name: Post-Checkout Permission Fix
+    - name: Fix Permissions (Checkout)
       run: |
-        set +e
-        # Fix workspace permissions now that checkout is done
         sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
-        # Ensure rustup/cargo dirs are user-owned
-        sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
-        # Clean previous build artifacts (workspace relative)
-        sudo rm -rf target/ target-root-build/ || true
+        chmod +x dist/assay
 
-    - name: Prune old CI build dirs (workspace)
-      run: |
-        set -euo pipefail
-        echo "Before prune:"
-        df -h "$GITHUB_WORKSPACE" || true
-
-        KEEP_TARGET="assay-target-${{ matrix.kernel }}-${{ github.run_id }}"
-        KEEP_TMP="rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}"
-
-        # Remove any previous assay-target-* dirs EXCEPT current one
-        find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name "assay-target-*" \
-          ! -name "$KEEP_TARGET" \
-          -print -exec sudo rm -rf {} + || true
-
-        # Remove any previous rustc-tmp-* dirs EXCEPT current one
-        find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name "rustc-tmp-*" \
-          ! -name "$KEEP_TMP" \
-          -print -exec sudo rm -rf {} + || true
-
-        echo "After prune:"
-        df -h "$GITHUB_WORKSPACE" || true
-
-    - name: Prune Cargo caches (runner hygiene)
-      run: |
-        set +e
-        echo "=== Cargo cache usage (before) ==="
-        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
-
-        # Remove old registry download tarballs + index cache entries (keeps current toolchain usable)
-        find "$HOME/.cargo/registry/cache" -type f -mtime +14 -print -delete 2>/dev/null || true
-        find "$HOME/.cargo/registry/index" -type f -mtime +30 -print -delete 2>/dev/null || true
-
-        # Prune old git checkouts (these get huge on aya/libbpf submodules over time)
-        find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -print -exec rm -rf {} + 2>/dev/null || true
-        find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -print -exec rm -rf {} + 2>/dev/null || true
-
-        echo "=== Cargo cache usage (after) ==="
-        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
-
-    - name: Disk threshold gate (fail fast)
-      run: |
-        set -euo pipefail
-        # Require at least ~6GiB free in workspace to avoid rustc/link ENOSPC mid-flight
-        AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
-        echo "Workspace available KB: $AVAIL_KB"
-        if [ "$AVAIL_KB" -lt 6291456 ]; then
-          echo "ERROR: Not enough free space in workspace (need >= ~6GiB)."
-          df -h "$GITHUB_WORKSPACE" || true
-          exit 1
-        fi
-
-    - name: Setup Build Dirs
-      run: |
-        set -euo pipefail
-        # Create unique build dirs (now that we own the workspace)
-        mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
-
-        # TMPDIR needs 1777 to behave like /tmp
-        chmod 1777 "$TMPDIR" || true
-
-        echo "Build Dirs Ready:"
-        ls -ld "$TMPDIR" "$CARGO_TARGET_DIR"
-
-        echo "=== Workspace top usage (debug) ==="
-        du -h -d 1 "$GITHUB_WORKSPACE" 2>/dev/null | sort -h | tail -n 20 || true
-
-    - name: Build eBPF (Release)
-      run: cargo +nightly xtask build-ebpf --release
-
-    - name: Build CLI (Release)
-      # Uses CARGO_TARGET_DIR from env (unique per job)
-      # Build the main binary only (no tests) to keep target dir clean
-      run: cargo build --release --package assay-cli --bin assay
-
-    - name: Run End-to-End Deny Smoke Test (Script)
-      # ZERO-COMPILE STRATEGY: Run pre-built binary via shell script
+    - name: Run End-to-End Deny Smoke Test
       run: |
         set -euo pipefail
 
-        # Resolve Artifacts
-        BIN="$CARGO_TARGET_DIR/release/assay"
+        # Verify Artifacts
+        test -f dist/assay || { echo "Missing binary"; ls -R dist; exit 1; }
+        test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
 
-        # Robust lookup for eBPF
-        if [ -f "target/assay-ebpf.o" ]; then
-             EBPF="$PWD/target/assay-ebpf.o"
-        elif [ -n "$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)" ]; then
-             EBPF="$(find target -maxdepth 4 -name 'assay-ebpf.o' -print -quit 2>/dev/null)"
-        else
-             echo "Error: eBPF artifact not found"
-             exit 1
-        fi
+        # Setup Isolation
+        mkdir -p "$TMPDIR"
+        chmod 1777 "$TMPDIR"
 
-        echo "Binary: $BIN"
-        echo "eBPF:   $EBPF"
-
-        # Check binary exists
-        if [ ! -x "$BIN" ]; then
-             echo "Error: Binary not found or not executable at $BIN"
-             ls -R "$CARGO_TARGET_DIR" || true
-             exit 1
-        fi
-
-        # Execute Script as Root
-        # We pass the pre-built binary path env var
+        # Execute
         sudo -E env \
           TMPDIR="$TMPDIR" \
-          ASSAY_BIN="$BIN" \
-          ASSAY_EBPF_PATH="$EBPF" \
+          ASSAY_BIN="$PWD/dist/assay" \
+          ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
           bash scripts/ci/lsm_deny_smoke.sh
 
     - name: Cleanup per-run dirs
       if: always()
       run: |
-        set +e
-        echo "Cleaning up build directories..."
-        rm -rf "$CARGO_TARGET_DIR" || true
-        rm -rf "$TMPDIR" || true
+         rm -rf "$TMPDIR" || true
+         rm -rf dist/ || true
 
-    - name: Failure Artifacts (P1.2 Requirement)
-      if: failure() || cancelled()
+    - name: Failure Artifacts
+      if: failure()
       run: |
-        set +e
-        mkdir -p artifacts || true
+        mkdir -p artifacts
         sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
         sudo bpftool prog show > artifacts/bpftool_prog.log 2>&1 || true
         sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log 2>&1 || true
-        echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
-        echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}" >> artifacts/kernel.txt || true
-        echo "TMPDIR=${TMPDIR:-}" >> artifacts/kernel.txt || true
 
     - uses: actions/upload-artifact@v4
-      if: failure() || cancelled()
+      if: failure()
       with:
         name: matrix-debug-${{ matrix.kernel }}
         path: artifacts/
