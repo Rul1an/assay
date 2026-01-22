@@ -27,25 +27,30 @@ if [ ! -f "$ASSAY_EBPF_PATH" ]; then
 fi
 
 # 0b) Check LSM Status (Fail-Fast or Soft-Skip)
+require_bpf=0
+case "${REQUIRE_BPF_LSM:-0}" in
+  1|true|TRUE|yes|YES) require_bpf=1 ;;
+esac
+
 if [ -r /sys/kernel/security/lsm ]; then
   ACTIVE_LSMS="$(cat /sys/kernel/security/lsm)"
   echo "Active LSMs: $ACTIVE_LSMS"
-  if ! echo "$ACTIVE_LSMS" | grep -q "bpf"; then
+  if ! echo "$ACTIVE_LSMS" | grep -Eq '(^|,)bpf(,|$)'; then
     echo "⚠️  SKIP: 'bpf' not found in Active LSMs. Kernel cmdline needs 'lsm=...,bpf'."
-    if [ "${REQUIRE_BPF_LSM:-0}" -eq 1 ]; then
-        echo "❌ FAILURE: CI Mode (Strict) requires BPF LSM support."
-        exit 1
+    if [ "$require_bpf" -eq 1 ]; then
+      echo "❌ FAILURE: Strict mode requires BPF LSM support."
+      exit 1
     fi
-    echo "⚠️  Soft Skip in CI Mode (LSM missing on this runner)."
+    echo "⚠️  Soft Skip: BPF LSM missing on this runner."
     exit 0
   fi
 else
   echo "⚠️  /sys/kernel/security/lsm not readable. Assuming BPF LSM is missing."
-  if [ "${REQUIRE_BPF_LSM:-0}" -eq 1 ]; then
-      echo "❌ FAILURE: CI Mode (Strict) requires BPF LSM support."
-      exit 1
+  if [ "$require_bpf" -eq 1 ]; then
+    echo "❌ FAILURE: Strict mode requires BPF LSM support."
+    exit 1
   fi
-  echo "⚠️  Soft Skip in CI Mode (LSM missing on this runner)."
+  echo "⚠️  Soft Skip: cannot read LSM list."
   exit 0
 fi
 
@@ -75,8 +80,8 @@ cat "$POLICY"
 # 3) Start Monitor (capture logs)
 LOG="$(mktemp /tmp/assay-monitor.XXXXXX.log)"
 echo "Starting Monitor... (log: $LOG)"
-# Ensure no stale assay
-pkill -x assay 2>/dev/null || true
+# Ensure no stale assay (Commented out: risky on shared runners)
+# pkill -x assay 2>/dev/null || true
 
 # Start in background, capture stdout+stderr
 "$ASSAY_BIN" monitor --policy "$POLICY" --ebpf "$ASSAY_EBPF_PATH" >"$LOG" 2>&1 &
