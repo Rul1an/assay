@@ -103,6 +103,8 @@ jobs:
           set +e
           echo "=== Disk before ==="
           df -h || true
+          echo "=== Top 25 Root Directories ==="
+          sudo du -xhd 1 / | sort -hr | head -n 25 || true
 
           # Clean runner internals if RUNNER_WORKDIR is available
           [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
