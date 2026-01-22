@@ -85,32 +85,44 @@ jobs:
       CARGO_INCREMENTAL: 0
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: false
-
-      - name: Emergency Runner Cleanup (Post-Checkout, Safe)
+      - name: Emergency cleanup (Manual, no actions/*)
+        shell: bash
         run: |
           set +e
-          echo "=== Disk before cleanup ==="
-          df -h "$GITHUB_WORKSPACE" || true
+          echo "=== Disk before ==="
+          df -h || true
 
-          echo "=== Cleaning repo workspace (git clean) ==="
-          git reset --hard || true
-          git clean -ffdx || true
+          # Big wins on self-hosted runners:
+          # If RUNNER_WORKDIR is empty/unset, these will fail safely or do nothing
+          # Note: We use sudo rm -rf to ensure we really kill everything.
+          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_actions" 2>/dev/null || true
+          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_tool" 2>/dev/null || true
+          [ -n "$RUNNER_WORKDIR" ] && sudo rm -rf "$RUNNER_WORKDIR/_temp" 2>/dev/null || true
 
-          echo "=== Pruning Cargo caches (hygiene) ==="
-          du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
-          find "$HOME/.cargo/registry/cache" -type f -mtime +14 -delete 2>/dev/null || true
-          find "$HOME/.cargo/registry/index" -type f -mtime +30 -delete 2>/dev/null || true
-          find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-          find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+          # Workspace cruft
+          rm -rf "$GITHUB_WORKSPACE"/* || true
 
-          echo "=== Docker Prune ==="
+          # Cargo caches (optional)
+          rm -rf "$HOME/.cargo/registry/cache" || true
+          rm -rf "$HOME/.cargo/git/checkouts" || true
+
+          # Docker (if you use it)
           sudo docker system prune -af --volumes || true
 
-          echo "=== Disk after cleanup ==="
-          df -h "$GITHUB_WORKSPACE" || true
+          echo "=== Disk after ==="
+          df -h || true
+
+      - name: Manual checkout (no actions/checkout)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf repo
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git fetch origin "${GITHUB_SHA}"
+          git checkout --detach "${GITHUB_SHA}"
 
       - name: Disk Threshold Gate (3.5GB)
         run: |
@@ -139,21 +151,55 @@ jobs:
           fi
           command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: assay-dist
-          path: dist
+      - name: Download assay-dist artifact via API (Manual)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd repo
+
+          # List artifacts for this workflow run
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          ART_ID="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$API" | python3 - <<'PY'
+          import json,sys
+          data=json.load(sys.stdin)
+          for a in data.get("artifacts",[]):
+            if a.get("name")=="assay-dist":
+              print(a["id"]); break
+          else:
+            raise SystemExit("assay-dist artifact not found")
+          PY
+          )"
+
+          echo "Artifact id: $ART_ID"
+
+          # Download zip
+          ZIP_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ART_ID}/zip"
+          rm -rf dist && mkdir -p dist
+          curl -fL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$ZIP_URL" -o dist/assay-dist.zip
+
+          unzip -o dist/assay-dist.zip -d dist
+          ls -lh dist
 
       - name: Fix Permissions
         run: |
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          cd repo
           chmod +x dist/assay
 
       - name: Run End-to-End Deny Smoke Test
         run: |
           set -euo pipefail
 
+          cd repo
           test -f dist/assay || { echo "Missing binary"; ls -R dist; exit 1; }
           test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
 
@@ -162,8 +208,9 @@ jobs:
 
           sudo -E env \
             TMPDIR="$TMPDIR" \
-            ASSAY_BIN="$PWD/dist/assay" \
-            ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
+            # Note: repo/ is the checkout dir now
+            ASSAY_BIN="$PWD/repo/dist/assay" \
+            ASSAY_EBPF_PATH="$PWD/repo/dist/assay-ebpf.o" \
             bash scripts/ci/lsm_deny_smoke.sh
 
       - name: Cleanup per-run dirs
@@ -171,7 +218,7 @@ jobs:
         run: |
           set +e
           rm -rf "$TMPDIR" || true
-          rm -rf dist/ || true
+          rm -rf repo/dist/ || true
 
       - name: Failure Artifacts
         if: failure()
@@ -188,8 +235,8 @@ jobs:
           echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
           echo "Arch: $(uname -m)" >> artifacts/kernel.txt || true
 
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: matrix-debug-${{ matrix.kernel }}
-          path: artifacts/
+      # - uses: actions/upload-artifact@v4
+      #   if: failure()
+      #   with:
+      #     name: matrix-debug-${{ matrix.kernel }}
+      #     path: artifacts/
