@@ -103,6 +103,8 @@ jobs:
           set +e
           echo "=== Disk before ==="
           df -h || true
+          echo "=== Top 25 Root Directories ==="
+          sudo du -xhd 1 / | sort -hr | head -n 25 || true
 
           # kill workspace no matter who owns it
           sudo rm -rf "$GITHUB_WORKSPACE" || true
