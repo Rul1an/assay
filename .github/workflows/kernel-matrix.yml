@@ -23,6 +23,7 @@ jobs:
 
     env:
       CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
 
     steps:
     - name: Configure Build Env
@@ -113,17 +114,49 @@ jobs:
         echo "After prune:"
         df -h "$GITHUB_WORKSPACE" || true
 
-     - name: Setup Build Dirs
-       run: |
-         set -euo pipefail
-         # Create unique build dirs (now that we own the workspace)
-         mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
+    - name: Prune Cargo caches (runner hygiene)
+      run: |
+        set +e
+        echo "=== Cargo cache usage (before) ==="
+        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+
+        # Remove old registry download tarballs + index cache entries (keeps current toolchain usable)
+        find "$HOME/.cargo/registry/cache" -type f -mtime +14 -print -delete 2>/dev/null || true
+        find "$HOME/.cargo/registry/index" -type f -mtime +30 -print -delete 2>/dev/null || true
+
+        # Prune old git checkouts (these get huge on aya/libbpf submodules over time)
+        find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -print -exec rm -rf {} + 2>/dev/null || true
+        find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -print -exec rm -rf {} + 2>/dev/null || true
+
+        echo "=== Cargo cache usage (after) ==="
+        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+
+    - name: Disk threshold gate (fail fast)
+      run: |
+        set -euo pipefail
+        # Require at least ~6GiB free in workspace to avoid rustc/link ENOSPC mid-flight
+        AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+        echo "Workspace available KB: $AVAIL_KB"
+        if [ "$AVAIL_KB" -lt 6291456 ]; then
+          echo "ERROR: Not enough free space in workspace (need >= ~6GiB)."
+          df -h "$GITHUB_WORKSPACE" || true
+          exit 1
+        fi
+
+    - name: Setup Build Dirs
+      run: |
+        set -euo pipefail
+        # Create unique build dirs (now that we own the workspace)
+        mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
 
         # TMPDIR needs 1777 to behave like /tmp
         chmod 1777 "$TMPDIR" || true
 
         echo "Build Dirs Ready:"
         ls -ld "$TMPDIR" "$CARGO_TARGET_DIR"
+
+        echo "=== Workspace top usage (debug) ==="
+        du -h -d 1 "$GITHUB_WORKSPACE" 2>/dev/null | sort -h | tail -n 20 || true
 
     - name: Build eBPF (Release)
       run: cargo +nightly xtask build-ebpf --release
