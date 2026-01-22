@@ -91,11 +91,11 @@ echo "=== Pre-clean verification (should be empty) ==="
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
   echo "-- links containing 'assay' (if any) --"
   $BPFTOOL link show | grep -i assay || true
-  echo "-- maps DENY_INO (should be none before start) --"
+  echo "-- Checking for existing DENY_INO maps (stale/other) --"
   $BPFTOOL map show | grep -F "name DENY_INO" || true
 fi
 
-echo "Monitor runner: uid=$(id -u) euid=$(id -u) caps=$(grep CapEff /proc/$$/status || true)"
+echo "Monitor runner: uid=$(id -u) euid=$(id -ru) caps=$(grep CapEff /proc/$$/status || true)"
 echo "Starting Monitor... (log: $LOG)"
 # Ensure no stale assay (Commented out: risky on shared runners)
 # pkill -x assay 2>/dev/null || true
@@ -155,20 +155,26 @@ fi
 # 5) Attempt Access (Expect EPERM) - as unprivileged user
 echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."
 
-ACCESS_CMD="cat \"$VICTIM\""
-if id nobody >/dev/null 2>&1; then
-  if command -v sudo >/dev/null 2>&1; then
-    ACCESS_CMD="sudo -u nobody -- cat \"$VICTIM\""
-  else
-    ACCESS_CMD="su -s /bin/bash nobody -c 'cat \"$VICTIM\"'"
-  fi
-fi
+# 5) Attempt Access (Expect EPERM) - as unprivileged user
+echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."
 
-echo "Access Command: $ACCESS_CMD"
 set +e
-OUTPUT="$(eval "$ACCESS_CMD" 2>&1)"
-EXIT_CODE=$?
+if id nobody >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+  echo "Access Command: sudo -u nobody -- cat \"$VICTIM\""
+  OUTPUT="$(sudo -u nobody -- cat "$VICTIM" 2>&1)"
+  EXIT_CODE=$?
+elif id nobody >/dev/null 2>&1 && command -v su >/dev/null 2>&1; then
+  echo "Access Command: su -s /bin/bash nobody -c 'cat \"$VICTIM\"'"
+  OUTPUT="$(su -s /bin/bash nobody -c "cat \"$VICTIM\"" 2>&1)"
+  EXIT_CODE=$?
+else
+  echo "WARN: no 'nobody' user or sudo/su available; falling back to current user"
+  echo "Access Command: cat \"$VICTIM\""
+  OUTPUT="$(cat "$VICTIM" 2>&1)"
+  EXIT_CODE=$?
+fi
 set -e
+
 echo "Access Result: ExitCode=$EXIT_CODE Output='$OUTPUT'"
 
 # 6) Validate Results
