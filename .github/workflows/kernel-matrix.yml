@@ -29,8 +29,8 @@ jobs:
       run: |
         # Set unique target dir per job in WORKSPACE (larger partition than runner.temp)
         echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/assay-target-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
-        # Force rustc to use runner.temp for intermediate files (small, fast, avoiding /tmp EPERM)
-        echo "TMPDIR=${{ runner.temp }}/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+        # Force rustc to use WORKSPACE for intermediate files (avoiding runner.temp ENOSPC)
+        echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
     - name: Setup Rust Path
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -83,20 +83,41 @@ jobs:
 
     - name: Post-Checkout Permission Fix
       run: |
-         # Fix workspace permissions now that checkout is done
-         sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+        set +e
+        # Fix workspace permissions now that checkout is done
+        sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+        # Ensure rustup/cargo dirs are user-owned
+        sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
+        # Clean previous build artifacts (workspace relative)
+        sudo rm -rf target/ target-root-build/ || true
 
-         # Clean previous build artifacts (workspace relative)
-         sudo rm -rf target/ target-root-build/
-
-         # Ensure rustup/cargo dirs are user-owned
-         sudo chown -R "$(id -u):$(id -g)" "$HOME/.rustup" "$HOME/.cargo" || true
-
-    - name: Setup Build Dirs
+    - name: Prune old CI build dirs (workspace)
       run: |
         set -euo pipefail
-        # Create unique build dirs (now that we own the workspace)
-        mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
+        echo "Before prune:"
+        df -h "$GITHUB_WORKSPACE" || true
+
+        KEEP_TARGET="assay-target-${{ matrix.kernel }}-${{ github.run_id }}"
+        KEEP_TMP="rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}"
+
+        # Remove any previous assay-target-* dirs EXCEPT current one
+        find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name "assay-target-*" \
+          ! -name "$KEEP_TARGET" \
+          -print -exec sudo rm -rf {} + || true
+
+        # Remove any previous rustc-tmp-* dirs EXCEPT current one
+        find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name "rustc-tmp-*" \
+          ! -name "$KEEP_TMP" \
+          -print -exec sudo rm -rf {} + || true
+
+        echo "After prune:"
+        df -h "$GITHUB_WORKSPACE" || true
+
+     - name: Setup Build Dirs
+       run: |
+         set -euo pipefail
+         # Create unique build dirs (now that we own the workspace)
+         mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
 
         # TMPDIR needs 1777 to behave like /tmp
         chmod 1777 "$TMPDIR" || true

@@ -96,8 +96,12 @@ echo "✅ Monitor attached"
 
 # 4) Verify Map State (Diagnostics)
 echo "--- Map Status (Pre-Check) ---"
-$BPFTOOL map show name DENY_INO || echo "Failed to show DENY_INO"
-$BPFTOOL map dump name DENY_INO || echo "Failed to dump DENY_INO"
+if command -v "$BPFTOOL" >/dev/null 2>&1; then
+  $BPFTOOL map show name DENY_INO || echo "Failed to show DENY_INO"
+  $BPFTOOL map dump name DENY_INO || echo "Failed to dump DENY_INO"
+else
+  echo "bpftool not available; skipping map diagnostics"
+fi
 
 # 5) Attempt Access (Expect EPERM)
 echo "Attempting to cat victim file (expect EPERM)..."
@@ -123,7 +127,9 @@ else
 fi
 
 echo "--- LSM_HIT Counter ---"
-$BPFTOOL map dump name LSM_HIT || true
+if command -v "$BPFTOOL" >/dev/null 2>&1; then
+  $BPFTOOL map dump name LSM_HIT || true
+fi
 
 if [ "$SUCCESS" = true ]; then
   echo "Test PASSED"

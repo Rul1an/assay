@@ -80,11 +80,20 @@ pub struct InodeResolved {
     pub _pad: u32,
 }
 
-#[cfg(feature = "user")]
+#[cfg(all(target_os = "linux", feature = "user"))]
 unsafe impl aya::Pod for InodeResolved {}
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "user"))]
+unsafe impl aya::Pod for InodeKeyMap {}
+
+#[cfg(all(target_os = "linux", feature = "user"))]
 unsafe impl aya::Pod for InodeKey {}
+
+#[cfg(all(target_os = "linux", feature = "user"))]
+const _: () = {
+    fn _assert_pod<T: aya::Pod>() {}
+    _assert_pod::<InodeKeyMap>();
+};
 
 impl MonitorEvent {
     pub const fn zeroed() -> Self {
