@@ -290,6 +290,13 @@ echo ">> [Logs] Monitor Log (Warning):"
 grep "Warning" /tmp/assay-lsm-verify/monitor.log || echo "No Warning lines found."
 echo ">> [Logs] Last 50 lines of monitor.log:"
 tail -n 50 /tmp/assay-lsm-verify/monitor.log
+echo ">> [BPF] LSM Counters (HIT / DENY):"
+if command -v bpftool >/dev/null 2>&1; then
+  bpftool map dump name LSM_HIT 2>/dev/null || echo "LSM_HIT not found"
+  bpftool map dump name LSM_DENY 2>/dev/null || echo "LSM_DENY not found"
+else
+  echo "bpftool missing"
+fi
 
 if [ $EXIT_CODE -ne 0 ]; then
     echo "✅ SUCCESS: Access Blocked (Exit code $EXIT_CODE)"

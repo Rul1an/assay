@@ -192,9 +192,12 @@ else
   SUCCESS=false
 fi
 
-echo "--- LSM_HIT Counter ---"
+echo "--- LSM Counters (HIT / DENY) ---"
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
+  echo "HIT:"
   $BPFTOOL map dump name LSM_HIT || true
+  echo "DENY:"
+  $BPFTOOL map dump name LSM_DENY || true
 fi
 
 if [ "$SUCCESS" = true ]; then

@@ -61,6 +61,9 @@ pub static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
 pub static LSM_HIT: Array<u64> = Array::with_max_entries(1, 0);
 
 #[map]
+pub static LSM_DENY: Array<u64> = Array::with_max_entries(1, 0);
+
+#[map]
 pub static DENY_INO: HashMap<assay_common::InodeKeyMap, u32> = HashMap::with_max_entries(1024, 0);
 
 #[map]

@@ -4,7 +4,7 @@ use aya_ebpf::{
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
-use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL, LSM_HIT, DENY_INO, LSM_EVENTS, STATS};
+use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL, LSM_HIT, LSM_DENY, DENY_INO, LSM_EVENTS, STATS};
 use core::ffi::c_void;
 use crate::vmlinux::{file, inode, super_block};
 use aya_log_ebpf::info;
@@ -123,6 +123,10 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
             unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0", s_dev as u64, i_ino, i_gen, *rule_id); }
 
+            if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
+                unsafe { *denies += 1 };
+            }
+
             let mut alert_data = [0u8; 64];
             unsafe {
                 *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
@@ -145,6 +149,10 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     if let Some(rule_id) = unsafe { DENY_INO.get(&key_fallback) } {
         unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0", s_dev as u64, i_ino, *rule_id); }
+
+        if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
+            unsafe { *denies += 1 };
+        }
 
         let mut alert_data = [0u8; 64];
         unsafe {
