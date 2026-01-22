@@ -79,6 +79,12 @@ cat "$POLICY"
 
 # 3) Start Monitor (capture logs)
 LOG="$(mktemp /tmp/assay-monitor.XXXXXX.log)"
+echo "=== Pre-Clean: Killing stale assay processes & BPF pins ==="
+pkill -x assay 2>/dev/null || true
+# Clean up pinned objects if any
+rm -rf /sys/fs/bpf/assay 2>/dev/null || true
+rm -rf /sys/fs/bpf/assay-* 2>/dev/null || true
+
 echo "Starting Monitor... (log: $LOG)"
 # Ensure no stale assay (Commented out: risky on shared runners)
 # pkill -x assay 2>/dev/null || true
