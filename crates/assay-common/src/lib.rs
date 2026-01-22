@@ -92,7 +92,9 @@ unsafe impl aya::Pod for InodeKey {}
 #[cfg(all(target_os = "linux", feature = "user"))]
 const _: () = {
     fn _assert_pod<T: aya::Pod>() {}
-    _assert_pod::<InodeKeyMap>();
+    fn _check() {
+        _assert_pod::<InodeKeyMap>();
+    }
 };
 
 impl MonitorEvent {
