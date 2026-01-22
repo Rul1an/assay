@@ -626,18 +626,20 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn test_kernel_dev_encoding() {
-        // Case 1: Root device-like (8, 1) -> 0x800001 (MKDEV: major << 20 | minor)
-        // 8 << 20 = 0x800000
-        // | 1 = 0x800001
+        // Case 1: Root device-like (8, 1) -> 0x801 (new_encode_dev)
+        // (1 & 0xff) | ((8 & 0xfff) << 8) | ((1 & 0xfffff00) << 12)
+        // = 1 | 0x800 = 0x801 (2049)
         let maj = 8;
         let min = 1;
-        // On macOS makedev returns i32, on Linux u64. We mock carefully or just rely on logic.
-        // We can't easily mock libc::major/minor without implementing them manually or linking real libc.
-        // But on Linux CI, this will run against real glibc.
 
         let fake_dev = libc::makedev(maj, min);
         let encoded = encode_kernel_dev(fake_dev as u64);
-        assert_eq!(encoded, 0x800001, "Expected Linux MKDEV layout (maj<<20 | min)");
+
+        let expected = (min & 0xff) | ((maj & 0xfff) << 8) | ((min & 0xfffff00) << 12);
+
+        assert_eq!(encoded, expected, "Expected Linux new_encode_dev (sb->s_dev) encoding");
+        // Double check against the magic number we saw in logs
+        assert_eq!(encoded, 2049);
     }
 
     #[test]
