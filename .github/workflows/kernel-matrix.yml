@@ -15,30 +15,48 @@ jobs:
   build-artifacts:
     name: Build Artifacts (Ubuntu ARM)
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev
+          sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
-      - name: Install Rust Toolchain
+      - name: Install Rust Toolchain (nightly rust-src only)
         run: |
-          rustup toolchain install nightly --component rust-src
-          rustup default nightly
+          set -euo pipefail
+          rustup toolchain install nightly --profile minimal --component rust-src
 
-      - name: Build eBPF
-        run: cargo xtask build-ebpf --release
+      - name: Build eBPF (Release)
+        run: |
+          set -euo pipefail
+          cargo +nightly xtask build-ebpf --release
 
-      - name: Build CLI
-        run: cargo build --release --package assay-cli --bin assay
+      - name: Build CLI (Release)
+        run: |
+          set -euo pipefail
+          cargo build --release --package assay-cli --bin assay
 
       - name: Prepare Artifacts
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp target/release/assay dist/
-          cp target/assay-ebpf.o dist/
+
+          # Binary
+          cp -v target/release/assay dist/
+
+          # Robust eBPF lookup (paths vary by build strategy)
+          EBPF_PATH="$(find target -maxdepth 6 -name 'assay-ebpf.o' -type f -print -quit)"
+          if [ -z "${EBPF_PATH:-}" ]; then
+            echo "Error: Could not locate assay-ebpf.o under target/"
+            find target -maxdepth 6 -type f -name '*ebpf*.o' -print || true
+            exit 1
+          fi
+          cp -v "$EBPF_PATH" dist/assay-ebpf.o
+
           ls -lh dist/
 
       - uses: actions/upload-artifact@v4
@@ -55,106 +73,117 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kernel: ["5.15", "6.6"] # Represents old LTS and modern LTS
+        kernel: ["5.15", "6.6"]
 
     env:
       CARGO_INCREMENTAL: 0
 
     steps:
-    - name: Emergency Runner Cleanup (Pre-Flight)
-      run: |
-        set +e
-        echo "=== Pruning workspace (emergency start) ==="
-        # Nuke current workspace content to ensure clean slate
-        rm -rf "$GITHUB_WORKSPACE"/* || true
+      - uses: actions/checkout@v4
+        with:
+          clean: false
 
-        echo "=== Pruning Cargo caches (hygiene) ==="
-        du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
-        find "$HOME/.cargo/registry/cache" -type f -mtime +14 -delete 2>/dev/null || true
-        find "$HOME/.cargo/registry/index" -type f -mtime +30 -delete 2>/dev/null || true
-        find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
-        find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+      - name: Emergency Runner Cleanup (Post-Checkout, Safe)
+        run: |
+          set +e
+          echo "=== Disk before cleanup ==="
+          df -h "$GITHUB_WORKSPACE" || true
 
-        echo "=== Docker Prune ==="
-        sudo docker system prune -af --volumes || true
+          echo "=== Cleaning repo workspace (git clean) ==="
+          git reset --hard || true
+          git clean -ffdx || true
 
-        echo "=== Disk Usage After Prune ==="
-        df -h "$GITHUB_WORKSPACE" || true
+          echo "=== Pruning Cargo caches (hygiene) ==="
+          du -sh "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+          find "$HOME/.cargo/registry/cache" -type f -mtime +14 -delete 2>/dev/null || true
+          find "$HOME/.cargo/registry/index" -type f -mtime +30 -delete 2>/dev/null || true
+          find "$HOME/.cargo/git/checkouts" -maxdepth 2 -mindepth 2 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+          find "$HOME/.cargo/git/db" -maxdepth 1 -mindepth 1 -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
 
-    - name: Disk Threshold Gate (3.5GB)
-      run: |
-        set -euo pipefail
-        # Require at least ~3.5GiB free in workspace
-        AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
-        echo "Workspace available KB: $AVAIL_KB"
-        if [ "$AVAIL_KB" -lt 3670016 ]; then
-          echo "ERROR: Not enough free space (need >= ~3.5GiB)."
-          exit 1
-        fi
+          echo "=== Docker Prune ==="
+          sudo docker system prune -af --volumes || true
 
-    - name: Configure Execution Env
-      run: |
-        echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+          echo "=== Disk after cleanup ==="
+          df -h "$GITHUB_WORKSPACE" || true
 
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libbpf-dev libsqlite3-dev
+      - name: Disk Threshold Gate (3.5GB)
+        run: |
+          set -euo pipefail
+          AVAIL_KB="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          echo "Workspace available KB: $AVAIL_KB"
+          if [ "$AVAIL_KB" -lt 3670016 ]; then
+            echo "ERROR: Not enough free space (need >= ~3.5GiB)."
+            exit 1
+          fi
 
-        KREL="$(uname -r)"
-        if ! sudo apt-get install -y "linux-tools-$KREL"; then
-           sudo apt-get install -y linux-tools-common linux-tools-generic || true
-        fi
+      - name: Configure Execution Env
+        run: |
+          set -euo pipefail
+          echo "TMPDIR=$GITHUB_WORKSPACE/rustc-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
-    - uses: actions/download-artifact@v4
-      with:
-        name: assay-dist
-        path: dist
+      - name: Install Runtime Dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libbpf-dev libsqlite3-dev
 
-    - uses: actions/checkout@v4
-      with:
-        clean: false # Managed by emergency cleanup
+          KREL="$(uname -r)"
+          if ! sudo apt-get install -y "linux-tools-$KREL"; then
+            sudo apt-get install -y linux-tools-common linux-tools-generic || true
+          fi
+          command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
 
-    - name: Fix Permissions (Checkout)
-      run: |
-        sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
-        chmod +x dist/assay
+      - uses: actions/download-artifact@v4
+        with:
+          name: assay-dist
+          path: dist
 
-    - name: Run End-to-End Deny Smoke Test
-      run: |
-        set -euo pipefail
+      - name: Fix Permissions
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          chmod +x dist/assay
 
-        # Verify Artifacts
-        test -f dist/assay || { echo "Missing binary"; ls -R dist; exit 1; }
-        test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
+      - name: Run End-to-End Deny Smoke Test
+        run: |
+          set -euo pipefail
 
-        # Setup Isolation
-        mkdir -p "$TMPDIR"
-        chmod 1777 "$TMPDIR"
+          test -f dist/assay || { echo "Missing binary"; ls -R dist; exit 1; }
+          test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
 
-        # Execute
-        sudo -E env \
-          TMPDIR="$TMPDIR" \
-          ASSAY_BIN="$PWD/dist/assay" \
-          ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
-          bash scripts/ci/lsm_deny_smoke.sh
+          mkdir -p "$TMPDIR"
+          chmod 1777 "$TMPDIR" || true
 
-    - name: Cleanup per-run dirs
-      if: always()
-      run: |
-         rm -rf "$TMPDIR" || true
-         rm -rf dist/ || true
+          sudo -E env \
+            TMPDIR="$TMPDIR" \
+            ASSAY_BIN="$PWD/dist/assay" \
+            ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
+            bash scripts/ci/lsm_deny_smoke.sh
 
-    - name: Failure Artifacts
-      if: failure()
-      run: |
-        mkdir -p artifacts
-        sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
-        sudo bpftool prog show > artifacts/bpftool_prog.log 2>&1 || true
-        sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log 2>&1 || true
+      - name: Cleanup per-run dirs
+        if: always()
+        run: |
+          set +e
+          rm -rf "$TMPDIR" || true
+          rm -rf dist/ || true
 
-    - uses: actions/upload-artifact@v4
-      if: failure()
-      with:
-        name: matrix-debug-${{ matrix.kernel }}
-        path: artifacts/
+      - name: Failure Artifacts
+        if: failure()
+        run: |
+          set +e
+          mkdir -p artifacts
+          sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
+          if command -v bpftool >/dev/null 2>&1; then
+            sudo bpftool prog show > artifacts/bpftool_prog.log 2>&1 || true
+            sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log 2>&1 || true
+          else
+            echo "bpftool not available" > artifacts/bpftool_missing.txt
+          fi
+          echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
+          echo "Arch: $(uname -m)" >> artifacts/kernel.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: matrix-debug-${{ matrix.kernel }}
+          path: artifacts/
