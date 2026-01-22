@@ -9,6 +9,7 @@ on:
       - "crates/assay-cli/**"
       - ".github/workflows/kernel-matrix.yml"
   push:
+    branches: [ "main", "feat/*" ]
 
 permissions:
   contents: read
@@ -49,7 +50,7 @@ jobs:
       - name: Build CLI (Release)
         run: |
           set -euo pipefail
-          cargo build --release --package assay-cli --bin assay
+          cargo +nightly build --release --package assay-cli --bin assay
 
       - name: Prepare Artifacts
         run: |
@@ -189,7 +190,7 @@ jobs:
           ART_ID=""
           for i in 1 2 3 4 5; do
             ART_ID="$(curl -fsSL \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Authorization: token ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               "$API" | python3 -c '
           import json,sys
