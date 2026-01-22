@@ -95,6 +95,7 @@ if command -v "$BPFTOOL" >/dev/null 2>&1; then
   $BPFTOOL map show | grep -F "name DENY_INO" || true
 fi
 
+echo "Monitor runner: uid=$(id -u) euid=$(id -u) caps=$(grep CapEff /proc/$$/status || true)"
 echo "Starting Monitor... (log: $LOG)"
 # Ensure no stale assay (Commented out: risky on shared runners)
 # pkill -x assay 2>/dev/null || true
@@ -151,10 +152,21 @@ else
   echo "bpftool not available; skipping map diagnostics"
 fi
 
-# 5) Attempt Access (Expect EPERM)
-echo "Attempting to cat victim file (expect EPERM)..."
+# 5) Attempt Access (Expect EPERM) - as unprivileged user
+echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."
+
+ACCESS_CMD="cat \"$VICTIM\""
+if id nobody >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    ACCESS_CMD="sudo -u nobody -- cat \"$VICTIM\""
+  else
+    ACCESS_CMD="su -s /bin/bash nobody -c 'cat \"$VICTIM\"'"
+  fi
+fi
+
+echo "Access Command: $ACCESS_CMD"
 set +e
-OUTPUT="$(cat "$VICTIM" 2>&1)"
+OUTPUT="$(eval "$ACCESS_CMD" 2>&1)"
 EXIT_CODE=$?
 set -e
 echo "Access Result: ExitCode=$EXIT_CODE Output='$OUTPUT'"
