@@ -145,7 +145,7 @@ jobs:
             sudo apt-get install -y linux-tools-common linux-tools-generic || true
           fi
 
-          fi
+
 
           command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
 
