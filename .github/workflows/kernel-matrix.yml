@@ -30,6 +30,12 @@ jobs:
           set -euo pipefail
           rustup toolchain install nightly --profile minimal --component rust-src
 
+      - name: Install bpf-linker
+        run: |
+          set -euo pipefail
+          cargo install bpf-linker --locked
+          command -v bpf-linker
+
       - name: Build eBPF (Release)
         run: |
           set -euo pipefail
