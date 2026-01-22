@@ -11,6 +11,11 @@ on:
   push:
     branches: [ "main", "feat/*" ]
 
+
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   build-artifacts:
     name: Build Artifacts (Ubuntu ARM)
@@ -205,7 +210,7 @@ jobs:
           rm -rf dist && mkdir -p dist
           curl -fL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
+            -H "Accept: application/octet-stream" \
             "$ZIP_URL" -o dist/assay-dist.zip
 
           unzip -o dist/assay-dist.zip -d dist
