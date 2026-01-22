@@ -26,6 +26,29 @@ if [ ! -f "$ASSAY_EBPF_PATH" ]; then
   exit 1
 fi
 
+# 0b) Check LSM Status (Fail-Fast or Soft-Skip)
+if [ -r /sys/kernel/security/lsm ]; then
+  ACTIVE_LSMS="$(cat /sys/kernel/security/lsm)"
+  echo "Active LSMs: $ACTIVE_LSMS"
+  if ! echo "$ACTIVE_LSMS" | grep -q "bpf"; then
+    echo "⚠️  SKIP: 'bpf' not found in Active LSMs. Kernel cmdline needs 'lsm=...,bpf'."
+    if [ "${REQUIRE_BPF_LSM:-0}" -eq 1 ]; then
+        echo "❌ FAILURE: CI Mode (Strict) requires BPF LSM support."
+        exit 1
+    fi
+    echo "⚠️  Soft Skip in CI Mode (LSM missing on this runner)."
+    exit 0
+  fi
+else
+  echo "⚠️  /sys/kernel/security/lsm not readable. Assuming BPF LSM is missing."
+  if [ "${REQUIRE_BPF_LSM:-0}" -eq 1 ]; then
+      echo "❌ FAILURE: CI Mode (Strict) requires BPF LSM support."
+      exit 1
+  fi
+  echo "⚠️  Soft Skip in CI Mode (LSM missing on this runner)."
+  exit 0
+fi
+
 # 1) Setup Victim (stable file, not auto-deleted by mktemp(1) anyway)
 VICTIM="$(mktemp /tmp/assay-victim.XXXXXX)"
 echo "SECRET_DATA_PAYLOAD" > "$VICTIM"
