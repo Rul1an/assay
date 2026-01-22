@@ -133,17 +133,36 @@ jobs:
           set -euo pipefail
           echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
 
-      - name: Install Runtime Dependencies
+      - name: Install Runtime Dependencies (Minimal)
         shell: bash
         run: |
           set -euo pipefail
+
+          # Pre-clean apt caches
+          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
+          sudo apt-get clean || true
+
+          echo "=== Disk Before Install ==="
+          df -h / "$GITHUB_WORKSPACE" || true
+
           sudo apt-get update
-          sudo apt-get install -y libbpf-dev libsqlite3-dev
+
+          # Install minimal deps (no-install-recommends is critical to avoid LLVM/Clang)
+          sudo apt-get install -y --no-install-recommends \
+            libbpf-dev \
+            libsqlite3-dev
 
           KREL="$(uname -r)"
-          if ! sudo apt-get install -y "linux-tools-$KREL"; then
-            sudo apt-get install -y linux-tools-common linux-tools-generic || true
+          if ! sudo apt-get install -y --no-install-recommends "linux-tools-$KREL"; then
+            sudo apt-get install -y --no-install-recommends linux-tools-common linux-tools-generic || true
           fi
+
+          # Post-clean to free space immediately
+          sudo apt-get clean || true
+          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
+
+          echo "=== Disk After Install ==="
+          df -h / "$GITHUB_WORKSPACE" || true
 
 
 
