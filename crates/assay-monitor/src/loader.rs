@@ -192,13 +192,29 @@ impl LinuxMonitor {
             use assay_common::InodeKeyMap;
             let mut hm: AyaHashMap<_, InodeKeyMap, u32> = AyaHashMap::try_from(map)?;
             for rule in compiled.tier1.inode_deny_exact.iter() {
-                let key = InodeKeyMap {
+                // 1. Standard new_encode_dev format (already valid in rule.dev)
+                let key_std = InodeKeyMap {
                     ino: rule.ino,
                     dev: rule.dev,
                     gen: rule.gen,
                 };
-                hm.insert(key, rule.rule_id, 0)?;
-                println!("DEBUG: Inserted Inode Rule: dev={} gen={} ino={} rule_id={}", rule.dev, rule.gen, rule.ino, rule.rule_id);
+                hm.insert(key_std, rule.rule_id, 0)?;
+                println!("DEBUG: Inserted Inode Rule (Std): dev={} gen={} ino={} rule_id={}", rule.dev, rule.gen, rule.ino, rule.rule_id);
+
+                // 2. Alternate/Old encoding logic: (major << 20) | minor
+                // We decode rule.dev first (which is new_encoded) to get major/minor back
+                let major = (rule.dev >> 8) & 0xfff;
+                let minor = (rule.dev & 0xff) | ((rule.dev >> 12) & 0xfffff00);
+                let dev_alt = (major << 20) | minor;
+
+                let key_alt = InodeKeyMap {
+                    ino: rule.ino,
+                    dev: dev_alt,
+                    gen: rule.gen,
+                };
+                hm.insert(key_alt, rule.rule_id, 0)?;
+                println!("DEBUG: Inserted Inode Rule (Alt): dev={} (maj={} min={}) gen={} ino={} rule_id={}", dev_alt, major, minor, rule.gen, rule.ino, rule.rule_id);
+
 
                 // SOTA Hardening: Always insert default-generation (0) rule as fallback
                 // This covers cases where:
@@ -206,13 +222,21 @@ impl LinuxMonitor {
                 // 2. Filesystems report varying generations
                 // For a DENY rule, "Fail Closed" means we block the Inode ID even if generation mismatches (risk of collision is acceptable for safety).
                 if rule.gen != 0 {
-                    let key_fallback = InodeKeyMap {
+                    let key_fallback_std = InodeKeyMap {
                         ino: rule.ino,
                         dev: rule.dev,
                         gen: 0,
                     };
-                    hm.insert(key_fallback, rule.rule_id, 0)?;
-                    println!("DEBUG: Inserted Fallback Rule: dev={} gen=0 ino={} rule_id={}", rule.dev, rule.ino, rule.rule_id);
+                    hm.insert(key_fallback_std, rule.rule_id, 0)?;
+                    println!("DEBUG: Inserted Fallback Rule (Std): dev={} gen=0 ino={} rule_id={}", rule.dev, rule.ino, rule.rule_id);
+
+                    let key_fallback_alt = InodeKeyMap {
+                        ino: rule.ino,
+                        dev: dev_alt,
+                        gen: 0,
+                    };
+                    hm.insert(key_fallback_alt, rule.rule_id, 0)?;
+                    println!("DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}", dev_alt, rule.ino, rule.rule_id);
                 }
             }
         }

@@ -259,10 +259,24 @@ stat /tmp/assay-test/secret.txt || echo "stat failed"
 stat -c "Dev: %d (0x%x) Ino: %i" /tmp/assay-test/secret.txt || true
 ls -ln /tmp/assay-test/secret.txt
 
+chmod 644 /tmp/assay-test/secret.txt
+
 set +e
-cat /tmp/assay-test/secret.txt
-EXIT_CODE=$?
+if id nobody >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+  echo ">> [Test] Access Command: sudo -u nobody -- cat ..."
+  OUTPUT="$(sudo -u nobody -- cat /tmp/assay-test/secret.txt 2>&1)"
+  EXIT_CODE=$?
+elif id nobody >/dev/null 2>&1 && command -v su >/dev/null 2>&1; then
+  echo ">> [Test] Access Command: su -s /bin/bash nobody -c ..."
+  OUTPUT="$(su -s /bin/bash nobody -c "cat /tmp/assay-test/secret.txt" 2>&1)"
+  EXIT_CODE=$?
+else
+  echo ">> [Test] Access Command: cat (fallback to current user)..."
+  OUTPUT="$(cat /tmp/assay-test/secret.txt 2>&1)"
+  EXIT_CODE=$?
+fi
 set -e
+echo "$OUTPUT"
 
 echo ">> [Result] cat exit: $EXIT_CODE"
 
