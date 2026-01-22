@@ -70,7 +70,7 @@ proptest! {
         // So we test the *logic* directly here essentially.
         //
         // Manual encode logic matching `encode_kernel_dev`:
-        let encoded = (minor & 0xff) | (major << 8) | ((minor & !0xff) << 12);
+        let encoded = expected_new_encode_dev(major, minor);
 
         let (dec_maj, dec_min) = decode_kernel_dev(encoded);
         assert_eq!(dec_maj, major);
