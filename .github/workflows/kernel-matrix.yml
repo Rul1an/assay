@@ -69,17 +69,42 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Dependencies
+        shell: bash
         run: |
           set -euo pipefail
-          timeout 600s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Acquire::CompressionTypes::Order::=gz \
-            -o Acquire::ForceIPv4=true \
-            -o Acquire::Languages=none
-          sudo apt-get install -y --no-install-recommends \
-            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+
+          # Switch Ubuntu Ports mirror (handles both deb822 + legacy sources.list)
+          MIRROR="http://mirrors.edge.kernel.org/ubuntu-ports"
+
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list
+          fi
+
+          # Try install first, fallback to robust update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            llvm-dev libclang-dev build-essential libbpf-dev pkg-config || {
+
+            timeout 900s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+
+            sudo apt-get install -y --no-install-recommends \
+              llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+          }
 
       - name: Install Rust Toolchain (nightly rust-src only)
         uses: dtolnay/rust-toolchain@nightly
@@ -141,6 +166,7 @@ jobs:
       actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
     needs: [lint, build-artifacts]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
@@ -177,8 +203,8 @@ jobs:
 
           # docker + apt caches (optional)
           sudo docker system prune -af --volumes || true
-          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
-          sudo apt-get clean || true
+          # sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
+          # sudo apt-get clean || true
 
           echo "=== Disk after ==="
           df -h || true
@@ -208,17 +234,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Pre-clean apt caches
-          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* || true
-          sudo apt-get clean || true
+          # If this is an ARM Ubuntu runner (ports.ubuntu.com), switch to kernel mirror (Deb822 safe).
+          MIRROR="http://mirrors.edge.kernel.org/ubuntu-ports"
 
-          echo "=== Disk Before Install ==="
-          df -h / "$GITHUB_WORKSPACE" || true
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ] && grep -q 'ports.ubuntu.com/ubuntu-ports' /etc/apt/sources.list.d/ubuntu.sources; then
+             echo "Detected ports.ubuntu.com in ubuntu.sources. Switching..."
+             sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          if [ -f /etc/apt/sources.list ] && grep -q 'ports.ubuntu.com/ubuntu-ports' /etc/apt/sources.list; then
+            echo "Detected ports.ubuntu.com in sources.list. Switching..."
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list
+          fi
 
           timeout 900s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
+            -o Acquire::Queue-Mode=access \
+            -o Acquire::Retries=10 \
+            -o Acquire::http::Timeout=60 \
+            -o Acquire::https::Timeout=60 \
+            -o Acquire::http::Pipeline-Depth=0 \
+            -o Acquire::https::Pipeline-Depth=0 \
             -o Acquire::CompressionTypes::Order::=gz \
             -o Acquire::ForceIPv4=true \
             -o Acquire::Languages=none

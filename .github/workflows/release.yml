@@ -82,12 +82,34 @@ jobs:
       - name: Install cross-compilation tools
         if: matrix.cross
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Acquire::Languages=none
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          # Switch Ubuntu Ports mirror (Deb822 safe)
+          MIRROR="http://mirrors.edge.kernel.org/ubuntu-ports"
+
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list
+          fi
+
+          # Try install first, fallback to robust update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          }
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Cache cargo

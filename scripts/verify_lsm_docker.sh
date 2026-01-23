@@ -112,8 +112,10 @@ if [ "$(uname -s)" == "Linux" ] && [ -x "$CARGO_BIN" ]; then
         echo "🍎 Detected ARM64 (Apple Silicon). Building for target: $TARGET"
       else
         TARGET="x86_64-unknown-linux-musl"
-        # TODO: Pin SHA for x86_64 once verified
-        BUILDER_IMAGE="messense/rust-musl-cross:x86_64-musl"
+        # Default = immutable digest (secure by default). Override for local dev if needed.
+        DEFAULT_X86_64_BUILDER_IMAGE="messense/rust-musl-cross@sha256:c2b6442fad2e05c28db5006c745d10469b4d44ada7c1810b305fbc887a107b59"
+        BUILDER_IMAGE="${ASSAY_MUSL_BUILDER_IMAGE_X86_64:-$DEFAULT_X86_64_BUILDER_IMAGE}"
+
         echo "💻 Detected x86_64. Building for target: $TARGET"
       fi
 
@@ -415,17 +417,25 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   set -euo pipefail
   mkdir -p /sys/kernel/tracing /sys/kernel/debug /sys/fs/bpf || true
 
+  # Opt-in to Azure mirrors for 10x speedup and retry logic
+  sed -i "s/archive.ubuntu.com/azure.archive.ubuntu.com/g" /etc/apt/sources.list
+  sed -i "s/security.ubuntu.com/azure.archive.ubuntu.com/g" /etc/apt/sources.list
+
+
   # Try in-container mounts
   mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
   mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
   mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
 
   timeout 300s DEBIAN_FRONTEND=noninteractive apt-get update -y \
-    -o Acquire::Retries=5 \
-    -o Acquire::http::Timeout=30 \
-    -o Acquire::https::Timeout=30 \
+    -o Acquire::Retries=10 \
+    -o Acquire::http::Timeout=60 \
+    -o Acquire::https::Timeout=60 \
     -o Acquire::CompressionTypes::Order::=gz \
-    -o Acquire::ForceIPv4=true
+    -o Acquire::ForceIPv4=true \
+    -o Acquire::http::No-Cache=True \
+    -o Acquire::http::Pipeline-Depth=0
+
 
   # Check availability
   if [ ! -d /sys/kernel/tracing ] && [ ! -d /sys/kernel/debug/tracing ]; then

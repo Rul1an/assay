@@ -19,12 +19,16 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Acquire::Languages=none
-          sudo apt-get install -y clang libsqlite3-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo apt-get install -y clang libsqlite3-dev
+          }
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -59,12 +63,16 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Acquire::Languages=none
-          sudo apt-get install -y mold clang libsqlite3-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mold clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo apt-get install -y mold clang libsqlite3-dev
+          }
 
       - name: Sccache
         uses: mozilla-actions/sccache-action@v0.0.6
@@ -104,21 +112,81 @@ jobs:
         if: runner.os != 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli
 
-  ebpf-smoke:
-    name: eBPF monitor smoke (${{ matrix.os_name }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: [self-hosted, bpf-lsm]
-            os_name: Linux (Self-Hosted)
-          - runner: ubuntu-latest
-            os_name: Linux (Ubuntu)
+  ebpf-smoke-ubuntu:
+    name: eBPF monitor smoke (Linux - Ubuntu)
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Install Dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Try install first, fallback to update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Queue-Mode=access \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::http::Pipeline-Depth=0 \
+              -o Acquire::https::Pipeline-Depth=0 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
+          }
+
+          if ! command -v bpf-linker >/dev/null 2>&1; then
+            cargo install bpf-linker
+          fi
+
+      - name: Verify LSM blocking (CI Mode - Ubuntu soft skip)
+        shell: bash
+        env:
+          STRICT_LSM_CHECK: "0"
+        run: |
+          set -euo pipefail
+          chmod +x scripts/verify_lsm_docker.sh
+          sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
+
+      - name: Fix log permissions
+        if: always()
+        shell: bash
+        run: |
+          sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
+          ls -l /tmp/assay-lsm-verify || true
+
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-smoke-logs-ubuntu
+          path: /tmp/assay-lsm-verify/
+
+
+  ebpf-smoke-self-hosted:
+    name: eBPF monitor smoke (Linux - Self-Hosted)
+    needs: [test]
+    # Security: never run untrusted code from forks on self-hosted
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: [self-hosted, bpf-lsm]
     permissions:
       contents: read
     steps:
       - name: Pre-clean workspace ownership
+        shell: bash
         run: |
           sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
           sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" || true
@@ -131,31 +199,62 @@ jobs:
           components: rust-src
 
       - name: Install Dependencies
+        shell: bash
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-            -o Acquire::Retries=5 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Acquire::Languages=none
-          sudo apt-get install -y build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
-          # Fix persistent runner permissions if needed
+          set -euo pipefail
+
+          # Switch Ubuntu Ports mirror if applicable (Deb822 + legacy)
+          MIRROR="http://mirrors.edge.kernel.org/ubuntu-ports"
+
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ] && grep -q 'ports.ubuntu.com/ubuntu-ports' /etc/apt/sources.list.d/ubuntu.sources; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          if [ -f /etc/apt/sources.list ] && grep -q 'ports.ubuntu.com/ubuntu-ports' /etc/apt/sources.list; then
+            sudo sed -i \
+              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
+              /etc/apt/sources.list
+          fi
+
+          # Try install first, fallback to robust update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Queue-Mode=access \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::http::Pipeline-Depth=0 \
+              -o Acquire::https::Pipeline-Depth=0 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
+          }
+
           sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
-          if ! command -v bpf-linker &> /dev/null; then
+          if ! command -v bpf-linker >/dev/null 2>&1; then
             cargo install bpf-linker
           fi
 
-      - name: Verify LSM blocking (CI Mode)
+      - name: Verify LSM blocking (CI Mode - strict on self-hosted)
+        shell: bash
         env:
-          STRICT_LSM_CHECK: ${{ matrix.runner != 'ubuntu-latest' && '1' || '0' }}
+          STRICT_LSM_CHECK: "1"
         run: |
+          set -euo pipefail
           chmod +x scripts/verify_lsm_docker.sh
-          # CI Mode = Soft Skip on Ubuntu-Latest (due to no BPF LSM), Hard Fail on missing tracefs
           sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
 
       - name: Fix log permissions
         if: always()
+        shell: bash
         run: |
-          echo "Fixing permissions for /tmp/assay-lsm-verify"
           sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
           ls -l /tmp/assay-lsm-verify || true
 
@@ -163,5 +262,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-smoke-logs
+          name: ci-smoke-logs-self-hosted
           path: /tmp/assay-lsm-verify/

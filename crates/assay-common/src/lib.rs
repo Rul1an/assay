@@ -64,8 +64,11 @@ pub struct InodeKeyMap {
 ///   new_encode_dev(MKDEV(major,minor)) for 32-bit dev_t encoding used in-kernel.
 #[cfg(target_os = "linux")]
 pub fn encode_kernel_dev(dev: u64) -> u32 {
-    let major = libc::major(dev as libc::dev_t) as u32;
-    let minor = libc::minor(dev as libc::dev_t) as u32;
+    // Replicate Linux/glibc major()/minor() from <sys/sysmacros.h>
+    // major(dev) = ((dev >> 8) & 0xfff)
+    // minor(dev) = (dev & 0xff) | ((dev >> 12) & 0xfff00)
+    let major = ((dev >> 8) & 0xfff) as u32;
+    let minor = ((dev & 0xff) | ((dev >> 12) & 0xfff00)) as u32;
 
     // new_encode_dev:
     // (minor & 0xff) | ((major & 0xfff) << 8) | ((minor & 0xfffff00) << 12)
@@ -152,7 +155,7 @@ pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
     Ok(out as u32)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "std"))]
 pub mod strict_open {
     use libc::c_long;
     use std::{ffi::CStr, mem::size_of};
