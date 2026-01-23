@@ -1,5 +1,7 @@
 # .github/actionlint.yaml
 self-hosted-runner:
   labels:
-    - assay-bpf-runner
+    - self-hosted
+    - linux
     - bpf-lsm
+    - assay-bpf-runner

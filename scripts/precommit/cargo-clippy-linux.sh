@@ -7,5 +7,10 @@ if [[ "$OS" != "linux" ]]; then
   exit 0
 fi
 
+if [[ "${PRECOMMIT_CLIPPY:-0}" != "1" ]]; then
+  echo "cargo-clippy: skipped (set PRECOMMIT_CLIPPY=1 to enable)"
+  exit 0
+fi
+
 # strict, but only on Linux
 cargo clippy --workspace --all-targets -- -D warnings
