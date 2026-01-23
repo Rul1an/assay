@@ -88,16 +88,32 @@ jobs:
           # Enable multiarch
           sudo dpkg --add-architecture arm64
 
+          # Determine codename (e.g., noble)
+          . /etc/os-release
+          CODENAME="${VERSION_CODENAME:-noble}"
+
           # 1) Prevent existing repos (archive/security) from attempting arm64 indices
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            # Deb822: ensure every stanza has Architectures: amd64
-            sudo awk 'BEGIN{RS=""; ORS="\n\n"}
-              {
-                if ($0 ~ /^Types: deb/m && $0 !~ /^Architectures:/m) {
-                  $0 = $0 "\nArchitectures: amd64"
-                }
-                print
-              }' /etc/apt/sources.list.d/ubuntu.sources | sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null
+            # If Architectures exists, replace it; else add it per stanza.
+            # This keeps Deb822 valid and deterministic.
+            sudo python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
+          if p.exists():
+              s = p.read_text()
+              stanzas = re.split(r"\n\s*\n", s.strip())
+              out = []
+              for st in stanzas:
+                  if not st.strip():
+                      continue
+                  if re.search(r"^Types:\s*deb\s*$", st, re.M):
+                      if re.search(r"^Architectures:\s*", st, re.M):
+                          st = re.sub(r"^Architectures:\s*.*$", "Architectures: amd64", st, flags=re.M)
+                      else:
+                          st = st + "\nArchitectures: amd64"
+                  out.append(st)
+              p.write_text("\n\n".join(out) + "\n")
+          PY
           fi
 
           if [ -f /etc/apt/sources.list ]; then
@@ -108,11 +124,11 @@ jobs:
           fi
 
           # 2) Add arm64-only ubuntu-ports repo (this is where arm64 packages actually come from)
-          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<'EOF'
-          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble main universe restricted multiverse
-          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-updates main universe restricted multiverse
-          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-security main universe restricted multiverse
-          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-backports main universe restricted multiverse
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<EOF
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME} main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-updates main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-security main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-backports main universe restricted multiverse
           EOF
 
           # 3) Run your failover (rewrites any */ubuntu-ports to gofoss/ports) + robust update
