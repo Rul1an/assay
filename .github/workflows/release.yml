@@ -85,17 +85,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Enable multiarch
           sudo dpkg --add-architecture arm64
 
-          # Determine codename (e.g., noble)
           . /etc/os-release
           CODENAME="${VERSION_CODENAME:-noble}"
 
-          # 1) Prevent existing repos (archive/security) from attempting arm64 indices
+          # 1) Force amd64-only for default Ubuntu sources so apt doesn't try arm64 on archive/security
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            # If Architectures exists, replace it; else add it per stanza.
-            # This keeps Deb822 valid and deterministic.
             sudo python3 - <<'PY'
           import pathlib, re
           p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
@@ -117,13 +113,12 @@ jobs:
           fi
 
           if [ -f /etc/apt/sources.list ]; then
-            # legacy: add [arch=amd64] if no arch qualifier
             sudo sed -i -E \
               's|^(deb\s+)(http[s]?://(archive|security)\.ubuntu\.com/ubuntu)|deb [arch=amd64] \2|g' \
               /etc/apt/sources.list
           fi
 
-          # 2) Add arm64-only ubuntu-ports repo (this is where arm64 packages actually come from)
+          # 2) Add arm64-only ubuntu-ports repo (arm64 packages live here)
           sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<EOF
           deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME} main universe restricted multiverse
           deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-updates main universe restricted multiverse
@@ -131,7 +126,7 @@ jobs:
           deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-backports main universe restricted multiverse
           EOF
 
-          # 3) Run your failover (rewrites any */ubuntu-ports to gofoss/ports) + robust update
+          # 3) Rewrite any */ubuntu-ports to the chosen mirror + robust update
           sudo bash scripts/ci/apt_ports_failover.sh
 
           # Toolchain + sysroot + target libs
