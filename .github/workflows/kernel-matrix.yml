@@ -29,6 +29,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
       - name: Set up Rust (fmt + clippy)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install pre-commit
+          pip install "pre-commit==4.4.0"
 
           # system tools
           sudo apt-get update -y
@@ -47,7 +53,7 @@ jobs:
 
           # actionlint (Go)
           sudo apt-get install -y --no-install-recommends golang-go
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
           # typos via cargo
@@ -86,9 +92,14 @@ jobs:
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Install Rust Toolchain (nightly rust-src only)
-        run: |
-          set -euo pipefail
-          rustup toolchain install nightly --profile minimal --component rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
 
       - name: Install bpf-linker (nightly)
         run: |
@@ -137,7 +148,6 @@ jobs:
   matrix-test:
     permissions:
       contents: read
-      actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
     needs: [lint, build-artifacts]
     runs-on: [self-hosted, linux, assay-bpf-runner]
@@ -158,7 +168,7 @@ jobs:
       - name: Emergency cleanup (FIX PERMS)
         shell: bash
         run: |
-          set +e
+          set +eu
           echo "=== Disk before ==="
           df -h || true
           echo "=== Top 25 Root Directories ==="
