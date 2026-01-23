@@ -4,12 +4,6 @@ set -euo pipefail
 # Shared logic for robust Ubuntu Ports mirror failover
 # Used in CI workflows to prevent 404 errors on ARM/Self-hosted runners
 
-# Optimization: Skip if not using Ubuntu Ports (e.g. AMD64)
-if ! grep -Rqs "ports.ubuntu.com/ubuntu-ports" /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null; then
-  echo "No ubuntu-ports sources detected; skipping ports mirror failover."
-  exit 0
-fi
-
 MIRRORS=(
   "https://mirror.gofoss.xyz/ubuntu-ports"
   "http://ports.ubuntu.com/ubuntu-ports"
@@ -46,20 +40,27 @@ apt_update() {
     -o Acquire::Languages=none
 }
 
-ok=0
-# Temporarily disable exit-on-error to allow loop to try next mirror
-set +e
-for m in "${MIRRORS[@]}"; do
-  echo "Trying Ubuntu Ports mirror: $m"
-  switch_mirror "$m"
-  if apt_update; then
-    ok=1
-    break
-  fi
-done
-set -e
+# Logic: If Ports runner, use failover. Else, standard robust update.
+if grep -Rqs "ports.ubuntu.com/ubuntu-ports" /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null; then
+  echo "Ubuntu Ports detected. Engaging robust mirror failover..."
 
-if [ "$ok" -ne 1 ]; then
-  echo "ERROR: apt-get update failed on all mirrors"
-  exit 1
+  ok=0
+  set +e
+  for m in "${MIRRORS[@]}"; do
+    echo "Trying Ubuntu Ports mirror: $m"
+    switch_mirror "$m"
+    if apt_update; then
+      ok=1
+      break
+    fi
+  done
+  set -e
+
+  if [ "$ok" -ne 1 ]; then
+    echo "ERROR: apt-get update failed on all mirrors"
+    exit 1
+  fi
+else
+  echo "Standard runner detected (No Ubuntu Ports). Running robust update..."
+  apt_update
 fi
