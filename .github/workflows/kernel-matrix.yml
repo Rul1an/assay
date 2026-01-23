@@ -9,7 +9,7 @@ on:
       - "crates/assay-cli/**"
       - ".github/workflows/kernel-matrix.yml"
   push:
-    branches: [ "main", "feat/*" ]
+    branches: [ "main" ]
 
 permissions:
   contents: read
@@ -98,7 +98,7 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-matrix
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ matrix.kernel }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
@@ -258,8 +258,10 @@ jobs:
           echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
           echo "Arch: $(uname -m)" >> artifacts/kernel.txt || true
 
-      # - uses: actions/upload-artifact@v4
-      #   if: failure()
-      #   with:
-      #     name: matrix-debug-${{ matrix.kernel }}
-      #     path: artifacts/
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: matrix-debug-${{ matrix.kernel }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
