@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  clippy:
+    name: Clippy (deny warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   test:
     name: Build + Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
