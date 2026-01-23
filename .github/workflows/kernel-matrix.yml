@@ -100,11 +100,11 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.kernel }}
       cancel-in-progress: true
-    matrix:
-        kernel: ["5.15", "6.6"]
-      max-parallel: 1
     strategy:
       fail-fast: false
+      max-parallel: 1
+      matrix:
+        kernel: ["5.15", "6.6"]
 
     env:
       CARGO_INCREMENTAL: 0
