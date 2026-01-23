@@ -58,8 +58,6 @@ fn workspace_root() -> anyhow::Result<PathBuf> {
     Ok(root.to_path_buf())
 }
 
-
-
 fn get_host_user_group() -> Option<(String, String)> {
     #[cfg(target_os = "linux")]
     {
@@ -185,10 +183,7 @@ fn resolve_ebpf_output(
 
     // 1) Preferred: target/<triple>/<profile>/<bin-name>
     // Cargo bin name is usually "assay-ebpf" (package name).
-    let preferred = target_dir
-        .join(target)
-        .join(profile)
-        .join("assay-ebpf");
+    let preferred = target_dir.join(target).join(profile).join("assay-ebpf");
     if preferred.exists() {
         return Ok(preferred);
     }
@@ -230,7 +225,6 @@ fn resolve_ebpf_output(
 }
 
 fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Result<()> {
-
     let root_str = root
         .to_str()
         .context("workspace root path is not valid utf-8")?;
@@ -257,11 +251,17 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     if !opts.docker_image.contains("assay-ebpf-builder") {
         // We need nightly for -Z build-std, so install it first
         script.push_str("rustup toolchain install nightly; ");
-        script.push_str("rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true; ");
-        script.push_str("if ! command -v bpf-linker > /dev/null; then echo 'Installing bpf-linker...'; ");
+        script.push_str(
+            "rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true; ",
+        );
+        script.push_str(
+            "if ! command -v bpf-linker > /dev/null; then echo 'Installing bpf-linker...'; ",
+        );
 
         // Install dependencies for bpf-linker
-        script.push_str("apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ");
+        script.push_str(
+            "apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ",
+        );
 
         script.push_str("cargo install bpf-linker --locked; fi; ");
     }
@@ -272,14 +272,14 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
         script.push_str("echo 'ERROR: bpf-linker missing in builder image'; exit 1; ");
     } else {
         script.push_str("echo 'Installing bpf-linker...'; ");
-        script.push_str("apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ");
+        script.push_str(
+            "apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ",
+        );
         script.push_str("cargo install bpf-linker --locked; ");
     }
     script.push_str("fi; ");
 
     script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
-
-
 
     script.push_str("cargo +nightly build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));
@@ -311,8 +311,14 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
 
     // Chown the output file to match host user
-    script.push_str(&format!("chown {}:{} /work/target/assay-ebpf.o || true; ", uid, gid));
-    script.push_str(&format!("chown -R {}:{} /work/target-ebpf || true; ", uid, gid));
+    script.push_str(&format!(
+        "chown {}:{} /work/target/assay-ebpf.o || true; ",
+        uid, gid
+    ));
+    script.push_str(&format!(
+        "chown -R {}:{} /work/target-ebpf || true; ",
+        uid, gid
+    ));
 
     let status = Command::new("docker")
         .args([

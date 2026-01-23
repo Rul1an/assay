@@ -189,14 +189,14 @@ async def call_tool_safely(tool_name: str, args: dict):
         "assay_check_args",
         {"target_tool": tool_name, "args": args}
     )
-    
+
     if not check_result["allowed"]:
         # Self-correct using suggested fix
         if "suggested_fix" in check_result:
             args = {**args, **check_result["suggested_fix"]}
         else:
             raise ValueError(f"Invalid args: {check_result['violations']}")
-    
+
     # Now safe to call
     return await call_actual_tool(tool_name, args)
 ```

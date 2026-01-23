@@ -208,10 +208,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Assay
         run: cargo install assay
-      
+
       - name: Run Tests
         run: |
           assay run \
@@ -220,7 +220,7 @@ jobs:
             --strict \
             --output sarif \
             --db :memory:
-      
+
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v2
         if: always()

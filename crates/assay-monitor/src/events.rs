@@ -5,7 +5,6 @@ use tokio_stream::wrappers::ReceiverStream;
 
 pub type EventStream = ReceiverStream<Result<MonitorEvent, MonitorError>>;
 
-
 /// Parse fixed-size MonitorEvent from ringbuf bytes.
 /// Safe pattern: MaybeUninit + memcpy into repr(C) POD.
 pub fn parse_event(bytes: &[u8]) -> Result<MonitorEvent, MonitorError> {
@@ -57,4 +56,3 @@ pub fn send_parsed(
     // best-effort send
     let _ = tx.blocking_send(ev);
 }
-

@@ -1,3 +1,4 @@
+#!/bin/bash
 
 set -e
 # Cleanup any stale monitors
@@ -47,4 +48,3 @@ else
   echo "✅ PASS: cat command failed as expected (Exit: $EXIT_CODE)."
   exit 0
 fi
-

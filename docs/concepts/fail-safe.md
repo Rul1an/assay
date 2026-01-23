@@ -88,7 +88,7 @@ settings:
 tests:
   - id: normal_check
     # Inherits: allow
-    
+
   - id: critical_safety_check
     on_error: block  # Override: strict for this test
     assertions:
@@ -107,7 +107,7 @@ tests:
       - type: args_valid
         on_error: block  # Critical
         tool: ApplyDiscount
-        
+
       - type: sequence_valid
         on_error: allow  # Less critical
         rules: [...]

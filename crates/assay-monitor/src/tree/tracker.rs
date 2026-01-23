@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{RwLock};
+use super::node::{read_children, ProcessNode};
 use assay_common::exports::ProcessTreeExport;
-use super::node::{ProcessNode, read_children};
+use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 
 /// Configuration for the tracker
 #[derive(Debug, Clone)]
@@ -159,7 +159,9 @@ impl ProcessTreeTracker {
         let inner = self.inner.read().map_err(|_| TrackerError::LockPoisoned)?;
         Ok(ProcessTreeExport {
             roots: inner.roots.iter().copied().collect(),
-            nodes: inner.nodes.iter()
+            nodes: inner
+                .nodes
+                .iter()
                 .map(|(&pid, node)| (pid, node.into()))
                 .collect(),
             total_count: inner.nodes.len(),

@@ -17,5 +17,3 @@ assay-common = { path = "../assay-common", default-features = false }
 name = "assay-ebpf"
 path = "src/main.rs"
 required-features = ["ebpf"]
-
-

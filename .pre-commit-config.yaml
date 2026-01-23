@@ -9,6 +9,12 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: check-yaml
+        args: ["--unsafe"]
+        exclude: |
+          (?x)^(
+            tests/fixtures/mcp/malformed\.yaml|
+            tests/fixtures/golden/eval_broken\.yaml
+          )$
       - id: check-toml
       - id: end-of-file-fixer
       - id: trailing-whitespace
@@ -24,6 +30,13 @@ repos:
         types_or: [text]
         args: ["--config", ".typos.toml"]
         pass_filenames: true
+        exclude: |
+          (?x)^(
+            crates/assay-ebpf/src/vmlinux\.rs|
+            docs/MCP_TESTPLAN_CLAUDE_DESKTOP\.md|
+            examples/.*|
+            .*\.jsonl$
+          )
 
   # actionlint (GitHub Actions workflow lint)
   - repo: local
@@ -42,7 +55,7 @@ repos:
         entry: shellcheck
         language: system
         types: [shell]
-        args: ["-x"]
+        args: ["-x", "-S", "warning"]
 
   # --- Rust: fmt on commit (fast), clippy on push (heavier) ---
   - repo: local

@@ -195,15 +195,15 @@ Combined check (args + sequence + blocklist).
 async def safe_tool_call(tool_name, args):
     # Check first
     result = await assay_check_args(tool_name, args)
-    
+
     if result["allowed"]:
         return await execute_tool(tool_name, args)
-    
+
     # Apply suggested fix
     if "suggested_fix" in result:
         fixed_args = {**args, **result["suggested_fix"]}
         return await execute_tool(tool_name, fixed_args)
-    
+
     # Can't fix — report error
     raise ValidationError(result["violations"])
 ```
@@ -214,17 +214,17 @@ async def safe_tool_call(tool_name, args):
 async def tool_with_retry(tool_name, args, max_retries=3):
     for attempt in range(max_retries):
         result = await assay_check_args(tool_name, args)
-        
+
         if result["allowed"]:
             return await execute_tool(tool_name, args)
-        
+
         # Ask LLM to fix based on feedback
         args = await llm_fix_args(
-            tool_name, 
-            args, 
+            tool_name,
+            args,
             result["violations"]
         )
-    
+
     raise MaxRetriesExceeded()
 ```
 
@@ -241,7 +241,7 @@ async def plan_and_execute(plan: List[ToolCall]):
         )
         if result["decision"] != "allow":
             return {"error": "Plan validation failed", "details": result}
-    
+
     # Execute validated plan
     for call in plan:
         await execute_tool(call.tool, call.args)
@@ -307,7 +307,7 @@ Agent: "I've applied a 30% discount, the maximum available."
 ```python
 async def safe_tool_call(tool_name, args):
     result = await assay_check_args(tool_name, args)
-    
+
     if not result["allowed"]:
         logger.info(
             "Self-correction applied",
@@ -316,7 +316,7 @@ async def safe_tool_call(tool_name, args):
             fixed=result.get("suggested_fix"),
             violations=result["violations"]
         )
-    
+
     # ...
 ```
 

@@ -188,22 +188,22 @@ mcp_session = MCPSession("localhost:3001")
 
 async def safe_execute(tool_name: str, args: dict) -> dict:
     """Execute a tool with automatic self-correction."""
-    
+
     # Check with Assay
     check = await mcp_session.call_tool("assay_check_args", {
         "target_tool": tool_name,
         "args": args
     })
-    
+
     if check["allowed"]:
         return await execute_tool(tool_name, args)
-    
+
     # Apply fix if available
     if "suggested_fix" in check:
         fixed_args = {**args, **check["suggested_fix"]}
         print(f"Self-corrected: {args} → {fixed_args}")
         return await execute_tool(tool_name, fixed_args)
-    
+
     # Can't fix automatically
     raise ValueError(f"Invalid args: {check['violations']}")
 ```
@@ -217,13 +217,13 @@ class AssayValidatedTool(Tool):
     def _run(self, **kwargs):
         # Check before running
         check = assay_client.check_args(self.name, kwargs)
-        
+
         if not check["allowed"]:
             if "suggested_fix" in check:
                 kwargs = {**kwargs, **check["suggested_fix"]}
             else:
                 raise ValueError(check["violations"])
-        
+
         return self._actual_run(**kwargs)
 ```
 
@@ -277,8 +277,8 @@ if check["allowed"]:
 
 ```python
 if not check["allowed"]:
-    logger.info("Self-correction", 
-        original=args, 
+    logger.info("Self-correction",
+        original=args,
         fixed=check["suggested_fix"],
         violations=check["violations"]
     )

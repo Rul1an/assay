@@ -1,12 +1,11 @@
-
 use aya_ebpf::{
-    macros::{cgroup_sock_addr, map},
-    maps::{HashMap, LpmTrie, RingBuf, Array},
-    maps::lpm_trie::Key,
-    programs::SockAddrContext,
-    helpers::{bpf_get_current_cgroup_id, bpf_ktime_get_ns, bpf_get_current_pid_tgid},
-    EbpfContext,
     bindings::bpf_sock_addr,
+    helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_ktime_get_ns},
+    macros::{cgroup_sock_addr, map},
+    maps::lpm_trie::Key,
+    maps::{Array, HashMap, LpmTrie, RingBuf},
+    programs::SockAddrContext,
+    EbpfContext,
 };
 
 const MAX_CIDR_RULES: u32 = 1024;
@@ -56,7 +55,13 @@ struct SocketEvent {
 #[cgroup_sock_addr(connect4)]
 pub fn connect4_hook(ctx: SockAddrContext) -> i32 {
     match try_connect4(&ctx) {
-        Ok(allow) => if allow { 1 } else { 0 },
+        Ok(allow) => {
+            if allow {
+                1
+            } else {
+                0
+            }
+        }
         Err(_) => 1,
     }
 }
@@ -143,7 +148,6 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
         }
     }
 
-
     // Correctly close try_connect4
     inc_stat(STAT_ALLOWED);
     Ok(true)
@@ -152,7 +156,13 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
 #[cgroup_sock_addr(connect6)]
 pub fn connect6_hook(ctx: SockAddrContext) -> i32 {
     match try_connect6(&ctx) {
-        Ok(allow) => if allow { 1 } else { 0 },
+        Ok(allow) => {
+            if allow {
+                1
+            } else {
+                0
+            }
+        }
         Err(_) => 1,
     }
 }
@@ -190,7 +200,7 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
     let key = Key::new(128, ip6_bytes);
     if let Some(&action) = CIDR_RULES_V6.get(&key) {
         if action == ACTION_DENY as u32 {
-             emit_socket_event(
+            emit_socket_event(
                 EVENT_CONNECT_BLOCKED,
                 cgroup_id,
                 10,

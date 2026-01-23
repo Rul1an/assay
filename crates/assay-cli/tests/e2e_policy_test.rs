@@ -40,8 +40,6 @@ fn test_policy_parses_all_blocks() {
     assert!(policy.kill_switch.is_some());
 }
 
-
-
 fn setup_fake_unmanaged_config(root: &std::path::Path) {
     // Unix-style path (Linux/macOS + sometimes used cross-platform)
     let claude_unix = root.join(".config/claude");
@@ -120,14 +118,17 @@ fn test_discovery_respects_policy_fail_on_unmanaged() {
 
 #[test]
 fn test_kill_switch_config_parses_mode() {
-    let policy: assay_core::mcp::policy::McpPolicy = serde_yaml::from_str(r#"
+    let policy: assay_core::mcp::policy::McpPolicy = serde_yaml::from_str(
+        r#"
 version: "2.0"
 kill_switch:
   enabled: true
   mode: graceful
   grace_period_ms: 1000
   kill_children: true
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let ks = policy.kill_switch.unwrap();
     assert!(ks.enabled);
@@ -144,7 +145,10 @@ fn test_monitor_triggers_kill_on_ssh_read() {
     std::fs::write(&policy_path, FULL_LIFECYCLE_POLICY).unwrap();
 
     let mut child = Command::new("bash")
-        .args(["-c", "mkdir -p ~/.ssh; echo 'secret' > ~/.ssh/id_rsa; sleep 1; cat ~/.ssh/id_rsa; sleep 30"])
+        .args([
+            "-c",
+            "mkdir -p ~/.ssh; echo 'secret' > ~/.ssh/id_rsa; sleep 1; cat ~/.ssh/id_rsa; sleep 30",
+        ])
         .spawn()
         .unwrap();
 
@@ -152,9 +156,13 @@ fn test_monitor_triggers_kill_on_ssh_read() {
 
     let _ = Command::new(env!("CARGO_BIN_EXE_assay"))
         .args([
-            "monitor", "--pid", &pid,
-            "--policy", policy_path.to_str().unwrap(),
-            "--duration", "10s",
+            "monitor",
+            "--pid",
+            &pid,
+            "--policy",
+            policy_path.to_str().unwrap(),
+            "--duration",
+            "10s",
             "--print",
         ])
         .status()

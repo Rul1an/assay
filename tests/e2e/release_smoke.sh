@@ -22,6 +22,7 @@ python -m build
 echo "[2/4] Creating Fresh Virtualenv..."
 python3 -m venv .venv_smoke
 if [ -f ".venv_smoke/bin/activate" ]; then
+    # shellcheck disable=SC1091
     source .venv_smoke/bin/activate
 else
     echo "Error: Failed to create/activate venv"
@@ -30,10 +31,10 @@ fi
 pip install --upgrade pip
 
 # 3. Install Wheel with Extras
-# Find the wheel file (version agnostic)
-WHEEL=$(ls dist/assay-*.whl | head -n 1)
+# Find the wheel file (version agnostic) (SC2012 fix)
+WHEEL=$(find dist -maxdepth 1 -name 'assay-*.whl' -print -quit)
 echo "Found wheel: $WHEEL"
-pip install "$WHEEL[openai]"
+pip install "${WHEEL}[openai]"
 
 # 4. Run Doctor
 echo "[3/4] Running Doctor..."

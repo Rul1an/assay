@@ -114,11 +114,11 @@ tests:
 EOF
 
 set +e
-OUT_PROMPT=$($VERDICT ci \
+$VERDICT ci \
   --config verdict_prompt_fail.yaml \
   --trace-file $TRACE_OUT \
   --db $DB_OUT \
-  --replay-strict 2>&1)
+  --replay-strict 2>&1
 EXIT_P=$?
 set -e
 

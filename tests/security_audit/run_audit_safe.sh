@@ -15,10 +15,10 @@ run_test() {
     local name="$1"
     local input="$2"
     local policy="$3"
-    
+
     echo "--- Test: $name ---" >> "$RESULTS"
     echo "Input: $input" >> "$RESULTS"
-    
+
     # Use gtimeout if available (macOS coreutils), else timeout
     local TIMEOUT_CMD="timeout"
     if command -v gtimeout &> /dev/null; then

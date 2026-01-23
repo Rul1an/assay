@@ -23,13 +23,13 @@ fn expected_new_encode_dev(major: u32, minor: u32) -> u32 {
 #[test]
 fn test_regression_pairs() {
     let pairs = vec![
-        (0, 0),         // Zero
-        (1, 1),         // Basic (1, 1) -> 0x101
-        (8, 1),         // SDA1 typical -> 0x801
-        (255, 255),     // Classic 8-bit limits
-        (4095, 1048575),// Max standard (12-bit major, 20-bit minor)
-        (0, 256),       // Minor > 255 (extended minor part usage)
-        (300, 0),       // Major > 255
+        (0, 0),          // Zero
+        (1, 1),          // Basic (1, 1) -> 0x101
+        (8, 1),          // SDA1 typical -> 0x801
+        (255, 255),      // Classic 8-bit limits
+        (4095, 1048575), // Max standard (12-bit major, 20-bit minor)
+        (0, 256),        // Minor > 255 (extended minor part usage)
+        (300, 0),        // Major > 255
     ];
 
     for (maj, min) in pairs {
@@ -55,9 +55,16 @@ fn test_regression_pairs() {
         if extracted_maj == maj && extracted_min == min {
             let encoded = encode_kernel_dev(dev_t);
             let expected = expected_new_encode_dev(maj, min);
-            assert_eq!(encoded, expected, "Failed for ({}, {}) -> Expected {:#x}, Got {:#x}", maj, min, expected, encoded);
+            assert_eq!(
+                encoded, expected,
+                "Failed for ({}, {}) -> Expected {:#x}, Got {:#x}",
+                maj, min, expected, encoded
+            );
         } else {
-             eprintln!("Skipping ({}, {}) - Platform makedev/major mismatch (Got {}, {})", maj, min, extracted_maj, extracted_min);
+            eprintln!(
+                "Skipping ({}, {}) - Platform makedev/major mismatch (Got {}, {})",
+                maj, min, extracted_maj, extracted_min
+            );
         }
     }
 }

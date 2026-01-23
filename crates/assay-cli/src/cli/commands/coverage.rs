@@ -12,7 +12,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
             .unwrap_or("manual_policy")
             .to_string();
 
-        // Fingerpint the policy file itself as the "config"
+        // Fingerprint the policy file itself as the "config"
         let fp = assay_core::baseline::compute_config_fingerprint(&p);
 
         (p, suite, fp)

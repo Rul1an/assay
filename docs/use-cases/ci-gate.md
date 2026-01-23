@@ -60,10 +60,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Assay
         run: cargo install assay
-      
+
       - name: Run Tests
         run: |
           assay run \
@@ -72,7 +72,7 @@ jobs:
             --strict \
             --output sarif \
             --db :memory:
-      
+
       - name: Upload Results
         uses: github/codeql-action/upload-sarif@v2
         if: always()
@@ -153,7 +153,7 @@ PR opened → Run tests → 50ms → Deterministic result → ✅ or ❌
    Tool: apply_discount
    Argument: percent = 50
    Violation: Value exceeds maximum (max: 30)
-   
+
    File: prompts/discount-handler.yaml:15
 ```
 
@@ -165,7 +165,7 @@ PR opened → Run tests → 50ms → Deterministic result → ✅ or ❌
    Rule: auth_before_data
    Expected: authenticate before get_customer
    Actual: get_customer called without prior authenticate
-   
+
    File: agents/customer-service.py:42
 ```
 
@@ -176,7 +176,7 @@ PR opened → Run tests → 50ms → Deterministic result → ✅ or ❌
 
    Blocked tool called: admin_delete
    This tool is not allowed in production agents.
-   
+
    File: agents/admin-handler.py:88
 ```
 
@@ -237,7 +237,7 @@ jobs:
   fast-tests:
     # Assay (milliseconds, free)
     - uses: Rul1an/assay-action@v1
-  
+
   slow-tests:
     needs: fast-tests  # Only if fast tests pass
     # Real LLM tests (minutes, paid)

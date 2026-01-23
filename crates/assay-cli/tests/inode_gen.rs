@@ -23,7 +23,7 @@ fn test_inode_generation_retrieval() {
         Ok(gen) => {
             println!("Got generation: {}", gen);
             // gen might be 0 on tmpfs or young files, that's fine.
-        },
+        }
         Err(e) => {
             // If the FS doesn't support it, we expect specific errors.
             // On tmpfs, ioctl might fail with ENOTTY (25) or similar.

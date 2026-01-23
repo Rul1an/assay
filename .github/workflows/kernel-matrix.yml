@@ -198,7 +198,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> $GITHUB_ENV
+          echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> "$GITHUB_ENV"
 
       - name: Install Runtime Dependencies (Minimal)
         shell: bash
@@ -293,15 +293,15 @@ jobs:
           set +e
           cd "$GITHUB_WORKSPACE" || true
           mkdir -p artifacts
-          sudo dmesg -T > artifacts/dmesg.log 2>&1 || true
+          sudo dmesg -T | sudo tee artifacts/dmesg.log > /dev/null 2>&1 || true
           if command -v bpftool >/dev/null 2>&1; then
-            sudo bpftool prog show > artifacts/bpftool_prog.log 2>&1 || true
-            sudo bpftool map dump name DENY_INO > artifacts/bpftool_map_deny.log 2>&1 || true
+            sudo bpftool prog show | sudo tee artifacts/bpftool_prog.log > /dev/null 2>&1 || true
+            sudo bpftool map dump name DENY_INO | sudo tee artifacts/bpftool_map_deny.log > /dev/null 2>&1 || true
           else
-            echo "bpftool not available" > artifacts/bpftool_missing.txt
+            echo "bpftool not available" | sudo tee artifacts/bpftool_missing.txt > /dev/null || true
           fi
-          echo "Kernel: $(uname -r)" > artifacts/kernel.txt || true
-          echo "Arch: $(uname -m)" >> artifacts/kernel.txt || true
+          echo "Kernel: $(uname -r)" | sudo tee artifacts/kernel.txt > /dev/null || true
+          echo "Arch: $(uname -m)" | sudo tee -a artifacts/kernel.txt > /dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: failure()

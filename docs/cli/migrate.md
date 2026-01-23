@@ -44,13 +44,13 @@ assay migrate --config eval.yaml
 
 # Output:
 # Migrating eval.yaml from v0 to v1...
-# 
+#
 # Changes:
 #   - Added: version: "1"
 #   - Converted: sequences → rules DSL
 #   - Inlined: policies/discount.yaml
 #   - Renamed: threshold → min_score (deprecated)
-# 
+#
 # Created backup: eval.yaml.bak
 # Written: eval.yaml
 ```
@@ -175,7 +175,7 @@ Warning: Lossy conversion detected
 
   The v0 field 'fuzzy_match' has no v1 equivalent.
   This field will be removed.
-  
+
   If you rely on this behavior, consider:
     1. Using a custom metric
     2. Opening an issue for feature request
@@ -189,7 +189,7 @@ Warning: Ambiguous sequence conversion
   The sequence [A, B, C] could mean:
     - A before B, B before C (chain)
     - A before B, A before C (fan-out)
-  
+
   Assuming chain behavior. Review the generated rules.
 ```
 

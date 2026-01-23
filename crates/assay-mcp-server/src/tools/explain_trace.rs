@@ -230,10 +230,14 @@ sequences: []
         assert_eq!(result["format"], "markdown");
 
         // Verify MCP content array
-        let content_arr = result["content"].as_array().expect("content should be array");
+        let content_arr = result["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content_arr[0]["type"], "text");
 
-        let text = content_arr[0]["text"].as_str().expect("text should be string");
+        let text = content_arr[0]["text"]
+            .as_str()
+            .expect("text should be string");
         assert!(text.contains("## Trace Explanation"));
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;

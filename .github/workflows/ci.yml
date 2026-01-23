@@ -51,16 +51,18 @@ jobs:
       - name: Configure Environment
         shell: bash
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "SCCACHE_DIR=$HOME/.sccache" >> $GITHUB_ENV
-          echo "SCCACHE_GHA_ENABLED=false" >> $GITHUB_ENV
-          echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse" >> $GITHUB_ENV
+          {
+            echo "RUSTC_WRAPPER=sccache"
+            echo "SCCACHE_DIR=$HOME/.sccache"
+            echo "SCCACHE_GHA_ENABLED=false"
+            echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse"
+          } >> "$GITHUB_ENV"
 
       - name: Configure Linker (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
 
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)

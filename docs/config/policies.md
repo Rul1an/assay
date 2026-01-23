@@ -74,15 +74,15 @@ arguments:
   # String
   name:
     type: string
-  
+
   # Number (integer or float)
   amount:
     type: number
-  
+
   # Integer only
   count:
     type: integer
-  
+
   # Boolean
   active:
     type: boolean
@@ -97,7 +97,7 @@ arguments:
     type: array
     items:
       type: string
-  
+
   # Object
   address:
     type: object
@@ -189,7 +189,7 @@ arguments:
   email:
     type: string
     format: email
-  
+
   created_at:
     type: string
     format: datetime
@@ -204,7 +204,7 @@ arguments:
   id:
     type: string
     required: true     # Must be present
-  
+
   nickname:
     type: string
     required: false    # Optional (default)
@@ -222,11 +222,11 @@ arguments:
     type: number
     max: 30
     on_violation: block   # Fail the test (default)
-  
+
   legacy_field:
     type: string
     on_violation: warn    # Log warning, continue
-  
+
   debug_mode:
     type: boolean
     on_violation: log     # Silent log, continue
@@ -258,7 +258,7 @@ tools:
     arguments:
       id:
         $ref: "common.yaml#/definitions/customer_id"
-  
+
   update_customer:
     arguments:
       id:
@@ -279,13 +279,13 @@ arguments:
   payment_type:
     type: string
     enum: ["card", "bank_transfer"]
-  
+
   card_number:
     type: string
     pattern: "^[0-9]{16}$"
     required_if:
       payment_type: "card"
-  
+
   account_number:
     type: string
     required_if:

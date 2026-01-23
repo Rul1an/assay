@@ -33,7 +33,7 @@ echo "🛡️  [2/5] Configuring Kernel Boot Parameters for BPF LSM..."
 if ! grep -q "lsm=.*bpf" /etc/default/grub; then
     echo "   -> Appending 'bpf' to GRUB_CMDLINE_LINUX..."
     # Backup
-    cp /etc/default/grub /etc/default/grub.bak.$(date +%s)
+    cp /etc/default/grub "/etc/default/grub.bak.$(date +%s)"
 
     # Append bpf to existing line or create new
     # SOTA approach: Ensure we don't break existing args
@@ -91,9 +91,9 @@ if [ ! -f "$RUNNER_DIR/.runner" ]; then
     cd "$RUNNER_DIR"
     # Fetch latest version from GH API
     LATEST_VER=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name | sed 's/v//')
-    curl -o actions-runner-linux-x64-${LATEST_VER}.tar.gz -L https://github.com/actions/runner/releases/download/v${LATEST_VER}/actions-runner-linux-x64-${LATEST_VER}.tar.gz
+    curl -o "actions-runner-linux-x64-${LATEST_VER}.tar.gz" -L "https://github.com/actions/runner/releases/download/v${LATEST_VER}/actions-runner-linux-x64-${LATEST_VER}.tar.gz"
 
-    tar xzf ./actions-runner-linux-x64-${LATEST_VER}.tar.gz
+    tar xzf "./actions-runner-linux-x64-${LATEST_VER}.tar.gz"
 
     echo "   -> Registering Runner (Requires GITHUB_TOKEN interactions)..."
     echo "   ⚠️  Manual Step: Run 'config.sh' as $RUNNER_USER using the token."

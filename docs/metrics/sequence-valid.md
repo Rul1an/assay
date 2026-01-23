@@ -114,16 +114,16 @@ tests:
       # Must authenticate
       - type: require
         tool: authenticate
-      
+
       # Auth before data access
       - type: before
         first: authenticate
         then: [get_data, update_data, delete_data]
-      
+
       # No admin tools
       - type: blocklist
         tools: [admin_*, system_*]
-      
+
       # Max 5 API calls
       - type: count
         tool: external_api

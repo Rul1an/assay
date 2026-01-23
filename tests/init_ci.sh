@@ -5,7 +5,8 @@ set -e
 TEST_DIR="test-init-ci-$(date +%s)"
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
-export PATH=$PATH:$(pwd)/../target/debug
+PATH="$PATH:$(pwd)/../target/debug"
+export PATH
 
 echo "Running assay init-ci tests in $TEST_DIR"
 

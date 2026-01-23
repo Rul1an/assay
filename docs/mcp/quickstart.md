@@ -104,7 +104,7 @@ tools:
       id:
         type: string
         pattern: "^cust_[0-9]+$"
-  
+
   update_customer:
     arguments:
       id:
@@ -113,7 +113,7 @@ tools:
       email:
         type: string
         format: email
-  
+
   send_email:
     arguments:
       to:
@@ -159,7 +159,7 @@ Ensure tools are called in the correct order:
 # mcp-eval.yaml (add this test)
 tests:
   # ... existing tests ...
-  
+
   - id: read_before_write
     metric: sequence_valid
     rules:

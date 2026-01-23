@@ -46,8 +46,6 @@
 //! - **Performance**: Simple checks in kernel, complex in userspace
 //! - **Defense in depth**: Critical paths blocked by LSM, others detected
 
-
-
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
@@ -282,10 +280,9 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
                 stats.tier1_rules += 1;
             }
             Err(e) => {
-                stats.warnings.push(format!(
-                    "Invalid CIDR '{}': {}",
-                    cidr_str, e
-                ));
+                stats
+                    .warnings
+                    .push(format!("Invalid CIDR '{}': {}", cidr_str, e));
             }
         }
         rule_id += 1;
@@ -304,10 +301,9 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
                 stats.tier1_rules += 1;
             }
             Err(e) => {
-                stats.warnings.push(format!(
-                    "Invalid CIDR '{}': {}",
-                    cidr_str, e
-                ));
+                stats
+                    .warnings
+                    .push(format!("Invalid CIDR '{}': {}", cidr_str, e));
             }
         }
         rule_id += 1;
@@ -354,7 +350,11 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
         rule_id += 1;
     }
 
-    CompiledPolicy { tier1, tier2, stats }
+    CompiledPolicy {
+        tier1,
+        tier2,
+        stats,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -527,9 +527,9 @@ mod tests {
         let policy = Policy {
             files: FilePolicy {
                 deny: vec![
-                    "/etc/shadow".to_string(),           // → Tier 1 exact
-                    "/home/user/*".to_string(),          // → Tier 1 prefix
-                    "**/.ssh/id_*".to_string(),          // → Tier 2 glob
+                    "/etc/shadow".to_string(),  // → Tier 1 exact
+                    "/home/user/*".to_string(), // → Tier 1 prefix
+                    "**/.ssh/id_*".to_string(), // → Tier 2 glob
                 ],
                 allow: vec![],
             },

@@ -1,7 +1,7 @@
 // crates/assay-core/src/agentic/mod.rs
 // A reusable "Agentic Contract" builder that turns Diagnostics into:
 // - suggested_actions (commands to run)
-// - suggested_patches (JSON Patch ops, machine-applyable)
+// - suggested_patches (JSON Patch ops, machine-applicable)
 //
 // This is intentionally conservative + deterministic.
 

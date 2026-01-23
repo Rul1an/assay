@@ -84,7 +84,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -99,11 +99,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            V="${{ github.event.inputs.version }}"
           else
-            VERSION="${GITHUB_REF#refs/tags/}"
+            V="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
@@ -156,11 +156,11 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            V="${{ github.event.inputs.version }}"
           else
-            VERSION="${GITHUB_REF#refs/tags/}"
+            V="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -176,7 +176,6 @@ jobs:
       - name: Generate release notes
         id: notes
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           cat > release_notes.md << 'EOF'
           ## Assay ${{ steps.version.outputs.version }}
 
@@ -211,7 +210,7 @@ jobs:
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Assay ${{ steps.version.outputs.version }}
           body_path: release_notes.md
@@ -247,7 +246,7 @@ jobs:
         if: always()
         run: |
           echo "🧹 Cleaning up root-owned files..."
-          sudo chown -R $(whoami):$(id -gn) . || true
+          sudo chown -R "$(whoami)":"$(id -gn)" . || true
 
       - name: Upload verification logs
         if: always()

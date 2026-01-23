@@ -1,9 +1,9 @@
 use clap::Parser;
 
+pub mod cgroup;
 mod cli;
 pub mod packs;
 mod templates;
-pub mod cgroup;
 
 use cli::args::Cli;
 use cli::commands::dispatch;

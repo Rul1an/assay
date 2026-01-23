@@ -199,7 +199,7 @@ tools:
         type: string
         # Add: required: true
         # Add: pattern: "^cust_[0-9]+$"
-  
+
   update_customer:
     arguments:
       id:
@@ -231,7 +231,7 @@ Supported formats:
 Error: Failed to parse session.json
 
   Line 15: Expected ',' or '}' but found ':'
-  
+
 Suggestion: Validate JSON with 'jq . session.json'
 ```
 

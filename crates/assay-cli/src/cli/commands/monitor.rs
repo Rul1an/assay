@@ -1,13 +1,12 @@
-
 #[cfg(target_os = "linux")]
 use crate::cli::commands::exit_codes;
 use clap::Args;
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
-use tokio_stream::StreamExt;
-#[cfg(target_os = "linux")]
 use assay_common::encode_kernel_dev;
+#[cfg(target_os = "linux")]
+use tokio_stream::StreamExt;
 
 #[derive(Args, Debug, Clone)]
 #[command(
@@ -65,7 +64,6 @@ pub struct MonitorArgs {
     pub monitor_all: bool,
 }
 
-
 pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
     #[cfg(not(target_os = "linux"))]
     {
@@ -82,8 +80,8 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 
 #[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
+    use assay_common::{get_inode_generation, strict_open, EVENT_CONNECT, EVENT_OPENAT};
     use assay_monitor::Monitor;
-    use assay_common::{EVENT_OPENAT, EVENT_CONNECT, get_inode_generation, strict_open};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -91,7 +89,9 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
         if let Some(rm) = p.runtime_monitor {
             if !rm.enabled {
-                if !args.quiet { eprintln!("Runtime monitor disabled by policy."); }
+                if !args.quiet {
+                    eprintln!("Runtime monitor disabled by policy.");
+                }
                 return Ok(0);
             }
             runtime_config = Some(rm);
@@ -123,14 +123,23 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
     // SOTA Hardening: Set monitor_all BEFORE attach to ensure deterministic global coverage
     if args.monitor_all {
-        if !args.quiet { println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering."); }
+        if !args.quiet {
+            println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
+        }
         monitor.set_monitor_all(true)?;
 
         // Readback verification (critical for CI determinism).
         let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
-        println!("DEBUG: CONFIG[{}]={} confirmed", assay_common::KEY_MONITOR_ALL, v);
+        println!(
+            "DEBUG: CONFIG[{}]={} confirmed",
+            assay_common::KEY_MONITOR_ALL,
+            v
+        );
         if v != 1 {
-            eprintln!("❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)", assay_common::KEY_MONITOR_ALL);
+            eprintln!(
+                "❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)",
+                assay_common::KEY_MONITOR_ALL
+            );
             return Ok(40);
         }
     }
@@ -138,7 +147,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     if !args.pid.is_empty() {
         // Compatibility: Populate Legacy PID Map (for Tracepoints if they use it)
         if let Err(e) = monitor.set_monitored_pids(&args.pid) {
-             eprintln!("Warning: Failed to populate PID map: {}", e);
+            eprintln!("Warning: Failed to populate PID map: {}", e);
         }
 
         // Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
@@ -153,16 +162,17 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if !cgroups.is_empty() {
-             if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
-                 eprintln!("Error: Failed to populate Cgroup map: {}", e);
-                 return Ok(40);
-             }
-             if !args.quiet { eprintln!("Monitored Cgroups: {:?}", cgroups); }
+            if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
+                eprintln!("Error: Failed to populate Cgroup map: {}", e);
+                return Ok(40);
+            }
+            if !args.quiet {
+                eprintln!("Monitored Cgroups: {:?}", cgroups);
+            }
         } else {
-             eprintln!("Warning: No valid cgroups resolved. Rules will not match.");
+            eprintln!("Warning: No valid cgroups resolved. Rules will not match.");
         }
     }
-
 
     if let Err(e) = monitor.attach() {
         eprintln!("Failed to attach probes: {}", e);
@@ -209,7 +219,9 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         for part in input.split('/') {
             match part {
                 "" | "." => {}
-                ".." => { parts.pop(); }
+                ".." => {
+                    parts.pop();
+                }
                 x => parts.push(x),
             }
         }
@@ -224,14 +236,23 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    #[cfg(target_os="linux")]
+    #[cfg(target_os = "linux")]
     async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
         unsafe {
-            libc::kill(pid as i32, if mode == assay_core::mcp::runtime_features::KillMode::Immediate { libc::SIGKILL } else { libc::SIGTERM });
+            libc::kill(
+                pid as i32,
+                if mode == assay_core::mcp::runtime_features::KillMode::Immediate {
+                    libc::SIGKILL
+                } else {
+                    libc::SIGTERM
+                },
+            );
         }
         if mode == assay_core::mcp::runtime_features::KillMode::Graceful {
             tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
-            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
         }
     }
 
@@ -243,14 +264,22 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
             // support only file_open for now (openat)
             // Note: need to import MonitorRuleType or use full path
-            if !matches!(kind, assay_core::mcp::runtime_features::MonitorRuleType::FileOpen) {
+            if !matches!(
+                kind,
+                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen
+            ) {
                 continue;
             }
 
             match compile_globset(&mc.path_globs) {
                 Ok(allow) => {
-                     let deny = mc.not.as_ref().map(|n| compile_globset(&n.path_globs)).transpose().unwrap_or(None);
-                     rules.push(ActiveRule {
+                    let deny = mc
+                        .not
+                        .as_ref()
+                        .map(|n| compile_globset(&n.path_globs))
+                        .transpose()
+                        .unwrap_or(None);
+                    rules.push(ActiveRule {
                         id: r.id.clone(),
                         action: r.action.clone(),
                         allow,
@@ -258,7 +287,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                     });
                 }
                 Err(e) => {
-                     eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
+                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
                 }
             }
         }
@@ -274,43 +303,47 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             // But for "Shield" implementation, we usually map "Deny/Kill" rules matchers.
             // The McpPolicy separates "Action" from "Rule".
             // If action is Log, we shouldn't put it in Tier 1 Deny.
-            let is_enforcement = matches!(r.action,
-                assay_core::mcp::runtime_features::MonitorAction::TriggerKill |
-                assay_core::mcp::runtime_features::MonitorAction::Deny
+            let is_enforcement = matches!(
+                r.action,
+                assay_core::mcp::runtime_features::MonitorAction::TriggerKill
+                    | assay_core::mcp::runtime_features::MonitorAction::Deny
             );
 
-            if !is_enforcement { continue; }
+            if !is_enforcement {
+                continue;
+            }
 
             match r.rule_type {
                 assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
-                     // Map to file deny
-                     for glob in &r.match_config.path_globs {
-                         t1_policy.files.deny.push(glob.clone());
-                     }
-                     // Map exceptions
-                     if let Some(not) = &r.match_config.not {
-                         for glob in &not.path_globs {
-                             t1_policy.files.allow.push(glob.clone());
-                         }
-                     }
+                    // Map to file deny
+                    for glob in &r.match_config.path_globs {
+                        t1_policy.files.deny.push(glob.clone());
+                    }
+                    // Map exceptions
+                    if let Some(not) = &r.match_config.not {
+                        for glob in &not.path_globs {
+                            t1_policy.files.allow.push(glob.clone());
+                        }
+                    }
                 }
                 assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
                     for dest in &r.match_config.dest_globs {
                         // Attempt to parse as CIDR, otherwise Glob
                         // Heuristic: Check if "IP/Prefix" format
                         let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                             // Check if left side is IP and right side is number
-                             ip_part.parse::<std::net::IpAddr>().is_ok() && prefix_part.parse::<u8>().is_ok()
+                            // Check if left side is IP and right side is number
+                            ip_part.parse::<std::net::IpAddr>().is_ok()
+                                && prefix_part.parse::<u8>().is_ok()
                         } else {
-                             false
+                            false
                         };
 
                         if is_cidr {
-                             t1_policy.network.deny_cidrs.push(dest.clone());
+                            t1_policy.network.deny_cidrs.push(dest.clone());
                         } else if let Ok(port) = dest.parse::<u16>() {
-                             t1_policy.network.deny_ports.push(port);
+                            t1_policy.network.deny_ports.push(port);
                         } else {
-                             t1_policy.network.deny_destinations.push(dest.clone());
+                            t1_policy.network.deny_destinations.push(dest.clone());
                         }
                     }
                 }
@@ -327,11 +360,12 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             use std::ffi::CString;
             use std::os::unix::ffi::OsStrExt;
 
-            let c_path = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes()) {
+            let c_path = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes())
+            {
                 Ok(c) => c,
                 Err(e) => {
-                     eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
-                     continue;
+                    eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
+                    continue;
                 }
             };
 
@@ -346,17 +380,30 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                     // ELOOP = Symlink blocked by RESOLVE_NO_SYMLINKS
                     // EXDEV = Path breakout blocked by RESOLVE_BENEATH
                     // ENOSYS = openat2 not supported
-                    if e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error() == Some(libc::ENOSYS) {
+                    if e.kind() == std::io::ErrorKind::Unsupported
+                        || e.raw_os_error() == Some(libc::ENOSYS)
+                    {
                         // Fallback to O_PATH | O_NOFOLLOW
                         // TODO: Log warning "Strict open unavailable"
-                        match unsafe { libc::open(c_path.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) } {
-                             ok if ok >= 0 => ok,
-                             _ => {
-                                 eprintln!("Warning: Fallback open failed for {}: {}", rule.path, std::io::Error::last_os_error());
-                                 continue;
-                             }
+                        match unsafe {
+                            libc::open(
+                                c_path.as_ptr(),
+                                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            )
+                        } {
+                            ok if ok >= 0 => ok,
+                            _ => {
+                                eprintln!(
+                                    "Warning: Fallback open failed for {}: {}",
+                                    rule.path,
+                                    std::io::Error::last_os_error()
+                                );
+                                continue;
+                            }
                         }
-                    } else if e.raw_os_error() == Some(libc::ELOOP) || e.raw_os_error() == Some(libc::EXDEV) {
+                    } else if e.raw_os_error() == Some(libc::ELOOP)
+                        || e.raw_os_error() == Some(libc::EXDEV)
+                    {
                         eprintln!("Warning: Strict open blocked access to {} (Symlink/Breakout detected): {}", rule.path, e);
                         continue;
                     } else {
@@ -371,7 +418,11 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let res = unsafe { libc::fstat(guard_fd, &mut stat) };
             if res < 0 {
                 unsafe { libc::close(guard_fd) };
-                eprintln!("Warning: Could not fstat denied path {} (skipping): {}", rule.path, std::io::Error::last_os_error());
+                eprintln!(
+                    "Warning: Could not fstat denied path {} (skipping): {}",
+                    rule.path,
+                    std::io::Error::last_os_error()
+                );
                 continue;
             }
 
@@ -385,7 +436,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                         0
                     } else {
                         // In fail-closed, one might abort. Here we warn.
-                        eprintln!("Warning: Could not get inode generation for {} (using gen=0): {}", rule.path, e);
+                        eprintln!(
+                            "Warning: Could not get inode generation for {} (using gen=0): {}",
+                            rule.path, e
+                        );
                         0
                     }
                 }
@@ -400,8 +454,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             let kernel_dev = encode_kernel_dev(dev);
 
             if !args.quiet {
-                let maj =  libc::major(stat.st_dev);
-                let min =  libc::minor(stat.st_dev);
+                let maj = libc::major(stat.st_dev);
+                let min = libc::minor(stat.st_dev);
                 eprintln!(
                     "Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={} gen={}",
                     rule.path, dev, maj, min, kernel_dev, ino, gen
@@ -431,7 +485,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
-            eprintln!("Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}", e);
+            eprintln!(
+                "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
+                e
+            );
         }
     }
 
@@ -449,7 +506,11 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     }
 
     fn dump_prefix_hex(data: &[u8], n: usize) -> String {
-        data.iter().take(n).map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("")
+        data.iter()
+            .take(n)
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     loop {
@@ -595,11 +656,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     Ok(exit_codes::OK)
 }
 
-
 #[cfg(target_os = "linux")]
 use futures::FutureExt; // for .boxed()
 
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
     use std::io::BufRead;
     use std::os::linux::fs::MetadataExt; // for st_ino
@@ -618,14 +678,18 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
             let path = if path.is_empty() { "/" } else { path }; // Root cgroup
 
             let full_path = format!("/sys/fs/cgroup{}", path);
-            let metadata = std::fs::metadata(&full_path).map_err(|e| anyhow::anyhow!("Failed to stat {}: {}", full_path, e))?;
+            let metadata = std::fs::metadata(&full_path)
+                .map_err(|e| anyhow::anyhow!("Failed to stat {}: {}", full_path, e))?;
             return Ok(metadata.st_ino());
         }
     }
 
     // Fallback: If no V2 entry, maybe use /proc/self/cgroup inode?
     // Or just fail.
-    Err(anyhow::anyhow!("No Cgroup V2 entry found in {}", cgroup_path))
+    Err(anyhow::anyhow!(
+        "No Cgroup V2 entry found in {}",
+        cgroup_path
+    ))
 }
 
 #[cfg(test)]
@@ -646,7 +710,10 @@ mod tests {
 
         let expected = (min & 0xff) | ((maj & 0xfff) << 8) | ((min & 0xfffff00) << 12);
 
-        assert_eq!(encoded, expected, "Expected Linux new_encode_dev (sb->s_dev) encoding");
+        assert_eq!(
+            encoded, expected,
+            "Expected Linux new_encode_dev (sb->s_dev) encoding"
+        );
         // Double check against the magic number we saw in logs
         assert_eq!(encoded, 2049);
     }
@@ -676,7 +743,3 @@ mod tests {
         assert_eq!(2 + 2, 4);
     }
 }
-
-
-
-

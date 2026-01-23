@@ -1,6 +1,6 @@
 use assay_core::mcp::policy::McpPolicy;
-use tempfile::NamedTempFile;
 use std::io::Write;
+use tempfile::NamedTempFile;
 
 #[test]
 fn test_validation_fails_unknown_rule_ref() {
@@ -25,20 +25,28 @@ kill_switch:
     let val = policy.validate();
     assert!(val.is_err(), "Validation should fail for unknown rule ID");
     let err = val.unwrap_err().to_string();
-    assert!(err.contains("unknown rule id"), "Error message should mention unknown rule id: {}", err);
+    assert!(
+        err.contains("unknown rule id"),
+        "Error message should mention unknown rule id: {}",
+        err
+    );
 }
 
 #[test]
 fn test_unknown_fields_are_ignored_via_loader() {
     // Tests that McpPolicy::from_file uses serde_ignored to warn instead of crash
     let mut tmp = NamedTempFile::new().unwrap();
-    write!(tmp, r#"
+    write!(
+        tmp,
+        r#"
 version: "2.0"
 random_toplevel_field: "junk"
 discovery:
   enabled: true
   weird_discovery_setting: 123
-"#).unwrap();
+"#
+    )
+    .unwrap();
 
     // Should load successfully despite unknown fields
     let policy = McpPolicy::from_file(tmp.path()).expect("Should load policy with unknown fields");

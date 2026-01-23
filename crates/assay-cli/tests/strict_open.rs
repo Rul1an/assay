@@ -33,7 +33,7 @@ fn test_strict_open_blocks_symlinks() {
         Ok(fd) => {
             unsafe { libc::close(fd) };
             panic!("Strict open SUCCEEDED on a symlink! (Security Failure)");
-        },
+        }
         Err(e) => {
             // Check error code
             let errno = e.raw_os_error().unwrap_or(0);
@@ -43,7 +43,10 @@ fn test_strict_open_blocks_symlinks() {
             } else if errno == libc::ENOSYS || errno == libc::EOPNOTSUPP {
                 println!("SKIPPING: openat2 not supported on this kernel.");
             } else {
-                panic!("Strict open failed with unexpected error: {} (Expected ELOOP)", e);
+                panic!(
+                    "Strict open failed with unexpected error: {} (Expected ELOOP)",
+                    e
+                );
             }
         }
     }
@@ -61,14 +64,14 @@ fn test_strict_open_allows_regular_file() {
         Ok(fd) => {
             println!("SUCCESS: Strict open allowed regular file.");
             unsafe { libc::close(fd) };
-        },
+        }
         Err(e) => {
-             let errno = e.raw_os_error().unwrap_or(0);
-             if errno == libc::ENOSYS || errno == libc::EOPNOTSUPP {
+            let errno = e.raw_os_error().unwrap_or(0);
+            if errno == libc::ENOSYS || errno == libc::EOPNOTSUPP {
                 println!("SKIPPING: openat2 not supported.");
-             } else {
-                 panic!("Strict open FAILED on regular file: {}", e);
-             }
+            } else {
+                panic!("Strict open FAILED on regular file: {}", e);
+            }
         }
     }
 }

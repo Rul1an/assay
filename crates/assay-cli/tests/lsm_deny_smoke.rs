@@ -61,14 +61,16 @@ runtime_monitor:
 
     let mut policy_file = NamedTempFile::new().expect("Failed to create policy file");
     use std::io::Write;
-    policy_file.write_all(policy_content.as_bytes()).expect("Failed to write policy");
+    policy_file
+        .write_all(policy_content.as_bytes())
+        .expect("Failed to write policy");
     let policy_path = policy_file.path().to_owned();
 
     // 3. Spawn assay monitor
     let mut cmd = Command::cargo_bin("assay").expect("Failed to find assay binary");
     cmd.arg("monitor")
-       .arg("--policy")
-       .arg(policy_path.to_str().unwrap());
+        .arg("--policy")
+        .arg(policy_path.to_str().unwrap());
 
     // Allow overriding eBPF path via env var (for CI where artifact is separate from test runner)
     if let Ok(ebpf_path) = std::env::var("ASSAY_EBPF_PATH") {
@@ -91,11 +93,12 @@ runtime_monitor:
             // Failed to deny
             eprintln!("FAILURE: Managed to open victim file!");
             false
-        },
+        }
         Err(e) => {
             eprintln!("Generated error: {:?}", e);
             if let Some(os_err) = e.raw_os_error() {
-                if os_err == libc::EPERM { // EPERM = 1
+                if os_err == libc::EPERM {
+                    // EPERM = 1
                     eprintln!("SUCCESS: Got EPERM as expected.");
                     true
                 } else {
@@ -134,7 +137,10 @@ runtime_monitor:
             let stdout = String::from_utf8_lossy(&output.stdout);
             eprintln!("LSM_HIT Dump:\n{}", stdout);
         } else {
-             eprintln!("bpftool failed: {}", String::from_utf8_lossy(&output.stderr));
+            eprintln!(
+                "bpftool failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 

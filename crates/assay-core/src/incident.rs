@@ -1,17 +1,17 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use assay_common::exports::{EventRecordExport, ProcessTreeExport};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
+use nix::fcntl::{open, openat, renameat, OFlag};
+#[cfg(unix)]
+use nix::sys::stat::{fchmod, Mode};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd};
-#[cfg(unix)]
-use nix::fcntl::{open, openat, OFlag, renameat};
-#[cfg(unix)]
-use nix::sys::stat::{Mode, fchmod};
 
 use uuid::Uuid;
 
@@ -57,7 +57,7 @@ impl IncidentBuilder {
                 },
                 tree: ProcessTreeExport::default(),
                 events: Vec::new(),
-            }
+            },
         }
     }
 
@@ -83,18 +83,19 @@ impl IncidentBuilder {
 
         // 1. Ensure directory exists
         if !output_dir.exists() {
-             fs::create_dir_all(output_dir).context("Failed to create output dir")?;
-             let mut perms = fs::metadata(output_dir)?.permissions();
-             perms.set_mode(0o700);
-             fs::set_permissions(output_dir, perms).context("Failed to secure new output dir")?;
+            fs::create_dir_all(output_dir).context("Failed to create output dir")?;
+            let mut perms = fs::metadata(output_dir)?.permissions();
+            perms.set_mode(0o700);
+            fs::set_permissions(output_dir, perms).context("Failed to secure new output dir")?;
         }
 
         // 2. Open Directory securely (O_DIRECTORY | O_NOFOLLOW)
         let dir_raw_fd = open(
             dir_path_str,
             OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW,
-            Mode::empty()
-        ).context("Failed to open output directory securely")?;
+            Mode::empty(),
+        )
+        .context("Failed to open output directory securely")?;
 
         // SAFETY: We wrap the raw FD immediately to ensure RAII closure.
         let dir_file = unsafe { std::fs::File::from_raw_fd(dir_raw_fd) };
@@ -110,7 +111,10 @@ impl IncidentBuilder {
 
         // SOTA: Guaranteed unique filename to prevent overwrites (collision free)
         let suffix = Uuid::new_v4().simple().to_string();
-        let filename = format!("incident_{}_{}.json", self.bundle.metadata.session_id, suffix);
+        let filename = format!(
+            "incident_{}_{}.json",
+            self.bundle.metadata.session_id, suffix
+        );
         let tmp_filename = format!(".tmp_{}", filename);
 
         let content = serde_json::to_string_pretty(&self.bundle)
@@ -121,8 +125,9 @@ impl IncidentBuilder {
             dir_file.as_raw_fd(),
             tmp_filename.as_str(),
             OFlag::O_CREAT | OFlag::O_WRONLY | OFlag::O_EXCL | OFlag::O_NOFOLLOW,
-            Mode::from_bits_truncate(0o600)
-        ).context("Failed to create temp file securely")?;
+            Mode::from_bits_truncate(0o600),
+        )
+        .context("Failed to create temp file securely")?;
 
         let mut tmp_file = unsafe { std::fs::File::from_raw_fd(tmp_fd) };
 
@@ -136,8 +141,9 @@ impl IncidentBuilder {
             Some(dir_file.as_raw_fd()),
             tmp_filename.as_str(),
             Some(dir_file.as_raw_fd()),
-            filename.as_str()
-        ).context("Failed to rename atomic file")?;
+            filename.as_str(),
+        )
+        .context("Failed to rename atomic file")?;
 
         // 7. Sync Parent Directory
         dir_file.sync_all()?;
@@ -166,7 +172,12 @@ mod tests {
 
         // Check 1: File exists
         assert!(path.exists());
-        assert!(path.file_name().unwrap().to_str().unwrap().contains("test-session"));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("test-session"));
 
         // Check 2: Permissions (0600)
         let perms = fs::metadata(&path)?.permissions();

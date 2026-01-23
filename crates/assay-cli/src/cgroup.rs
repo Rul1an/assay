@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
+use anyhow::{anyhow, Context, Result};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::{Context, Result, anyhow};
 
 /// Manages Cgroup V2 operations for Assay.
 pub struct CgroupManager {
@@ -28,27 +28,35 @@ impl CgroupManager {
 
         // P0 Fix: Robust parsing of /proc/self/cgroup
         // We look for the line starting with "0::" (Unified hierarchy)
-        let content = fs::read_to_string("/proc/self/cgroup")
-            .context("Failed to read /proc/self/cgroup")?;
+        let content =
+            fs::read_to_string("/proc/self/cgroup").context("Failed to read /proc/self/cgroup")?;
 
-        let self_cgroup_line = content.lines()
+        let self_cgroup_line = content
+            .lines()
             .find(|line| line.starts_with("0::"))
-            .ok_or_else(|| anyhow!("Could not find Unified Hierarchy (0::) in /proc/self/cgroup"))?;
+            .ok_or_else(|| {
+                anyhow!("Could not find Unified Hierarchy (0::) in /proc/self/cgroup")
+            })?;
 
-        let self_cgroup_path = self_cgroup_line.split("::").nth(1)
+        let self_cgroup_path = self_cgroup_line
+            .split("::")
+            .nth(1)
             .ok_or_else(|| anyhow!("Invalid cgroup line format"))?;
 
         // Handle root case "0::/" -> "" (empty relative path)
         let relative_path = if self_cgroup_path == "/" {
             Path::new("")
         } else {
-            self_cgroup_path.strip_prefix('/').unwrap_or(self_cgroup_path).as_ref()
+            self_cgroup_path
+                .strip_prefix('/')
+                .unwrap_or(self_cgroup_path)
+                .as_ref()
         };
 
         let root_path = mount_point.join(relative_path);
 
         if !root_path.exists() {
-             return Err(anyhow!("Could not verify own cgroup path: {:?}", root_path));
+            return Err(anyhow!("Could not verify own cgroup path: {:?}", root_path));
         }
 
         Ok(Self { root_path })
@@ -70,21 +78,26 @@ impl CgroupManager {
         // Best effort enable pids controller
         let subtree = self.root_path.join("cgroup.subtree_control");
         if subtree.exists() {
-             // Ignoring errors as we might lack delegation
-             let _ = fs::write(&subtree, "+pids");
+            // Ignoring errors as we might lack delegation
+            let _ = fs::write(&subtree, "+pids");
         }
 
         let meta = fs::metadata(&path)?;
         #[cfg(unix)]
         let id = meta.ino();
         #[cfg(not(unix))]
-        let id = { let _ = meta; 0 }; // Stub for non-Unix
+        let id = {
+            let _ = meta;
+            0
+        }; // Stub for non-Unix
         Ok(SessionCgroup { path, id })
     }
 }
 
 impl SessionCgroup {
-    pub fn id(&self) -> u64 { self.id }
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 
     pub fn add_process(&self, pid: u32) -> Result<()> {
         let procs_path = self.path.join("cgroup.procs");
@@ -94,13 +107,17 @@ impl SessionCgroup {
 
     pub fn freeze(&self) -> Result<()> {
         let p = self.path.join("cgroup.freeze");
-        if p.exists() { fs::write(p, "1")?; }
+        if p.exists() {
+            fs::write(p, "1")?;
+        }
         Ok(())
     }
 
     pub fn thaw(&self) -> Result<()> {
         let p = self.path.join("cgroup.freeze");
-        if p.exists() { fs::write(p, "0")?; }
+        if p.exists() {
+            fs::write(p, "0")?;
+        }
         Ok(())
     }
 
@@ -109,7 +126,7 @@ impl SessionCgroup {
         if p.exists() {
             fs::write(p, "1")?;
         } else {
-             return Err(anyhow!("cgroup.kill missing"));
+            return Err(anyhow!("cgroup.kill missing"));
         }
         Ok(())
     }
@@ -119,7 +136,8 @@ impl SessionCgroup {
         let _ = self.freeze();
 
         let procs = fs::read_to_string(self.path.join("cgroup.procs"))?;
-        let mut pids: Vec<i32> = procs.lines()
+        let mut pids: Vec<i32> = procs
+            .lines()
             .filter_map(|l| l.trim().parse::<i32>().ok())
             .collect();
         // SOTA: Dedupe to prevent double-signaling (which is harmless but sloppy)
@@ -128,7 +146,9 @@ impl SessionCgroup {
 
         // Send SIGTERM via pidfd if possible
         for &pid in &pids {
-            if pid <= 0 { continue; }
+            if pid <= 0 {
+                continue;
+            }
 
             #[cfg(target_os = "linux")]
             unsafe {
@@ -136,7 +156,13 @@ impl SessionCgroup {
                 let fd = libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32;
                 if fd >= 0 {
                     // syscall(SYS_pidfd_send_signal, fd, SIGTERM, NULL, 0)
-                    let _ = libc::syscall(libc::SYS_pidfd_send_signal, fd, libc::SIGTERM, std::ptr::null::<libc::siginfo_t>(), 0);
+                    let _ = libc::syscall(
+                        libc::SYS_pidfd_send_signal,
+                        fd,
+                        libc::SIGTERM,
+                        std::ptr::null::<libc::siginfo_t>(),
+                        0,
+                    );
                     libc::close(fd);
                 } else {
                     // Fallback to classic kill if pidfd fails
@@ -146,9 +172,9 @@ impl SessionCgroup {
 
             #[cfg(all(unix, not(target_os = "linux")))]
             {
-               use nix::sys::signal::{kill, Signal};
-               use nix::unistd::Pid;
-               let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
             }
             #[cfg(not(unix))]
             {
@@ -166,13 +192,17 @@ impl SessionCgroup {
 
     pub fn set_pids_max(&self, max: u32) -> Result<()> {
         let p = self.path.join("pids.max");
-        if p.exists() { fs::write(p, max.to_string())?; }
+        if p.exists() {
+            fs::write(p, max.to_string())?;
+        }
         Ok(())
     }
 
     /// P0 Hardening: Reliable cleanup
     pub fn remove(&self) -> Result<()> {
-        if !self.path.exists() { return Ok(()); }
+        if !self.path.exists() {
+            return Ok(());
+        }
 
         // Retry loop for cgroup removal (busy/not empty)
         for _ in 0..3 {

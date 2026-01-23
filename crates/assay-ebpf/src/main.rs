@@ -1,14 +1,9 @@
 #![no_std]
 #![no_main]
 
-
-
-
-
 #[no_mangle]
 #[link_section = "license"]
 pub static _LICENSE: [u8; 4] = *b"GPL\0";
-
 
 pub mod lsm;
 pub mod socket_lsm;
@@ -21,21 +16,18 @@ pub mod vmlinux;
 
 use assay_common::{MonitorEvent, EVENT_CONNECT, KEY_MONITOR_ALL};
 use aya_ebpf::{
+    helpers::{
+        bpf_get_current_ancestor_cgroup_id, bpf_get_current_cgroup_id, bpf_get_current_pid_tgid,
+    },
     macros::{map, tracepoint},
     maps::{Array, HashMap, RingBuf},
     programs::TracePointContext,
-    helpers::{
-        bpf_get_current_cgroup_id,
-        bpf_get_current_ancestor_cgroup_id,
-        bpf_get_current_pid_tgid,
-    },
 };
 
 #[inline(always)]
 fn current_tgid() -> u32 {
     (bpf_get_current_pid_tgid() >> 32) as u32
 }
-
 
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
@@ -87,15 +79,25 @@ const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
 fn max_ancestor_depth() -> usize {
-    let v = unsafe { CONFIG.get(&KEY_MAX_ANCESTOR_DEPTH) }.copied().unwrap_or(8);
+    let v = unsafe { CONFIG.get(&KEY_MAX_ANCESTOR_DEPTH) }
+        .copied()
+        .unwrap_or(8);
     let v = v as usize;
-    if v > MAX_ANCESTOR_DEPTH_HARD { MAX_ANCESTOR_DEPTH_HARD } else { v }
+    if v > MAX_ANCESTOR_DEPTH_HARD {
+        MAX_ANCESTOR_DEPTH_HARD
+    } else {
+        v
+    }
 }
 
 #[inline(always)]
 fn is_monitored() -> bool {
     // 0. Global Monitor-All Override
-    if unsafe { CONFIG.get(&KEY_MONITOR_ALL) }.copied().unwrap_or(0) != 0 {
+    if unsafe { CONFIG.get(&KEY_MONITOR_ALL) }
+        .copied()
+        .unwrap_or(0)
+        != 0
+    {
         return true;
     }
 
@@ -113,10 +115,14 @@ fn is_monitored() -> bool {
     // 3. Scan Ancestors (prevent nested cgroup escape)
     let depth = max_ancestor_depth();
     for i in 0..MAX_ANCESTOR_DEPTH_HARD {
-        if i >= depth { break; }
+        if i >= depth {
+            break;
+        }
 
         let ancestor_id = unsafe { bpf_get_current_ancestor_cgroup_id(i as i32) };
-        if ancestor_id == 0 { break; } // Root or error
+        if ancestor_id == 0 {
+            break;
+        } // Root or error
 
         if unsafe { MONITORED_CGROUPS.get(&ancestor_id) }.is_some() {
             return true;
@@ -204,7 +210,11 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
-            let n = if raw_sockaddr.len() < DATA_LEN { raw_sockaddr.len() } else { DATA_LEN };
+            let n = if raw_sockaddr.len() < DATA_LEN {
+                raw_sockaddr.len()
+            } else {
+                DATA_LEN
+            };
             core::ptr::copy_nonoverlapping(raw_sockaddr.as_ptr(), data_ptr, n);
         }
         entry.submit(0);
@@ -217,7 +227,6 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
-
 
 #[tracepoint]
 pub fn assay_monitor_fork(ctx: TracePointContext) -> u32 {

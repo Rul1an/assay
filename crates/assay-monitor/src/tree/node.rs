@@ -1,6 +1,6 @@
+use assay_common::exports::{ProcessNodeExport, ProcessStateExport};
 use std::collections::HashSet;
 use std::fs;
-use assay_common::exports::{ProcessNodeExport, ProcessStateExport};
 
 #[derive(Debug, Clone)]
 pub struct ProcessNode {
@@ -83,16 +83,16 @@ pub fn read_children(ppid: u32) -> std::io::Result<Vec<u32>> {
                 // Comm can contain spaces and parenthesis, tricky parsing
                 // Robust way: find last ')' then 2nd field after
                 if let Some(end_comm) = stat.rfind(')') {
-                     let rest = &stat[end_comm+1..];
-                     let mut parts = rest.split_whitespace();
-                     // State is parts[0], PPID is parts[1]
-                     if let Some(ppid_str) = parts.nth(1) {
-                         if let Ok(p) = ppid_str.parse::<u32>() {
-                             if p == ppid {
-                                 children.push(pid);
-                             }
-                         }
-                     }
+                    let rest = &stat[end_comm + 1..];
+                    let mut parts = rest.split_whitespace();
+                    // State is parts[0], PPID is parts[1]
+                    if let Some(ppid_str) = parts.nth(1) {
+                        if let Ok(p) = ppid_str.parse::<u32>() {
+                            if p == ppid {
+                                children.push(pid);
+                            }
+                        }
+                    }
                 }
             }
         }

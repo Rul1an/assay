@@ -1,14 +1,16 @@
+use crate::vmlinux::{file, inode, super_block};
+use crate::{
+    CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS, STATS,
+};
+use assay_common::KEY_MONITOR_ALL;
 use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
-use crate::{MONITORED_CGROUPS, CONFIG, LSM_HIT, LSM_DENY, LSM_BYPASS, DENY_INO, LSM_EVENTS, STATS};
-use assay_common::KEY_MONITOR_ALL;
-use core::ffi::c_void;
-use crate::vmlinux::{file, inode, super_block};
 use aya_log_ebpf::info;
+use core::ffi::c_void;
 
 const MAX_DENY_PATHS: u32 = 256;
 
@@ -28,7 +30,14 @@ static DENY_PATHS_PREFIX: HashMap<u64, DenyPrefix> = HashMap::with_max_entries(M
 // Maps now consolidated in main.rs
 
 // Helper to emit events matching MonitorEvent ABI
-fn emit_event(ctx: &LsmContext, event_id: u32, _cgroup_id: u64, _rule_id: u32, data: &[u8], _path_len: u32) {
+fn emit_event(
+    ctx: &LsmContext,
+    event_id: u32,
+    _cgroup_id: u64,
+    _rule_id: u32,
+    data: &[u8],
+    _path_len: u32,
+) {
     if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 520]>(0) {
         let buf = entry.as_mut_ptr() as *mut u8;
         unsafe {
@@ -45,7 +54,7 @@ fn emit_event(ctx: &LsmContext, event_id: u32, _cgroup_id: u64, _rule_id: u32, d
             core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
 
             // Zero pad
-             if len < 512 {
+            if len < 512 {
                 core::ptr::write_bytes(data_ptr.add(len), 0, 512 - len);
             }
         }
@@ -98,16 +107,20 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     // Hardening: Null Check
     if inode_ptr.is_null() {
-         return Ok(0);
+        return Ok(0);
     }
 
     // Read i_ino
     let i_ino = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0) };
 
     // Read i_generation (SOTA)
-    let i_gen = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
+    let i_gen =
+        unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
 
-    let sb_ptr: *mut super_block = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block).unwrap_or(core::ptr::null_mut()) };
+    let sb_ptr: *mut super_block = unsafe {
+        bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block)
+            .unwrap_or(core::ptr::null_mut())
+    };
 
     let mut s_dev = 0u32;
     if !sb_ptr.is_null() {
@@ -125,7 +138,15 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
             gen: i_gen,
         };
         if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
-            unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0", s_dev as u64, i_ino, i_gen, *rule_id); }
+            unsafe {
+                aya_ebpf::helpers::bpf_printk!(
+                    b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0",
+                    s_dev as u64,
+                    i_ino,
+                    i_gen,
+                    *rule_id
+                );
+            }
 
             if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
                 unsafe { *denies += 1 };
@@ -152,7 +173,14 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     };
 
     if let Some(rule_id) = unsafe { DENY_INO.get(&key_fallback) } {
-        unsafe { aya_ebpf::helpers::bpf_printk!(b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0", s_dev as u64, i_ino, *rule_id); }
+        unsafe {
+            aya_ebpf::helpers::bpf_printk!(
+                b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0",
+                s_dev as u64,
+                i_ino,
+                *rule_id
+            );
+        }
 
         if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
             unsafe { *denies += 1 };

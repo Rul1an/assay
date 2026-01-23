@@ -84,7 +84,10 @@ impl Monitor {
         }
     }
 
-    pub fn set_tier1_rules(&mut self, compiled: &assay_policy::tiers::CompiledPolicy) -> Result<(), MonitorError> {
+    pub fn set_tier1_rules(
+        &mut self,
+        compiled: &assay_policy::tiers::CompiledPolicy,
+    ) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         return self.inner.set_tier1_rules(compiled);
 
@@ -95,7 +98,10 @@ impl Monitor {
         }
     }
 
-    pub fn attach_network_cgroup(&mut self, cgroup_file: &std::fs::File) -> Result<(), MonitorError> {
+    pub fn attach_network_cgroup(
+        &mut self,
+        cgroup_file: &std::fs::File,
+    ) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         return self.inner.attach_network_cgroup(cgroup_file);
 

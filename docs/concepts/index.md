@@ -51,7 +51,7 @@ graph TD
     ---
 
     Recorded agent sessions in a normalized format. The "golden" behavior you test against.
-    
+
     - What is a trace?
     - Trace format (JSONL)
     - Creating and managing traces
@@ -64,7 +64,7 @@ graph TD
     ---
 
     Rules that define "correct" behavior for tool arguments.
-    
+
     - Policy structure
     - Constraint types
     - Built-in formats
@@ -77,7 +77,7 @@ graph TD
     ---
 
     Pure functions that validate agent behavior.
-    
+
     - args_valid
     - sequence_valid
     - tool_blocklist
@@ -90,7 +90,7 @@ graph TD
     ---
 
     Deterministic re-execution without calling LLMs or tools.
-    
+
     - How replay works
     - Strict vs. lenient mode
     - Determinism guarantees
@@ -103,7 +103,7 @@ graph TD
     ---
 
     Intelligent caching to skip redundant work.
-    
+
     - How caching works
     - Fingerprint computation
     - Cache invalidation

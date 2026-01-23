@@ -30,7 +30,7 @@ tools:
         type: string
         required: true
         pattern: "^cust_[0-9]+$"
-  
+
   apply_discount:
     arguments:
       percent:
@@ -40,7 +40,7 @@ tools:
       order_id:
         type: string
         required: true
-  
+
   send_email:
     arguments:
       to:
@@ -89,12 +89,12 @@ arguments:
     type: number
     min: 1
     max: 100
-    
+
   price:
     type: number
     minimum: 0        # Alias for min
     maximum: 9999.99  # Alias for max
-    
+
   rating:
     type: number
     enum: [1, 2, 3, 4, 5]  # Must be one of these values
@@ -108,15 +108,15 @@ arguments:
     type: string
     minLength: 3
     maxLength: 10
-    
+
   email:
     type: string
     format: email  # Built-in format
-    
+
   phone:
     type: string
     pattern: "^\\+[0-9]{10,15}$"  # Regex pattern
-    
+
   status:
     type: string
     enum: ["pending", "approved", "rejected"]
@@ -139,11 +139,11 @@ arguments:
   user_email:
     type: string
     format: email
-  
+
   webhook_url:
     type: string
     format: uri
-  
+
   request_id:
     type: string
     format: uuid
@@ -160,7 +160,7 @@ arguments:
     items:
       type: string
       maxLength: 50
-  
+
   scores:
     type: array
     items:
@@ -200,11 +200,11 @@ arguments:
     type: number
     max: 30
     on_violation: block   # Default: fail the test
-  
+
   legacy_field:
     type: string
     on_violation: warn    # Log warning, don't fail
-  
+
   debug_mode:
     type: boolean
     on_violation: log     # Silent log, continue
@@ -231,7 +231,7 @@ tests:
   - id: validate_all_args
     metric: args_valid
     policy: policies/customer-service.yaml
-  
+
   - id: validate_payments_only
     metric: args_valid
     policy: policies/payments.yaml
@@ -265,7 +265,7 @@ definitions:
   customer_id:
     type: string
     pattern: "^cust_[0-9]+$"
-  
+
   order_id:
     type: string
     pattern: "^ord_[0-9]+$"
@@ -276,7 +276,7 @@ tools:
     arguments:
       id:
         $ref: "common.yaml#/definitions/customer_id"
-  
+
   get_order:
     arguments:
       order_id:
@@ -301,13 +301,13 @@ tools:
         type: number
         min: 1
         max: 99
-  
+
   apply_coupon:
     arguments:
       code:
         type: string
         pattern: "^[A-Z0-9]{6,12}$"
-      
+
   process_payment:
     arguments:
       amount:
@@ -335,7 +335,7 @@ tools:
         pattern: "^P[0-9]{8}$"
       include_history:
         type: boolean
-  
+
   prescribe_medication:
     arguments:
       medication_id:

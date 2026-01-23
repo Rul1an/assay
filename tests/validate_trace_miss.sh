@@ -2,7 +2,7 @@
 set -e
 
 # Path to the compiled binary
-VERDICT_BIN="cargo run -q --bin verdict --"
+
 
 # Create a temporary directory for the test
 TEST_DIR=$(mktemp -d)

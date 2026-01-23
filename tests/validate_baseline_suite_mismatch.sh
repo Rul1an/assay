@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERDICT_BIN="cargo run -q --bin verdict --"
+
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 

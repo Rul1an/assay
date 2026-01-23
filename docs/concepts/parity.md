@@ -87,7 +87,7 @@ pub fn verify_parity(check: &PolicyCheck, input: &CheckInput) -> ParityResult {
     let batch_result = batch::evaluate(check, input);
     let streaming_result = streaming::evaluate(check, input);
 
-    let is_identical = 
+    let is_identical =
         batch_result.outcome == streaming_result.outcome
         && batch_result.reason == streaming_result.reason;
 
@@ -126,7 +126,7 @@ The parity test is a **release gate**:
 # .github/workflows/parity.yml
 - name: Run parity tests
   run: cargo test -p assay-core --test parity -- --nocapture
-  
+
 - name: Check result
   if: failure()
   run: |

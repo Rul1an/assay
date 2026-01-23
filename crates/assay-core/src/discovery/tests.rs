@@ -82,7 +82,7 @@ mod test_suite {
         // For now, let's just run a shell command that includes the string.
 
         // This is tricky to test reliably across platforms without a dedicated helper binary.
-        // I will skip the complex process spawning for this quick fix and instead specificy that
+        // I will skip the complex process spawning for this quick fix and instead specify that
         // unit testing this requires mocked Traits, which is a larger refactor.
         // I'll add a comment about this constraint.
 

@@ -22,7 +22,7 @@ metadata:
 
 tests:
   # --- Pass cases ---
-  
+
   - id: args_valid_pass_basic
     description: "Valid args within constraints"
     check_type: args_valid

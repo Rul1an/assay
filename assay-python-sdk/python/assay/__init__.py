@@ -23,4 +23,3 @@ def validate(policy_path: str, traces: list) -> dict:
         traces = [traces]
 
     return cov.analyze(traces)
-

@@ -10,10 +10,11 @@ use sysinfo::System;
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     let policy_config = if let Some(path) = &args.policy {
         let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
-        p.discovery.unwrap_or(assay_core::mcp::policy::DiscoveryConfig {
-            enabled: true,
-            ..Default::default()
-        })
+        p.discovery
+            .unwrap_or(assay_core::mcp::policy::DiscoveryConfig {
+                enabled: true,
+                ..Default::default()
+            })
     } else {
         // No policy? Use defaults tailored for CLI usage
         assay_core::mcp::policy::DiscoveryConfig {
@@ -22,17 +23,15 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         }
     };
 
-
-
     let mut servers = Vec::new();
 
     if policy_config.enabled {
         // Use methods from policy, or default if empty
         let methods = if policy_config.methods.is_empty() {
-             vec![
+            vec![
                 assay_core::mcp::policy::DiscoveryMethod::ConfigFiles,
-                assay_core::mcp::policy::DiscoveryMethod::Processes
-             ]
+                assay_core::mcp::policy::DiscoveryMethod::Processes,
+            ]
         } else {
             policy_config.methods.clone()
         };
@@ -69,11 +68,21 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
             .count(),
         managed: servers
             .iter()
-            .filter(|s| matches!(s.policy_status, assay_core::discovery::types::PolicyStatus::Managed { .. }))
+            .filter(|s| {
+                matches!(
+                    s.policy_status,
+                    assay_core::discovery::types::PolicyStatus::Managed { .. }
+                )
+            })
             .count(),
         unmanaged: servers
             .iter()
-            .filter(|s| matches!(s.policy_status, assay_core::discovery::types::PolicyStatus::Unmanaged))
+            .filter(|s| {
+                matches!(
+                    s.policy_status,
+                    assay_core::discovery::types::PolicyStatus::Unmanaged
+                )
+            })
             .count(),
         with_auth: servers
             .iter()
@@ -115,7 +124,6 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         _ => {
             // table/text - usually stdout only
             print_table(&inventory);
-
         }
     }
 
@@ -124,7 +132,12 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     let mut exit_code = 0;
 
     // Check Unmanaged
-    let unmanaged_action = if args.fail_on.as_ref().map(|v| v.contains(&"unmanaged".to_string())).unwrap_or(false) {
+    let unmanaged_action = if args
+        .fail_on
+        .as_ref()
+        .map(|v| v.contains(&"unmanaged".to_string()))
+        .unwrap_or(false)
+    {
         ActionLevel::Fail
     } else {
         policy_config.on_findings.unmanaged_server.clone()
@@ -144,7 +157,12 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     }
 
     // Check No Auth
-    let no_auth_action = if args.fail_on.as_ref().map(|v| v.contains(&"no_auth".to_string())).unwrap_or(false) {
+    let no_auth_action = if args
+        .fail_on
+        .as_ref()
+        .map(|v| v.contains(&"no_auth".to_string()))
+        .unwrap_or(false)
+    {
         ActionLevel::Fail
     } else {
         policy_config.on_findings.no_auth.clone()
@@ -153,14 +171,22 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     if summary.without_auth > 0 {
         match no_auth_action {
             ActionLevel::Fail => {
-                 eprintln!("Error: Found {} servers without authentication.", summary.without_auth);
-                 // Keep highest specific error code or just return failure?
-                 if exit_code == 0 { exit_code = 11; }
+                eprintln!(
+                    "Error: Found {} servers without authentication.",
+                    summary.without_auth
+                );
+                // Keep highest specific error code or just return failure?
+                if exit_code == 0 {
+                    exit_code = 11;
+                }
             }
-             ActionLevel::Warn => {
-                 eprintln!("Warning: Found {} servers without authentication.", summary.without_auth);
-             }
-             ActionLevel::Log => {}
+            ActionLevel::Warn => {
+                eprintln!(
+                    "Warning: Found {} servers without authentication.",
+                    summary.without_auth
+                );
+            }
+            ActionLevel::Log => {}
         }
     }
 
@@ -228,12 +254,12 @@ fn get_config_search_paths() -> Vec<PathBuf> {
 
         // Windows path
         if cfg!(target_os = "windows") {
-             // Prefer %APPDATA% if set (Standard & Testable), else fallback to home/AppData/Roaming
-             if let Ok(appdata) = std::env::var("APPDATA") {
-                 paths.push(PathBuf::from(appdata).join("Claude/claude_desktop_config.json"));
-             } else {
-                 paths.push(home.join("AppData/Roaming/Claude/claude_desktop_config.json"));
-             }
+            // Prefer %APPDATA% if set (Standard & Testable), else fallback to home/AppData/Roaming
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                paths.push(PathBuf::from(appdata).join("Claude/claude_desktop_config.json"));
+            } else {
+                paths.push(home.join("AppData/Roaming/Claude/claude_desktop_config.json"));
+            }
         }
     }
     paths

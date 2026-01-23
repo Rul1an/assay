@@ -45,7 +45,7 @@ if [[ "$WARM_CODE" -ne 0 ]]; then
 fi
 
 # Runs
-FAILS=0
+
 NONZERO_CODES=0
 CACHE_MISS_COUNT=0
 

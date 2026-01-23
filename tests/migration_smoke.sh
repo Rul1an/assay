@@ -41,7 +41,7 @@ cd "$TEST_DIR"
 
 echo "0.1 Checking Deprecation Warning..."
 # Create a dummy trace or just run with fake model
-OUTPUT=$(../../../$APP run --config legacy.yaml 2>&1 || true)
+OUTPUT=$(../../../"$APP" run --config legacy.yaml 2>&1 || true)
 if [[ "$OUTPUT" != *"WARN: Deprecated policy file"* ]]; then
     echo "❌ Expected deprecation warning missing"
     echo "Output: $OUTPUT"
@@ -49,14 +49,14 @@ if [[ "$OUTPUT" != *"WARN: Deprecated policy file"* ]]; then
 fi
 
 echo "0.2 Checking Warning Suppression (MCP_CONFIG_LEGACY)..."
-OUTPUT=$(MCP_CONFIG_LEGACY=1 ../../../$APP run --config legacy.yaml 2>&1 || true)
+OUTPUT=$(MCP_CONFIG_LEGACY=1 ../../../"$APP" run --config legacy.yaml 2>&1 || true)
 if [[ "$OUTPUT" == *"WARN: Deprecated policy file"* ]]; then
     echo "❌ Warning NOT suppressed by env var"
     exit 1
 fi
 
 echo "1. Running migration..."
-../../../$APP migrate --config legacy.yaml
+../../../"$APP" migrate --config legacy.yaml
 
 echo "2. Verifying Inline Content..."
 if ! grep -q "properties:" legacy.yaml; then

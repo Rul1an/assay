@@ -7,7 +7,6 @@ VERDICT=$PWD/target/release/verdict
 
 export PYTHONPATH=$PWD/assay/python
 TRACE_FILE="$PWD/assay/python/examples/openai-demo/traces/openai.jsonl"
-CONFIG_FILE="$PWD/assay/python/examples/openai-demo/verdict.yaml"
 
 # Truncate
 : > "$TRACE_FILE"

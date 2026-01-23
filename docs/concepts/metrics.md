@@ -91,7 +91,7 @@ tests:
     metric: args_valid
     policy: policies/payments.yaml
     tools: [process_payment, refund]  # Only check these
-    
+
   - id: strict_mode
     metric: args_valid
     policy: policies/all.yaml
@@ -151,8 +151,8 @@ rules:
    Rule: require
    Expected: authenticate to be called
    Actual: authenticate was never called
-   
-   Rule: before  
+
+   Rule: before
    Expected: authenticate before get_patient_record
    Actual: get_patient_record called without prior authenticate
 ```
@@ -230,7 +230,7 @@ blocklist:
    Violation: Blocked tool called
    Tool: admin_delete
    Policy: Blocklist includes 'admin_delete'
-   
+
    Calls found: 1
 ```
 
@@ -332,7 +332,7 @@ pub fn my_custom_metric(trace: &Trace, config: &Config) -> MetricResult {
     let violations = trace.tool_calls()
         .filter(|call| !is_valid(call))
         .collect();
-    
+
     MetricResult {
         status: if violations.is_empty() { Pass } else { Fail },
         violations,

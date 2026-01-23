@@ -17,17 +17,17 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
-      
+
       - name: Install Assay
         run: cargo install assay-cli
-      
+
       - name: Run evaluations
         run: |
           assay run \
@@ -49,13 +49,13 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
-      
+
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -65,13 +65,13 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-assay-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Install Assay
         run: |
           if ! command -v assay &> /dev/null; then
             cargo install assay-cli
           fi
-      
+
       - name: Run evaluations
         run: |
           assay run \
@@ -106,16 +106,16 @@ jobs:
           - name: edge-cases
             config: evals/edge-cases.yaml
             trace: traces/edge-cases.jsonl
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
-      
+
       - name: Install Assay
         run: cargo install assay-cli
-      
+
       - name: Run ${{ matrix.suite.name }} evaluations
         run: |
           assay run \
@@ -138,16 +138,16 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
-      
+
       - name: Install Assay
         run: cargo install assay-cli
-      
+
       - name: Run evaluations
         id: eval
         run: |
@@ -157,7 +157,7 @@ jobs:
             --strict \
             --db .assay/eval.db
         continue-on-error: true
-      
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         if: always()
@@ -167,7 +167,7 @@ jobs:
             .assay/
             run.json
           retention-days: 7
-      
+
       - name: Check result
         if: steps.eval.outcome == 'failure'
         run: exit 1
@@ -188,16 +188,16 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
-      
+
       - name: Install Assay
         run: cargo install assay-cli
-      
+
       - name: Run evaluations
         working-directory: ./agents/my-agent
         run: |

@@ -76,10 +76,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Assay
         run: cargo install assay-cli
-      
+
       - name: Run evals
         run: assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl --strict
 ```

@@ -108,7 +108,7 @@ pub async fn validate(
             // We use the same lookup logic as TraceClient::complete
             // But here we want to collect ALL misses, not just fail on first.
             // Since `complete` is not exposed as "check only", we iterate.
-            // Actually TraceClient doesn't expose keys publically yet.
+            // Actually TraceClient doesn't expose keys publicly yet.
             // We might need to call complete and catch error?
             // OR better: call complete() on client. Since it returns LlmResponse or Err(Diagnostic)
 

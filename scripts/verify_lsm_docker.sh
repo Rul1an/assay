@@ -92,6 +92,7 @@ else
   echo "----------------------------------------------------------------"
 
   # Robustly find cargo
+# shellcheck disable=SC1091
 if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
@@ -129,6 +130,7 @@ fi
 
 # Create structured log directory for CI
 mkdir -p /tmp/assay-lsm-verify
+# shellcheck disable=SC2034
 LOG_DIR="/tmp/assay-lsm-verify"
 
 # Generate Policy (Legacy format for reference, but we use deny_modern.yaml)
@@ -162,6 +164,7 @@ EOF
 # ------------------------------------------------------------------------------
 # 2. Runtime Verification Phase (Smart Runner)
 # ------------------------------------------------------------------------------
+# shellcheck disable=SC2016
 RUN_TEST_CMD='
 set -e
 # Cleanup any stale monitors
@@ -174,7 +177,7 @@ echo ">> [Diag] Tracefs: $(mount | grep tracefs || echo "Missing")"
 echo ">> [Diag] BPFFS: $(mount | grep bpf || echo "Missing")"
 
 if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
-  echo "⚠️  SKIP: 'bpf' not found in Active LSMs. Kernel cmdline needs 'lsm=...,bpf'."
+  echo "⚠️  SKIP: '\''bpf'\'' not found in Active LSMs. Kernel cmdline needs '\''lsm=...,bpf'\''."
   if [ "${CI_MODE:-0}" -eq 1 ] && [ "${STRICT_LSM_CHECK:-0}" -eq 1 ]; then
       echo "❌ FAILURE: CI Mode (Strict) requires BPF LSM support."
       exit 1
@@ -380,7 +383,9 @@ fi
 echo "🐳 Docker Fallback..."
 
 HOST_HAS_TRACEFS=0
+# shellcheck disable=SC2034
 [ -d /sys/kernel/tracing ] && HOST_HAS_TRACEFS=1
+# shellcheck disable=SC2034
 [ -d /sys/kernel/debug ] && HOST_HAS_DEBUGFS=1
 
 # Preflight Skip logic
@@ -405,6 +410,7 @@ DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml")
 [ -d /sys/kernel/debug ] && DOCKER_ARGS+=(-v /sys/kernel/debug:/sys/kernel/debug)
 [ -d /sys/kernel/tracing ] && DOCKER_ARGS+=(-v /sys/kernel/tracing:/sys/kernel/tracing)
 
+# shellcheck disable=SC2016
 DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   set -euo pipefail
   mkdir -p /sys/kernel/tracing /sys/kernel/debug /sys/fs/bpf || true

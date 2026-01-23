@@ -2,10 +2,10 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::option::Option;
 use std::string::String;
-use std::vec::Vec;
-use std::option::Option; // Option is usually in core prelude, but to be safe. Actually Option/Result are usually available.
-// String and Vec are the main ones missing in no_std default.
+use std::vec::Vec; // Option is usually in core prelude, but to be safe. Actually Option/Result are usually available.
+                   // String and Vec are the main ones missing in no_std default.
 
 /// Exported process node (from ProcessTreeTracker)
 #[derive(Debug, Clone, Serialize)]
@@ -30,8 +30,7 @@ pub enum ProcessStateExport {
 }
 
 /// Exported process tree
-#[derive(Debug, Clone, Serialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct ProcessTreeExport {
     /// Root PIDs (explicitly monitored)
     pub roots: Vec<u32>,
@@ -42,8 +41,6 @@ pub struct ProcessTreeExport {
     /// Total count of nodes
     pub total_count: usize,
 }
-
-
 
 /// Kill result export (from kill_tree)
 #[derive(Debug, Clone, Serialize)]
@@ -101,7 +98,7 @@ impl EventRecordExport {
         pid: u32,
         timestamp: chrono::DateTime<chrono::Utc>,
         event_type: String,
-        details: serde_json::Value
+        details: serde_json::Value,
     ) -> Self {
         Self {
             timestamp: timestamp.to_rfc3339(),

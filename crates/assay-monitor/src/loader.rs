@@ -1,16 +1,16 @@
-use std::sync::{Arc, Mutex};
+use crate::events::{self, EventStream};
+use crate::MonitorError;
+use assay_common::KEY_MONITOR_ALL;
+use assay_policy::tiers::CompiledPolicy;
+use aya::maps::lpm_trie::Key;
 use aya::{
     maps::{HashMap as AyaHashMap, LpmTrie, RingBuf},
     programs::{Lsm, TracePoint},
-    Ebpf, Btf,
+    Btf, Ebpf,
 };
-use aya::maps::lpm_trie::Key;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use crate::events::{self, EventStream};
-use crate::MonitorError;
-use assay_policy::tiers::CompiledPolicy;
-use assay_common::KEY_MONITOR_ALL;
 
 #[cfg(target_os = "linux")]
 pub struct LinuxMonitor {
@@ -40,7 +40,8 @@ impl LinuxMonitor {
 
     pub fn load_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, MonitorError> {
         let path_ref = path.as_ref();
-        let data = std::fs::read(path_ref).map_err(|e| MonitorError::FileError(format!("{}: {}", path_ref.display(), e)))?;
+        let data = std::fs::read(path_ref)
+            .map_err(|e| MonitorError::FileError(format!("{}: {}", path_ref.display(), e)))?;
         Self::new(&data)
     }
 
@@ -48,9 +49,14 @@ impl LinuxMonitor {
         Self::new(bytes)
     }
 
-    pub fn set_config(&mut self, config: &std::collections::HashMap<u32, u32>) -> Result<(), MonitorError> {
+    pub fn set_config(
+        &mut self,
+        config: &std::collections::HashMap<u32, u32>,
+    ) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        let map = bpf.map_mut("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
+        let map = bpf
+            .map_mut("CONFIG")
+            .ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
         let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
 
         for (k, v) in config {
@@ -73,7 +79,9 @@ impl LinuxMonitor {
 
     pub fn get_config_u32(&mut self, key: u32) -> Result<u32, MonitorError> {
         let bpf = self.bpf.lock().unwrap();
-        let map = bpf.map("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
+        let map = bpf
+            .map("CONFIG")
+            .ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
         let hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
         Ok(hm.get(&key, 0).unwrap_or(0))
     }
@@ -89,15 +97,17 @@ impl LinuxMonitor {
 
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         let val = if enabled { 1 } else { 0 };
-        let config = std::collections::HashMap::from([
-             (KEY_MONITOR_ALL, val),
-        ]);
+        let config = std::collections::HashMap::from([(KEY_MONITOR_ALL, val)]);
         self.set_config(&config)
     }
 
     pub fn set_monitored_pids(&mut self, pids: &[u32]) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        let map = bpf.map_mut("MONITORED_PIDS").ok_or(MonitorError::MapNotFound { name: "MONITORED_PIDS" })?;
+        let map = bpf
+            .map_mut("MONITORED_PIDS")
+            .ok_or(MonitorError::MapNotFound {
+                name: "MONITORED_PIDS",
+            })?;
         let mut hm: AyaHashMap<_, u32, u8> = AyaHashMap::try_from(map)?;
         for &pid in pids {
             hm.insert(pid, 1, 0)?;
@@ -107,7 +117,11 @@ impl LinuxMonitor {
 
     pub fn set_monitored_cgroups(&mut self, cgroups: &[u64]) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        let map = bpf.map_mut("MONITORED_CGROUPS").ok_or(MonitorError::MapNotFound { name: "MONITORED_CGROUPS" })?;
+        let map = bpf
+            .map_mut("MONITORED_CGROUPS")
+            .ok_or(MonitorError::MapNotFound {
+                name: "MONITORED_CGROUPS",
+            })?;
         let mut hm: AyaHashMap<_, u64, u8> = AyaHashMap::try_from(map)?;
         for &cg in cgroups {
             hm.insert(cg, 1, 0)?;
@@ -125,59 +139,59 @@ impl LinuxMonitor {
 
         // 1. Tracepoints
         if let Some(prog) = bpf.program_mut("assay_monitor_openat") {
-             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                  tp.load()?;
-                  let link_id = tp.attach("syscalls", "sys_enter_openat")?;
-                  let link = tp.take_link(link_id)?;
-                  self.links.push(MonitorLink::TracePoint(link));
-                  println!("DEBUG: Attached Tracepoint sys_enter_openat");
-             }
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                let link_id = tp.attach("syscalls", "sys_enter_openat")?;
+                let link = tp.take_link(link_id)?;
+                self.links.push(MonitorLink::TracePoint(link));
+                println!("DEBUG: Attached Tracepoint sys_enter_openat");
+            }
         }
         if let Some(prog) = bpf.program_mut("assay_monitor_openat2") {
-             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                  tp.load()?;
-                  let link_id = tp.attach("syscalls", "sys_enter_openat2")?;
-                  let link = tp.take_link(link_id)?;
-                  self.links.push(MonitorLink::TracePoint(link));
-                  println!("DEBUG: Attached Tracepoint sys_enter_openat2");
-             }
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                let link_id = tp.attach("syscalls", "sys_enter_openat2")?;
+                let link = tp.take_link(link_id)?;
+                self.links.push(MonitorLink::TracePoint(link));
+                println!("DEBUG: Attached Tracepoint sys_enter_openat2");
+            }
         }
         if let Some(prog) = bpf.program_mut("assay_monitor_connect") {
-             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                  tp.load()?;
-                  let link_id = tp.attach("syscalls", "sys_enter_connect")?;
-                  let link = tp.take_link(link_id)?;
-                  self.links.push(MonitorLink::TracePoint(link));
-                  println!("DEBUG: Attached Tracepoint sys_enter_connect");
-             }
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                let link_id = tp.attach("syscalls", "sys_enter_connect")?;
+                let link = tp.take_link(link_id)?;
+                self.links.push(MonitorLink::TracePoint(link));
+                println!("DEBUG: Attached Tracepoint sys_enter_connect");
+            }
         }
         if let Some(prog) = bpf.program_mut("assay_monitor_fork") {
-             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                  tp.load()?;
-                  match tp.attach("syscalls", "sys_enter_fork") {
-                      Ok(link_id) => {
-                          if let Ok(link) = tp.take_link(link_id) {
-                              self.links.push(MonitorLink::TracePoint(link));
-                              println!("DEBUG: Attached Tracepoint sys_enter_fork");
-                          }
-                      },
-                      Err(e) => eprintln!("WARN: Failed to attach sys_enter_fork: {}", e),
-                  }
-             }
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                match tp.attach("syscalls", "sys_enter_fork") {
+                    Ok(link_id) => {
+                        if let Ok(link) = tp.take_link(link_id) {
+                            self.links.push(MonitorLink::TracePoint(link));
+                            println!("DEBUG: Attached Tracepoint sys_enter_fork");
+                        }
+                    }
+                    Err(e) => eprintln!("WARN: Failed to attach sys_enter_fork: {}", e),
+                }
+            }
         }
 
         // 2. LSM
         {
-             if let Some(prog) = bpf.program_mut("file_open_lsm") {
-                  if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
-                      let btf = Btf::from_sys_fs()?;
-                      lsm.load("file_open", &btf)?;
-                      let link_id = lsm.attach()?;
-                      let link = lsm.take_link(link_id)?;
-                      self.links.push(MonitorLink::Lsm(link));
-                      println!("DEBUG: Attached LSM file_open");
-                  }
-             }
+            if let Some(prog) = bpf.program_mut("file_open_lsm") {
+                if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
+                    let btf = Btf::from_sys_fs()?;
+                    lsm.load("file_open", &btf)?;
+                    let link_id = lsm.attach()?;
+                    let link = lsm.take_link(link_id)?;
+                    self.links.push(MonitorLink::Lsm(link));
+                    println!("DEBUG: Attached LSM file_open");
+                }
+            }
         }
 
         Ok(())
@@ -190,7 +204,7 @@ impl LinuxMonitor {
         if let Some(map) = bpf.map_mut("DENY_PATHS_EXACT") {
             let mut hm: AyaHashMap<_, u64, u32> = AyaHashMap::try_from(map)?;
             for (key, rule_id) in compiled.tier1.file_exact_entries() {
-                 hm.insert(key, rule_id, 0)?;
+                hm.insert(key, rule_id, 0)?;
             }
         }
 
@@ -207,7 +221,10 @@ impl LinuxMonitor {
                     gen: rule.gen,
                 };
                 hm.insert(key_std, rule.rule_id, 0)?;
-                println!("DEBUG: Inserted Inode Rule (Std): dev={} gen={} ino={} rule_id={}", rule.dev, rule.gen, rule.ino, rule.rule_id);
+                println!(
+                    "DEBUG: Inserted Inode Rule (Std): dev={} gen={} ino={} rule_id={}",
+                    rule.dev, rule.gen, rule.ino, rule.rule_id
+                );
 
                 // 2. Alternate/Old encoding logic: (major << 20) | minor
                 // We decode rule.dev first (which is new_encoded) to get major/minor back
@@ -223,7 +240,6 @@ impl LinuxMonitor {
                 hm.insert(key_alt, rule.rule_id, 0)?;
                 println!("DEBUG: Inserted Inode Rule (Alt): dev={} (maj={} min={}) gen={} ino={} rule_id={}", dev_alt, major, minor, rule.gen, rule.ino, rule.rule_id);
 
-
                 // SOTA Hardening: Always insert default-generation (0) rule as fallback
                 // This covers cases where:
                 // 1. Kernel logic falls back to checking gen=0
@@ -236,7 +252,10 @@ impl LinuxMonitor {
                         gen: 0,
                     };
                     hm.insert(key_fallback_std, rule.rule_id, 0)?;
-                    println!("DEBUG: Inserted Fallback Rule (Std): dev={} gen=0 ino={} rule_id={}", rule.dev, rule.ino, rule.rule_id);
+                    println!(
+                        "DEBUG: Inserted Fallback Rule (Std): dev={} gen=0 ino={} rule_id={}",
+                        rule.dev, rule.ino, rule.rule_id
+                    );
 
                     let key_fallback_alt = InodeKeyMap {
                         ino: rule.ino,
@@ -244,7 +263,10 @@ impl LinuxMonitor {
                         gen: 0,
                     };
                     hm.insert(key_fallback_alt, rule.rule_id, 0)?;
-                    println!("DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}", dev_alt, rule.ino, rule.rule_id);
+                    println!(
+                        "DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}",
+                        dev_alt, rule.ino, rule.rule_id
+                    );
                 }
             }
         }
@@ -255,7 +277,6 @@ impl LinuxMonitor {
                 hm.insert(hash, [len, rule_id], 0)?;
             }
         }
-
 
         if let Some(map) = bpf.map_mut("CIDR_RULES_V4") {
             let mut trie: LpmTrie<_, [u8; 4], u32> = LpmTrie::try_from(map)?;
@@ -268,7 +289,10 @@ impl LinuxMonitor {
         Ok(())
     }
 
-    pub fn attach_network_cgroup(&mut self, _cgroup_file: &std::fs::File) -> Result<(), MonitorError> {
+    pub fn attach_network_cgroup(
+        &mut self,
+        _cgroup_file: &std::fs::File,
+    ) -> Result<(), MonitorError> {
         // Stub for compatibility
         Ok(())
     }
@@ -286,9 +310,13 @@ impl LinuxMonitor {
                     if let Some(map) = bpf.map_mut("EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
-                                if item.len() == 0 { continue; }
+                                if item.len() == 0 {
+                                    continue;
+                                }
                                 let ev = events::parse_event(&item);
-                                if tx.blocking_send(ev).is_err() { break 'outer; }
+                                if tx.blocking_send(ev).is_err() {
+                                    break 'outer;
+                                }
                             }
                         }
                     }
@@ -296,11 +324,15 @@ impl LinuxMonitor {
                     // Poll LSM Events
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
-                             while let Some(item) = ring_buf.next() {
-                                 if item.len() == 0 { continue; }
-                                 let ev = events::parse_event(&item);
-                                 if tx.blocking_send(ev).is_err() { break 'outer; }
-                             }
+                            while let Some(item) = ring_buf.next() {
+                                if item.len() == 0 {
+                                    continue;
+                                }
+                                let ev = events::parse_event(&item);
+                                if tx.blocking_send(ev).is_err() {
+                                    break 'outer;
+                                }
+                            }
                         }
                     }
                 }

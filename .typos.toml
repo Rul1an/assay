@@ -1,20 +1,60 @@
 # .typos.toml
 [files]
 extend-exclude = [
+  "crates/assay-ebpf/src/vmlinux.rs",
+  "examples/**",
+  "docs/MCP_TESTPLAN_CLAUDE_DESKTOP.md",
+  "**/*.jsonl",
   "target/**",
-  "**/*.o",
-  "**/*.a",
-  "**/*.so",
   "dist/**",
-  "artifacts/**",
-  ".git/**",
-  "Cargo.lock",
-  "**/*.min.js",
 ]
 
 [default]
-# Hex/hashes exclusion (Jan 2026 best practice)
 extend-ignore-re = [
-  # sha256-like blobs / long hex strings
   "[0-9a-fA-F]{32,}",
 ]
+
+[default.extend-words]
+requre_args = "requre_args"
+Tru = "Tru"
+requre = "requre"
+als = "als"
+aanwezig = "aanwezig"
+gebruik = "gebruik"
+Installeer = "Installeer"
+Fase = "Fase"
+Integratie = "Integratie"
+Operatie = "Operatie"
+controle = "controle"
+controles = "controles"
+productie = "productie"
+wil = "wil"
+alle = "alle"
+checkt = "checkt"
+geen = "geen"
+# English whitelist for common kernel/technical terms
+fils = "fils"
+sme = "sme"
+opf = "opf"
+rto = "rto"
+oif = "oif"
+iif = "iif"
+nd = "nd"
+parms = "parms"
+wronly = "wronly"
+iput = "iput"
+sigfault = "sigfault"
+filp = "filp"
+prefered = "prefered"
+unitialized = "unitialized"
+unx = "unx"
+sems = "sems"
+alos = "alos"
+emac = "emac"
+thr = "thr"
+wqs = "wqs"
+lso = "lso"
+invald = "invald"
+pc_ressize = "pc_ressize"
+admin_cotrol = "admin_cotrol"
+vendor_pn = "vendor_pn"

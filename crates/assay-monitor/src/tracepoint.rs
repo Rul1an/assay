@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use anyhow::{Result, Context};
-use std::collections::HashMap;
 
 /// Resolves field offsets for syscall tracepoints by reading the kernel's format file.
 pub struct TracepointResolver;
@@ -26,13 +26,16 @@ impl TracepointResolver {
             .unwrap_or(24);
         map.insert(1, connect_sa);
 
-        let fork_parent = Self::find_offset("sched", "sched_process_fork", "parent_pid").unwrap_or(24);
+        let fork_parent =
+            Self::find_offset("sched", "sched_process_fork", "parent_pid").unwrap_or(24);
         map.insert(2, fork_parent);
 
-        let fork_child = Self::find_offset("sched", "sched_process_fork", "child_pid").unwrap_or(44);
+        let fork_child =
+            Self::find_offset("sched", "sched_process_fork", "child_pid").unwrap_or(44);
         map.insert(3, fork_child);
 
-        let openat2_fn = Self::find_offset("syscalls", "sys_enter_openat2", "filename").unwrap_or(24);
+        let openat2_fn =
+            Self::find_offset("syscalls", "sys_enter_openat2", "filename").unwrap_or(24);
         map.insert(4, openat2_fn);
 
         map
@@ -40,10 +43,7 @@ impl TracepointResolver {
 
     /// Reads tracepoint format file, checking tracefs first then debugfs.
     pub fn find_offset(category: &str, event: &str, field: &str) -> Result<u32> {
-        let potential_roots = [
-            "/sys/kernel/tracing",
-            "/sys/kernel/debug/tracing",
-        ];
+        let potential_roots = ["/sys/kernel/tracing", "/sys/kernel/debug/tracing"];
 
         for root in potential_roots {
             let path = format!("{}/events/{}/{}/format", root, category, event);
@@ -52,7 +52,11 @@ impl TracepointResolver {
             }
         }
 
-        Err(anyhow::anyhow!("Tracepoint format file not found for {}/{}", category, event))
+        Err(anyhow::anyhow!(
+            "Tracepoint format file not found for {}/{}",
+            category,
+            event
+        ))
     }
 
     fn parse_format_file(path: &str, field_name: &str) -> Result<u32> {
@@ -63,7 +67,9 @@ impl TracepointResolver {
             // Format: field:const char *filename; offset:16; size:8; signed:0;
             if line.starts_with("field:") {
                 let parts: Vec<&str> = line.split(';').collect();
-                if parts.len() < 2 { continue; }
+                if parts.len() < 2 {
+                    continue;
+                }
 
                 // Parse "field:..." part to extract name
                 // "field:const char *filename" -> last token is "filename" or "*filename"
@@ -76,20 +82,24 @@ impl TracepointResolver {
                 let actual_name = actual_name.trim_start_matches('*');
 
                 if actual_name == field_name {
-                     // Found it! Parse offset.
-                     // Search for "offset:N" part
-                     for part in parts.iter().skip(1) {
-                         let part = part.trim();
-                         if part.starts_with("offset:") {
-                             let val_str = part.strip_prefix("offset:").unwrap_or("0");
-                             let val = val_str.parse::<u32>().context("Failed to parse offset")?;
-                             return Ok(val);
-                         }
-                     }
+                    // Found it! Parse offset.
+                    // Search for "offset:N" part
+                    for part in parts.iter().skip(1) {
+                        let part = part.trim();
+                        if part.starts_with("offset:") {
+                            let val_str = part.strip_prefix("offset:").unwrap_or("0");
+                            let val = val_str.parse::<u32>().context("Failed to parse offset")?;
+                            return Ok(val);
+                        }
+                    }
                 }
             }
         }
 
-        Err(anyhow::anyhow!("Field '{}' not found in format file '{}'", field_name, path))
+        Err(anyhow::anyhow!(
+            "Field '{}' not found in format file '{}'",
+            field_name,
+            path
+        ))
     }
 }

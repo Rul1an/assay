@@ -12,7 +12,7 @@ set -e
 
 # --- Configuration ---
 GITHUB_REPO="Rul1an/assay"
-BINARY_NAME="assay"
+
 INSTALL_DIR="${ASSAY_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${ASSAY_VERSION:-latest}"
 
@@ -32,7 +32,7 @@ log_error() { printf "${RED}${BOLD}[ERROR]${NC} %s\n" "$1"; exit 1; }
 
 # --- Main ---
 main() {
-    printf "${BOLD}✨ Assay Installer${NC}\n"
+    printf "%b✨ Assay Installer%b\n" "${BOLD}" "${NC}"
     printf "\n"
 
     # 1. Detect OS & Arch
@@ -159,12 +159,12 @@ main() {
             printf "\n"
             log_warn "Your path is missing $INSTALL_DIR"
             printf "   Add this to your shell config (~/.zshrc, ~/.bashrc):\n"
-            printf "   ${BOLD}export PATH=\"\$PATH:$INSTALL_DIR\"${NC}\n"
+            printf "   %bexport PATH=\"\$PATH:%s\"%b\n" "${BOLD}" "$INSTALL_DIR" "${NC}"
             printf "\n"
             ;;
     esac
 
-    printf "Run ${BOLD}assay --help${NC} to get started.\n"
+    printf "Run %bassay --help%b to get started.\n" "${BOLD}" "${NC}"
 }
 
 main "$@"

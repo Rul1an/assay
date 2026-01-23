@@ -14,10 +14,10 @@ run_test() {
     local name="$1"
     local input="$2"
     local policy="$3"
-    
+
     echo "--- Test: $name ---" >> "$RESULTS"
     echo "Input: $input" >> "$RESULTS"
-    
+
     if [ -z "$policy" ]; then
         # No policy (Passthrough)
         echo "$input" | timeout 2 "$ASSAY" mcp wrap -- python3 "$SERVER" >> "$RESULTS" 2>&1 || echo "(TIMEOUT)" >> "$RESULTS"

@@ -105,6 +105,7 @@ echo "Starting Monitor... (log: $LOG)"
 MONITOR_PID=$!
 echo "Monitor PID: $MONITOR_PID"
 
+# shellcheck disable=SC2329
 cleanup() {
   echo "Cleaning up..."
   kill "$MONITOR_PID" 2>/dev/null || true

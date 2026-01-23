@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Run Assay Tests
         uses: Rul1an/assay-action@v1
         with:
@@ -185,21 +185,21 @@ workflows:
 // Jenkinsfile
 pipeline {
     agent any
-    
+
     stages {
         stage('Install Assay') {
             steps {
                 sh 'cargo install assay'
             }
         }
-        
+
         stage('Run Tests') {
             steps {
                 sh 'assay run --config mcp-eval.yaml --output junit'
             }
         }
     }
-    
+
     post {
         always {
             junit '.assay/reports/junit.xml'
@@ -275,7 +275,7 @@ jobs:
     # Deterministic replay (ms)
     steps:
       - uses: Rul1an/assay-action@v1
-  
+
   integration:
     needs: assay-fast
     # Real LLM tests (minutes) — only if fast tests pass

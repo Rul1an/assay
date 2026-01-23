@@ -18,5 +18,3 @@ tokio-stream = "0.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { version = "0.13.0" }
 aya-log = { version = "0.2" }
-
-

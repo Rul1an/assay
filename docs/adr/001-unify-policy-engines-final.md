@@ -1,9 +1,9 @@
 # ADR 001: Unify Policy Engines (JSON Schema vs Regex)
 
-**Status:** Accepted  
-**Date:** 2026-01-07  
-**Authors:** Antigravity, Roel Schuurkes  
-**Target Version:** Assay v1.6.0  
+**Status:** Accepted
+**Date:** 2026-01-07
+**Authors:** Antigravity, Roel Schuurkes
+**Target Version:** Assay v1.6.0
 
 ---
 
@@ -121,7 +121,7 @@ signatures:
 
 Wildcard patterns in `tools.allow` and `tools.deny` support:
 - `prefix*` — matches tools starting with prefix
-- `*suffix` — matches tools ending with suffix  
+- `*suffix` — matches tools ending with suffix
 - `*contains*` — matches tools containing substring
 - `*` — matches all tools
 
@@ -174,39 +174,39 @@ use std::collections::HashMap;
 pub struct McpPolicy {
     #[serde(default)]
     pub version: String,
-    
+
     #[serde(default)]
     pub name: String,
-    
+
     #[serde(default)]
     pub metadata: Option<PolicyMetadata>,
-    
+
     #[serde(default)]
     pub tools: ToolPolicy,
-    
+
     // Legacy v1: root-level allow/deny (normalized into tools.* on load)
     #[serde(default)]
     allow: Option<Vec<String>>,
     #[serde(default)]
     deny: Option<Vec<String>>,
-    
+
     /// V2: JSON Schema per tool (primary)
     #[serde(default)]
     pub schemas: HashMap<String, Value>,
-    
+
     /// V1 (deprecated): Regex constraints - auto-converted to schemas on load
     #[serde(default, deserialize_with = "deserialize_constraints")]
     constraints: Vec<ConstraintRule>,
-    
+
     #[serde(default)]
     pub enforcement: EnforcementSettings,
-    
+
     #[serde(default)]
     pub limits: Option<GlobalLimits>,
-    
+
     #[serde(default)]
     pub signatures: Option<SignaturePolicy>,
-    
+
     /// Compiled schemas (lazy, thread-safe) - compiled against full policy doc for $ref resolution
     #[serde(skip)]
     compiled: OnceLock<HashMap<String, Arc<jsonschema::JSONSchema>>>,
@@ -247,10 +247,10 @@ impl McpPolicy {
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut policy: McpPolicy = serde_yaml::from_str(&content)?;
-        
+
         // Normalize legacy root-level allow/deny into tools.*
         policy.normalize_legacy_shapes();
-        
+
         // Auto-migrate v1 constraints to schemas
         if !policy.constraints.is_empty() {
             tracing::warn!(
@@ -259,10 +259,10 @@ impl McpPolicy {
             );
             policy.migrate_constraints_to_schemas();
         }
-        
+
         Ok(policy)
     }
-    
+
     /// Normalize v1 root-level allow/deny into tools.allow/tools.deny
     fn normalize_legacy_shapes(&mut self) {
         if let Some(allow) = self.allow.take() {
@@ -278,7 +278,7 @@ impl McpPolicy {
             );
         }
     }
-    
+
     /// Get compiled schemas - compiles all at once on first access.
     /// Compilation uses full policy document as root for $ref resolution.
     fn compiled_schemas(&self) -> &HashMap<String, Arc<jsonschema::JSONSchema>> {
@@ -286,7 +286,7 @@ impl McpPolicy {
             self.compile_all_schemas()
         })
     }
-    
+
     /// Compile all schemas with access to full policy document for $ref resolution.
     fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::JSONSchema>> {
         // Build root document that includes $defs for $ref resolution
@@ -294,15 +294,15 @@ impl McpPolicy {
             "$defs": self.schemas.get("$defs").cloned().unwrap_or(json!({})),
             "schemas": &self.schemas,
         });
-        
+
         let mut compiled = HashMap::new();
-        
+
         for (tool_name, schema) in &self.schemas {
             // Skip meta-keys ($defs, etc.)
             if tool_name.starts_with('$') {
                 continue;
             }
-            
+
             // Compile with root document context for $ref resolution
             match jsonschema::JSONSchema::options()
                 .with_document(root_doc.clone())
@@ -321,7 +321,7 @@ impl McpPolicy {
                 }
             }
         }
-        
+
         compiled
     }
 }
@@ -337,7 +337,7 @@ impl McpPolicy {
         if let Some(decision) = self.check_rate_limits(state) {
             return decision;
         }
-        
+
         // 2. Deny list (with wildcards)
         if self.is_denied(tool_name) {
             return PolicyDecision::Deny {
@@ -347,7 +347,7 @@ impl McpPolicy {
                 contract: self.format_deny_contract(tool_name, "E_TOOL_DENIED"),
             };
         }
-        
+
         // 3. Allow list (if defined)
         if self.has_allowlist() && !self.is_allowed(tool_name) {
             return PolicyDecision::Deny {
@@ -357,13 +357,13 @@ impl McpPolicy {
                 contract: self.format_deny_contract(tool_name, "E_TOOL_NOT_ALLOWED"),
             };
         }
-        
+
         // 4. Schema validation (JSON Schema)
         let compiled = self.compiled_schemas();
         if let Some(validator) = compiled.get(tool_name) {
             return self.evaluate_schema(tool_name, validator, args);
         }
-        
+
         // 5. No schema defined - check enforcement mode
         match self.enforcement.unconstrained_tools {
             UnconstrainedMode::Deny => PolicyDecision::Deny {
@@ -380,11 +380,11 @@ impl McpPolicy {
             UnconstrainedMode::Allow => PolicyDecision::Allow,
         }
     }
-    
+
     fn evaluate_schema(
-        &self, 
-        tool: &str, 
-        validator: &jsonschema::JSONSchema, 
+        &self,
+        tool: &str,
+        validator: &jsonschema::JSONSchema,
         args: &Value
     ) -> PolicyDecision {
         match validator.validate(args) {
@@ -396,7 +396,7 @@ impl McpPolicy {
                         "message": e.to_string(),
                     }))
                     .collect();
-                
+
                 PolicyDecision::Deny {
                     tool: tool.to_string(),
                     code: "E_ARG_SCHEMA".to_string(),
@@ -450,7 +450,7 @@ impl McpPolicy {
 fn constraint_to_schema(constraint: &ConstraintRule) -> Value {
     let mut properties = json!({});
     let mut required = vec![];
-    
+
     for (param_name, param_constraint) in &constraint.params {
         if let Some(pattern) = &param_constraint.matches {
             properties[param_name] = json!({
@@ -462,7 +462,7 @@ fn constraint_to_schema(constraint: &ConstraintRule) -> Value {
             required.push(param_name.clone());
         }
     }
-    
+
     json!({
         "type": "object",
         "additionalProperties": false,    // Security default
@@ -487,7 +487,7 @@ pub fn export_v2_policy(policy: &McpPolicy) -> String {
 #[derive(Subcommand)]
 pub enum Command {
     // ... existing commands
-    
+
     /// Policy management commands
     Policy(PolicyArgs),
 }
@@ -502,10 +502,10 @@ pub struct PolicyArgs {
 pub enum PolicyCommand {
     /// Migrate v1.x policy to v2.0 format
     Migrate(PolicyMigrateArgs),
-    
+
     /// Validate policy syntax and schemas
     Validate(PolicyValidateArgs),
-    
+
     /// Format policy file (normalize YAML)
     Fmt(PolicyFmtArgs),
 }
@@ -521,11 +521,11 @@ pub struct PolicyMigrateArgs {
     /// Input policy file
     #[arg(short, long)]
     input: PathBuf,
-    
+
     /// Output file (default: overwrite input)
     #[arg(short, long)]
     output: Option<PathBuf>,
-    
+
     /// Preview changes without writing
     #[arg(long)]
     dry_run: bool,
@@ -533,27 +533,27 @@ pub struct PolicyMigrateArgs {
 
 pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     let mut policy = McpPolicy::from_file(&args.input)?;
-    
+
     if policy.version == "2.0" && policy.constraints.is_empty() {
         println!("✅ Policy is already v2.0 format");
         return Ok(0);
     }
-    
+
     let constraint_count = policy.constraints.len();
     policy.migrate_constraints_to_schemas();
-    
+
     let yaml = export_v2_policy(&policy);
-    
+
     if args.dry_run {
         println!("--- Migration Preview ({} constraints → schemas) ---", constraint_count);
         println!("{}", yaml);
         return Ok(0);
     }
-    
+
     let output_path = args.output.unwrap_or(args.input.clone());
     std::fs::write(&output_path, &yaml)?;
-    
-    println!("✅ Migrated {} constraints to v2.0 schemas: {}", 
+
+    println!("✅ Migrated {} constraints to v2.0 schemas: {}",
              constraint_count, output_path.display());
     Ok(0)
 }
@@ -568,13 +568,13 @@ pub async fn run_coverage(config: &CoverageConfig) -> Result<i32> {
     let policy = McpPolicy::from_file(&config.policy_path)?;
     // Warning emitted automatically if v1 constraints detected
     // Legacy shapes normalized automatically
-    
+
     let mut state = PolicyState::default();
-    
+
     for trace in &traces {
         for tool_call in &trace.tool_calls {
             let decision = policy.evaluate(&tool_call.name, &tool_call.arguments, &mut state);
-            
+
             match decision {
                 PolicyDecision::Allow => { /* pass */ }
                 PolicyDecision::AllowWithWarning { code, reason, .. } => {
@@ -586,7 +586,7 @@ pub async fn run_coverage(config: &CoverageConfig) -> Result<i32> {
             }
         }
     }
-    
+
     // ... rest of coverage output
 }
 ```
@@ -603,10 +603,10 @@ use assay_core::mcp::policy::{McpPolicy, PolicyDecision, PolicyState};
 pub async fn handle_check_args(params: CheckArgsParams, policy_root: &Path) -> ToolResult {
     let policy_path = policy_root.join(&params.policy);
     let policy = McpPolicy::from_file(&policy_path)?;
-    
+
     let mut state = PolicyState::default();
     let decision = policy.evaluate(&params.tool, &params.arguments, &mut state);
-    
+
     match decision {
         PolicyDecision::Allow => {
             ToolResult::success(json!({"allowed": true}))
@@ -644,14 +644,14 @@ schemas:
       pattern: "^/workspace/.*"
       minLength: 1
       maxLength: 4096
-  
+
   read_file:
     type: object
     additionalProperties: false
     properties:
       path: { $ref: "#/$defs/safe_path" }
     required: [path]
-  
+
   list_directory:
     type: object
     additionalProperties: false
@@ -748,7 +748,7 @@ schemas:
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_legacy_shape_normalization() {
         let yaml = r#"
@@ -758,11 +758,11 @@ deny: [write_file]
         let policy: McpPolicy = serde_yaml::from_str(yaml).unwrap();
         let mut normalized = policy.clone();
         normalized.normalize_legacy_shapes();
-        
+
         assert!(normalized.tools.allow.as_ref().unwrap().contains(&"read_file".to_string()));
         assert!(normalized.tools.deny.as_ref().unwrap().contains(&"write_file".to_string()));
     }
-    
+
     #[test]
     fn test_v1_auto_migration() {
         let v1_yaml = r#"
@@ -775,12 +775,12 @@ constraints:
 "#;
         let mut policy: McpPolicy = serde_yaml::from_str(v1_yaml).unwrap();
         policy.migrate_constraints_to_schemas();
-        
+
         assert_eq!(policy.version, "2.0");
         assert!(policy.schemas.contains_key("read_file"));
         assert!(policy.constraints.is_empty());
     }
-    
+
     #[test]
     fn test_unconstrained_warn_mode() {
         let policy = McpPolicy {
@@ -789,13 +789,13 @@ constraints:
             },
             ..Default::default()
         };
-        
+
         let mut state = PolicyState::default();
         let decision = policy.evaluate("unknown_tool", &json!({}), &mut state);
-        
+
         assert!(matches!(decision, PolicyDecision::AllowWithWarning { .. }));
     }
-    
+
     #[test]
     fn test_unconstrained_deny_mode() {
         let policy = McpPolicy {
@@ -804,13 +804,13 @@ constraints:
             },
             ..Default::default()
         };
-        
+
         let mut state = PolicyState::default();
         let decision = policy.evaluate("unknown_tool", &json!({}), &mut state);
-        
+
         assert!(matches!(decision, PolicyDecision::Deny { code, .. } if code == "E_TOOL_UNCONSTRAINED"));
     }
-    
+
     #[test]
     fn test_migration_adds_security_defaults() {
         let constraint = ConstraintRule {
@@ -819,15 +819,15 @@ constraints:
                 "path".to_string() => ConstraintParam { matches: Some("^/safe/.*".to_string()) }
             },
         };
-        
+
         let schema = constraint_to_schema(&constraint);
-        
+
         // Security defaults added
         assert_eq!(schema["additionalProperties"], false);
         assert_eq!(schema["properties"]["path"]["minLength"], 1);
         assert_eq!(schema["properties"]["path"]["maxLength"], 4096);
     }
-    
+
     #[test]
     fn test_wildcard_patterns() {
         let policy = McpPolicy {
@@ -837,13 +837,13 @@ constraints:
             },
             ..Default::default()
         };
-        
+
         assert!(policy.is_denied("execute_command"));
         assert!(policy.is_denied("execute_shell"));
         assert!(policy.is_denied("run_dangerous"));
         assert!(!policy.is_denied("read_file"));
     }
-    
+
     #[test]
     fn test_reserved_keys_skipped() {
         let policy = McpPolicy {
@@ -853,9 +853,9 @@ constraints:
             },
             ..Default::default()
         };
-        
+
         let compiled = policy.compiled_schemas();
-        
+
         // $defs should not be compiled as a tool schema
         assert!(!compiled.contains_key("$defs"));
         assert!(compiled.contains_key("read_file"));
