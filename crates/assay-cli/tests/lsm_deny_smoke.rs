@@ -120,16 +120,16 @@ runtime_monitor:
     eprintln!("--- Map Diagnostics ---");
     // Show map metadata (Verify key_size=16)
     let _ = Command::new("bpftool")
-        .args(&["map", "show", "name", "DENY_INO"])
+        .args(["map", "show", "name", "DENY_INO"])
         .status();
 
     // Dump map contents
     let _ = Command::new("bpftool")
-        .args(&["map", "dump", "name", "DENY_INO"])
+        .args(["map", "dump", "name", "DENY_INO"])
         .status();
 
     let bpftool_output = Command::new("bpftool")
-        .args(&["map", "dump", "name", "LSM_HIT"])
+        .args(["map", "dump", "name", "LSM_HIT"])
         .output();
 
     if let Ok(output) = bpftool_output {

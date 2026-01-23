@@ -447,8 +447,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
             unsafe { libc::close(guard_fd) };
 
-            let dev = stat.st_dev as u64;
-            let ino = stat.st_ino as u64;
+            let dev = stat.st_dev;
+            let ino = stat.st_ino;
 
             // 4) Re-encode dev_t to match kernel s_dev (new_encode_dev)
             let kernel_dev = encode_kernel_dev(dev);
@@ -603,7 +603,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
 
                                      println!("[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}", event.pid, dev, dev, ino, gen);
                                 }
-                                101 | 102 | 103 | 104 => {
+                                101..=104 => {
                                     let chunk_idx = event.event_type - 101;
                                     let start_offset = chunk_idx * 64;
                                     let dump = dump_prefix_hex(&event.data, 64);
