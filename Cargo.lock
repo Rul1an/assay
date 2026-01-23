@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "0.1.0"
+version = "2.2.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "2.1.15"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "2.0.4"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "0.1.0"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "clap",
