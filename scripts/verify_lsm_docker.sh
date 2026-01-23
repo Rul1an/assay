@@ -23,7 +23,7 @@ ENFORCE_LSM=${ENFORCE_LSM:-0}
 # Assay Verification Runner (Polyglot)
 # Supports:
 # 1. Native Linux (Direct Execution) - Best for CI/Production
-# 2. macOS + Lima VM (Option B) - Best for Local Dev
+2. macOS + Lima VM (Option B) - Best for Local Dev
 # 3. macOS + Docker (Option C) - Fallback (Skipped if tracefs missing)
 # ==============================================================================
 
@@ -41,12 +41,12 @@ sudo rm -rf /tmp/assay-lsm-verify || true
 
 # Build eBPF (Kernel Space) via Builder Image
 echo "----------------------------------------------------------------"
-echo "� [0/3] Preparing Docker Builder Image..."
+echo " [0/3] Preparing Docker Builder Image..."
 echo "----------------------------------------------------------------"
 cargo xtask build-image
 
 echo "----------------------------------------------------------------"
-echo "�🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
+echo "🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
 cargo clean -p assay-ebpf
 cargo xtask build-ebpf --docker
@@ -186,15 +186,14 @@ fi
 echo ">> [Test] Setting up test files..."
 mkdir -p /tmp/assay-test
 echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
-chmod 600 /tmp/assay-test/secret.txt
+echo ">> [Info] Initial file creation complete."
 
 # Start Monitor
 # Use specific log location for CI collection
 rm -rf /tmp/assay-lsm-verify
 mkdir -p /tmp/assay-lsm-verify
 
-# Debug: Check binary
-# Debug: Check binary DIRECTLY to stdout
+# Debug: Check binary Direct to stdout
 echo ">> [Debug] Checking binary (STDOUT)..."
 ls -l ./assay
 file ./assay || echo "file command missing"
@@ -208,8 +207,6 @@ chmod +x ./assay
 } > /tmp/assay-lsm-verify/debug_binary.txt 2>&1 || true
 
 echo "Starting monitor..."
-# Capture the launch output specifically
-# Capture the launch output specifically
 (
   echo ">>> [Monitor Wrapper] Launching..."
   # Explicitly list the binary to prove it exists inside subshell
@@ -219,39 +216,15 @@ echo "Starting monitor..."
 ) > /tmp/assay-lsm-verify/monitor.log 2>&1 &
 MONITOR_PID=$!
 echo "Monitor PID: $MONITOR_PID" >> /tmp/assay-lsm-verify/debug_binary.txt
-sleep 5 # Wait for attachment
-
-# Collect dmesg logs (including segfaults)
-dmesg -T | grep -Ei "bpf|verifier|lsm|aya|segfault" | tail -n 300 > /tmp/assay-lsm-verify/dmesg_bpf.log 2>&1 || true
-
-# Check if monitor died prematurely (Verifier error or crash)
-if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-  echo "❌ FAILURE: Monitor exited before test began!"
-  echo ">> Monitor Logs (Last 50 lines):"
-  cat /tmp/assay-lsm-verify/monitor.log
-  echo ">> Debug Binary Info:"
-  cat /tmp/assay-lsm-verify/debug_binary.txt || echo "debug_binary.txt missing"
-  exit 1
-fi
 
 # 2026 HARDENING: Ensure we are actually attached and policy is armed!
-# "Assay Monitor running" is printed after successful attach().
-# "✅ Policy applied" is printed after rules are inserted.
-echo "Waiting for monitor readiness (attach + policy)..."
+echo "Waiting for monitor readiness (attach)..."
 ATTACHED=0
-POLICY_READY=0
 for _ in {1..20}; do
   if grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
     ATTACHED=1
-  fi
-  if grep -q "✅ Policy applied" /tmp/assay-lsm-verify/monitor.log; then
-    POLICY_READY=1
-  fi
-
-  if [ "$ATTACHED" -eq 1 ] && [ "$POLICY_READY" -eq 1 ]; then
     break
   fi
-
   # if it died, fail early
   if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
     echo "❌ FAILURE: Monitor exited early."
@@ -266,10 +239,26 @@ if [ "$ATTACHED" -ne 1 ]; then
     cat /tmp/assay-lsm-verify/monitor.log
     exit 1
 fi
-if [ "$POLICY_READY" -ne 1 ]; then
-    echo "❌ FAILURE: Policy not applied in time"
+
+echo "Waiting for policy readiness signpost..."
+READY=0
+for _ in {1..30}; do
+  if grep -q "✅ Policy applied: tier1 inode rules loaded" /tmp/assay-lsm-verify/monitor.log; then
+    READY=1
+    break
+  fi
+  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+    echo "❌ FAILURE: Monitor exited before policy readiness."
     cat /tmp/assay-lsm-verify/monitor.log
     exit 1
+  fi
+  sleep 0.5
+done
+
+if [ "$READY" -ne 1 ]; then
+  echo "❌ FAILURE: Policy readiness signpost not seen."
+  cat /tmp/assay-lsm-verify/monitor.log
+  exit 1
 fi
 echo "✅ Monitor Attached and Policy Armed"
 
@@ -288,7 +277,7 @@ if id nobody >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
   EXIT_CODE=$?
 elif id nobody >/dev/null 2>&1 && command -v su >/dev/null 2>&1; then
   echo ">> [Test] Access Command: su -s /bin/bash nobody -c ..."
-  OUTPUT="$(su -s /bin/bash nobody -c "cat /tmp/assay-test/secret.txt" 2>&1)"
+  OUTPUT="$(su -s /bin/bash nobody -c \"cat /tmp/assay-test/secret.txt\" 2>&1)"
   EXIT_CODE=$?
 else
   echo ">> [Test] Access Command: cat (fallback to current user)..."
@@ -310,6 +299,7 @@ echo ">> [Logs] Monitor Log (Warning):"
 grep "Warning" /tmp/assay-lsm-verify/monitor.log || echo "No Warning lines found."
 echo ">> [Logs] Last 50 lines of monitor.log:"
 tail -n 50 /tmp/assay-lsm-verify/monitor.log
+
 echo ">> [BPF] LSM Counters (HIT / DENY / BYPASS):"
 if command -v bpftool >/dev/null 2>&1; then
   echo "HIT:"
@@ -342,7 +332,6 @@ if [ "$(uname -s)" == "Linux" ]; then
     fi
 
     # Copy artifacts to temp dir to avoid pollution
-    # Always copy from ./assay (downloaded or built) + eBPF object + modern policy
     TMP_DIR=$(mktemp -d)
     cp ./assay "$TMP_DIR/"
     cp ./assay-ebpf.o "$TMP_DIR/"
@@ -365,7 +354,6 @@ if command -v limactl >/dev/null 2>&1; then
         echo "   Running test inside Lima..."
 
         # Copy artifacts to Lima
-        # We assume /tmp is writable.
         limactl shell "$LIMA_INSTANCE" -- rm -rf /tmp/assay-test
         limactl shell "$LIMA_INSTANCE" -- mkdir -p /tmp/assay-test
 
@@ -390,7 +378,6 @@ HOST_HAS_TRACEFS=0
 [ -d /sys/kernel/debug ] && HOST_HAS_DEBUGFS=1
 
 # Preflight Skip logic
-    # We are on Mac/Windows, checking if we should skip
     echo "⚠️  Non-Linux Host + No Lima."
     echo "   Docker Desktop VM often lacks tracefs mounts."
     if [ "$ENFORCE_LSM" -eq 1 ]; then
@@ -405,7 +392,7 @@ DOCKER_ARGS+=(-e CI_MODE="$CI_MODE")
 DOCKER_ARGS+=(-e ENFORCE_LSM="$ENFORCE_LSM")
 DOCKER_ARGS+=(-v "${WORKDIR}/assay:/usr/local/bin/assay")
 DOCKER_ARGS+=(-v "${WORKDIR}/assay-ebpf.o:/assay-ebpf.o")
-DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml") # Fix: Mount modern policy
+DOCKER_ARGS+=(-v "${WORKDIR}/deny_modern.yaml:/deny_modern.yaml")
 
 # Mounts if present
 [ -d /sys/fs/bpf ] && DOCKER_ARGS+=(-v /sys/fs/bpf:/sys/fs/bpf)
@@ -418,7 +405,7 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
 
   # Try in-container mounts
   mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
-  mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+  mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug /sys/kernel/debug 2>/dev/null || true
   mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
 
   # Check availability
@@ -436,7 +423,6 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
        exit 0
     fi
   else
-    # If securityfs is missing, we assume no LSM support
     echo "⚠️  SKIP: /sys/kernel/security/lsm missing (Docker Desktop limitation)."
     if [ "${ENFORCE_LSM:-0}" -eq 1 ]; then echo "❌ Enforcement Active: /sys/kernel/security/lsm missing"; exit 1; fi
     exit 0

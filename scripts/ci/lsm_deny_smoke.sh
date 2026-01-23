@@ -117,21 +117,13 @@ cleanup() {
 trap cleanup EXIT
 
 # 3b) Prove attachment and policy application succeeded
-echo "Waiting for monitor readiness (attach + policy)..."
+echo "Waiting for monitor readiness (attach)..."
 ATTACHED=0
-POLICY_READY=0
 for _ in {1..20}; do
   if grep -q "Assay Monitor running" "$LOG"; then
     ATTACHED=1
-  fi
-  if grep -q "✅ Policy applied" "$LOG"; then
-    POLICY_READY=1
-  fi
-
-  if [ "$ATTACHED" -eq 1 ] && [ "$POLICY_READY" -eq 1 ]; then
     break
   fi
-
   # if it died, fail early
   if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
     echo "FAILURE: Monitor exited early."
@@ -148,28 +140,42 @@ if [ "$ATTACHED" -ne 1 ]; then
   tail -n 200 "$LOG" || true
   exit 1
 fi
-if [ "$POLICY_READY" -ne 1 ]; then
-  echo "FAILURE: Policy was not applied in time ('✅ Policy applied' not seen)."
-  echo "--- monitor.log (last 200) ---"
+
+echo "Waiting for policy readiness signpost..."
+READY=0
+for _ in {1..30}; do
+  if grep -q "✅ Policy applied: tier1 inode rules loaded" "$LOG"; then
+    READY=1
+    break
+  fi
+  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+    echo "FAILURE: Monitor exited before policy readiness."
+    tail -n 200 "$LOG" || true
+    exit 1
+  fi
+  sleep 0.5
+done
+
+if [ "$READY" -ne 1 ]; then
+  echo "FAILURE: Policy readiness signpost not seen."
   tail -n 200 "$LOG" || true
   exit 1
 fi
-echo "✅ Monitor attached and Policy armed"
-sleep 2 # Wait for userspace to resolve inodes and populate BPF maps
+echo "✅ Policy ready"
+sleep 1 # Final settling time for BPF maps
 
 # 4) Verify Map State (Diagnostics)
 echo "--- Map Status (Pre-Check: Verify 2049/0x801) ---"
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
   $BPFTOOL map show name DENY_INO || echo "Failed to show DENY_INO"
   $BPFTOOL map dump name DENY_INO || echo "Failed to dump DENY_INO"
-  echo "--- CONFIG Map ---"
-  $BPFTOOL map dump name CONFIG || echo "Failed to dump CONFIG"
+  echo "--- CONFIG map (debug) ---"
+  $BPFTOOL map dump name CONFIG || true
+  echo "--- LSM_BYPASS counter (debug) ---"
+  $BPFTOOL map dump name LSM_BYPASS || true
 else
   echo "bpftool not available; skipping map diagnostics"
 fi
-
-# 5) Attempt Access (Expect EPERM) - as unprivileged user
-echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."
 
 # 5) Attempt Access (Expect EPERM) - as unprivileged user
 echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."

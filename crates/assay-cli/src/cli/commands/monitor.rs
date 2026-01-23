@@ -126,11 +126,12 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         if !args.quiet { println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering."); }
         monitor.set_monitor_all(true)?;
 
-        // Deterministic Readback Verification
-        match monitor.get_config_u32(assay_common::KEY_MONITOR_ALL) {
-             Ok(1) => if !args.quiet { println!("DEBUG: CONFIG[100]=1 confirmed (MonitorAll active)"); },
-             Ok(v) => anyhow::bail!("CONFIG[100] verify failed: expected 1, got {}", v),
-             Err(e) => anyhow::bail!("CONFIG[100] readback failed: {}", e),
+        // Readback verification (critical for CI determinism).
+        let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
+        println!("DEBUG: CONFIG[{}]={} confirmed", assay_common::KEY_MONITOR_ALL, v);
+        if v != 1 {
+            eprintln!("❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)", assay_common::KEY_MONITOR_ALL);
+            return Ok(40);
         }
     }
 

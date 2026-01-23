@@ -75,7 +75,7 @@ impl LinuxMonitor {
         let mut bpf = self.bpf.lock().unwrap();
         let map = bpf.map_mut("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
         let hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
-        Ok(hm.get(&key, 0)?)
+        Ok(hm.get(&key, 0).unwrap_or(0))
     }
 
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
