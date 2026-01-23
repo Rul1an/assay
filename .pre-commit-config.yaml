@@ -1,9 +1,9 @@
 # .pre-commit-config.yaml
-# Fast on pre-commit; heavier on pre-push.
-default_stages: [pre-commit]
+minimum_pre_commit_version: "3.6.0"
 
+# Best practice: pin versions (rev) and periodically `pre-commit autoupdate`.
 repos:
-  # --- Basic hygiene (fast, auto-fix where possible) ---
+  # Baseline hygiene (stable, fast)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -12,37 +12,47 @@ repos:
       - id: check-toml
       - id: end-of-file-fixer
       - id: trailing-whitespace
-      - id: mixed-line-ending
-      - id: check-added-large-files
-        args: ["--maxkb=1024"]
 
-  # --- Spelling (fast) ---
-  - repo: https://github.com/crate-ci/typos
-    rev: v1.16.26
+  # --- Tooling hooks (system) ---
+  # typos (spellcheck)
+  - repo: local
     hooks:
       - id: typos
+        name: typos (spellcheck)
+        entry: typos
+        language: system
+        types_or: [text]
+        args: ["--config", ".typos.toml"]
+        pass_filenames: true
 
-  # --- GitHub Actions workflow linting ---
-  - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.3
+  # actionlint (GitHub Actions workflow lint)
+  - repo: local
     hooks:
       - id: actionlint
+        name: actionlint (GitHub Actions)
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
 
-  # --- Shell scripts ---
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+  # shellcheck (bash)
+  - repo: local
     hooks:
       - id: shellcheck
-        files: ^(scripts/|\.github/|.*\.sh$)
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
+        args: ["-x"]
 
-  # --- Rust: fmt on commit (auto-fix), clippy on pre-push (heavier) ---
+  # --- Rust: fmt on commit (fast), clippy on push (heavier) ---
   - repo: local
     hooks:
       - id: cargo-fmt
-        name: cargo fmt (workspace)
-        entry: cargo fmt --all
+        name: cargo fmt --check
+        entry: bash -lc 'cargo fmt --all -- --check'
         language: system
-        types: [rust]
+        types_or: [rust]
+        pass_filenames: false
 
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)

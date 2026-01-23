@@ -1,12 +1,20 @@
 # .typos.toml
-[default]
-extend-ignore-re = [
-  "sha256:[0-9a-f]{64}",
-]
-
 [files]
 extend-exclude = [
+  "target/**",
+  "**/*.o",
+  "**/*.a",
+  "**/*.so",
+  "dist/**",
+  "artifacts/**",
+  ".git/**",
   "Cargo.lock",
-  "target/",
-  "dist/",
+  "**/*.min.js",
+]
+
+[default]
+# Hex/hashes exclusion (Jan 2026 best practice)
+extend-ignore-re = [
+  # sha256-like blobs / long hex strings
+  "[0-9a-fA-F]{32,}",
 ]

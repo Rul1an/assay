@@ -16,21 +16,47 @@ permissions:
 
 jobs:
   lint:
-    name: Lint & Hygiene (pre-commit)
-    runs-on: ubuntu-24.04-arm
+    name: Lint (pre-commit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust Toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt clippy
-      - name: Install pipx & pre-commit
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust (fmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install lint tools
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pipx
-          pipx install pre-commit
-      - name: Run pre-commit
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install pre-commit
+
+          # system tools
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+          # actionlint (Go)
+          sudo apt-get install -y --no-install-recommends golang-go
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+          # typos via cargo
+          cargo install typos-cli --locked
+
+      - name: Run pre-commit (all files)
+        shell: bash
         run: |
-          # Note: we run all files but clippy is only in pre-push stage in config
-          # To run clippy in CI, we explicitly trigger that stage or hook
+          set -euo pipefail
           pre-commit run --all-files --show-diff-on-failure
 
   build-artifacts:
@@ -38,6 +64,7 @@ jobs:
       contents: read
       actions: write
     name: Build Artifacts (Ubuntu ARM)
+    needs: lint
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     concurrency:
@@ -112,7 +139,7 @@ jobs:
       contents: read
       actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
-    needs: build-artifacts
+    needs: [lint, build-artifacts]
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
