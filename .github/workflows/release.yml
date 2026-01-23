@@ -88,12 +88,19 @@ jobs:
           # Switch Ubuntu Ports mirror with robust failover
           sudo bash scripts/ci/apt_ports_failover.sh
 
-          # Install with strict flags (update already handled)
-          # libc6-dev-arm64-cross provides the target sysroot headers (bits/*) needed by ring (C build)
+          # Enable multiarch so we can install target (arm64) libs
+          sudo dpkg --add-architecture arm64
+
+          # Update after adding arch
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+
+          # Toolchain + sysroot + target libs
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu \
             libc6-dev-arm64-cross \
-            linux-libc-dev-arm64-cross
+            linux-libc-dev-arm64-cross \
+            pkg-config \
+            libsqlite3-dev:arm64
 
           {
             echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
