@@ -1,6 +1,28 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v2.2.0] - 2026-01-23
+
+### 🛡️ SOTA Hardening (Jan 2026)
+
+This release delivers "State-of-the-Art" infrastructure hardening, specifically targeting ARM/Self-Hosted stability and CI reliability. It eliminates supply chain risks and ensures deterministic builds across all platforms.
+
+### ✨ Major Features
+-   **Robust ARM Infrastructure**: Implemented a "GoFoss -> Ubuntu Ports" failover loop for all ARM runners. This eliminates flaky `404` errors caused by the unstable `ports.ubuntu.com` mirror.
+    -   **Generic Logic**: The failover script aggressively rewrites *any* `ubuntu-ports` source, scrubbing legacy/broken mirrors (e.g. `edge.kernel.org`) from self-hosted runners.
+    -   **Optimization**: Automatically skips logic on AMD64 runners (`ubuntu-latest`) to preserve "Fast Path" performance.
+-   **Intelligent Gating**:
+    -   **Fork Safety**: Self-hosted runners are now strictly gated (`if: fork == false`) to prevent malicious code execution from PR forks.
+    -   **Split Smoke**: `ebpf-smoke` is split into `-ubuntu` (for signal) and `-self-hosted` (for depth), ensuring forks still get CI feedback.
+-   **Performance "Fast Path"**:
+    -   **Install-First**: All apt jobs now attempt `install` before `update`, leveraging fresh runner caches for significant speedups.
+    -   **Hardened Flags**: Ubiquitous use of `DEBIAN_FRONTEND=noninteractive` and `--no-install-recommends`.
+
+### 🐛 Fixes
+-   **Artifact Sequencing**: Fixed a race condition in `kernel-matrix.yml` (`matrix-test`) where install scripts ran before artifact download.
+-   **Supply Chain**: Enforced `--locked` / pinned versions for all `bpf-linker` installations.
+-   **Cleanup**: Removed legacy `actions/cache` usage for apt-lists (native disk caching is superior on self-hosted).
+
 ## [v2.1.1] - 2026-01-15
 
 ### 🛡️ LSM Hardening & Safety
