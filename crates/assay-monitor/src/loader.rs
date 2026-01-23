@@ -72,8 +72,8 @@ impl LinuxMonitor {
     }
 
     pub fn get_config_u32(&mut self, key: u32) -> Result<u32, MonitorError> {
-        let mut bpf = self.bpf.lock().unwrap();
-        let map = bpf.map_mut("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
+        let bpf = self.bpf.lock().unwrap();
+        let map = bpf.map("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
         let hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
         Ok(hm.get(&key, 0).unwrap_or(0))
     }
@@ -212,7 +212,7 @@ impl LinuxMonitor {
                 // 2. Alternate/Old encoding logic: (major << 20) | minor
                 // We decode rule.dev first (which is new_encoded) to get major/minor back
                 let major = (rule.dev >> 8) & 0xfff;
-                let minor = (rule.dev & 0xff) | ((rule.dev >> 12) & 0xfffff00);
+                let minor = (rule.dev & 0xff) | ((rule.dev >> 12) & 0xfff00);
                 let dev_alt = (major << 20) | minor;
 
                 let key_alt = InodeKeyMap {
@@ -247,7 +247,6 @@ impl LinuxMonitor {
                     println!("DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}", dev_alt, rule.ino, rule.rule_id);
                 }
             }
-            println!("✅ Policy applied: tier1 inode rules loaded");
         }
 
         if let Some(map) = bpf.map_mut("DENY_PATHS_PREFIX") {
@@ -257,6 +256,7 @@ impl LinuxMonitor {
             }
         }
 
+
         if let Some(map) = bpf.map_mut("CIDR_RULES_V4") {
             let mut trie: LpmTrie<_, [u8; 4], u32> = LpmTrie::try_from(map)?;
             for (prefix_len, addr, action) in compiled.tier1.cidr_v4_entries() {
@@ -264,6 +264,7 @@ impl LinuxMonitor {
             }
         }
 
+        println!("✅ Policy applied: tier1 inode rules loaded");
         Ok(())
     }
 

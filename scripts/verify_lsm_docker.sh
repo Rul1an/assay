@@ -23,7 +23,7 @@ ENFORCE_LSM=${ENFORCE_LSM:-0}
 # Assay Verification Runner (Polyglot)
 # Supports:
 # 1. Native Linux (Direct Execution) - Best for CI/Production
-2. macOS + Lima VM (Option B) - Best for Local Dev
+# 2. macOS + Lima VM (Option B) - Best for Local Dev
 # 3. macOS + Docker (Option C) - Fallback (Skipped if tracefs missing)
 # ==============================================================================
 

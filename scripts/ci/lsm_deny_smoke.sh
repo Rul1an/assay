@@ -141,6 +141,12 @@ if [ "$ATTACHED" -ne 1 ]; then
   exit 1
 fi
 
+if ! grep -q "DEBUG: CONFIG\[100\]=1 confirmed" "$LOG"; then
+  echo "FAILURE: MONITOR_ALL config not confirmed in logs."
+  tail -n 200 "$LOG" || true
+  exit 1
+fi
+
 echo "Waiting for policy readiness signpost..."
 READY=0
 for _ in {1..30}; do

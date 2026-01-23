@@ -117,6 +117,17 @@ impl Monitor {
         }
     }
 
+    pub fn get_config_u32(&mut self, key: u32) -> Result<u32, MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.get_config_u32(key);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = key;
+            Ok(0)
+        }
+    }
+
     /// Attach probes/tracepoints.
     pub fn attach(&mut self) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
