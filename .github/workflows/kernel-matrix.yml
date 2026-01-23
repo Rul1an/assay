@@ -73,38 +73,63 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Switch Ubuntu Ports mirror (handles both deb822 + legacy sources.list)
-          MIRROR="http://mirrors.edge.kernel.org/ubuntu-ports"
+          # Switch Ubuntu Ports mirror with robust failover
+          set +e
+          MIRRORS=(
+            "https://mirror.gofoss.xyz/ubuntu-ports"
+            "http://ports.ubuntu.com/ubuntu-ports"
+          )
 
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i \
-              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
-              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
-              /etc/apt/sources.list.d/ubuntu.sources
-          fi
+          switch_mirror() {
+            local m="$1"
+            # deb822 (24.04+)
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+              sudo sed -i \
+                -e "s|http://ports.ubuntu.com/ubuntu-ports|${m}|g" \
+                -e "s|https://ports.ubuntu.com/ubuntu-ports|${m}|g" \
+                /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+            fi
+            # legacy
+            if [ -f /etc/apt/sources.list ]; then
+              sudo sed -i \
+                -e "s|http://ports.ubuntu.com/ubuntu-ports|${m}|g" \
+                -e "s|https://ports.ubuntu.com/ubuntu-ports|${m}|g" \
+                /etc/apt/sources.list 2>/dev/null || true
+            fi
+          }
 
-          if [ -f /etc/apt/sources.list ]; then
-            sudo sed -i \
-              -e "s|http://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
-              -e "s|https://ports.ubuntu.com/ubuntu-ports|${MIRROR}|g" \
-              /etc/apt/sources.list
-          fi
-
-          # Try install first, fallback to robust update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            llvm-dev libclang-dev build-essential libbpf-dev pkg-config || {
-
-            timeout 900s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          apt_update() {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Queue-Mode=access \
               -o Acquire::Retries=10 \
               -o Acquire::http::Timeout=60 \
               -o Acquire::https::Timeout=60 \
+              -o Acquire::http::Pipeline-Depth=0 \
+              -o Acquire::https::Pipeline-Depth=0 \
               -o Acquire::CompressionTypes::Order::=gz \
               -o Acquire::ForceIPv4=true \
               -o Acquire::Languages=none
-
-            sudo apt-get install -y --no-install-recommends \
-              llvm-dev libclang-dev build-essential libbpf-dev pkg-config
           }
+
+          ok=0
+          for m in "${MIRRORS[@]}"; do
+            echo "Trying Ubuntu Ports mirror: $m"
+            switch_mirror "$m"
+            if apt_update; then
+              ok=1
+              break
+            fi
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "ERROR: apt-get update failed on all mirrors"
+            exit 1
+          fi
+          set -e
+
+          # Install with strict flags (update already handled)
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Install Rust Toolchain (nightly rust-src only)
         uses: dtolnay/rust-toolchain@nightly
