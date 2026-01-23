@@ -117,12 +117,12 @@ jobs:
           fi
 
           if [ -f /etc/apt/sources.list ]; then
-            # Only tag lines that do NOT already specify an arch
-            sudo sed -i -E \
-              '/^deb(\s+\[[^]]*\])?\s+http/{
-                /^\s*deb\s+\[/! s|^(deb\s+)(http[s]?://(archive|security)\.ubuntu\.com/ubuntu)|deb [arch=amd64] \2|
-              }' \
-              /etc/apt/sources.list
+            # If a line already has an arch bracket, leave it alone.
+            # Otherwise, force [arch=amd64] for any ubuntu.com/ubuntu repo (incl azure.archive.ubuntu.com).
+            sudo sed -i -E '
+              /^deb(-src)?[[:space:]]+\[.*\][[:space:]]+/b
+              s|^(deb(-src)?[[:space:]]+)(http(s)?://[^[:space:]]*ubuntu\.com/ubuntu)|\1[arch=amd64] \3|
+            ' /etc/apt/sources.list
           fi
 
           # 2) Add arm64-only ubuntu-ports repo (arm64 packages live here)
