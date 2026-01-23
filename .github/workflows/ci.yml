@@ -137,64 +137,14 @@ jobs:
           set -euo pipefail
 
           # Switch Ubuntu Ports mirror with robust failover
-          set +e
-          MIRRORS=(
-            "https://mirror.gofoss.xyz/ubuntu-ports"
-            "http://ports.ubuntu.com/ubuntu-ports"
-          )
+          sudo bash scripts/ci/apt_ports_failover.sh
 
-          switch_mirror() {
-            local m="$1"
-            # deb822 (24.04+)
-            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-              sudo sed -i \
-                -e "s|http://ports.ubuntu.com/ubuntu-ports|${m}|g" \
-                -e "s|https://ports.ubuntu.com/ubuntu-ports|${m}|g" \
-                /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
-            fi
-            # legacy
-            if [ -f /etc/apt/sources.list ]; then
-              sudo sed -i \
-                -e "s|http://ports.ubuntu.com/ubuntu-ports|${m}|g" \
-                -e "s|https://ports.ubuntu.com/ubuntu-ports|${m}|g" \
-                /etc/apt/sources.list 2>/dev/null || true
-            fi
-          }
-
-          apt_update() {
-            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
-              -o Acquire::Queue-Mode=access \
-              -o Acquire::Retries=10 \
-              -o Acquire::http::Timeout=60 \
-              -o Acquire::https::Timeout=60 \
-              -o Acquire::http::Pipeline-Depth=0 \
-              -o Acquire::https::Pipeline-Depth=0 \
-              -o Acquire::CompressionTypes::Order::=gz \
-              -o Acquire::ForceIPv4=true \
-              -o Acquire::Languages=none
-          }
-
-          ok=0
-          for m in "${MIRRORS[@]}"; do
-            echo "Trying Ubuntu Ports mirror: $m"
-            switch_mirror "$m"
-            if apt_update; then
-              ok=1
-              break
-            fi
-          done
-
-          if [ "$ok" -ne 1 ]; then
-            echo "ERROR: apt-get update failed on all mirrors"
-            exit 1
-          fi
-          set -e
           # Install with strict flags (update already handled)
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
 
           if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker
+            cargo install bpf-linker --locked
           fi
 
       - name: Verify LSM blocking (CI Mode - Ubuntu soft skip)
@@ -311,7 +261,7 @@ jobs:
 
           sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
           if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker
+            cargo install bpf-linker --locked
           fi
 
       - name: Verify LSM blocking (CI Mode - strict on self-hosted)
