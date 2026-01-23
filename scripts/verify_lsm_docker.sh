@@ -405,13 +405,15 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
 
   # Try in-container mounts
   mountpoint -q /sys/kernel/tracing || mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
-  mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug /sys/kernel/debug 2>/dev/null || true
+  mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
   mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
 
-  sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+  timeout 180s DEBIAN_FRONTEND=noninteractive apt-get update -y \
     -o Acquire::Retries=5 \
     -o Acquire::http::Timeout=30 \
-    -o Acquire::https::Timeout=30
+    -o Acquire::https::Timeout=30 \
+    -o Acquire::CompressionTypes::Order::=gz \
+    -o Acquire::ForceIPv4=true
 
   # Check availability
   if [ ! -d /sys/kernel/tracing ] && [ ! -d /sys/kernel/debug/tracing ]; then

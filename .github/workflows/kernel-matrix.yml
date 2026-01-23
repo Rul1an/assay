@@ -24,17 +24,19 @@ jobs:
     timeout-minutes: 20
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-build
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
           set -euo pipefail
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          timeout 300s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
             -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::CompressionTypes::Order::=gz \
+            -o Acquire::ForceIPv4=true
           sudo apt-get install -y --no-install-recommends \
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
@@ -98,10 +100,11 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.kernel }}
       cancel-in-progress: true
+    matrix:
+        kernel: ["5.15", "6.6"]
+      max-parallel: 1
     strategy:
       fail-fast: false
-      matrix:
-        kernel: ["5.15", "6.6"]
 
     env:
       CARGO_INCREMENTAL: 0
@@ -164,10 +167,12 @@ jobs:
           echo "=== Disk Before Install ==="
           df -h / "$GITHUB_WORKSPACE" || true
 
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          timeout 180s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
             -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::CompressionTypes::Order::=gz \
+            -o Acquire::ForceIPv4=true
 
           # Install minimal deps (no-install-recommends is critical to avoid LLVM/Clang)
           sudo apt-get install -y --no-install-recommends \
