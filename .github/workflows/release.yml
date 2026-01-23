@@ -96,24 +96,7 @@ jobs:
 
           # 1) Force amd64-only for default Ubuntu sources so apt doesn't try arm64 on archive/security
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo python3 - <<'PY'
-          import pathlib, re
-          p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
-          if p.exists():
-              s = p.read_text()
-              stanzas = re.split(r"\n\s*\n", s.strip())
-              out = []
-              for st in stanzas:
-                  if not st.strip():
-                      continue
-                  if re.search(r"^Types:\s*deb\s*$", st, re.M):
-                      if re.search(r"^Architectures:\s*", st, re.M):
-                          st = re.sub(r"^Architectures:\s*.*$", "Architectures: amd64", st, flags=re.M)
-                      else:
-                          st = st + "\nArchitectures: amd64"
-                  out.append(st)
-              p.write_text("\n\n".join(out) + "\n")
-          PY
+            sudo python3 scripts/ci/fix_apt_sources.py
           fi
 
           if [ -f /etc/apt/sources.list ]; then

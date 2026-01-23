@@ -9,9 +9,16 @@ MIRRORS=(
   "http://ports.ubuntu.com/ubuntu-ports"
 )
 
+# Collect all apt sources files we might touch
 SOURCES=()
 [ -f /etc/apt/sources.list ] && SOURCES+=(/etc/apt/sources.list)
-[ -f /etc/apt/sources.list.d/ubuntu.sources ] && SOURCES+=(/etc/apt/sources.list.d/ubuntu.sources)
+
+# Include all .list and .sources under sources.list.d (covers ubuntu.sources + ubuntu-ports-arm64.list)
+if [ -d /etc/apt/sources.list.d ]; then
+  while IFS= read -r -d '' f; do
+    SOURCES+=("$f")
+  done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \( -name "*.list" -o -name "*.sources" \) -print0 2>/dev/null || true)
+fi
 
 # If we can't find any sources files, just run update (best effort)
 if [ "${#SOURCES[@]}" -eq 0 ]; then
@@ -41,11 +48,13 @@ grep -nH "/ubuntu-ports" "${SOURCES[@]}" 2>/dev/null || true
 
 switch_mirror() {
   local m="$1"
-  # Replace ANY scheme://host/.../ubuntu-ports with chosen mirror (Deb822 + legacy safe)
   for f in "${SOURCES[@]}"; do
-    sudo sed -i -E \
-      -e "s|https?://[^[:space:]]*/ubuntu-ports|${m}|g" \
-      "$f" 2>/dev/null || true
+    # Replace ANY scheme://host/.../ubuntu-ports (optionally with trailing slash) with chosen mirror
+    if ! sudo sed -i -E \
+      -e "s|https?://[^[:space:]]*/ubuntu-ports/?|${m}|g" \
+      "$f" 2>/dev/null; then
+      echo "WARN: failed to rewrite ubuntu-ports entries in $f"
+    fi
   done
 }
 
