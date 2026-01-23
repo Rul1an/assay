@@ -1,0 +1,52 @@
+# .pre-commit-config.yaml
+# Fast on pre-commit; heavier on pre-push.
+default_stages: [pre-commit]
+
+repos:
+  # --- Basic hygiene (fast, auto-fix where possible) ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  # --- Spelling (fast) ---
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.16.26
+    hooks:
+      - id: typos
+
+  # --- GitHub Actions workflow linting ---
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.3
+    hooks:
+      - id: actionlint
+
+  # --- Shell scripts ---
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: ^(scripts/|\.github/|.*\.sh$)
+
+  # --- Rust: fmt on commit (auto-fix), clippy on pre-push (heavier) ---
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt (workspace)
+        entry: cargo fmt --all
+        language: system
+        types: [rust]
+
+      - id: cargo-clippy
+        name: cargo clippy (workspace, deny warnings)
+        entry: bash -lc 'cargo clippy --workspace --all-targets --all-features -- -D warnings'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false

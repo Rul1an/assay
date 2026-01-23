@@ -1,0 +1,12 @@
+# .typos.toml
+[default]
+extend-ignore-re = [
+  "sha256:[0-9a-f]{64}",
+]
+
+[files]
+extend-exclude = [
+  "Cargo.lock",
+  "target/",
+  "dist/",
+]

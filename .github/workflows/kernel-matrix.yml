@@ -15,6 +15,24 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint & Hygiene (pre-commit)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust Toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt clippy
+      - name: Install pipx & pre-commit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pipx
+          pipx install pre-commit
+      - name: Run pre-commit
+        run: |
+          # Note: we run all files but clippy is only in pre-push stage in config
+          # To run clippy in CI, we explicitly trigger that stage or hook
+          pre-commit run --all-files --show-diff-on-failure
+
   build-artifacts:
     permissions:
       contents: read
