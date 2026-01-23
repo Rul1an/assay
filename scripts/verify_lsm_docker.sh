@@ -240,6 +240,12 @@ if [ "$ATTACHED" -ne 1 ]; then
     exit 1
 fi
 
+if ! grep -q "DEBUG: CONFIG\[100\]=1 confirmed" /tmp/assay-lsm-verify/monitor.log; then
+    echo "❌ FAILURE: MONITOR_ALL config not confirmed in logs."
+    cat /tmp/assay-lsm-verify/monitor.log
+    exit 1
+fi
+
 echo "Waiting for policy readiness signpost..."
 READY=0
 for _ in {1..30}; do
@@ -408,7 +414,7 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
   mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
 
-  timeout 180s DEBIAN_FRONTEND=noninteractive apt-get update -y \
+  timeout 300s DEBIAN_FRONTEND=noninteractive apt-get update -y \
     -o Acquire::Retries=5 \
     -o Acquire::http::Timeout=30 \
     -o Acquire::https::Timeout=30 \
@@ -441,7 +447,7 @@ DOCKER_ARGS+=(ubuntu:22.04 bash -lc '
   chmod 600 /secret.txt
 
   echo "1. Starting Assay Monitor..."
-  RUST_LOG=info assay monitor --ebpf /assay-ebpf.o --policy /deny_modern.yaml --print &
+  RUST_LOG=info assay monitor --ebpf /assay-ebpf.o --policy /deny_modern.yaml --monitor-all --print &
   MONITOR_PID=$!
   sleep 3
 

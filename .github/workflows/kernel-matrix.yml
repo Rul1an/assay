@@ -98,7 +98,7 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.kernel }}
+      group: ${{ github.workflow }}-${{ github.ref }}-matrix
       cancel-in-progress: true
     strategy:
       fail-fast: false
@@ -167,7 +167,7 @@ jobs:
           echo "=== Disk Before Install ==="
           df -h / "$GITHUB_WORKSPACE" || true
 
-          timeout 180s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          timeout 300s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
             -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
