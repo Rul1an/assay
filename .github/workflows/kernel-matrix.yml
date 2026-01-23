@@ -170,7 +170,9 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
 
           # runner internals (best effort)
-          [ -n "${RUNNER_WORKDIR:-}" ] && sudo rm -rf "${RUNNER_WORKDIR}/_temp" "${RUNNER_WORKDIR}/_tool" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo rm -rf "${RUNNER_WORKDIR}/_temp" "${RUNNER_WORKDIR}/_tool" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          fi
 
           # docker + apt caches (optional)
           sudo docker system prune -af --volumes || true

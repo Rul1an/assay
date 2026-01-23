@@ -1,5 +1,6 @@
 # .pre-commit-config.yaml
 minimum_pre_commit_version: "3.6.0"
+default_install_hook_types: [pre-commit, pre-push]
 
 # Best practice: pin versions (rev) and periodically `pre-commit autoupdate`.
 repos:
@@ -36,7 +37,7 @@ repos:
     hooks:
       - id: actionlint
         name: actionlint (GitHub Actions)
-        entry: actionlint
+        entry: actionlint -config-file .github/actionlint.yaml
         language: system
         files: ^\.github/workflows/.*\.ya?ml$
 
