@@ -41,7 +41,11 @@ apt_update() {
 }
 
 # Logic: If Ports runner, use failover. Else, standard robust update.
-if grep -Rqs "ports.ubuntu.com/ubuntu-ports" /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null; then
+SOURCES=()
+[ -f /etc/apt/sources.list ] && SOURCES+=(/etc/apt/sources.list)
+[ -f /etc/apt/sources.list.d/ubuntu.sources ] && SOURCES+=(/etc/apt/sources.list.d/ubuntu.sources)
+
+if [ ${#SOURCES[@]} -gt 0 ] && grep -qs "ports.ubuntu.com/ubuntu-ports" "${SOURCES[@]}"; then
   echo "Ubuntu Ports detected. Engaging robust mirror failover..."
 
   ok=0
@@ -61,6 +65,6 @@ if grep -Rqs "ports.ubuntu.com/ubuntu-ports" /etc/apt/sources.list /etc/apt/sour
     exit 1
   fi
 else
-  echo "Standard runner detected (No Ubuntu Ports). Running robust update..."
+  echo "Standard runner detected (or no sources found). Running robust update..."
   apt_update
 fi
