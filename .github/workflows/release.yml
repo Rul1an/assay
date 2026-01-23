@@ -85,14 +85,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Switch Ubuntu Ports mirror with robust failover
-          sudo bash scripts/ci/apt_ports_failover.sh
-
-          # Enable multiarch so we can install target (arm64) libs
+          # Enable multiarch
           sudo dpkg --add-architecture arm64
 
-          # Update after adding arch
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+          # 1) Prevent existing repos (archive/security) from attempting arm64 indices
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            # Deb822: ensure every stanza has Architectures: amd64
+            sudo awk 'BEGIN{RS=""; ORS="\n\n"}
+              {
+                if ($0 ~ /^Types: deb/m && $0 !~ /^Architectures:/m) {
+                  $0 = $0 "\nArchitectures: amd64"
+                }
+                print
+              }' /etc/apt/sources.list.d/ubuntu.sources | sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null
+          fi
+
+          if [ -f /etc/apt/sources.list ]; then
+            # legacy: add [arch=amd64] if no arch qualifier
+            sudo sed -i -E \
+              's|^(deb\s+)(http[s]?://(archive|security)\.ubuntu\.com/ubuntu)|deb [arch=amd64] \2|g' \
+              /etc/apt/sources.list
+          fi
+
+          # 2) Add arm64-only ubuntu-ports repo (this is where arm64 packages actually come from)
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<'EOF'
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-updates main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-security main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports noble-backports main universe restricted multiverse
+          EOF
+
+          # 3) Run your failover (rewrites any */ubuntu-ports to gofoss/ports) + robust update
+          sudo bash scripts/ci/apt_ports_failover.sh
 
           # Toolchain + sysroot + target libs
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
