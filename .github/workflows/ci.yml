@@ -19,7 +19,11 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::Languages=none
           sudo apt-get install -y clang libsqlite3-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,7 +59,11 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::Languages=none
           sudo apt-get install -y mold clang libsqlite3-dev
 
       - name: Sccache
@@ -124,7 +132,12 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Acquire::Languages=none
+          sudo apt-get install -y build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
           # Fix persistent runner permissions if needed
           sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
           if ! command -v bpf-linker &> /dev/null; then

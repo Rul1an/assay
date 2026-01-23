@@ -310,7 +310,7 @@ impl LinuxMonitor {
                     if let Some(map) = bpf.map_mut("EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
-                                if item.len() == 0 {
+                                if item.is_empty() {
                                     continue;
                                 }
                                 let ev = events::parse_event(&item);
@@ -325,7 +325,7 @@ impl LinuxMonitor {
                     if let Some(map) = bpf.map_mut("LSM_EVENTS") {
                         if let Ok(mut ring_buf) = RingBuf::try_from(map) {
                             while let Some(item) = ring_buf.next() {
-                                if item.len() == 0 {
+                                if item.is_empty() {
                                     continue;
                                 }
                                 let ev = events::parse_event(&item);

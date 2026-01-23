@@ -42,23 +42,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install lint tools (pinned)
+      - name: Install pre-commit (pinned)
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install pre-commit==4.4.0
-
-          # system tools
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends shellcheck golang-go
-
-          # pin actionlint
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
-
-          # pin typos via cargo
-          cargo install typos-cli --version 1.42.0 --locked
 
       - name: Run pre-commit (all files)
         shell: bash
@@ -69,7 +58,6 @@ jobs:
   build-artifacts:
     permissions:
       contents: read
-      actions: write
     name: Build Artifacts (Ubuntu ARM)
     needs: lint
     runs-on: ubuntu-24.04-arm
@@ -83,12 +71,13 @@ jobs:
       - name: Install Dependencies
         run: |
           set -euo pipefail
-          timeout 300s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          timeout 600s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
             -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             -o Acquire::CompressionTypes::Order::=gz \
-            -o Acquire::ForceIPv4=true
+            -o Acquire::ForceIPv4=true \
+            -o Acquire::Languages=none
           sudo apt-get install -y --no-install-recommends \
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
@@ -226,12 +215,13 @@ jobs:
           echo "=== Disk Before Install ==="
           df -h / "$GITHUB_WORKSPACE" || true
 
-          timeout 300s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+          timeout 900s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
             -o Acquire::Retries=5 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             -o Acquire::CompressionTypes::Order::=gz \
-            -o Acquire::ForceIPv4=true
+            -o Acquire::ForceIPv4=true \
+            -o Acquire::Languages=none
 
           # Install minimal deps (no-install-recommends is critical to avoid LLVM/Clang)
           sudo apt-get install -y --no-install-recommends \
