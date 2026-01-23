@@ -85,6 +85,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Ensure python3 is available (for Deb822 rewrite) and update strictly for current arch first
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
+
           sudo dpkg --add-architecture arm64
 
           . /etc/os-release
@@ -113,8 +117,11 @@ jobs:
           fi
 
           if [ -f /etc/apt/sources.list ]; then
+            # Only tag lines that do NOT already specify an arch
             sudo sed -i -E \
-              's|^(deb\s+)(http[s]?://(archive|security)\.ubuntu\.com/ubuntu)|deb [arch=amd64] \2|g' \
+              '/^deb(\s+\[[^]]*\])?\s+http/{
+                /^\s*deb\s+\[/! s|^(deb\s+)(http[s]?://(archive|security)\.ubuntu\.com/ubuntu)|deb [arch=amd64] \2|
+              }' \
               /etc/apt/sources.list
           fi
 
