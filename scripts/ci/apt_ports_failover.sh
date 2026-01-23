@@ -4,6 +4,12 @@ set -euo pipefail
 # Shared logic for robust Ubuntu Ports mirror failover
 # Used in CI workflows to prevent 404 errors on ARM/Self-hosted runners
 
+# Optimization: Skip if not using Ubuntu Ports (e.g. AMD64)
+if ! grep -Rqs "ports.ubuntu.com/ubuntu-ports" /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null; then
+  echo "No ubuntu-ports sources detected; skipping ports mirror failover."
+  exit 0
+fi
+
 MIRRORS=(
   "https://mirror.gofoss.xyz/ubuntu-ports"
   "http://ports.ubuntu.com/ubuntu-ports"
@@ -28,7 +34,7 @@ switch_mirror() {
 }
 
 apt_update() {
-  sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+  timeout 900s sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
     -o Acquire::Queue-Mode=access \
     -o Acquire::Retries=10 \
     -o Acquire::http::Timeout=60 \

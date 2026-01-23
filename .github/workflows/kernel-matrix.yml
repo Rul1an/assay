@@ -204,6 +204,13 @@ jobs:
           set -euo pipefail
           echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> "$GITHUB_ENV"
 
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: assay-dist
+          path: dist
+
       - name: Install Runtime Dependencies (Minimal)
         shell: bash
         run: |
@@ -234,11 +241,6 @@ jobs:
 
 
           command -v bpftool >/dev/null 2>&1 || echo "WARN: bpftool not found (failure artifacts may be limited)"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: assay-dist
-          path: dist
 
       - name: Debug Artifacts
         shell: bash
