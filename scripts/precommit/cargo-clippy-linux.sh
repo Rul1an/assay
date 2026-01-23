@@ -13,4 +13,4 @@ if [[ "${PRECOMMIT_CLIPPY:-0}" != "1" ]]; then
 fi
 
 # strict, but only on Linux
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --locked --workspace --all-targets -- -D warnings

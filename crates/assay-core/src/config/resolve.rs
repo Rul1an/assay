@@ -96,7 +96,7 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
     // The user plan says: "Dit doet dezelfde path→inline transformatie".
     // It doesn't explicitly say it bumps version, but keeping it consistent with migration is good.
     // However, for "mixed mode" support, we might just resolved policies without enforcing version=1?
-    // User request: "Precedence rule: als configVersion: 1 en schema/rules/blocklist aanwezig → gebruik inline... Als configVersion: 1 maar alleen policy aanwezig → toegestaan"
+    // User request: "Precedence rule: if configVersion: 1 and schema/rules/blocklist present → use inline... If configVersion: 1 but only policy present → allowed"
     // So current load logic handles precedence (by checking fields).
     // `resolve_policies` transforms config to have inline fields.
 

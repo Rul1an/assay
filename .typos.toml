@@ -5,6 +5,7 @@ extend-exclude = [
   "examples/**",
   "docs/MCP_TESTPLAN_CLAUDE_DESKTOP.md",
   "**/*.jsonl",
+  "tests/security_audit/**",
   "target/**",
   "dist/**",
 ]
@@ -15,23 +16,10 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
-requre_args = "requre_args"
+TruLens = "TruLens"
 Tru = "Tru"
 requre = "requre"
-als = "als"
-aanwezig = "aanwezig"
-gebruik = "gebruik"
-Installeer = "Installeer"
-Fase = "Fase"
-Integratie = "Integratie"
-Operatie = "Operatie"
-controle = "controle"
-controles = "controles"
-productie = "productie"
-wil = "wil"
-alle = "alle"
-checkt = "checkt"
-geen = "geen"
+requre_args = "requre_args"
 # English whitelist for common kernel/technical terms
 fils = "fils"
 sme = "sme"
