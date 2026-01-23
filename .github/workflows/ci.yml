@@ -19,6 +19,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          set -euo pipefail
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
               -o Acquire::Retries=10 \
@@ -27,7 +28,7 @@ jobs:
               -o Acquire::CompressionTypes::Order::=gz \
               -o Acquire::ForceIPv4=true \
               -o Acquire::Languages=none
-            sudo apt-get install -y clang libsqlite3-dev
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -63,6 +64,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          set -euo pipefail
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mold clang libsqlite3-dev || {
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
               -o Acquire::Retries=10 \
@@ -71,7 +73,7 @@ jobs:
               -o Acquire::CompressionTypes::Order::=gz \
               -o Acquire::ForceIPv4=true \
               -o Acquire::Languages=none
-            sudo apt-get install -y mold clang libsqlite3-dev
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mold clang libsqlite3-dev
           }
 
       - name: Sccache
@@ -116,6 +118,9 @@ jobs:
     name: eBPF monitor smoke (Linux - Ubuntu)
     needs: [test]
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-ubuntu
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -182,6 +187,9 @@ jobs:
     # Security: never run untrusted code from forks on self-hosted
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, bpf-lsm]
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
