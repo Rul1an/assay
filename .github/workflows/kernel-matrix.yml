@@ -92,7 +92,7 @@ jobs:
   matrix-test:
     permissions:
       contents: read
-      actions: read
+      actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
     needs: build-artifacts
     runs-on: [self-hosted, linux, assay-bpf-runner]
