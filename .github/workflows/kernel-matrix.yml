@@ -22,14 +22,21 @@ jobs:
     name: Build Artifacts (Ubuntu ARM)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-build
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30
+          sudo apt-get install -y --no-install-recommends \
+            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Install Rust Toolchain (nightly rust-src only)
         run: |
@@ -88,6 +95,9 @@ jobs:
     needs: build-artifacts
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.kernel }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -154,7 +164,10 @@ jobs:
           echo "=== Disk Before Install ==="
           df -h / "$GITHUB_WORKSPACE" || true
 
-          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30
 
           # Install minimal deps (no-install-recommends is critical to avoid LLVM/Clang)
           sudo apt-get install -y --no-install-recommends \
