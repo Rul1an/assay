@@ -101,7 +101,7 @@ echo "Starting Monitor... (log: $LOG)"
 # pkill -x assay 2>/dev/null || true
 
 # Start in background, capture stdout+stderr
-"$ASSAY_BIN" monitor --policy "$POLICY" --ebpf "$ASSAY_EBPF_PATH" >"$LOG" 2>&1 &
+"$ASSAY_BIN" monitor --policy "$POLICY" --ebpf "$ASSAY_EBPF_PATH" --monitor-all >"$LOG" 2>&1 &
 MONITOR_PID=$!
 echo "Monitor PID: $MONITOR_PID"
 
@@ -116,14 +116,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 3b) Prove attachment succeeded
-echo "Waiting for monitor attach confirmation..."
+# 3b) Prove attachment and policy application succeeded
+echo "Waiting for monitor readiness (attach + policy)..."
 ATTACHED=0
+POLICY_READY=0
 for _ in {1..20}; do
   if grep -q "Assay Monitor running" "$LOG"; then
     ATTACHED=1
+  fi
+  if grep -q "✅ Policy applied" "$LOG"; then
+    POLICY_READY=1
+  fi
+
+  if [ "$ATTACHED" -eq 1 ] && [ "$POLICY_READY" -eq 1 ]; then
     break
   fi
+
   # if it died, fail early
   if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
     echo "FAILURE: Monitor exited early."
@@ -140,7 +148,13 @@ if [ "$ATTACHED" -ne 1 ]; then
   tail -n 200 "$LOG" || true
   exit 1
 fi
-echo "✅ Monitor attached"
+if [ "$POLICY_READY" -ne 1 ]; then
+  echo "FAILURE: Policy was not applied in time ('✅ Policy applied' not seen)."
+  echo "--- monitor.log (last 200) ---"
+  tail -n 200 "$LOG" || true
+  exit 1
+fi
+echo "✅ Monitor attached and Policy armed"
 sleep 2 # Wait for userspace to resolve inodes and populate BPF maps
 
 # 4) Verify Map State (Diagnostics)
@@ -148,6 +162,8 @@ echo "--- Map Status (Pre-Check: Verify 2049/0x801) ---"
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
   $BPFTOOL map show name DENY_INO || echo "Failed to show DENY_INO"
   $BPFTOOL map dump name DENY_INO || echo "Failed to dump DENY_INO"
+  echo "--- CONFIG Map ---"
+  $BPFTOOL map dump name CONFIG || echo "Failed to dump CONFIG"
 else
   echo "bpftool not available; skipping map diagnostics"
 fi
@@ -192,12 +208,14 @@ else
   SUCCESS=false
 fi
 
-echo "--- LSM Counters (HIT / DENY) ---"
+echo "--- LSM Counters (HIT / DENY / BYPASS) ---"
 if command -v "$BPFTOOL" >/dev/null 2>&1; then
   echo "HIT:"
   $BPFTOOL map dump name LSM_HIT || true
   echo "DENY:"
   $BPFTOOL map dump name LSM_DENY || true
+  echo "BYPASS:"
+  $BPFTOOL map dump name LSM_BYPASS || true
 fi
 
 if [ "$SUCCESS" = true ]; then

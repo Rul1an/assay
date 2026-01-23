@@ -12,6 +12,8 @@ pub const EVENT_FORK: u32 = 3;
 pub const EVENT_EXEC: u32 = 4;
 pub const EVENT_EXIT: u32 = 5;
 
+pub const KEY_MONITOR_ALL: u32 = 100;
+
 pub const EVENT_FILE_BLOCKED: u32 = 10;
 pub const EVENT_CONNECT_BLOCKED: u32 = 20;
 

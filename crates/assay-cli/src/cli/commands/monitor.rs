@@ -121,6 +121,19 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     };
 
+    // SOTA Hardening: Set monitor_all BEFORE attach to ensure deterministic global coverage
+    if args.monitor_all {
+        if !args.quiet { println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering."); }
+        monitor.set_monitor_all(true)?;
+
+        // Deterministic Readback Verification
+        match monitor.get_config_u32(assay_common::KEY_MONITOR_ALL) {
+             Ok(1) => if !args.quiet { println!("DEBUG: CONFIG[100]=1 confirmed (MonitorAll active)"); },
+             Ok(v) => anyhow::bail!("CONFIG[100] verify failed: expected 1, got {}", v),
+             Err(e) => anyhow::bail!("CONFIG[100] readback failed: {}", e),
+        }
+    }
+
     if !args.pid.is_empty() {
         // Compatibility: Populate Legacy PID Map (for Tracepoints if they use it)
         if let Err(e) = monitor.set_monitored_pids(&args.pid) {
@@ -419,11 +432,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
             eprintln!("Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}", e);
         }
-    }
-
-    if args.monitor_all {
-        if !args.quiet { println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering."); }
-        monitor.set_monitor_all(true)?;
     }
 
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;

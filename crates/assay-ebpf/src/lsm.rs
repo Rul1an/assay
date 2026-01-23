@@ -4,7 +4,8 @@ use aya_ebpf::{
     maps::{Array, HashMap, RingBuf},
     programs::LsmContext,
 };
-use crate::{MONITORED_CGROUPS, CONFIG, KEY_MONITOR_ALL, LSM_HIT, LSM_DENY, DENY_INO, LSM_EVENTS, STATS};
+use crate::{MONITORED_CGROUPS, CONFIG, LSM_HIT, LSM_DENY, LSM_BYPASS, DENY_INO, LSM_EVENTS, STATS};
+use assay_common::KEY_MONITOR_ALL;
 use core::ffi::c_void;
 use crate::vmlinux::{file, inode, super_block};
 use aya_log_ebpf::info;
@@ -80,6 +81,9 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     // Optimization: avoid heavy logic if not monitored
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
+        if let Some(x) = LSM_BYPASS.get_ptr_mut(0) {
+            unsafe { *x += 1 };
+        }
         return Ok(0);
     }
 

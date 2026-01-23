@@ -19,7 +19,7 @@ pub mod socket_lsm;
 #[allow(clippy::all)]
 pub mod vmlinux;
 
-use assay_common::{MonitorEvent, EVENT_CONNECT};
+use assay_common::{MonitorEvent, EVENT_CONNECT, KEY_MONITOR_ALL};
 use aya_ebpf::{
     macros::{map, tracepoint},
     maps::{Array, HashMap, RingBuf},
@@ -64,6 +64,9 @@ pub static LSM_HIT: Array<u64> = Array::with_max_entries(1, 0);
 pub static LSM_DENY: Array<u64> = Array::with_max_entries(1, 0);
 
 #[map]
+pub static LSM_BYPASS: Array<u64> = Array::with_max_entries(1, 0);
+
+#[map]
 pub static DENY_INO: HashMap<assay_common::InodeKeyMap, u32> = HashMap::with_max_entries(1024, 0);
 
 #[map]
@@ -80,7 +83,6 @@ const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
-pub const KEY_MONITOR_ALL: u32 = 100;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]

@@ -10,6 +10,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::events::{self, EventStream};
 use crate::MonitorError;
 use assay_policy::tiers::CompiledPolicy;
+use assay_common::KEY_MONITOR_ALL;
 
 #[cfg(target_os = "linux")]
 pub struct LinuxMonitor {
@@ -53,7 +54,7 @@ impl LinuxMonitor {
         let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
 
         for (k, v) in config {
-            hm.insert(k, v, 0)?;
+            hm.insert(*k, *v, 0)?;
         }
 
         // Verification Loop
@@ -70,6 +71,13 @@ impl LinuxMonitor {
         Ok(())
     }
 
+    pub fn get_config_u32(&mut self, key: u32) -> Result<u32, MonitorError> {
+        let mut bpf = self.bpf.lock().unwrap();
+        let map = bpf.map_mut("CONFIG").ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
+        let hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+        Ok(hm.get(&key, 0)?)
+    }
+
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
         // Example: Set default offsets for common kernels
         let config = std::collections::HashMap::from([
@@ -82,7 +90,7 @@ impl LinuxMonitor {
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         let val = if enabled { 1 } else { 0 };
         let config = std::collections::HashMap::from([
-             (100, val), // KEY_MONITOR_ALL
+             (KEY_MONITOR_ALL, val),
         ]);
         self.set_config(&config)
     }
@@ -239,6 +247,7 @@ impl LinuxMonitor {
                     println!("DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}", dev_alt, rule.ino, rule.rule_id);
                 }
             }
+            println!("✅ Policy applied: tier1 inode rules loaded");
         }
 
         if let Some(map) = bpf.map_mut("DENY_PATHS_PREFIX") {

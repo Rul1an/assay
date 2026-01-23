@@ -234,24 +234,44 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   exit 1
 fi
 
-# 2026 HARDENING: Ensure we are actually attached!
-# Grep for the specific log line that confirms the BPF program was loaded/attached.
-# "Assay Monitor running" is printed after successful attach() in monitor.rs.
-if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
-    echo "Monitor: Assay Monitor running not found in logs yet. Giving it 5 more seconds..."
-    sleep 5
-    if ! grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
-        echo "❌ FAILURE: Monitor running but NOT attached (Verifier rejection?)"
-        echo ">> Monitor Logs (Last 50 lines):"
-        cat /tmp/assay-lsm-verify/monitor.log
-        echo ">> DMESG (Verifier Debug):"
-        cat /tmp/assay-lsm-verify/dmesg_bpf.log
-        # Kill it to be safe
-        kill $MONITOR_PID 2>/dev/null || true
-        exit 1
-    fi
+# 2026 HARDENING: Ensure we are actually attached and policy is armed!
+# "Assay Monitor running" is printed after successful attach().
+# "✅ Policy applied" is printed after rules are inserted.
+echo "Waiting for monitor readiness (attach + policy)..."
+ATTACHED=0
+POLICY_READY=0
+for _ in {1..20}; do
+  if grep -q "Assay Monitor running" /tmp/assay-lsm-verify/monitor.log; then
+    ATTACHED=1
+  fi
+  if grep -q "✅ Policy applied" /tmp/assay-lsm-verify/monitor.log; then
+    POLICY_READY=1
+  fi
+
+  if [ "$ATTACHED" -eq 1 ] && [ "$POLICY_READY" -eq 1 ]; then
+    break
+  fi
+
+  # if it died, fail early
+  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+    echo "❌ FAILURE: Monitor exited early."
+    cat /tmp/assay-lsm-verify/monitor.log
+    exit 1
+  fi
+  sleep 0.5
+done
+
+if [ "$ATTACHED" -ne 1 ]; then
+    echo "❌ FAILURE: Monitor attached but NOT running in time"
+    cat /tmp/assay-lsm-verify/monitor.log
+    exit 1
 fi
-echo "✅ Monitor Attached (Wait complete)"
+if [ "$POLICY_READY" -ne 1 ]; then
+    echo "❌ FAILURE: Policy not applied in time"
+    cat /tmp/assay-lsm-verify/monitor.log
+    exit 1
+fi
+echo "✅ Monitor Attached and Policy Armed"
 
 echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
 echo ">> [Debug] File Stat:"
@@ -290,10 +310,16 @@ echo ">> [Logs] Monitor Log (Warning):"
 grep "Warning" /tmp/assay-lsm-verify/monitor.log || echo "No Warning lines found."
 echo ">> [Logs] Last 50 lines of monitor.log:"
 tail -n 50 /tmp/assay-lsm-verify/monitor.log
-echo ">> [BPF] LSM Counters (HIT / DENY):"
+echo ">> [BPF] LSM Counters (HIT / DENY / BYPASS):"
 if command -v bpftool >/dev/null 2>&1; then
-  bpftool map dump name LSM_HIT 2>/dev/null || echo "LSM_HIT not found"
-  bpftool map dump name LSM_DENY 2>/dev/null || echo "LSM_DENY not found"
+  echo "HIT:"
+  bpftool map dump name LSM_HIT 2>/dev/null || echo "not found"
+  echo "DENY:"
+  bpftool map dump name LSM_DENY 2>/dev/null || echo "not found"
+  echo "BYPASS:"
+  bpftool map dump name LSM_BYPASS 2>/dev/null || echo "not found"
+  echo "CONFIG:"
+  bpftool map dump name CONFIG 2>/dev/null || echo "not found"
 else
   echo "bpftool missing"
 fi
