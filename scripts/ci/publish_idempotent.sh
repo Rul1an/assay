@@ -56,39 +56,51 @@ PY
 }
 
 # Query crates.io for a specific crate+version; print HTTP status
-# Returns 000 on network failure.
 cratesio_status() {
   local crate="$1"
   local ver="$2"
   local url="https://crates.io/api/v1/crates/${crate}/${ver}"
 
-  # Time out quickly; return code even if body is empty.
-  # If curl itself fails, echo 000 (standard convention).
-  curl -sS --connect-timeout 10 --max-time 20 -o /dev/null -w "%{http_code}" "$url" || echo "000"
+  # Cloudflare/WAF sometimes 403s "generic" clients from CI.
+  # Provide a clear UA + Accept, and allow retries.
+  # If curl completely fails (timeout/DNS), echo 000.
+  curl -sS \
+    --connect-timeout 10 --max-time 20 \
+    --retry 5 --retry-delay 2 --retry-all-errors \
+    -A "assay-ci (github-actions; idempotent publish check)" \
+    -H "Accept: application/json" \
+    -o /dev/null -w "%{http_code}" \
+    "$url" || echo "000"
 }
 
-# Publish wrapper that handles "already exists" race condition
-cargo_publish_race_safe() {
+try_publish() {
   local crate="$1"
-  local out
 
+  # Attempt publish; treat "already exists" as success for idempotency.
+  # Using mktemp avoids pipefail issues with tee + grep.
+  local log
+  log="$(mktemp)"
   set +e
-  out="$(cargo publish --package "$crate" --verbose 2>&1)"
-  local rc=$?
+  cargo publish --package "$crate" --verbose 2>&1 | tee "$log"
+  local rc="${PIPESTATUS[0]}"
   set -e
 
-  if [ $rc -eq 0 ]; then
-    echo "$out"
+  if [ "$rc" -eq 0 ]; then
+    echo "Sleeping 45s for index propagation..."
+    sleep 45
+    rm -f "$log"
     return 0
   fi
 
-  if echo "$out" | grep -q "already exists"; then
-    echo "✅ ${crate} already published (race condition ignored) — continuing."
+  if grep -qiE "already exists on crates\.io|is already uploaded|crate .* already exists" "$log"; then
+    echo "✅ ${crate} already on crates.io — skipping."
+    rm -f "$log"
     return 0
   fi
 
-  echo "$out"
-  return $rc
+  echo "❌ cargo publish failed for ${crate} (see log above)."
+  rm -f "$log"
+  return 1
 }
 
 publish_one() {
@@ -108,17 +120,16 @@ publish_one() {
       ;;
     404)
       echo "⬆️  ${crate}@${ver} not found — publishing..."
-      if cargo_publish_race_safe "$crate"; then
-        echo "Sleeping 45s for index propagation..."
-        sleep 45
-        return 0
-      else
-        return 1
-      fi
+      try_publish "$crate"
+      return 0
+      ;;
+    403)
+      echo "⚠️  crates.io API returned 403 (likely WAF/Cloudflare). Falling back to publish-attempt idempotency..."
+      try_publish "$crate"
+      return 0
       ;;
     429|500|502|503|504|000)
       echo "⚠️  crates.io returned ${code} for ${crate}@${ver} — retrying with backoff..."
-      # simple backoff retries
       for i in 1 2 3 4 5; do
         sleep $((i*10))
         code="$(cratesio_status "$crate" "$ver")"
@@ -126,11 +137,9 @@ publish_one() {
           echo "✅ ${crate}@${ver} appears published now — continuing."
           return 0
         fi
-        if [[ "$code" == "404" ]]; then
-          echo "⬆️  still not found — attempting publish (try $i)..."
-          if cargo_publish_race_safe "$crate"; then
-            echo "Sleeping 45s for index propagation..."
-            sleep 45
+        if [[ "$code" == "404" || "$code" == "403" ]]; then
+          echo "⬆️  attempting publish (try $i)..."
+          if try_publish "$crate"; then
             return 0
           fi
         fi
