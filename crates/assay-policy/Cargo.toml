@@ -1,6 +1,6 @@
 [package]
 name = "assay-policy"
-version = "2.2.1"
+version = "2.2.2"
 edition = "2021"
 description = "Policy types and compilation logic for Assay"
 license = "MIT"
