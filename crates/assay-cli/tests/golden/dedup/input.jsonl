@@ -1,0 +1,10 @@
+{"type":"file_open","path":"/etc/passwd","pid":1000,"timestamp":100}
+{"type":"file_open","path":"/etc/passwd","pid":1001,"timestamp":110}
+{"type":"file_open","path":"/etc/passwd","pid":1002,"timestamp":120}
+{"type":"file_open","path":"/etc/passwd","pid":1003,"timestamp":130}
+{"type":"file_open","path":"/etc/passwd","pid":1004,"timestamp":140}
+{"type":"file_open","path":"/etc/shadow","pid":1000,"timestamp":200}
+{"type":"file_open","path":"/etc/shadow","pid":1001,"timestamp":210}
+{"type":"file_open","path":"/etc/shadow","pid":1002,"timestamp":220}
+{"type":"file_open","path":"/etc/shadow","pid":1003,"timestamp":230}
+{"type":"file_open","path":"/etc/shadow","pid":1004,"timestamp":240}

@@ -61,3 +61,10 @@ repos:
         language: system
         stages: [pre-push]
         pass_filenames: false
+
+      - id: linux-check
+        name: linux compile gate (target/multipass)
+        entry: bash scripts/ci/check-linux.sh
+        language: system
+        stages: [pre-push]
+        pass_filenames: false

@@ -14,6 +14,8 @@ pub mod discover;
 pub mod doctor;
 pub mod explain;
 pub mod fix;
+pub mod generate;
+pub mod heuristics;
 pub mod import;
 pub mod init;
 pub mod init_ci;
@@ -22,6 +24,7 @@ pub mod mcp;
 pub mod migrate;
 pub mod monitor;
 pub mod policy;
+pub mod record;
 pub mod validate;
 
 pub mod exit_codes {
@@ -63,6 +66,8 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Kill(args) => kill::run(args).await,
         Command::Monitor(args) => monitor::run(args).await,
         Command::Policy(args) => policy::run(args).await,
+        Command::Generate(args) => generate::run(args),
+        Command::Record(args) => record::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)

@@ -1,0 +1,17 @@
+# Generated Policy (v2.0)
+# Source: Learned from observations
+# Generated at: 2026-01-24T19:00:00+00:00
+
+files:
+  allow:
+  - /etc/passwd
+network:
+  needs_review:
+    10.0.0.1:5432:
+      risk: needs_review
+      reasons:
+      - sensitive port 5432
+      count: 1
+processes:
+  allow_executables:
+  - /bin/bash

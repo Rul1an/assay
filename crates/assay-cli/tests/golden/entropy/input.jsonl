@@ -1,0 +1,2 @@
+{"type":"file_open", "path":"/tmp/a1b2c3d4e5f6g7.sh", "pid": 100, "timestamp": 100}
+{"type":"file_open", "path":"/etc/passwd", "pid": 100, "timestamp": 101}

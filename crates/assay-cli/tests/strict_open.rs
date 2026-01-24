@@ -3,8 +3,11 @@
 
 #[cfg(target_os = "linux")]
 use assay_common::strict_open;
+#[cfg(target_os = "linux")]
 use std::ffi::CString;
+#[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 
 #[test]

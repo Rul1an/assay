@@ -1,0 +1,61 @@
+# Generated Policy (v2.0)
+# Source: Learned from observations
+# Generated at: 2026-01-24T19:00:00+00:00
+
+network:
+  needs_review:
+    10.0.0.10:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.11:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.1:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.2:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.3:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.4:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.5:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.6:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.7:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.8:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1
+    10.0.0.9:80:
+      risk: needs_review
+      reasons:
+      - 11 unique IPs
+      count: 1

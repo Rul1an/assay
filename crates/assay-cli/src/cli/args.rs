@@ -41,6 +41,10 @@ pub enum Command {
     Kill(super::commands::kill::KillArgs),
     /// Runtime eBPF Monitor (Linux only)
     Monitor(super::commands::monitor::MonitorArgs),
+    /// Learning Mode: Generate policy from observed events
+    Generate(GenerateArgs),
+    /// Learning Mode: Capture and Generate in one flow
+    Record(RecordArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
@@ -793,4 +797,46 @@ pub struct DiscoverArgs {
     /// Policy file to use for configuration
     #[arg(long)]
     pub policy: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct GenerateArgs {
+    #[arg(short, long)]
+    pub input: PathBuf,
+
+    #[arg(short, long, default_value = "policy.yaml")]
+    pub output: PathBuf,
+
+    #[arg(long, default_value = "Generated Policy")]
+    pub name: String,
+
+    #[arg(long, default_value_t = 0.5)]
+    pub strictness: f64,
+
+    #[arg(long, default_value = "yaml")]
+    pub format: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct RecordArgs {
+    /// Command to record
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
+
+    /// Policy file to write
+    #[arg(short, long, default_value = "policy.yaml")]
+    pub output: PathBuf,
+
+    #[arg(long, default_value = "Recorded Policy")]
+    pub name: String,
+
+    #[arg(long, default_value_t = 0.5)]
+    pub strictness: f64,
+
+    /// Duration to wait before stopping monitor after command exits (seconds)
+    #[arg(long, default_value_t = 1)]
+    pub settle_duration: u64,
 }
