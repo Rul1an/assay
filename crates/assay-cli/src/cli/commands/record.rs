@@ -1,0 +1,117 @@
+//! Assay Record: Unified Capture + Generate Flow
+
+use crate::cli::args::{GenerateArgs, RecordArgs};
+use crate::cli::commands::generate;
+use anyhow::{Context, Result};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+use tokio::time::sleep;
+
+pub async fn run(args: RecordArgs) -> Result<i32> {
+    let trace_file = std::env::temp_dir().join(format!("assay-trace-{}.jsonl", std::process::id()));
+
+    eprintln!(">>> Starting background monitor...");
+    eprintln!(">>> Output trace: {}", trace_file.display());
+
+    // 1. Start Monitor in background
+    // We use the same binary "assay" but with "monitor" subcommand
+    let my_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("assay"));
+
+    // Ensure trace file is clean
+    if trace_file.exists() {
+        std::fs::remove_file(&trace_file)?;
+    }
+
+    struct TraceGuard(PathBuf);
+    impl Drop for TraceGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _guard = TraceGuard(trace_file.clone());
+
+    let mut monitor = Command::new(&my_exe)
+        .arg("monitor")
+        .arg("--output")
+        .arg(&trace_file)
+        // We assume 'assay monitor' has a flag or behavior to handle non-interactive bg run
+        // But 'monitor' runs until signal. We will kill it.
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("Failed to spawn assay monitor")?;
+
+    // Give it a moment to attach
+    // Wait for monitor to be ready by polling for the trace file to appear,
+    // with a conservative timeout to avoid hanging indefinitely.
+    let monitor_attach_timeout = Duration::from_secs(5);
+    let poll_interval = Duration::from_millis(100);
+    let attach_start = std::time::Instant::now();
+    loop {
+        if trace_file.exists() {
+            break;
+        }
+        if attach_start.elapsed() >= monitor_attach_timeout {
+            eprintln!(
+                ">>> Monitor did not signal readiness within {:?}; proceeding anyway.",
+                monitor_attach_timeout
+            );
+            break;
+        }
+        sleep(poll_interval).await;
+    }
+
+    // 2. Run User Command
+    let (cmd, cmd_args) = args
+        .command
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("no command provided to run"))?;
+
+    eprintln!(">>> Running: {:?}", args.command);
+
+    // Check if monitor is still alive/running before we do anything
+    if let Ok(Some(status)) = monitor.try_wait() {
+        return Err(anyhow::anyhow!(
+            "Monitor process died early with status: {}",
+            status
+        ));
+    }
+
+    let status = Command::new(cmd)
+        .args(cmd_args)
+        .status()
+        .context("Failed to run user command")?;
+
+    eprintln!(">>> Command finished with status: {}", status);
+
+    // 3. Settle
+    if args.settle_duration > 0 {
+        eprintln!(
+            ">>> Waiting {}s for events to settle...",
+            args.settle_duration
+        );
+        sleep(Duration::from_secs(args.settle_duration)).await;
+    }
+
+    // 4. Stop Monitor
+    eprintln!(">>> Stopping monitor...");
+    let _ = monitor.kill(); // SIGKILL/SIGTERM equivalent
+    let _ = monitor.wait(); // Reap zombie
+
+    // 5. Generate Policy
+    eprintln!(">>> Generating policy to {}...", args.output.display());
+
+    let gen_args = GenerateArgs {
+        input: trace_file.clone(),
+        output: args.output.clone(),
+        name: args.name,
+        strictness: args.strictness,
+        format: "yaml".to_string(), // Default to yaml
+        dry_run: false,
+    };
+
+    // We can call generate::run directly since it's in-process
+    // Note: generate::run is synchronous currently, but that's fine inside async fn
+    generate::run(gen_args)
+}

@@ -1,8 +1,9 @@
 #![cfg(unix)]
 #[cfg(target_os = "linux")]
 use assay_common::get_inode_generation;
-
+#[cfg(target_os = "linux")]
 use std::os::unix::prelude::AsRawFd;
+#[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 
 #[test]

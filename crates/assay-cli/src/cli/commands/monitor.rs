@@ -694,7 +694,8 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[cfg(target_os = "linux")]
+    use assay_common::encode_kernel_dev;
 
     #[test]
     #[cfg(target_os = "linux")]

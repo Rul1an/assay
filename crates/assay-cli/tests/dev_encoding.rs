@@ -1,4 +1,4 @@
-#![cfg(unix)]
+#![cfg(target_os = "linux")]
 use assay_common::encode_kernel_dev;
 use proptest::prelude::*;
 

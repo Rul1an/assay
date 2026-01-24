@@ -1,0 +1,3 @@
+{"type":"file_open","path":"/etc/passwd","pid":1000,"timestamp":1706000000}
+{"type":"net_connect","dest":"10.0.0.1:5432","pid":1000,"timestamp":1706000001}
+{"type":"proc_exec","path":"/bin/bash","pid":1000,"timestamp":1706000002}
