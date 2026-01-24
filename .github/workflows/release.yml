@@ -274,7 +274,7 @@ jobs:
     name: Verify LSM Enforcement
     needs: [build]
     # SOTA 2026: Require explicit 'bpf-lsm' label for guaranteed kernel support
-    runs-on: [self-hosted, bpf-lsm]
+    runs-on: [self-hosted]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

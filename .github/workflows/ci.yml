@@ -176,7 +176,7 @@ jobs:
     needs: [test]
     # Security: never run untrusted code from forks on self-hosted
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    runs-on: [self-hosted, bpf-lsm]
+    runs-on: [self-hosted]
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
       cancel-in-progress: true
