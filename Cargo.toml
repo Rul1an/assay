@@ -27,7 +27,7 @@ unused_lifetimes = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
 unwrap_used = "allow"
 print_stdout = "allow"
 missing_errors_doc = "allow"

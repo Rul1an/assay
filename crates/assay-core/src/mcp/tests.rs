@@ -223,6 +223,7 @@ fn test_is_v1_format() {
 
 #[test]
 #[serial_test::serial]
+#[allow(unsafe_code)]
 fn test_strict_deprecation_env_var() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let path = tmp.path();

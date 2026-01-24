@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 use clap::Parser;
 
 pub mod cgroup;

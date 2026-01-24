@@ -1,5 +1,6 @@
 use anyhow::Context as _;
 use clap::Parser;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -311,14 +312,11 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     script.push_str(r#"cp -f "$OUT" /work/target/assay-ebpf.o; "#);
 
     // Chown the output file to match host user
-    script.push_str(&format!(
-        "chown {}:{} /work/target/assay-ebpf.o || true; ",
-        uid, gid
-    ));
-    script.push_str(&format!(
-        "chown -R {}:{} /work/target-ebpf || true; ",
-        uid, gid
-    ));
+    let _ = write!(
+        script,
+        "chown {uid}:{gid} /work/target/assay-ebpf.o || true; "
+    );
+    let _ = write!(script, "chown -R {uid}:{gid} /work/target-ebpf || true; ");
 
     let status = Command::new("docker")
         .args([
