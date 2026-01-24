@@ -86,8 +86,10 @@ jobs:
           set -euo pipefail
 
           # Ensure python3 is available (for Deb822 rewrite) and update strictly for current arch first
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
+          command -v python3 >/dev/null 2>&1 || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
+          }
 
           sudo dpkg --add-architecture arm64
 
@@ -275,7 +277,7 @@ jobs:
     needs: [build]
     # SOTA 2026: Manual check only, to prevent release blocking on runner availability
     if: github.event_name == 'workflow_dispatch'
-    # SOTA 2026: Require explicit 'bpf-lsm' label for guaranteed kernel support
+    # SOTA 2026: Manual check only; self-hosted runner optional
     runs-on: [self-hosted]
     timeout-minutes: 10
     steps:
@@ -362,8 +364,9 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          working-directory: assay-python-sdk
           target: ${{ matrix.target }}
-          args: --release --out dist --manifest-path assay-python-sdk/Cargo.toml
+          args: --release --out dist --locked
           sccache: 'true'
           manylinux: auto
 
