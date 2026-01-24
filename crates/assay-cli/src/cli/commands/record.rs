@@ -1,12 +1,33 @@
 //! Assay Record: Unified Capture + Generate Flow
 
-use crate::cli::args::{GenerateArgs, RecordArgs};
 use crate::cli::commands::generate;
 use anyhow::{Context, Result};
+use clap::Args;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
+
+#[derive(Args, Debug, Clone)]
+pub struct RecordArgs {
+    /// Command to record
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
+
+    /// Policy file to write
+    #[arg(short, long, default_value = "policy.yaml")]
+    pub output: PathBuf,
+
+    #[arg(long, default_value = "Recorded Policy")]
+    pub name: String,
+
+    #[arg(long, default_value_t = 0.5)]
+    pub strictness: f64,
+
+    /// Duration to wait before stopping monitor after command exits (seconds)
+    #[arg(long, default_value_t = 1)]
+    pub settle_duration: u64,
+}
 
 pub async fn run(args: RecordArgs) -> Result<i32> {
     let trace_file = std::env::temp_dir().join(format!("assay-trace-{}.jsonl", std::process::id()));
@@ -102,13 +123,19 @@ pub async fn run(args: RecordArgs) -> Result<i32> {
     // 5. Generate Policy
     eprintln!(">>> Generating policy to {}...", args.output.display());
 
-    let gen_args = GenerateArgs {
-        input: trace_file.clone(),
+    let gen_args = generate::GenerateArgs {
+        input: Some(trace_file.clone()),
+        profile: None,
         output: args.output.clone(),
         name: args.name,
-        strictness: args.strictness,
-        format: "yaml".to_string(), // Default to yaml
+        format: "yaml".to_string(),
         dry_run: false,
+        heuristics: true, // Enable heuristics for record mode
+        entropy_threshold: 3.8,
+        min_stability: 0.8,
+        review_threshold: 0.6,
+        new_is_risky: false,
+        alpha: 1.0,
     };
 
     // We can call generate::run directly since it's in-process

@@ -1,5 +1,5 @@
-# Generated Policy (v2.0)
-# Source: Learned from observations
-# Generated at: 2026-01-24T19:00:00+00:00
-
-{}
+_meta:
+  name: Test Policy
+files: {}
+network: {}
+processes: {}

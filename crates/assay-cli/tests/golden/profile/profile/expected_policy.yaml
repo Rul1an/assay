@@ -1,0 +1,46 @@
+# Expected policy from profile with --min-stability 0.8
+# Stable items (stability >= 0.8) → allow
+# Noise items (stability < 0.6) → skip (unless --new-is-risky)
+
+_meta:
+  name: test-policy
+  profile_runs: 10
+  min_stability: 0.8
+
+files:
+  allow:
+  - pattern: /etc/passwd
+    stability: 0.92
+    runs_seen: 10
+    reasons:
+    - stability 0.92 (10/10)
+  - pattern: /home/app/.config
+    stability: 0.92
+    runs_seen: 10
+    reasons:
+    - stability 0.92 (10/10)
+  needs_review: []
+  deny: []
+
+network:
+  allow_destinations:
+  - pattern: db.internal:5432
+    stability: 0.92
+    runs_seen: 10
+    reasons:
+    - stability 0.92 (10/10)
+  needs_review: []
+  deny_destinations: []
+
+processes:
+  allow:
+  - pattern: /usr/bin/app
+    stability: 0.92
+    runs_seen: 10
+    reasons:
+    - stability 0.92 (10/10)
+  needs_review: []
+  deny: []
+
+# Note: noise items (/tmp/noise-..., 192.168.1.99:12345) are SKIPPED
+# because stability 0.17 < 0.6 (review_threshold) and --new-is-risky not set

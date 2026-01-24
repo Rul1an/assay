@@ -1,0 +1,6 @@
+{"type":"file_open","path":"/etc/passwd","timestamp":2000}
+{"type":"file_open","path":"/home/app/.config","timestamp":2001}
+{"type":"net_connect","dest":"db.internal:5432","timestamp":2002}
+{"type":"proc_exec","path":"/usr/bin/app","timestamp":2003}
+{"type":"file_open","path":"/tmp/noise-x9y8z7w6.tmp","timestamp":2004}
+{"type":"net_connect","dest":"192.168.1.99:12345","timestamp":2005}
