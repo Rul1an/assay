@@ -166,6 +166,10 @@ pub enum Entry {
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline Heuristics (from Phase 2)
 // ─────────────────────────────────────────────────────────────────────────────
+// NOTE: This is an intentionally simplified subset of heuristics.rs, inlined for
+// self-contained policy generation. The full heuristics.rs module includes network
+// fanout analysis and per-PID tracking which requires runtime monitoring context.
+// This inline version focuses on static path entropy and sensitive port detection.
 
 mod heuristics {
     use std::collections::HashMap;
@@ -321,14 +325,27 @@ pub fn read_events(path: &PathBuf) -> Result<Vec<Event>> {
         Box::new(BufReader::new(std::fs::File::open(path)?))
     };
     let mut events = Vec::new();
-    for line in reader.lines() {
+    let mut skipped = 0;
+    for (i, line) in reader.lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Ok(e) = serde_json::from_str(&line) {
-            events.push(e);
+        match serde_json::from_str(&line) {
+            Ok(e) => events.push(e),
+            Err(_) => {
+                skipped += 1;
+                if skipped <= 3 {
+                    eprintln!("warning: skipping line {}: unparsable event", i + 1);
+                }
+            }
         }
+    }
+    if skipped > 3 {
+        eprintln!("warning: skipped {} unparsable lines total", skipped);
+    }
+    if events.is_empty() && skipped > 0 {
+        anyhow::bail!("no valid events found ({} lines skipped)", skipped);
     }
     Ok(events)
 }
@@ -624,6 +641,18 @@ pub fn run(args: GenerateArgs) -> Result<i32> {
     }
     if args.input.is_some() && args.profile.is_some() {
         anyhow::bail!("cannot use both --input and --profile");
+    }
+
+    // Validate: stability thresholds relationship
+    if args.min_stability < args.review_threshold {
+        anyhow::bail!(
+            "--min-stability ({}) must be >= --review-threshold ({})",
+            args.min_stability,
+            args.review_threshold
+        );
+    }
+    if args.alpha <= 0.0 {
+        anyhow::bail!("--alpha must be positive (got {})", args.alpha);
     }
 
     let heur_cfg = heuristics::Config {

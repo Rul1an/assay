@@ -21,9 +21,6 @@ pub struct RecordArgs {
     #[arg(long, default_value = "Recorded Policy")]
     pub name: String,
 
-    #[arg(long, default_value_t = 0.5)]
-    pub strictness: f64,
-
     /// Duration to wait before stopping monitor after command exits (seconds)
     #[arg(long, default_value_t = 1)]
     pub settle_duration: u64,
