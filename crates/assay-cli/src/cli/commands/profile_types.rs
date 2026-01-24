@@ -122,6 +122,7 @@ pub fn stability_smoothed(runs_seen: u32, total_runs: u32, alpha: f64) -> f64 {
 
 pub const DEFAULT_ALPHA: f64 = 1.0;
 
+#[allow(dead_code)] // Will be used in SOTA 2026 refinements
 #[derive(Debug, Clone)]
 pub struct StabilityConfig {
     pub promote_threshold: f64, // >= this → allow

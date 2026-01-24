@@ -10,6 +10,8 @@
 //! | NeedsReview      | Suspicious, human should verify      |
 //! | DenyRecommended  | Likely malicious                     |
 
+#![allow(dead_code)] // Phase 3 generate.rs has inline heuristics
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

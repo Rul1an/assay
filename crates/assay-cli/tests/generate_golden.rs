@@ -1,5 +1,7 @@
 //! Golden tests for assay generate (Phase 3)
 
+#![allow(deprecated)] // cargo_bin is deprecated but still works
+
 use assert_cmd::Command;
 use std::path::PathBuf;
 

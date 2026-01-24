@@ -70,7 +70,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Policy(args) => policy::run(args).await,
         Command::Generate(args) => generate::run(args),
         Command::Record(args) => record::run(args).await,
-        Command::Profile(args) => profile::run(args).map_err(Into::into),
+        Command::Profile(args) => profile::run(args),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)

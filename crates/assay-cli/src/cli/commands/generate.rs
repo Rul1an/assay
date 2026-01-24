@@ -568,9 +568,8 @@ fn classify_entry(
     // Stability-based classification
     if stab >= args.min_stability {
         Some(("allow", false))
-    } else if stab >= args.review_threshold {
-        Some(("needs_review", false))
-    } else if args.new_is_risky {
+    } else if stab >= args.review_threshold || args.new_is_risky {
+        // Medium stability OR low-stability with new_is_risky → needs_review
         Some(("needs_review", false))
     } else {
         None // Skip low-stability items

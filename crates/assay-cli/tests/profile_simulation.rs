@@ -17,6 +17,7 @@ mod profile_types {
 
     pub const MAX_RUN_IDS: usize = 200;
 
+    #[allow(dead_code)] // Used for test simulation only
     #[derive(Debug, Clone, Default)]
     pub struct Profile {
         pub name: String,
