@@ -635,7 +635,7 @@ impl Store {
     }
 
     fn insert_episode(
-        tx: &rusqlite::Transaction,
+        tx: &rusqlite::Transaction<'_>,
         e: &EpisodeStart,
         run_id: Option<i64>,
         test_id: Option<&str>,
@@ -674,7 +674,7 @@ impl Store {
         Ok(())
     }
 
-    fn insert_step(tx: &rusqlite::Transaction, e: &StepEntry) -> anyhow::Result<()> {
+    fn insert_step(tx: &rusqlite::Transaction<'_>, e: &StepEntry) -> anyhow::Result<()> {
         let meta = serde_json::to_string(&e.meta).unwrap_or_default();
         let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
 
@@ -698,7 +698,7 @@ impl Store {
         Ok(())
     }
 
-    fn insert_tool_call(tx: &rusqlite::Transaction, e: &ToolCallEntry) -> anyhow::Result<()> {
+    fn insert_tool_call(tx: &rusqlite::Transaction<'_>, e: &ToolCallEntry) -> anyhow::Result<()> {
         let args = serde_json::to_string(&e.args).unwrap_or_default();
         let result = e
             .result
@@ -739,7 +739,7 @@ impl Store {
         Ok(n)
     }
 
-    fn update_episode_end(tx: &rusqlite::Transaction, e: &EpisodeEnd) -> anyhow::Result<()> {
+    fn update_episode_end(tx: &rusqlite::Transaction<'_>, e: &EpisodeEnd) -> anyhow::Result<()> {
         tx.execute(
             "UPDATE episodes SET outcome = ? WHERE id = ?",
             (e.outcome.as_deref(), &e.episode_id),

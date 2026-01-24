@@ -1,7 +1,7 @@
 [package]
 name = "assay-ebpf"
-version = "2.2.2"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 publish = false
 
 [features]
@@ -11,7 +11,7 @@ ebpf = []
 [dependencies]
 aya-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
-assay-common = { path = "../assay-common", default-features = false }
+assay-common.workspace = true
 
 [[bin]]
 name = "assay-ebpf"

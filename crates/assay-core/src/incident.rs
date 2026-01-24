@@ -98,6 +98,7 @@ impl IncidentBuilder {
         .context("Failed to open output directory securely")?;
 
         // SAFETY: We wrap the raw FD immediately to ensure RAII closure.
+        #[allow(unsafe_code)]
         let dir_file = unsafe { std::fs::File::from_raw_fd(dir_raw_fd) };
 
         // 3. Verify Directory Permissions (fstat on fd)
@@ -129,6 +130,7 @@ impl IncidentBuilder {
         )
         .context("Failed to create temp file securely")?;
 
+        #[allow(unsafe_code)]
         let mut tmp_file = unsafe { std::fs::File::from_raw_fd(tmp_fd) };
 
         // 5. Write and Fsync

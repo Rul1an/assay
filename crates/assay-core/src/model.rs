@@ -242,7 +242,7 @@ impl<'de> Deserialize<'de> for TestInput {
         impl<'de> serde::de::Visitor<'de> for TestInputVisitor {
             type Value = TestInput;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("string or struct TestInput")
             }
 

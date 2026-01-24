@@ -21,6 +21,7 @@ pub fn parse_event(bytes: &[u8]) -> Result<MonitorEvent, MonitorError> {
     // - We copy exactly `size_of::<MonitorEvent>()` bytes into the struct.
     // - Layout is protected by compile-time asserts in assay-common.
     let mut out = core::mem::MaybeUninit::<MonitorEvent>::uninit();
+    #[allow(unsafe_code)] // Performance: zero-copy parse from ringbuf
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), out.as_mut_ptr() as *mut u8, need);
         Ok(out.assume_init())

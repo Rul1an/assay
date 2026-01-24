@@ -3,14 +3,17 @@ name = "assay-it"
 version.workspace = true
 edition = "2021"
 
+[lints]
+workspace = true
+
 [lib]
 name = "assay"
 crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.23.3", features = ["extension-module"] }
-assay-core = { path = "../crates/assay-core", version = "2.0.0" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
+assay-core.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+serde_yaml.workspace = true
 pythonize = "0.23.0"

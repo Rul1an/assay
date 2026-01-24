@@ -1,9 +1,12 @@
 [package]
 name = "assay-xtask"
-version = "2.2.2"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+anyhow.workspace = true
+clap.workspace = true

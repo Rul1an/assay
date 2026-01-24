@@ -19,6 +19,19 @@ default-members = [
   "assay-python-sdk",
 ]
 
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "allow"
+rust_2018_idioms = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "allow"
+print_stdout = "allow"
+missing_errors_doc = "allow"
+
 [workspace.package]
 version = "2.2.2"
 edition = "2021"
@@ -48,3 +61,27 @@ codegen-units = 1
 opt-level = 3
 debug = false
 codegen-units = 1
+
+[workspace.dependencies]
+# Internal crates
+assay-core = { path = "crates/assay-core", version = "2.2.2" }
+assay-common = { path = "crates/assay-common", version = "2.2.2", default-features = false }
+assay-monitor = { path = "crates/assay-monitor", version = "2.2.2" }
+assay-metrics = { path = "crates/assay-metrics", version = "2.2.2" }
+assay-policy = { path = "crates/assay-policy", version = "2.2.2" }
+assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.2.2" }
+
+# Common dependencies
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1.0", features = ["derive"], default-features = false }
+serde_json = { version = "1.0", default-features = false }
+serde_yaml = "0.9"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"], default-features = false }
+tempfile = "3"
+regex = "1"
+async-trait = "0.1"

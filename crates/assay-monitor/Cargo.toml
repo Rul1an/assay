@@ -1,20 +1,24 @@
 [package]
 name = "assay-monitor"
-version = "2.2.2"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Userspace monitor for Assay eBPF programs"
-license = "MIT"
-repository = "https://github.com/Rul1an/assay"
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-assay-common = { path = "../assay-common", version = "2.0.0", features = ["user"] }
-assay-policy = { path = "../assay-policy", version = "2.0.0" }
-thiserror = "1"
-anyhow = "1"
-tokio = { version = "1", features = ["sync"] }
+assay-common = { workspace = true }
+assay-policy.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 tokio-stream = "0.1"
 
 # Linux-only eBPF stack
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { version = "0.13.0" }
 aya-log = { version = "0.2" }
+assay-common = { workspace = true, features = ["user"] }

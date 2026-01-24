@@ -136,13 +136,6 @@ mkdir -p /tmp/assay-lsm-verify
 LOG_DIR="/tmp/assay-lsm-verify"
 
 # Generate Policy (Legacy format for reference, but we use deny_modern.yaml)
-echo "----------------------------------------------------------------"
-echo "📝 [3/3] Generating Test Policy (deny.yaml)..."
-echo "----------------------------------------------------------------"
-cat > deny.yaml <<EOF
-files:
-  deny: ["/tmp/assay-test/secret.txt"]
-EOF
 
 # Modern Policy for Shield/LSM enforcement
 cat > deny_modern.yaml <<EOF
@@ -370,7 +363,7 @@ if command -v limactl >/dev/null 2>&1; then
 
         limactl cp ./assay "$LIMA_INSTANCE":/tmp/assay-test/
         limactl cp ./assay-ebpf.o "$LIMA_INSTANCE":/tmp/assay-test/
-        limactl cp deny.yaml "$LIMA_INSTANCE":/tmp/assay-test/
+
         limactl cp deny_modern.yaml "$LIMA_INSTANCE":/tmp/assay-test/
 
         # Run test inside Lima (sudo required)

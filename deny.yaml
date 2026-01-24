@@ -1,2 +1,0 @@
-files:
-  deny: ["/tmp/assay-test/secret.txt"]

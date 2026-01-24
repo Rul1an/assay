@@ -25,7 +25,7 @@ echo "TOP_SECRET_DATA" > /tmp/assay-test/secret.txt
 chmod 600 /tmp/assay-test/secret.txt
 
 # Start Monitor
-RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny.yaml --monitor-all --print > monitor.log 2>&1 &
+RUST_LOG=info ./assay monitor --ebpf ./assay-ebpf.o --policy ./deny_modern.yaml --monitor-all --print > monitor.log 2>&1 &
 MONITOR_PID=$!
 sleep 5 # Wait for attachment
 
