@@ -206,6 +206,8 @@ pub struct CompilationStats {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Compile a policy into enforcement tiers
+#[allow(clippy::too_many_lines)]
+#[must_use]
 pub fn compile(policy: &Policy) -> CompiledPolicy {
     let mut tier1 = Tier1Rules::default();
     let mut tier2 = Tier2Rules::default();
@@ -282,7 +284,7 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
             Err(e) => {
                 stats
                     .warnings
-                    .push(format!("Invalid CIDR '{}': {}", cidr_str, e));
+                    .push(format!("Invalid CIDR '{cidr_str}': {e}"));
             }
         }
         rule_id += 1;
@@ -303,7 +305,7 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
             Err(e) => {
                 stats
                     .warnings
-                    .push(format!("Invalid CIDR '{}': {}", cidr_str, e));
+                    .push(format!("Invalid CIDR '{cidr_str}': {e}"));
             }
         }
         rule_id += 1;
@@ -320,7 +322,9 @@ pub fn compile(policy: &Policy) -> CompiledPolicy {
         rule_id += 1;
     }
 
-    tier1.network_allow_ports = policy.network.allow_ports.clone();
+    tier1
+        .network_allow_ports
+        .clone_from(&policy.network.allow_ports);
 
     // Destination patterns → Tier 2
     for dest in &policy.network.deny_destinations {
@@ -400,12 +404,12 @@ fn classify_path_pattern(pattern: &str) -> PathClass {
 
 /// FNV-1a hash (same as kernel)
 fn fnv1a_hash(data: &[u8]) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0100_0000_01b3;
 
     let mut hash = FNV_OFFSET;
     for &byte in data {
-        hash ^= byte as u64;
+        hash ^= u64::from(byte);
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
@@ -416,7 +420,8 @@ fn fnv1a_hash(data: &[u8]) -> u64 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl Tier1Rules {
-    /// Generate entries for DENY_PATHS_EXACT map
+    /// Generate entries for `DENY_PATHS_EXACT` map
+    #[must_use]
     pub fn file_exact_entries(&self) -> Vec<(u64, u32)> {
         self.file_deny_exact
             .iter()
@@ -424,15 +429,22 @@ impl Tier1Rules {
             .collect()
     }
 
-    /// Generate entries for DENY_PATHS_PREFIX map
+    /// Generate entries for `DENY_PATHS_PREFIX` map
+    #[must_use]
     pub fn file_prefix_entries(&self) -> Vec<(u64, (u32, u32))> {
         self.file_deny_prefix
             .iter()
-            .map(|r| (r.hash, (r.path.len() as u32, r.rule_id)))
+            .map(|r| {
+                (
+                    r.hash,
+                    (u32::try_from(r.path.len()).unwrap_or(0), r.rule_id),
+                )
+            })
             .collect()
     }
 
-    /// Generate entries for CIDR_RULES_V4 map
+    /// Generate entries for `CIDR_RULES_V4` map
+    #[must_use]
     pub fn cidr_v4_entries(&self) -> Vec<(u32, [u8; 4], u8)> {
         let mut entries = Vec::new();
 
@@ -440,7 +452,7 @@ impl Tier1Rules {
         for rule in &self.network_allow_cidrs {
             if let IpNet::V4(net) = rule.parsed {
                 entries.push((
-                    net.prefix_len() as u32,
+                    u32::from(net.prefix_len()),
                     net.addr().octets(),
                     1, // ACTION_ALLOW
                 ));
@@ -451,7 +463,7 @@ impl Tier1Rules {
         for rule in &self.network_deny_cidrs {
             if let IpNet::V4(net) = rule.parsed {
                 entries.push((
-                    net.prefix_len() as u32,
+                    u32::from(net.prefix_len()),
                     net.addr().octets(),
                     2, // ACTION_DENY
                 ));
@@ -461,7 +473,8 @@ impl Tier1Rules {
         entries
     }
 
-    /// Generate entries for DENY_PORTS map
+    /// Generate entries for `DENY_PORTS` map
+    #[must_use]
     pub fn port_deny_entries(&self) -> Vec<(u16, u32)> {
         self.network_deny_ports
             .iter()
@@ -469,7 +482,8 @@ impl Tier1Rules {
             .collect()
     }
 
-    /// Generate entries for DENY_INO map (SOTA)
+    /// Generate entries for `DENY_INO` map (SOTA)
+    #[must_use]
     pub fn inode_exact_entries(&self) -> Vec<(String, InodeRule)> {
         self.inode_deny_exact
             .iter()

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unsafe_code)]
 
 #[cfg(feature = "std")]
 extern crate std;
