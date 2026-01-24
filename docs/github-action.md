@@ -255,3 +255,61 @@ Add debug logging for troubleshooting:
 ### Cache the Assay Binary
 
 The Cargo cache action above caches the compiled binary, making subsequent runs faster.
+
+## MCP Security Validation
+
+To validate your MCP policies on every PR (including SARIF upload for GitHub Security):
+
+```yaml
+# .github/workflows/assay-security.yml
+name: Assay MCP Security
+
+on:
+  push:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "**/*.mcp.json"
+      - ".github/workflows/assay-security.yml"
+  pull_request:
+    paths:
+      - "assay.yaml"
+      - "policy.yaml"
+      - "**/*.mcp.json"
+      - ".github/workflows/assay-security.yml"
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Assay
+        run: |
+          curl -fsSL https://getassay.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Validate policy file (syntax + schema compile)
+        run: |
+          # Adjust to your policy path:
+          assay policy validate --input policy.yaml --deny-deprecations
+
+      - name: Assay validate (SARIF)
+        run: |
+          assay validate --format sarif --output results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+      - name: Fail on issues (PR gating)
+        run: |
+          assay validate --format text
+```

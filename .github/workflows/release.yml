@@ -275,9 +275,9 @@ jobs:
   verify-lsm-blocking:
     name: Verify LSM Enforcement
     needs: [build]
-    # SOTA 2026: Manual check only, to prevent release blocking on runner availability
+    # Manual check only, to prevent release blocking on runner availability
     if: github.event_name == 'workflow_dispatch'
-    # SOTA 2026: Manual check only; self-hosted runner optional
+    # Manual check only; self-hosted runner optional
     runs-on: [self-hosted]
     timeout-minutes: 10
     steps:

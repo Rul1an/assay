@@ -98,7 +98,7 @@ try_publish() {
     return 0
   fi
 
-  # SOTA 2026: During Trusted Publishing rollouts, some crates might not yet have tokens enabled.
+  # During Trusted Publishing rollouts, some crates might not yet have tokens enabled.
   # Treat this as a skip (yellow warning) rather than a pipeline failure.
   if grep -qi "token not valid for crate" "$log"; then
     echo "⚠️  Token not valid for ${crate} (Trusted Publishing restriction?) — skipping."

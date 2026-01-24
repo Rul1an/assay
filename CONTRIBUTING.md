@@ -44,22 +44,7 @@ cargo xtask build-ebpf --docker
 2. Run eBPF build (docker) for target `bpfel-unknown-none`.
 3. Verify with `verify_lsm_docker.sh`:
 
-   ```text
-   🚀 Starting Assay Verification...
-   ----------------------------------------------------------------
-   🛠️  [1/3] Building eBPF bytecode (assay-ebpf)...
-   ----------------------------------------------------------------
-   eBPF build successful (docker) for target bpfel-unknown-none
-   ----------------------------------------------------------------
-   🛠️  [2/3] Building assay-cli (userspace)...
-   ----------------------------------------------------------------
-   🍎 Detected ARM64 (Apple Silicon). Building for target: aarch64-unknown-linux-musl
-   ----------------------------------------------------------------
-   📝 [3/3] Generating Test Policy (deny.yaml)...
-   ----------------------------------------------------------------
-   ----------------------------------------------------------------
-   🧪 Starting Runtime Verification...
-   ----------------------------------------------------------------
-   🍋 Lima VM 'default' detected.
-      Running test inside Lima....
+   ```bash
+   ./scripts/verify_lsm_docker.sh
+   # Expect: eBPF build success + detected Lima/Docker env + passing runtime test
    ```
