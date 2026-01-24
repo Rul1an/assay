@@ -13,6 +13,7 @@ use tempfile::NamedTempFile;
 
 #[test]
 #[allow(deprecated)]
+#[allow(unsafe_code)]
 fn test_lsm_deny_smoke_e2e() {
     // 0. Pre-flight check for root
     if unsafe { libc::geteuid() } != 0 {
