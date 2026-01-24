@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 use assert_cmd::cargo::CommandCargoExt;
 use std::process::Command;
 

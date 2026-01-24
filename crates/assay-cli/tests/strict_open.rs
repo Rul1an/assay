@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 #![cfg(unix)]
 
 #[cfg(target_os = "linux")]
