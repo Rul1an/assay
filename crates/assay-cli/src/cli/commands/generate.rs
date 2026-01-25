@@ -57,7 +57,7 @@ pub struct GenerateArgs {
 
     // ─── Profile stability ───
     /// Minimum stability to auto-allow (profile mode)
-    #[arg(long, default_value_t = 0.8)]
+    #[arg(long, default_value_t = 0.7)]
     pub min_stability: f64,
 
     /// Below this, mark as needs_review if --new-is-risky
