@@ -1,4 +1,4 @@
-//! Simulation tests for multi-run stability (Phase 3)
+//! Simulation tests for multi-run stability
 //!
 //! These tests verify:
 //! 1. Stable artifacts get high stability scores

@@ -1,4 +1,4 @@
-//! Profile types for multi-run stability analysis (Phase 3)
+//! Profile types for multi-run stability analysis
 //!
 //! A Profile accumulates observations across multiple runs to determine
 //! which artifacts are stable (consistently observed) vs noise (sporadic).
@@ -147,7 +147,7 @@ pub const DEFAULT_ALPHA: f64 = 1.0;
 #[allow(dead_code)]
 pub const DEFAULT_WILSON_Z: f64 = 1.96; // ~95% confidence
 
-#[allow(dead_code)] // Will be used in SOTA 2026 refinements
+#[allow(dead_code)] // Future refinements
 #[derive(Debug, Clone)]
 pub struct StabilityConfig {
     pub promote_threshold: f64, // >= this → allow

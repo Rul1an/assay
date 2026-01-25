@@ -1,11 +1,11 @@
-//! Learning Mode: Generate policy (Phase 3 - with profile support)
+//! Learning Mode: Generate policy
 //!
 //! # Usage
 //! ```bash
-//! # Single-run mode (Phase 2)
+//! # Single-run mode
 //! assay generate -i trace.jsonl --heuristics
 //!
-//! # Profile mode (Phase 3)
+//! # Profile mode (stability analysis)
 //! assay generate --profile profile.yaml --min-stability 0.8
 //! assay generate --profile profile.yaml --min-stability 0.8 --new-is-risky
 //! ```
@@ -48,14 +48,14 @@ pub struct GenerateArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    // ─── Single-run heuristics (Phase 2) ───
+    // ─── Single-run heuristics ───
     #[arg(long)]
     pub heuristics: bool,
 
     #[arg(long, default_value_t = 3.8)]
     pub entropy_threshold: f64,
 
-    // ─── Profile stability (Phase 3) ───
+    // ─── Profile stability ───
     /// Minimum stability to auto-allow (profile mode)
     #[arg(long, default_value_t = 0.8)]
     pub min_stability: f64,
@@ -174,7 +174,7 @@ pub enum Entry {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Single-Run Aggregation (Phase 2)
+// Single-Run Aggregation
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
@@ -293,7 +293,7 @@ pub fn aggregate(events: &[Event]) -> Aggregated {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Generate from Single Run (Phase 2)
+// Generate from Single Run
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn generate_from_trace(
@@ -399,7 +399,7 @@ fn make_entry_simple(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Generate from Profile (Phase 3)
+// Generate from Profile
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn generate_from_profile(

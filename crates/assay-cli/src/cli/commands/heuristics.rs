@@ -1,7 +1,7 @@
-//! Learning Mode Heuristics (Phase 2b/2c)
+//! Learning Mode Heuristics
 //!
-//! - Phase 2b: Entropy detection for suspicious paths
-//! - Phase 2c: Network fanout analysis
+//! - Entropy detection for suspicious paths
+//! - Network fanout analysis
 //!
 //! # Risk Levels
 //! | Level            | Meaning                              |
@@ -10,7 +10,7 @@
 //! | NeedsReview      | Suspicious, human should verify      |
 //! | DenyRecommended  | Likely malicious                     |
 
-#![allow(dead_code)] // Phase 3 generate.rs has inline heuristics
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -79,7 +79,7 @@ impl Default for HeuristicsConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2b: Entropy Analysis
+// Entropy Analysis
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Shannon entropy (bits per character)
@@ -164,7 +164,7 @@ pub fn analyze_dest(dest: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2c: Network Fanout Analysis
+// Network Fanout Analysis
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
