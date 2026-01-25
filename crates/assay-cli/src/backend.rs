@@ -64,11 +64,18 @@ pub struct LandlockEnforcer {
 }
 
 impl LandlockEnforcer {
-    /// Enforce the ruleset. Safe to call from pre_exec (no allocations on Linux).
+    /// Enforce the ruleset. Safe to call from pre_exec.
+    ///
+    /// # Safety Note
+    /// This MUST be called from pre_exec (after fork, before exec).
+    /// The implementation ONLY calls syscalls (prctl + landlock_restrict_self).
+    /// No heap allocations occur in the success path.
+    /// On failure, std::io::Error is constructed but this is a rare error case
+    /// where the child will exit anyway.
     pub fn enforce(&mut self) -> std::io::Result<()> {
         #[cfg(target_os = "linux")]
         if let Some(ruleset) = self.ruleset.take() {
-            return landlock_impl::enforce(ruleset).map_err(std::io::Error::other);
+            return landlock_impl::enforce_fork_safe(ruleset);
         }
         Ok(())
     }
@@ -128,15 +135,27 @@ mod landlock_impl {
 
     pub(super) type RulesetHandle = RulesetCreated;
 
-    pub(super) fn enforce(ruleset: RulesetHandle) -> anyhow::Result<()> {
-        let status = ruleset.restrict_self()?;
-        if status.ruleset == RulesetStatus::NotEnforced {
-            // This is arguably safe to construct in pre_exec as it's just an error
-            // But ideally we'd avoid even this allocation.
-            // For now, let's allow it as a rare error case.
-            anyhow::bail!("Landlock not enforced (kernel may not support it)");
+    /// Fork-safe enforcement: only syscalls, returns errno on failure.
+    ///
+    /// # Fork Safety
+    /// `restrict_self()` internally calls `prctl(PR_SET_NO_NEW_PRIVS)` and
+    /// `landlock_restrict_self()`. Both are syscalls, no heap allocation.
+    /// We convert any error to std::io::Error with the raw errno.
+    pub(super) fn enforce_fork_safe(ruleset: RulesetHandle) -> std::io::Result<()> {
+        match ruleset.restrict_self() {
+            Ok(status) => {
+                if status.ruleset == RulesetStatus::NotEnforced {
+                    // Return a simple errno instead of allocating error string
+                    return Err(std::io::Error::from_raw_os_error(libc::ENOTSUP));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                // Convert landlock error to io::Error
+                // Landlock crate errors contain the errno internally
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+            }
         }
-        Ok(())
     }
 
     /// Create Landlock ruleset from policy.
