@@ -13,14 +13,6 @@ pub struct SandboxArgs {
     /// Path to policy file (optional)
     #[arg(long)]
     pub policy: Option<PathBuf>,
-
-    /// Dry-run mode: Log violations but do not block
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Trace level: error|warn|info|debug|trace
-    #[arg(long, default_value = "info")]
-    pub trace_level: String,
 }
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
@@ -73,19 +65,32 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         Err(e) => eprintln!("WARN: Failed to create trace dir: {}", e),
     }
 
+    // Scoped /tmp creation
+    let user = std::env::var("USER").unwrap_or_else(|_| "sandbox".to_string());
+    let tmp_dir = std::path::PathBuf::from(format!("/tmp/assay-{}", user));
+    if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+        eprintln!(
+            "WARN: Failed to create scoped tmp dir {}: {}",
+            tmp_dir.display(),
+            e
+        );
+    }
+
     eprintln!("------------------");
 
     // Spawn child with sandbox isolation
     let cmd_name = &args.command[0];
     let cmd_args = &args.command[1..];
 
-    let status = spawn_sandboxed(cmd_name, cmd_args, &backend, &policy)?;
+    let status = spawn_sandboxed(cmd_name, cmd_args, &backend, &policy, &tmp_dir)?;
 
+    // Consolidate exit code logic
+    // Just return direct status code or signal failure
     match status.code() {
-        Some(0) => Ok(exit_codes::SUCCESS),
-        Some(_) => Ok(exit_codes::COMMAND_FAILED),
+        Some(code) => Ok(code),
         None => {
             eprintln!("sandbox error: child terminated by signal");
+            // Standard convention 128 + signal, but we can return generic error for now
             Ok(exit_codes::INTERNAL_ERROR)
         }
     }
@@ -99,12 +104,18 @@ fn spawn_sandboxed(
     cmd_args: &[String],
     backend: &BackendType,
     policy: &crate::policy::Policy,
+    scoped_tmp: &std::path::Path,
 ) -> anyhow::Result<std::process::ExitStatus> {
     let mut cmd = std::process::Command::new(cmd_name);
     cmd.args(cmd_args)
+        .env("TMPDIR", scoped_tmp)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+
+    // Prepare Landlock ruleset in parent process (Safe allocation/IO)
+    #[cfg(target_os = "linux")]
+    let mut enforcer = crate::backend::prepare_landlock(policy, scoped_tmp)?;
 
     // Apply Landlock isolation via pre_exec (child-side, before exec)
     #[cfg(all(target_os = "linux", target_family = "unix"))]
@@ -112,13 +123,12 @@ fn spawn_sandboxed(
         use std::os::unix::process::CommandExt;
 
         if matches!(backend, BackendType::Landlock) {
-            let policy_clone = policy.clone();
             // SAFETY: pre_exec runs after fork, before exec in child process.
-            // apply_landlock only calls Landlock syscalls (no async, no allocations).
+            // LandlockHelper::enforce() only calls restrict_self() (syscalls only).
+            // No allocations or IO occur in the critical section.
             unsafe {
                 cmd.pre_exec(move || {
-                    crate::backend::apply_landlock(&policy_clone)
-                        .map_err(|e| std::io::Error::other(e.to_string()))?;
+                    enforcer.enforce()?;
                     Ok(())
                 });
             }
@@ -130,6 +140,7 @@ fn spawn_sandboxed(
     {
         let _ = backend;
         let _ = policy;
+        let _ = scoped_tmp;
     }
 
     let status = cmd

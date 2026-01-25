@@ -21,7 +21,8 @@ We define distinct tiers of protection to set clear user expectations:
 *   **BPF-LSM (Full Fidelity)**: Requires `assay-bpf` helper + capabilities.
     *   *Capabilities*: Deep enforcement (socket, file, process), high-fidelity telemetry, signal blocking.
 *   **Landlock (Baseline Containment)**: Rootless fallback (Kernel 5.13+).
-    *   *Capabilities*: Best-effort containment. FS restricted to CWD (write) and System (read). Network blocked if Kernel > 6.7.
+    *   *Capabilities*: Best-effort containment. FS restricted to CWD (read-only default) and System (read).
+    *   *Network*: Network restriction planned (Landlock ABI v4). v0.1 reports NET:audit.
     *   *UX*: Explicitly labeled as "Containment Mode" vs "Enforcement Mode".
 *   **Ptrace (Audit Only)**: Last resort.
     *   *Capabilities*: Violation detection only (no blocking). Slow.
@@ -39,7 +40,7 @@ Merge priority is deterministic to prevent "open by accident" flaws:
 *   **Defaults**: The default policy is `mcp-server-minimal` (Deny Shell, Deny Secrets, Deny Outbound).
 
 ### 5. Input/Output Hygiene (SOTA)
-*   **Environment Filtering**: Sandbox scrubs sensitive env vars (`AWS_*`, `GITHUB_*`, `OPENAI_*`) by default unless explicitly allowed via `--env-allow`.
+*   **Environment Filtering**: Planned for PR4/PR5. v0.1 inherits env.
 *   **Future**: MCP-aware proxy for structured tool I/O interception.
 
 ## Interfaces
@@ -53,13 +54,12 @@ enum SandboxEvent {
 }
 ```
 
-### Backend Trait
+### Backend Type (v0.1)
+v0.1 uses `BackendType` enum; trait-based backend planned once BPF helper lands.
 ```rust
-trait SandboxBackend {
-  fn name(&self) -> &'static str;
-  fn capabilities(&self) -> BackendCaps; // { enforce_fs, enforce_net, audit_only }
-  fn attach(&mut self, spec: AttachSpec) -> Result<()>;
-  fn stream(&mut self) -> EventStream;
-  fn detach(&mut self) -> Result<()>;
+enum BackendType {
+  Landlock,
+  NoopAudit,
+  Bpf, // Future
 }
 ```

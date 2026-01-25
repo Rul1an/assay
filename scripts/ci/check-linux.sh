@@ -34,7 +34,7 @@ run_multipass_check() {
   # (Mount or git clone inside VM; see notes below.)
   # NOTE: We only run clippy on pre-push (not tests) to keep iteration fast.
   # Full tests run in CI on the self-hosted runner.
-  timeout 180 multipass exec "$VM_NAME" -- bash -c "
+  timeout 180 multipass exec "$VM_NAME" -- bash -lc "
     export PATH=\"\$HOME/.cargo/bin:\$PATH\"
     if [ -f \"\$HOME/.cargo/env\" ]; then . \"\$HOME/.cargo/env\"; fi
     export CARGO_TARGET_DIR=\"/tmp/assay-target\"

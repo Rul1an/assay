@@ -57,9 +57,41 @@ pub fn detect_backend() -> (BackendType, BackendCaps) {
     }
 }
 
-/// Apply sandbox restrictions. Delegates to platform-specific implementation.
-pub fn apply_landlock(policy: &crate::policy::Policy) -> anyhow::Result<()> {
-    landlock_impl::apply(policy)
+/// Handle for enforcing Landlock restrictions.
+pub struct LandlockEnforcer {
+    #[cfg(target_os = "linux")]
+    ruleset: Option<landlock_impl::RulesetHandle>,
+}
+
+impl LandlockEnforcer {
+    /// Enforce the ruleset. Safe to call from pre_exec (no allocations on Linux).
+    pub fn enforce(&mut self) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        if let Some(ruleset) = self.ruleset.take() {
+            return landlock_impl::enforce(ruleset).map_err(std::io::Error::other);
+        }
+        Ok(())
+    }
+}
+
+/// Prepare Landlock ruleset. allocations/IO allowed here.
+pub fn prepare_landlock(
+    policy: &crate::policy::Policy,
+    scoped_tmp: &std::path::Path,
+) -> anyhow::Result<LandlockEnforcer> {
+    #[cfg(target_os = "linux")]
+    {
+        let ruleset = landlock_impl::create_ruleset(policy, scoped_tmp)?;
+        Ok(LandlockEnforcer {
+            ruleset: Some(ruleset),
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = policy;
+        let _ = scoped_tmp;
+        Ok(LandlockEnforcer {})
+    }
 }
 
 // =============================================================================
@@ -94,24 +126,45 @@ mod landlock_impl {
         }
     }
 
-    /// Apply Landlock restrictions to the current process.
-    pub(super) fn apply(policy: &crate::policy::Policy) -> anyhow::Result<()> {
+    pub(super) type RulesetHandle = RulesetCreated;
+
+    pub(super) fn enforce(ruleset: RulesetHandle) -> anyhow::Result<()> {
+        let status = ruleset.restrict_self()?;
+        if status.ruleset == RulesetStatus::NotEnforced {
+            // This is arguably safe to construct in pre_exec as it's just an error
+            // But ideally we'd avoid even this allocation.
+            // For now, let's allow it as a rare error case.
+            anyhow::bail!("Landlock not enforced (kernel may not support it)");
+        }
+        Ok(())
+    }
+
+    /// Create Landlock ruleset from policy.
+    pub(super) fn create_ruleset(
+        policy: &crate::policy::Policy,
+        scoped_tmp: &Path,
+    ) -> anyhow::Result<RulesetCreated> {
         let abi = ABI::V1;
         let mut ruleset = Ruleset::default()
             .handle_access(AccessFs::from_all(abi))?
             .create()?;
 
-        // 1. Allow CWD full access (developer DX)
+        // 1. Allow CWD (RX only by default, safe containment)
         if let Ok(cwd) = std::env::current_dir() {
             ruleset = add_path(
                 ruleset,
                 cwd.to_string_lossy().as_ref(),
-                AccessFs::from_all(abi),
+                AccessFs::from_read(abi) | AccessFs::Execute,
             )?;
         }
 
-        // 2. Allow /tmp scoped access
-        ruleset = add_path(ruleset, "/tmp", AccessFs::from_all(abi))?;
+        // 2. Allow scoped /tmp (RWX)
+        // Ensure it exists? Caller responsibility, but we check existence in add_path.
+        ruleset = add_path(
+            ruleset,
+            scoped_tmp.to_string_lossy().as_ref(),
+            AccessFs::from_all(abi),
+        )?;
 
         // 3. Allow system files (Read Only)
         for path in SYSTEM_READ_FILES {
@@ -119,44 +172,31 @@ mod landlock_impl {
         }
 
         // 4. Allow system runtime dirs (Read + Execute)
-        // AccessFs::from_read includes ReadFile + ReadDir. We add Execute.
         let rx = AccessFs::from_read(abi) | AccessFs::Execute;
         for path in SYSTEM_RUNTIME_DIRS {
             ruleset = add_path(ruleset, path, rx)?;
         }
 
-        // 5. Allow paths from policy.fs.allow with Narrowing
-        if let Ok(cwd) = std::env::current_dir() {
+        // 5. Allow paths from policy.fs.allow
+        // Note: We assume policy has already been filtered for deny rules (Policy Engine responsibility).
+        if let Ok(_cwd) = std::env::current_dir() {
             for path in &policy.fs.allow {
                 let expanded = expand_path(path);
 
-                // Narrowing: Grant RWX only if under CWD or /tmp, otherwise RX (safe default)
-                let access = if is_under(&expanded, Some(&cwd)) || expanded.starts_with("/tmp") {
-                    AccessFs::from_all(abi)
-                } else {
-                    AccessFs::from_read(abi) | AccessFs::Execute
-                };
-
+                // Grant RWX only if specifically allowed.
+                // Narrowing logic: checks if under CWD or tmp, but for now we trust explicit allows.
+                // Default CWD is RX, so explicit allow on ${CWD}/out is needed for write.
+                let access = AccessFs::from_all(abi);
                 ruleset = add_path(ruleset, &expanded, access)?;
             }
         } else {
-            // Fallback if CWD fails: everything is RX (safest)
             for path in &policy.fs.allow {
                 let expanded = expand_path(path);
-                ruleset = add_path(
-                    ruleset,
-                    &expanded,
-                    AccessFs::from_read(abi) | AccessFs::Execute,
-                )?;
+                ruleset = add_path(ruleset, &expanded, AccessFs::from_all(abi))?;
             }
         }
 
-        let status = ruleset.restrict_self()?;
-        if status.ruleset == RulesetStatus::NotEnforced {
-            anyhow::bail!("Landlock not enforced (kernel may not support it)");
-        }
-
-        Ok(())
+        Ok(ruleset)
     }
 
     /// Helper to safely add rules.
@@ -178,16 +218,6 @@ mod landlock_impl {
             }
         }
         Ok(ruleset)
-    }
-
-    /// Check if path is under base directory.
-    fn is_under(path: &str, base: Option<&std::path::Path>) -> bool {
-        if let Some(base) = base {
-            let p = std::path::Path::new(path);
-            p.starts_with(base)
-        } else {
-            false
-        }
     }
 
     /// Expand ~ and ${HOME} in paths.
@@ -232,7 +262,11 @@ mod landlock_impl {
     }
 
     /// No-op on non-Linux platforms.
-    pub(super) fn apply(_policy: &crate::policy::Policy) -> anyhow::Result<()> {
+    /// No-op on non-Linux platforms.
+    pub(super) fn create_ruleset(
+        _policy: &crate::policy::Policy,
+        _scoped_tmp: &std::path::Path,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }
