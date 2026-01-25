@@ -6,6 +6,7 @@ pub mod caps;
 pub mod cgroup;
 mod cli;
 pub mod diagnostics;
+mod env_filter;
 pub mod exit_codes;
 pub mod fs;
 pub mod packs;
