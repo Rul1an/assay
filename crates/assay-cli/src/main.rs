@@ -1,6 +1,7 @@
 #![allow(unsafe_code)]
 use clap::Parser;
 
+pub mod backend;
 pub mod cgroup;
 mod cli;
 pub mod exit_codes;
