@@ -36,7 +36,7 @@ Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It
 
     You need **Determinism**. Assay is a high-performance Rust binary that enforces rigid JSON Schemas and sequence constraints in CI. No flaky evals.
 
-    [:octicons-arrow-right-24: CLI Reference](cli/index.md)
+    [:octicons-arrow-right-24: CLI Reference](reference/cli/index.md)
 
 </div>
 
@@ -88,5 +88,5 @@ sudo assay monitor --policy policy.yaml
 ## Next Steps
 
 - [**Get Started**](getting-started/index.md)
-- [**Python SDK**](python-quickstart.md)
-- [**Config Reference**](config/index.md)
+- [**Python SDK**](getting-started/python-quickstart.md)
+- [**Config Reference**](reference/config/index.md)

@@ -1,116 +1,180 @@
-//! Learning Mode: Generate policy from observed events (v2.2 Phase 1 + 2)
+//! Learning Mode: Generate policy
+//!
+//! # Usage
+//! ```bash
+//! # Single-run mode
+//! assay generate -i trace.jsonl --heuristics
+//!
+//! # Profile mode (stability analysis)
+//! assay generate --profile profile.yaml --min-stability 0.8
+//! assay generate --profile profile.yaml --min-stability 0.8 --new-is-risky
+//! ```
 
-use crate::cli::args::GenerateArgs;
-use crate::cli::commands::heuristics::{
-    self, parse_dest, HeuristicsConfig, RiskAssessment, RiskLevel,
-};
 use anyhow::Result;
+use clap::Args;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use super::events::Event;
+use super::heuristics::{self, HeuristicsConfig};
+use super::profile_types::{self, stability_smoothed, Profile, ProfileEntry};
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Input Types
+// CLI Args
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ObservedEvent {
-    FileOpen {
-        path: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
-    NetConnect {
-        dest: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
-    ProcExec {
-        path: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
+#[derive(Args, Debug, Clone)]
+#[command(about = "Generate policy from trace or profile")]
+pub struct GenerateArgs {
+    /// Input trace file (single-run mode)
+    #[arg(short, long)]
+    pub input: Option<PathBuf>,
+
+    /// Profile file (multi-run mode)
+    #[arg(long)]
+    pub profile: Option<PathBuf>,
+
+    #[arg(short, long, default_value = "policy.yaml")]
+    pub output: PathBuf,
+
+    #[arg(long, default_value = "Generated Policy")]
+    pub name: String,
+
+    #[arg(long, default_value = "yaml")]
+    pub format: String,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    // ─── Single-run heuristics ───
+    #[arg(long)]
+    pub heuristics: bool,
+
+    #[arg(long, default_value_t = 3.8)]
+    pub entropy_threshold: f64,
+
+    // ─── Profile stability ───
+    /// Minimum stability to auto-allow (profile mode)
+    #[arg(long, default_value_t = 0.7)]
+    pub min_stability: f64,
+
+    /// Below this, mark as needs_review if --new-is-risky
+    #[arg(long, default_value_t = 0.6)]
+    pub review_threshold: f64,
+
+    /// Treat low-stability items as risky (else skip them)
+    #[arg(long)]
+    pub new_is_risky: bool,
+
+    /// Smoothing parameter (Laplace) for display
+    #[arg(long, default_value_t = 1.0)]
+    pub alpha: f64,
+
+    /// Minimum runs before anything can be auto-allowed (safety belt)
+    #[arg(long, default_value_t = 1)]
+    pub min_runs: u32,
+
+    /// Z-score for Wilson lower bound gating (1.96 ≈ 95% confidence)
+    #[arg(long, default_value_t = 1.96)]
+    pub wilson_z: f64,
+}
+
+impl GenerateArgs {
+    pub fn validate(&self) -> Result<()> {
+        if self.min_stability < 0.0 || self.min_stability > 1.0 {
+            anyhow::bail!("--min-stability must be between 0.0 and 1.0");
+        }
+        if self.review_threshold < 0.0 || self.review_threshold > 1.0 {
+            anyhow::bail!("--review-threshold must be between 0.0 and 1.0");
+        }
+        if self.min_stability < self.review_threshold {
+            anyhow::bail!(
+                "--min-stability ({}) must be >= --review-threshold ({})",
+                self.min_stability,
+                self.review_threshold
+            );
+        }
+        if self.alpha <= 0.0 {
+            anyhow::bail!("--alpha must be positive");
+        }
+        if self.wilson_z <= 0.0 {
+            anyhow::bail!("--wilson-z must be positive");
+        }
+        if self.entropy_threshold < 0.0 {
+            anyhow::bail!("--entropy-threshold must be non-negative");
+        }
+        Ok(())
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Output Types (SOTA / assay-policy aligned)
+// Output Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Policy {
-    #[serde(default, skip_serializing_if = "FilePolicy::is_empty")]
-    pub files: FilePolicy,
-
-    #[serde(default, skip_serializing_if = "NetworkPolicy::is_empty")]
-    pub network: NetworkPolicy,
-
-    #[serde(default, skip_serializing_if = "ProcessPolicy::is_empty")]
-    pub processes: ProcessPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<Meta>,
+    pub files: Section,
+    pub network: NetSection,
+    pub processes: Section,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct FilePolicy {
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub allow: BTreeSet<String>,
-
-    // Items that need review due to risk heuristics
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub needs_review: BTreeMap<String, RiskInfo>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Meta {
+    pub name: String,
+    pub generated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_runs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_stability: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_runs: Option<u32>,
 }
 
-impl FilePolicy {
-    pub fn is_empty(&self) -> bool {
-        self.allow.is_empty() && self.needs_review.is_empty()
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Section {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs_review: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct NetworkPolicy {
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub allow_cidrs: BTreeSet<String>,
-
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub needs_review: BTreeMap<String, RiskInfo>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct NetSection {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_destinations: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs_review: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_destinations: Vec<String>,
 }
 
-impl NetworkPolicy {
-    pub fn is_empty(&self) -> bool {
-        self.allow_cidrs.is_empty() && self.needs_review.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProcessPolicy {
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub allow_executables: BTreeSet<String>,
-
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub needs_review: BTreeMap<String, RiskInfo>,
-}
-
-impl ProcessPolicy {
-    pub fn is_empty(&self) -> bool {
-        self.allow_executables.is_empty() && self.needs_review.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RiskInfo {
-    pub risk: RiskLevel,
-    pub reasons: Vec<String>,
-    pub count: u32,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Entry {
+    Simple(String),
+    WithMeta {
+        pattern: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        count: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stability: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        runs_seen: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        risk: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasons: Option<Vec<String>>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Aggregation
+// Single-Run Aggregation
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
@@ -118,11 +182,10 @@ pub struct Stats {
     pub count: u32,
     pub first_seen: u64,
     pub last_seen: u64,
-    pub example_pids: BTreeSet<u32>,
 }
 
 impl Stats {
-    fn update(&mut self, ts: u64, pid: u32) {
+    fn update(&mut self, ts: u64) {
         self.count += 1;
         if ts > 0 {
             if self.first_seen == 0 || ts < self.first_seen {
@@ -132,9 +195,6 @@ impl Stats {
                 self.last_seen = ts;
             }
         }
-        if self.example_pids.len() < 5 {
-            self.example_pids.insert(pid);
-        }
     }
 }
 
@@ -143,8 +203,6 @@ pub struct Aggregated {
     pub files: BTreeMap<String, Stats>,
     pub network: BTreeMap<String, Stats>,
     pub processes: BTreeMap<String, Stats>,
-    // Track full fanout separate from stats to avoid capping
-    pub raw_fanout: std::collections::HashMap<u32, BTreeSet<String>>,
 }
 
 impl Aggregated {
@@ -153,263 +211,416 @@ impl Aggregated {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Logic
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub fn read_events(path: &PathBuf) -> Result<Vec<ObservedEvent>> {
+pub fn read_events(path: &PathBuf) -> Result<Vec<Event>> {
     let reader: Box<dyn BufRead> = if path.to_string_lossy() == "-" {
         Box::new(BufReader::new(std::io::stdin()))
     } else {
         Box::new(BufReader::new(std::fs::File::open(path)?))
     };
-
     let mut events = Vec::new();
     let mut total_lines = 0;
     let mut error_count = 0;
 
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
-        if line.trim().is_empty() || line.trim().starts_with('#') {
+        if line.trim().is_empty() || line.starts_with('#') {
             continue;
         }
         total_lines += 1;
         match serde_json::from_str(&line) {
             Ok(e) => events.push(e),
-            Err(e) => {
+            Err(_) => {
                 error_count += 1;
-                eprintln!("line {}: {}", i + 1, e);
+                if error_count <= 3 {
+                    eprintln!("warning: skipping line {}: unparsable event", i + 1);
+                }
             }
         }
     }
 
-    if error_count > 0 {
-        if events.is_empty() {
-            return Err(anyhow::anyhow!(
-                "failed to parse any events from input: {} parse errors over {} event lines",
-                error_count,
-                total_lines
-            ));
-        }
+    if error_count > 3 {
+        eprintln!("warning: skipped {} unparsable lines total", error_count);
+    }
+
+    if events.is_empty() && error_count > 0 {
+        anyhow::bail!(
+            "no valid events found ({} lines skipped, 0 ok)",
+            error_count
+        );
+    }
+
+    if total_lines > 0 {
         let error_rate = error_count as f64 / total_lines as f64;
         if error_rate > 0.5 {
             eprintln!(
-                "warning: high parse error rate: {} errors, {} successfully parsed ({} total event lines)",
-                error_count,
-                events.len(),
-                total_lines
+                "warning: high error rate ({:.1}%) - check input format",
+                error_rate * 100.0
             );
         }
     }
+
     Ok(events)
 }
 
-pub fn aggregate(events: &[ObservedEvent]) -> Aggregated {
+pub fn aggregate(events: &[Event]) -> Aggregated {
     let mut agg = Aggregated::default();
     for ev in events {
         match ev {
-            ObservedEvent::FileOpen {
-                path,
-                timestamp,
-                pid,
-            } => {
-                agg.files
-                    .entry(path.clone())
-                    .or_default()
-                    .update(*timestamp, *pid);
-            }
-            ObservedEvent::NetConnect {
-                dest,
-                timestamp,
-                pid,
-            } => {
-                agg.network
-                    .entry(dest.clone())
-                    .or_default()
-                    .update(*timestamp, *pid);
-
-                let entry = agg.raw_fanout.entry(*pid).or_default();
-                if entry.len() < 5000 {
-                    entry.insert(dest.clone());
-                }
-            }
-            ObservedEvent::ProcExec {
-                path,
-                timestamp,
-                pid,
-            } => {
-                agg.processes
-                    .entry(path.clone())
-                    .or_default()
-                    .update(*timestamp, *pid);
-            }
+            Event::FileOpen {
+                path, timestamp, ..
+            } => agg
+                .files
+                .entry(path.clone())
+                .or_default()
+                .update(*timestamp),
+            Event::NetConnect {
+                dest, timestamp, ..
+            } => agg
+                .network
+                .entry(dest.clone())
+                .or_default()
+                .update(*timestamp),
+            Event::ProcExec {
+                path, timestamp, ..
+            } => agg
+                .processes
+                .entry(path.clone())
+                .or_default()
+                .update(*timestamp),
         }
     }
     agg
 }
 
-pub fn generate_policy(
-    _name: &str,
-    strictness: f64,
-    _source: Option<String>,
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate from Single Run
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn generate_from_trace(
+    name: &str,
     agg: &Aggregated,
-    _with_timestamp: bool,
+    use_heuristics: bool,
+    cfg: &HeuristicsConfig,
 ) -> Policy {
-    let mut policy = Policy::default();
+    let mut files = Section::default();
+    let mut network = NetSection::default();
+    let mut processes = Section::default();
 
-    // Map strictness (0.0-1.0) to heuristics config
-    // strictness 0.5 (default) -> entropy 3.8, fanout 10
-    // strictness 1.0 (strict)  -> entropy 3.0, fanout 5
-    // strictness 0.0 (loose)   -> entropy 5.0, fanout 50
-    let mut cfg = HeuristicsConfig::default();
-
-    if strictness > 0.0 {
-        // Linear interpolation roughly
-        // 0.0 -> 5.0
-        // 1.0 -> 3.0
-        // formula: 5.0 - (strictness * 2.0)
-        cfg.entropy_threshold = (5.0 - (strictness * 2.0)).max(2.5);
-
-        // Fanout
-        // 0.0 -> 50
-        // 1.0 -> 5
-        let f_warn = (50.0 - (strictness * 45.0)) as usize;
-        cfg.fanout_warn = f_warn.max(3);
-        cfg.fanout_deny = f_warn * 5;
-
-        // Port Scan
-        // 0.0 -> 40
-        // 1.0 -> 10
-        cfg.port_scan_threshold = ((40.0 - strictness * 30.0) as usize).max(10);
-    }
-
-    // Global Fanout Analysis (Accurate)
-    let mut net_analyzer = heuristics::NetworkAnalyzer::new(cfg.clone());
-    for (pid, dests) in &agg.raw_fanout {
-        for dest in dests {
-            net_analyzer.record(*pid, dest);
-        }
-    }
-
-    // Map suspicious PIDs back to their destinations to ensure we catch all of them
-    // dest -> max_risk
-    let mut suspicious_dest_risks: std::collections::HashMap<String, RiskAssessment> =
-        std::collections::HashMap::new();
-    for (pid, dests) in &agg.raw_fanout {
-        let risk = net_analyzer.assess_pid(*pid);
-        if risk.level != RiskLevel::Low {
-            for dest in dests {
-                // If this dest was touched by a suspicious PID, record it
-                if let Some(existing) = suspicious_dest_risks.get_mut(dest) {
-                    if risk.level > existing.level {
-                        *existing = risk.clone();
-                    }
-                } else {
-                    suspicious_dest_risks.insert(dest.clone(), risk.clone());
-                }
-            }
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Files
-    // ─────────────────────────────────────────────────────────────────────────
     for (path, stats) in &agg.files {
-        let risk = heuristics::analyze_entropy(path, &cfg);
-        if risk.level != RiskLevel::Low {
-            policy.files.needs_review.insert(
-                path.clone(),
-                RiskInfo {
-                    risk: risk.level,
-                    reasons: risk.reasons,
-                    count: stats.count,
-                },
-            );
+        let risk = if use_heuristics {
+            Some(heuristics::analyze_entropy(path, cfg))
         } else {
-            policy.files.allow.insert(path.clone());
+            None
+        };
+        let entry = make_entry_simple(path, stats.count, risk.as_ref());
+        match risk.as_ref().map(|r| &r.level) {
+            Some(heuristics::RiskLevel::DenyRecommended) => files.deny.push(path.clone()),
+            Some(heuristics::RiskLevel::NeedsReview) => files.needs_review.push(entry),
+            _ => files.allow.push(entry),
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Network
-    // ─────────────────────────────────────────────────────────────────────────
     for (dest, stats) in &agg.network {
-        // Destination Risk
-        let dest_risk = net_analyzer.assess_dest(dest);
-
-        // Fanout Risk: Check if *any* PID that touched this was risky
-        // derived from the full raw_fanout, not just statistics.example_pids
-        let fanout_risk = suspicious_dest_risks.get(dest).cloned().unwrap_or_default();
-
-        if dest_risk.level != RiskLevel::Low || fanout_risk.level != RiskLevel::Low {
-            let mut reasons = dest_risk.reasons;
-            reasons.extend(fanout_risk.reasons);
-            let level = if fanout_risk.level > dest_risk.level {
-                fanout_risk.level
-            } else {
-                dest_risk.level
-            };
-
-            policy.network.needs_review.insert(
-                dest.clone(),
-                RiskInfo {
-                    risk: level,
-                    reasons: {
-                        reasons.sort();
-                        reasons.dedup();
-                        reasons
-                    },
-                    count: stats.count,
-                },
-            );
+        let risk = if use_heuristics {
+            Some(heuristics::analyze_dest(dest, cfg))
         } else {
-            // Apply standard allow logic
-            use std::net::IpAddr;
-            let (ip_str, _) = parse_dest(dest);
+            None
+        };
+        let entry = make_entry_simple(dest, stats.count, risk.as_ref());
+        match risk.as_ref().map(|r| &r.level) {
+            Some(heuristics::RiskLevel::DenyRecommended) => {
+                network.deny_destinations.push(dest.clone())
+            }
+            Some(heuristics::RiskLevel::NeedsReview) => network.needs_review.push(entry),
+            _ => network.allow_destinations.push(entry),
+        }
+    }
 
-            if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                let cidr = match ip {
-                    IpAddr::V4(_) => format!("{}/32", ip),
-                    IpAddr::V6(_) => format!("{}/128", ip),
-                };
-                policy.network.allow_cidrs.insert(cidr);
+    for (path, stats) in &agg.processes {
+        let risk = if use_heuristics {
+            Some(heuristics::analyze_entropy(path, cfg))
+        } else {
+            None
+        };
+        let entry = make_entry_simple(path, stats.count, risk.as_ref());
+        match risk.as_ref().map(|r| &r.level) {
+            Some(heuristics::RiskLevel::DenyRecommended) => processes.deny.push(path.clone()),
+            Some(heuristics::RiskLevel::NeedsReview) => processes.needs_review.push(entry),
+            _ => processes.allow.push(entry),
+        }
+    }
+
+    Policy {
+        _meta: Some(Meta {
+            name: name.into(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            profile_runs: None,
+            min_stability: None,
+            min_runs: None,
+        }),
+        files,
+        network,
+        processes,
+    }
+}
+
+fn make_entry_simple(
+    pattern: &str,
+    count: u32,
+    risk: Option<&heuristics::RiskAssessment>,
+) -> Entry {
+    match risk {
+        Some(r) if r.level > heuristics::RiskLevel::Low => Entry::WithMeta {
+            pattern: pattern.into(),
+            count: Some(count),
+            stability: None,
+            runs_seen: None,
+            risk: match r.level {
+                heuristics::RiskLevel::Low => Some("low".into()),
+                heuristics::RiskLevel::NeedsReview => Some("needs_review".into()),
+                heuristics::RiskLevel::DenyRecommended => Some("deny_recommended".into()),
+            },
+            reasons: if r.reasons.is_empty() {
+                None
+            } else {
+                Some(r.reasons.clone())
+            },
+        },
+        _ if count > 1 => Entry::WithMeta {
+            pattern: pattern.into(),
+            count: Some(count),
+            stability: None,
+            runs_seen: None,
+            risk: None,
+            reasons: None,
+        },
+        _ => Entry::Simple(pattern.into()),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate from Profile
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn generate_from_profile(
+    name: &str,
+    profile: &Profile,
+    args: &GenerateArgs,
+    heur_cfg: &HeuristicsConfig,
+) -> Policy {
+    let total_runs = profile.total_runs;
+    let alpha = args.alpha;
+
+    let mut files = Section::default();
+    let mut network = NetSection::default();
+    let mut processes = Section::default();
+
+    // Process files
+    for (path, entry) in &profile.entries.files {
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
+        let risk = if args.heuristics {
+            Some(heuristics::analyze_entropy(path, heur_cfg))
+        } else {
+            None
+        };
+
+        if let Some((section, is_deny)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
+        {
+            let out_entry = make_entry_profile(
+                path,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
+            match (section, is_deny) {
+                ("deny", _) => files.deny.push(path.clone()),
+                ("needs_review", _) => files.needs_review.push(out_entry),
+                ("allow", _) => files.allow.push(out_entry),
+                _ => {}
             }
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Processes
-    // ─────────────────────────────────────────────────────────────────────────
-    for (path, stats) in &agg.processes {
-        let risk = heuristics::analyze_entropy(path, &cfg);
-        if risk.level != RiskLevel::Low {
-            policy.processes.needs_review.insert(
-                path.clone(),
-                RiskInfo {
-                    risk: risk.level,
-                    reasons: risk.reasons,
-                    count: stats.count,
-                },
-            );
+    // Process network
+    for (dest, entry) in &profile.entries.network {
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
+        let risk = if args.heuristics {
+            Some(heuristics::analyze_dest(dest, heur_cfg))
         } else {
-            policy.processes.allow_executables.insert(path.clone());
+            None
+        };
+
+        if let Some((section, _)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
+        {
+            let out_entry = make_entry_profile(
+                dest,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
+            match section {
+                "deny" => network.deny_destinations.push(dest.clone()),
+                "needs_review" => network.needs_review.push(out_entry),
+                "allow" => network.allow_destinations.push(out_entry),
+                _ => {}
+            }
         }
     }
 
-    policy
+    // Process processes
+    for (path, entry) in &profile.entries.processes {
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
+        let risk = if args.heuristics {
+            Some(heuristics::analyze_entropy(path, heur_cfg))
+        } else {
+            None
+        };
+
+        if let Some((section, _)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
+        {
+            let out_entry = make_entry_profile(
+                path,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
+            match section {
+                "deny" => processes.deny.push(path.clone()),
+                "needs_review" => processes.needs_review.push(out_entry),
+                "allow" => processes.allow.push(out_entry),
+                _ => {}
+            }
+        }
+    }
+
+    Policy {
+        _meta: Some(Meta {
+            name: name.into(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            profile_runs: Some(total_runs),
+            min_stability: Some(args.min_stability),
+            min_runs: if args.min_runs > 1 {
+                Some(args.min_runs)
+            } else {
+                None
+            },
+        }),
+        files,
+        network,
+        processes,
+    }
 }
+
+/// Returns (section, is_deny) or None if should skip
+/// `stab_gate` is Wilson lower bound for conservative gating
+fn classify_entry(
+    stab_gate: f64,
+    risk: Option<&heuristics::RiskAssessment>,
+    args: &GenerateArgs,
+    total_runs: u32,
+    runs_seen: u32,
+) -> Option<(&'static str, bool)> {
+    // Priority: heuristics risk overrides stability
+    if let Some(r) = risk {
+        match r.level {
+            heuristics::RiskLevel::DenyRecommended => return Some(("deny", true)),
+            heuristics::RiskLevel::NeedsReview => return Some(("needs_review", false)),
+            _ => {}
+        }
+    }
+
+    // Safety belt: not enough runs (profile-wide or entry-specific) -> don't auto-allow yet
+    if total_runs < args.min_runs || runs_seen < args.min_runs {
+        return if args.new_is_risky {
+            Some(("needs_review", false))
+        } else {
+            None
+        };
+    }
+
+    // Stability-based classification (using Wilson lower bound for gating)
+    if stab_gate >= args.min_stability {
+        Some(("allow", false))
+    } else if stab_gate >= args.review_threshold || args.new_is_risky {
+        // Medium stability OR low-stability with new_is_risky → needs_review
+        Some(("needs_review", false))
+    } else {
+        None // Skip low-stability items
+    }
+}
+
+fn make_entry_profile(
+    pattern: &str,
+    entry: &ProfileEntry,
+    stab_display: f64,
+    stab_gate: f64,
+    total_runs: u32,
+    args: &GenerateArgs,
+    risk: Option<&heuristics::RiskAssessment>,
+) -> Entry {
+    let mut reasons = Vec::new();
+
+    // Safety belt feedback
+    if total_runs < args.min_runs || entry.runs_seen < args.min_runs {
+        reasons.push(format!(
+            "min_runs gate: need >= {} runs (profile={}, entry={})",
+            args.min_runs, total_runs, entry.runs_seen
+        ));
+    }
+
+    // Show both Laplace (human-readable) and Wilson (gating) scores
+    reasons.push(format!(
+        "wilson_lb {:.2} (z={:.2})",
+        stab_gate, args.wilson_z
+    ));
+    reasons.push(format!(
+        "laplace {:.2} (α={:.1}, {}/{})",
+        stab_display, args.alpha, entry.runs_seen, total_runs
+    ));
+    if let Some(r) = risk {
+        reasons.extend(r.reasons.clone());
+    }
+
+    Entry::WithMeta {
+        pattern: pattern.into(),
+        count: Some(entry.hits_total as u32),
+        stability: Some((stab_display * 100.0).round() / 100.0), // Round to 2 decimals
+        runs_seen: Some(entry.runs_seen),
+        risk: risk.map(|r| match r.level {
+            heuristics::RiskLevel::Low => "low".into(),
+            heuristics::RiskLevel::NeedsReview => "needs_review".into(),
+            heuristics::RiskLevel::DenyRecommended => "deny_recommended".into(),
+        }),
+        reasons: Some(reasons),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Serialization
+// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn serialize(policy: &Policy, format: &str) -> Result<String> {
     Ok(match format {
         "json" => serde_json::to_string_pretty(policy)?,
-        _ => {
-            let yaml = serde_yaml::to_string(policy)?;
-            let header = format!(
-                "# Generated Policy (v2.0)\n# Source: Learned from observations\n# Generated at: {}\n\n",
-                chrono::Utc::now().to_rfc3339()
-            );
-            format!("{}{}", header, yaml)
-        }
+        _ => serde_yaml::to_string(policy)?,
     })
 }
 
@@ -418,32 +629,68 @@ pub fn serialize(policy: &Policy, format: &str) -> Result<String> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn run(args: GenerateArgs) -> Result<i32> {
-    let events = read_events(&args.input)?;
-    let agg = aggregate(&events);
+    // Validate: need either --input or --profile
+    if args.input.is_none() && args.profile.is_none() {
+        anyhow::bail!("specify either --input (single-run) or --profile (multi-run)");
+    }
+    if args.input.is_some() && args.profile.is_some() {
+        anyhow::bail!("cannot use both --input and --profile");
+    }
 
+    args.validate()?;
+
+    let heur_cfg = HeuristicsConfig {
+        entropy_threshold: args.entropy_threshold,
+        ..Default::default()
+    };
+
+    let policy = if let Some(profile_path) = &args.profile {
+        // Profile mode (Phase 3)
+        let profile = profile_types::load_profile(profile_path)?;
+        eprintln!(
+            "Loaded profile: {} runs, {} entries",
+            profile.total_runs,
+            profile.total_entries()
+        );
+        generate_from_profile(&args.name, &profile, &args, &heur_cfg)
+    } else {
+        // Single-run mode (Phase 2)
+        let input = args.input.as_ref().unwrap();
+        let events = read_events(input)?;
+        let agg = aggregate(&events);
+        eprintln!(
+            "Aggregated {} unique from {} events",
+            agg.total(),
+            events.len()
+        );
+        generate_from_trace(&args.name, &agg, args.heuristics, &heur_cfg)
+    };
+
+    // Report
+    let allow_count = policy.files.allow.len()
+        + policy.network.allow_destinations.len()
+        + policy.processes.allow.len();
+    let review_count = policy.files.needs_review.len()
+        + policy.network.needs_review.len()
+        + policy.processes.needs_review.len();
+    let deny_count = policy.files.deny.len()
+        + policy.network.deny_destinations.len()
+        + policy.processes.deny.len();
     eprintln!(
-        "Aggregated {} unique from {} events",
-        agg.total(),
-        events.len()
+        "Policy: {} allow, {} needs_review, {} deny",
+        allow_count, review_count, deny_count
     );
 
-    let source =
-        (args.input.to_string_lossy() != "-").then(|| args.input.to_string_lossy().to_string());
-
-    let policy = generate_policy(&args.name, args.strictness, source, &agg, true);
     let output = serialize(&policy, &args.format)?;
 
     if args.dry_run {
         println!("{}", output);
     } else {
-        if let Some(parent) = args.output.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         std::fs::write(&args.output, &output)?;
         eprintln!("Wrote {}", args.output.display());
     }
 
-    Ok(super::exit_codes::OK)
+    Ok(0)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -455,30 +702,131 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_file_event() {
-        let e: ObservedEvent =
-            serde_json::from_str(r#"{"type":"file_open","path":"/etc/passwd"}"#).unwrap();
-        assert!(matches!(e, ObservedEvent::FileOpen { path, .. } if path == "/etc/passwd"));
+    fn classify_stable_low_risk() {
+        let args = GenerateArgs {
+            input: None,
+            profile: None,
+            output: "".into(),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+        };
+
+        // High stability, no risk → allow
+        assert_eq!(
+            classify_entry(0.9, None, &args, 10, 10),
+            Some(("allow", false))
+        );
+
+        // Medium stability → needs_review
+        assert_eq!(
+            classify_entry(0.7, None, &args, 10, 7),
+            Some(("needs_review", false))
+        );
+
+        // Low stability, not risky → skip
+        assert_eq!(classify_entry(0.3, None, &args, 10, 3), None);
     }
 
     #[test]
-    fn deterministic_order() {
-        let events = vec![
-            ObservedEvent::FileOpen {
-                path: "/z".into(),
-                pid: 1,
-                timestamp: 0,
-            },
-            ObservedEvent::FileOpen {
-                path: "/a".into(),
-                pid: 1,
-                timestamp: 0,
-            },
-        ];
-        let agg = aggregate(&events);
-        let policy = generate_policy("T", 0.5, None, &agg, false);
+    fn classify_new_is_risky() {
+        let args = GenerateArgs {
+            input: None,
+            profile: None,
+            output: "".into(),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: true,
+            alpha: 1.0,
+        };
 
-        let allowed: Vec<_> = policy.files.allow.into_iter().collect();
-        assert_eq!(allowed, vec!["/a", "/z"]);
+        // Low stability with new_is_risky → needs_review
+        assert_eq!(
+            classify_entry(0.3, None, &args, 10, 3),
+            Some(("needs_review", false))
+        );
+    }
+
+    #[test]
+    fn classify_min_runs_gates_early_noise() {
+        // Too early: total_runs < min_runs should skip unless new_is_risky
+        let mut args = default_args();
+        args.min_runs = 5;
+
+        // total_runs=1 < 5 -> gated
+        assert_eq!(classify_entry(0.99, None, &args, 1, 1), None);
+
+        args.new_is_risky = true;
+        assert_eq!(
+            classify_entry(0.99, None, &args, 1, 1),
+            Some(("needs_review", false))
+        );
+
+        // entry.runs_seen < min_runs -> gated (even if total_runs ok)
+        args.new_is_risky = false;
+        assert_eq!(classify_entry(0.99, None, &args, 10, 1), None);
+    }
+
+    #[test]
+    fn classify_risk_overrides() {
+        let args = GenerateArgs {
+            input: None,
+            profile: None,
+            output: "".into(),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            heuristics: true,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 5,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+        };
+
+        let mut risk = heuristics::RiskAssessment::default();
+        risk.add(heuristics::RiskLevel::DenyRecommended, "test".to_string());
+
+        // High stability but deny risk → deny
+        assert_eq!(
+            classify_entry(0.95, Some(&risk), &args, 1, 1),
+            Some(("deny", true))
+        );
+    }
+
+    fn default_args() -> GenerateArgs {
+        GenerateArgs {
+            input: None,
+            profile: None,
+            output: "".into(),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+        }
     }
 }

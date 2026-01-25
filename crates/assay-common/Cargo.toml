@@ -17,7 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"], optional = true }
 chrono = { workspace = true, optional = true }
 
-aya = { version = "0.13.0", optional = true }
+aya = { workspace = true, optional = true }
 
 [features]
 default = ["std"]

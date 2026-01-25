@@ -1,0 +1,34 @@
+# Expected profile after 10 runs:
+# - 9 runs with run_stable.jsonl
+# - 1 run with run_with_noise.jsonl
+
+version: '1.0'
+name: test-profile
+total_runs: 10
+
+entries:
+  files:
+    /etc/passwd:
+      runs_seen: 10
+      hits_total: 10
+    /home/app/.config:
+      runs_seen: 10
+      hits_total: 10
+    /tmp/noise-x9y8z7w6.tmp:
+      runs_seen: 1
+      hits_total: 1
+  network:
+    db.internal:5432:
+      runs_seen: 10
+      hits_total: 10
+    192.168.1.99:12345:
+      runs_seen: 1
+      hits_total: 1
+  processes:
+    /usr/bin/app:
+      runs_seen: 10
+      hits_total: 10
+
+# Stability scores (α=1.0):
+# - /etc/passwd: (10+1)/(10+2) = 0.92 → allow
+# - /tmp/noise-...: (1+1)/(10+2) = 0.17 → skip or needs_review

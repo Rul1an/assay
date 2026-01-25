@@ -1,7 +1,7 @@
-//! Learning Mode Heuristics (Phase 2b/2c)
+//! Learning Mode Heuristics
 //!
-//! - Phase 2b: Entropy detection for suspicious paths
-//! - Phase 2c: Network fanout analysis
+//! - Entropy detection for suspicious paths
+//! - Network fanout analysis
 //!
 //! # Risk Levels
 //! | Level            | Meaning                              |
@@ -9,6 +9,8 @@
 //! | Low              | Normal, auto-allow                   |
 //! | NeedsReview      | Suspicious, human should verify      |
 //! | DenyRecommended  | Likely malicious                     |
+
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -77,7 +79,7 @@ impl Default for HeuristicsConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2b: Entropy Analysis
+// Entropy Analysis
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Shannon entropy (bits per character)
@@ -150,8 +152,19 @@ pub fn analyze_entropy(path: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
     r
 }
 
+/// Analyze destination for suspicious ports (stateless)
+pub fn analyze_dest(dest: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
+    let mut r = RiskAssessment::default();
+    if let (_, Some(port)) = parse_dest(dest) {
+        if cfg.suspicious_ports.contains(&port) {
+            r.add(RiskLevel::NeedsReview, format!("sensitive port {}", port));
+        }
+    }
+    r
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2c: Network Fanout Analysis
+// Network Fanout Analysis
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]

@@ -45,5 +45,5 @@ output:
 
 ## See Also
 
-- [Quick Start](../getting-started/quickstart.md)
+- [Quick Start](../../getting-started/quickstart.md)
 - [CLI Reference](../cli/index.md)

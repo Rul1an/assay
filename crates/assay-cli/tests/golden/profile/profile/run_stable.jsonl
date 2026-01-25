@@ -1,0 +1,4 @@
+{"type":"file_open","path":"/etc/passwd","timestamp":1000}
+{"type":"file_open","path":"/home/app/.config","timestamp":1001}
+{"type":"net_connect","dest":"db.internal:5432","timestamp":1002}
+{"type":"proc_exec","path":"/usr/bin/app","timestamp":1003}
