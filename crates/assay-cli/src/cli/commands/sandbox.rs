@@ -59,19 +59,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         Err(e) => eprintln!("WARN: Failed to create trace dir: {}", e),
     }
 
-    // Scoped /tmp creation (PR5.1 Fix: use uid-based or consistent fallback)
-    // SOTA recommendation: /tmp/assay-$UID but we need libc for getuid if on unix.
-    // For now stick to USER but in next PR5.4 adapt to strict.
-    let user = std::env::var("USER").unwrap_or_else(|_| "sandbox".to_string());
-    let tmp_dir = std::path::PathBuf::from(format!("/tmp/assay-{}", user));
-    if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
-        eprintln!(
-            "WARN: Failed to create scoped tmp dir {}: {}",
-            tmp_dir.display(),
-            e
-        );
-    }
-    // Set 0700 permissions if possible (best effort without libc dep here, update in PR5.4)
+    // PR5.4: Scoped /tmp with proper isolation
+    // Use UID (not $USER env which can be spoofed) + PID for uniqueness per run
+    let tmp_dir = create_scoped_tmp()?;
+    eprintln!("Tmp:     {}", tmp_dir.display());
 
     eprintln!("──────────────────");
 
@@ -199,4 +190,44 @@ fn spawn_sandboxed(
         .map_err(|e| anyhow::anyhow!("failed to spawn child: {}", e))?;
 
     Ok(status)
+}
+
+/// Create a scoped temporary directory for sandbox isolation.
+///
+/// # Security
+/// - Uses UID (not $USER env var which can be spoofed)
+/// - Adds PID for uniqueness per sandbox run
+/// - Sets 0700 permissions (owner-only access)
+/// - Prefers XDG_RUNTIME_DIR if available (often tmpfs, more secure)
+fn create_scoped_tmp() -> anyhow::Result<std::path::PathBuf> {
+    let pid = std::process::id();
+
+    // Get UID - use libc on Unix, fallback to USER env on other platforms
+    #[cfg(unix)]
+    let uid = unsafe { libc::getuid() };
+    #[cfg(not(unix))]
+    let uid = std::env::var("USER")
+        .map(|u| u.chars().take(8).collect::<String>())
+        .unwrap_or_else(|_| "sandbox".to_string());
+
+    // Prefer XDG_RUNTIME_DIR (often tmpfs, more secure)
+    // Falls back to /tmp
+    let base = std::env::var("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+
+    let tmp_dir = base.join(format!("assay-{}-{}", uid, pid));
+
+    // Create with restricted permissions
+    std::fs::create_dir_all(&tmp_dir)?;
+
+    // Set 0700 permissions (owner-only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o700);
+        std::fs::set_permissions(&tmp_dir, perms)?;
+    }
+
+    Ok(tmp_dir)
 }
