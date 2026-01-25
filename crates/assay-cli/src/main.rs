@@ -9,6 +9,7 @@ pub mod diagnostics;
 mod env_filter;
 pub mod exit_codes;
 pub mod fs;
+pub mod landlock_check;
 pub mod packs;
 pub mod policy;
 pub mod setup;
