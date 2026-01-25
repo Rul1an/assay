@@ -3,6 +3,8 @@ use clap::Parser;
 
 pub mod cgroup;
 mod cli;
+pub mod exit_codes;
+pub mod fs;
 pub mod packs;
 mod templates;
 

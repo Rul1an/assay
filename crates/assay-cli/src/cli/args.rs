@@ -47,6 +47,8 @@ pub enum Command {
     Record(super::commands::record::RecordArgs),
     /// Manage multi-run profiles for stability analysis
     Profile(super::commands::profile::ProfileArgs),
+    /// Secure execution sandbox (v0.1)
+    Sandbox(super::commands::sandbox::SandboxArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
