@@ -163,19 +163,15 @@ fn cmd_init(args: InitArgs) -> Result<i32> {
     Ok(0)
 }
 
-fn cmd_update(args: UpdateArgs) -> Result<i32> {
-    // Load existing profile
-    let mut profile = load_profile(&args.profile)
-        .with_context(|| format!("failed to load profile: {}", args.profile.display()))?;
-
+fn enforce_scope(profile: &mut Profile, new_scope: Option<&String>, force: bool) -> Result<()> {
     // Hard Scope Guard (SOTA: prevent pollution from different configs)
     if let Some(ref current_scope) = profile.scope {
-        if let Some(ref new_scope) = args.scope {
-            if current_scope != new_scope {
-                if args.force {
+        if let Some(scope) = new_scope {
+            if current_scope != scope {
+                if force {
                     eprintln!(
                         "WARNING: Scope mismatch (profile='{}', update='{}'). Forcing update.",
-                        current_scope, new_scope
+                        current_scope, scope
                     );
                 } else {
                     anyhow::bail!(
@@ -183,16 +179,26 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
                         This prevents accidentally merging runs from different configurations. \
                         Use --force to override.",
                         current_scope,
-                        new_scope
+                        scope
                     );
                 }
             }
         }
-    } else if let Some(ref new_scope) = args.scope {
+    } else if let Some(scope) = new_scope {
         // First time seeing a scope -> lock it
-        eprintln!("Setting profile scope to '{}'", new_scope);
-        profile.scope = Some(new_scope.clone());
+        eprintln!("Setting profile scope to '{}'", scope);
+        profile.scope = Some(scope.clone());
     }
+    Ok(())
+}
+
+fn cmd_update(args: UpdateArgs) -> Result<i32> {
+    // Load existing profile
+    let mut profile = load_profile(&args.profile)
+        .with_context(|| format!("failed to load profile: {}", args.profile.display()))?;
+
+    // Enforce scope guard
+    enforce_scope(&mut profile, args.scope.as_ref(), args.force)?;
 
     // Idempotency check
     if profile.has_run(&args.run_id) {
@@ -515,5 +521,43 @@ mod tests {
         assert_eq!(updated, 1);
         assert_eq!(profile.entries.files["/a"].runs_seen, 2);
         assert_eq!(profile.entries.files["/a"].hits_total, 7); // 5 + 2
+    }
+
+    #[test]
+    fn scope_guard_mismatch() {
+        let mut p = Profile::new("test", Some("scope-A".into()));
+        let new_scope = Some("scope-B".to_string());
+
+        // Mismatch without force -> Error
+        let res = enforce_scope(&mut p, new_scope.as_ref(), false);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Scope mismatch"));
+
+        // Mismatch with force -> Ok (no change to profile scope effectively, runs just get merged)
+        // Wait, current logic allows update but doesn't change profile scope. That's desired behavior.
+        let res_force = enforce_scope(&mut p, new_scope.as_ref(), true);
+        assert!(res_force.is_ok());
+        assert_eq!(p.scope.as_deref(), Some("scope-A"));
+    }
+
+    #[test]
+    fn scope_guard_init() {
+        let mut p = Profile::new("test", None);
+        let new_scope = Some("scope-init".to_string());
+
+        // First time -> set scope
+        assert!(enforce_scope(&mut p, new_scope.as_ref(), false).is_ok());
+        assert_eq!(p.scope.as_deref(), Some("scope-init"));
+    }
+
+    #[test]
+    fn scope_guard_noop() {
+        let mut p = Profile::new("test", Some("scope-A".into()));
+
+        // Matching scope -> Ok
+        assert!(enforce_scope(&mut p, Some(&"scope-A".to_string()), false).is_ok());
+
+        // No incoming scope -> Ok
+        assert!(enforce_scope(&mut p, None, false).is_ok());
     }
 }
