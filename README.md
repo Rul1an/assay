@@ -78,14 +78,14 @@ constraints:
         matches: "^/app/.*|^/data/.*"
 ```
 
-See [Migration Guide](docs/migration/v1-to-v2.md) if upgrading from v1.x.
+See [Migration Guide](docs/guides/migration.md) if upgrading from v1.x.
 
 ## Documentation
 
 Full documentation available at [getassay.dev](https://getassay.dev).
 
--   [Policy Syntax (v2.0)](docs/policies.md)
--   [Runtime Enforcement](docs/runtime.md)
+-   [Policy Syntax (v2.0)](docs/reference/policies.md)
+-   [Runtime Enforcement](docs/architecture/runtime.md)
 -   [Policy Packs](https://getassay.dev/docs/packs)
 -   [CI Recipes](https://getassay.dev/docs/ci)
 -   [Configuration Reference](https://getassay.dev/docs/config)

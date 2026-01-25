@@ -29,7 +29,7 @@ assay --version
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
 | [`assay replay`](replay.md) | Interactive trace replay |
-| [`assay monitor`](../runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
+| [`assay monitor`](../../guides/runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
 | [`assay mcp-server`](mcp-server.md) | Start Assay as MCP tool server |
 
 ---
