@@ -263,6 +263,7 @@ mod landlock_impl {
 
     /// No-op on non-Linux platforms.
     /// No-op on non-Linux platforms.
+    #[allow(dead_code)]
     pub(super) fn create_ruleset(
         _policy: &crate::policy::Policy,
         _scoped_tmp: &std::path::Path,

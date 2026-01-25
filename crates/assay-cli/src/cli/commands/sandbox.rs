@@ -140,16 +140,40 @@ fn spawn_sandboxed(
     // Always set TMPDIR to scoped tmp
     cmd.env("TMPDIR", scoped_tmp);
 
+    // Check Landlock compatibility (PR5.2)
+    // Detect "Deny inside Allow" conflicts which Landlock cannot enforce.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let compat = crate::landlock_check::check_compatibility(policy, &cwd, scoped_tmp);
+
+    #[allow(unused_assignments, unused_mut)]
+    let mut should_enforce = matches!(backend, BackendType::Landlock);
+
+    if should_enforce && !compat.is_compatible() {
+        eprintln!("WARN: Landlock policy conflict detected (Deny rule inside Allow root).");
+        for (allow, deny) in &compat.conflicts {
+            eprintln!("  - Deny {:?} is inside Allowed {:?}", deny, allow);
+        }
+        eprintln!("WARN: Degrading to Audit mode (no containment). Fix policy or use Landlock-compatible rules.");
+        #[cfg(target_os = "linux")]
+        {
+            should_enforce = false;
+        }
+    }
+
     // Prepare Landlock ruleset in parent process (Safe allocation/IO)
     #[cfg(target_os = "linux")]
-    let mut enforcer = crate::backend::prepare_landlock(policy, scoped_tmp)?;
+    let enforcer_opt = if should_enforce {
+        Some(crate::backend::prepare_landlock(policy, scoped_tmp)?)
+    } else {
+        None
+    };
 
     // Apply Landlock isolation via pre_exec (child-side, before exec)
     #[cfg(all(target_os = "linux", target_family = "unix"))]
     {
         use std::os::unix::process::CommandExt;
 
-        if matches!(backend, BackendType::Landlock) {
+        if let Some(mut enforcer) = enforcer_opt {
             // SAFETY: pre_exec runs after fork, before exec in child process.
             // LandlockHelper::enforce() only calls restrict_self() (syscalls only).
             // No allocations or IO occur in the critical section.
