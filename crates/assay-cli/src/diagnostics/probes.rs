@@ -66,6 +66,7 @@ pub fn probe_system() -> DiagnosticReport {
         bpf_lsm,
         helper,
         backend,
+        sandbox_features: SandboxFeatures::default(),
         status,
         suggestions,
     }
@@ -94,12 +95,24 @@ fn probe_lsms() -> Vec<String> {
 
 fn probe_landlock(lsms: &[String]) -> LandlockStatus {
     let available = lsms.contains(&"landlock".to_string());
-    // In v0.1 we rely on simple presence check
+
+    // Read actual ABI version from sysfs (PR5.5 enhancement)
+    let abi_version = if available {
+        std::fs::read_to_string("/sys/kernel/security/landlock/abi_version")
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+    } else {
+        None
+    };
+
+    // Net enforcement requires ABI >= 4
+    let net_enforce = abi_version.map(|v| v >= 4).unwrap_or(false);
+
     LandlockStatus {
         available,
         fs_enforce: available,
-        net_enforce: false,
-        abi_version: if available { Some(1) } else { None }, // Minimal assumption if present
+        net_enforce,
+        abi_version,
     }
 }
 
