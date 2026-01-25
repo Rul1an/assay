@@ -85,3 +85,7 @@ chrono = { version = "0.4", features = ["serde"], default-features = false }
 tempfile = "3"
 regex = "1"
 async-trait = "0.1"
+sha2 = "0.10"
+hex = "0.4"
+aya = "0.13.0"
+aya-log = "0.2"

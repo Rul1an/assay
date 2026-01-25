@@ -23,10 +23,10 @@ tokio = { workspace = true, features = ["full", "fs"] }
 assay-core.workspace = true
 assay-common = { workspace = true, features = ["std"] }
 assay-metrics.workspace = true
-sha2 = "0.10"
-hex = "0.4"
+sha2.workspace = true
+hex.workspace = true
 moka = { version = "0.12", features = ["sync"] }
-tracing = "0.1"
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
 
 [dev-dependencies]

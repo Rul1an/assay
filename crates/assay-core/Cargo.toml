@@ -29,10 +29,10 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono = { workspace = true, features = ["std", "clock"] }
-sha2 = "0.10"
+sha2.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt-multi-thread"] }
 reqwest = { version = "0.12.26", default-features = false, features = ["json", "rustls-tls"] }
-hex = "0.4.3"
+hex.workspace = true
 md5 = "0.8.0"
 strsim = "0.11.1"
 serde_ignored = "0.1.14"
