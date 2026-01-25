@@ -152,6 +152,17 @@ pub fn analyze_entropy(path: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
     r
 }
 
+/// Analyze destination for suspicious ports (stateless)
+pub fn analyze_dest(dest: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
+    let mut r = RiskAssessment::default();
+    if let (_, Some(port)) = parse_dest(dest) {
+        if cfg.suspicious_ports.contains(&port) {
+            r.add(RiskLevel::NeedsReview, format!("sensitive port {}", port));
+        }
+    }
+    r
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 2c: Network Fanout Analysis
 // ─────────────────────────────────────────────────────────────────────────────

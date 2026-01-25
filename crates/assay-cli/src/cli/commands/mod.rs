@@ -12,6 +12,7 @@ pub mod coverage;
 pub mod demo;
 pub mod discover;
 pub mod doctor;
+pub mod events;
 pub mod explain;
 pub mod fix;
 pub mod generate;
@@ -25,6 +26,8 @@ pub mod migrate;
 pub mod monitor;
 pub mod policy;
 pub mod profile;
+#[cfg(test)]
+mod profile_simulation_test;
 pub mod profile_types;
 pub mod record;
 pub mod validate;

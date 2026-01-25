@@ -75,8 +75,9 @@ fn golden_entropy() {
 }
 
 #[test]
-fn golden_fanout() {
+fn golden_many_network() {
     // Tests policy generation with many network destinations
     // Note: inline heuristics only checks entropy and sensitive ports, not fanout count
-    run_golden("fanout", true);
+    // (Renamed from fanout to avoid implying fanout detection)
+    run_golden("many_network", true);
 }

@@ -8,6 +8,6 @@ files:
     count: 1
     risk: needs_review
     reasons:
-    - 'entropy 4.09: ''a1b2c3d4e5f6g7.s'''
+    - high entropy 'a1b2c3d4e5f6g7.s…' (4.09 bits)
 network: {}
 processes: {}

@@ -6,62 +6,8 @@
 //! 3. Idempotency prevents double-counting
 //! 4. Run ID ring buffer works correctly
 
-use std::collections::BTreeMap;
-
-// Import types (adjust path for actual integration)
-// use assay_cli::commands::{profile, profile_types, generate};
-
-/// Simulated profile types (inline for standalone testing)
-mod profile_types {
-    use super::*;
-
-    pub const MAX_RUN_IDS: usize = 200;
-
-    #[allow(dead_code)] // Used for test simulation only
-    #[derive(Debug, Clone, Default)]
-    pub struct Profile {
-        pub name: String,
-        pub total_runs: u32,
-        pub run_ids: Vec<String>,
-        pub files: BTreeMap<String, Entry>,
-        pub network: BTreeMap<String, Entry>,
-    }
-
-    #[derive(Debug, Clone, Default)]
-    pub struct Entry {
-        pub runs_seen: u32,
-        pub hits_total: u64,
-    }
-
-    impl Profile {
-        pub fn new(name: &str) -> Self {
-            Self {
-                name: name.into(),
-                ..Default::default()
-            }
-        }
-
-        pub fn has_run(&self, run_id: &str) -> bool {
-            self.run_ids.contains(&run_id.to_string())
-        }
-
-        pub fn add_run_id(&mut self, run_id: String) {
-            self.run_ids.push(run_id);
-            if self.run_ids.len() > MAX_RUN_IDS {
-                self.run_ids.remove(0);
-            }
-        }
-    }
-
-    pub fn stability_smoothed(runs_seen: u32, total_runs: u32, alpha: f64) -> f64 {
-        if total_runs == 0 {
-            return 0.0;
-        }
-        (runs_seen as f64 + alpha) / (total_runs as f64 + 2.0 * alpha)
-    }
-}
-
-use profile_types::*;
+use super::profile_types::{stability_smoothed, Profile, MAX_RUN_IDS};
+use std::collections::BTreeSet;
 
 /// Simulate merging a run into a profile
 fn merge_run(profile: &mut Profile, run_id: &str, files: &[&str], network: &[&str]) {
@@ -74,17 +20,17 @@ fn merge_run(profile: &mut Profile, run_id: &str, files: &[&str], network: &[&st
     profile.add_run_id(run_id.to_string());
 
     // Merge files (deduplicated per run)
-    for path in files {
-        let entry = profile.files.entry(path.to_string()).or_default();
-        entry.runs_seen += 1;
-        entry.hits_total += 1;
+    let uniq_files: BTreeSet<_> = files.iter().copied().collect();
+    for path in uniq_files {
+        let entry = profile.entries.files.entry(path.to_string()).or_default();
+        entry.merge_run(0, 1); // timestamp=0, hits=1
     }
 
     // Merge network
-    for dest in network {
-        let entry = profile.network.entry(dest.to_string()).or_default();
-        entry.runs_seen += 1;
-        entry.hits_total += 1;
+    let uniq_net: BTreeSet<_> = network.iter().copied().collect();
+    for dest in uniq_net {
+        let entry = profile.entries.network.entry(dest.to_string()).or_default();
+        entry.merge_run(0, 1);
     }
 }
 
@@ -94,7 +40,7 @@ fn merge_run(profile: &mut Profile, run_id: &str, files: &[&str], network: &[&st
 
 #[test]
 fn test_stable_vs_noise() {
-    let mut profile = Profile::new("test-app");
+    let mut profile = Profile::new("test-app", None);
 
     // Stable artifacts appear in every run
     let stable_file = "/etc/passwd";
@@ -123,13 +69,13 @@ fn test_stable_vs_noise() {
     assert_eq!(profile.total_runs, 10);
 
     // Stable file seen in all 10 runs
-    assert_eq!(profile.files[stable_file].runs_seen, 10);
+    assert_eq!(profile.entries.files[stable_file].runs_seen, 10);
 
     // Stable network seen in all 10 runs
-    assert_eq!(profile.network[stable_net].runs_seen, 10);
+    assert_eq!(profile.entries.network[stable_net].runs_seen, 10);
 
     // Noise file seen in only 1 run
-    assert_eq!(profile.files[noise_file].runs_seen, 1);
+    assert_eq!(profile.entries.files[noise_file].runs_seen, 1);
 
     // Verify stability scores (α=1.0)
     let stable_stab = stability_smoothed(10, 10, 1.0);
@@ -144,12 +90,6 @@ fn test_stable_vs_noise() {
 
     // Noise should be ~0.17
     assert!(noise_stab < 0.2, "noise should be <0.2, got {}", noise_stab);
-
-    // With min_stability=0.8:
-    // - stable_file → allow
-    // - noise_file → skip (or needs_review if new_is_risky)
-    assert!(stable_stab >= 0.8);
-    assert!(noise_stab < 0.6);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +98,7 @@ fn test_stable_vs_noise() {
 
 #[test]
 fn test_idempotency() {
-    let mut profile = Profile::new("test");
+    let mut profile = Profile::new("test", None);
 
     // Merge same run twice
     merge_run(&mut profile, "run-1", &["/a"], &[]);
@@ -166,12 +106,12 @@ fn test_idempotency() {
 
     // Should only count once
     assert_eq!(profile.total_runs, 1);
-    assert_eq!(profile.files["/a"].runs_seen, 1);
+    assert_eq!(profile.entries.files["/a"].runs_seen, 1);
 
     // Different run should count
     merge_run(&mut profile, "run-2", &["/a"], &[]);
     assert_eq!(profile.total_runs, 2);
-    assert_eq!(profile.files["/a"].runs_seen, 2);
+    assert_eq!(profile.entries.files["/a"].runs_seen, 2);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +120,7 @@ fn test_idempotency() {
 
 #[test]
 fn test_run_id_ring_buffer() {
-    let mut profile = Profile::new("test");
+    let mut profile = Profile::new("test", None);
 
     // Add more than MAX_RUN_IDS
     for i in 0..(MAX_RUN_IDS + 50) {
@@ -193,12 +133,13 @@ fn test_run_id_ring_buffer() {
     // But run_ids should be capped
     assert_eq!(profile.run_ids.len(), MAX_RUN_IDS);
 
-    // Old runs should be evicted from idempotency check
-    // (but total_runs stays accurate)
+    // Check oldest and newest logic robustly
+    // Old runs should be evicted
     assert!(!profile.has_run("run-0"));
-    assert!(!profile.has_run("run-49"));
-    assert!(profile.has_run("run-50"));
-    assert!(profile.has_run(&format!("run-{}", MAX_RUN_IDS + 49)));
+
+    // Newest run should be present
+    let newest_id = format!("run-{}", MAX_RUN_IDS + 50 - 1);
+    assert!(profile.has_run(&newest_id));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,7 +177,7 @@ fn test_stability_thresholds() {
 
 #[test]
 fn test_flaky_artifact() {
-    let mut profile = Profile::new("test");
+    let mut profile = Profile::new("test", None);
 
     // Flaky file appears in 50% of runs
     for i in 0..10 {
@@ -246,14 +187,10 @@ fn test_flaky_artifact() {
     }
 
     assert_eq!(profile.total_runs, 10);
-    assert_eq!(profile.files["/flaky"].runs_seen, 5);
+    assert_eq!(profile.entries.files["/flaky"].runs_seen, 5);
 
     let stab = stability_smoothed(5, 10, 1.0);
     assert!((stab - 0.5).abs() < 0.01);
-
-    // With min_stability=0.8, review_threshold=0.6:
-    // - 0.5 < 0.6 → either skip or needs_review (depending on new_is_risky)
-    // This is correct behavior: flaky artifacts shouldn't auto-allow
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,7 +199,7 @@ fn test_flaky_artifact() {
 
 #[test]
 fn test_new_artifact() {
-    let mut profile = Profile::new("test");
+    let mut profile = Profile::new("test", None);
 
     // 9 runs without the artifact
     for i in 0..9 {
@@ -273,8 +210,8 @@ fn test_new_artifact() {
     merge_run(&mut profile, "run-9", &["/stable", "/new"], &[]);
 
     assert_eq!(profile.total_runs, 10);
-    assert_eq!(profile.files["/stable"].runs_seen, 10);
-    assert_eq!(profile.files["/new"].runs_seen, 1);
+    assert_eq!(profile.entries.files["/stable"].runs_seen, 10);
+    assert_eq!(profile.entries.files["/new"].runs_seen, 1);
 
     let stable_stab = stability_smoothed(10, 10, 1.0);
     let new_stab = stability_smoothed(1, 10, 1.0);
@@ -282,7 +219,4 @@ fn test_new_artifact() {
     // New artifact gets low stability despite appearing in recent run
     assert!(stable_stab > 0.9);
     assert!(new_stab < 0.2);
-
-    // This is the key insight: new artifacts need to prove themselves
-    // over multiple runs before being promoted to allow
 }

@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use super::events::Event;
+use super::heuristics::{self, HeuristicsConfig};
 use super::profile_types::{self, stability_smoothed, Profile, ProfileEntry};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,34 +81,32 @@ pub struct GenerateArgs {
     pub wilson_z: f64,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Input Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Event {
-    FileOpen {
-        path: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
-    NetConnect {
-        dest: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
-    ProcExec {
-        path: String,
-        #[serde(default)]
-        pid: u32,
-        #[serde(default)]
-        timestamp: u64,
-    },
+impl GenerateArgs {
+    pub fn validate(&self) -> Result<()> {
+        if self.min_stability < 0.0 || self.min_stability > 1.0 {
+            anyhow::bail!("--min-stability must be between 0.0 and 1.0");
+        }
+        if self.review_threshold < 0.0 || self.review_threshold > 1.0 {
+            anyhow::bail!("--review-threshold must be between 0.0 and 1.0");
+        }
+        if self.min_stability < self.review_threshold {
+            anyhow::bail!(
+                "--min-stability ({}) must be >= --review-threshold ({})",
+                self.min_stability,
+                self.review_threshold
+            );
+        }
+        if self.alpha <= 0.0 {
+            anyhow::bail!("--alpha must be positive");
+        }
+        if self.wilson_z <= 0.0 {
+            anyhow::bail!("--wilson-z must be positive");
+        }
+        if self.entropy_threshold < 0.0 {
+            anyhow::bail!("--entropy-threshold must be non-negative");
+        }
+        Ok(())
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,123 +174,6 @@ pub enum Entry {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Inline Heuristics (from Phase 2)
-// ─────────────────────────────────────────────────────────────────────────────
-// NOTE: This is an intentionally simplified subset of heuristics.rs, inlined for
-// self-contained policy generation. The full heuristics.rs module includes network
-// fanout analysis and per-PID tracking which requires runtime monitoring context.
-// This inline version focuses on static path entropy and sensitive port detection.
-
-mod heuristics {
-    use std::collections::HashMap;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-    pub enum RiskLevel {
-        #[default]
-        Low,
-        NeedsReview,
-        DenyRecommended,
-    }
-
-    impl RiskLevel {
-        pub fn as_str(&self) -> &'static str {
-            match self {
-                Self::Low => "low",
-                Self::NeedsReview => "needs_review",
-                Self::DenyRecommended => "deny_recommended",
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Default)]
-    pub struct Assessment {
-        pub level: RiskLevel,
-        pub reasons: Vec<String>,
-    }
-
-    impl Assessment {
-        pub fn add(&mut self, level: RiskLevel, reason: String) {
-            if level > self.level {
-                self.level = level;
-            }
-            self.reasons.push(reason);
-        }
-    }
-
-    pub struct Config {
-        pub entropy_threshold: f64,
-        pub allowlist: Vec<&'static str>,
-    }
-    impl Default for Config {
-        fn default() -> Self {
-            Self {
-                entropy_threshold: 3.8,
-                allowlist: vec!["/proc/", "/sys/", "/run/user/", ".so."],
-            }
-        }
-    }
-
-    pub fn entropy(s: &str) -> f64 {
-        if s.is_empty() {
-            return 0.0;
-        }
-        let mut freq: HashMap<char, usize> = HashMap::new();
-        for c in s.chars() {
-            *freq.entry(c).or_default() += 1;
-        }
-        let len = s.len() as f64;
-        freq.values()
-            .map(|&n| {
-                let p = n as f64 / len;
-                -p * p.log2()
-            })
-            .sum()
-    }
-
-    pub fn analyze_path(path: &str, cfg: &Config) -> Assessment {
-        let mut r = Assessment::default();
-        if cfg.allowlist.iter().any(|p| path.contains(p)) {
-            return r;
-        }
-        let max_seg = path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .map(|s| (s, entropy(s)))
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        if let Some((seg, ent)) = max_seg {
-            if seg.len() >= 8 && ent >= cfg.entropy_threshold {
-                let trunc = if seg.len() > 16 { &seg[..16] } else { seg };
-                if ent > 4.5 {
-                    r.add(
-                        RiskLevel::DenyRecommended,
-                        format!("high entropy '{}'", trunc),
-                    );
-                } else {
-                    r.add(
-                        RiskLevel::NeedsReview,
-                        format!("entropy {:.2}: '{}'", ent, trunc),
-                    );
-                }
-            }
-        }
-        r
-    }
-
-    pub fn analyze_dest(dest: &str) -> Assessment {
-        let mut r = Assessment::default();
-        let suspicious = [22, 23, 445, 139, 3389, 1433, 3306, 5432];
-        if let Some(port_str) = dest.rsplit(':').next() {
-            if let Ok(port) = port_str.parse::<u16>() {
-                if suspicious.contains(&port) {
-                    r.add(RiskLevel::NeedsReview, format!("sensitive port {}", port));
-                }
-            }
-        }
-        r
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Single-Run Aggregation (Phase 2)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -335,28 +218,47 @@ pub fn read_events(path: &PathBuf) -> Result<Vec<Event>> {
         Box::new(BufReader::new(std::fs::File::open(path)?))
     };
     let mut events = Vec::new();
-    let mut skipped = 0;
+    let mut total_lines = 0;
+    let mut error_count = 0;
+
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() || line.starts_with('#') {
             continue;
         }
+        total_lines += 1;
         match serde_json::from_str(&line) {
             Ok(e) => events.push(e),
             Err(_) => {
-                skipped += 1;
-                if skipped <= 3 {
+                error_count += 1;
+                if error_count <= 3 {
                     eprintln!("warning: skipping line {}: unparsable event", i + 1);
                 }
             }
         }
     }
-    if skipped > 3 {
-        eprintln!("warning: skipped {} unparsable lines total", skipped);
+
+    if error_count > 3 {
+        eprintln!("warning: skipped {} unparsable lines total", error_count);
     }
-    if events.is_empty() && skipped > 0 {
-        anyhow::bail!("no valid events found ({} lines skipped)", skipped);
+
+    if events.is_empty() && error_count > 0 {
+        anyhow::bail!(
+            "no valid events found ({} lines skipped, 0 ok)",
+            error_count
+        );
     }
+
+    if total_lines > 0 {
+        let error_rate = error_count as f64 / total_lines as f64;
+        if error_rate > 0.5 {
+            eprintln!(
+                "warning: high error rate ({:.1}%) - check input format",
+                error_rate * 100.0
+            );
+        }
+    }
+
     Ok(events)
 }
 
@@ -398,7 +300,7 @@ pub fn generate_from_trace(
     name: &str,
     agg: &Aggregated,
     use_heuristics: bool,
-    cfg: &heuristics::Config,
+    cfg: &HeuristicsConfig,
 ) -> Policy {
     let mut files = Section::default();
     let mut network = NetSection::default();
@@ -406,7 +308,7 @@ pub fn generate_from_trace(
 
     for (path, stats) in &agg.files {
         let risk = if use_heuristics {
-            Some(heuristics::analyze_path(path, cfg))
+            Some(heuristics::analyze_entropy(path, cfg))
         } else {
             None
         };
@@ -420,7 +322,7 @@ pub fn generate_from_trace(
 
     for (dest, stats) in &agg.network {
         let risk = if use_heuristics {
-            Some(heuristics::analyze_dest(dest))
+            Some(heuristics::analyze_dest(dest, cfg))
         } else {
             None
         };
@@ -436,7 +338,7 @@ pub fn generate_from_trace(
 
     for (path, stats) in &agg.processes {
         let risk = if use_heuristics {
-            Some(heuristics::analyze_path(path, cfg))
+            Some(heuristics::analyze_entropy(path, cfg))
         } else {
             None
         };
@@ -462,14 +364,22 @@ pub fn generate_from_trace(
     }
 }
 
-fn make_entry_simple(pattern: &str, count: u32, risk: Option<&heuristics::Assessment>) -> Entry {
+fn make_entry_simple(
+    pattern: &str,
+    count: u32,
+    risk: Option<&heuristics::RiskAssessment>,
+) -> Entry {
     match risk {
         Some(r) if r.level > heuristics::RiskLevel::Low => Entry::WithMeta {
             pattern: pattern.into(),
             count: Some(count),
             stability: None,
             runs_seen: None,
-            risk: Some(r.level.as_str().into()),
+            risk: match r.level {
+                heuristics::RiskLevel::Low => Some("low".into()),
+                heuristics::RiskLevel::NeedsReview => Some("needs_review".into()),
+                heuristics::RiskLevel::DenyRecommended => Some("deny_recommended".into()),
+            },
             reasons: if r.reasons.is_empty() {
                 None
             } else {
@@ -496,7 +406,7 @@ pub fn generate_from_profile(
     name: &str,
     profile: &Profile,
     args: &GenerateArgs,
-    heur_cfg: &heuristics::Config,
+    heur_cfg: &HeuristicsConfig,
 ) -> Policy {
     let total_runs = profile.total_runs;
     let alpha = args.alpha;
@@ -511,7 +421,7 @@ pub fn generate_from_profile(
         let stab_gate =
             profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
-            Some(heuristics::analyze_path(path, heur_cfg))
+            Some(heuristics::analyze_entropy(path, heur_cfg))
         } else {
             None
         };
@@ -543,7 +453,7 @@ pub fn generate_from_profile(
         let stab_gate =
             profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
-            Some(heuristics::analyze_dest(dest))
+            Some(heuristics::analyze_dest(dest, heur_cfg))
         } else {
             None
         };
@@ -575,7 +485,7 @@ pub fn generate_from_profile(
         let stab_gate =
             profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
-            Some(heuristics::analyze_path(path, heur_cfg))
+            Some(heuristics::analyze_entropy(path, heur_cfg))
         } else {
             None
         };
@@ -623,7 +533,7 @@ pub fn generate_from_profile(
 /// `stab_gate` is Wilson lower bound for conservative gating
 fn classify_entry(
     stab_gate: f64,
-    risk: Option<&heuristics::Assessment>,
+    risk: Option<&heuristics::RiskAssessment>,
     args: &GenerateArgs,
     total_runs: u32,
     runs_seen: u32,
@@ -664,7 +574,7 @@ fn make_entry_profile(
     stab_gate: f64,
     total_runs: u32,
     args: &GenerateArgs,
-    risk: Option<&heuristics::Assessment>,
+    risk: Option<&heuristics::RiskAssessment>,
 ) -> Entry {
     let mut reasons = Vec::new();
 
@@ -694,7 +604,11 @@ fn make_entry_profile(
         count: Some(entry.hits_total as u32),
         stability: Some((stab_display * 100.0).round() / 100.0), // Round to 2 decimals
         runs_seen: Some(entry.runs_seen),
-        risk: risk.map(|r| r.level.as_str().into()),
+        risk: risk.map(|r| match r.level {
+            heuristics::RiskLevel::Low => "low".into(),
+            heuristics::RiskLevel::NeedsReview => "needs_review".into(),
+            heuristics::RiskLevel::DenyRecommended => "deny_recommended".into(),
+        }),
         reasons: Some(reasons),
     }
 }
@@ -723,19 +637,9 @@ pub fn run(args: GenerateArgs) -> Result<i32> {
         anyhow::bail!("cannot use both --input and --profile");
     }
 
-    // Validate: stability thresholds relationship
-    if args.min_stability < args.review_threshold {
-        anyhow::bail!(
-            "--min-stability ({}) must be >= --review-threshold ({})",
-            args.min_stability,
-            args.review_threshold
-        );
-    }
-    if args.alpha <= 0.0 {
-        anyhow::bail!("--alpha must be positive (got {})", args.alpha);
-    }
+    args.validate()?;
 
-    let heur_cfg = heuristics::Config {
+    let heur_cfg = HeuristicsConfig {
         entropy_threshold: args.entropy_threshold,
         ..Default::default()
     };
@@ -897,8 +801,8 @@ mod tests {
             alpha: 1.0,
         };
 
-        let mut risk = heuristics::Assessment::default();
-        risk.add(heuristics::RiskLevel::DenyRecommended, "test".into());
+        let mut risk = heuristics::RiskAssessment::default();
+        risk.add(heuristics::RiskLevel::DenyRecommended, "test".to_string());
 
         // High stability but deny risk → deny
         assert_eq!(
