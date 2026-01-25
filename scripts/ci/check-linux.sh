@@ -32,12 +32,15 @@ run_multipass_check() {
 
   # Execute in VM. Assumes repo available at $WORKDIR in VM.
   # (Mount or git clone inside VM; see notes below.)
-  multipass exec "$VM_NAME" -- bash -lc "
+  multipass exec "$VM_NAME" -- bash -c "
+    export PATH=\"\$HOME/.cargo/bin:\$PATH\"
+    if [ -f \"\$HOME/.cargo/env\" ]; then . \"\$HOME/.cargo/env\"; fi
+    export CARGO_TARGET_DIR=\"/tmp/assay-target\"
     set -euo pipefail
     cd '$WORKDIR'
-    rustup component add clippy >/dev/null 2>&1 || true
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
+    rustup component add clippy
+    cargo clippy --locked --workspace --all-targets -- -D warnings
+    cargo test --locked --workspace
   "
 }
 
