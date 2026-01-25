@@ -133,6 +133,8 @@ pub async fn run(args: RecordArgs) -> Result<i32> {
         review_threshold: 0.6,
         new_is_risky: false,
         alpha: 1.0,
+        min_runs: 5,    // SOTA: safety belt
+        wilson_z: 1.96, // SOTA: 95% confidence gating
     };
 
     // We can call generate::run directly since it's in-process

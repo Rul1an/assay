@@ -113,6 +113,7 @@ impl ProfileEntry {
 
 /// Laplace-smoothed stability: (runs_seen + α) / (total_runs + 2α)
 /// With α=1: 1/1→0.67, 10/10→0.92, 5/10→0.5, 0/10→0.08
+/// Use this for human-readable display/UX.
 pub fn stability_smoothed(runs_seen: u32, total_runs: u32, alpha: f64) -> f64 {
     if total_runs == 0 {
         return 0.0;
@@ -120,7 +121,31 @@ pub fn stability_smoothed(runs_seen: u32, total_runs: u32, alpha: f64) -> f64 {
     (runs_seen as f64 + alpha) / (total_runs as f64 + 2.0 * alpha)
 }
 
+/// Wilson score lower bound for binomial proportion.
+/// This provides conservative gating: at low N, even 100% observed is not "stable".
+/// z=1.96 gives ~95% confidence; z=1.645 gives ~90%.
+///
+/// Formula: (p + z²/2n - z√(p(1-p)/n + z²/4n²)) / (1 + z²/n)
+/// Reference: https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
+pub fn stability_wilson_lower(runs_seen: u32, total_runs: u32, z: f64) -> f64 {
+    if total_runs == 0 {
+        return 0.0;
+    }
+    let n = total_runs as f64;
+    let p = runs_seen as f64 / n;
+    let z2 = z * z;
+
+    // Numerically stable Wilson score lower bound
+    let denominator = 1.0 + z2 / n;
+    let center = p + z2 / (2.0 * n);
+    let margin = z * ((p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt());
+
+    ((center - margin) / denominator).max(0.0)
+}
+
 pub const DEFAULT_ALPHA: f64 = 1.0;
+#[allow(dead_code)]
+pub const DEFAULT_WILSON_Z: f64 = 1.96; // ~95% confidence
 
 #[allow(dead_code)] // Will be used in SOTA 2026 refinements
 #[derive(Debug, Clone)]
@@ -128,6 +153,8 @@ pub struct StabilityConfig {
     pub promote_threshold: f64, // >= this → allow
     pub review_threshold: f64,  // < this → needs_review (if new_is_risky)
     pub alpha: f64,
+    pub wilson_z: f64,
+    pub min_runs: u32,
     pub new_is_risky: bool,
 }
 
@@ -137,6 +164,8 @@ impl Default for StabilityConfig {
             promote_threshold: 0.8,
             review_threshold: 0.6,
             alpha: DEFAULT_ALPHA,
+            wilson_z: DEFAULT_WILSON_Z,
+            min_runs: 5,
             new_is_risky: false,
         }
     }
@@ -209,5 +238,38 @@ mod tests {
         assert_eq!(e.hits_total, 8);
         assert_eq!(e.first_seen, 100);
         assert_eq!(e.last_seen, 200);
+    }
+
+    #[test]
+    fn wilson_lower_bound() {
+        // Wilson is conservative: 1/1 should NOT be 1.0
+        let w_1_1 = stability_wilson_lower(1, 1, 1.96);
+        assert!(w_1_1 < 0.5, "wilson(1/1) should be <0.5, got {}", w_1_1);
+
+        // 10/10 should be high but not 1.0
+        let w_10_10 = stability_wilson_lower(10, 10, 1.96);
+        assert!(
+            w_10_10 > 0.7 && w_10_10 < 1.0,
+            "wilson(10/10) expected 0.7-1.0, got {}",
+            w_10_10
+        );
+
+        // 0/10 should be near 0
+        let w_0_10 = stability_wilson_lower(0, 10, 1.96);
+        assert!(
+            w_0_10 < 0.05,
+            "wilson(0/10) should be <0.05, got {}",
+            w_0_10
+        );
+
+        // Compare with Laplace: Wilson is always more conservative
+        let laplace_1_1 = stability_smoothed(1, 1, 1.0);
+        assert!(
+            w_1_1 < laplace_1_1,
+            "wilson should be more conservative than laplace"
+        );
+
+        // Edge case: 0 total runs
+        assert_eq!(stability_wilson_lower(0, 0, 1.96), 0.0);
     }
 }

@@ -64,6 +64,14 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub strict: bool,
 
+    /// Scope fingerprint check (prevents pollution)
+    #[arg(long)]
+    pub scope: Option<String>,
+
+    /// Force update even if scope mismatch
+    #[arg(long)]
+    pub force: bool,
+
     /// Verbose output
     #[arg(short, long)]
     pub verbose: bool,
@@ -159,6 +167,32 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
     // Load existing profile
     let mut profile = load_profile(&args.profile)
         .with_context(|| format!("failed to load profile: {}", args.profile.display()))?;
+
+    // Hard Scope Guard (SOTA: prevent pollution from different configs)
+    if let Some(ref current_scope) = profile.scope {
+        if let Some(ref new_scope) = args.scope {
+            if current_scope != new_scope {
+                if args.force {
+                    eprintln!(
+                        "WARNING: Scope mismatch (profile='{}', update='{}'). Forcing update.",
+                        current_scope, new_scope
+                    );
+                } else {
+                    anyhow::bail!(
+                        "Scope mismatch: profile scope is '{}' but update scope is '{}'. \
+                        This prevents accidentally merging runs from different configurations. \
+                        Use --force to override.",
+                        current_scope,
+                        new_scope
+                    );
+                }
+            }
+        }
+    } else if let Some(ref new_scope) = args.scope {
+        // First time seeing a scope -> lock it
+        eprintln!("Setting profile scope to '{}'", new_scope);
+        profile.scope = Some(new_scope.clone());
+    }
 
     // Idempotency check
     if profile.has_run(&args.run_id) {

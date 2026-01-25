@@ -66,9 +66,17 @@ pub struct GenerateArgs {
     #[arg(long)]
     pub new_is_risky: bool,
 
-    /// Smoothing parameter (Laplace)
+    /// Smoothing parameter (Laplace) for display
     #[arg(long, default_value_t = 1.0)]
     pub alpha: f64,
+
+    /// Minimum runs before anything can be auto-allowed (safety belt)
+    #[arg(long, default_value_t = 5)]
+    pub min_runs: u32,
+
+    /// Z-score for Wilson lower bound gating (1.96 ≈ 95% confidence)
+    #[arg(long, default_value_t = 1.96)]
+    pub wilson_z: f64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -496,15 +504,26 @@ pub fn generate_from_profile(
 
     // Process files
     for (path, entry) in &profile.entries.files {
-        let stab = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
             Some(heuristics::analyze_path(path, heur_cfg))
         } else {
             None
         };
 
-        if let Some((section, is_deny)) = classify_entry(stab, risk.as_ref(), args) {
-            let out_entry = make_entry_profile(path, entry, stab, total_runs, risk.as_ref());
+        if let Some((section, is_deny)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs)
+        {
+            let out_entry = make_entry_profile(
+                path,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
             match (section, is_deny) {
                 ("deny", _) => files.deny.push(path.clone()),
                 ("needs_review", _) => files.needs_review.push(out_entry),
@@ -516,15 +535,25 @@ pub fn generate_from_profile(
 
     // Process network
     for (dest, entry) in &profile.entries.network {
-        let stab = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
             Some(heuristics::analyze_dest(dest))
         } else {
             None
         };
 
-        if let Some((section, _)) = classify_entry(stab, risk.as_ref(), args) {
-            let out_entry = make_entry_profile(dest, entry, stab, total_runs, risk.as_ref());
+        if let Some((section, _)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs) {
+            let out_entry = make_entry_profile(
+                dest,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
             match section {
                 "deny" => network.deny_destinations.push(dest.clone()),
                 "needs_review" => network.needs_review.push(out_entry),
@@ -536,15 +565,25 @@ pub fn generate_from_profile(
 
     // Process processes
     for (path, entry) in &profile.entries.processes {
-        let stab = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_display = stability_smoothed(entry.runs_seen, total_runs, alpha);
+        let stab_gate =
+            profile_types::stability_wilson_lower(entry.runs_seen, total_runs, args.wilson_z);
         let risk = if args.heuristics {
             Some(heuristics::analyze_path(path, heur_cfg))
         } else {
             None
         };
 
-        if let Some((section, _)) = classify_entry(stab, risk.as_ref(), args) {
-            let out_entry = make_entry_profile(path, entry, stab, total_runs, risk.as_ref());
+        if let Some((section, _)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs) {
+            let out_entry = make_entry_profile(
+                path,
+                entry,
+                stab_display,
+                stab_gate,
+                total_runs,
+                args,
+                risk.as_ref(),
+            );
             match section {
                 "deny" => processes.deny.push(path.clone()),
                 "needs_review" => processes.needs_review.push(out_entry),
@@ -568,10 +607,12 @@ pub fn generate_from_profile(
 }
 
 /// Returns (section, is_deny) or None if should skip
+/// `stab_gate` is Wilson lower bound for conservative gating
 fn classify_entry(
-    stab: f64,
+    stab_gate: f64,
     risk: Option<&heuristics::Assessment>,
     args: &GenerateArgs,
+    total_runs: u32,
 ) -> Option<(&'static str, bool)> {
     // Priority: heuristics risk overrides stability
     if let Some(r) = risk {
@@ -582,10 +623,19 @@ fn classify_entry(
         }
     }
 
-    // Stability-based classification
-    if stab >= args.min_stability {
+    // Safety belt: not enough runs -> don't auto-allow yet
+    if total_runs < args.min_runs {
+        return if args.new_is_risky {
+            Some(("needs_review", false))
+        } else {
+            None
+        };
+    }
+
+    // Stability-based classification (using Wilson lower bound for gating)
+    if stab_gate >= args.min_stability {
         Some(("allow", false))
-    } else if stab >= args.review_threshold || args.new_is_risky {
+    } else if stab_gate >= args.review_threshold || args.new_is_risky {
         // Medium stability OR low-stability with new_is_risky → needs_review
         Some(("needs_review", false))
     } else {
@@ -596,14 +646,21 @@ fn classify_entry(
 fn make_entry_profile(
     pattern: &str,
     entry: &ProfileEntry,
-    stab: f64,
+    stab_display: f64,
+    stab_gate: f64,
     total_runs: u32,
+    args: &GenerateArgs,
     risk: Option<&heuristics::Assessment>,
 ) -> Entry {
     let mut reasons = Vec::new();
+    // Show both Laplace (human-readable) and Wilson (gating) scores
     reasons.push(format!(
-        "stability {:.2} ({}/{})",
-        stab, entry.runs_seen, total_runs
+        "wilson_lb {:.2} (z={:.2})",
+        stab_gate, args.wilson_z
+    ));
+    reasons.push(format!(
+        "laplace {:.2} (α={:.1}, {}/{})",
+        stab_display, args.alpha, entry.runs_seen, total_runs
     ));
     if let Some(r) = risk {
         reasons.extend(r.reasons.clone());
@@ -612,7 +669,7 @@ fn make_entry_profile(
     Entry::WithMeta {
         pattern: pattern.into(),
         count: Some(entry.hits_total as u32),
-        stability: Some((stab * 100.0).round() / 100.0), // Round to 2 decimals
+        stability: Some((stab_display * 100.0).round() / 100.0), // Round to 2 decimals
         runs_seen: Some(entry.runs_seen),
         risk: risk.map(|r| r.level.as_str().into()),
         reasons: Some(reasons),
