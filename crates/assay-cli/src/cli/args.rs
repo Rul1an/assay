@@ -49,6 +49,8 @@ pub enum Command {
     Profile(super::commands::profile::ProfileArgs),
     /// Secure execution sandbox (v0.1)
     Sandbox(super::commands::sandbox::SandboxArgs),
+    /// Interactive installer and environment setup (Phase 2)
+    Setup(SetupArgs),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
@@ -529,7 +531,7 @@ pub struct CalibrateArgs {
 #[derive(clap::Args, Debug, Clone)]
 pub struct DoctorArgs {
     #[arg(long)]
-    pub config: std::path::PathBuf,
+    pub config: Option<std::path::PathBuf>,
 
     #[arg(long)]
     pub trace_file: Option<std::path::PathBuf>,
@@ -654,6 +656,33 @@ pub struct ConfigPathArgs {
     /// Output JSON only
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct SetupArgs {
+    /// Dry run: show what would be installed but do not make changes (default)
+    #[arg(long, default_value_t = true)]
+    pub dry_run: bool,
+
+    /// Apply changes: actually perform installation (may require sudo)
+    #[arg(long, conflicts_with = "dry_run")]
+    pub apply: bool,
+
+    /// Install helper binary from this local path (e.g. target/release/assay-bpf)
+    #[arg(long)]
+    pub helper_from: Option<PathBuf>,
+
+    /// Installation prefix for binary (default: /usr/local/bin)
+    #[arg(long, default_value = "/usr/local/bin")]
+    pub prefix: PathBuf,
+
+    /// Runtime directory for socket (default: /run/assay)
+    #[arg(long, default_value = "/run/assay")]
+    pub runtime_dir: PathBuf,
+
+    /// Non-interactive mode (for CI/automation)
+    #[arg(long)]
+    pub non_interactive: bool,
 }
 
 #[derive(Parser, Clone, Debug)]

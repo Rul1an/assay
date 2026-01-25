@@ -66,7 +66,7 @@ impl LlmClient for OpenAIClient {
             .await?;
 
         if !resp.status().is_success() {
-            let error_text = resp.text().await.unwrap_or_default();
+            let error_text = resp.text().await.unwrap_or_else(|_| String::new());
             anyhow::bail!("OpenAI chat API error: {}", error_text);
         }
 

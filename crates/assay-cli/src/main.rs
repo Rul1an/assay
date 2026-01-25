@@ -1,12 +1,16 @@
 #![allow(unsafe_code)]
 use clap::Parser;
 
+pub mod backend;
+pub mod caps;
 pub mod cgroup;
 mod cli;
+pub mod diagnostics;
 pub mod exit_codes;
 pub mod fs;
 pub mod packs;
 pub mod policy;
+pub mod setup;
 mod templates;
 
 use cli::args::Cli;
