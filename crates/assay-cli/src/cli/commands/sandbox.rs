@@ -1,23 +1,12 @@
 use crate::backend::BackendType;
+use crate::cli::args::SandboxArgs;
+use crate::env_filter::{format_banner, EnvFilter, EnvMode};
 use crate::exit_codes;
-use clap::Args;
-use std::path::PathBuf;
 use std::process::Stdio;
-
-#[derive(Args, Debug, Clone)]
-pub struct SandboxArgs {
-    /// Command to run in the sandbox
-    #[arg(allow_hyphen_values = true, required = true, trailing_var_arg = true)]
-    pub command: Vec<String>,
-
-    /// Path to policy file (optional)
-    #[arg(long)]
-    pub policy: Option<PathBuf>,
-}
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     eprintln!("Assay Sandbox v0.1");
-    eprintln!("------------------");
+    eprintln!("──────────────────");
 
     // PR3: Detect and display backend
     let (backend, caps) = crate::backend::detect_backend();
@@ -33,6 +22,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         if caps.enforce_fs { "enforce" } else { "audit" },
         if caps.enforce_net { "enforce" } else { "audit" }
     );
+
+    // PR5.1: Environment filtering
+    let (env_filter, env_mode) = build_env_filter(&args);
+    let env_result = env_filter.filter_current();
+    eprintln!("  Env: {}", format_banner(&env_result, env_mode));
 
     // PR2: Load policy from file or use default MCP pack
     let policy = if let Some(ref path) = args.policy {
@@ -65,7 +59,9 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         Err(e) => eprintln!("WARN: Failed to create trace dir: {}", e),
     }
 
-    // Scoped /tmp creation
+    // Scoped /tmp creation (PR5.1 Fix: use uid-based or consistent fallback)
+    // SOTA recommendation: /tmp/assay-$UID but we need libc for getuid if on unix.
+    // For now stick to USER but in next PR5.4 adapt to strict.
     let user = std::env::var("USER").unwrap_or_else(|_| "sandbox".to_string());
     let tmp_dir = std::path::PathBuf::from(format!("/tmp/assay-{}", user));
     if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
@@ -75,14 +71,22 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             e
         );
     }
+    // Set 0700 permissions if possible (best effort without libc dep here, update in PR5.4)
 
-    eprintln!("------------------");
+    eprintln!("──────────────────");
 
     // Spawn child with sandbox isolation
     let cmd_name = &args.command[0];
     let cmd_args = &args.command[1..];
 
-    let status = spawn_sandboxed(cmd_name, cmd_args, &backend, &policy, &tmp_dir)?;
+    let status = spawn_sandboxed(
+        cmd_name,
+        cmd_args,
+        &backend,
+        &policy,
+        &tmp_dir,
+        &env_result.filtered_env,
+    )?;
 
     // Consolidate exit code logic
     // Just return direct status code or signal failure
@@ -96,6 +100,21 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 }
 
+/// Build the environment filter based on CLI args.
+fn build_env_filter(args: &SandboxArgs) -> (EnvFilter, EnvMode) {
+    if args.env_passthrough {
+        (EnvFilter::passthrough(), EnvMode::Passthrough)
+    } else {
+        let filter = EnvFilter::default_scrub();
+        let filter = if let Some(ref allowed) = args.env_allow {
+            filter.with_allowed(allowed)
+        } else {
+            filter
+        };
+        (filter, EnvMode::Scrub)
+    }
+}
+
 /// Spawn a child process with appropriate sandbox isolation.
 /// On Linux with Landlock: applies restrictions via pre_exec (before exec).
 /// On other platforms: just runs the command (audit-only).
@@ -105,13 +124,21 @@ fn spawn_sandboxed(
     backend: &BackendType,
     policy: &crate::policy::Policy,
     scoped_tmp: &std::path::Path,
+    filtered_env: &std::collections::HashMap<String, String>,
 ) -> anyhow::Result<std::process::ExitStatus> {
     let mut cmd = std::process::Command::new(cmd_name);
     cmd.args(cmd_args)
-        .env("TMPDIR", scoped_tmp)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+
+    // PR5.1: Apply filtered environment (scrubbed by default)
+    cmd.env_clear();
+    for (key, value) in filtered_env {
+        cmd.env(key, value);
+    }
+    // Always set TMPDIR to scoped tmp
+    cmd.env("TMPDIR", scoped_tmp);
 
     // Prepare Landlock ruleset in parent process (Safe allocation/IO)
     #[cfg(target_os = "linux")]

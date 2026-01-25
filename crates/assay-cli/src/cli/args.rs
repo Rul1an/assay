@@ -48,7 +48,7 @@ pub enum Command {
     /// Manage multi-run profiles for stability analysis
     Profile(super::commands::profile::ProfileArgs),
     /// Secure execution sandbox (v0.1)
-    Sandbox(super::commands::sandbox::SandboxArgs),
+    Sandbox(SandboxArgs),
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
 }
@@ -830,4 +830,22 @@ pub struct DiscoverArgs {
     /// Policy file to use for configuration
     #[arg(long)]
     pub policy: Option<PathBuf>,
+}
+#[derive(clap::Args, Debug, Clone)]
+pub struct SandboxArgs {
+    /// Command to run in the sandbox
+    #[arg(allow_hyphen_values = true, required = true, trailing_var_arg = true)]
+    pub command: Vec<String>,
+
+    /// Path to policy file (optional)
+    #[arg(long)]
+    pub policy: Option<std::path::PathBuf>,
+
+    /// Allow specific env vars through the scrub filter (comma-separated or repeated)
+    #[arg(long = "env-allow", value_delimiter = ',')]
+    pub env_allow: Option<Vec<String>>,
+
+    /// DANGER: Pass all env vars without scrubbing
+    #[arg(long = "env-passthrough")]
+    pub env_passthrough: bool,
 }
