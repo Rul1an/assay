@@ -71,7 +71,7 @@ pub struct GenerateArgs {
     pub alpha: f64,
 
     /// Minimum runs before anything can be auto-allowed (safety belt)
-    #[arg(long, default_value_t = 5)]
+    #[arg(long, default_value_t = 1)]
     pub min_runs: u32,
 
     /// Z-score for Wilson lower bound gating (1.96 ≈ 95% confidence)
@@ -130,6 +130,8 @@ pub struct Meta {
     pub profile_runs: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_stability: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_runs: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -452,6 +454,7 @@ pub fn generate_from_trace(
             generated_at: chrono::Utc::now().to_rfc3339(),
             profile_runs: None,
             min_stability: None,
+            min_runs: None,
         }),
         files,
         network,
@@ -513,7 +516,8 @@ pub fn generate_from_profile(
             None
         };
 
-        if let Some((section, is_deny)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs)
+        if let Some((section, is_deny)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
         {
             let out_entry = make_entry_profile(
                 path,
@@ -544,7 +548,9 @@ pub fn generate_from_profile(
             None
         };
 
-        if let Some((section, _)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs) {
+        if let Some((section, _)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
+        {
             let out_entry = make_entry_profile(
                 dest,
                 entry,
@@ -574,7 +580,9 @@ pub fn generate_from_profile(
             None
         };
 
-        if let Some((section, _)) = classify_entry(stab_gate, risk.as_ref(), args, total_runs) {
+        if let Some((section, _)) =
+            classify_entry(stab_gate, risk.as_ref(), args, total_runs, entry.runs_seen)
+        {
             let out_entry = make_entry_profile(
                 path,
                 entry,
@@ -599,6 +607,11 @@ pub fn generate_from_profile(
             generated_at: chrono::Utc::now().to_rfc3339(),
             profile_runs: Some(total_runs),
             min_stability: Some(args.min_stability),
+            min_runs: if args.min_runs > 1 {
+                Some(args.min_runs)
+            } else {
+                None
+            },
         }),
         files,
         network,
@@ -613,6 +626,7 @@ fn classify_entry(
     risk: Option<&heuristics::Assessment>,
     args: &GenerateArgs,
     total_runs: u32,
+    runs_seen: u32,
 ) -> Option<(&'static str, bool)> {
     // Priority: heuristics risk overrides stability
     if let Some(r) = risk {
@@ -623,8 +637,8 @@ fn classify_entry(
         }
     }
 
-    // Safety belt: not enough runs -> don't auto-allow yet
-    if total_runs < args.min_runs {
+    // Safety belt: not enough runs (profile-wide or entry-specific) -> don't auto-allow yet
+    if total_runs < args.min_runs || runs_seen < args.min_runs {
         return if args.new_is_risky {
             Some(("needs_review", false))
         } else {
@@ -653,6 +667,15 @@ fn make_entry_profile(
     risk: Option<&heuristics::Assessment>,
 ) -> Entry {
     let mut reasons = Vec::new();
+
+    // Safety belt feedback
+    if total_runs < args.min_runs || entry.runs_seen < args.min_runs {
+        reasons.push(format!(
+            "min_runs gate: need >= {} runs (profile={}, entry={})",
+            args.min_runs, total_runs, entry.runs_seen
+        ));
+    }
+
     // Show both Laplace (human-readable) and Wilson (gating) scores
     reasons.push(format!(
         "wilson_lb {:.2} (z={:.2})",
@@ -786,22 +809,27 @@ mod tests {
             heuristics: false,
             entropy_threshold: 3.8,
             min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
             review_threshold: 0.6,
             new_is_risky: false,
             alpha: 1.0,
         };
 
         // High stability, no risk → allow
-        assert_eq!(classify_entry(0.9, None, &args), Some(("allow", false)));
+        assert_eq!(
+            classify_entry(0.9, None, &args, 10, 10),
+            Some(("allow", false))
+        );
 
         // Medium stability → needs_review
         assert_eq!(
-            classify_entry(0.7, None, &args),
+            classify_entry(0.7, None, &args, 10, 7),
             Some(("needs_review", false))
         );
 
         // Low stability, not risky → skip
-        assert_eq!(classify_entry(0.3, None, &args), None);
+        assert_eq!(classify_entry(0.3, None, &args, 10, 3), None);
     }
 
     #[test]
@@ -816,6 +844,8 @@ mod tests {
             heuristics: false,
             entropy_threshold: 3.8,
             min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
             review_threshold: 0.6,
             new_is_risky: true,
             alpha: 1.0,
@@ -823,9 +853,29 @@ mod tests {
 
         // Low stability with new_is_risky → needs_review
         assert_eq!(
-            classify_entry(0.3, None, &args),
+            classify_entry(0.3, None, &args, 10, 3),
             Some(("needs_review", false))
         );
+    }
+
+    #[test]
+    fn classify_min_runs_gates_early_noise() {
+        // Too early: total_runs < min_runs should skip unless new_is_risky
+        let mut args = default_args();
+        args.min_runs = 5;
+
+        // total_runs=1 < 5 -> gated
+        assert_eq!(classify_entry(0.99, None, &args, 1, 1), None);
+
+        args.new_is_risky = true;
+        assert_eq!(
+            classify_entry(0.99, None, &args, 1, 1),
+            Some(("needs_review", false))
+        );
+
+        // entry.runs_seen < min_runs -> gated (even if total_runs ok)
+        args.new_is_risky = false;
+        assert_eq!(classify_entry(0.99, None, &args, 10, 1), None);
     }
 
     #[test]
@@ -840,6 +890,8 @@ mod tests {
             heuristics: true,
             entropy_threshold: 3.8,
             min_stability: 0.8,
+            min_runs: 5,
+            wilson_z: 1.96,
             review_threshold: 0.6,
             new_is_risky: false,
             alpha: 1.0,
@@ -850,8 +902,27 @@ mod tests {
 
         // High stability but deny risk → deny
         assert_eq!(
-            classify_entry(0.95, Some(&risk), &args),
+            classify_entry(0.95, Some(&risk), &args, 1, 1),
             Some(("deny", true))
         );
+    }
+
+    fn default_args() -> GenerateArgs {
+        GenerateArgs {
+            input: None,
+            profile: None,
+            output: "".into(),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+        }
     }
 }

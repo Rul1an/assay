@@ -133,7 +133,7 @@ pub async fn run(args: RecordArgs) -> Result<i32> {
         review_threshold: 0.6,
         new_is_risky: false,
         alpha: 1.0,
-        min_runs: 5,    // SOTA: safety belt
+        min_runs: 0,    // single-run mode
         wilson_z: 1.96, // SOTA: 95% confidence gating
     };
 
