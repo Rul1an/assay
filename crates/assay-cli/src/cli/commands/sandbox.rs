@@ -26,11 +26,28 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     eprintln!("Assay Sandbox v0.1");
     eprintln!("------------------");
     eprintln!("Backend: [No-Op Stub]"); // Placeholder for PR3
+
+    // PR2: Load policy from file or use default MCP pack
+    let policy = if let Some(ref path) = args.policy {
+        match crate::policy::Policy::load(path) {
+            Ok(p) => {
+                eprintln!("Policy:  {} (loaded)", path.display());
+                p
+            }
+            Err(e) => {
+                eprintln!("WARN: Failed to load policy: {}. Using default.", e);
+                crate::policy::mcp_server_minimal()
+            }
+        }
+    } else {
+        eprintln!("Policy:  mcp-server-minimal (default)");
+        crate::policy::mcp_server_minimal()
+    };
+
+    let (fs_allow, fs_deny, net_allow, net_deny) = policy.rule_counts();
     eprintln!(
-        "Policy:  {:?}",
-        args.policy
-            .as_deref()
-            .unwrap_or(std::path::Path::new("default"))
+        "Rules:   FS(allow:{} deny:{}) NET(allow:{} deny:{})",
+        fs_allow, fs_deny, net_allow, net_deny
     );
     eprintln!("Command: {:?}", args.command);
     eprintln!("PID:     {}", std::process::id());

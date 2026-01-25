@@ -6,6 +6,7 @@ mod cli;
 pub mod exit_codes;
 pub mod fs;
 pub mod packs;
+pub mod policy;
 mod templates;
 
 use cli::args::Cli;
