@@ -40,6 +40,30 @@ pub fn format_text(report: &DiagnosticReport) -> String {
     ));
     s.push_str(&format!("  Details:    {}\n", report.backend.reason));
 
+    // Phase 5 hardening features
+    s.push_str("\nSandbox Hardening (v2.3):\n");
+    let f = &report.sandbox_features;
+    s.push_str(&format!(
+        "  Env Scrubbing:      {}\n",
+        if f.env_scrubbing { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "  Scoped /tmp:        {}\n",
+        if f.scoped_tmp { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "  Fork-safe pre_exec: {}\n",
+        if f.fork_safe_preexec { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "  Deny Conflict Det:  {}\n",
+        if f.deny_conflict_detection {
+            "✓"
+        } else {
+            "✗"
+        }
+    ));
+
     s.push_str("\nStatus: ");
     match report.status {
         SystemStatus::Ready => s.push_str("✓ READY\n"),

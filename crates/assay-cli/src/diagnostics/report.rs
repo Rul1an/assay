@@ -11,6 +11,7 @@ pub struct DiagnosticReport {
     pub bpf_lsm: BpfLsmStatus,
     pub helper: HelperStatus,
     pub backend: BackendSelection,
+    pub sandbox_features: SandboxFeatures,
     pub status: SystemStatus,
     pub suggestions: Vec<String>,
 }
@@ -20,7 +21,7 @@ pub struct LandlockStatus {
     pub available: bool,
     pub fs_enforce: bool,
     pub net_enforce: bool,
-    pub abi_version: Option<i32>,
+    pub abi_version: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -50,4 +51,28 @@ pub enum SystemStatus {
     Ready,
     Degraded,
     Unsupported,
+}
+
+/// Phase 5 sandbox hardening features status
+#[derive(Debug, Serialize, Clone)]
+pub struct SandboxFeatures {
+    /// Environment variable scrubbing enabled
+    pub env_scrubbing: bool,
+    /// Scoped /tmp with proper permissions
+    pub scoped_tmp: bool,
+    /// Fork-safe pre_exec (no allocations)
+    pub fork_safe_preexec: bool,
+    /// Deny-wins conflict detection
+    pub deny_conflict_detection: bool,
+}
+
+impl Default for SandboxFeatures {
+    fn default() -> Self {
+        Self {
+            env_scrubbing: true,
+            scoped_tmp: true,
+            fork_safe_preexec: true,
+            deny_conflict_detection: true,
+        }
+    }
 }
