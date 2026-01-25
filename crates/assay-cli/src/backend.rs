@@ -153,7 +153,7 @@ mod landlock_impl {
             Err(e) => {
                 // Convert landlock error to io::Error
                 // Landlock crate errors contain the errno internally
-                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+                Err(std::io::Error::other(e))
             }
         }
     }
