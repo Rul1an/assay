@@ -39,21 +39,20 @@ The format enforces strict redaction categories to ensure evidence is "safe by d
 | Class | Description | Handling | Examples |
 | :--- | :--- | :--- | :--- |
 | **`public`** | Metadata, hashes, timestamps | Always logged | `event_type`, `run_id`, `tool_name` |
-| **`sensitive`** | Arguments, paths, env output | **Redacted** or Generalized | `path: /home/user/...` -> `~/***`, `env: AWS_KEY` -> `***` |
-| **`forbidden`** | Secrets, Tokens, PII | **Dropped** completely | `OPENAI_API_KEY` values, Authorization headers |
+| **`sensitive`** | Arguments, paths, env output | **Generalized** | `/Users/name/file` -> `~/**/file`, `--token=xyz` -> `--token=***` |
+| **`forbidden`** | Secrets, Tokens, PII | **Dropped** completely | `Authorization` headers, raw secret values |
 
-### 3. Core Payload Schemas (v1)
+### 3. Core Payload Schemas (v1.0)
 
-All payloads must be defined via stable JSON Schemas.
+All payloads are defined via stable Rust types in `assay-evidence` and mapped from `assay-cli`.
 
-#### A. `env.filtered` (Environment Hygiene)
-Records environment scrubbing results without leaking values.
+#### A. `assay.profile.started` (Run Context)
+Records the start of an attestation run.
 ```json
 {
-  "mode": "strict|scrub|passthrough",
-  "passed_keys": ["PATH", "HOME"],
-  "dropped_keys": ["AWS_SECRET_ACCESS_KEY"],
-  "counters": { "passed": 2, "dropped": 1 }
+  "profile_name": "string",
+  "profile_version": "string",
+  "total_runs_aggregated": 50
 }
 ```
 

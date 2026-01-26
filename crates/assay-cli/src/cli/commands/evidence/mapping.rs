@@ -1,7 +1,7 @@
 use crate::cli::commands::profile_types::{Profile, ProfileEntry};
 use anyhow::Result;
 use assay_evidence::types::EvidenceEvent;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 /// Level of detail to include in the evidence bundle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
@@ -46,12 +46,17 @@ impl EvidenceMapper {
         }
     }
 
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     pub fn map_profile(
         &mut self,
         profile: &Profile,
         detail: DetailLevel,
     ) -> Result<Vec<EvidenceEvent>> {
         let mut events = Vec::new();
+        let export_time = Utc::now();
 
         // 1. Started Event (Control)
         events.push(self.create_event(
@@ -62,16 +67,20 @@ impl EvidenceMapper {
                 "profile_version": profile.version,
                 "total_runs_aggregated": profile.total_runs,
             }),
+            export_time,
         ));
 
         // 2. Observed Events (if requested)
         if detail != DetailLevel::Summary {
+            // Note: BTreeMap keys are already sorted in Rust.
+            // We just need to ensure we map them in a stable way.
             self.map_entries(
                 &mut events,
                 &profile.entries.files,
                 "assay.fs.access",
                 "file",
                 detail,
+                export_time,
             );
             self.map_entries(
                 &mut events,
@@ -79,6 +88,7 @@ impl EvidenceMapper {
                 "assay.net.connect",
                 "host",
                 detail,
+                export_time,
             );
             self.map_entries(
                 &mut events,
@@ -86,6 +96,7 @@ impl EvidenceMapper {
                 "assay.process.exec",
                 "cmd",
                 detail,
+                export_time,
             );
         }
 
@@ -99,6 +110,7 @@ impl EvidenceMapper {
                 "processes_count": profile.entries.processes.len(),
                 "integrity_scope": profile.scope,
             }),
+            export_time,
         ));
 
         Ok(events)
@@ -111,20 +123,17 @@ impl EvidenceMapper {
         event_type: &str,
         subject_key: &str,
         detail: DetailLevel,
+        export_time: DateTime<Utc>,
     ) {
+        // Entries is a BTreeMap, so it's already sorted by key (path/host/cmd).
         for (key, entry) in entries {
             let subject: String = if detail == DetailLevel::Full {
                 key.clone()
             } else {
                 // Redaction for Observed mode:
-                // For paths, strict mode might hash specific segments, but here we expect
-                // generalized paths (which Profile stores).
-                // However, we still treat them as potentially sensitive.
-
-                // For v1, we assume Profile keys are generalized enough (e.g. /tmp/...)
-                // but we should hash distinct paths if they look like PII?
-                // For now, passthrough generalized path.
-                key.clone()
+                // 1. Path Generalization: /home/roelschuurkes/file -> ~/**/file
+                // 2. Token Scrubbing: --token=xyz -> --token=***
+                self.scrub_subject(key)
             };
 
             let payload = if detail == DetailLevel::Full {
@@ -142,18 +151,34 @@ impl EvidenceMapper {
                 })
             };
 
-            // Use the generic factory, but override the subject URI if possible
-            let ev = self.create_event(event_type, &subject, payload);
-
-            // Backdate to last_seen if available (to reflect reality),
-            // otherwise keep seq-time (monotonic).
-            // Profile stores logical timestamps (u64), we might need to interpret them.
-            // If they are unix timestamps (ms or s?), we can use them.
-            // profile.rs uses chrono::Utc::now() for created_at, but entries use u64.
-            // Let's trust they are comparable or just use cur time for export "statement".
-
+            let ev = self.create_event(event_type, &subject, payload, export_time);
             events.push(ev);
         }
+    }
+
+    fn scrub_subject(&self, input: &str) -> String {
+        // Simple 2026-style scrubbing
+        let mut scrubbed = input.to_string();
+
+        // 1. Path generalization (very basic for v1)
+        if scrubbed.starts_with("/Users/") || scrubbed.starts_with("/home/") {
+            let parts: Vec<&str> = scrubbed.split('/').collect();
+            if parts.len() > 3 {
+                // /Users/name/rest -> ~/**/rest
+                scrubbed = format!("~/**/{}", parts[3..].join("/"));
+            }
+        }
+
+        // 2. Token/Secret scrubbing
+        let sensitive = ["token=", "key=", "Authorization:", "password="];
+        for pattern in sensitive {
+            if let Some(idx) = scrubbed.find(pattern) {
+                scrubbed.truncate(idx + pattern.len());
+                scrubbed.push_str("***");
+            }
+        }
+
+        scrubbed
     }
 
     fn create_event(
@@ -161,13 +186,13 @@ impl EvidenceMapper {
         type_: &str,
         subject: &str,
         data: serde_json::Value,
+        time: DateTime<Utc>,
     ) -> EvidenceEvent {
         // Construct standard EvidenceEvent
         // ID format: {run_id}:{seq}
         // Seq increments strictly.
 
         let id = format!("{}:{}", self.run_id, self.seq);
-        let time = Utc::now(); // Use export time as the "attestation time"
 
         let source = format!("urn:assay:cli:{}", self.producer_version);
 

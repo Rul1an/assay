@@ -23,9 +23,9 @@ pub struct EvidenceExportArgs {
     #[arg(long, alias = "input")]
     pub profile: std::path::PathBuf,
 
-    /// Output bundle path (.tar.gz)
+    /// Output bundle path (.tar.gz). Defaults to assay_evidence_{run_id}.tar.gz
     #[arg(long, short = 'o')]
-    pub out: std::path::PathBuf,
+    pub out: Option<std::path::PathBuf>,
 
     /// Level of detail to include (summary, observed, full)
     #[arg(long, value_enum, default_value_t = DetailLevel::Observed)]
@@ -36,7 +36,7 @@ pub struct EvidenceExportArgs {
 pub struct EvidenceVerifyArgs {
     /// Bundle path, or "-" for stdin
     #[arg(value_name = "BUNDLE", default_value = "-")]
-    pub bundle: String,
+    pub bundle: std::path::PathBuf,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -68,19 +68,20 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
         .with_context(|| format!("failed to load profile from {}", args.profile.display()))?;
 
     // 2. Map Profile -> EvidenceEvents
-    // Deterministic RunID: Use profile name + hash of created_at?
-    // For now, let's use profile.name as base, or generate a fresh UUID if not stable.
-    // Ideally we'd have a persistent RunID in the profile.
-    // Profile struct has `run_ids` (vector). We could use the LAST run id?
-    // Or just generating a "bundle run id".
+    // Deterministic RunID check happens inside mapper if none provided
     let run_id_opt = profile.run_ids.last().cloned();
 
     let mut mapper = EvidenceMapper::new(run_id_opt, &profile.name);
     let events = mapper.map_profile(&profile, args.detail)?;
+    let run_id = mapper.run_id().to_string();
 
     // 3. Write Bundle
-    let out_file = File::create(&args.out)
-        .with_context(|| format!("failed to create output file {}", args.out.display()))?;
+    let out_path = args
+        .out
+        .unwrap_or_else(|| std::path::PathBuf::from(format!("assay_evidence_{}.tar.gz", run_id)));
+
+    let out_file = File::create(&out_path)
+        .with_context(|| format!("failed to create output file {}", out_path.display()))?;
 
     let mut bw = assay_evidence::bundle::BundleWriter::new(out_file);
     for ev in events {
@@ -89,12 +90,12 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
 
     bw.finish().context("failed to finalize evidence bundle")?;
 
-    eprintln!("Exported evidence bundle to {}", args.out.display());
+    eprintln!("Exported evidence bundle to {}", out_path.display());
     Ok(0)
 }
 
 fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
-    if args.bundle == "-" {
+    if args.bundle.to_string_lossy() == "-" {
         let mut buf = Vec::new();
         io::stdin().read_to_end(&mut buf)?;
         assay_evidence::bundle::verify_bundle(io::Cursor::new(buf))
@@ -104,29 +105,28 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     }
 
     let f = File::open(&args.bundle)
-        .with_context(|| format!("failed to open bundle {}", args.bundle))?;
+        .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
     assay_evidence::bundle::verify_bundle(f).context("bundle verification failed")?;
 
-    eprintln!("Bundle verified ({}): OK", args.bundle);
+    eprintln!("Bundle verified ({}): OK", args.bundle.display());
     Ok(0)
 }
 
 fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
-    use assay_evidence::bundle::reader::BundleReader;
+    // 1. Verify (unless disabled)
+    let verified = if !args.no_verify {
+        let f = File::open(&args.bundle)?;
+        assay_evidence::bundle::verify_bundle(f).is_ok()
+    } else {
+        false
+    };
 
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
+    let br =
+        assay_evidence::bundle::BundleReader::open(f).context("failed to open bundle reader")?;
 
-    // Verify first (unless skipped)
-    if !args.no_verify {
-        let mut verify_reader = File::open(&args.bundle)?;
-        assay_evidence::bundle::verify_bundle(&mut verify_reader)
-            .context("Verification FAILED (use --no-verify to inspect corrupt bundles)")?;
-    }
-
-    // Now read contents
-    let br = BundleReader::open(f)?;
     let manifest = br.manifest();
 
     if args.format == "json" {
@@ -140,6 +140,15 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     // Table view
     println!("Evidence Bundle Inspector");
     println!("=========================");
+    if !args.no_verify {
+        if verified {
+            println!("Verified:    ✅ OK");
+        } else {
+            println!("Verified:    ❌ FAILED (Integrity compromised)");
+        }
+    } else {
+        println!("Verified:    ⚠️  SKIPPED");
+    }
     println!("Bundle ID:   {}", manifest.bundle_id);
     println!(
         "Producer:    {} v{}",
