@@ -80,7 +80,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 p
             }
             Err(e) => {
-                if let Some(p) = &mut profiler {
+                if let Some(p) = &profiler {
                     p.note(format!("failed to load policy: {}", e));
                 }
                 eprintln!("WARN: Failed to load policy: {}. Using default.", e);
@@ -131,7 +131,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let cmd_args = &args.command[1..];
 
     // PR7: record generalized argv0 if profiling
-    if let Some(p) = &mut profiler {
+    if let Some(p) = &profiler {
         let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
 
         // Resolve cmd_name via PATH if possible (deterministic resolution)
@@ -169,7 +169,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     if should_enforce && !compat.is_compatible() {
         if args.fail_closed {
-            if let Some(p) = &mut profiler {
+            if let Some(p) = &profiler {
                 p.record(ProfileEvent::EnforcementFailed {
                     reason: "landlock policy conflict (fail-closed)".to_string(),
                     detail: None,
@@ -185,7 +185,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
 
-        if let Some(p) = &mut profiler {
+        if let Some(p) = &profiler {
             p.record(ProfileEvent::AuditFallback {
                 reason: "landlock policy conflict (degraded to audit)".to_string(),
                 detail: None,
@@ -211,7 +211,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     cmd.env_clear();
     for (key, value) in &env_result.filtered_env {
         cmd.env(key, value);
-        if let Some(p) = &mut profiler {
+        if let Some(p) = &profiler {
             p.record(ProfileEvent::EnvProvidedKeys {
                 key: key.clone(),
                 scrubbed: false, // TODO: if we implement partial scrubbing, track here
@@ -273,7 +273,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     // Only enabled if test cfg OR explicit env var is set
     #[cfg(any(test, feature = "profile-test-hook"))]
     if let Some(events) = crate::profile::events::try_load_test_events() {
-        if let Some(p) = &mut profiler {
+        if let Some(p) = &profiler {
             p.note("injected_test_events: true");
             for ev in events {
                 p.record(ev);

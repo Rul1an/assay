@@ -52,68 +52,69 @@ impl ProfileReport {
     }
 }
 
+use std::sync::{Arc, Mutex};
+
 /// Collector for profiling events.
 ///
-/// NOTE: This is intended for single-threaded usage within a sandbox runloop.
-/// Record operations require `&mut self`.
-#[derive(Debug)]
+/// NOTE: This is thread-safe and can be shared across async tasks or threads.
+#[derive(Debug, Clone)]
 pub struct ProfileCollector {
     cfg: ProfileConfig,
-    agg: ProfileAgg,
+    agg: Arc<Mutex<ProfileAgg>>,
 }
 
 impl ProfileCollector {
     pub fn new(cfg: ProfileConfig) -> Self {
         Self {
             cfg,
-            agg: ProfileAgg::default(),
+            agg: Arc::new(Mutex::new(ProfileAgg::default())),
         }
     }
 
-    pub fn record(&mut self, ev: ProfileEvent) {
+    pub fn record(&self, ev: ProfileEvent) {
+        let mut agg = self.agg.lock().unwrap_or_else(|e| e.into_inner());
         match ev {
             ProfileEvent::Counter { name, inc } => {
-                *self.agg.counters.entry(name).or_default() += inc;
+                *agg.counters.entry(name).or_default() += inc;
             }
             ProfileEvent::EnvProvidedKeys { key, scrubbed: _ } => {
-                *self.agg.env_provided.entry(key).or_default() += 1;
+                *agg.env_provided.entry(key).or_default() += 1;
             }
             ProfileEvent::ExecObserved { argv0 } => {
-                *self.agg.execs.entry(argv0).or_default() += 1;
+                *agg.execs.entry(argv0).or_default() += 1;
             }
             ProfileEvent::FsObserved { op, path, backend } => {
-                self.agg.fs.push((op, path, backend));
+                agg.fs.push((op, path, backend));
             }
             ProfileEvent::AuditFallback { reason, detail: _ } => {
-                self.agg.notes.push(format!("audit_fallback: {}", reason));
-                *self
-                    .agg
-                    .counters
+                agg.notes.push(format!("audit_fallback: {}", reason));
+                *agg.counters
                     .entry("sandbox.audit_fallback".to_string())
                     .or_default() += 1;
             }
             ProfileEvent::EnforcementFailed { reason, detail: _ } => {
-                self.agg
-                    .notes
-                    .push(format!("enforcement_failed: {}", reason));
-                *self
-                    .agg
-                    .counters
+                agg.notes.push(format!("enforcement_failed: {}", reason));
+                *agg.counters
                     .entry("sandbox.fail_closed_triggered".to_string())
                     .or_default() += 1;
             }
         }
     }
 
-    pub fn note<S: Into<String>>(&mut self, s: S) {
-        self.agg.notes.push(s.into());
+    pub fn note<S: Into<String>>(&self, s: S) {
+        let mut agg = self.agg.lock().unwrap_or_else(|e| e.into_inner());
+        agg.notes.push(s.into());
     }
 
     pub fn finish(self) -> ProfileReport {
+        let agg = Arc::try_unwrap(self.agg)
+            .map(|m| m.into_inner().unwrap_or_default())
+            .unwrap_or_else(|a| a.lock().unwrap_or_else(|e| e.into_inner()).clone());
+
         ProfileReport {
             version: 1,
             config: self.cfg,
-            agg: self.agg,
+            agg,
         }
     }
 }
