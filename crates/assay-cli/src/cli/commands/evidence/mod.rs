@@ -1,28 +1,35 @@
+pub mod mapping;
+
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
+use mapping::{DetailLevel, EvidenceMapper};
 use std::fs::File;
 use std::io::{self, Read};
 
 /// Manage tamper-evident bundles (audit/compliance)
 #[derive(Debug, Subcommand, Clone)]
 pub enum EvidenceCmd {
-    /// Export an evidence bundle from inputs
+    /// Export an evidence bundle from a Profile
     Export(EvidenceExportArgs),
     /// Verify a bundle's integrity and provenance
     Verify(EvidenceVerifyArgs),
+    /// Inspect a bundle's contents (verify + show table)
+    Show(EvidenceShowArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct EvidenceExportArgs {
-    /// Input events source (e.g. 'profile.yaml', 'events.jsonl', or Trace Dir)
-    /// Currently only supports 'profile.yaml' style input for v1 demo.
-    #[arg(long)]
-    pub input: std::path::PathBuf,
+    /// Input Profile trace (YAML/JSON)
+    #[arg(long, alias = "input")]
+    pub profile: std::path::PathBuf,
 
-    /// Output bundle path (tar.gz).
-    /// Should end in .tar.gz
-    #[arg(long)]
+    /// Output bundle path (.tar.gz)
+    #[arg(long, short = 'o')]
     pub out: std::path::PathBuf,
+
+    /// Level of detail to include (summary, observed, full)
+    #[arg(long, value_enum, default_value_t = DetailLevel::Observed)]
+    pub detail: DetailLevel,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -32,23 +39,46 @@ pub struct EvidenceVerifyArgs {
     pub bundle: String,
 }
 
+#[derive(Debug, Args, Clone)]
+pub struct EvidenceShowArgs {
+    /// Bundle path
+    #[arg(value_name = "BUNDLE")]
+    pub bundle: std::path::PathBuf,
+
+    /// Skip verification (show even if corrupt/untrusted)
+    #[arg(long)]
+    pub no_verify: bool,
+
+    /// Output format: 'table' or 'json' (raw dump)
+    #[arg(long, default_value = "table")]
+    pub format: String,
+}
+
 pub fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
     match args.cmd {
         EvidenceCmd::Export(a) => cmd_export(a),
         EvidenceCmd::Verify(a) => cmd_verify(a),
+        EvidenceCmd::Show(a) => cmd_show(a),
     }
 }
 
 fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
-    let events = load_events_from_input(&args.input)
-        .with_context(|| format!("failed to load events from {}", args.input.display()))?;
+    // 1. Load Profile
+    let profile = crate::cli::commands::profile_types::load_profile(&args.profile)
+        .with_context(|| format!("failed to load profile from {}", args.profile.display()))?;
 
-    if events.is_empty() {
-        eprintln!("Warning: No events found in input. Bundle checks might fail event count.");
-    }
+    // 2. Map Profile -> EvidenceEvents
+    // Deterministic RunID: Use profile name + hash of created_at?
+    // For now, let's use profile.name as base, or generate a fresh UUID if not stable.
+    // Ideally we'd have a persistent RunID in the profile.
+    // Profile struct has `run_ids` (vector). We could use the LAST run id?
+    // Or just generating a "bundle run id".
+    let run_id_opt = profile.run_ids.last().cloned();
 
-    // Atomic write pattern: write to tmp then rename?
-    // For now direct write, user must ensure path is valid.
+    let mut mapper = EvidenceMapper::new(run_id_opt, &profile.name);
+    let events = mapper.map_profile(&profile, args.detail)?;
+
+    // 3. Write Bundle
     let out_file = File::create(&args.out)
         .with_context(|| format!("failed to create output file {}", args.out.display()))?;
 
@@ -82,34 +112,71 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Convert input (e.g. profile yaml? or raw jsonl?) to EvidenceEvents.
-/// For v1, we assume input is a JSONL file of pre-formatted EvidenceEvents for simplicity,
-/// OR we map from Profile format if needed.
-/// Since the user said "exporter wiring comes logically: assay sandbox --profile -> map 1-to-1",
-/// let's implement a simple loader that expects EvidenceEvent JSONL for now to satisfy the contract.
-fn load_events_from_input(
-    input: &std::path::Path,
-) -> Result<Vec<assay_evidence::types::EvidenceEvent>> {
-    use std::io::BufRead;
+fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
+    use assay_evidence::bundle::reader::BundleReader;
 
-    let f = File::open(input)?;
-    let reader = io::BufReader::new(f);
-    let mut events = Vec::new();
+    let f = File::open(&args.bundle)
+        .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
-    for (i, line) in reader.lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Try parsing directly as EvidenceEvent
-        // This assumes some upstream tool already shaped it.
-        // In a real integration, we'd map from crate::profile::events::Event -> EvidenceEvent.
-        // But let's start with native passthrough.
-        let ev: assay_evidence::types::EvidenceEvent = serde_json::from_str(&line)
-            .with_context(|| format!("Line {}: invalid evidence event json", i + 1))?;
-        events.push(ev);
+    // Verify first (unless skipped)
+    if !args.no_verify {
+        let mut verify_reader = File::open(&args.bundle)?;
+        assay_evidence::bundle::verify_bundle(&mut verify_reader)
+            .context("Verification FAILED (use --no-verify to inspect corrupt bundles)")?;
     }
 
-    Ok(events)
+    // Now read contents
+    let br = BundleReader::open(f)?;
+    let manifest = br.manifest();
+
+    if args.format == "json" {
+        // Just dump all events as JSON array?
+        // Or Manifest + Events?
+        println!("{}", serde_json::to_string_pretty(&manifest)?);
+        // Todo: iterate events and print
+        return Ok(0);
+    }
+
+    // Table view
+    println!("Evidence Bundle Inspector");
+    println!("=========================");
+    println!("Bundle ID:   {}", manifest.bundle_id);
+    println!(
+        "Producer:    {} v{}",
+        manifest.producer.name, manifest.producer.version
+    );
+    println!("Run ID:      {}", manifest.run_id);
+    println!("Events:      {}", manifest.event_count);
+    println!("Run Root:    {}...", &manifest.run_root[..16]);
+    println!("");
+    println!("{:<4} {:<25} {:<30} SUBJECT", "SEQ", "TIME", "TYPE");
+    println!("{:-<4} {:-<25} {:-<30} {:-<20}", "", "", "", "");
+
+    for ev_res in br.events() {
+        let ev = ev_res?;
+        let subject = ev.subject.as_deref().unwrap_or("-");
+        // Truncate time for display
+        let time_str = ev.time.to_rfc3339();
+        let time_short = if time_str.len() > 19 {
+            &time_str[11..19]
+        } else {
+            &time_str
+        };
+
+        println!(
+            "{:<4} {:<25} {:<30} {}",
+            ev.seq,
+            time_short, // Use full time or truncated? use full for now
+            ev.type_,
+            subject
+        );
+    }
+
+    if !args.no_verify {
+        println!("\n✅ Verified Integrity");
+    } else {
+        println!("\n⚠️  Verification Skipped");
+    }
+
+    Ok(0)
 }
