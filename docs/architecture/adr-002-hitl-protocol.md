@@ -14,10 +14,14 @@ We define HITL as a **protocol/decision boundary** rather than a UI component.
 3.  **CI/Headless Contract**:
     - In non-interactive/CI mode, a required approval results in `exit 2` and the `E_APPROVAL_REQUIRED` marker.
     - Determinism is maintained via `--approvals <FILE>` which provides pre-authorized decisions for specific fingerprints.
-4.  **Ownership**: Hosts (IDE) are responsible for user presentation; Assay is responsible for policy evaluation and block-signals.
+4.  **Approval Receipts (Enterprise Control)**:
+    - Each approval generates a signed "receipt" (cryptographic marker) proving that a human explicitly authorized a specific tool call with specific arguments.
+    - These receipts are recorded in the trace/audit log for compliance.
+5.  **Ownership**: Hosts (IDE) are responsible for user presentation; Assay is responsible for policy evaluation and block-signals.
 
 ## Rationale
 - **Determinism**: Decoupling the wait-for-human from the core loop ensures replays remain stable.
+- **Compliance Evidence**: By treating approval as a "receipt", we provide the "proof of oversight" required for regulated environments.
 - **CI Friendly**: Standardizing exit codes and markers allows pipelines to treat approvals as "security gates".
 - **Separation of Concerns**: Assay avoids building UI logic for every possible host.
 
