@@ -20,16 +20,17 @@ Every evidence record is an Event enveloping a type-specific Payload.
 | `specversion` | `1.0` | CloudEvents spec version | Fixed string. |
 | `type` | string | Event Type URN | e.g. `assay.env.filtered`, `assay.tool.decision`. |
 | `source` | string | Producer Identifier | URI identifying the specific runner instance. |
-| `id` | string | Event ID | **Deterministic**: `sha256(canonical_event_input)`. See ADR-007. |
+| `id` | string | Event ID | `{run_id}:{seq}` (e.g. `run_abc:0`). |
 | `time` | string | Timestamp (RFC3339) | UTC only. |
-| `subject` | string | Subject ID (optional) | e.g. `tool:read_file`, `user:123`. |
-| `trace_id` | string | OTel Trace ID | Required for correlation. |
-| `span_id` | string | OTel Span ID | Required for correlation. |
-| `run` | object | Run Context | `{ "run_id": "...", "seq": 42 }` (Monotonic sequence). |
-| `producer` | object | Producer Metadata | `{ "name": "assay", "version": "...", "git": "...", "platform": {...} }`. |
-| `policy_ref` | object | Policy Context | `{ "policy_id": "sha256:...", "source": "..." }`. |
-| `privacy` | object | Privacy Flags | `{ "contains_pii": false, "contains_secrets": false }`. |
-| `payload` | object | **Type-Specific Data** | Validated against `type` schema. |
+| `subject` | string | Subject ID (optional) | Semantic subject (e.g. `tool:read_file`, `policy:check`). |
+| `traceparent` | string | W3C Trace Parent | Required for correlation. |
+| `tracestate` | string | W3C Trace State | Optional. |
+| `assayrunid` | string | Run Context (Flattened) | Deterministic ID for the run. |
+| `assayseq` | int | Sequence (Flattened) | 0-indexed monotonic counter. |
+| `assayproducer` | string | Producer Name | e.g. "assay". |
+| `assayproducerversion`| string | Producer Version | e.g. "2.6.0". |
+| `assaycontenthash` | string | **Payload Integrity** | `sha256(canonical_payload)`. |
+| `data` | object | **Type-Specific Data** | Validated against `type` schema. |
 
 ### 2. Privacy Classes (Data Protection)
 
