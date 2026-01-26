@@ -164,9 +164,6 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     // Apply Landlock isolation via pre_exec (child-side, before exec)
     #[cfg(all(target_os = "linux", target_family = "unix"))]
     {
-        // tokio::process::Command implements CommandExt on Unix
-        use std::os::unix::process::CommandExt;
-
         if let Some(mut enforcer) = enforcer_opt {
             unsafe {
                 cmd.pre_exec(move || {
