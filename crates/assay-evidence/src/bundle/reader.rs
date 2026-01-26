@@ -59,6 +59,7 @@ impl BundleReader {
     /// - Bundle verification fails
     /// - IO errors
     /// - Memory allocation fails (very large bundles)
+    ///
     /// Open and verify a bundle, loading it into memory.
     pub fn open<R: Read>(reader: R) -> Result<Self> {
         Self::open_internal(reader, true)

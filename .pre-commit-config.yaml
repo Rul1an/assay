@@ -56,8 +56,8 @@ repos:
         pass_filenames: false
 
       - id: cargo-clippy
-        name: cargo clippy (workspace, deny warnings) [linux-only]
-        entry: scripts/precommit/cargo-clippy-linux.sh
+        name: cargo clippy (workspace, deny warnings)
+        entry: scripts/precommit/cargo-clippy.sh
         language: system
         stages: [pre-push]
         pass_filenames: false
