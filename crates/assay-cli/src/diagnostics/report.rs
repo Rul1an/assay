@@ -12,6 +12,7 @@ pub struct DiagnosticReport {
     pub helper: HelperStatus,
     pub backend: BackendSelection,
     pub sandbox_features: SandboxFeatures,
+    pub metrics: std::collections::HashMap<String, u64>,
     pub status: SystemStatus,
     pub suggestions: Vec<String>,
 }

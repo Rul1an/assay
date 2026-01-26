@@ -67,6 +67,7 @@ pub fn probe_system() -> DiagnosticReport {
         helper,
         backend,
         sandbox_features: SandboxFeatures::default(),
+        metrics: crate::metrics::get_all(),
         status,
         suggestions,
     }

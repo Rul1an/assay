@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [features]
 experimental = ["assay-core/experimental"]
+profile-test-hook = []
 
 [dependencies]
 anyhow.workspace = true
@@ -45,6 +46,7 @@ tokio-stream = "0.1"
 futures = "0.3"
 globset = "0.4"
 libc = "0.2"
+once_cell = "1.18"
 nix = { version = "0.27", features = ["signal", "process", "fs", "ioctl"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -58,3 +60,4 @@ regex = "1"
 assert_cmd = "2.1.1"
 predicates = "3.1.3"
 proptest = "1.4"
+serial_test = "3.3.1"
