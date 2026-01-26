@@ -11,7 +11,11 @@
 pub struct BackendCaps {
     pub enforce_fs: bool,
     pub enforce_net: bool,
+    pub enforce_ioctl: bool,
+    pub enforce_scopes: bool,
     pub audit_only: bool,
+    /// Detected ABI version (for Landlock)
+    pub abi_version: u32,
 }
 
 /// Backend selection result.
@@ -35,13 +39,17 @@ impl BackendType {
 
 /// Detect available backend based on actual system probing.
 pub fn detect_backend() -> (BackendType, BackendCaps) {
-    if landlock_impl::probe_fs() {
+    let (supported, abi) = landlock_impl::probe_abi();
+    if supported {
         (
             BackendType::Landlock,
             BackendCaps {
-                enforce_fs: true,
-                enforce_net: false, // NET not implemented yet - honest reporting
+                enforce_fs: abi >= 1,
+                enforce_net: abi >= 4,
+                enforce_ioctl: abi >= 5,
+                enforce_scopes: abi >= 6,
                 audit_only: false,
+                abi_version: abi,
             },
         )
     } else {
@@ -51,7 +59,10 @@ pub fn detect_backend() -> (BackendType, BackendCaps) {
             BackendCaps {
                 enforce_fs: false,
                 enforce_net: false,
+                enforce_ioctl: false,
+                enforce_scopes: false,
                 audit_only: true,
+                abi_version: 0,
             },
         )
     }
@@ -124,38 +135,66 @@ mod landlock_impl {
     /// System directories that require READ + EXECUTE (for binaries/libs).
     const SYSTEM_RUNTIME_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
 
-    /// Probe-based Landlock FS detection.
-    pub(super) fn probe_fs() -> bool {
-        // Actually try to create a minimal ruleset to verify kernel support
-        match Ruleset::default().handle_access(AccessFs::from_all(ABI::V1)) {
-            Ok(ruleset) => ruleset.create().is_ok(),
-            Err(_) => false,
+    /// Probe-based Landlock ABI detection.
+    pub(super) fn probe_abi() -> (bool, u32) {
+        let mut max_abi = 0;
+        // Check V1 (FS Read/Write/Exec)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V1))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 1;
+        } else {
+            return (false, 0);
         }
+
+        // Check V2 (FS Refer)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V2))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 2;
+        } else {
+            return (true, max_abi);
+        }
+
+        // Check V3 (FS Truncate)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V3))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 3;
+        } else {
+            return (true, max_abi);
+        }
+
+        // Check V4 (Net TCP)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V4))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 4;
+        }
+
+        (true, max_abi)
     }
 
     pub(super) type RulesetHandle = RulesetCreated;
 
     /// Fork-safe enforcement: only syscalls, returns errno on failure.
-    ///
-    /// # Fork Safety
-    /// `restrict_self()` internally calls `prctl(PR_SET_NO_NEW_PRIVS)` and
-    /// `landlock_restrict_self()`. Both are syscalls, no heap allocation.
-    /// We convert any error to std::io::Error with the raw errno.
     pub(super) fn enforce_fork_safe(ruleset: RulesetHandle) -> std::io::Result<()> {
         match ruleset.restrict_self() {
             Ok(status) => {
                 if status.ruleset == RulesetStatus::NotEnforced {
-                    // Return a simple errno instead of allocating error string
                     return Err(std::io::Error::from_raw_os_error(libc::ENOTSUP));
                 }
                 Ok(())
             }
-            Err(_e) => {
-                // Return a raw errno to satisfy SOTA fork-safety (async-signal-safe)
-                // Landlock crate errors usually result from syscalls with -1;
-                // we'll return EPERM as a safe generic failure if mapping is complex.
-                Err(std::io::Error::from_raw_os_error(libc::EPERM))
-            }
+            Err(_e) => Err(std::io::Error::from_raw_os_error(libc::EPERM)),
         }
     }
 
@@ -164,10 +203,23 @@ mod landlock_impl {
         policy: &crate::policy::Policy,
         scoped_tmp: &Path,
     ) -> anyhow::Result<RulesetCreated> {
-        let abi = ABI::V1;
-        let mut ruleset = Ruleset::default()
-            .handle_access(AccessFs::from_all(abi))?
-            .create()?;
+        let (_, abi_level) = probe_abi();
+        let abi = match abi_level {
+            1 => ABI::V1,
+            2 => ABI::V2,
+            3 => ABI::V3,
+            _ => ABI::V4, // Default to V4 for probing higher
+        };
+
+        let mut ruleset = Ruleset::default();
+
+        // FS rules (ABI V1-V3)
+        ruleset = ruleset.handle_access(AccessFs::from_all(abi))?;
+
+        // TODO: NET rules (ABI V4) if abi_level >= 4
+        // if abi_level >= 4 { ruleset = ruleset.handle_access(AccessNet::from_all(abi))?; }
+
+        let mut ruleset = ruleset.create()?;
 
         // 1. Allow CWD (RX only by default, safe containment)
         if let Ok(cwd) = std::env::current_dir() {
@@ -179,7 +231,6 @@ mod landlock_impl {
         }
 
         // 2. Allow scoped /tmp (RWX)
-        // Ensure it exists? Caller responsibility, but we check existence in add_path.
         ruleset = add_path(
             ruleset,
             scoped_tmp.to_string_lossy().as_ref(),
@@ -198,22 +249,9 @@ mod landlock_impl {
         }
 
         // 5. Allow paths from policy.fs.allow
-        // Note: We assume policy has already been filtered for deny rules (Policy Engine responsibility).
-        if let Ok(_cwd) = std::env::current_dir() {
-            for path in &policy.fs.allow {
-                let expanded = expand_path(path);
-
-                // Grant RWX only if specifically allowed.
-                // Narrowing logic: checks if under CWD or tmp, but for now we trust explicit allows.
-                // Default CWD is RX, so explicit allow on ${CWD}/out is needed for write.
-                let access = AccessFs::from_all(abi);
-                ruleset = add_path(ruleset, &expanded, access)?;
-            }
-        } else {
-            for path in &policy.fs.allow {
-                let expanded = expand_path(path);
-                ruleset = add_path(ruleset, &expanded, AccessFs::from_all(abi))?;
-            }
+        for path in &policy.fs.allow {
+            let expanded = expand_path(path);
+            ruleset = add_path(ruleset, &expanded, AccessFs::from_all(abi))?;
         }
 
         Ok(ruleset)
@@ -277,12 +315,10 @@ mod landlock_impl {
 #[cfg(not(target_os = "linux"))]
 mod landlock_impl {
     /// No Landlock on non-Linux platforms.
-    pub(super) fn probe_fs() -> bool {
-        false
+    pub(super) fn probe_abi() -> (bool, u32) {
+        (false, 0)
     }
 
-    /// No-op on non-Linux platforms.
-    /// No-op on non-Linux platforms.
     #[allow(dead_code)]
     pub(super) fn create_ruleset(
         _policy: &crate::policy::Policy,

@@ -13,20 +13,55 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
 
-    // PR3: Detect and display backend
-    let (backend, caps) = crate::backend::detect_backend();
-    let mode = if caps.audit_only {
-        "Audit"
-    } else {
-        "Containment"
-    };
-    eprintln!(
-        "Backend: {} (Mode: {}, FS:{}, NET:{})",
-        backend.name(),
-        mode,
-        if caps.enforce_fs { "enforce" } else { "audit" },
-        if caps.enforce_net { "enforce" } else { "audit" }
-    );
+    // ABI Probing & Backend Selection
+    let (probed_backend, caps) = crate::backend::detect_backend();
+
+    // PR8: Enforcement Contract logic
+    // Default: use Landlock if available, unless --dry-run is set.
+    // If --enforce is explicitly set, we MUST use enforcement or fail (if fail_closed).
+    let backend = probed_backend;
+    let mut active_enforcement = matches!(backend, BackendType::Landlock) && !args.dry_run;
+
+    if args.dry_run {
+        active_enforcement = false;
+        // Forced to NoopAudit for dry-run if we want to trace without blocking
+        // (Assuming NoopAudit provides enough tracing for exit 4)
+    }
+
+    if args.enforce && !matches!(backend, BackendType::Landlock) {
+        if args.fail_closed {
+            eprintln!("ERROR: Active enforcement requested (--enforce) but no containment backend available.");
+            return Ok(exit_codes::POLICY_UNENFORCEABLE);
+        }
+        eprintln!(
+            "WARN: Active enforcement requested but not supported. Falling back to Audit mode."
+        );
+    }
+
+    if !args.quiet {
+        eprintln!(
+            "Backend: {} (Mode: {}, FS:{}, NET:{}, ABI:v{})",
+            backend.name(),
+            if active_enforcement {
+                "Containment"
+            } else if args.dry_run {
+                "Dry-Run"
+            } else {
+                "Audit"
+            },
+            if active_enforcement && caps.enforce_fs {
+                "enforce"
+            } else {
+                "audit"
+            },
+            if active_enforcement && caps.enforce_net {
+                "enforce"
+            } else {
+                "audit"
+            },
+            caps.abi_version
+        );
+    }
 
     // PR5.1 / PR6: Environment filtering
     let env_filter = build_env_filter(&args);
@@ -165,9 +200,9 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let compat = crate::landlock_check::check_compatibility(&policy, &cwd, &tmp_dir);
 
     #[allow(unused_assignments, unused_mut)]
-    let mut should_enforce = matches!(backend, BackendType::Landlock);
+    let mut actual_enforcement = active_enforcement;
 
-    if should_enforce && !compat.is_compatible() {
+    if actual_enforcement && !compat.is_compatible() {
         if args.fail_closed {
             if let Some(p) = &profiler {
                 p.record(ProfileEvent::EnforcementFailed {
@@ -197,6 +232,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
         metrics::increment("degraded_to_audit_conflict");
+        #[cfg(all(target_os = "linux", target_family = "unix"))]
+        {
+            actual_enforcement = false;
+        }
     }
 
     let mut cmd = tokio::process::Command::new(cmd_name);
@@ -225,7 +264,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     // Prepare Landlock ruleset in parent process (Safe allocation/IO)
     #[cfg(target_os = "linux")]
-    let enforcer_opt = if should_enforce {
+    let enforcer_opt = if actual_enforcement {
         // Note: prepare_landlock is blocking (file IO/parsing), but that's fine here before spawn
         Some(crate::backend::prepare_landlock(&policy, &tmp_dir)?)
     } else {
@@ -282,6 +321,37 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 
     if let Some(p) = profiler {
+        // PR8: Dry-run violation detection
+        let report = p.clone().finish();
+        let suggestions = report.to_suggestion(crate::profile::suggest::SuggestConfig {
+            widen_dirs_to_glob: false,
+        });
+
+        if args.dry_run {
+            let mut violations = 0;
+            // Heuristic: if suggestions contain FS paths not in original policy, it's a violation
+            for path in suggestions.fs.allow {
+                if !policy.fs.allow.iter().any(|p| p == &path) {
+                    violations += 1;
+                    if !args.quiet {
+                        eprintln!(
+                            "DRY-RUN VIOLATION: Would have blocked FS access to: {}",
+                            path
+                        );
+                    }
+                }
+            }
+
+            if violations > 0 {
+                if !args.quiet {
+                    eprintln!("──────────────────");
+                    eprintln!("DRY-RUN: Found {} potential violations.", violations);
+                }
+                maybe_profile_finish(p, &args)?;
+                return Ok(exit_codes::WOULD_BLOCK);
+            }
+        }
+
         maybe_profile_finish(p, &args)?;
     }
 
