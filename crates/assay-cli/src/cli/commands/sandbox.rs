@@ -9,6 +9,7 @@ use tokio::time::Duration;
 use crate::profile::{events::ProfileEvent, ProfileCollector, ProfileConfig};
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
+    let mut profiler: Option<ProfileCollector> = None;
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
 
@@ -113,7 +114,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let tmp_dir = create_scoped_tmp()?;
 
     // PR7: Initialize profiler if requested (passing tmp_dir for generalization)
-    let mut profiler = maybe_profile_begin(&args, Some(&tmp_dir));
+    profiler = maybe_profile_begin(&args, Some(&tmp_dir));
 
     if !args.quiet {
         eprintln!("Tmp:     {}", tmp_dir.display());
@@ -134,7 +135,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     if should_enforce && !compat.is_compatible() {
         if args.fail_closed {
             if let Some(p) = &mut profiler {
-                p.record(ProfileEvent::Degraded {
+                p.record(ProfileEvent::EnforcementFailed {
                     reason: "landlock policy conflict (fail-closed)".to_string(),
                     detail: None,
                 });
@@ -150,7 +151,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         }
 
         if let Some(p) = &mut profiler {
-            p.record(ProfileEvent::Degraded {
+            p.record(ProfileEvent::AuditFallback {
                 reason: "landlock policy conflict (degraded to audit)".to_string(),
                 detail: None,
             });

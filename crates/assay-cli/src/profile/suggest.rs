@@ -11,6 +11,7 @@ pub struct SuggestConfig {
 /// Generated policy suggestion (deterministic struct).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PolicySuggestion {
+    pub api_version: u32,
     pub extends: Vec<String>,
     pub fs_allow: BTreeSet<String>,
     pub fs_deny: BTreeSet<String>,
@@ -22,6 +23,7 @@ pub struct PolicySuggestion {
 
 pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> PolicySuggestion {
     let mut out = PolicySuggestion::default();
+    out.api_version = 1;
 
     // Default base packs (future: configurable)
     out.extends.push("pack:deny-all".to_string());
