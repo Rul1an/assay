@@ -96,11 +96,111 @@ fn test_evidence_export_deterministic() {
             .success();
     }
 
-    // Since export_time = Utc::now() is called per map_profile run,
-    // the byte-for-byte tar won't match (because JCS binary has 'time' field).
-    // BUT we can verify show output or extracted contents are mostly stable.
-    // In our implementation, every run of map_profile gets a fresh export_time.
-    // User asked for "Stable timestamps": "otherwise: one export_time".
-    // I used `Utc::now()` inside `map_profile` which is called once.
-    // However, two separate CLI runs WILL have different Utc::now().
+    // Verify manifest and run_root identity (Absolute determinism)
+    // We can't easily check byte-for-byte tar due to gzip headers,
+    // but we can check that they have identical Bundle IDs.
+    let get_bundle_id = |path: &std::path::Path| {
+        let mut cmd = Command::cargo_bin("assay").unwrap();
+        let output = cmd
+            .arg("evidence")
+            .arg("show")
+            .arg(path)
+            .arg("--format")
+            .arg("json")
+            .output()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        json["manifest"]["bundle_id"].as_str().unwrap().to_string()
+    };
+
+    let id1 = get_bundle_id(&bundle1);
+    let id2 = get_bundle_id(&bundle2);
+    assert_eq!(
+        id1, id2,
+        "Bundles should have identical IDs when anchored to same profile"
+    );
+    assert!(!id1.is_empty());
+}
+
+#[test]
+fn test_evidence_verify_fail_corrupt_manifest() {
+    let dir = tempdir().unwrap();
+    let bundle_path = dir.path().join("corrupt.tar.gz");
+
+    // 1. Create valid bundle
+    let profile_path = dir.path().join("profile.yaml");
+    fs::write(&profile_path, "version: \"1.0\"\nname: corrupt-test\ntotal_runs: 1\ncreated_at: \"2026-01-26T23:00:00Z\"\nupdated_at: \"2026-01-26T23:00:00Z\"\nentries: {}").unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.arg("evidence")
+        .arg("export")
+        .arg("--profile")
+        .arg(&profile_path)
+        .arg("--out")
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    // 2. Corrupt it (flip a byte in the middle of the gzip)
+    let mut bytes = fs::read(&bundle_path).unwrap();
+    if bytes.len() > 50 {
+        bytes[40] ^= 0xFF;
+    }
+    fs::write(&bundle_path, bytes).unwrap();
+
+    // 3. Verify should fail
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.arg("evidence")
+        .arg("verify")
+        .arg(&bundle_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::is_match("(?i)(failed|corrupt|invalid)").unwrap());
+}
+
+#[test]
+fn test_evidence_verify_fail_on_extra_file() {
+    let dir = tempdir().unwrap();
+    let bundle_path = dir.path().join("extra.tar.gz");
+    let bundle_unpacked = dir.path().join("unpacked");
+    fs::create_dir(&bundle_unpacked).unwrap();
+
+    // 1. Create valid bundle
+    let profile_path = dir.path().join("profile.yaml");
+    fs::write(&profile_path, "version: \"1.0\"\nname: extra-test\ntotal_runs: 1\ncreated_at: \"2026-01-26T23:00:00Z\"\nupdated_at: \"2026-01-26T23:00:00Z\"\nentries: {}").unwrap();
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.arg("evidence")
+        .arg("export")
+        .arg("--profile")
+        .arg(&profile_path)
+        .arg("--out")
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    // 2. Use tar to add extra file
+    // Note: This relies on 'tar' Being available on the system (standard on Mac/Linux)
+    let _ = std::process::Command::new("gunzip")
+        .arg(&bundle_path)
+        .status();
+    let bundle_tar = dir.path().join("extra.tar");
+    fs::write(dir.path().join("malicious.txt"), "hello").unwrap();
+    let _ = std::process::Command::new("tar")
+        .arg("-rf")
+        .arg(&bundle_tar)
+        .arg("-C")
+        .arg(dir.path())
+        .arg("malicious.txt")
+        .status();
+    let _ = std::process::Command::new("gzip").arg(&bundle_tar).status();
+    fs::rename(dir.path().join("extra.tar.gz"), &bundle_path).unwrap();
+
+    // 3. Verify should fail
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.arg("evidence")
+        .arg("verify")
+        .arg(&bundle_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::is_match("(?i)(extra|disallowed|unexpected)").unwrap());
 }

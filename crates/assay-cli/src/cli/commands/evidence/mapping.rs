@@ -56,7 +56,11 @@ impl EvidenceMapper {
         detail: DetailLevel,
     ) -> Result<Vec<EvidenceEvent>> {
         let mut events = Vec::new();
-        let export_time = Utc::now();
+
+        // One stable export-run timestamp (anchored to profile for determinism)
+        let export_time = DateTime::parse_from_rfc3339(&profile.updated_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
 
         // 1. Started Event (Control)
         events.push(self.create_event(
@@ -162,19 +166,43 @@ impl EvidenceMapper {
         // Simple 2026-style scrubbing
         let mut scrubbed = input.to_string();
 
-        // 1. Path generalization (very basic for v1)
-        if scrubbed.starts_with("/Users/") || scrubbed.starts_with("/home/") {
-            let parts: Vec<&str> = scrubbed.split('/').collect();
-            if parts.len() > 3 {
-                // /Users/name/rest -> ~/**/rest
-                scrubbed = format!("~/**/{}", parts[3..].join("/"));
+        // 1. Path generalization
+        // Handle /Users (Mac), /home (Linux), and C:\Users (Windows)
+        let normalized = scrubbed.replace('\\', "/");
+        if normalized.starts_with("/Users/")
+            || normalized.starts_with("/home/")
+            || normalized.contains("/Users/")
+        {
+            // Try to find the user segment and generalize
+            let parts: Vec<&str> = normalized.split('/').collect();
+            for (i, part) in parts.iter().enumerate() {
+                if (*part == "Users" || *part == "home") && i + 1 < parts.len() {
+                    // generalize from here
+                    scrubbed = format!("~/**/{}", parts[i + 2..].join("/"));
+                    break;
+                }
             }
         }
 
         // 2. Token/Secret scrubbing
-        let sensitive = ["token=", "key=", "Authorization:", "password="];
+        let sensitive = [
+            "Authorization: Bearer ",
+            "Authorization: ",
+            "token=",
+            "key=",
+            "Bearer ",
+            "api_key=",
+            "apikey=",
+            "secret=",
+            "password=",
+            "session=",
+            "cookie=",
+        ];
         for pattern in sensitive {
             if let Some(idx) = scrubbed.find(pattern) {
+                // If already scrubbed at this position or after, skip?
+                // Simple approach: if we find it, truncate and break for this pattern
+                // but we want to allow multiple scrubs if they don't overlap.
                 scrubbed.truncate(idx + pattern.len());
                 scrubbed.push_str("***");
             }
@@ -225,5 +253,65 @@ impl EvidenceMapper {
 
         self.seq += 1;
         ev
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scrub_subject_paths() {
+        let mapper = EvidenceMapper::new(None, "test");
+        assert_eq!(
+            mapper.scrub_subject("/Users/alice/repo/file.txt"),
+            "~/**/repo/file.txt"
+        );
+        assert_eq!(
+            mapper.scrub_subject("/home/bob/scripts/run.sh"),
+            "~/**/scripts/run.sh"
+        );
+        assert_eq!(
+            mapper.scrub_subject("C:\\Users\\charlie\\docs\\sec.txt"),
+            "~/**/docs/sec.txt"
+        );
+        assert_eq!(mapper.scrub_subject("/etc/passwd"), "/etc/passwd");
+    }
+
+    #[test]
+    fn test_scrub_subject_secrets() {
+        let mapper = EvidenceMapper::new(None, "test");
+        assert_eq!(
+            mapper.scrub_subject("curl -H 'Authorization: Bearer xyz'"),
+            "curl -H 'Authorization: Bearer ***"
+        );
+        assert_eq!(
+            mapper.scrub_subject("mysql --password=secret123"),
+            "mysql --password=***"
+        );
+        assert_eq!(
+            mapper.scrub_subject("https://api.com?api_key=12345&other=val"),
+            "https://api.com?api_key=***"
+        );
+    }
+
+    #[test]
+    fn test_determinism_stable_time() {
+        let mut mapper = EvidenceMapper::new(None, "test");
+        let profile = Profile {
+            version: "1.0".into(),
+            name: "test".into(),
+            created_at: "2026-01-26T22:00:00Z".into(),
+            updated_at: "2026-01-26T23:00:00Z".into(),
+            total_runs: 1,
+            run_ids: vec!["run1".into()],
+            scope: None,
+            entries: Default::default(),
+        };
+
+        let events = mapper.map_profile(&profile, DetailLevel::Summary).unwrap();
+        for ev in events {
+            assert_eq!(ev.time.to_rfc3339(), "2026-01-26T23:00:00+00:00");
+        }
     }
 }
