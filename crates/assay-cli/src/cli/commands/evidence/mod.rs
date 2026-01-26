@@ -148,7 +148,7 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     println!("Run ID:      {}", manifest.run_id);
     println!("Events:      {}", manifest.event_count);
     println!("Run Root:    {}...", &manifest.run_root[..16]);
-    println!("");
+    println!();
     println!("{:<4} {:<25} {:<30} SUBJECT", "SEQ", "TIME", "TYPE");
     println!("{:-<4} {:-<25} {:-<30} {:-<20}", "", "", "", "");
 
