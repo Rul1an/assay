@@ -125,6 +125,7 @@ dependencies = [
  "landlock",
  "libc",
  "nix",
+ "once_cell",
  "predicates",
  "proptest",
  "regex",

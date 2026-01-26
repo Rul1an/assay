@@ -1,8 +1,10 @@
 use crate::backend::BackendType;
 use crate::cli::args::SandboxArgs;
-use crate::env_filter::{format_banner, EnvFilter, EnvMode};
+use crate::env_filter::EnvFilter;
 use crate::exit_codes;
+use crate::metrics;
 use std::process::Stdio;
+use tokio::time::Duration;
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     eprintln!("Assay Sandbox v0.1");
@@ -23,16 +25,43 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         if caps.enforce_net { "enforce" } else { "audit" }
     );
 
-    // PR5.1: Environment filtering
-    let (env_filter, env_mode) = build_env_filter(&args);
+    // PR5.1 / PR6: Environment filtering
+    let env_filter = build_env_filter(&args);
     let env_result = env_filter.filter_current();
-    eprintln!("  Env: {}", format_banner(&env_result, env_mode));
+
+    // Banner output
+    if !args.quiet {
+        eprintln!("  Env: {}", env_filter.format_banner(&env_result));
+
+        // Warn about exec-influence allows
+        for var in &env_result.exec_influence_allowed {
+            eprintln!("  ⚠ Exec-influence var ALLOWED: {}", var);
+        }
+    }
+
+    // Metrics: record env filtering stats
+    metrics::add(
+        "env_scrubbed_keys_total",
+        env_result.scrubbed_keys.len() as u64,
+    );
+    metrics::add(
+        "env_exec_influence_stripped",
+        env_result.exec_influence_stripped.len() as u64,
+    );
+    if !env_result.exec_influence_allowed.is_empty() {
+        metrics::add(
+            "env_exec_influence_allowed",
+            env_result.exec_influence_allowed.len() as u64,
+        );
+    }
 
     // PR2: Load policy from file or use default MCP pack
     let policy = if let Some(ref path) = args.policy {
         match crate::policy::Policy::load(path) {
             Ok(p) => {
-                eprintln!("Policy:  {} (loaded)", path.display());
+                if !args.quiet {
+                    eprintln!("Policy:  {} (loaded)", path.display());
+                }
                 p
             }
             Err(e) => {
@@ -41,120 +70,93 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             }
         }
     } else {
-        eprintln!("Policy:  mcp-server-minimal (default)");
+        if !args.quiet {
+            eprintln!("Policy:  mcp-server-minimal (default)");
+        }
         crate::policy::mcp_server_minimal()
     };
 
-    let (fs_allow, fs_deny, net_allow, net_deny) = policy.rule_counts();
-    eprintln!(
-        "Rules:   FS(allow:{} deny:{}) NET(allow:{} deny:{})",
-        fs_allow, fs_deny, net_allow, net_deny
-    );
-    eprintln!("Command: {:?}", args.command);
-    eprintln!("PID:     {}", std::process::id());
-
-    // PR1: Ensure trace directory exists
-    match crate::fs::ensure_assay_trace_dir() {
-        Ok(path) => eprintln!("Traces:  {}", path.display()),
-        Err(e) => eprintln!("WARN: Failed to create trace dir: {}", e),
-    }
-
-    // PR5.4: Scoped /tmp with proper isolation
-    // Use UID (not $USER env which can be spoofed) + PID for uniqueness per run
-    let tmp_dir = create_scoped_tmp()?;
-    eprintln!("Tmp:     {}", tmp_dir.display());
-
-    eprintln!("──────────────────");
-
-    // Spawn child with sandbox isolation
-    let cmd_name = &args.command[0];
-    let cmd_args = &args.command[1..];
-
-    let status = spawn_sandboxed(
-        cmd_name,
-        cmd_args,
-        &backend,
-        &policy,
-        &tmp_dir,
-        &env_result.filtered_env,
-    )?;
-
-    // Consolidate exit code logic
-    // Just return direct status code or signal failure
-    match status.code() {
-        Some(code) => Ok(code),
-        None => {
-            eprintln!("sandbox error: child terminated by signal");
-            // Standard convention 128 + signal, but we can return generic error for now
-            Ok(exit_codes::INTERNAL_ERROR)
+    if !args.quiet {
+        let (fs_allow, fs_deny, net_allow, net_deny) = policy.rule_counts();
+        eprintln!(
+            "Rules:   FS(allow:{} deny:{}) NET(allow:{} deny:{})",
+            fs_allow, fs_deny, net_allow, net_deny
+        );
+        eprintln!("Command: {:?}", args.command);
+        eprintln!("PID:     {}", std::process::id());
+        if let Some(wd) = &args.workdir {
+            eprintln!("Workdir: {}", wd.display());
         }
     }
-}
 
-/// Build the environment filter based on CLI args.
-fn build_env_filter(args: &SandboxArgs) -> (EnvFilter, EnvMode) {
-    if args.env_passthrough {
-        (EnvFilter::passthrough(), EnvMode::Passthrough)
-    } else {
-        let filter = EnvFilter::default_scrub();
-        let filter = if let Some(ref allowed) = args.env_allow {
-            filter.with_allowed(allowed)
-        } else {
-            filter
-        };
-        (filter, EnvMode::Scrub)
+    // PR1: Ensure trace directory exists
+    // match crate::fs::ensure_assay_trace_dir() { ... } // (Optional logging)
+
+    // PR5.4: Scoped /tmp with proper isolation
+    let tmp_dir = create_scoped_tmp()?;
+    if !args.quiet {
+        eprintln!("Tmp:     {}", tmp_dir.display());
+        eprintln!("──────────────────");
     }
-}
 
-/// Spawn a child process with appropriate sandbox isolation.
-/// On Linux with Landlock: applies restrictions via pre_exec (before exec).
-/// On other platforms: just runs the command (audit-only).
-fn spawn_sandboxed(
-    cmd_name: &str,
-    cmd_args: &[String],
-    backend: &BackendType,
-    policy: &crate::policy::Policy,
-    scoped_tmp: &std::path::Path,
-    filtered_env: &std::collections::HashMap<String, String>,
-) -> anyhow::Result<std::process::ExitStatus> {
-    let mut cmd = std::process::Command::new(cmd_name);
-    cmd.args(cmd_args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    // Determine working directory
+    let cwd = args.workdir.clone().unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
 
-    // PR5.1: Apply filtered environment (scrubbed by default)
-    cmd.env_clear();
-    for (key, value) in filtered_env {
-        cmd.env(key, value);
-    }
-    // Always set TMPDIR to scoped tmp
-    cmd.env("TMPDIR", scoped_tmp);
-
-    // Check Landlock compatibility (PR5.2)
-    // Detect "Deny inside Allow" conflicts which Landlock cannot enforce.
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let compat = crate::landlock_check::check_compatibility(policy, &cwd, scoped_tmp);
+    // Check Landlock compatibility before start
+    let compat = crate::landlock_check::check_compatibility(&policy, &cwd, &tmp_dir);
 
     #[allow(unused_assignments, unused_mut)]
     let mut should_enforce = matches!(backend, BackendType::Landlock);
 
     if should_enforce && !compat.is_compatible() {
+        if args.fail_closed {
+            eprintln!("ERROR: Policy cannot be fully enforced (--fail-closed active)");
+            eprintln!("E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE");
+            eprintln!(
+                "       {} deny rule(s) conflict with allow rules",
+                compat.conflicts.len()
+            );
+            metrics::increment("policy_conflict_fail_closed");
+            return Ok(exit_codes::POLICY_UNENFORCEABLE);
+        }
+
         eprintln!("WARN: Landlock policy conflict detected (Deny rule inside Allow root).");
-        for (allow, deny) in &compat.conflicts {
-            eprintln!("  - Deny {:?} is inside Allowed {:?}", deny, allow);
-        }
-        eprintln!("WARN: Degrading to Audit mode (no containment). Fix policy or use Landlock-compatible rules.");
-        #[cfg(target_os = "linux")]
-        {
-            should_enforce = false;
-        }
+        eprintln!(
+            "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
+        );
+        metrics::increment("degraded_to_audit_conflict");
+
+        should_enforce = false;
     }
+
+    // Spawn child with sandbox isolation
+    let cmd_name = &args.command[0];
+    let cmd_args = &args.command[1..];
+
+    let mut cmd = tokio::process::Command::new(cmd_name);
+    cmd.args(cmd_args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .current_dir(&cwd);
+
+    // PR5.1: Apply filtered environment
+    cmd.env_clear();
+    for (key, value) in &env_result.filtered_env {
+        cmd.env(key, value);
+    }
+    // Always set TMPDIR/TMP/TEMP to scoped tmp
+    cmd.env("TMPDIR", &tmp_dir);
+    cmd.env("TMP", &tmp_dir);
+    cmd.env("TEMP", &tmp_dir);
 
     // Prepare Landlock ruleset in parent process (Safe allocation/IO)
     #[cfg(target_os = "linux")]
     let enforcer_opt = if should_enforce {
-        Some(crate::backend::prepare_landlock(policy, scoped_tmp)?)
+        // Note: prepare_landlock is blocking (file IO/parsing), but that's fine here before spawn
+        Some(crate::backend::prepare_landlock(&policy, &tmp_dir)?)
     } else {
         None
     };
@@ -162,12 +164,10 @@ fn spawn_sandboxed(
     // Apply Landlock isolation via pre_exec (child-side, before exec)
     #[cfg(all(target_os = "linux", target_family = "unix"))]
     {
+        // tokio::process::Command implements CommandExt on Unix
         use std::os::unix::process::CommandExt;
 
         if let Some(mut enforcer) = enforcer_opt {
-            // SAFETY: pre_exec runs after fork, before exec in child process.
-            // LandlockHelper::enforce() only calls restrict_self() (syscalls only).
-            // No allocations or IO occur in the critical section.
             unsafe {
                 cmd.pre_exec(move || {
                     enforcer.enforce()?;
@@ -177,28 +177,67 @@ fn spawn_sandboxed(
         }
     }
 
-    // Suppress unused variable warning on non-Linux
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = backend;
-        let _ = policy;
-        let _ = scoped_tmp;
-    }
-
-    let status = cmd
-        .status()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| anyhow::anyhow!("failed to spawn child: {}", e))?;
 
-    Ok(status)
+    // Handle timeout
+    let status_res = if let Some(sec) = args.timeout {
+        match tokio::time::timeout(Duration::from_secs(sec), child.wait()).await {
+            Ok(res) => res,
+            Err(_) => {
+                // Timeout elapsed, kill process
+                let _ = child.start_kill(); // ignore error if already exited
+                let _ = child.wait().await; // clean up zombie
+                eprintln!("\nTIMEOUT: Process exceeded {}s limit", sec);
+                metrics::increment("sandbox_timeout");
+                // Return generic failure or strict timeout code
+                return Ok(exit_codes::COMMAND_FAILED);
+            }
+        }
+    } else {
+        child.wait().await
+    };
+
+    let status = status_res?;
+
+    match status.code() {
+        Some(code) => Ok(code),
+        None => {
+            eprintln!("sandbox error: child terminated by signal");
+            Ok(exit_codes::INTERNAL_ERROR)
+        }
+    }
+}
+
+/// Build the environment filter based on CLI args.
+fn build_env_filter(args: &SandboxArgs) -> EnvFilter {
+    if args.env_passthrough {
+        return EnvFilter::passthrough();
+    }
+
+    let mut filter = if args.env_strict {
+        EnvFilter::strict()
+    } else {
+        EnvFilter::default() // scrub default
+    };
+
+    if args.env_strip_exec {
+        filter = filter.with_strip_exec(true);
+    }
+
+    if let Some(ref allowed) = args.env_allow {
+        filter = filter.with_allowed(allowed);
+    }
+
+    if args.env_safe_path {
+        filter = filter.with_safe_path(true);
+    }
+
+    filter
 }
 
 /// Create a scoped temporary directory for sandbox isolation.
-///
-/// # Security
-/// - Uses UID (not $USER env var which can be spoofed)
-/// - Adds PID for uniqueness per sandbox run
-/// - Sets 0700 permissions (owner-only access)
-/// - Prefers XDG_RUNTIME_DIR if available (often tmpfs, more secure)
 fn create_scoped_tmp() -> anyhow::Result<std::path::PathBuf> {
     let pid = std::process::id();
 

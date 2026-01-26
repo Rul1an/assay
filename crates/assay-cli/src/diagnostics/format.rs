@@ -64,6 +64,19 @@ pub fn format_text(report: &DiagnosticReport) -> String {
         }
     ));
 
+    if !report.metrics.is_empty() {
+        s.push_str("\nTelemetry Counters (local):\n");
+        // Sort keys for deterministic output
+        let mut keys: Vec<&String> = report.metrics.keys().collect();
+        keys.sort();
+
+        for key in keys {
+            if let Some(val) = report.metrics.get(key) {
+                s.push_str(&format!("  {}: {}\n", key, val));
+            }
+        }
+    }
+
     s.push_str("\nStatus: ");
     match report.status {
         SystemStatus::Ready => s.push_str("✓ READY\n"),

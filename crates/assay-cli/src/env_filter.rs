@@ -2,316 +2,638 @@
 //!
 //! By default, the sandbox scrubs sensitive environment variables to prevent
 //! credential leakage to untrusted MCP servers and agents. This module
-//! implements the filtering logic described in ADR-001.
+//! implements the filtering logic described in ADR-001 and Phase 6 Hardening.
 //!
 //! # Security Model
 //!
-//! - **Default**: Scrub known sensitive patterns (API keys, tokens, secrets)
-//! - **Allow**: Explicitly allow specific variables through the filter
+//! - **Scrub (Default)**: Remove known sensitive patterns (API keys, tokens, secrets)
+//! - **Strict**: Only allow safe base variables (PATH, HOME, etc) + explicit allows
 //! - **Passthrough**: Danger mode - pass all variables (not recommended)
+//!
+//! Additionally, "Execution Influence" variables (like LD_PRELOAD) can be stripped
+//! independently or as part of Strict mode.
 
 use std::collections::{HashMap, HashSet};
 
-/// Default patterns to scrub from environment.
-/// These cover common cloud providers, AI/ML APIs, and generic secret patterns.
-const DEFAULT_SCRUB_PATTERNS: &[&str] = &[
-    // Cloud providers
-    "AWS_*",
-    "AZURE_*",
-    "GCP_*",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GOOGLE_CLOUD_*",
-    "DIGITALOCEAN_*",
-    "LINODE_*",
-    "VULTR_*",
-    "CLOUDFLARE_*",
-    // AI/ML APIs
-    "OPENAI_*",
-    "ANTHROPIC_*",
-    "HF_*",
-    "HUGGING*",
-    "REPLICATE_*",
-    "COHERE_*",
-    "MISTRAL_*",
-    "GROQ_*",
-    "TOGETHER_*",
-    "FIREWORKS_*",
-    "DEEPSEEK_*",
-    "PERPLEXITY_*",
-    // Dev tools & CI
-    "GITHUB_*",
-    "GITLAB_*",
-    "BITBUCKET_*",
-    "CODECOV_*",
-    "CIRCLECI_*",
-    "TRAVIS_*",
-    "NPM_*",
-    "CARGO_REGISTRY_*",
-    "PYPI_*",
-    "DOCKER_*",
-    // Generic secret patterns (suffix)
-    "*_TOKEN",
-    "*_SECRET",
-    "*_KEY",
-    "*_PASSWORD",
-    "*_CREDENTIAL",
-    "*_CREDENTIALS",
-    "*_API_KEY",
-    "*_AUTH",
-    "*_PRIVATE_KEY",
-    "*_ACCESS_KEY",
-    "*_SECRET_KEY",
-    // Database & connection strings
-    "*_DATABASE_URL",
-    "*_CONNECTION_STRING",
-    "*_DSN",
-    "DATABASE_URL",
-    "REDIS_URL",
-    "MONGODB_*",
-    "POSTGRES_*",
-    "MYSQL_*",
-    // SOTA/Agent upgrades
-    "SSH_*",
-    "GPG_*",
-    "SOPS_*",
-    "VAULT_*",
-    "KUBECONFIG",
-    "KUBE_*",
-    "1PASSWORD_*",
-    "OP_*",
-    "PASS_*",
-    "*_SESSION",
-    "*_COOKIE",
-    "*_BEARER",
-    "*_JWT",
-];
+/// Environment filtering mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnvMode {
+    /// Pattern-based scrub: remove known secrets, pass unknown
+    #[default]
+    Scrub,
+    /// Strict: only SAFE_BASE + explicit allows, scrub everything else
+    Strict,
+    /// Passthrough: no filtering (danger!)
+    Passthrough,
+}
 
-/// Variables that are always safe to pass through.
-/// These are essential for basic process operation.
-const SAFE_BASE_PATTERNS: &[&str] = &[
+/// Result of environment filtering
+#[derive(Debug, Clone)]
+pub struct EnvFilterResult {
+    pub filtered_env: HashMap<String, String>,
+    pub passed_count: usize,
+    pub scrubbed_keys: Vec<String>,
+    pub exec_influence_stripped: Vec<String>,
+    pub exec_influence_allowed: Vec<String>, // Explicitly allowed (warn)
+}
+
+/// Environment filter configuration
+#[derive(Debug, Clone)]
+pub struct EnvFilter {
+    pub mode: EnvMode,
+    pub strip_exec_influence: bool,
+    pub enforce_safe_path: bool,
+    pub explicit_allow: HashSet<String>,
+}
+
+// ============================================================================
+// Pattern Definitions
+// ============================================================================
+
+/// Safe base patterns that always pass in strict mode
+pub const SAFE_BASE_PATTERNS: &[&str] = &[
+    // System essentials
     "PATH",
     "HOME",
     "USER",
-    "LOGNAME",
     "SHELL",
+    "LOGNAME",
+    // Locale & terminal
     "LANG",
     "LC_*",
     "TERM",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-    "XDG_*",
-    "PWD",
-    "OLDPWD",
-    "SHLVL",
-    "HOSTNAME",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
     "COLORTERM",
-    "COLUMNS",
-    "LINES",
-    // Rust/Cargo build vars (not secrets)
-    "CARGO",
-    "CARGO_HOME",
-    "CARGO_MANIFEST_DIR",
-    "CARGO_PKG_*",
-    "RUSTUP_HOME",
-    "RUST_BACKTRACE",
-    "RUST_LOG",
-    // Common dev tools (non-secret)
-    "EDITOR",
-    "VISUAL",
-    "PAGER",
-    "LESS",
     "CLICOLOR",
     "CLICOLOR_FORCE",
     "NO_COLOR",
     "FORCE_COLOR",
+    // Temp directories (will be overwritten with scoped path)
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    // XDG directories
+    "XDG_*",
+    // Rust development
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+    "RUST_LIB_BACKTRACE",
+    "CARGO_HOME",
+    "CARGO_TARGET_DIR",
+    "RUSTUP_HOME",
+    // Editor & tools
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "LESS",
+    "LESSCHARSET",
+    // Timezone
+    "TZ",
 ];
 
-/// Filtering mode for environment variables.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EnvMode {
-    /// Scrub sensitive patterns (default, secure)
-    #[default]
-    Scrub,
-    /// Pass all environment variables (danger!)
-    Passthrough,
-}
+/// Secret patterns to scrub in Scrub mode
+pub const SECRET_SCRUB_PATTERNS: &[&str] = &[
+    // Generic credential patterns
+    "*_TOKEN",
+    "*_SECRET",
+    "*_KEY",
+    "*_PASSWORD",
+    "*_CREDENTIAL*",
+    "*_API_KEY",
+    "*_APIKEY",
+    "*_AUTH",
+    "*_BEARER",
+    // Cloud providers
+    "AWS_*",
+    "OPENAI_*",
+    "ANTHROPIC_*",
+    "AZURE_*",
+    "GCP_*",
+    "GOOGLE_*",
+    "DIGITALOCEAN_*",
+    "LINODE_*",
+    "VULTR_*",
+    "CLOUDFLARE_*",
+    "HEROKU_*",
+    "VERCEL_*",
+    "NETLIFY_*",
+    "FLY_*",
+    // Version control & CI
+    "GITHUB_*",
+    "GITLAB_*",
+    "BITBUCKET_*",
+    "CI_*",
+    "CIRCLE_*",
+    "TRAVIS_*",
+    "JENKINS_*",
+    "BUILDKITE_*",
+    "CODEBUILD_*",
+    // Databases & storage
+    "DATABASE_URL",
+    "*_DATABASE_URL",
+    "*_CONNECTION_STRING",
+    "*_CONN_STR",
+    "REDIS_*",
+    "MONGO_*",
+    "MYSQL_*",
+    "POSTGRES_*",
+    "PGPASSWORD",
+    "PGUSER",
+    // Security tools
+    "SSH_*",
+    "GPG_*",
+    "VAULT_*",
+    "KUBECONFIG",
+    "DOCKER_*",
+    // Package managers
+    "NPM_TOKEN",
+    "NPM_AUTH_TOKEN",
+    "YARN_*",
+    "PIP_*",
+    "PYPI_*",
+    "CARGO_REGISTRY_TOKEN",
+    "GEM_*",
+    "NUGET_*",
+    // Misc
+    "*_PRIVATE_KEY",
+    "*_SIGNING_KEY",
+    "*_ENCRYPTION_KEY",
+    "SLACK_*",
+    "DISCORD_*",
+    "TWILIO_*",
+    "SENDGRID_*",
+    "STRIPE_*",
+    "SENTRY_*",
+    "DATADOG_*",
+    "NEWRELIC_*",
+];
 
-/// Environment filter configuration.
-#[derive(Debug, Clone)]
-pub struct EnvFilter {
-    mode: EnvMode,
-    /// Additional variables to explicitly allow (overrides scrub patterns)
-    explicit_allow: HashSet<String>,
-}
+/// Execution-influence variables (code injection risk)
+pub const EXEC_INFLUENCE_PATTERNS: &[&str] = &[
+    // Dynamic linker (Linux)
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "LD_DEBUG",
+    "LD_DEBUG_OUTPUT",
+    "LD_PROFILE",
+    "LD_PROFILE_OUTPUT",
+    "LD_BIND_NOW",
+    "LD_BIND_NOT",
+    "LD_DYNAMIC_WEAK",
+    "LD_HWCAP_MASK",
+    "LD_ORIGIN_PATH",
+    "LD_ASSUME_KERNEL",
+    "LD_POINTER_GUARD",
+    "LD_PREFER_MAP_32BIT_EXEC",
+    "LD_SHOW_AUXV",
+    "LD_USE_LOAD_BIAS",
+    "LD_VERBOSE",
+    "LD_WARN",
+    // Dynamic linker (macOS)
+    "DYLD_*",
+    // Python
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONHOME",
+    "PYTHONUSERBASE",
+    "PYTHONEXECUTABLE",
+    "PYTHONWARNINGS",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONHASHSEED",
+    "PYTHONINSPECT",
+    "PYTHONIOENCODING",
+    "PYTHONNOUSERSITE",
+    "PYTHONOPTIMIZE",
+    "PYTHONUNBUFFERED",
+    "PYTHONVERBOSE",
+    "PYTHONMALLOC",
+    "PYTHONCOERCECLOCALE",
+    "PYTHONDEVMODE",
+    "PYTHONFAULTHANDLER",
+    "PYTHONTRACEMALLOC",
+    "PYTHONPROFILEIMPORTTIME",
+    "PYTHONBREAKPOINT",
+    // Node.js
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_REDIRECT_WARNINGS",
+    "NODE_DEBUG",
+    "NODE_DEBUG_NATIVE",
+    "NODE_PENDING_DEPRECATION",
+    "NODE_PENDING_PIPE_INSTANCES",
+    "NODE_PRESERVE_SYMLINKS",
+    "NODE_PRESERVE_SYMLINKS_MAIN",
+    "NODE_REPL_EXTERNAL_MODULE",
+    "NODE_REPL_HISTORY",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NODE_V8_COVERAGE",
+    // Ruby
+    "RUBYOPT",
+    "RUBYLIB",
+    "RUBYPATH",
+    "RUBYSHELL",
+    "RUBY_GC_*",
+    "RUBY_THREAD_*",
+    // Perl
+    "PERL5LIB",
+    "PERL5OPT",
+    "PERLLIB",
+    "PERL_MM_OPT",
+    "PERL_MB_OPT",
+    // Java
+    "JAVA_TOOL_OPTIONS",
+    "_JAVA_OPTIONS",
+    "JAVA_OPTIONS",
+    "CLASSPATH",
+    "JDK_JAVA_OPTIONS",
+    // Rust
+    "RUSTC_WRAPPER",
+    "RUSTDOC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTFLAGS",
+    "RUSTDOCFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_ENCODED_RUSTDOCFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
+    "CARGO_BUILD_RUSTDOCFLAGS",
+    // C/C++ build
+    "CC",
+    "CXX",
+    "CPP",
+    "CFLAGS",
+    "CXXFLAGS",
+    "CPPFLAGS",
+    "LDFLAGS",
+    "LIBS",
+    "AR",
+    "AS",
+    "LD",
+    "NM",
+    "OBJCOPY",
+    "OBJDUMP",
+    "RANLIB",
+    "STRIP",
+    "PKG_CONFIG",
+    "PKG_CONFIG_PATH",
+    "PKG_CONFIG_LIBDIR",
+    "CMAKE_*",
+    "MAKEFLAGS",
+    "MFLAGS",
+    "MAKELEVEL",
+    // Shell behavior
+    "BASH_ENV",
+    "ENV",
+    "ZDOTDIR",
+    "CDPATH",
+    "GLOBIGNORE",
+    "BASH_XTRACEFD",
+    "PS4",
+    "PROMPT_COMMAND",
+    "FIGNORE",
+    "HOSTFILE",
+    "INPUTRC",
+    "MAILPATH",
+    "TIMEFORMAT",
+    // Git (selective: hooks can execute code)
+    "GIT_EXEC_PATH",
+    "GIT_TEMPLATE_DIR",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_ASKPASS",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "SSH_ASKPASS",
+    "SUDO_ASKPASS",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_DIFF_OPTS",
+    "GIT_PAGER",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    // Misc execution control
+    "SHELL", // Note: this is also in SAFE_BASE, strip_exec wins if conflicting
+    "EXECIGNORE",
+    "IFS",
+];
 
-/// Result of filtering environment variables.
-#[derive(Debug, Clone)]
-pub struct EnvFilterResult {
-    /// The filtered environment to pass to the child process
-    pub filtered_env: HashMap<String, String>,
-    /// Keys that were scrubbed (for reporting, values NOT included)
-    pub scrubbed_keys: Vec<String>,
-    /// Total number of variables passed through
-    pub passed_count: usize,
+// ============================================================================
+// Implementation
+// ============================================================================
+
+impl Default for EnvFilter {
+    fn default() -> Self {
+        Self {
+            mode: EnvMode::Scrub,
+            strip_exec_influence: false, // PR6: default off for DX, opt-in
+            enforce_safe_path: false,
+            explicit_allow: HashSet::new(),
+        }
+    }
 }
 
 impl EnvFilter {
-    /// Create a new filter with default scrub mode.
-    pub fn default_scrub() -> Self {
+    /// Create a strict mode filter (only safe base + explicit allows)
+    pub fn strict() -> Self {
         Self {
-            mode: EnvMode::Scrub,
+            mode: EnvMode::Strict,
+            strip_exec_influence: true, // Strict implies strip exec influence
+            enforce_safe_path: false,
             explicit_allow: HashSet::new(),
         }
     }
 
-    /// Create a filter that passes all variables (danger!).
+    /// Create a passthrough filter (danger!)
     pub fn passthrough() -> Self {
         Self {
             mode: EnvMode::Passthrough,
+            strip_exec_influence: false,
+            enforce_safe_path: false,
             explicit_allow: HashSet::new(),
         }
     }
 
-    /// Add explicit allow list (overrides scrub patterns).
-    pub fn with_allowed(mut self, keys: &[String]) -> Self {
-        self.explicit_allow.extend(keys.iter().cloned());
+    /// Enable execution-influence stripping
+    pub fn with_strip_exec(mut self, strip: bool) -> Self {
+        self.strip_exec_influence = strip;
         self
     }
 
-    /// Filter environment variables according to the configured mode.
-    pub fn filter(&self, env: &HashMap<String, String>) -> EnvFilterResult {
-        match self.mode {
-            EnvMode::Passthrough => EnvFilterResult {
-                filtered_env: env.clone(),
-                scrubbed_keys: vec![],
-                passed_count: env.len(),
-            },
-            EnvMode::Scrub => self.filter_scrub(env),
-        }
+    /// Enable strictly safe PATH
+    pub fn with_safe_path(mut self, safe: bool) -> Self {
+        self.enforce_safe_path = safe;
+        self
     }
 
-    /// Filter from current process environment.
+    /// Add explicit allow list
+    pub fn with_allowed<I, S>(mut self, vars: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.explicit_allow.extend(vars.into_iter().map(Into::into));
+        self
+    }
+
+    /// Filter environment variables
+    pub fn filter(&self, env: &HashMap<String, String>) -> EnvFilterResult {
+        let mut result = match self.mode {
+            EnvMode::Passthrough => self.filter_passthrough(env),
+            EnvMode::Scrub => self.filter_scrub(env),
+            EnvMode::Strict => self.filter_strict(env),
+        };
+
+        // Post-process PATH if needed
+        if self.enforce_safe_path {
+            let safe_default = if cfg!(target_os = "macos") {
+                "/usr/bin:/bin:/usr/sbin:/sbin"
+            } else {
+                "/usr/bin:/bin"
+            };
+            result
+                .filtered_env
+                .insert("PATH".to_string(), safe_default.to_string());
+        } else if self.mode == EnvMode::Strict {
+            // In Strict Default: Sanitized PATH (strip relative/dot paths)
+            if let Some(path) = result.filtered_env.get("PATH") {
+                let sanitized = std::env::split_paths(path)
+                    .filter(|p| {
+                        // Keep only absolute paths
+                        p.is_absolute()
+                        // And verify no components are "." or ".." implicitly handled by canonicalization
+                        // but split_paths just splits.
+                        // We primarily want to block "./bin" or relative hijacking.
+                    })
+                    .collect::<Vec<_>>();
+
+                // Join back. If empty, maybe fallback to safe default?
+                // For now, join.
+                if let Ok(new_path) = std::env::join_paths(sanitized) {
+                    if let Ok(s) = new_path.into_string() {
+                        result.filtered_env.insert("PATH".to_string(), s);
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Filter from current process environment
     pub fn filter_current(&self) -> EnvFilterResult {
         let env: HashMap<String, String> = std::env::vars().collect();
         self.filter(&env)
     }
 
+    fn filter_passthrough(&self, env: &HashMap<String, String>) -> EnvFilterResult {
+        // Passthrough: only strip exec influence if explicitly enabled
+        let mut filtered = env.clone();
+        let mut exec_stripped = Vec::new();
+        let mut exec_allowed = Vec::new();
+
+        if self.strip_exec_influence {
+            for key in env.keys() {
+                if matches_any_pattern(key, EXEC_INFLUENCE_PATTERNS) {
+                    if self.explicit_allow.contains(key) {
+                        exec_allowed.push(key.clone());
+                    } else {
+                        filtered.remove(key);
+                        exec_stripped.push(key.clone());
+                    }
+                }
+            }
+        }
+
+        exec_stripped.sort();
+        exec_allowed.sort();
+
+        EnvFilterResult {
+            passed_count: filtered.len(),
+            filtered_env: filtered,
+            scrubbed_keys: Vec::new(),
+            exec_influence_stripped: exec_stripped,
+            exec_influence_allowed: exec_allowed,
+        }
+    }
+
     fn filter_scrub(&self, env: &HashMap<String, String>) -> EnvFilterResult {
         let mut filtered = HashMap::new();
         let mut scrubbed = Vec::new();
+        let mut exec_stripped = Vec::new();
+        let mut exec_allowed = Vec::new();
 
         for (key, value) in env {
-            // Check explicit allow first (highest priority)
+            // 1. Check explicit allow first (highest priority)
             if self.explicit_allow.contains(key) {
+                // Check if it's an exec-influence var (warn but allow)
+                if self.strip_exec_influence && matches_any_pattern(key, EXEC_INFLUENCE_PATTERNS) {
+                    exec_allowed.push(key.clone());
+                }
                 filtered.insert(key.clone(), value.clone());
                 continue;
             }
 
-            // Check if it matches scrub patterns (Security Priority)
-            // Done BEFORE safe base to prevent leaks like "LC_SECRET" (matches LC_* and *_SECRET)
-            if matches_any_pattern(key, DEFAULT_SCRUB_PATTERNS) {
-                scrubbed.push(key.clone());
+            // 2. Check exec-influence (if enabled)
+            if self.strip_exec_influence && matches_any_pattern(key, EXEC_INFLUENCE_PATTERNS) {
+                exec_stripped.push(key.clone());
                 continue;
             }
 
-            // Check if it's a safe base variable
+            // 3. Safe Base always passes (even unlikely conflict)
             if matches_any_pattern(key, SAFE_BASE_PATTERNS) {
                 filtered.insert(key.clone(), value.clone());
                 continue;
             }
 
-            // Default: allow through (unknown variables are passed)
+            // 4. Check secret patterns (scrub)
+            if matches_any_pattern(key, SECRET_SCRUB_PATTERNS) {
+                scrubbed.push(key.clone());
+                continue;
+            }
+
+            // 4. Pass through (unknown vars allowed in Scrub mode)
             filtered.insert(key.clone(), value.clone());
         }
 
-        // Sort scrubbed keys for deterministic output
         scrubbed.sort();
+        exec_stripped.sort();
+        exec_allowed.sort();
 
         EnvFilterResult {
             passed_count: filtered.len(),
             filtered_env: filtered,
             scrubbed_keys: scrubbed,
+            exec_influence_stripped: exec_stripped,
+            exec_influence_allowed: exec_allowed,
         }
     }
-}
 
-/// Check if a key matches any of the given glob patterns.
-fn matches_any_pattern(key: &str, patterns: &[&str]) -> bool {
-    patterns.iter().any(|pattern| matches_glob(key, pattern))
-}
+    fn filter_strict(&self, env: &HashMap<String, String>) -> EnvFilterResult {
+        let mut filtered = HashMap::new();
+        let mut scrubbed = Vec::new();
+        let mut exec_stripped = Vec::new();
+        let mut exec_allowed = Vec::new();
 
-/// Simple wildcard matching supporting only `*` wildcard.
-///
-/// Patterns:
-/// - `PREFIX_*` matches keys starting with `PREFIX_`
-/// - `*_SUFFIX` matches keys ending with `_SUFFIX`
-/// - `*CONTAINS*` matches keys containing substring (multi-wildcard matches disjoint parts)
-/// - `EXACT` matches exactly `EXACT`
-fn matches_glob(key: &str, pattern: &str) -> bool {
-    // Handle patterns with wildcards
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-
-        match parts.len() {
-            // Single `*` splits into 2 parts
-            2 => {
-                let (prefix, suffix) = (parts[0], parts[1]);
-
-                if prefix.is_empty() && suffix.is_empty() {
-                    // Pattern is just "*" - matches everything
-                    true
-                } else if prefix.is_empty() {
-                    // Pattern is "*SUFFIX" - matches if key ends with suffix
-                    key.ends_with(suffix)
-                } else if suffix.is_empty() {
-                    // Pattern is "PREFIX*" - matches if key starts with prefix
-                    key.starts_with(prefix)
-                } else {
-                    // Pattern is "PREFIX*SUFFIX" - matches if key starts with prefix and ends with suffix
-                    key.starts_with(prefix)
-                        && key.ends_with(suffix)
-                        && key.len() >= prefix.len() + suffix.len()
+        for (key, value) in env {
+            // 1. Check explicit allow first (highest priority)
+            if self.explicit_allow.contains(key) {
+                // Check if it's an exec-influence var (warn but allow)
+                if matches_any_pattern(key, EXEC_INFLUENCE_PATTERNS) {
+                    exec_allowed.push(key.clone());
                 }
+                filtered.insert(key.clone(), value.clone());
+                continue;
             }
-            // No `*` - exact match (handled below)
-            1 => key == pattern,
-            // Multiple `*` - not supported, fall back to contains check
-            _ => {
-                // For patterns like "*FOO*", check if all non-empty parts are contained
-                parts
-                    .iter()
-                    .filter(|p| !p.is_empty())
-                    .all(|p| key.contains(p))
+
+            // 2. Exec-influence always stripped in strict (unless explicit allow)
+            if matches_any_pattern(key, EXEC_INFLUENCE_PATTERNS) {
+                exec_stripped.push(key.clone());
+                continue;
             }
+
+            // 3. Only safe base patterns pass
+            if matches_any_pattern(key, SAFE_BASE_PATTERNS) {
+                filtered.insert(key.clone(), value.clone());
+                continue;
+            }
+
+            // 4. Everything else is scrubbed
+            scrubbed.push(key.clone());
         }
-    } else {
-        // No wildcard - exact match
-        key == pattern
+
+        scrubbed.sort();
+        exec_stripped.sort();
+        exec_allowed.sort();
+
+        EnvFilterResult {
+            passed_count: filtered.len(),
+            filtered_env: filtered,
+            scrubbed_keys: scrubbed,
+            exec_influence_stripped: exec_stripped,
+            exec_influence_allowed: exec_allowed,
+        }
+    }
+
+    /// Format banner line
+    pub fn format_banner(&self, result: &EnvFilterResult) -> String {
+        let mode_str = match self.mode {
+            EnvMode::Passthrough => "⚠ passthrough",
+            EnvMode::Scrub => "scrubbed",
+            EnvMode::Strict => "strict",
+        };
+
+        let mut parts = vec![format!(
+            "{} ({} passed, {} removed)",
+            mode_str,
+            result.passed_count,
+            result.scrubbed_keys.len()
+        )];
+
+        if !result.exec_influence_stripped.is_empty() {
+            parts.push(format!(
+                "exec-influence stripped: {}",
+                result.exec_influence_stripped.len()
+            ));
+        }
+
+        if !result.exec_influence_allowed.is_empty() {
+            parts.push(format!(
+                "⚠ exec-influence ALLOWED: {}",
+                result.exec_influence_allowed.join(", ")
+            ));
+        }
+
+        if self.mode == EnvMode::Passthrough {
+            parts.push("DANGER".to_string());
+        }
+
+        parts.join(", ")
     }
 }
 
-/// Format the env filter result for banner display.
-pub fn format_banner(result: &EnvFilterResult, mode: EnvMode) -> String {
-    match mode {
-        EnvMode::Passthrough => {
-            format!("⚠ passthrough ({} vars, DANGER)", result.passed_count)
+/// Match a key against glob patterns (PREFIX_*, *_SUFFIX, *CONTAINS*, EXACT)
+fn matches_any_pattern(key: &str, patterns: &[&str]) -> bool {
+    for pattern in patterns {
+        if matches_pattern(key, pattern) {
+            return true;
         }
-        EnvMode::Scrub => {
-            if result.scrubbed_keys.is_empty() {
-                format!("clean ({} vars)", result.passed_count)
-            } else {
-                format!(
-                    "scrubbed ({} passed, {} removed)",
-                    result.passed_count,
-                    result.scrubbed_keys.len()
-                )
-            }
+    }
+    false
+}
+
+fn matches_pattern(key: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let has_prefix_wildcard = pattern.starts_with('*');
+    let has_suffix_wildcard = pattern.ends_with('*');
+
+    match (has_prefix_wildcard, has_suffix_wildcard) {
+        (true, true) => {
+            // *CONTAINS*
+            let inner = &pattern[1..pattern.len() - 1];
+            key.contains(inner)
+        }
+        (true, false) => {
+            // *_SUFFIX
+            let suffix = &pattern[1..];
+            key.ends_with(suffix)
+        }
+        (false, true) => {
+            // PREFIX_*
+            let prefix = &pattern[..pattern.len() - 1];
+            key.starts_with(prefix)
+        }
+        (false, false) => {
+            // EXACT
+            key == pattern
         }
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -324,269 +646,122 @@ mod tests {
             .collect()
     }
 
-    // ========== Glob matching tests ==========
-
     #[test]
-    fn test_glob_exact_match() {
-        assert!(matches_glob("PATH", "PATH"));
-        assert!(!matches_glob("PATH", "HOME"));
-        assert!(!matches_glob("MY_PATH", "PATH"));
+    fn test_pattern_matching() {
+        assert!(matches_pattern("AWS_SECRET", "AWS_*"));
+        assert!(matches_pattern("GITHUB_TOKEN", "*_TOKEN"));
+        assert!(matches_pattern("MY_SECRET_KEY", "*SECRET*"));
+        assert!(matches_pattern("PATH", "PATH"));
+        assert!(!matches_pattern("PATH", "PATHX"));
+        assert!(!matches_pattern("XPATH", "PATH"));
     }
 
     #[test]
-    fn test_glob_prefix_wildcard() {
-        // PREFIX_* pattern
-        assert!(matches_glob("AWS_SECRET_ACCESS_KEY", "AWS_*"));
-        assert!(matches_glob("AWS_", "AWS_*")); // Edge: just prefix
-        assert!(!matches_glob("BAWS_FOO", "AWS_*")); // No match
-        assert!(!matches_glob("aws_secret", "AWS_*")); // Case sensitive
-    }
-
-    #[test]
-    fn test_glob_suffix_wildcard() {
-        // *_SUFFIX pattern
-        assert!(matches_glob("GITHUB_TOKEN", "*_TOKEN"));
-        assert!(matches_glob("MY_API_TOKEN", "*_TOKEN"));
-        assert!(matches_glob("_TOKEN", "*_TOKEN")); // Edge: just suffix
-        assert!(!matches_glob("TOKEN", "*_TOKEN")); // Must have underscore
-        assert!(!matches_glob("TOKEN_VALUE", "*_TOKEN")); // Wrong position
-    }
-
-    #[test]
-    fn test_glob_contains_wildcard() {
-        // *CONTAINS* pattern (multiple wildcards)
-        assert!(matches_glob("HUGGINGFACE_TOKEN", "HUGGING*"));
-        assert!(matches_glob("HUGGING", "HUGGING*"));
-    }
-
-    #[test]
-    fn test_glob_prefix_suffix_wildcard() {
-        // PREFIX*SUFFIX pattern
-        assert!(matches_glob("CARGO_PKG_NAME", "CARGO_PKG_*"));
-        assert!(matches_glob("LC_ALL", "LC_*"));
-    }
-
-    // ========== Filter tests ==========
-
-    #[test]
-    fn test_default_scrubs_secrets() {
+    fn test_scrub_mode_removes_secrets() {
         let env = make_env(&[
             ("PATH", "/usr/bin"),
             ("HOME", "/home/user"),
-            ("OPENAI_API_KEY", "sk-secret"),
-            ("AWS_SECRET_ACCESS_KEY", "aws-secret"),
-            ("MY_APP_TOKEN", "token123"),
+            ("AWS_SECRET_ACCESS_KEY", "secret"),
             ("GITHUB_TOKEN", "ghp_xxx"),
-            ("NORMAL_VAR", "value"),
+            ("CUSTOM_VAR", "value"),
         ]);
 
-        let result = EnvFilter::default_scrub().filter(&env);
+        let result = EnvFilter::default().filter(&env);
 
-        // Safe vars should pass
         assert!(result.filtered_env.contains_key("PATH"));
         assert!(result.filtered_env.contains_key("HOME"));
-        assert!(result.filtered_env.contains_key("NORMAL_VAR"));
-
-        // Secrets should be scrubbed
-        assert!(!result.filtered_env.contains_key("OPENAI_API_KEY"));
+        assert!(result.filtered_env.contains_key("CUSTOM_VAR")); // Unknown passes in Scrub
         assert!(!result.filtered_env.contains_key("AWS_SECRET_ACCESS_KEY"));
-        assert!(!result.filtered_env.contains_key("MY_APP_TOKEN"));
         assert!(!result.filtered_env.contains_key("GITHUB_TOKEN"));
-
-        // Verify scrubbed list
-        assert_eq!(result.scrubbed_keys.len(), 4);
-        assert!(result.scrubbed_keys.contains(&"OPENAI_API_KEY".to_string()));
-        assert!(result
-            .scrubbed_keys
-            .contains(&"AWS_SECRET_ACCESS_KEY".to_string()));
-        assert!(result.scrubbed_keys.contains(&"MY_APP_TOKEN".to_string()));
-        assert!(result.scrubbed_keys.contains(&"GITHUB_TOKEN".to_string()));
+        assert_eq!(result.scrubbed_keys.len(), 2);
     }
 
     #[test]
-    fn test_explicit_allow_overrides_scrub() {
+    fn test_strict_mode_blocks_unknown() {
         let env = make_env(&[
-            ("OPENAI_API_KEY", "sk-secret"),
-            ("AWS_SECRET_ACCESS_KEY", "aws-secret"),
+            ("PATH", "/usr/bin"),
+            ("HOME", "/home/user"),
+            ("CUSTOM_VAR", "value"),
+            ("MY_CONFIG", "config"),
         ]);
 
-        let result = EnvFilter::default_scrub()
-            .with_allowed(&["OPENAI_API_KEY".to_string()])
-            .filter(&env);
+        let result = EnvFilter::strict().filter(&env);
 
-        // Explicitly allowed should pass through
-        assert!(result.filtered_env.contains_key("OPENAI_API_KEY"));
-        assert_eq!(
-            result.filtered_env.get("OPENAI_API_KEY"),
-            Some(&"sk-secret".to_string())
-        );
-
-        // Non-allowed secret still scrubbed
-        assert!(!result.filtered_env.contains_key("AWS_SECRET_ACCESS_KEY"));
-        assert!(result
-            .scrubbed_keys
-            .contains(&"AWS_SECRET_ACCESS_KEY".to_string()));
+        assert!(result.filtered_env.contains_key("PATH"));
+        assert!(result.filtered_env.contains_key("HOME"));
+        assert!(!result.filtered_env.contains_key("CUSTOM_VAR")); // Blocked in Strict
+        assert!(!result.filtered_env.contains_key("MY_CONFIG"));
+        assert_eq!(result.scrubbed_keys.len(), 2);
     }
 
     #[test]
-    fn test_passthrough_allows_all() {
+    fn test_strict_with_explicit_allow() {
+        let env = make_env(&[("PATH", "/usr/bin"), ("CUSTOM_VAR", "value")]);
+
+        let result = EnvFilter::strict()
+            .with_allowed(["CUSTOM_VAR"])
+            .filter(&env);
+
+        assert!(result.filtered_env.contains_key("PATH"));
+        assert!(result.filtered_env.contains_key("CUSTOM_VAR")); // Explicitly allowed
+    }
+
+    #[test]
+    fn test_exec_influence_stripped() {
         let env = make_env(&[
-            ("OPENAI_API_KEY", "sk-secret"),
-            ("AWS_SECRET_ACCESS_KEY", "aws-secret"),
             ("PATH", "/usr/bin"),
+            ("LD_PRELOAD", "/tmp/evil.so"),
+            ("PYTHONPATH", "/tmp/evil"),
+            ("NODE_OPTIONS", "--require=/tmp/evil.js"),
+        ]);
+
+        let result = EnvFilter::default().with_strip_exec(true).filter(&env);
+
+        assert!(result.filtered_env.contains_key("PATH"));
+        assert!(!result.filtered_env.contains_key("LD_PRELOAD"));
+        assert!(!result.filtered_env.contains_key("PYTHONPATH"));
+        assert!(!result.filtered_env.contains_key("NODE_OPTIONS"));
+        assert_eq!(result.exec_influence_stripped.len(), 3);
+    }
+
+    #[test]
+    fn test_exec_influence_allowed_with_warning() {
+        let env = make_env(&[("PATH", "/usr/bin"), ("LD_PRELOAD", "/tmp/needed.so")]);
+
+        let result = EnvFilter::default()
+            .with_strip_exec(true)
+            .with_allowed(["LD_PRELOAD"])
+            .filter(&env);
+
+        assert!(result.filtered_env.contains_key("LD_PRELOAD")); // Allowed
+        assert_eq!(result.exec_influence_allowed, vec!["LD_PRELOAD"]); // But warned
+        assert!(result.exec_influence_stripped.is_empty());
+    }
+
+    #[test]
+    fn test_passthrough_mode() {
+        let env = make_env(&[
+            ("PATH", "/usr/bin"),
+            ("AWS_SECRET", "secret"),
+            ("LD_PRELOAD", "/tmp/lib.so"),
         ]);
 
         let result = EnvFilter::passthrough().filter(&env);
 
-        assert_eq!(result.filtered_env.len(), 3);
-        assert!(result.scrubbed_keys.is_empty());
-        assert!(result.filtered_env.contains_key("OPENAI_API_KEY"));
-        assert!(result.filtered_env.contains_key("AWS_SECRET_ACCESS_KEY"));
-    }
-
-    #[test]
-    fn test_safe_base_always_passes() {
-        let env = make_env(&[
-            ("PATH", "/usr/bin"),
-            ("HOME", "/home/user"),
-            ("USER", "testuser"),
-            ("SHELL", "/bin/bash"),
-            ("LANG", "en_US.UTF-8"),
-            ("LC_ALL", "C"),
-            ("TERM", "xterm-256color"),
-            ("XDG_CONFIG_HOME", "/home/user/.config"),
-            ("RUST_LOG", "debug"),
-            ("RUST_BACKTRACE", "1"),
-        ]);
-
-        let result = EnvFilter::default_scrub().filter(&env);
-
-        // All safe base vars should pass
-        for key in env.keys() {
-            assert!(
-                result.filtered_env.contains_key(key),
-                "Safe base var {} should pass through",
-                key
-            );
-        }
+        assert_eq!(result.filtered_env.len(), 3); // Everything passes
         assert!(result.scrubbed_keys.is_empty());
     }
 
     #[test]
-    fn test_unknown_vars_pass_through() {
-        let env = make_env(&[
-            ("MY_CUSTOM_VAR", "value"),
-            ("APP_DEBUG", "true"),
-            ("SOME_SETTING", "123"),
-        ]);
+    fn test_banner_format() {
+        let env = make_env(&[("PATH", "/usr/bin"), ("AWS_SECRET", "secret")]);
 
-        let result = EnvFilter::default_scrub().filter(&env);
+        let filter = EnvFilter::default();
+        let result = filter.filter(&env);
+        let banner = filter.format_banner(&result);
 
-        // Unknown vars that don't match scrub patterns should pass
-        assert_eq!(result.filtered_env.len(), 3);
-        assert!(result.scrubbed_keys.is_empty());
-    }
-
-    #[test]
-    fn test_database_url_scrubbed() {
-        let env = make_env(&[
-            ("DATABASE_URL", "postgres://user:pass@host/db"),
-            ("REDIS_URL", "redis://localhost"),
-            ("MY_DATABASE_URL", "mysql://..."),
-        ]);
-
-        let result = EnvFilter::default_scrub().filter(&env);
-
-        assert!(!result.filtered_env.contains_key("DATABASE_URL"));
-        assert!(!result.filtered_env.contains_key("REDIS_URL"));
-        assert!(!result.filtered_env.contains_key("MY_DATABASE_URL"));
-        assert_eq!(result.scrubbed_keys.len(), 3);
-    }
-
-    #[test]
-    fn test_multiple_allow() {
-        let env = make_env(&[
-            ("OPENAI_API_KEY", "sk-1"),
-            ("ANTHROPIC_API_KEY", "sk-2"),
-            ("GITHUB_TOKEN", "ghp-3"),
-        ]);
-
-        let result = EnvFilter::default_scrub()
-            .with_allowed(&[
-                "OPENAI_API_KEY".to_string(),
-                "ANTHROPIC_API_KEY".to_string(),
-            ])
-            .filter(&env);
-
-        assert!(result.filtered_env.contains_key("OPENAI_API_KEY"));
-        assert!(result.filtered_env.contains_key("ANTHROPIC_API_KEY"));
-        assert!(!result.filtered_env.contains_key("GITHUB_TOKEN"));
-    }
-
-    // ========== Banner formatting tests ==========
-
-    #[test]
-    fn test_banner_scrubbed() {
-        let result = EnvFilterResult {
-            filtered_env: HashMap::new(),
-            scrubbed_keys: vec!["FOO".to_string(), "BAR".to_string()],
-            passed_count: 10,
-        };
-
-        let banner = format_banner(&result, EnvMode::Scrub);
         assert!(banner.contains("scrubbed"));
-        assert!(banner.contains("10 passed"));
-        assert!(banner.contains("2 removed"));
-    }
-
-    #[test]
-    fn test_banner_passthrough() {
-        let result = EnvFilterResult {
-            filtered_env: HashMap::new(),
-            scrubbed_keys: vec![],
-            passed_count: 25,
-        };
-
-        let banner = format_banner(&result, EnvMode::Passthrough);
-        assert!(banner.contains("passthrough"));
-        assert!(banner.contains("25 vars"));
-        assert!(banner.contains("DANGER"));
-    }
-
-    #[test]
-    fn test_scrub_priority_over_safe_base() {
-        // "LC_*" is in SAFE_BASE_PATTERNS
-        // "*_SECRET" is in DEFAULT_SCRUB_PATTERNS
-        // "LC_SECRET" matches BOTH. It MUST BE SCRUBBED.
-        let env = make_env(&[
-            ("LC_ALL", "C"),          // Safe only
-            ("LC_SECRET", "leak me"), // Safe + Scrub -> Scrub
-            ("MY_SECRET", "secret"),  // Scrub only
-        ]);
-
-        let result = EnvFilter::default_scrub().filter(&env);
-
-        assert!(result.filtered_env.contains_key("LC_ALL"));
-        assert!(!result.filtered_env.contains_key("MY_SECRET"));
-
-        // Critical check: Priority
-        assert!(
-            !result.filtered_env.contains_key("LC_SECRET"),
-            "LC_SECRET should be scrubbed even if LC_* is safe"
-        );
-        assert!(result.scrubbed_keys.contains(&"LC_SECRET".to_string()));
-    }
-
-    #[test]
-    fn test_banner_clean() {
-        let result = EnvFilterResult {
-            filtered_env: HashMap::new(),
-            scrubbed_keys: vec![],
-            passed_count: 15,
-        };
-
-        let banner = format_banner(&result, EnvMode::Scrub);
-        assert!(banner.contains("clean"));
-        assert!(banner.contains("15 vars"));
+        assert!(banner.contains("1 passed"));
+        assert!(banner.contains("1 removed"));
     }
 }

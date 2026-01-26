@@ -838,14 +838,46 @@ pub struct SandboxArgs {
     pub command: Vec<String>,
 
     /// Path to policy file (optional)
-    #[arg(long)]
+    #[arg(long, short)]
     pub policy: Option<std::path::PathBuf>,
 
-    /// Allow specific env vars through the scrub filter (comma-separated or repeated)
+    /// Working directory for command
+    #[arg(long, short)]
+    pub workdir: Option<std::path::PathBuf>,
+
+    /// Timeout in seconds
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
+    /// Fail if policy cannot be enforced (exit 2)
+    #[arg(long)]
+    pub fail_closed: bool,
+
+    /// Strict env mode: only safe base vars + explicit allows
+    #[arg(long = "env-strict")]
+    pub env_strict: bool,
+
+    /// Strip execution-influence vars (LD_PRELOAD, etc.)
+    #[arg(long = "env-strip-exec")]
+    pub env_strip_exec: bool,
+
+    /// Allow specific env vars through the filter (comma-separated or repeated)
     #[arg(long = "env-allow", value_delimiter = ',')]
     pub env_allow: Option<Vec<String>>,
 
     /// DANGER: Pass all env vars without scrubbing
     #[arg(long = "env-passthrough")]
     pub env_passthrough: bool,
+
+    /// Force a safe PATH (/usr/bin:/bin on Linux)
+    #[arg(long = "env-safe-path")]
+    pub env_safe_path: bool,
+
+    /// Show detailed sandbox setup
+    #[arg(long, short)]
+    pub verbose: bool,
+
+    /// Suppress banner output
+    #[arg(long, short)]
+    pub quiet: bool,
 }

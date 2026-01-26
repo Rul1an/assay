@@ -164,18 +164,21 @@ nav:
     - config/index.md
     - mcp-eval.yaml: config/eval-yaml.md
     - Policy Files: config/policies.md
+    - Sandbox Policies: reference/sandbox-policies.md
+    - Environment Filtering: reference/sandbox-env.md
     - Sequence Rules DSL: config/sequences.md
     - Migration Guide: config/migration.md
 
   - CLI Reference:
-    - cli/index.md
-    - assay init: cli/init.md
-    - assay validate: cli/validate.md
-    - assay run: cli/run.md
-    - assay import: cli/import.md
-    - assay migrate: cli/migrate.md
-    - assay replay: cli/replay.md
-    - assay mcp-server: cli/mcp-server.md
+    - reference/cli/index.md
+    - assay init: reference/cli/init.md
+    - assay validate: reference/cli/validate.md
+    - assay run: reference/cli/run.md
+    - assay sandbox: reference/cli/sandbox.md
+    - assay import: reference/cli/import.md
+    - assay migrate: reference/cli/migrate.md
+    - assay replay: reference/cli/replay.md
+    - assay mcp-server: reference/cli/mcp-server.md
 
   - Metrics Reference:
     - metrics/index.md
@@ -193,6 +196,7 @@ nav:
 
   - Guides:
     - guides/index.md
+    - Sandbox Security: guides/sandbox-security.md
     - Gateway Pattern: guides/gateway-pattern.md
 
   - Architecture:
