@@ -41,6 +41,8 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 | `--env-allow <VAR>` | Allow specific env var(s) through the scrub filter |
 | `--env-strict` | Strict mode: only safe base vars + explicit allows |
 | `--env-passthrough` | ⚠️ DANGER: Pass all env vars (disables scrubbing) |
+| `--env-strip-exec` | Strip execution-related env vars (e.g. `PATH`, loader/debug vars) after filtering |
+| `--env-safe-path` | Reset `PATH` inside the sandbox to a minimal, known-safe search path |
 
 ### Execution
 
@@ -363,4 +365,4 @@ The sandbox protects against:
 - [Sandbox Security Guide](../../guides/sandbox-security.md)
 - [Environment Filtering Reference](../sandbox-env.md)
 - [Sandbox Policies Reference](../sandbox-policies.md)
-- [assay doctor](doctor.md)
+- [assay doctor](../doctor.md)

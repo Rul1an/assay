@@ -33,6 +33,18 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     if !args.quiet {
         eprintln!("  Env: {}", env_filter.format_banner(&env_result));
 
+        if args.verbose {
+            // Verbose: Show detailed scrubbing info
+            eprintln!("  Env Details:");
+            eprintln!("    Passed: {} vars", env_result.passed_count);
+            if !env_result.scrubbed_keys.is_empty() {
+                eprintln!("    Scrubbed: {:?}", env_result.scrubbed_keys);
+            }
+            if !env_result.exec_influence_stripped.is_empty() {
+                eprintln!("    Stripped: {:?}", env_result.exec_influence_stripped);
+            }
+        }
+
         // Warn about exec-influence allows
         for var in &env_result.exec_influence_allowed {
             eprintln!("  ⚠ Exec-influence var ALLOWED: {}", var);

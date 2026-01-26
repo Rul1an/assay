@@ -97,7 +97,10 @@ Variables matching these patterns are **removed**:
 | `CLASSPATH` | Java classpath hijack | |
 | `RUSTC_WRAPPER` | Rust compiler wrapper hijack | |
 | `CC`, `CXX` | Compiler hijack | |
+| `CC`, `CXX` | Compiler hijack | |
 | `CFLAGS`, `LDFLAGS` | Compiler flag injection | |
+
+> **Note**: Execution-influence variables (such as `LD_PRELOAD`, `PYTHONPATH`, `NODE_OPTIONS`) are **not removed** by the default Pattern Scrub. They are only stripped when you use `--env-strip-exec` or strict mode (`--env-strict`).
 
 ### Allowed Patterns (Safe Base)
 
@@ -321,7 +324,7 @@ export LD_PRELOAD=/tmp/keylogger.so
 
 **Risk**: Even "trusted" programs can be hijacked.
 
-**Mitigation**: Strip all execution-influence variables by default.
+**Mitigation**: When execution-influence scrubbing is enabled (e.g., via `--env-strip-exec` or strict mode), Assay strips all execution-influence variables.
 
 ### Why Strict Mode?
 

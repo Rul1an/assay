@@ -106,7 +106,11 @@ pub fn reset() {
 mod tests {
     use super::*;
 
+    use super::*;
+    use serial_test::serial;
+
     #[test]
+    #[serial]
     fn test_increment() {
         // Use a temporary path for testing to avoid messing with real metrics
         // Note: In real usage, this changes the global static, so we can't fully isolate path
@@ -119,6 +123,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_add() {
         reset();
         add("test_add", 5);
