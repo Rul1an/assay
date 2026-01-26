@@ -105,8 +105,6 @@ pub fn reset() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use super::*;
     use serial_test::serial;
 
     #[test]
