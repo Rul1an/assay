@@ -178,6 +178,39 @@ mod landlock_impl {
             .is_ok()
         {
             max_abi = 4;
+        } else {
+            return (true, max_abi);
+        }
+
+        // Check V5 (IOCTL)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V5))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 5;
+        } else {
+            return (true, max_abi);
+        }
+
+        // Check V6 (IPC Scopes - Linux 6.12+)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V6))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 6;
+        } else {
+            return (true, max_abi);
+        }
+
+        // Check V7 (Audit Logging - Linux 6.15+)
+        if Ruleset::default()
+            .handle_access(AccessFs::from_all(ABI::V7))
+            .and_then(|r| r.create())
+            .is_ok()
+        {
+            max_abi = 7;
         }
 
         (true, max_abi)
