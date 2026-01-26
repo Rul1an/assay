@@ -22,10 +22,16 @@ pub enum ProfileEvent {
         backend: BackendHint,
     },
 
-    /// Degradation event (e.g., Landlock conflict)
-    Degraded {
+    /// Audit fallback event (e.g., Landlock conflict allowed in permissive mode)
+    AuditFallback {
         reason: String,
         /// Detailed context (may be redacted later)
+        detail: Option<String>,
+    },
+
+    /// Enforcement failure (e.g., fail-closed triggered)
+    EnforcementFailed {
+        reason: String,
         detail: Option<String>,
     },
 }
@@ -109,9 +115,15 @@ pub fn try_load_test_events() -> Option<Vec<ProfileEvent>> {
                 path: f.get("path")?.as_str()?.to_string(),
                 backend: BackendHint::Injected,
             });
-        } else if let Some(d) = obj.get("Degraded") {
+        } else if let Some(d) = obj.get("AuditFallback") {
             let d = d.as_object()?;
-            out.push(ProfileEvent::Degraded {
+            out.push(ProfileEvent::AuditFallback {
+                reason: d.get("reason")?.as_str()?.to_string(),
+                detail: d.get("detail").and_then(|v| v.as_str()).map(String::from),
+            });
+        } else if let Some(d) = obj.get("EnforcementFailed") {
+            let d = d.as_object()?;
+            out.push(ProfileEvent::EnforcementFailed {
                 reason: d.get("reason")?.as_str()?.to_string(),
                 detail: d.get("detail").and_then(|v| v.as_str()).map(String::from),
             });

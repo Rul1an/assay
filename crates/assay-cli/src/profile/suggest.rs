@@ -1,14 +1,15 @@
 use super::{generalize, ProfileReport};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SuggestConfig {
     pub widen_dirs_to_glob: bool,
 }
 
 /// Generated policy suggestion (deterministic struct).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct PolicySuggestion {
     pub extends: Vec<String>,
     pub fs_allow: BTreeSet<String>,
@@ -37,9 +38,16 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
         out.env_allow.insert(k.clone());
     }
 
-    // Execs: simple string collection
+    // Execs: generalize command paths
     for cmd in report.agg.execs.keys() {
-        out.exec_allow.insert(cmd.clone());
+        let p = PathBuf::from(cmd);
+        let g = generalize::generalize_path(
+            &p,
+            &report.config.cwd,
+            report.config.home.as_deref(),
+            report.config.assay_tmp.as_deref(),
+        );
+        out.exec_allow.insert(g.rendered);
     }
 
     // FS: Generalize paths
@@ -71,15 +79,18 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
     }
 
     // Heuristic: If we allowed ${ASSAY_TMP}/..., maybe just allow ${ASSAY_TMP}/** once?
-    let tmp_prefix = "${ASSAY_TMP}/";
-    let has_tmp = out.fs_allow.iter().any(|p| p.starts_with(tmp_prefix));
-    if has_tmp {
-        // Remove individual tmp files
-        out.fs_allow.retain(|p| !p.starts_with(tmp_prefix));
-        // Add broad allow
-        out.fs_allow.insert("${ASSAY_TMP}/**".to_string());
+    if cfg.widen_dirs_to_glob {
+        let tmp_prefix = "${ASSAY_TMP}/";
+        let has_tmp = out.fs_allow.iter().any(|p| p.starts_with(tmp_prefix));
+        if has_tmp {
+            // Remove individual tmp files
+            out.fs_allow.retain(|p| !p.starts_with(tmp_prefix));
+            // Add broad allow
+            out.fs_allow.insert("${ASSAY_TMP}/**".to_string());
+        }
+
+        // Future: other widening heuristics based on cfg
     }
 
-    let _ = cfg; // unused for now
     out
 }

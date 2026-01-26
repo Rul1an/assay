@@ -9,8 +9,6 @@ use tokio::time::Duration;
 use crate::profile::{events::ProfileEvent, ProfileCollector, ProfileConfig};
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
-    // PR7: Initialize profiler if requested
-    let mut profiler = maybe_profile_begin(&args);
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
 
@@ -113,6 +111,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     // PR5.4: Scoped /tmp with proper isolation
     let tmp_dir = create_scoped_tmp()?;
+
+    // PR7: Initialize profiler if requested (passing tmp_dir for generalization)
+    let mut profiler = maybe_profile_begin(&args, Some(&tmp_dir));
+
     if !args.quiet {
         eprintln!("Tmp:     {}", tmp_dir.display());
         eprintln!("──────────────────");
@@ -161,7 +163,6 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         metrics::increment("degraded_to_audit_conflict");
 
         should_enforce = false;
-        let _ = should_enforce; // Silence clippy if needed, or just remove assignment if truly unused further down
     }
 
     // Spawn child with sandbox isolation
@@ -330,7 +331,10 @@ fn create_scoped_tmp() -> anyhow::Result<std::path::PathBuf> {
     Ok(tmp_dir)
 }
 
-fn maybe_profile_begin(args: &SandboxArgs) -> Option<ProfileCollector> {
+fn maybe_profile_begin(
+    args: &SandboxArgs,
+    assay_tmp: Option<&std::path::Path>,
+) -> Option<ProfileCollector> {
     let _ = args.profile.as_ref()?; // If none, return early
 
     let cwd = std::env::current_dir()
@@ -341,20 +345,27 @@ fn maybe_profile_begin(args: &SandboxArgs) -> Option<ProfileCollector> {
     Some(ProfileCollector::new(ProfileConfig {
         cwd,
         home,
-        assay_tmp: None,
+        assay_tmp: assay_tmp.map(|p| p.to_path_buf()),
     }))
 }
 
 fn maybe_profile_finish(prof: ProfileCollector, args: &SandboxArgs) -> anyhow::Result<()> {
     let report = prof.finish();
-    let sugg_cfg = crate::profile::suggest::SuggestConfig::default();
+    // Default SuggestConfig: widen dirs to glob by default for SOTA DX
+    let sugg_cfg = crate::profile::suggest::SuggestConfig {
+        widen_dirs_to_glob: true,
+    };
     let suggestion = report.to_suggestion(sugg_cfg);
 
-    let yaml = crate::profile::writer::write_yaml(&suggestion);
+    let content = match args.profile_format.as_str() {
+        "json" => crate::profile::writer::write_json(&suggestion)?,
+        _ => crate::profile::writer::write_yaml(&suggestion),
+    };
+
     let out_path = args.profile.as_ref().expect("profiler active");
 
     // Atomic Write
-    crate::profile::writer::save_atomic(out_path, &yaml)?;
+    crate::profile::writer::save_atomic(out_path, &content)?;
 
     // Optional report
     let report_path = args.profile_report.clone().unwrap_or_else(|| {

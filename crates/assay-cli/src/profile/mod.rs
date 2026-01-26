@@ -52,7 +52,10 @@ impl ProfileReport {
     }
 }
 
-/// Thread-local collector for events.
+/// Collector for profiling events.
+///
+/// NOTE: This is intended for single-threaded usage within a sandbox runloop.
+/// Record operations require `&mut self`.
 #[derive(Debug)]
 pub struct ProfileCollector {
     cfg: ProfileConfig,
@@ -81,12 +84,22 @@ impl ProfileCollector {
             ProfileEvent::FsObserved { op, path, backend } => {
                 self.agg.fs.push((op, path, backend));
             }
-            ProfileEvent::Degraded { reason, detail: _ } => {
-                self.agg.notes.push(format!("degraded: {}", reason));
+            ProfileEvent::AuditFallback { reason, detail: _ } => {
+                self.agg.notes.push(format!("audit_fallback: {}", reason));
                 *self
                     .agg
                     .counters
-                    .entry("sandbox.degrade_to_audit".to_string())
+                    .entry("sandbox.audit_fallback".to_string())
+                    .or_default() += 1;
+            }
+            ProfileEvent::EnforcementFailed { reason, detail: _ } => {
+                self.agg
+                    .notes
+                    .push(format!("enforcement_failed: {}", reason));
+                *self
+                    .agg
+                    .counters
+                    .entry("sandbox.enforcement_failed".to_string())
                     .or_default() += 1;
             }
         }
@@ -136,7 +149,7 @@ mod tests {
             path: "/repo/data/input.txt".into(),
             backend: BackendHint::Injected,
         });
-        c.record(ProfileEvent::Degraded {
+        c.record(ProfileEvent::AuditFallback {
             reason: "landlock policy conflict".into(),
             detail: None,
         });

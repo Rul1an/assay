@@ -19,9 +19,13 @@ pub fn write_yaml(s: &PolicySuggestion) -> String {
     for p in &s.fs_allow {
         out.push_str(&format!("    - \"{}\"\n", escape(p)));
     }
-    out.push_str("  deny:\n");
-    for p in &s.fs_deny {
-        out.push_str(&format!("    - \"{}\"\n", escape(p)));
+    if s.fs_deny.is_empty() {
+        out.push_str("  deny: []\n");
+    } else {
+        out.push_str("  deny:\n");
+        for p in &s.fs_deny {
+            out.push_str(&format!("    - \"{}\"\n", escape(p)));
+        }
     }
 
     out.push_str("net:\n");
@@ -61,6 +65,12 @@ fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Write policy suggestion to JSON string (deterministic).
+pub fn write_json(s: &PolicySuggestion) -> anyhow::Result<String> {
+    // We use serde_json for SOTA reliability
+    Ok(serde_json::to_string_pretty(s)?)
+}
+
 /// Save content to disk atomically and safely.
 pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
     // 1. Check if target is a symlink (avoid TOCTOU/symlink attacks if possible)
@@ -71,7 +81,18 @@ pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
         }
     }
 
-    let temp_path = path.with_extension("tmp");
+    // Unique temp path to avoid race conditions
+    let pid = std::process::id();
+    let temp_path = path.with_extension(format!("tmp.{}", pid));
+
+    // RAII Cleanup handler
+    struct Cleanup<'a>(&'a Path);
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(self.0);
+        }
+    }
+    let _cleanup = Cleanup(&temp_path);
 
     // 2. Create temp file
     let mut file = File::create(&temp_path)?;
@@ -92,8 +113,11 @@ pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
     file.sync_all()?;
     drop(file); // Ensure closed
 
-    // 6. Rename
+    // 6. Rename (Atomic)
     std::fs::rename(&temp_path, path)?;
+
+    // Defuse cleanup: path is successfully moved
+    std::mem::forget(_cleanup);
 
     Ok(())
 }

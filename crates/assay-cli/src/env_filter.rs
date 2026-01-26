@@ -591,7 +591,7 @@ impl EnvFilter {
 }
 
 /// Match a key against glob patterns (PREFIX_*, *_SUFFIX, *CONTAINS*, EXACT)
-fn matches_any_pattern(key: &str, patterns: &[&str]) -> bool {
+pub fn matches_any_pattern(key: &str, patterns: &[&str]) -> bool {
     for pattern in patterns {
         if matches_pattern(key, pattern) {
             return true;

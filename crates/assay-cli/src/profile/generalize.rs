@@ -112,7 +112,14 @@ fn normalize_path(path: &Path) -> PathBuf {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                out.pop();
+                // Only pop if we are not at root.
+                // For absolute paths, first component is RootDir.
+                // For relative paths, out might be empty.
+                if let Some(last) = out.components().last() {
+                    if last != Component::RootDir {
+                        out.pop();
+                    }
+                }
             }
             c => out.push(c),
         }
@@ -163,5 +170,20 @@ mod tests {
         let cwd = Path::new("/app");
         let p = generalize_path(Path::new("/app/./foo/../bar"), cwd, None, None);
         assert_eq!(p.rendered, "./bar");
+    }
+
+    #[test]
+    fn test_path_traversal_protection() {
+        let cwd = Path::new("/app");
+        // Should NOT be allowed to pop past root /
+        let p = generalize_path(Path::new("/app/../../etc/passwd"), cwd, None, None);
+        assert_eq!(p.rendered, "/etc/passwd");
+
+        // Relative traversal should stay at "." if it pops too much
+        let p = normalize_path(Path::new("foo/../../bar"));
+        assert_eq!(p, PathBuf::from("bar")); // foo/.. -> "" then .. -> stays at "" then bar -> bar
+
+        let p = normalize_path(Path::new("../../../secret"));
+        assert_eq!(p, PathBuf::from("secret"));
     }
 }
