@@ -109,6 +109,8 @@ dependencies = [
  "anyhow",
  "assay-common",
  "assay-core",
+ "assay-evidence",
+ "assay-mcp-server",
  "assay-metrics",
  "assay-monitor",
  "assay-policy",

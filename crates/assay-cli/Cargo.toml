@@ -32,8 +32,10 @@ tokio.workspace = true
 assay-core.workspace = true
 assay-monitor.workspace = true
 assay-common = { workspace = true, features = ["std"] }
-assay-policy.workspace = true
-assay-metrics.workspace = true
+assay-policy = { workspace = true }
+assay-metrics = { workspace = true }
+assay-evidence = { workspace = true }
+assay-mcp-server = { workspace = true }
 
 dialoguer = "0.11"
 similar = "2"

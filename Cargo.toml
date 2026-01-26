@@ -70,6 +70,7 @@ assay-monitor = { path = "crates/assay-monitor", version = "2.5.0" }
 assay-metrics = { path = "crates/assay-metrics", version = "2.5.0" }
 assay-policy = { path = "crates/assay-policy", version = "2.5.0" }
 assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.5.0" }
+assay-evidence = { path = "crates/assay-evidence", version = "2.5.0" }
 
 # Common dependencies
 anyhow = "1"
