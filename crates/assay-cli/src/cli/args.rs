@@ -49,6 +49,8 @@ pub enum Command {
     Profile(super::commands::profile::ProfileArgs),
     /// Secure execution sandbox (v0.1)
     Sandbox(SandboxArgs),
+    /// Evidence Management (Audit/Compliance)
+    Evidence(EvidenceArgs),
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
 }
@@ -797,9 +799,19 @@ pub struct PolicyMigrateArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
-    /// Preview only (no write)
+    /// Dry run (print to stdout instead of overwriting)
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Preview only (no write)
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct EvidenceArgs {
+    #[command(subcommand)]
+    pub cmd: super::commands::evidence::EvidenceCmd,
 }
 
 #[derive(clap::Args, Clone, Debug)]

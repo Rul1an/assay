@@ -247,7 +247,7 @@ mod tests {
     /// Verify metadata fields DON'T affect content hash
     #[test]
     fn test_content_hash_ignores_metadata() {
-        let mut event1 = create_test_event();
+        let event1 = create_test_event();
         let mut event2 = create_test_event();
 
         // Change metadata fields

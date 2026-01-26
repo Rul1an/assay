@@ -27,7 +27,6 @@ use crate::crypto::jcs;
 use crate::types::{EvidenceEvent, ProducerMeta};
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -721,7 +720,7 @@ mod tests {
         let mut buffer = Vec::new();
         let mut writer = BundleWriter::new(&mut buffer);
 
-        let mut event1 = create_event(0);
+        let event1 = create_event(0);
         let mut event2 = create_event(1);
         event2.run_id = "different_run".into();
         event2.id = "different_run:1".into();

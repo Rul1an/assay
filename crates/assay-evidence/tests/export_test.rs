@@ -25,19 +25,18 @@ fn test_bundle_determinism() {
     let mut entries = archive.entries().unwrap();
 
     // First entry MUST be manifest.json
-    let mut manifest_entry = entries.next().expect("Manifest missing").unwrap();
+    let manifest_entry = entries.next().expect("Manifest missing").unwrap();
     assert_eq!(
         manifest_entry.path().unwrap().to_str().unwrap(),
         "manifest.json"
     );
 
-    // 3. Verify Bundle Contract (New Self-Check)
-    use std::io::Seek;
+    // Verify Bundle Contract (New Self-Check)
     let mut verify_cursor = Cursor::new(bundle1.clone());
     assay_evidence::bundle::verify_bundle(&mut verify_cursor).expect("verify_bundle failed");
 
     // Second entry MUST be events.ndjson
-    let mut events_entry = entries.next().expect("Events missing").unwrap();
+    let events_entry = entries.next().expect("Events missing").unwrap();
     assert_eq!(
         events_entry.path().unwrap().to_str().unwrap(),
         "events.ndjson"

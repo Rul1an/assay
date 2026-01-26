@@ -232,7 +232,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
         metrics::increment("degraded_to_audit_conflict");
-        actual_enforcement = false;
+        let _ = false; // actual_enforcement value is ignored in degraded mode
     }
 
     let mut cmd = tokio::process::Command::new(cmd_name);

@@ -78,7 +78,7 @@ fn test_reject_missing_content_hash() {
     event.content_hash = None; // Explicitly remove
 
     // Serialize manually to NDJSON (bypassing BundleWriter normalization)
-    let events_json = serde_json::to_string(&event).unwrap() + "\n";
+    let _events_json = serde_json::to_string(&event).unwrap() + "\n";
 
     // Create fake bundle with missing content_hash
     // This requires manually crafting the archive...
@@ -249,7 +249,7 @@ fn test_content_hash_includes_type() {
 
 #[test]
 fn test_content_hash_excludes_metadata() {
-    let mut event1 = create_event(0);
+    let event1 = create_event(0);
     let mut event2 = create_event(0);
 
     // Change metadata fields that should NOT affect hash
@@ -271,7 +271,6 @@ fn test_reject_extra_file() {
 
     // Create a bundle manually with an extra file
     {
-        use assay_evidence::bundle::writer::Manifest;
         use flate2::{Compression, GzBuilder};
         use tar::{Builder, Header};
 

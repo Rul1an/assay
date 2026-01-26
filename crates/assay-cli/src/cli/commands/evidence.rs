@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use std::fs::File;
-use std::io::{self, Read, Write};
-use crate::exit_codes;
+use std::io::{self, Read};
 
 /// Manage tamper-evident bundles (audit/compliance)
 #[derive(Debug, Subcommand, Clone)]
@@ -77,8 +76,7 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle))?;
 
-    assay_evidence::bundle::verify_bundle(f)
-        .context("bundle verification failed")?;
+    assay_evidence::bundle::verify_bundle(f).context("bundle verification failed")?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle);
     Ok(0)
@@ -89,7 +87,9 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
 /// OR we map from Profile format if needed.
 /// Since the user said "exporter wiring comes logically: assay sandbox --profile -> map 1-to-1",
 /// let's implement a simple loader that expects EvidenceEvent JSONL for now to satisfy the contract.
-fn load_events_from_input(input: &std::path::Path) -> Result<Vec<assay_evidence::types::EvidenceEvent>> {
+fn load_events_from_input(
+    input: &std::path::Path,
+) -> Result<Vec<assay_evidence::types::EvidenceEvent>> {
     use std::io::BufRead;
 
     let f = File::open(input)?;
@@ -98,14 +98,16 @@ fn load_events_from_input(input: &std::path::Path) -> Result<Vec<assay_evidence:
 
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
 
         // Try parsing directly as EvidenceEvent
         // This assumes some upstream tool already shaped it.
         // In a real integration, we'd map from crate::profile::events::Event -> EvidenceEvent.
         // But let's start with native passthrough.
         let ev: assay_evidence::types::EvidenceEvent = serde_json::from_str(&line)
-            .with_context(|| format!("Line {}: invalid evidence event json", i+1))?;
+            .with_context(|| format!("Line {}: invalid evidence event json", i + 1))?;
         events.push(ev);
     }
 

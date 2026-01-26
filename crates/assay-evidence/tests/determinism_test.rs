@@ -275,7 +275,7 @@ fn test_golden_hash() {
     // 1. The change broke determinism (bad!)
     // 2. The change intentionally modified the format (update the golden hash)
 
-    let (bundle, hash) = generate_bundle(1);
+    let (_bundle, hash) = generate_bundle(1);
 
     // Print for debugging (comment out in CI)
     // println!("Bundle size: {} bytes", bundle.len());

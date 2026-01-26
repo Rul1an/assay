@@ -13,6 +13,7 @@ pub mod demo;
 pub mod discover;
 pub mod doctor;
 pub mod events;
+pub mod evidence;
 pub mod explain;
 pub mod fix;
 pub mod generate;
@@ -77,6 +78,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Record(args) => record::run(args).await,
         Command::Profile(args) => profile::run(args),
         Command::Sandbox(args) => sandbox::run(args).await,
+        Command::Evidence(args) => evidence::run(args),
         Command::Setup(args) => setup::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
