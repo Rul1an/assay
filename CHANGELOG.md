@@ -1,6 +1,50 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [v2.4.0] - 2026-01-26
+
+### 🛡️ Phase 5: SOTA Sandbox Hardening
+
+This release delivers **State-of-the-Art** sandbox hardening, addressing MCP security guidance for credential isolation, honest capability reporting, and fork-safe enforcement.
+
+### ✨ Major Features
+
+-   **Environment Scrubbing** (`env_filter.rs`):
+    -   Default-deny for secrets (`*_TOKEN`, `*_KEY`, `*_SECRET`, `AWS_*`, `GITHUB_*`)
+    -   CLI flags: `--env-allow=VAR=value`, `--env-passthrough=VAR`
+    -   Always sets `TMPDIR` to scoped sandbox directory
+-   **Landlock Deny-wins Correctness** (`landlock_check.rs`):
+    -   Detects "deny inside allow" conflicts that Landlock cannot enforce
+    -   Automatic degradation to Audit mode with explicit warning
+    -   Prevents false sense of security from unenforceable policies
+-   **Fork-Safe pre_exec**:
+    -   Eliminated heap allocations in `pre_exec` closure
+    -   Uses `std::io::Error::from_raw_os_error()` instead of `anyhow::bail!()`
+    -   Syscall-only in critical fork-exec window
+-   **Scoped /tmp Isolation**:
+    -   UID-based (not `$USER` env which can be spoofed)
+    -   Per-run isolation via PID in path
+    -   0700 permissions (owner-only)
+    -   Prefers `XDG_RUNTIME_DIR` when available
+-   **Doctor Deep Dive v2**:
+    -   Reports Phase 5 hardening feature status
+    -   Reads actual Landlock ABI version from sysfs
+    -   Net enforcement correctly reports ABI >= 4 requirement
+
+### 🛠️ CI Improvements
+
+-   **`scripts/ci/phase5-check.sh`**: New quality gate script
+    -   `CARGO_TARGET_DIR=/tmp/assay-target` for VM mount compatibility
+    -   `--locked` on all cargo commands
+    -   Strict Clippy `-D warnings`
+
+### 🐛 Fixes
+
+-   Fixed `unused_assignments` warning on macOS via `#[cfg(target_os = "linux")]`
+-   Fixed `io_other_error` Clippy lint (Rust 1.93)
+-   Added `#[allow(dead_code)]` for non-Linux Landlock stubs
+
 ## [v2.2.0] - 2026-01-23
 
 ### 🛡️ SOTA Hardening (Jan 2026)
