@@ -116,6 +116,13 @@ pub fn save_atomic(path: &Path, content: &str) -> anyhow::Result<()> {
     // 6. Rename (Atomic)
     std::fs::rename(&temp_path, path)?;
 
+    // 7. Fsync Directory (SOTA durability: ensure rename is persisted)
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+
     // Defuse cleanup: path is successfully moved
     std::mem::forget(_cleanup);
 

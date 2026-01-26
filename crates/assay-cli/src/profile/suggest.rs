@@ -33,9 +33,11 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
     // Notes
     out.notes = report.agg.notes.clone();
 
-    // Environment: only keys are collected
+    // Environment: only keys are collected. Exclude SAFE_BASE to minimize policy noise.
     for k in report.agg.env_provided.keys() {
-        out.env_allow.insert(k.clone());
+        if !crate::env_filter::matches_any_pattern(k, crate::env_filter::SAFE_BASE_PATTERNS) {
+            out.env_allow.insert(k.clone());
+        }
     }
 
     // Execs: generalize command paths
