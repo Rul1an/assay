@@ -6,7 +6,11 @@ use crate::metrics;
 use std::process::Stdio;
 use tokio::time::Duration;
 
+use crate::profile::{events::ProfileEvent, ProfileCollector, ProfileConfig};
+
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
+    // PR7: Initialize profiler if requested
+    let mut profiler = maybe_profile_begin(&args);
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
 
@@ -77,6 +81,9 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 p
             }
             Err(e) => {
+                if let Some(p) = &mut profiler {
+                    p.note(format!("failed to load policy: {}", e));
+                }
                 eprintln!("WARN: Failed to load policy: {}. Using default.", e);
                 crate::policy::mcp_server_minimal()
             }
@@ -124,6 +131,12 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     if should_enforce && !compat.is_compatible() {
         if args.fail_closed {
+            if let Some(p) = &mut profiler {
+                p.record(ProfileEvent::Degraded {
+                    reason: "landlock policy conflict (fail-closed)".to_string(),
+                    detail: None,
+                });
+            }
             eprintln!("ERROR: Policy cannot be fully enforced (--fail-closed active)");
             eprintln!("E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE");
             eprintln!(
@@ -134,6 +147,13 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
 
+        if let Some(p) = &mut profiler {
+            p.record(ProfileEvent::Degraded {
+                reason: "landlock policy conflict (degraded to audit)".to_string(),
+                detail: None,
+            });
+        }
+
         eprintln!("WARN: Landlock policy conflict detected (Deny rule inside Allow root).");
         eprintln!(
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
@@ -141,6 +161,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         metrics::increment("degraded_to_audit_conflict");
 
         should_enforce = false;
+        let _ = should_enforce; // Silence clippy if needed, or just remove assignment if truly unused further down
     }
 
     // Spawn child with sandbox isolation
@@ -148,6 +169,13 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let cmd_args = &args.command[1..];
 
     let mut cmd = tokio::process::Command::new(cmd_name);
+
+    if let Some(p) = &mut profiler {
+        p.record(ProfileEvent::ExecObserved {
+            argv0: cmd_name.clone(),
+        });
+    }
+
     cmd.args(cmd_args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -158,6 +186,12 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     cmd.env_clear();
     for (key, value) in &env_result.filtered_env {
         cmd.env(key, value);
+        if let Some(p) = &mut profiler {
+            p.record(ProfileEvent::EnvProvided {
+                key: key.clone(),
+                scrubbed: false, // TODO: if we implement partial scrubbing, track here
+            });
+        }
     }
     // Always set TMPDIR/TMP/TEMP to scoped tmp
     cmd.env("TMPDIR", &tmp_dir);
@@ -209,6 +243,22 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     };
 
     let status = status_res?;
+
+    // PR7: Test Hook for Injected Events
+    // Only enabled if test cfg OR explicit env var is set
+    #[cfg(any(test, feature = "profile-test-hook"))]
+    if let Some(events) = crate::profile::events::try_load_test_events() {
+        if let Some(p) = &mut profiler {
+            p.note("injected_test_events: true");
+            for ev in events {
+                p.record(ev);
+            }
+        }
+    }
+
+    if let Some(p) = profiler {
+        maybe_profile_finish(p, &args)?;
+    }
 
     match status.code() {
         Some(code) => Ok(code),
@@ -278,4 +328,66 @@ fn create_scoped_tmp() -> anyhow::Result<std::path::PathBuf> {
     }
 
     Ok(tmp_dir)
+}
+
+fn maybe_profile_begin(args: &SandboxArgs) -> Option<ProfileCollector> {
+    let _ = args.profile.as_ref()?; // If none, return early
+
+    let cwd = std::env::current_dir()
+        .ok()
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+
+    Some(ProfileCollector::new(ProfileConfig {
+        cwd,
+        home,
+        assay_tmp: None,
+    }))
+}
+
+fn maybe_profile_finish(prof: ProfileCollector, args: &SandboxArgs) -> anyhow::Result<()> {
+    let report = prof.finish();
+    let sugg_cfg = crate::profile::suggest::SuggestConfig::default();
+    let suggestion = report.to_suggestion(sugg_cfg);
+
+    let yaml = crate::profile::writer::write_yaml(&suggestion);
+    let out_path = args.profile.as_ref().expect("profiler active");
+
+    // Atomic Write
+    crate::profile::writer::save_atomic(out_path, &yaml)?;
+
+    // Optional report
+    let report_path = args.profile_report.clone().unwrap_or_else(|| {
+        let mut p = out_path.clone();
+        if let Some(fname) = p.file_name() {
+            let new_name = format!("{}.report.md", fname.to_string_lossy());
+            p.set_file_name(new_name);
+        } else {
+            p.set_extension("report.md");
+        }
+        p
+    });
+
+    // Simple report generation
+    let report_md = format!(
+        "# Assay Profile Report\n\n\
+         - **Command**: {:?}\n\
+         - **Status**: Finished\n\
+         - **Counters**: {:?}\n\
+         - **Notes**: {:?}\n",
+        args.command, suggestion.counters, suggestion.notes
+    );
+
+    // Atomic write report too
+    crate::profile::writer::save_atomic(&report_path, &report_md)?;
+
+    if !args.quiet {
+        eprintln!(
+            "Profile: {} (and {})",
+            out_path.display(),
+            report_path.display()
+        );
+    }
+
+    Ok(())
 }

@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [features]
 experimental = ["assay-core/experimental"]
+profile-test-hook = []
 
 [dependencies]
 anyhow.workspace = true

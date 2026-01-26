@@ -873,6 +873,18 @@ pub struct SandboxArgs {
     #[arg(long = "env-safe-path")]
     pub env_safe_path: bool,
 
+    /// Profile execution and generate policy suggestion at this path
+    #[arg(long)]
+    pub profile: Option<PathBuf>,
+
+    /// Profile output format: yaml | json (default: yaml)
+    #[arg(long, default_value = "yaml")]
+    pub profile_format: String,
+
+    /// Optional path for human-readable profile report
+    #[arg(long)]
+    pub profile_report: Option<PathBuf>,
+
     /// Show detailed sandbox setup
     #[arg(long, short)]
     pub verbose: bool,
