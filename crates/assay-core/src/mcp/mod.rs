@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod identity;
 pub mod jsonrpc;
 pub mod mapper_v2;
 pub mod parser;

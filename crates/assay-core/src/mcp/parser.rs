@@ -172,6 +172,7 @@ fn parse_tools_list_result(v: &serde_json::Value) -> Result<Vec<McpToolDef>> {
             name,
             description,
             input_schema,
+            tool_identity: None,
         });
     }
     Ok(out)

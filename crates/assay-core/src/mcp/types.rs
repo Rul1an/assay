@@ -1,3 +1,4 @@
+use super::identity::ToolIdentity;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,9 @@ pub struct McpToolDef {
     /// MCP often uses JSON Schema-like shapes; keep as Value.
     #[serde(default)]
     pub input_schema: Option<serde_json::Value>,
+    /// Cryptographic identity (computed at runtime or pinned in policy)
+    #[serde(default)]
+    pub tool_identity: Option<ToolIdentity>,
 }
 
 /// Wrapper for MCP events with metadata needed for deterministic sorting (P0.3).

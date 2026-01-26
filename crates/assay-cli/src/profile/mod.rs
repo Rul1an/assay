@@ -132,7 +132,7 @@ mod tests {
             home: Some(PathBuf::from("/home/u")),
             assay_tmp: Some(PathBuf::from("/tmp/assay-1000-999")),
         };
-        let mut c = ProfileCollector::new(cfg);
+        let c = ProfileCollector::new(cfg);
 
         c.record(ProfileEvent::Counter {
             name: "sandbox.env_strict_used".into(),
