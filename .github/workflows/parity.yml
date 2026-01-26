@@ -8,11 +8,7 @@ on:
       - 'crates/assay-metrics/**'
       - 'crates/assay-mcp-server/**'
   pull_request:
-    branches: [main]
-    paths:
-      - 'crates/assay-core/**'
-      - 'crates/assay-metrics/**'
-      - 'crates/assay-mcp-server/**'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

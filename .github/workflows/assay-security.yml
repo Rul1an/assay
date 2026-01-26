@@ -8,11 +8,7 @@ on:
       - "examples/**"
       - "**/*.mcp.json"
   pull_request:
-    paths:
-      - "assay.yaml"
-      - "policy.yaml"
-      - "examples/**"
-      - "**/*.mcp.json"
+  workflow_dispatch:
 
 jobs:
   security-check:
