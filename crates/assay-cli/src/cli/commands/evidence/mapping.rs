@@ -133,6 +133,8 @@ impl EvidenceMapper {
                 // Redaction for Observed mode:
                 // 1. Path Generalization: /home/roelschuurkes/file -> ~/**/file
                 // 2. Token Scrubbing: --token=xyz -> --token=***
+                // For v1, we assume Profile keys are generalized enough (e.g. /tmp/...)
+                // but we perform basic scrubbing of user homes and tokens.
                 self.scrub_subject(key)
             };
 
@@ -145,7 +147,7 @@ impl EvidenceMapper {
                     "runs_seen": entry.runs_seen,
                 })
             } else {
-                // Observed: Minimized payload
+                // Observed: Minimized payload (subject_key is intentionally omitted for privacy)
                 serde_json::json!({
                     "hits": entry.hits_total,
                 })
@@ -202,18 +204,20 @@ impl EvidenceMapper {
         let mut t_hasher = sha2::Sha256::new();
         t_hasher.update(self.run_id.as_bytes());
         let t_hash = hex::encode(t_hasher.finalize());
+        assert!(t_hash.len() >= 32, "SHA256 hex hash too short");
         let trace_id = &t_hash[..32];
 
         // SpanID determined by Event ID (uniqueness)
         let mut s_hasher = sha2::Sha256::new();
         s_hasher.update(id.as_bytes());
         let s_hash = hex::encode(s_hasher.finalize());
+        assert!(s_hash.len() >= 16, "SHA256 hex hash too short");
         let span_id = &s_hash[..16];
 
         let mut ev = EvidenceEvent::new(type_, &source, &self.run_id, self.seq, data);
         ev.id = id;
         ev.time = time;
-        if !subject.is_empty() && !subject.starts_with("urn:") {
+        if !subject.is_empty() {
             ev.subject = Some(subject.to_string());
         }
 

@@ -114,26 +114,27 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
 }
 
 fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
-    // 1. Verify (unless disabled)
-    let verified = if !args.no_verify {
-        let f = File::open(&args.bundle)?;
-        assay_evidence::bundle::verify_bundle(f).is_ok()
-    } else {
-        false
-    };
-
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
-    let br =
-        assay_evidence::bundle::BundleReader::open(f).context("failed to open bundle reader")?;
 
+    let br = if args.no_verify {
+        assay_evidence::bundle::BundleReader::open_unverified(f)
+    } else {
+        assay_evidence::bundle::BundleReader::open(f)
+    }
+    .context("failed to open bundle reader")?;
+
+    let verified = !args.no_verify; // If open() succeeded above, it IS verified.
     let manifest = br.manifest();
 
     if args.format == "json" {
-        // Just dump all events as JSON array?
-        // Or Manifest + Events?
-        println!("{}", serde_json::to_string_pretty(&manifest)?);
-        // Todo: iterate events and print
+        // Output complete bundle as JSON: manifest + events
+        let events = br.events().collect::<Result<Vec<_>>>()?;
+        let bundle_json = serde_json::json!({
+            "manifest": manifest,
+            "events": events,
+        });
+        println!("{}", serde_json::to_string_pretty(&bundle_json)?);
         return Ok(0);
     }
 
@@ -156,7 +157,8 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     );
     println!("Run ID:      {}", manifest.run_id);
     println!("Events:      {}", manifest.event_count);
-    println!("Run Root:    {}...", &manifest.run_root[..16]);
+    let run_root_display: String = manifest.run_root.chars().take(16).collect();
+    println!("Run Root:    {}...", run_root_display);
     println!();
     println!("{:<4} {:<25} {:<30} SUBJECT", "SEQ", "TIME", "TYPE");
     println!("{:-<4} {:-<25} {:-<30} {:-<20}", "", "", "", "");
@@ -167,17 +169,15 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
         // Truncate time for display
         let time_str = ev.time.to_rfc3339();
         let time_short = if time_str.len() > 19 {
-            &time_str[11..19]
+            // Safely extract HH:MM:SS
+            time_str.chars().skip(11).take(8).collect::<String>()
         } else {
-            &time_str
+            time_str.clone()
         };
 
         println!(
             "{:<4} {:<25} {:<30} {}",
-            ev.seq,
-            time_short, // Use full time or truncated? use full for now
-            ev.type_,
-            subject
+            ev.seq, time_short, ev.type_, subject
         );
     }
 
