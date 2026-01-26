@@ -1,51 +1,92 @@
 # ADR-006: Evidence Contract for Agent Runtime
 
 ## Status
-Proposed (Q1 2026 Strategy)
+**Adopted** (Q1 2026 Strategy)
 
 ## Context
 As agents move toward production, auditability and governance become primary requirements. Current logging is often non-standard and difficult to integrate with Enterprise security stacks. We need a first-class "Evidence Contract" that is tamper-evident, standardized, and interoperable.
 
 ## Decision
-Assay will adopt a multi-layer standardized Evidence Format.
+Assay will adopt a multi-layer standardized Evidence Format based on **CloudEvents v1.0** and **OpenTelemetry (OTel)** correlation.
 
-### 1. Envelope: CloudEvents v1.0
-All evidence events will follow the [CloudEvents](https://cloudevents.io/) specification. This ensures compatibility with SIEM/SOAR and event-driven architectures.
+### 1. Evidence Envelope (CloudEvents v1.0-style)
 
-| Field | Value / Description |
-| :--- | :--- |
-| `specversion` | "1.0" |
-| `type` | e.g., `assay.sandbox.v1.decision` |
-| `source` | URI of the assay runner/instance |
-| `subject` | e.g., `tool.read_file` |
-| `id` | Deterministic Event ID (see ADR-007) |
-| `time` | RFC 3339 Timestamp (UTC) |
+Every evidence record is an Event enveloping a type-specific Payload.
 
-### 2. Context: OpenTelemetry (OTel)
-To enable correlation across the agentic stack, all events must carry OTel trace and span IDs.
+**Schema:** `assay.evidence.event.v1`
 
+| Field | Type | Description | Invariants |
+| :--- | :--- | :--- | :--- |
+| `specversion` | `1.0` | CloudEvents spec version | Fixed string. |
+| `type` | string | Event Type URN | e.g. `assay.env.filtered`, `assay.tool.decision`. |
+| `source` | string | Producer Identifier | URI identifying the specific runner instance. |
+| `id` | string | Event ID | **Deterministic**: `sha256(canonical_event_input)`. See ADR-007. |
+| `time` | string | Timestamp (RFC3339) | UTC only. |
+| `subject` | string | Subject ID (optional) | e.g. `tool:read_file`, `user:123`. |
+| `trace_id` | string | OTel Trace ID | Required for correlation. |
+| `span_id` | string | OTel Span ID | Required for correlation. |
+| `run` | object | Run Context | `{ "run_id": "...", "seq": 42 }` (Monotonic sequence). |
+| `producer` | object | Producer Metadata | `{ "name": "assay", "version": "...", "git": "...", "platform": {...} }`. |
+| `policy_ref` | object | Policy Context | `{ "policy_id": "sha256:...", "source": "..." }`. |
+| `privacy` | object | Privacy Flags | `{ "contains_pii": false, "contains_secrets": false }`. |
+| `payload` | object | **Type-Specific Data** | Validated against `type` schema. |
+
+### 2. Privacy Classes (Data Protection)
+
+The format enforces strict redaction categories to ensure evidence is "safe by default" for storage.
+
+| Class | Description | Handling | Examples |
+| :--- | :--- | :--- | :--- |
+| **`public`** | Metadata, hashes, timestamps | Always logged | `event_type`, `run_id`, `tool_name` |
+| **`sensitive`** | Arguments, paths, env output | **Redacted** or Generalized | `path: /home/user/...` -> `~/***`, `env: AWS_KEY` -> `***` |
+| **`forbidden`** | Secrets, Tokens, PII | **Dropped** completely | `OPENAI_API_KEY` values, Authorization headers |
+
+### 3. Core Payload Schemas (v1)
+
+All payloads must be defined via stable JSON Schemas.
+
+#### A. `env.filtered` (Environment Hygiene)
+Records environment scrubbing results without leaking values.
 ```json
 {
-  "trace_id": "...",
-  "span_id": "...",
-  "parent_span_id": "..."
+  "mode": "strict|scrub|passthrough",
+  "passed_keys": ["PATH", "HOME"],
+  "dropped_keys": ["AWS_SECRET_ACCESS_KEY"],
+  "counters": { "passed": 2, "dropped": 1 }
 }
 ```
 
-### 3. Payload: Domain-Specific Evidence
-Specific event types for Assay operations:
-- **`assay.sandbox.started/finished`**: Metadata about the environment (OS, Landlock ABI, process).
-- **`assay.policy.decision`**: The core "Trust Event". Includes `code`, `reason`, `contract`, and `decision` (Allow/Deny/Partial).
-- **`assay.tool.invoked/result`**: Tool execution evidence. Includes `schema_hash` and `redacted_args`.
-- **`assay.integrity.failure`**: Special event for Tool Drift or Supply-Chain issues.
+#### B. `tool.decision` (Policy Enforcement)
+Records authorization decisions (HITL-ready, protocol-based).
+```json
+{
+  "tool": "read_file",
+  "decision": "allow|deny|requires_approval",
+  "reason_code": "E_POLICY_DENY",
+  "args_schema_hash": "sha256:..."
+}
+```
 
-### 4. Data Privacy Classes
-The format enforces strict redaction categories:
-- **`CLASS_PUBLIC`**: Meta-hash, tool name, timestamps. Always logged.
-- **`CLASS_SENSITIVE`**: Arguments, environment variables. Redacted/masked by default.
-- **`CLASS_FORBIDDEN`**: Secrets, tokens. Never recorded in evidence.
+#### C. `sandbox.degraded` (Operational Integrity)
+Records when security guarantees are weakened.
+```json
+{
+  "reason_code": "E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE",
+  "message": "Degrading to Audit mode due to conflict on non-Linux platform."
+}
+```
+
+#### D. `fs.observed` (Activity Log)
+Records filesystem activity with generalized paths.
+```json
+{
+  "op": "read|write|exec",
+  "path": "${ASSAY_TMP}/input.txt",
+  "backend": "landlock|ebpf"
+}
+```
 
 ## Consequences
-- Assay becomes interoperable with established observability and security stacks (OTel/SIEM).
-- The Evidence Format is the "Protocol" that connects the Open Source runner to the Paid Evidence Store.
-- High performance cost for canonicalization and hashing (offset by Blake3 speed).
+- **Interoperability**: Standard envelope allows ingestion by any CloudEvents-compatible system (Splunk, Azure Event Grid).
+- **Audit-Ready**: Separation of `sensitive` data ensures evidence can be stored long-term without GDPR/compliance risks.
+- **Strictness**: Breaking changes to schemas require new `type` versions (e.g. `assay.env.filtered.v2`).

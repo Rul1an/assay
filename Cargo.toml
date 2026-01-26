@@ -6,7 +6,7 @@ members = [
   "crates/assay-cli", "crates/assay-mcp-server",
   "crates/assay-xtask", "crates/assay-monitor",
   "crates/assay-ebpf", "crates/assay-common",
-  "assay-python-sdk", "crates/assay-policy",
+  "assay-python-sdk", "crates/assay-policy", "crates/assay-evidence",
 ]
 default-members = [
   "crates/assay-core",
@@ -33,7 +33,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "2.4.0"
+version = "2.5.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
@@ -64,12 +64,12 @@ codegen-units = 1
 
 [workspace.dependencies]
 # Internal crates
-assay-core = { path = "crates/assay-core", version = "2.3.1" }
-assay-common = { path = "crates/assay-common", version = "2.3.1", default-features = false }
-assay-monitor = { path = "crates/assay-monitor", version = "2.3.1" }
-assay-metrics = { path = "crates/assay-metrics", version = "2.3.1" }
-assay-policy = { path = "crates/assay-policy", version = "2.3.1" }
-assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.3.1" }
+assay-core = { path = "crates/assay-core", version = "2.5.0" }
+assay-common = { path = "crates/assay-common", version = "2.5.0", default-features = false }
+assay-monitor = { path = "crates/assay-monitor", version = "2.5.0" }
+assay-metrics = { path = "crates/assay-metrics", version = "2.5.0" }
+assay-policy = { path = "crates/assay-policy", version = "2.5.0" }
+assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.5.0" }
 
 # Common dependencies
 anyhow = "1"
