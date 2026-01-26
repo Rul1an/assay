@@ -162,8 +162,6 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
         metrics::increment("degraded_to_audit_conflict");
-
-        should_enforce = false;
     }
 
     // Spawn child with sandbox isolation

@@ -6,7 +6,7 @@ extends:
 fs:
   allow:
     - "./data/input.txt"
-  deny:
+  deny: []
 net:
   allow: []
   deny:
@@ -19,7 +19,7 @@ processes:
     - "/usr/bin/cat"
 meta:
   counters:
-    "sandbox.degrade_to_audit": 1
+    "sandbox.audit_fallback": 1
     "sandbox.env_strict_used": 1
   notes:
-    - "degraded: landlock policy conflict"
+    - "audit_fallback: landlock policy conflict"

@@ -8,7 +8,7 @@ fn test_profile_cli_workflow() -> anyhow::Result<()> {
     let out_yaml = tmp.path().join("policy.yaml");
     let out_report = tmp.path().join("report.md");
 
-    let mut cmd = Command::cargo_bin("assay")?;
+    let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
     cmd.arg("sandbox")
         .arg("--profile")
         .arg(&out_yaml)
@@ -37,7 +37,7 @@ fn test_profile_json_output() -> anyhow::Result<()> {
     let tmp = tempdir()?;
     let out_json = tmp.path().join("policy.json");
 
-    let mut cmd = Command::cargo_bin("assay")?;
+    let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
     cmd.arg("sandbox")
         .arg("--profile")
         .arg(&out_json)

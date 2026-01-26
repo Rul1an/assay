@@ -115,7 +115,7 @@ fn normalize_path(path: &Path) -> PathBuf {
                 // Only pop if we are not at root.
                 // For absolute paths, first component is RootDir.
                 // For relative paths, out might be empty.
-                if let Some(last) = out.components().last() {
+                if let Some(last) = out.components().next_back() {
                     if last != Component::RootDir {
                         out.pop();
                     }

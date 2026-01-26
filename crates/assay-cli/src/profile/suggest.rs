@@ -22,8 +22,10 @@ pub struct PolicySuggestion {
 }
 
 pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> PolicySuggestion {
-    let mut out = PolicySuggestion::default();
-    out.api_version = 1;
+    let mut out = PolicySuggestion {
+        api_version: 1,
+        ..PolicySuggestion::default()
+    };
 
     // Default base packs (future: configurable)
     out.extends.push("pack:deny-all".to_string());
