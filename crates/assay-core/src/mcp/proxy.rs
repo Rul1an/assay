@@ -13,6 +13,7 @@ pub struct ProxyConfig {
     pub dry_run: bool,
     pub verbose: bool,
     pub audit_log_path: Option<std::path::PathBuf>,
+    pub server_id: String,
 }
 
 pub struct McpProxy {
@@ -64,10 +65,52 @@ impl McpProxy {
             let mut line = String::new();
 
             while reader.read_line(&mut line)? > 0 {
+                let mut processed_line = line.clone();
+
+                // Phase 9: Compute Identities on tools/list response
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if let Some(result) = v.get_mut("result") {
+                        if let Some(tools) = result.get_mut("tools").and_then(|t| t.as_array_mut())
+                        {
+                            for tool in tools {
+                                let name = tool
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("unknown");
+                                let description = tool
+                                    .get("description")
+                                    .and_then(|d| d.as_str())
+                                    .map(|s| s.to_string());
+                                let input_schema = tool
+                                    .get("inputSchema")
+                                    .or_else(|| tool.get("input_schema"))
+                                    .cloned();
+
+                                let identity = super::identity::ToolIdentity::new(
+                                    &config.server_id,
+                                    name,
+                                    &input_schema,
+                                    &description,
+                                );
+
+                                // Augment the response with the computed identity for downstream/logging
+                                tool.as_object_mut().and_then(|m| {
+                                    m.insert(
+                                        "tool_identity".to_string(),
+                                        serde_json::to_value(&identity).unwrap(),
+                                    )
+                                });
+                            }
+                            processed_line =
+                                serde_json::to_string(&v).unwrap_or(line.clone()) + "\n";
+                        }
+                    }
+                }
+
                 let mut out = stdout_a
                     .lock()
                     .map_err(|e| io::Error::other(e.to_string()))?;
-                out.write_all(line.as_bytes())?;
+                out.write_all(processed_line.as_bytes())?;
                 out.flush()?;
                 line.clear();
             }

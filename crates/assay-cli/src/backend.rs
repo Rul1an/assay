@@ -137,7 +137,7 @@ mod landlock_impl {
 
     /// Probe-based Landlock ABI detection.
     pub(super) fn probe_abi() -> (bool, u32) {
-        let mut max_abi = 0;
+        let mut max_abi;
         // Check V1 (FS Read/Write/Exec)
         if Ruleset::default()
             .handle_access(AccessFs::from_all(ABI::V1))

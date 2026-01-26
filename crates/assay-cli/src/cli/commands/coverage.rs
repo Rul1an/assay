@@ -151,7 +151,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
                             .or_else(|| event.get("input")) // fallback for some formats
                             .unwrap_or(&args_default);
 
-                        let decision = policy_v2.evaluate(&tool_name, args, &mut state);
+                        let decision = policy_v2.evaluate(&tool_name, args, &mut state, None);
 
                         match decision {
                             assay_core::mcp::policy::PolicyDecision::Allow => {}

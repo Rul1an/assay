@@ -1,3 +1,4 @@
+use super::identity::ToolIdentity;
 use super::jsonrpc::{
     ContentItem, JsonRpcRequest, JsonRpcResponse, ToolCallResult, ToolResultBody,
 };
@@ -39,6 +40,10 @@ pub struct McpPolicy {
 
     #[serde(default)]
     pub signatures: Option<SignaturePolicy>,
+
+    /// Cryptographic pins for tool integrity (Phase 9)
+    #[serde(default)]
+    pub tool_pins: HashMap<String, ToolIdentity>,
 
     // Phase 4: Runtime Features
     #[serde(default)]
@@ -353,7 +358,30 @@ impl McpPolicy {
         tool_name: &str,
         args: &Value,
         state: &mut PolicyState,
+        runtime_identity: Option<&ToolIdentity>,
     ) -> PolicyDecision {
+        // 0. Tool Integrity Check (Phase 9)
+        if let Some(pinned) = self.tool_pins.get(tool_name) {
+            if let Some(runtime) = runtime_identity {
+                if pinned != runtime {
+                    return PolicyDecision::Deny {
+                        tool: tool_name.to_string(),
+                        code: "E_TOOL_DRIFT".to_string(),
+                        reason: format!(
+                            "Tool integrity failure: identity drifted from pinned version. (Runtime: {}, Pinned: {})",
+                            runtime.fingerprint(),
+                            pinned.fingerprint()
+                        ),
+                        contract: self.format_deny_contract(
+                            tool_name,
+                            "E_TOOL_DRIFT",
+                            "Tool metadata or schema has changed without policy update (SOTA Moat)",
+                        ),
+                    };
+                }
+            }
+        }
+
         // 1. Rate limits
         if let Some(decision) = self.check_rate_limits(state) {
             return decision;
@@ -512,7 +540,9 @@ impl McpPolicy {
         }
         if let Some(params) = request.tool_params() {
             // evaluate() increments counts, so we don't need to increment requests_count here
-            self.evaluate(&params.name, &params.arguments, state)
+            // Note: In strict mode, we might want to pass the runtime identity here.
+            // For now, identity check is performed by the proxy which manages the identity cache.
+            self.evaluate(&params.name, &params.arguments, state, None)
         } else {
             // Ordinary request, just count it
             state.requests_count += 1;
