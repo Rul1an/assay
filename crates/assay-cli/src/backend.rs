@@ -150,10 +150,11 @@ mod landlock_impl {
                 }
                 Ok(())
             }
-            Err(e) => {
-                // Convert landlock error to io::Error
-                // Landlock crate errors contain the errno internally
-                Err(std::io::Error::other(e))
+            Err(_e) => {
+                // Return a raw errno to satisfy SOTA fork-safety (async-signal-safe)
+                // Landlock crate errors usually result from syscalls with -1;
+                // we'll return EPERM as a safe generic failure if mapping is complex.
+                Err(std::io::Error::from_raw_os_error(libc::EPERM))
             }
         }
     }

@@ -126,6 +126,41 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     });
 
+    // Spawn child with sandbox isolation
+    let cmd_name = &args.command[0];
+    let cmd_args = &args.command[1..];
+
+    // PR7: record generalized argv0 if profiling
+    if let Some(p) = &mut profiler {
+        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+
+        // Resolve cmd_name via PATH if possible (deterministic resolution)
+        let resolved_cmd = if std::path::Path::new(cmd_name).is_absolute() {
+            std::path::PathBuf::from(cmd_name)
+        } else {
+            std::env::var_os("PATH")
+                .and_then(|paths| {
+                    std::env::split_paths(&paths).find_map(|dir| {
+                        let full_path = dir.join(cmd_name);
+                        if full_path.exists() {
+                            Some(full_path)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from(cmd_name))
+        };
+
+        let g = crate::profile::generalize::generalize_path(
+            &resolved_cmd,
+            &cwd,
+            home.as_deref(),
+            Some(&tmp_dir),
+        );
+        p.record(ProfileEvent::ExecObserved { argv0: g.rendered });
+    }
+
     // Check Landlock compatibility before start
     let compat = crate::landlock_check::check_compatibility(&policy, &cwd, &tmp_dir);
 
@@ -164,17 +199,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         metrics::increment("degraded_to_audit_conflict");
     }
 
-    // Spawn child with sandbox isolation
-    let cmd_name = &args.command[0];
-    let cmd_args = &args.command[1..];
-
     let mut cmd = tokio::process::Command::new(cmd_name);
-
-    if let Some(p) = &mut profiler {
-        p.record(ProfileEvent::ExecObserved {
-            argv0: cmd_name.clone(),
-        });
-    }
 
     cmd.args(cmd_args)
         .stdin(Stdio::inherit())
@@ -187,7 +212,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     for (key, value) in &env_result.filtered_env {
         cmd.env(key, value);
         if let Some(p) = &mut profiler {
-            p.record(ProfileEvent::EnvProvided {
+            p.record(ProfileEvent::EnvProvidedKeys {
                 key: key.clone(),
                 scrubbed: false, // TODO: if we implement partial scrubbing, track here
             });
@@ -385,7 +410,7 @@ fn maybe_profile_finish(prof: ProfileCollector, args: &SandboxArgs) -> anyhow::R
          - **Status**: Finished\n\
          - **Counters**: {:?}\n\
          - **Notes**: {:?}\n",
-        args.command, suggestion.counters, suggestion.notes
+        args.command, suggestion.meta.counters, suggestion.meta.notes
     );
 
     // Atomic write report too

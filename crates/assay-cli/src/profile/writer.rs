@@ -16,14 +16,14 @@ pub fn write_yaml(s: &PolicySuggestion) -> String {
 
     out.push_str("fs:\n");
     out.push_str("  allow:\n");
-    for p in &s.fs_allow {
+    for p in &s.fs.allow {
         out.push_str(&format!("    - \"{}\"\n", escape(p)));
     }
-    if s.fs_deny.is_empty() {
+    if s.fs.deny.is_empty() {
         out.push_str("  deny: []\n");
     } else {
         out.push_str("  deny:\n");
-        for p in &s.fs_deny {
+        for p in &s.fs.deny {
             out.push_str(&format!("    - \"{}\"\n", escape(p)));
         }
     }
@@ -31,29 +31,31 @@ pub fn write_yaml(s: &PolicySuggestion) -> String {
     out.push_str("net:\n");
     out.push_str("  allow: []\n");
     out.push_str("  deny:\n");
-    out.push_str("    - \"*:*\"\n");
+    for p in &s.net.deny {
+        out.push_str(&format!("    - \"{}\"\n", escape(p)));
+    }
 
     out.push_str("env:\n");
     out.push_str("  allow:\n");
-    for k in &s.env_allow {
+    for k in &s.env.allow {
         out.push_str(&format!("    - \"{}\"\n", escape(k)));
     }
 
     out.push_str("processes:\n");
     out.push_str("  allow:\n");
-    for x in &s.exec_allow {
+    for x in &s.processes.allow {
         out.push_str(&format!("    - \"{}\"\n", escape(x)));
     }
 
     out.push_str("meta:\n");
     out.push_str("  counters:\n");
-    for (k, v) in &s.counters {
+    for (k, v) in &s.meta.counters {
         out.push_str(&format!("    \"{}\": {}\n", escape(k), v));
     }
 
-    if !s.notes.is_empty() {
+    if !s.meta.notes.is_empty() {
         out.push_str("  notes:\n");
-        for n in &s.notes {
+        for n in &s.meta.notes {
             out.push_str(&format!("    - \"{}\"\n", escape(n)));
         }
     }

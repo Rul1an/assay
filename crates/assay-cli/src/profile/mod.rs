@@ -75,7 +75,7 @@ impl ProfileCollector {
             ProfileEvent::Counter { name, inc } => {
                 *self.agg.counters.entry(name).or_default() += inc;
             }
-            ProfileEvent::EnvProvided { key, scrubbed: _ } => {
+            ProfileEvent::EnvProvidedKeys { key, scrubbed: _ } => {
                 *self.agg.env_provided.entry(key).or_default() += 1;
             }
             ProfileEvent::ExecObserved { argv0 } => {
@@ -99,7 +99,7 @@ impl ProfileCollector {
                 *self
                     .agg
                     .counters
-                    .entry("sandbox.enforcement_failed".to_string())
+                    .entry("sandbox.fail_closed_triggered".to_string())
                     .or_default() += 1;
             }
         }
@@ -137,7 +137,7 @@ mod tests {
             name: "sandbox.env_strict_used".into(),
             inc: 1,
         });
-        c.record(ProfileEvent::EnvProvided {
+        c.record(ProfileEvent::EnvProvidedKeys {
             key: "FOO_FEATURE".into(),
             scrubbed: false,
         });

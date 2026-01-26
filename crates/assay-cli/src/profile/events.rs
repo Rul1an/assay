@@ -4,8 +4,8 @@ pub enum ProfileEvent {
     /// Generic counter (e.g., "sandbox.failsafe_triggered")
     Counter { name: String, inc: u64 },
 
-    /// Environment variable provided (after filtering)
-    EnvProvided {
+    /// Environment variable keys provided (after filtering)
+    EnvProvidedKeys {
         key: String,
         /// Whether the value was scrubbed/masked
         scrubbed: bool,
@@ -90,9 +90,9 @@ pub fn try_load_test_events() -> Option<Vec<ProfileEvent>> {
                 name: c.get("name")?.as_str()?.to_string(),
                 inc: c.get("inc")?.as_u64()?,
             });
-        } else if let Some(e) = obj.get("EnvProvided") {
+        } else if let Some(e) = obj.get("EnvProvidedKeys") {
             let e = e.as_object()?;
-            out.push(ProfileEvent::EnvProvided {
+            out.push(ProfileEvent::EnvProvidedKeys {
                 key: e.get("key")?.as_str()?.to_string(),
                 scrubbed: e.get("scrubbed")?.as_bool().unwrap_or(false),
             });

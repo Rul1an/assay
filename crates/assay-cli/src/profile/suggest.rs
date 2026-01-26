@@ -13,10 +13,37 @@ pub struct SuggestConfig {
 pub struct PolicySuggestion {
     pub api_version: u32,
     pub extends: Vec<String>,
-    pub fs_allow: BTreeSet<String>,
-    pub fs_deny: BTreeSet<String>,
-    pub env_allow: BTreeSet<String>,
-    pub exec_allow: BTreeSet<String>,
+    pub fs: FsPolicy,
+    pub net: NetPolicy,
+    pub env: EnvPolicy,
+    pub processes: ProcessPolicy,
+    pub meta: MetaPolicy,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FsPolicy {
+    pub allow: BTreeSet<String>,
+    pub deny: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct NetPolicy {
+    pub allow: BTreeSet<String>,
+    pub deny: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct EnvPolicy {
+    pub allow: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProcessPolicy {
+    pub allow: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MetaPolicy {
     pub notes: Vec<String>,
     pub counters: BTreeMap<String, u64>,
 }
@@ -32,15 +59,15 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
     out.extends.push("pack:mcp-server-minimal".to_string());
 
     // Counters
-    out.counters = report.agg.counters.clone();
+    out.meta.counters = report.agg.counters.clone();
 
     // Notes
-    out.notes = report.agg.notes.clone();
+    out.meta.notes = report.agg.notes.clone();
 
     // Environment: only keys are collected. Exclude SAFE_BASE to minimize policy noise.
     for k in report.agg.env_provided.keys() {
         if !crate::env_filter::matches_any_pattern(k, crate::env_filter::SAFE_BASE_PATTERNS) {
-            out.env_allow.insert(k.clone());
+            out.env.allow.insert(k.clone());
         }
     }
 
@@ -53,7 +80,7 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
             report.config.home.as_deref(),
             report.config.assay_tmp.as_deref(),
         );
-        out.exec_allow.insert(g.rendered);
+        out.processes.allow.insert(g.rendered);
     }
 
     // FS: Generalize paths
@@ -66,36 +93,36 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
             report.config.assay_tmp.as_deref(),
         );
 
-        // Future SOTA: different logic for read vs write?
-        // E.g. write to CWD -> suggest "./tmp/**" if it looks temporary?
-        // For now: exact generalized paths.
-
         match op {
             super::events::FsOp::Read => {
-                out.fs_allow.insert(g.rendered);
+                out.fs.allow.insert(g.rendered);
             }
             super::events::FsOp::Exec => {
-                out.fs_allow.insert(g.rendered);
+                out.fs.allow.insert(g.rendered);
             }
             super::events::FsOp::Write => {
-                // write needs allow too (Landlock rw often implies r)
-                out.fs_allow.insert(g.rendered);
+                out.fs.allow.insert(g.rendered);
             }
         }
     }
 
+    // Default deny for net if not already set (hardening)
+    out.net.deny.insert("*:*".to_string());
+
+    // Counters & Notes
+    out.meta.counters = report.agg.counters.clone();
+    out.meta.notes = report.agg.notes.clone();
+
     // Heuristic: If we allowed ${ASSAY_TMP}/..., maybe just allow ${ASSAY_TMP}/** once?
-    if cfg.widen_dirs_to_glob {
+    if cfg.widen_dirs_to_glob && report.config.assay_tmp.is_some() {
         let tmp_prefix = "${ASSAY_TMP}/";
-        let has_tmp = out.fs_allow.iter().any(|p| p.starts_with(tmp_prefix));
+        let has_tmp = out.fs.allow.iter().any(|p| p.starts_with(tmp_prefix));
         if has_tmp {
             // Remove individual tmp files
-            out.fs_allow.retain(|p| !p.starts_with(tmp_prefix));
+            out.fs.allow.retain(|p| !p.starts_with(tmp_prefix));
             // Add broad allow
-            out.fs_allow.insert("${ASSAY_TMP}/**".to_string());
+            out.fs.allow.insert("${ASSAY_TMP}/**".to_string());
         }
-
-        // Future: other widening heuristics based on cfg
     }
 
     out

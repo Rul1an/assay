@@ -1,10 +1,12 @@
 # ADR 001: Assay Sandbox Architecture (SOTA Refined)
 
-**Date**: 2026-01-25
+**Date**: 2026-01-26
 **Status**: Accepted
 
 ## Context
 Assay needs a "one command" sandbox experience (`assay sandbox -- cmd`) that works immediately for developers (DX) while providing robust security (SOTA). Running the entire agent as root is unsafe; requiring sudo for every run causes friction. We need a path that works unprivileged by default but can upgrade to full kernel enforcement seamlessly.
+
+As of Q1 2026, the SOTA for agentic security (e.g. MCPTox, OWASP LLM Top 10) emphasizes **Tool Poisoning** and **Indirect Prompt Injection** as primary threats. Assay must address these with high reliability and zero flakiness. Our architecture favors deterministic mechanisms (hashes, taint analysis) over non-deterministic LLM-based vetting.
 
 ## Decisions
 
@@ -39,9 +41,17 @@ Merge priority is deterministic to prevent "open by accident" flaws:
 *   **Union Strategy**: `allows` are additive; `denies` are additive.
 *   **Defaults**: The default policy is `mcp-server-minimal` (Deny Shell, Deny Secrets, Deny Outbound).
 
-### 5. Input/Output Hygiene (SOTA)
-*   **Environment Filtering**: Planned for PR4/PR5. v0.1 inherits env.
-*   **Future**: MCP-aware proxy for structured tool I/O interception.
+### 5. Deterministic SOTA Defense (Q1 2026)
+We prioritize deterministic, auditable security mechanisms over non-deterministic LLM-based semantic vetting:
+*   **Tool Identity & Provenance (MindGuard-aligned)**: Tools are identified by a tuple `(server_id, tool_name, schema_hash, description_hash)`. Metadata drift (e.g., description changes) is treated as a security event (Mitigating Tool Poisoning, MCPTox: 36.5%-72.8% success).
+*   **Prompt Injection Taint Analysis (OWASP-aligned)**: Untrusted data sources (tool outputs, web fetches) are labeled as `untrusted_content`. Lint rules prevent untrusted content from entering high-value instruction slots or system overrides.
+*   **Landlock ABI Matrix**: Sandboxing features (Net v4, ioctl v5, Scopes v6, Logging v7) are feature-gated based on detected kernel ABI. System degrades to audit or fails-closed based on feature criticality.
+
+### 6. CI-Friendly Human-in-the-Loop (HITL)
+High-risk tools (exec, write, secrets) require explicit approval:
+*   **Interactive Mode**: Approval prompts for developers.
+*   **CI Mode**: Approval via pre-signed tokens or environment lockfiles (PR review bypass).
+*   **Audit**: Every execution event records its justification and approval state.
 
 ## Interfaces
 

@@ -849,6 +849,14 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub timeout: Option<u64>,
 
+    /// Active enforcement: hard-block unauthorized actions
+    #[arg(long)]
+    pub enforce: bool,
+
+    /// Dry-run mode: allow and log unauthorized actions (exit 4 if they occur)
+    #[arg(long, conflicts_with = "enforce")]
+    pub dry_run: bool,
+
     /// Fail if policy cannot be enforced (exit 2)
     #[arg(long)]
     pub fail_closed: bool,
