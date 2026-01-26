@@ -699,6 +699,10 @@ pub struct McpWrapArgs {
     #[arg(long)]
     pub verbose: bool,
 
+    /// Unique label for this server (used for tool identity)
+    #[arg(long)]
+    pub label: Option<String>,
+
     /// Path to append-only audit log (JSONL)
     #[arg(long)]
     pub audit_log: Option<PathBuf>,

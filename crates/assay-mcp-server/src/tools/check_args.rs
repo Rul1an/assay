@@ -73,7 +73,7 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
     };
 
     // 3. Evaluate
-    let decision = policy.evaluate(tool_name, tool_args, &mut state);
+    let decision = policy.evaluate(tool_name, tool_args, &mut state, None);
 
     // 4. Transform Decision to Output
     match decision {

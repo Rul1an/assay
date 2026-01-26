@@ -28,7 +28,7 @@ fn test_v2_schema_validation_allow() {
     let mut state = PolicyState::default();
 
     let args = json!({ "path": "/safe/test.txt" });
-    let decision = policy.evaluate("read_file", &args, &mut state);
+    let decision = policy.evaluate("read_file", &args, &mut state, None);
 
     assert_eq!(decision, PolicyDecision::Allow);
 }
@@ -51,7 +51,7 @@ fn test_v2_schema_validation_deny() {
 
     // Violation: path does not match pattern
     let args = json!({ "path": "/unsafe/hack.sh" });
-    let decision = policy.evaluate("read_file", &args, &mut state);
+    let decision = policy.evaluate("read_file", &args, &mut state, None);
 
     if let PolicyDecision::Deny { code, .. } = decision {
         assert_eq!(code, "E_ARG_SCHEMA");
@@ -61,7 +61,7 @@ fn test_v2_schema_validation_deny() {
 
     // Violation: missing property
     let args_missing = json!({});
-    let decision_missing = policy.evaluate("read_file", &args_missing, &mut state);
+    let decision_missing = policy.evaluate("read_file", &args_missing, &mut state, None);
     if let PolicyDecision::Deny { code, .. } = decision_missing {
         assert_eq!(code, "E_ARG_SCHEMA");
     } else {
@@ -109,12 +109,12 @@ constraints:
     let mut state = PolicyState::default();
     let args_ok = json!({ "path": "/safe/file" });
     assert_eq!(
-        policy.evaluate("read_file", &args_ok, &mut state),
+        policy.evaluate("read_file", &args_ok, &mut state, None),
         PolicyDecision::Allow
     );
 
     let args_bad = json!({ "path": "/unsafe/file" });
-    match policy.evaluate("read_file", &args_bad, &mut state) {
+    match policy.evaluate("read_file", &args_bad, &mut state, None) {
         PolicyDecision::Deny { code, .. } => assert_eq!(code, "E_ARG_SCHEMA"),
         _ => panic!("Migrated policy failed to deny invalid arg"),
     }
@@ -127,7 +127,7 @@ fn test_enforcement_modes() {
     let mut state = PolicyState::default();
 
     // No schema for "unknown_tool"
-    let decision = policy.evaluate("unknown_tool", &json!({}), &mut state);
+    let decision = policy.evaluate("unknown_tool", &json!({}), &mut state, None);
     if let PolicyDecision::AllowWithWarning { code, .. } = decision {
         assert_eq!(code, "E_TOOL_UNCONSTRAINED");
     } else {
@@ -136,7 +136,7 @@ fn test_enforcement_modes() {
 
     // Change to Deny
     policy.enforcement.unconstrained_tools = UnconstrainedMode::Deny;
-    let decision_deny = policy.evaluate("unknown_tool", &json!({}), &mut state);
+    let decision_deny = policy.evaluate("unknown_tool", &json!({}), &mut state, None);
     if let PolicyDecision::Deny { code, .. } = decision_deny {
         assert_eq!(code, "E_TOOL_UNCONSTRAINED");
     } else {
@@ -145,7 +145,7 @@ fn test_enforcement_modes() {
 
     // Change to Allow
     policy.enforcement.unconstrained_tools = UnconstrainedMode::Allow;
-    let decision_allow = policy.evaluate("unknown_tool", &json!({}), &mut state);
+    let decision_allow = policy.evaluate("unknown_tool", &json!({}), &mut state, None);
     assert_eq!(decision_allow, PolicyDecision::Allow);
 }
 
@@ -176,18 +176,44 @@ fn test_defs_resolution() {
     // Valid
     let args_ok = json!({ "path": "/safe/ok" });
     assert_eq!(
-        policy.evaluate("refined_tool", &args_ok, &mut state),
+        policy.evaluate("refined_tool", &args_ok, &mut state, None),
         PolicyDecision::Allow
     );
 
     // Invalid
     let args_bad = json!({ "path": "/unsafe/bad" });
     if let PolicyDecision::Deny { code, .. } =
-        policy.evaluate("refined_tool", &args_bad, &mut state)
+        policy.evaluate("refined_tool", &args_bad, &mut state, None)
     {
         assert_eq!(code, "E_ARG_SCHEMA");
     } else {
         panic!("Expected Deny for ref violation");
+    }
+}
+#[test]
+fn test_tool_integrity_drift() {
+    use crate::mcp::identity::ToolIdentity;
+    let mut policy = McpPolicy::default();
+    let tool_name = "test_tool";
+    let pinned_id = ToolIdentity::new("srv1", tool_name, &None, &Some("old desc".into()));
+    let runtime_id = ToolIdentity::new("srv1", tool_name, &None, &Some("new desc".into()));
+
+    policy
+        .tool_pins
+        .insert(tool_name.to_string(), pinned_id.clone());
+    let mut state = PolicyState::default();
+
+    // Case 1: Match -> Allow (assuming no schema)
+    let tool_args = &json!({});
+    let decision = policy.evaluate(tool_name, tool_args, &mut state, None);
+    assert!(matches!(decision, PolicyDecision::AllowWithWarning { .. }));
+
+    // Case 2: Mismatch -> Deny
+    let decision_fail = policy.evaluate(tool_name, &json!({}), &mut state, Some(&runtime_id));
+    if let PolicyDecision::Deny { code, .. } = decision_fail {
+        assert_eq!(code, "E_TOOL_DRIFT");
+    } else {
+        panic!("Expected E_TOOL_DRIFT, got {:?}", decision_fail);
     }
 }
 

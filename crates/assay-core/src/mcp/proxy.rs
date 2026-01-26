@@ -2,6 +2,7 @@ use super::audit::{AuditEvent, AuditLog};
 use super::jsonrpc::JsonRpcRequest;
 use super::policy::{make_deny_response, McpPolicy, PolicyDecision, PolicyState};
 use std::{
+    collections::HashMap,
     io::{self, BufRead, BufReader, Write},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -20,6 +21,8 @@ pub struct McpProxy {
     child: Child,
     policy: McpPolicy,
     config: ProxyConfig,
+    /// Cache of tool identities discovered during tools/list
+    identity_cache: Arc<Mutex<HashMap<String, super::identity::ToolIdentity>>>,
 }
 
 impl Drop for McpProxy {
@@ -47,6 +50,7 @@ impl McpProxy {
             child,
             policy,
             config,
+            identity_cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -57,6 +61,8 @@ impl McpProxy {
         let stdout = Arc::new(Mutex::new(io::stdout()));
         let policy = self.policy.clone();
         let config = self.config.clone();
+        let identity_cache_a = self.identity_cache.clone();
+        let identity_cache_b = self.identity_cache.clone();
 
         // Thread A: server -> client passthrough
         let stdout_a = stdout.clone();
@@ -92,6 +98,10 @@ impl McpProxy {
                                     &input_schema,
                                     &description,
                                 );
+
+                                // Cache for runtime verification
+                                let mut cache = identity_cache_a.lock().unwrap();
+                                cache.insert(name.to_string(), identity.clone());
 
                                 // Augment the response with the computed identity for downstream/logging
                                 tool.as_object_mut().and_then(|m| {
@@ -131,8 +141,23 @@ impl McpProxy {
                 // 1. Try Parse as MCP Request
                 match serde_json::from_str::<JsonRpcRequest>(&line) {
                     Ok(req) => {
-                        // 2. Check Policy
-                        match policy.check(&req, &mut state) {
+                        // 2. Check Policy with Identity (Phase 9)
+                        let runtime_id = if req.is_tool_call() {
+                            let name = req.tool_params().map(|p| p.name).unwrap_or_default();
+                            let cache = identity_cache_b.lock().unwrap();
+                            cache.get(&name).cloned()
+                        } else {
+                            None
+                        };
+
+                        match policy.evaluate(
+                            &req.tool_params().map(|p| p.name).unwrap_or_default(),
+                            &req.tool_params()
+                                .map(|p| p.arguments)
+                                .unwrap_or(serde_json::Value::Null),
+                            &mut state,
+                            runtime_id.as_ref(),
+                        ) {
                             PolicyDecision::Allow => {
                                 Self::handle_allow(&req, &mut audit_log, config.verbose);
                             }

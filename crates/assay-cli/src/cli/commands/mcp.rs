@@ -40,6 +40,7 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         dry_run: args.dry_run,
         verbose: args.verbose,
         audit_log_path: args.audit_log,
+        server_id: args.label.unwrap_or_else(|| "default-mcp-server".into()),
     };
 
     if config.dry_run {
