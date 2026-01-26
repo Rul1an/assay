@@ -232,10 +232,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
         metrics::increment("degraded_to_audit_conflict");
-        #[cfg(all(target_os = "linux", target_family = "unix"))]
-        {
-            actual_enforcement = false;
-        }
+        actual_enforcement = false;
     }
 
     let mut cmd = tokio::process::Command::new(cmd_name);
@@ -321,8 +318,8 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 
     if let Some(p) = profiler {
-        // PR8: Dry-run violation detection
-        let report = p.clone().finish();
+        // PR8: Dry-run violation detection - Finish only once!
+        let report = p.finish();
         let suggestions = report.to_suggestion(crate::profile::suggest::SuggestConfig {
             widen_dirs_to_glob: false,
         });
@@ -330,8 +327,8 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         if args.dry_run {
             let mut violations = 0;
             // Heuristic: if suggestions contain FS paths not in original policy, it's a violation
-            for path in suggestions.fs.allow {
-                if !policy.fs.allow.iter().any(|p| p == &path) {
+            for path in &suggestions.fs.allow {
+                if !policy.fs.allow.iter().any(|p| p == path) {
                     violations += 1;
                     if !args.quiet {
                         eprintln!(
@@ -347,12 +344,12 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                     eprintln!("──────────────────");
                     eprintln!("DRY-RUN: Found {} potential violations.", violations);
                 }
-                maybe_profile_finish(p, &args)?;
+                maybe_profile_finish(report, &args)?;
                 return Ok(exit_codes::WOULD_BLOCK);
             }
         }
 
-        maybe_profile_finish(p, &args)?;
+        maybe_profile_finish(report, &args)?;
     }
 
     match status.code() {
@@ -443,8 +440,10 @@ fn maybe_profile_begin(
     }))
 }
 
-fn maybe_profile_finish(prof: ProfileCollector, args: &SandboxArgs) -> anyhow::Result<()> {
-    let report = prof.finish();
+fn maybe_profile_finish(
+    report: crate::profile::ProfileReport,
+    args: &SandboxArgs,
+) -> anyhow::Result<()> {
     // Default SuggestConfig: widen dirs to glob by default for SOTA DX
     let sugg_cfg = crate::profile::suggest::SuggestConfig {
         widen_dirs_to_glob: true,

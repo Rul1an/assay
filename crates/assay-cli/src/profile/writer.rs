@@ -29,7 +29,14 @@ pub fn write_yaml(s: &PolicySuggestion) -> String {
     }
 
     out.push_str("net:\n");
-    out.push_str("  allow: []\n");
+    if s.net.allow.is_empty() {
+        out.push_str("  allow: []\n");
+    } else {
+        out.push_str("  allow:\n");
+        for p in &s.net.allow {
+            out.push_str(&format!("    - \"{}\"\n", escape(p)));
+        }
+    }
     out.push_str("  deny:\n");
     for p in &s.net.deny {
         out.push_str(&format!("    - \"{}\"\n", escape(p)));

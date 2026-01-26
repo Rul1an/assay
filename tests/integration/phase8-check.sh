@@ -63,6 +63,6 @@ echo "--- Checking Fail-closed Logic ---"
 echo "✅ Fail-closed contract verified"
 
 # Cleanup
-rm -f phase8_denied.yaml trace.yaml
+rm -f phase8_denied.yaml trace.yaml trace.yaml.report.md
 
 echo "🎉 Phase 8 Check Complete!"

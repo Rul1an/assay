@@ -109,10 +109,6 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
     // Default deny for net if not already set (hardening)
     out.net.deny.insert("*:*".to_string());
 
-    // Counters & Notes
-    out.meta.counters = report.agg.counters.clone();
-    out.meta.notes = report.agg.notes.clone();
-
     // Heuristic: If we allowed ${ASSAY_TMP}/..., maybe just allow ${ASSAY_TMP}/** once?
     if cfg.widen_dirs_to_glob && report.config.assay_tmp.is_some() {
         let tmp_prefix = "${ASSAY_TMP}/";
