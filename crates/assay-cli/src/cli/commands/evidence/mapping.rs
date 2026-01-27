@@ -34,6 +34,7 @@ impl EvidenceMapper {
             let mut hasher = sha2::Sha256::new();
             hasher.update(profile_name.as_bytes());
             let hash = hex::encode(hasher.finalize());
+            assert!(hash.len() >= 16, "SHA256 hex hash too short");
             format!("run_{}", &hash[..16])
         };
 
@@ -134,11 +135,9 @@ impl EvidenceMapper {
             let subject: String = if detail == DetailLevel::Full {
                 key.clone()
             } else {
-                // Redaction for Observed mode:
-                // 1. Path Generalization: /home/roelschuurkes/file -> ~/**/file
-                // 2. Token Scrubbing: --token=xyz -> --token=***
-                // For v1, we assume Profile keys are generalized enough (e.g. /tmp/...)
-                // but we perform basic scrubbing of user homes and tokens.
+                // Observed mode:
+                // We perform basic scrubbing of user homes and tokens to ensure
+                // that generalized paths (which Profile stores) are doubly-vetted.
                 self.scrub_subject(key)
             };
 
@@ -287,12 +286,12 @@ mod tests {
         let mapper = EvidenceMapper::new(None, "test");
         // Mixed case
         assert_eq!(
-            mapper.scrub_subject("curl -H 'Authorization: Bearer xyz'"),
+            mapper.scrub_subject("curl -H 'Authorization: Bearer MOCKED_TOKEN'"),
             "curl -H 'Authorization: Bearer ***"
         );
         // Lower case
         assert_eq!(
-            mapper.scrub_subject("curl -H 'authorization: bearer xyz'"),
+            mapper.scrub_subject("curl -H 'authorization: bearer MOCKED_TOKEN'"),
             "curl -H 'authorization: bearer ***"
         );
         assert_eq!(
