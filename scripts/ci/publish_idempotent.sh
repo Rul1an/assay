@@ -12,6 +12,7 @@ CRATES=(
   "assay-policy"
   "assay-mcp-server"
   "assay-monitor"
+  "assay-sim"
   "assay-cli"
 )
 

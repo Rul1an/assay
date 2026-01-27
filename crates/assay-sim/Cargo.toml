@@ -1,11 +1,11 @@
 [package]
 name = "assay-sim"
 version = "2.7.0"
-publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+description = "Simulation harness for Assay (internal, API unstable)"
 
 [dependencies]
 anyhow = { workspace = true }
