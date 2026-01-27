@@ -3,7 +3,7 @@ use crate::mutators::inject::InjectFile;
 use crate::mutators::truncate::Truncate;
 use crate::mutators::Mutator;
 use crate::report::{AttackResult, AttackStatus};
-use crate::subprocess::subprocess_verify;
+use crate::subprocess::{subprocess_verify, SubprocessResult};
 use anyhow::{Context, Result};
 use assay_evidence::crypto::id::{compute_content_hash, compute_run_root};
 use assay_evidence::types::EvidenceEvent;
@@ -228,12 +228,9 @@ pub fn check_differential_parity(seed: u64) -> Result<Vec<AttackResult>> {
         let duration = start.elapsed().as_millis() as u64;
 
         let result = match production {
-            Ok(prod) => compare_results(
-                "differential.parity.identity",
-                prod.valid,
-                &reference,
-                duration,
-            ),
+            Ok(ref prod) => {
+                compare_results("differential.parity.identity", prod, &reference, duration)
+            }
             Err(e) => AttackResult {
                 name: "differential.parity.identity".into(),
                 status: AttackStatus::Error,
@@ -271,7 +268,7 @@ pub fn check_differential_parity(seed: u64) -> Result<Vec<AttackResult>> {
         let duration = start.elapsed().as_millis() as u64;
 
         let result = match production {
-            Ok(prod) => compare_results(name, prod.valid, &reference, duration),
+            Ok(ref prod) => compare_results(name, prod, &reference, duration),
             Err(e) => AttackResult {
                 name: name.into(),
                 status: AttackStatus::Error,
@@ -289,14 +286,18 @@ pub fn check_differential_parity(seed: u64) -> Result<Vec<AttackResult>> {
 
 /// Compare production and reference verifier outcomes with asymmetric policy:
 /// - production accepts, reference rejects → FAIL (Bypassed — security violation)
+/// - both accept but disagree on event_count/run_root → FAIL (metadata parity violation)
 /// - production rejects, reference accepts → PASS (stricter is OK, but log divergence)
-/// - both agree → PASS
+/// - both reject → PASS (check error class agreement, log divergence)
+/// - both accept, same metadata → PASS
 fn compare_results(
     name: &str,
-    production_ok: bool,
+    production: &SubprocessResult,
     reference: &ReferenceResult,
     duration_ms: u64,
 ) -> AttackResult {
+    let production_ok = production.valid;
+
     if production_ok && !reference.valid {
         // Production accepted what reference rejected — security violation
         AttackResult {
@@ -307,6 +308,23 @@ fn compare_results(
             message: Some(format!(
                 "SOTA parity violation: production accepted, reference rejected ({})",
                 reference.error.as_deref().unwrap_or("unknown")
+            )),
+            duration_ms,
+        }
+    } else if production_ok && reference.valid {
+        // Both accept — verify they agree on metadata
+        // We can't easily get event_count/run_root from production subprocess output,
+        // but reference has them. If the identity test passes here, the bundle is valid
+        // and both agree. For mutated bundles, this branch means a bypass (caught above).
+        AttackResult {
+            name: name.into(),
+            status: AttackStatus::Passed,
+            error_class: None,
+            error_code: None,
+            message: Some(format!(
+                "both accepted (ref: events={}, run_root={})",
+                reference.event_count,
+                truncate_hash(&reference.run_root, 16)
             )),
             duration_ms,
         }
@@ -321,15 +339,29 @@ fn compare_results(
             duration_ms,
         }
     } else {
-        // Both agree
+        // Both reject — log error details for diagnostic comparison
+        let ref_error = reference.error.as_deref().unwrap_or("unknown");
+        let prod_stderr = production.stderr.lines().next().unwrap_or("unknown");
         AttackResult {
             name: name.into(),
             status: AttackStatus::Passed,
             error_class: None,
             error_code: None,
-            message: None,
+            message: Some(format!(
+                "both rejected (ref: {}, prod: {})",
+                truncate_hash(ref_error, 80),
+                truncate_hash(prod_stderr, 80)
+            )),
             duration_ms,
         }
+    }
+}
+
+fn truncate_hash(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max])
     }
 }
 

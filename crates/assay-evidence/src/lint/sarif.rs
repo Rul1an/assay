@@ -86,6 +86,15 @@ pub fn to_sarif(report: &LintReport) -> serde_json::Value {
         })
         .collect();
 
+    // automationDetails.id includes run_id to distinguish uploads per bundle.
+    // Fingerprints are stable within a bundle (rule_id + event position), so same
+    // findings in the same bundle across reruns will be deduped by GitHub.
+    // Different bundles get different automation IDs, preventing cross-bundle dedup.
+    let automation_id = format!(
+        "assay-evidence/lint/{}/{}",
+        report.bundle_meta.run_id, report.tool_version
+    );
+
     json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -99,7 +108,10 @@ pub fn to_sarif(report: &LintReport) -> serde_json::Value {
                 }
             },
             "automationDetails": {
-                "id": format!("assay-evidence/lint/default@{}", report.tool_version)
+                "id": automation_id,
+                "description": {
+                    "text": format!("Lint results for bundle {}", report.bundle_meta.run_id)
+                }
             },
             "results": results
         }]

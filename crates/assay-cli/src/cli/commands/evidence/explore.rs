@@ -401,3 +401,153 @@ fn truncate_str(s: &str, max: usize) -> String {
         format!("{}...", truncated)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- truncate_str tests (UTF-8 safety) --
+
+    #[test]
+    fn test_truncate_str_ascii() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("hello world", 8), "hello...");
+    }
+
+    #[test]
+    fn test_truncate_str_multibyte_utf8() {
+        // 世界 is 2 chars, 6 bytes. Must not panic on byte boundary.
+        let input = "Hello 世界 🌍 test";
+        let result = truncate_str(input, 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() <= 10);
+    }
+
+    #[test]
+    fn test_truncate_str_exact_boundary() {
+        assert_eq!(truncate_str("abcde", 5), "abcde");
+        assert_eq!(truncate_str("abcdef", 5), "ab...");
+    }
+
+    // -- Input filtering tests --
+
+    #[test]
+    fn test_search_input_rejects_control_chars() {
+        // Simulate what the input handler does
+        let c = '\x1b'; // ESC character
+        assert!(c.is_control(), "ESC should be classified as control");
+
+        let c2 = '\x07'; // BEL
+        assert!(c2.is_control(), "BEL should be classified as control");
+
+        let c3 = '\x00'; // NUL
+        assert!(c3.is_control(), "NUL should be classified as control");
+
+        // Normal chars should pass
+        assert!(!'/'.is_control());
+        assert!(!'a'.is_control());
+        assert!(!'世'.is_control());
+    }
+
+    #[test]
+    fn test_search_query_length_cap() {
+        let mut query = String::new();
+        for _ in 0..QUERY_MAX_LEN + 50 {
+            let c = 'a';
+            if !c.is_control() && query.chars().count() < QUERY_MAX_LEN {
+                query.push(c);
+            }
+        }
+        assert_eq!(query.chars().count(), QUERY_MAX_LEN);
+    }
+
+    // -- AppState visible cache tests --
+
+    #[test]
+    fn test_visible_cache_filters_events() {
+        let events = vec![
+            make_test_event(0, "assay.net.connect", Some("api.example.com")),
+            make_test_event(1, "assay.fs.access", Some("/etc/passwd")),
+            make_test_event(2, "assay.net.connect", Some("evil.example.com")),
+        ];
+
+        let mut state = AppState {
+            events,
+            list_state: ListState::default(),
+            search_query: "evil".into(),
+            filter_type: String::new(),
+            mode: AppMode::Normal,
+            run_id: "test".into(),
+            event_count: 3,
+            verified: true,
+            visible_cache: Vec::new(),
+            cache_dirty: true,
+        };
+        state.ensure_visible_cache();
+
+        assert_eq!(state.visible_cache.len(), 1);
+        assert_eq!(state.visible_cache[0], 2); // only the evil.example.com event
+    }
+
+    #[test]
+    fn test_visible_cache_filter_type() {
+        let events = vec![
+            make_test_event(0, "assay.net.connect", Some("host")),
+            make_test_event(1, "assay.fs.access", Some("path")),
+            make_test_event(2, "assay.net.connect", Some("other")),
+        ];
+
+        let mut state = AppState {
+            events,
+            list_state: ListState::default(),
+            search_query: String::new(),
+            filter_type: "fs".into(),
+            mode: AppMode::Normal,
+            run_id: "test".into(),
+            event_count: 3,
+            verified: true,
+            visible_cache: Vec::new(),
+            cache_dirty: true,
+        };
+        state.ensure_visible_cache();
+
+        assert_eq!(state.visible_cache.len(), 1);
+        assert_eq!(state.visible_cache[0], 1);
+    }
+
+    #[test]
+    fn test_invalidate_cache_recomputes() {
+        let events = vec![make_test_event(0, "assay.test", Some("hello"))];
+        let mut state = AppState {
+            events,
+            list_state: ListState::default(),
+            search_query: String::new(),
+            filter_type: String::new(),
+            mode: AppMode::Normal,
+            run_id: "test".into(),
+            event_count: 1,
+            verified: true,
+            visible_cache: vec![0],
+            cache_dirty: false,
+        };
+
+        // Initially 1 visible event
+        assert_eq!(state.visible_cache.len(), 1);
+
+        // Set search that filters everything, invalidate cache
+        state.search_query = "nonexistent".into();
+        state.invalidate_cache();
+        state.ensure_visible_cache();
+
+        assert_eq!(state.visible_cache.len(), 0);
+    }
+
+    fn make_test_event(seq: u64, type_: &str, subject: Option<&str>) -> EvidenceEvent {
+        let mut event =
+            EvidenceEvent::new(type_, "urn:test", "testrun", seq, serde_json::json!({}));
+        if let Some(s) = subject {
+            event = event.with_subject(s);
+        }
+        event
+    }
+}

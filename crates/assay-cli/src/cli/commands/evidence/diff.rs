@@ -92,13 +92,25 @@ fn cmd_write_baseline(args: &DiffArgs) -> Result<i32> {
         .as_ref()
         .context("--write-baseline requires --key")?;
 
-    let target_path = dir.join(format!("{}.tar.gz", key));
+    // Path safety: reject keys that could escape the baseline directory
+    validate_baseline_key(key)?;
+
+    // Canonicalize dir (after creating it) and ensure target stays within it
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create baseline dir {}", dir.display()))?;
+    let canonical_dir = dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize baseline dir {}", dir.display()))?;
+    let canonical_target = canonical_dir.join(format!("{}.tar.gz", key));
+    if !canonical_target.starts_with(&canonical_dir) {
+        anyhow::bail!("baseline key '{}' would escape baseline directory", key);
+    }
 
     // Safety: don't overwrite unless --update-baseline is set
-    if target_path.exists() && !args.update_baseline {
+    if canonical_target.exists() && !args.update_baseline {
         anyhow::bail!(
             "Baseline already exists at {}. Use --update-baseline to overwrite.",
-            target_path.display()
+            canonical_target.display()
         );
     }
 
@@ -111,25 +123,62 @@ fn cmd_write_baseline(args: &DiffArgs) -> Result<i32> {
     let _ = assay_evidence::bundle::BundleReader::open(candidate_file)
         .context("candidate bundle verification failed — refusing to write as baseline")?;
 
-    // Create baseline directory if needed
-    std::fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create baseline dir {}", dir.display()))?;
-
-    // Copy candidate to baseline location
-    std::fs::copy(candidate_path, &target_path).with_context(|| {
+    // Atomic write: copy to temp file in same dir, then rename
+    let tmp_path = canonical_dir.join(format!(".{}.tar.gz.tmp", key));
+    std::fs::copy(candidate_path, &tmp_path).with_context(|| {
         format!(
-            "failed to copy {} to {}",
+            "failed to copy {} to temp {}",
             candidate_path.display(),
-            target_path.display()
+            tmp_path.display()
+        )
+    })?;
+    std::fs::rename(&tmp_path, &canonical_target).with_context(|| {
+        format!(
+            "failed to rename {} to {}",
+            tmp_path.display(),
+            canonical_target.display()
         )
     })?;
 
-    eprintln!("Baseline written to {}", target_path.display());
+    eprintln!("Baseline written to {}", canonical_target.display());
     Ok(0)
+}
+
+/// Validate that a baseline key is safe for use as a filename component.
+///
+/// Rejects path separators, parent directory traversal, and other unsafe patterns.
+fn validate_baseline_key(key: &str) -> Result<()> {
+    if key.is_empty() {
+        anyhow::bail!("baseline key must not be empty");
+    }
+    if key.contains('/') || key.contains('\\') {
+        anyhow::bail!(
+            "baseline key '{}' contains path separators — this is not allowed",
+            key
+        );
+    }
+    if key.contains("..") {
+        anyhow::bail!(
+            "baseline key '{}' contains '..' — path traversal is not allowed",
+            key
+        );
+    }
+    if key.starts_with('.') {
+        anyhow::bail!(
+            "baseline key '{}' starts with '.' — hidden files are not allowed",
+            key
+        );
+    }
+    // Reject any control characters
+    if key.chars().any(|c| c.is_control()) {
+        anyhow::bail!("baseline key contains control characters — this is not allowed");
+    }
+    Ok(())
 }
 
 fn resolve_paths(args: &DiffArgs) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     if let (Some(dir), Some(key)) = (&args.baseline_dir, &args.key) {
+        validate_baseline_key(key)?;
         // --baseline-dir mode: first positional arg is the candidate
         let baseline_path = dir.join(format!("{}.tar.gz", key));
         let candidate_path = args.baseline.clone();
@@ -156,4 +205,48 @@ fn print_diff_set(category: &str, diff: &assay_evidence::diff::DiffSet) {
         eprintln!("  - {}", removed);
     }
     eprintln!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_baseline_key_rejects_path_traversal() {
+        assert!(validate_baseline_key("../pwn").is_err());
+        assert!(validate_baseline_key("..").is_err());
+        assert!(validate_baseline_key("foo/../bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_key_rejects_path_separators() {
+        assert!(validate_baseline_key("a/b").is_err());
+        assert!(validate_baseline_key("a\\b").is_err());
+        assert!(validate_baseline_key("/absolute").is_err());
+        assert!(validate_baseline_key("\\windows").is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_key_rejects_hidden_files() {
+        assert!(validate_baseline_key(".hidden").is_err());
+        assert!(validate_baseline_key(".").is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_key_rejects_empty() {
+        assert!(validate_baseline_key("").is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_key_rejects_control_chars() {
+        assert!(validate_baseline_key("foo\x00bar").is_err());
+        assert!(validate_baseline_key("foo\nbar").is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_key_accepts_valid() {
+        assert!(validate_baseline_key("my-baseline").is_ok());
+        assert!(validate_baseline_key("test_v2").is_ok());
+        assert!(validate_baseline_key("2024-01-15-nightly").is_ok());
+    }
 }

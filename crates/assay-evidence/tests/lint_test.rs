@@ -112,9 +112,30 @@ fn test_sarif_output_valid() {
     assert!(run["tool"]["driver"]["rules"].is_array());
     assert!(run["results"].is_array());
 
-    // Check automation details
+    // Check automation details — includes run_id for cross-bundle uniqueness
     let automation_id = run["automationDetails"]["id"].as_str().unwrap();
-    assert!(automation_id.starts_with("assay-evidence/lint/default@"));
+    assert!(
+        automation_id.starts_with("assay-evidence/lint/"),
+        "automation_id should start with 'assay-evidence/lint/', got: {}",
+        automation_id
+    );
+
+    // Check security-severity on rules that have it
+    let rules = run["tool"]["driver"]["rules"].as_array().unwrap();
+    let w001_rule = rules.iter().find(|r| r["id"] == "ASSAY-W001").unwrap();
+    let security_sev = w001_rule["properties"]["security-severity"]
+        .as_str()
+        .unwrap();
+    assert_eq!(security_sev, "7.0");
+
+    // Check fingerprint on results
+    let results = run["results"].as_array().unwrap();
+    assert!(!results.is_empty());
+    let first_result = &results[0];
+    let fp = first_result["partialFingerprints"]["assayLintFingerprint/v1"]
+        .as_str()
+        .unwrap();
+    assert!(fp.starts_with("sha256:"));
 }
 
 #[test]
