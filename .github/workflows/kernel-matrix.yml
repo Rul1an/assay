@@ -14,10 +14,6 @@ on:
       - ".github/workflows/kernel-matrix.yml"
       - "Cargo.toml"
       - "Cargo.lock"
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
-      - ".gitignore"
   push:
     branches: [ "main", "debug/**" ]
 
