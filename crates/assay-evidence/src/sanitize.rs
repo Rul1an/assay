@@ -101,7 +101,14 @@ fn strip_escape_sequences(input: &str) -> String {
     String::from_utf8_lossy(&result).to_string()
 }
 
-/// Replace control characters (0x00-0x1F except \n and \t) with U+FFFD.
+/// Replace control characters with U+FFFD.
+///
+/// Covers both C0 controls (U+0000–U+001F, except \n and \t) and C1 controls
+/// (U+0080–U+009F). C1 includes 8-bit variants of CSI (0x9B), OSC (0x9D),
+/// and DCS (0x90) which some terminals (xterm in latin1 mode, rxvt) still
+/// interpret. Stripping them at the char level is safe because in valid UTF-8
+/// these are encoded as two-byte sequences (0xC2 0x80–0xC2 0x9F), never as
+/// raw single bytes that could collide with UTF-8 continuation bytes.
 fn replace_control_chars(input: &str) -> String {
     input
         .chars()
@@ -109,6 +116,13 @@ fn replace_control_chars(input: &str) -> String {
             if c == '\n' || c == '\t' {
                 c
             } else if c.is_control() && (c as u32) < 0x20 {
+                // C0 controls (NUL, SOH, ..., US) except newline/tab
+                '\u{FFFD}'
+            } else if (c as u32) == 0x7F {
+                // DEL
+                '\u{FFFD}'
+            } else if (0x80..=0x9F).contains(&(c as u32)) {
+                // C1 controls (includes 8-bit CSI, OSC, DCS variants)
                 '\u{FFFD}'
             } else {
                 c
@@ -182,6 +196,61 @@ mod tests {
         assert_eq!(sanitize_terminal("\x1bNAhello"), "hello");
         // SS3: ESC O + byte
         assert_eq!(sanitize_terminal("\x1bOBhello"), "hello");
+    }
+
+    #[test]
+    fn test_c1_controls_stripped() {
+        // U+009B = 8-bit CSI (could start escape sequence on some terminals)
+        let input = "hello\u{009B}31mworld";
+        let result = sanitize_terminal(input);
+        assert!(
+            !result.contains('\u{009B}'),
+            "C1 CSI (U+009B) should be replaced"
+        );
+        assert!(result.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_c1_osc_stripped() {
+        // U+009D = 8-bit OSC
+        let input = "before\u{009D}8;;https://evil.com\x07after";
+        let result = sanitize_terminal(input);
+        assert!(
+            !result.contains('\u{009D}'),
+            "C1 OSC (U+009D) should be replaced"
+        );
+    }
+
+    #[test]
+    fn test_c1_all_variants_stripped() {
+        // U+009B (CSI), U+009D (OSC), U+0090 (DCS), U+009C (ST)
+        let input = "a\u{009B}b\u{009D}c\u{0090}d\u{009C}e";
+        let out = sanitize_terminal(input);
+        assert!(!out.contains('\u{009B}'));
+        assert!(!out.contains('\u{009D}'));
+        assert!(!out.contains('\u{0090}'));
+        assert!(!out.contains('\u{009C}'));
+        // All replaced with FFFD, letters preserved
+        assert_eq!(out, "a\u{FFFD}b\u{FFFD}c\u{FFFD}d\u{FFFD}e");
+    }
+
+    #[test]
+    fn test_c1_does_not_break_utf8() {
+        // Ensure legitimate UTF-8 (accented chars, CJK, emoji) survives
+        let input = "café 世界 🌍 naïve";
+        assert_eq!(sanitize_terminal(input), input);
+    }
+
+    #[test]
+    fn test_emoji_through_csi_preserved() {
+        // ESC sequences stripped, but emoji content survives
+        let input = "emoji:\x1b[31m🔥\x1b[0m is safe";
+        assert_eq!(sanitize_terminal(input), "emoji:🔥 is safe");
+    }
+
+    #[test]
+    fn test_del_replaced() {
+        assert_eq!(sanitize_terminal("hello\x7Fworld"), "hello\u{FFFD}world");
     }
 
     #[test]

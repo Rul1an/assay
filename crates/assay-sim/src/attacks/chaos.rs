@@ -100,17 +100,24 @@ pub fn check_chaos_attacks(seed: u64) -> Result<Vec<AttackResult>> {
         let res = verify_bundle(chaos_reader);
         let duration = start.elapsed().as_millis() as u64;
 
-        let status = match res {
+        let (status, error_class, message) = match res {
             Ok(_) => {
-                // Verification passed despite chaos — that's fine, faults were non-fatal
-                AttackStatus::Passed
+                // Verification passed despite chaos — faults were non-fatal (EINTR retried, etc.)
+                (AttackStatus::Passed, None, None)
             }
             Err(e) => {
-                if e.downcast_ref::<VerifyError>().is_some() {
-                    AttackStatus::Blocked
+                let msg = format!("{:#}", e);
+                if let Some(ve) = e.downcast_ref::<VerifyError>() {
+                    // Structural verification failure → real "Blocked"
+                    (
+                        AttackStatus::Blocked,
+                        Some(format!("{:?}", ve.class)),
+                        Some(msg),
+                    )
                 } else {
-                    // IO error from chaos injection — expected
-                    AttackStatus::Blocked
+                    // IO error from chaos injection (WouldBlock, persistent EINTR, etc.)
+                    // This is infrastructure/transient — not a "blocked attack"
+                    (AttackStatus::Error, Some("InfraIO".into()), Some(msg))
                 }
             }
         };
@@ -118,9 +125,9 @@ pub fn check_chaos_attacks(seed: u64) -> Result<Vec<AttackResult>> {
         results.push(AttackResult {
             name: format!("chaos.io_fault.iter_{}", i),
             status,
-            error_class: None,
+            error_class,
             error_code: None,
-            message: None,
+            message,
             duration_ms: duration,
         });
     }

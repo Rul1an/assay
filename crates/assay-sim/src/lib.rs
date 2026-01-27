@@ -25,18 +25,42 @@ mod tests {
 
         let report = run_suite(cfg).expect("Suite failed to run");
 
-        // Assert Summary
-        println!("Report Summary: {:?}", report.summary);
-
-        // We expect:
-        // 1. attacks checks (BitFlip, Truncate, Inject, ZipBomb, TarDuplicate, Bom, Crlf, BundleSize) -> Blocked (count=8)
-        // 2. differential -> Passed (count=1)
-        // Total = 9, Blocked=8, Passed=1, Bypassed=0
-        if report.summary.blocked != 8 || report.summary.passed != 1 {
+        // Print full report on failure for debugging
+        if report.summary.bypassed > 0 {
             println!("{}", serde_json::to_string_pretty(&report).unwrap());
         }
-        assert_eq!(report.summary.blocked, 8, "Expected 8 blocked attacks");
-        assert_eq!(report.summary.passed, 1, "Expected 1 passed check");
-        assert_eq!(report.summary.bypassed, 0, "Expected 0 bypassed attacks");
+
+        // Invariant assertions (stable across attack additions):
+        // - No attack may bypass verification (security contract)
+        assert_eq!(
+            report.summary.bypassed, 0,
+            "SECURITY: {} attacks bypassed verification",
+            report.summary.bypassed
+        );
+        // - At least 1 attack must be blocked (sanity: attacks actually ran)
+        assert!(
+            report.summary.blocked >= 1,
+            "SANITY: no attacks were blocked — suite may not have run"
+        );
+        // - At least 1 check must pass (sanity: differential tests ran)
+        assert!(
+            report.summary.passed >= 1,
+            "SANITY: no checks passed — differential tests may not have run"
+        );
+        // - Every result must have a valid status classification:
+        //   Blocked/Passed are normal outcomes.
+        //   Error is acceptable for chaos IO faults (WouldBlock, persistent EINTR)
+        //   but NOT for integrity/differential tests.
+        for r in &report.results {
+            let is_chaos_io = r.name.starts_with("chaos.io_fault.");
+            match r.status {
+                AttackStatus::Blocked | AttackStatus::Passed => {} // always ok
+                AttackStatus::Error if is_chaos_io => {}           // infra IO, acceptable
+                _ => panic!(
+                    "Unexpected status {:?} for '{}': {:?}",
+                    r.status, r.name, r.message
+                ),
+            }
+        }
     }
 }

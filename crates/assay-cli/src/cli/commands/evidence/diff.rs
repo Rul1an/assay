@@ -179,8 +179,16 @@ fn validate_baseline_key(key: &str) -> Result<()> {
 fn resolve_paths(args: &DiffArgs) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     if let (Some(dir), Some(key)) = (&args.baseline_dir, &args.key) {
         validate_baseline_key(key)?;
+        // Canonicalize dir to resolve symlinks, then verify containment.
+        // This prevents a symlinked baseline-dir from escaping its apparent location.
+        let canonical_dir = dir
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize baseline dir {}", dir.display()))?;
+        let baseline_path = canonical_dir.join(format!("{}.tar.gz", key));
+        if !baseline_path.starts_with(&canonical_dir) {
+            anyhow::bail!("baseline key '{}' would escape baseline directory", key);
+        }
         // --baseline-dir mode: first positional arg is the candidate
-        let baseline_path = dir.join(format!("{}.tar.gz", key));
         let candidate_path = args.baseline.clone();
         Ok((baseline_path, candidate_path))
     } else {

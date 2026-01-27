@@ -276,14 +276,27 @@ fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
         .split(f.area());
 
     // Header
+    let verified_label = if state.verified {
+        "YES"
+    } else {
+        "SKIPPED — DATA IS UNTRUSTED"
+    };
     let header_text = format!(
         " Assay Evidence Explorer | Run: {} | Events: {} | Verified: {} ",
         sanitize_terminal_with_limit(&state.run_id, 40),
         state.event_count,
-        if state.verified { "YES" } else { "NO" }
+        verified_label,
     );
+    let header_style = if state.verified {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Red)
+            .add_modifier(Modifier::BOLD)
+    };
     let header = Paragraph::new(header_text)
-        .style(Style::default().fg(Color::White).bg(Color::DarkGray))
+        .style(header_style)
         .block(Block::default().borders(Borders::BOTTOM));
     f.render_widget(header, chunks[0]);
 

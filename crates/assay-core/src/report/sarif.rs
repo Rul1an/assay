@@ -1,6 +1,35 @@
 use crate::model::{TestResultRow, TestStatus};
 use std::path::Path;
 
+/// SARIF schema version used by all Assay SARIF producers.
+///
+/// Shared contract with `assay-evidence::lint::sarif` — both modules MUST use
+/// the same schema URI and version `"2.1.0"`.  When changing this constant,
+/// update the sibling in `assay-evidence/src/lint/sarif.rs` as well.
+pub const SARIF_SCHEMA: &str =
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json";
+
+/// Write test results as SARIF 2.1.0 to a file.
+///
+/// # SARIF consistency contract
+///
+/// There are two SARIF producers in the Assay workspace:
+///
+/// | Producer | Crate | Purpose |
+/// |----------|-------|---------|
+/// | `write_sarif` / `build_sarif_diagnostics` (this module) | `assay-core` | Test results & diagnostic reports |
+/// | `to_sarif` | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning |
+///
+/// **Shared invariants** (must stay in sync):
+/// - SARIF version: `"2.1.0"`
+/// - Schema URI: [`SARIF_SCHEMA`]
+/// - Severity mapping: `Error`→`"error"`, `Warn`→`"warning"`, `Info`/other→`"note"`
+///
+/// **Intentional differences** (by design, not drift):
+/// - This module includes `invocations[]` with exit codes (diagnostics path);
+///   `assay-evidence` does not.
+/// - `assay-evidence` includes `partialFingerprints`, `automationDetails`, and
+///   `tool.driver.rules[]` for GitHub Code Scanning; this module does not.
 pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> anyhow::Result<()> {
     let sarif_results: Vec<serde_json::Value> = results
         .iter()
@@ -20,7 +49,7 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
 
     let doc = serde_json::json!({
       "version": "2.1.0",
-      "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+      "$schema": SARIF_SCHEMA,
       "runs": [{
         "tool": { "driver": { "name": tool_name } },
         "results": sarif_results
@@ -79,7 +108,7 @@ pub fn build_sarif_diagnostics(
 
     serde_json::json!({
         "version": "2.1.0",
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "$schema": SARIF_SCHEMA,
         "runs": [{
             "tool": {
                 "driver": {

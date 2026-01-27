@@ -2,7 +2,36 @@ use super::rules::RULES;
 use super::LintReport;
 use serde_json::json;
 
+/// SARIF schema version used by all Assay SARIF producers.
+///
+/// Shared contract with `assay-core::report::sarif` — both modules MUST use the
+/// same schema URI and version `"2.1.0"`.  When changing this constant, update
+/// the sibling in `assay-core/src/report/sarif.rs` as well.
+pub const SARIF_SCHEMA: &str =
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json";
+
 /// Convert a LintReport to SARIF 2.1.0 format.
+///
+/// # SARIF consistency contract
+///
+/// There are two SARIF producers in the Assay workspace:
+///
+/// | Producer | Crate | Purpose |
+/// |----------|-------|---------|
+/// | `to_sarif` (this fn) | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning |
+/// | `write_sarif` / `build_sarif_diagnostics` | `assay-core` | Test results & diagnostic reports |
+///
+/// **Shared invariants** (must stay in sync):
+/// - SARIF version: `"2.1.0"`
+/// - Schema URI: [`SARIF_SCHEMA`]
+/// - Severity mapping: `Error`→`"error"`, `Warn`→`"warning"`, `Info`/other→`"note"`
+///
+/// **Intentional differences** (by design, not drift):
+/// - This producer includes `partialFingerprints` and `automationDetails` for
+///   GitHub Code Scanning deduplication; `assay-core` does not.
+/// - This producer populates `tool.driver.rules[]` from the lint rule registry;
+///   `assay-core` uses a single generic `ruleId`.
+/// - `assay-core` includes `invocations[]` with exit codes; this producer does not.
 pub fn to_sarif(report: &LintReport) -> serde_json::Value {
     let rules: Vec<serde_json::Value> = RULES
         .iter()
@@ -96,7 +125,7 @@ pub fn to_sarif(report: &LintReport) -> serde_json::Value {
     );
 
     json!({
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+        "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
         "runs": [{
             "tool": {

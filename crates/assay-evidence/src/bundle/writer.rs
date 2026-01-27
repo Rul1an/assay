@@ -571,6 +571,51 @@ impl<R: Read> Read for LimitReader<R> {
     }
 }
 
+/// A reader that transparently retries on [`ErrorKind::Interrupted`] (EINTR).
+///
+/// Many systems can deliver spurious interrupts during `read()` (signal delivery,
+/// ptrace, rare driver paths). The standard library's `Read::read` does **not**
+/// retry automatically, so callers that want robust IO on real-world systems
+/// should wrap their reader in this.
+///
+/// Only `Interrupted` is retried (max [`MAX_EINTR_RETRIES`] consecutive
+/// failures). All other errors, including `WouldBlock`, propagate immediately.
+const MAX_EINTR_RETRIES: usize = 16;
+
+struct EintrReader<R> {
+    inner: R,
+}
+
+impl<R: Read> EintrReader<R> {
+    fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R: Read> Read for EintrReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut retries = 0;
+        loop {
+            match self.inner.read(buf) {
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    retries += 1;
+                    if retries >= MAX_EINTR_RETRIES {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            format!(
+                                "persistent EINTR: interrupted {} consecutive times",
+                                MAX_EINTR_RETRIES
+                            ),
+                        ));
+                    }
+                    // retry immediately
+                }
+                other => return other,
+            }
+        }
+    }
+}
+
 /// Helper to read a line with a hard memory limit BEFORE allocation.
 fn read_line_bounded<R: BufRead>(
     reader: &mut R,
@@ -611,6 +656,9 @@ fn read_line_bounded<R: BufRead>(
 
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
+    // 0. Retry transient EINTR (signal delivery, ptrace, etc.)
+    let reader = EintrReader::new(reader);
+
     // 1. Limit INPUT size (Network protection)
     let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
 
