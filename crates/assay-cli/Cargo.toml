@@ -41,6 +41,8 @@ dialoguer = "0.11"
 similar = "2"
 serde_yaml.workspace = true
 chrono = { workspace = true, features = ["std", "clock"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
 dirs = "5.0"
 sysinfo = "0.30"
 humantime = "2"

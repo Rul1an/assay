@@ -1,0 +1,19 @@
+version: "1.0"
+name: demo-audit
+created_at: "2026-01-27T00:00:00Z"
+updated_at: "2026-01-27T00:10:00Z"
+total_runs: 1
+run_ids: ["demo_run_999"]
+entries:
+  files:
+    "/Users/roelschuurkes/secret.txt":
+      first_seen: 100
+      last_seen: 200
+      runs_seen: 1
+      hits_total: 1
+  network:
+    "api.stripe.com":
+      first_seen: 150
+      last_seen: 150
+      runs_seen: 1
+      hits_total: 1

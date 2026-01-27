@@ -59,13 +59,33 @@ impl BundleReader {
     /// - Bundle verification fails
     /// - IO errors
     /// - Memory allocation fails (very large bundles)
+    ///
+    /// Open and verify a bundle, loading it into memory.
     pub fn open<R: Read>(reader: R) -> Result<Self> {
+        Self::open_internal(reader, true)
+    }
+
+    /// Open a bundle without verification (for debugging/inspection).
+    pub fn open_unverified<R: Read>(reader: R) -> Result<Self> {
+        Self::open_internal(reader, false)
+    }
+
+    fn open_internal<R: Read>(reader: R, verify: bool) -> Result<Self> {
         // First pass: verify integrity and get manifest
         let mut buffer = Vec::new();
         let mut reader = reader;
         reader.read_to_end(&mut buffer)?;
 
-        let result = verify_bundle(Cursor::new(&buffer)).context("Bundle verification failed")?;
+        let manifest = if verify {
+            let result =
+                verify_bundle(Cursor::new(&buffer)).context("Bundle verification failed")?;
+            result.manifest
+        } else {
+            // Peek only
+            let info =
+                BundleInfo::peek(Cursor::new(&buffer)).context("Failed to peek bundle manifest")?;
+            info.manifest
+        };
 
         // Second pass: extract events content
         let decoder = GzDecoder::new(Cursor::new(&buffer));
@@ -84,7 +104,7 @@ impl BundleReader {
         }
 
         Ok(Self {
-            manifest: result.manifest,
+            manifest,
             events_content,
         })
     }

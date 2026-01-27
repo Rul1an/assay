@@ -104,7 +104,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "assay-cli"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -123,6 +123,7 @@ dependencies = [
  "env_logger",
  "futures",
  "globset",
+ "hex",
  "humantime",
  "landlock",
  "libc",
@@ -135,6 +136,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "sha2",
  "similar",
  "sysinfo",
  "tempfile",
@@ -145,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "aya",
  "chrono",
@@ -157,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -192,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -201,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -222,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -234,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -255,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -271,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -285,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -297,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1409,7 +1411,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2338,7 +2340,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2375,7 +2377,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
