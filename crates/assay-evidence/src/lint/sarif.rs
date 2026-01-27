@@ -23,13 +23,17 @@ pub fn to_sarif(report: &LintReport) -> serde_json::Value {
                     .insert("helpUri".into(), serde_json::Value::String(uri.into()));
             }
 
-            if !r.tags.is_empty() {
-                rule.as_object_mut().unwrap().insert(
-                    "properties".into(),
-                    json!({
-                        "tags": r.tags
-                    }),
-                );
+            if !r.tags.is_empty() || r.security_severity.is_some() {
+                let mut props = serde_json::Map::new();
+                if !r.tags.is_empty() {
+                    props.insert("tags".into(), json!(r.tags));
+                }
+                if let Some(ss) = r.security_severity {
+                    props.insert("security-severity".into(), json!(ss));
+                }
+                rule.as_object_mut()
+                    .unwrap()
+                    .insert("properties".into(), serde_json::Value::Object(props));
             }
 
             rule

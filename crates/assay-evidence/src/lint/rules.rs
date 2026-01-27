@@ -8,6 +8,9 @@ pub struct RuleDefinition {
     pub description: &'static str,
     pub help_uri: Option<&'static str>,
     pub tags: &'static [&'static str],
+    /// CVSS-like security severity (0.0–10.0) for GitHub Code Scanning integration.
+    /// Only set for security-relevant rules.
+    pub security_severity: Option<&'static str>,
     pub check: fn(&EvidenceEvent, &LintContext) -> Option<LintFinding>,
 }
 
@@ -25,6 +28,7 @@ pub static RULES: &[RuleDefinition] = &[
         description: "Subject may contain a secret (API key, token, password pattern)",
         help_uri: Some("https://docs.assay.dev/lint/ASSAY-W001"),
         tags: &["security", "secrets"],
+        security_severity: Some("7.0"),
         check: check_secret_in_subject,
     },
     RuleDefinition {
@@ -33,6 +37,7 @@ pub static RULES: &[RuleDefinition] = &[
         description: "Event flagged as containing PII but subject is non-empty",
         help_uri: Some("https://docs.assay.dev/lint/ASSAY-W002"),
         tags: &["privacy", "pii"],
+        security_severity: Some("4.0"),
         check: check_pii_flag_consistency,
     },
     RuleDefinition {
@@ -41,6 +46,7 @@ pub static RULES: &[RuleDefinition] = &[
         description: "Source format does not follow URN convention",
         help_uri: Some("https://docs.assay.dev/lint/ASSAY-I001"),
         tags: &["convention", "format"],
+        security_severity: None,
         check: check_source_format,
     },
     RuleDefinition {
@@ -49,6 +55,7 @@ pub static RULES: &[RuleDefinition] = &[
         description: "Event flagged as containing secrets but secrets flag is false",
         help_uri: Some("https://docs.assay.dev/lint/ASSAY-W003"),
         tags: &["security", "secrets"],
+        security_severity: Some("6.5"),
         check: check_secrets_flag_consistency,
     },
 ];

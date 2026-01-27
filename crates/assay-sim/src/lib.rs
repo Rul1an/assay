@@ -3,6 +3,7 @@ pub mod corpus;
 pub mod differential;
 pub mod mutators;
 pub mod report;
+pub mod subprocess;
 pub mod suite;
 
 pub use report::{AttackResult, AttackStatus, SimReport};

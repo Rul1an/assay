@@ -18,6 +18,7 @@ use std::io::stdout;
 const DEFAULT_MAX_EVENTS: usize = 50_000;
 const SUBJECT_MAX_LEN: usize = 200;
 const PAYLOAD_MAX_LEN: usize = 4096;
+const QUERY_MAX_LEN: usize = 200;
 
 #[derive(Debug, Args, Clone)]
 pub struct ExploreArgs {
@@ -43,6 +44,10 @@ struct AppState {
     run_id: String,
     event_count: usize,
     verified: bool,
+    /// Cached indices of visible events (recomputed only on filter/search change).
+    visible_cache: Vec<usize>,
+    /// Tracks whether the cache needs recomputation.
+    cache_dirty: bool,
 }
 
 #[derive(PartialEq)]
@@ -56,20 +61,25 @@ impl AppState {
     fn selected_event(&self) -> Option<&EvidenceEvent> {
         self.list_state
             .selected()
-            .and_then(|i| self.visible_events().get(i).copied())
+            .and_then(|i| self.visible_cache.get(i))
+            .and_then(|&idx| self.events.get(idx))
     }
 
-    fn visible_events(&self) -> Vec<&EvidenceEvent> {
-        self.events
+    /// Recompute visible event indices if the cache is dirty.
+    fn ensure_visible_cache(&mut self) {
+        if !self.cache_dirty {
+            return;
+        }
+        let search_lower = self.search_query.to_lowercase();
+        self.visible_cache = self
+            .events
             .iter()
-            .filter(|e| {
+            .enumerate()
+            .filter(|(_, e)| {
                 if !self.search_query.is_empty() {
                     let subject = e.subject.as_deref().unwrap_or("");
                     let sanitized = sanitize_terminal_with_limit(subject, SUBJECT_MAX_LEN);
-                    if !sanitized
-                        .to_lowercase()
-                        .contains(&self.search_query.to_lowercase())
-                    {
+                    if !sanitized.to_lowercase().contains(&search_lower) {
                         return false;
                     }
                 }
@@ -78,11 +88,24 @@ impl AppState {
                 }
                 true
             })
+            .map(|(i, _)| i)
+            .collect();
+        self.cache_dirty = false;
+    }
+
+    fn invalidate_cache(&mut self) {
+        self.cache_dirty = true;
+    }
+
+    fn visible_event_refs(&self) -> Vec<&EvidenceEvent> {
+        self.visible_cache
+            .iter()
+            .filter_map(|&idx| self.events.get(idx))
             .collect()
     }
 
     fn move_selection(&mut self, delta: i64) {
-        let len = self.visible_events().len();
+        let len = self.visible_cache.len();
         if len == 0 {
             return;
         }
@@ -119,6 +142,7 @@ pub fn cmd_explore(args: ExploreArgs) -> Result<i32> {
         events.push(ev_res.context("reading event")?);
     }
 
+    let visible_cache: Vec<usize> = (0..events.len()).collect();
     let mut state = AppState {
         events,
         list_state: ListState::default(),
@@ -128,6 +152,8 @@ pub fn cmd_explore(args: ExploreArgs) -> Result<i32> {
         run_id,
         event_count,
         verified,
+        visible_cache,
+        cache_dirty: false,
     };
     state.list_state.select(Some(0));
 
@@ -158,7 +184,7 @@ fn run_tui(state: &mut AppState) -> Result<()> {
                         KeyCode::PageUp => state.move_selection(-20),
                         KeyCode::Home => state.list_state.select(Some(0)),
                         KeyCode::End => {
-                            let len = state.visible_events().len();
+                            let len = state.visible_cache.len();
                             if len > 0 {
                                 state.list_state.select(Some(len - 1));
                             }
@@ -166,14 +192,17 @@ fn run_tui(state: &mut AppState) -> Result<()> {
                         KeyCode::Char('/') => {
                             state.mode = AppMode::Search;
                             state.search_query.clear();
+                            state.invalidate_cache();
                         }
                         KeyCode::Char('f') => {
                             state.mode = AppMode::Filter;
                             state.filter_type.clear();
+                            state.invalidate_cache();
                         }
                         KeyCode::Esc => {
                             state.search_query.clear();
                             state.filter_type.clear();
+                            state.invalidate_cache();
                         }
                         _ => {}
                     },
@@ -184,9 +213,15 @@ fn run_tui(state: &mut AppState) -> Result<()> {
                         }
                         KeyCode::Backspace => {
                             state.search_query.pop();
+                            state.invalidate_cache();
                         }
                         KeyCode::Char(c) => {
-                            state.search_query.push(c);
+                            // Filter control chars and cap length
+                            if !c.is_control() && state.search_query.chars().count() < QUERY_MAX_LEN
+                            {
+                                state.search_query.push(c);
+                                state.invalidate_cache();
+                            }
                         }
                         _ => {}
                     },
@@ -197,9 +232,15 @@ fn run_tui(state: &mut AppState) -> Result<()> {
                         }
                         KeyCode::Backspace => {
                             state.filter_type.pop();
+                            state.invalidate_cache();
                         }
                         KeyCode::Char(c) => {
-                            state.filter_type.push(c);
+                            // Filter control chars and cap length
+                            if !c.is_control() && state.filter_type.chars().count() < QUERY_MAX_LEN
+                            {
+                                state.filter_type.push(c);
+                                state.invalidate_cache();
+                            }
                         }
                         _ => {}
                     },
@@ -214,6 +255,8 @@ fn run_tui(state: &mut AppState) -> Result<()> {
 }
 
 fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
+    state.ensure_visible_cache();
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -242,7 +285,8 @@ fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
         .split(chunks[1]);
 
     // Event list (left pane)
-    let visible = state.visible_events();
+    let visible = state.visible_event_refs();
+    let visible_count = visible.len();
     let items: Vec<ListItem<'_>> = visible
         .iter()
         .map(|e| {
@@ -261,11 +305,17 @@ fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
         .collect();
 
     let list_title = if !state.search_query.is_empty() {
-        format!(" Events (search: {}) ", state.search_query)
+        format!(
+            " Events (search: {}) ",
+            sanitize_terminal_with_limit(&state.search_query, QUERY_MAX_LEN)
+        )
     } else if !state.filter_type.is_empty() {
-        format!(" Events (filter: {}) ", state.filter_type)
+        format!(
+            " Events (filter: {}) ",
+            sanitize_terminal_with_limit(&state.filter_type, QUERY_MAX_LEN)
+        )
     } else {
-        format!(" Events ({}) ", visible.len())
+        format!(" Events ({}) ", visible_count)
     };
 
     let list = List::new(items)
@@ -320,10 +370,13 @@ fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
         AppMode::Normal => {
             " j/k: navigate | PgUp/PgDn: page | /: search | f: filter | q: quit ".to_string()
         }
-        AppMode::Search => format!(" Search: {}_ (Enter/Esc to confirm) ", state.search_query),
+        AppMode::Search => format!(
+            " Search: {}_ (Enter/Esc to confirm) ",
+            sanitize_terminal_with_limit(&state.search_query, QUERY_MAX_LEN)
+        ),
         AppMode::Filter => format!(
             " Filter type: {}_ (Enter/Esc to confirm) ",
-            state.filter_type
+            sanitize_terminal_with_limit(&state.filter_type, QUERY_MAX_LEN)
         ),
     };
     let status_bar =

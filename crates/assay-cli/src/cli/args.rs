@@ -52,6 +52,7 @@ pub enum Command {
     /// Evidence Management (Audit/Compliance)
     Evidence(EvidenceArgs),
     /// Attack Simulation (Hardening/Compliance)
+    #[cfg(feature = "sim")]
     Sim(SimArgs),
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
@@ -920,18 +921,21 @@ pub struct SandboxArgs {
     pub quiet: bool,
 }
 
+#[cfg(feature = "sim")]
 #[derive(clap::Args, Clone, Debug)]
 pub struct SimArgs {
     #[command(subcommand)]
     pub cmd: SimSub,
 }
 
+#[cfg(feature = "sim")]
 #[derive(Subcommand, Clone, Debug)]
 pub enum SimSub {
     /// Run an attack simulation suite
     Run(SimRunArgs),
 }
 
+#[cfg(feature = "sim")]
 #[derive(clap::Args, Clone, Debug)]
 pub struct SimRunArgs {
     /// Simulation suite to run (quick, nightly, stress, chaos)

@@ -12,11 +12,12 @@ use std::io::Read;
 pub fn diff_bundles<R1: Read, R2: Read>(
     baseline: R1,
     candidate: R2,
-    _limits: VerifyLimits,
+    limits: VerifyLimits,
 ) -> Result<DiffReport> {
-    let baseline_reader = BundleReader::open(baseline).context("failed to open baseline bundle")?;
-    let candidate_reader =
-        BundleReader::open(candidate).context("failed to open candidate bundle")?;
+    let baseline_reader = BundleReader::open_with_limits(baseline, limits)
+        .context("failed to open baseline bundle")?;
+    let candidate_reader = BundleReader::open_with_limits(candidate, limits)
+        .context("failed to open candidate bundle")?;
 
     let baseline_events = baseline_reader
         .events_vec()

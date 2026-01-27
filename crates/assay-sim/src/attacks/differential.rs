@@ -3,14 +3,15 @@ use crate::mutators::inject::InjectFile;
 use crate::mutators::truncate::Truncate;
 use crate::mutators::Mutator;
 use crate::report::{AttackResult, AttackStatus};
+use crate::subprocess::subprocess_verify;
 use anyhow::{Context, Result};
 use assay_evidence::crypto::id::{compute_content_hash, compute_run_root};
 use assay_evidence::types::EvidenceEvent;
-use assay_evidence::{verify_bundle, BundleWriter};
+use assay_evidence::BundleWriter;
 use chrono::{TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Result from the reference (non-streaming) verifier.
 #[derive(Debug)]
@@ -177,21 +178,32 @@ fn reference_verify_inner(bundle_data: &[u8]) -> Result<ReferenceResult> {
 
 /// Run differential parity checks: apply mutations, compare production vs reference verifier.
 ///
+/// Uses subprocess isolation for the production verifier (`assay evidence verify`) to survive
+/// `panic = "abort"` in dev/release profiles. The reference verifier runs in-process.
+///
 /// For each mutation:
 /// 1. Apply mutation to a valid bundle
-/// 2. Run production `verify_bundle()` → result A
-/// 3. Run `reference_verify()` → result B
-/// 4. If A and B disagree → `AttackStatus::Failed` (SOTA parity violation)
-/// 5. If both agree → `AttackStatus::Passed`
-pub fn check_differential_parity(_seed: u64) -> Result<Vec<AttackResult>> {
+/// 2. Run production verifier via subprocess → result A
+/// 3. Run in-process `reference_verify()` → result B
+/// 4. If production accepts but reference rejects → `AttackStatus::Failed` (Bypassed)
+/// 5. If both reject → `AttackStatus::Passed`
+/// 6. If production rejects but reference accepts → `AttackStatus::Passed` (stricter is OK, logged)
+pub fn check_differential_parity(seed: u64) -> Result<Vec<AttackResult>> {
     let valid_bundle = create_test_bundle()?;
     let mut results = Vec::new();
+    let timeout = Duration::from_secs(30);
+
+    // Use seed for BitFlip mutation: controls which bits get flipped
+    let bitflip_count = ((seed % 10) + 1) as usize; // 1-10 flips based on seed
 
     // Define mutations to test
     let mutations: Vec<(&str, Box<dyn Mutator>)> = vec![
         (
             "differential.parity.bitflip",
-            Box::new(BitFlip { count: 5 }),
+            Box::new(BitFlip {
+                count: bitflip_count,
+                seed: Some(seed),
+            }),
         ),
         (
             "differential.parity.truncate",
@@ -211,30 +223,27 @@ pub fn check_differential_parity(_seed: u64) -> Result<Vec<AttackResult>> {
     // Also test the unmodified bundle
     {
         let start = Instant::now();
-        let production_ok = verify_bundle(Cursor::new(&valid_bundle)).is_ok();
+        let production = subprocess_verify(&valid_bundle, timeout);
         let reference = reference_verify(&valid_bundle);
         let duration = start.elapsed().as_millis() as u64;
 
-        let agree = production_ok == reference.valid;
-        results.push(AttackResult {
-            name: "differential.parity.identity".into(),
-            status: if agree {
-                AttackStatus::Passed
-            } else {
-                AttackStatus::Failed
+        let result = match production {
+            Ok(prod) => compare_results(
+                "differential.parity.identity",
+                prod.valid,
+                &reference,
+                duration,
+            ),
+            Err(e) => AttackResult {
+                name: "differential.parity.identity".into(),
+                status: AttackStatus::Error,
+                error_class: None,
+                error_code: None,
+                message: Some(format!("subprocess failed: {}", e)),
+                duration_ms: duration,
             },
-            error_class: None,
-            error_code: None,
-            message: if agree {
-                None
-            } else {
-                Some(format!(
-                    "SOTA parity violation: production={}, reference={}",
-                    production_ok, reference.valid
-                ))
-            },
-            duration_ms: duration,
-        });
+        };
+        results.push(result);
     }
 
     // Test each mutation
@@ -257,33 +266,71 @@ pub fn check_differential_parity(_seed: u64) -> Result<Vec<AttackResult>> {
             }
         };
 
-        let production_ok = verify_bundle(Cursor::new(&mutated)).is_ok();
+        let production = subprocess_verify(&mutated, timeout);
         let reference = reference_verify(&mutated);
         let duration = start.elapsed().as_millis() as u64;
 
-        let agree = production_ok == reference.valid;
-        results.push(AttackResult {
-            name: name.into(),
-            status: if agree {
-                AttackStatus::Passed
-            } else {
-                AttackStatus::Failed
+        let result = match production {
+            Ok(prod) => compare_results(name, prod.valid, &reference, duration),
+            Err(e) => AttackResult {
+                name: name.into(),
+                status: AttackStatus::Error,
+                error_class: None,
+                error_code: None,
+                message: Some(format!("subprocess failed: {}", e)),
+                duration_ms: duration,
             },
-            error_class: None,
-            error_code: None,
-            message: if agree {
-                None
-            } else {
-                Some(format!(
-                    "SOTA parity violation: production={}, reference={}",
-                    production_ok, reference.valid
-                ))
-            },
-            duration_ms: duration,
-        });
+        };
+        results.push(result);
     }
 
     Ok(results)
+}
+
+/// Compare production and reference verifier outcomes with asymmetric policy:
+/// - production accepts, reference rejects → FAIL (Bypassed — security violation)
+/// - production rejects, reference accepts → PASS (stricter is OK, but log divergence)
+/// - both agree → PASS
+fn compare_results(
+    name: &str,
+    production_ok: bool,
+    reference: &ReferenceResult,
+    duration_ms: u64,
+) -> AttackResult {
+    if production_ok && !reference.valid {
+        // Production accepted what reference rejected — security violation
+        AttackResult {
+            name: name.into(),
+            status: AttackStatus::Failed,
+            error_class: Some("parity_violation".into()),
+            error_code: Some("SOTA_BYPASS".into()),
+            message: Some(format!(
+                "SOTA parity violation: production accepted, reference rejected ({})",
+                reference.error.as_deref().unwrap_or("unknown")
+            )),
+            duration_ms,
+        }
+    } else if !production_ok && reference.valid {
+        // Production is stricter — acceptable, but log the divergence
+        AttackResult {
+            name: name.into(),
+            status: AttackStatus::Passed,
+            error_class: None,
+            error_code: None,
+            message: Some("strictness divergence: production rejected, reference accepted".into()),
+            duration_ms,
+        }
+    } else {
+        // Both agree
+        AttackResult {
+            name: name.into(),
+            status: AttackStatus::Passed,
+            error_class: None,
+            error_code: None,
+            message: None,
+            duration_ms,
+        }
+    }
 }
 
 fn create_test_bundle() -> Result<Vec<u8>> {

@@ -25,9 +25,22 @@ pub struct DiffArgs {
     /// Baseline key name (used with --baseline-dir)
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Write the candidate as the new baseline (creates {baseline-dir}/{key}.tar.gz)
+    #[arg(long)]
+    pub write_baseline: bool,
+
+    /// Overwrite existing baseline (required if baseline already exists)
+    #[arg(long)]
+    pub update_baseline: bool,
 }
 
 pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
+    // Handle --write-baseline / --update-baseline before diffing
+    if args.write_baseline || args.update_baseline {
+        return cmd_write_baseline(&args);
+    }
+
     let (baseline_path, candidate_path) = resolve_paths(&args)?;
 
     let baseline_file = File::open(&baseline_path)
@@ -66,6 +79,52 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
         }
     }
 
+    Ok(0)
+}
+
+fn cmd_write_baseline(args: &DiffArgs) -> Result<i32> {
+    let dir = args
+        .baseline_dir
+        .as_ref()
+        .context("--write-baseline requires --baseline-dir")?;
+    let key = args
+        .key
+        .as_ref()
+        .context("--write-baseline requires --key")?;
+
+    let target_path = dir.join(format!("{}.tar.gz", key));
+
+    // Safety: don't overwrite unless --update-baseline is set
+    if target_path.exists() && !args.update_baseline {
+        anyhow::bail!(
+            "Baseline already exists at {}. Use --update-baseline to overwrite.",
+            target_path.display()
+        );
+    }
+
+    // The candidate is the first positional arg in --baseline-dir mode
+    let candidate_path = &args.baseline;
+
+    // Verify the candidate bundle before writing it as a baseline
+    let candidate_file = File::open(candidate_path)
+        .with_context(|| format!("failed to open candidate {}", candidate_path.display()))?;
+    let _ = assay_evidence::bundle::BundleReader::open(candidate_file)
+        .context("candidate bundle verification failed — refusing to write as baseline")?;
+
+    // Create baseline directory if needed
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create baseline dir {}", dir.display()))?;
+
+    // Copy candidate to baseline location
+    std::fs::copy(candidate_path, &target_path).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            candidate_path.display(),
+            target_path.display()
+        )
+    })?;
+
+    eprintln!("Baseline written to {}", target_path.display());
     Ok(0)
 }
 
