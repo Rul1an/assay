@@ -18,9 +18,7 @@ pub enum DetailLevel {
 /// Maps a Profile to a sequence of EvidenceEvents.
 pub struct EvidenceMapper {
     run_id: String,
-    // producer: String, // unused
     producer_version: String,
-    // start_time: DateTime<Utc>, // unused
     seq: u64,
 }
 
@@ -40,9 +38,7 @@ impl EvidenceMapper {
 
         Self {
             run_id,
-            // producer: "assay-cli".to_string(),
             producer_version: env!("CARGO_PKG_VERSION").to_string(),
-            // start_time: Utc::now(),
             seq: 0,
         }
     }
@@ -63,10 +59,9 @@ impl EvidenceMapper {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
 
-        // 1. Started Event (Control)
         events.push(self.create_event(
             "assay.profile.started",
-            "urn:assay:phase:profile", // Subject is the profile itself
+            "urn:assay:phase:profile",
             serde_json::json!({
                 "profile_name": profile.name,
                 "profile_version": profile.version,
@@ -105,7 +100,6 @@ impl EvidenceMapper {
             );
         }
 
-        // 3. Finished Event (Control) - with summary counts
         events.push(self.create_event(
             "assay.profile.finished",
             "urn:assay:phase:profile",
@@ -136,8 +130,7 @@ impl EvidenceMapper {
                 key.clone()
             } else {
                 // Observed mode:
-                // We perform basic scrubbing of user homes and tokens to ensure
-                // that generalized paths (which Profile stores) are doubly-vetted.
+                // Generalized paths and token scrubbing for privacy preservation.
                 self.scrub_subject(key)
             };
 
@@ -202,9 +195,6 @@ impl EvidenceMapper {
         let lower_scrubbed = scrubbed.to_lowercase();
         for pattern in sensitive {
             if let Some(idx) = lower_scrubbed.find(pattern) {
-                // Once we match a sensitive pattern, we truncate and append ***.
-                // We use the original scrubbed string to preserve case of non-sensitive parts
-                // but truncate at the index found in lower_scrubbed.
                 scrubbed.truncate(idx + pattern.len());
                 scrubbed.push_str("***");
                 break;

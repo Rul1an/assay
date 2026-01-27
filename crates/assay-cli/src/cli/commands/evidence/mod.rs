@@ -68,7 +68,6 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
         .with_context(|| format!("failed to load profile from {}", args.profile.display()))?;
 
     // 2. Map Profile -> EvidenceEvents
-    // Deterministic RunID check happens inside mapper if none provided
     let run_id_opt = profile.run_ids.last().cloned();
 
     let mut mapper = EvidenceMapper::new(run_id_opt, &profile.name);
@@ -107,7 +106,8 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
-    assay_evidence::bundle::verify_bundle(f).context("bundle verification failed")?;
+    // BundleReader::open verifies by default
+    let _ = assay_evidence::bundle::BundleReader::open(f)?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle.display());
     Ok(0)
@@ -166,10 +166,8 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     for ev_res in br.events() {
         let ev = ev_res?;
         let subject = ev.subject.as_deref().unwrap_or("-");
-        // Truncate time for display
         let time_str = ev.time.to_rfc3339();
         let time_short = if time_str.len() > 19 {
-            // Safely extract HH:MM:SS
             time_str.chars().skip(11).take(8).collect::<String>()
         } else {
             time_str.clone()

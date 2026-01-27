@@ -131,16 +131,9 @@ pub struct EvidenceEvent {
     #[serde(rename = "assaysecrets")]
     pub contains_secrets: bool,
 
-    /// Cryptographic Content Hash of canonical data.
-    ///
-    /// Required for v1 Evidence Contract verification.
-    /// If None during export, BundleWriter will compute it.
-    /// Verifier will FAIL if this is None.
-    #[serde(skip_serializing_if = "Option::is_none", rename = "assaycontenthash")]
+    #[serde(rename = "assaycontenthash")]
     pub content_hash: Option<String>,
 
-    // -- Data --
-    /// The event payload (CloudEvents "data" field)
     #[serde(rename = "data")]
     pub payload: serde_json::Value,
 }
@@ -254,7 +247,6 @@ pub enum Payload {
     ProfileFinished(PayloadProfileFinished),
     #[serde(rename = "assay.policy.suggested")]
     PolicySuggested(PayloadPolicySuggested),
-    /// Extensible: unknown types pass through
     Unknown(serde_json::Value),
 }
 

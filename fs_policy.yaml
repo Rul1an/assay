@@ -1,6 +1,0 @@
-fs:
-  allow:
-    - "/bin"
-    - "/usr"
-    - "/lib"
-    - "${CWD}"

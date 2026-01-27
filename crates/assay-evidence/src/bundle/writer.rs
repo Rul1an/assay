@@ -171,9 +171,6 @@ impl<W: Write> BundleWriter<W> {
             bail!("Bundle is empty: at least one event required");
         }
 
-        // Step 1: Normalize & Validate Logic (Sorted Order is CRITICAL)
-
-        // SORT FIRST: Run Root must be computed on the canonical stream order
         self.events.sort_by_key(|e| e.seq);
 
         let mut content_hashes = Vec::with_capacity(self.events.len());
@@ -263,7 +260,6 @@ impl<W: Write> BundleWriter<W> {
             content_hashes.push(hash);
         }
 
-        // Step 4: Serialize events to canonical NDJSON
         let mut events_bytes = Vec::new();
         for event in &self.events {
             events_bytes.extend_from_slice(&jcs::to_vec(event)?);
@@ -273,11 +269,8 @@ impl<W: Write> BundleWriter<W> {
         let events_sha256 = format!("sha256:{}", hex::encode(Sha256::digest(&events_bytes)));
         let events_len = events_bytes.len() as u64;
 
-        // Step 2: Compute run_root (Post-Sort)
         let run_root = compute_run_root(&content_hashes);
 
-        // Step 3: Get metadata from first event (now robust)
-        // (already have first from loop above, but re-grab to be safe if moved)
         let first = &self.events[0];
         let producer = self
             .producer
@@ -285,7 +278,6 @@ impl<W: Write> BundleWriter<W> {
             .unwrap_or_else(|| first.producer_meta());
         let run_id = first.run_id.clone();
 
-        // Step 5: Build manifest
         let mut files = BTreeMap::new();
         files.insert(
             "events.ndjson".into(),
@@ -309,7 +301,6 @@ impl<W: Write> BundleWriter<W> {
 
         let manifest_bytes = jcs::to_vec(&manifest)?;
 
-        // Step 6: Write deterministic tar.gz
         let writer = self.writer.take().unwrap();
 
         let encoder = GzBuilder::new()
