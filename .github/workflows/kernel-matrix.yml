@@ -8,9 +8,18 @@ on:
       - "crates/assay-ebpf/**"
       - "crates/assay-cli/**"
       - "crates/assay-evidence/**"
+      - "crates/assay-sim/**"
+      - "crates/assay-monitor/**"
+      - "scripts/**"
       - ".github/workflows/kernel-matrix.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".gitignore"
   push:
-    branches: [ "main" ]
+    branches: [ "main", "debug/**" ]
 
 permissions:
   contents: read

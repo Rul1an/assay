@@ -1,49 +1,13 @@
-# .typos.toml
+[default.extend-words]
+ratatui = "ratatui"
+assay = "assay"
+ebpf = "ebpf"
+ndjson = "ndjson"
+sota = "sota"
+jcs = "jcs"
+
 [files]
 extend-exclude = [
-  "crates/assay-ebpf/src/vmlinux.rs",
-  "examples/**",
-  "docs/MCP_TESTPLAN_CLAUDE_DESKTOP.md",
-  "**/*.jsonl",
-  "tests/security_audit/**",
-  "target/**",
-  "dist/**",
+    "**/fixture/**",
+    "**/golden/**",
 ]
-
-[default]
-extend-ignore-re = [
-  "[0-9a-fA-F]{32,}",
-]
-
-[default.extend-words]
-TruLens = "TruLens"
-Tru = "Tru"
-requre = "requre"
-requre_args = "requre_args"
-# English whitelist for common kernel/technical terms
-fils = "fils"
-sme = "sme"
-opf = "opf"
-rto = "rto"
-oif = "oif"
-iif = "iif"
-nd = "nd"
-parms = "parms"
-wronly = "wronly"
-iput = "iput"
-sigfault = "sigfault"
-filp = "filp"
-prefered = "prefered"
-unitialized = "unitialized"
-unx = "unx"
-sems = "sems"
-alos = "alos"
-emac = "emac"
-thr = "thr"
-wqs = "wqs"
-lso = "lso"
-invald = "invald"
-pc_ressize = "pc_ressize"
-admin_cotrol = "admin_cotrol"
-vendor_pn = "vendor_pn"
-typ = "typ"
