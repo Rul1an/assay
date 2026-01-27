@@ -7,6 +7,7 @@ on:
     paths:
       - "crates/assay-ebpf/**"
       - "crates/assay-cli/**"
+      - "crates/assay-evidence/**"
       - ".github/workflows/kernel-matrix.yml"
   push:
     branches: [ "main" ]
