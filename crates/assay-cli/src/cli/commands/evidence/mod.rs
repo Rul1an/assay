@@ -1,3 +1,5 @@
+pub mod diff;
+pub mod lint;
 pub mod mapping;
 
 use anyhow::{Context, Result};
@@ -15,6 +17,13 @@ pub enum EvidenceCmd {
     Verify(EvidenceVerifyArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
+    /// Lint a bundle for quality and security issues
+    Lint(lint::LintArgs),
+    /// Diff two bundles and report changes
+    Diff(diff::DiffArgs),
+    /// Interactive TUI explorer for evidence bundles
+    #[cfg(feature = "tui")]
+    Explore(explore::ExploreArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -59,6 +68,10 @@ pub fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Export(a) => cmd_export(a),
         EvidenceCmd::Verify(a) => cmd_verify(a),
         EvidenceCmd::Show(a) => cmd_show(a),
+        EvidenceCmd::Lint(a) => lint::cmd_lint(a),
+        EvidenceCmd::Diff(a) => diff::cmd_diff(a),
+        #[cfg(feature = "tui")]
+        EvidenceCmd::Explore(a) => explore::cmd_explore(a),
     }
 }
 
@@ -187,3 +200,7 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
 
     Ok(0)
 }
+
+// TUI explore module (conditional compilation)
+#[cfg(feature = "tui")]
+pub mod explore;

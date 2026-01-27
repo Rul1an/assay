@@ -83,6 +83,19 @@ impl SimReport {
         self.results.push(res);
     }
 
+    /// Add a pre-built AttackResult directly.
+    pub fn add_result(&mut self, result: AttackResult) {
+        self.summary.total += 1;
+        match result.status {
+            AttackStatus::Passed => self.summary.passed += 1,
+            AttackStatus::Failed => self.summary.failed += 1,
+            AttackStatus::Blocked => self.summary.blocked += 1,
+            AttackStatus::Bypassed => self.summary.bypassed += 1,
+            AttackStatus::Error => self.summary.errors += 1,
+        }
+        self.results.push(result);
+    }
+
     pub fn add_check(&mut self, name: &str, result: Result<()>, duration_ms: u64) {
         self.summary.total += 1;
         let res = match result {

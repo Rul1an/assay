@@ -14,7 +14,7 @@
 //! For very large bundles (>1GB), consider tempfile-based streaming
 //! or the `into_events()` consuming pattern in a future version.
 
-use crate::bundle::writer::{verify_bundle, Manifest};
+use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
@@ -62,23 +62,28 @@ impl BundleReader {
     ///
     /// Open and verify a bundle, loading it into memory.
     pub fn open<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, true)
+        Self::open_internal(reader, Some(VerifyLimits::default()))
+    }
+
+    /// Open and verify a bundle with custom verification limits.
+    pub fn open_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
+        Self::open_internal(reader, Some(limits))
     }
 
     /// Open a bundle without verification (for debugging/inspection).
     pub fn open_unverified<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, false)
+        Self::open_internal(reader, None)
     }
 
-    fn open_internal<R: Read>(reader: R, verify: bool) -> Result<Self> {
+    fn open_internal<R: Read>(reader: R, limits: Option<VerifyLimits>) -> Result<Self> {
         // First pass: verify integrity and get manifest
         let mut buffer = Vec::new();
         let mut reader = reader;
         reader.read_to_end(&mut buffer)?;
 
-        let manifest = if verify {
-            let result =
-                verify_bundle(Cursor::new(&buffer)).context("Bundle verification failed")?;
+        let manifest = if let Some(limits) = limits {
+            let result = verify_bundle_with_limits(Cursor::new(&buffer), limits)
+                .context("Bundle verification failed")?;
             result.manifest
         } else {
             // Peek only

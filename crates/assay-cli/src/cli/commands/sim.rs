@@ -13,6 +13,7 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
         "quick" => SuiteTier::Quick,
         "nightly" => SuiteTier::Nightly,
         "stress" => SuiteTier::Stress,
+        "chaos" => SuiteTier::Chaos,
         _ => anyhow::bail!("unknown suite tier: {}", args.suite),
     };
 
