@@ -934,7 +934,7 @@ pub enum SimSub {
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct SimRunArgs {
-    /// Simulation suite to run (quick, nightly, stress)
+    /// Simulation suite to run (quick, nightly, stress, chaos)
     #[arg(long, default_value = "quick")]
     pub suite: String,
 

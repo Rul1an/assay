@@ -1,6 +1,9 @@
 pub mod bundle;
 pub mod crypto;
+pub mod diff;
+pub mod lint;
 pub mod ndjson;
+pub mod sanitize;
 pub mod types;
 
 // Convenience re-exports

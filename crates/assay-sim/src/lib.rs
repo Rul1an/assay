@@ -6,7 +6,7 @@ pub mod report;
 pub mod suite;
 
 pub use report::{AttackResult, AttackStatus, SimReport};
-pub use suite::{run_suite, SuiteConfig, SuiteTier};
+pub use suite::{run_suite, SuiteConfig, SuiteTier, TimeBudget};
 
 #[cfg(test)]
 mod tests {

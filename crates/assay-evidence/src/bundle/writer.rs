@@ -25,7 +25,7 @@
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::crypto::jcs;
 use crate::types::{EvidenceEvent, ProducerMeta};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
 use serde::{Deserialize, Serialize};
@@ -314,14 +314,16 @@ impl<W: Write> BundleWriter<W> {
         tar.mode(tar::HeaderMode::Deterministic);
 
         // Manifest FIRST
-        Self::write_entry(&mut tar, "manifest.json", &manifest_bytes)?;
+        Self::write_entry(&mut tar, "manifest.json", &manifest_bytes)
+            .context("writing manifest to tar")?;
 
         // Events SECOND
-        Self::write_entry(&mut tar, "events.ndjson", &events_bytes)?;
+        Self::write_entry(&mut tar, "events.ndjson", &events_bytes)
+            .context("writing events to tar")?;
 
         // Finalize
-        let encoder = tar.into_inner()?;
-        encoder.finish()?;
+        let encoder = tar.into_inner().context("finalizing tar archive")?;
+        encoder.finish().context("compressing gzip stream")?;
 
         Ok(())
     }
