@@ -409,6 +409,7 @@ pub enum ErrorCode {
     IntegrityTar,
     IntegrityManifestHash,
     IntegrityEventHash,
+    IntegrityManifestSize,
     IntegrityRunRootMismatch,
     IntegrityZipBomb,
     IntegrityIo,
@@ -774,6 +775,18 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     "Manifest missing 'events.ndjson'",
                 )
             })?;
+
+            // Size integrity check
+            if header_size != file_meta.bytes {
+                bail!(VerifyError::new(
+                    ErrorClass::Integrity,
+                    ErrorCode::IntegrityManifestSize,
+                    format!(
+                        "events.ndjson size mismatch: expected {}, got {}",
+                        file_meta.bytes, header_size
+                    )
+                ));
+            }
 
             // Stream processing: Hash + Parse line-by-line
             let mut hasher = Sha256::new();
