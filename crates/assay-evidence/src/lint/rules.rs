@@ -106,25 +106,21 @@ fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext) -> Option<L
 }
 
 fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintFinding> {
-    if event.contains_pii && event.subject.is_some() {
-        let subject = event.subject.as_deref().unwrap_or("");
-        // If PII flag is set and subject is non-empty, warn about potential PII leak in subject
-        if !subject.is_empty() {
-            return Some(
-                LintFinding::new(
-                    "ASSAY-W002",
-                    Severity::Warn,
-                    "Event marked as containing PII has a non-empty subject — consider redacting",
-                    Some(EventLocation {
-                        seq: ctx.seq,
-                        line: ctx.line_number,
-                        event_type: Some(event.type_.clone()),
-                    }),
-                    vec!["privacy".into(), "pii".into()],
-                )
-                .with_help_uri("https://docs.assay.dev/lint/ASSAY-W002"),
-            );
-        }
+    if event.contains_pii && event.subject.as_deref().filter(|s| !s.is_empty()).is_some() {
+        return Some(
+            LintFinding::new(
+                "ASSAY-W002",
+                Severity::Warn,
+                "Event marked as containing PII has a non-empty subject — consider redacting",
+                Some(EventLocation {
+                    seq: ctx.seq,
+                    line: ctx.line_number,
+                    event_type: Some(event.type_.clone()),
+                }),
+                vec!["privacy".into(), "pii".into()],
+            )
+            .with_help_uri("https://docs.assay.dev/lint/ASSAY-W002"),
+        );
     }
     None
 }

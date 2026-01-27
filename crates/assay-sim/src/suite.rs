@@ -22,10 +22,10 @@ pub struct SuiteConfig {
     pub verify_limits: Option<VerifyLimits>,
 }
 
-/// Time budget for a single attack or check.
+/// Time budget for an entire suite run.
 ///
-/// If the elapsed time exceeds the budget, the runner reports
-/// `AttackStatus::Error` with "time budget exceeded".
+/// If the elapsed time exceeds the budget, remaining phases are skipped and
+/// the runner reports `AttackStatus::Error` with "time budget exceeded".
 #[derive(Debug, Clone)]
 pub struct TimeBudget {
     start: Instant,
@@ -40,8 +40,8 @@ impl TimeBudget {
         }
     }
 
-    /// Default budget: 30 seconds per attack.
-    pub fn default_per_attack() -> Self {
+    /// Default suite budget: 30 seconds.
+    pub fn default_suite() -> Self {
         Self::new(Duration::from_secs(30))
     }
 
@@ -56,7 +56,7 @@ impl TimeBudget {
 
 pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     let mut report = SimReport::new(&format!("{:?}", cfg.tier), cfg.seed);
-    let budget = TimeBudget::default_per_attack();
+    let budget = TimeBudget::default_suite();
 
     // 1. Integrity Attacks (all tiers)
     //

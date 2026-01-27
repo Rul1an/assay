@@ -91,11 +91,11 @@ fn categorize_subjects(events: &[EvidenceEvent]) -> CategorizedSubjects {
             _ => continue,
         };
 
-        if event.type_.contains("net.connect") || event.type_.contains("net.") {
+        if event.type_.contains(".net.") || event.type_.ends_with(".net") {
             result.network.insert(subject);
-        } else if event.type_.contains("fs.access") || event.type_.contains("fs.") {
+        } else if event.type_.contains(".fs.") || event.type_.ends_with(".fs") {
             result.filesystem.insert(subject);
-        } else if event.type_.contains("process.exec") || event.type_.contains("exec") {
+        } else if event.type_.contains(".process.") || event.type_.ends_with(".process") {
             result.processes.insert(subject);
         }
     }

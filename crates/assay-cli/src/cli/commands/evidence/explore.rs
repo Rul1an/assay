@@ -164,6 +164,17 @@ pub fn cmd_explore(args: ExploreArgs) -> Result<i32> {
 fn run_tui(state: &mut AppState) -> Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+
+    let result = run_tui_inner(state);
+
+    // Always restore terminal state, even if the event loop errored.
+    let _ = disable_raw_mode();
+    let _ = stdout().execute(LeaveAlternateScreen);
+
+    result
+}
+
+fn run_tui_inner(state: &mut AppState) -> Result<()> {
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -249,8 +260,6 @@ fn run_tui(state: &mut AppState) -> Result<()> {
         }
     }
 
-    disable_raw_mode()?;
-    stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
 
@@ -385,9 +394,10 @@ fn draw_ui(f: &mut ratatui::Frame<'_>, state: &mut AppState) {
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max.saturating_sub(3)])
+        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
+        format!("{}...", truncated)
     }
 }
