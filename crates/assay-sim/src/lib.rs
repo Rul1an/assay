@@ -5,8 +5,8 @@ pub mod mutators;
 pub mod report;
 pub mod suite;
 
+pub use report::{AttackResult, AttackStatus, SimReport};
 pub use suite::{run_suite, SuiteConfig, SuiteTier};
-pub use report::{SimReport, AttackResult, AttackStatus};
 
 #[cfg(test)]
 mod tests {
@@ -32,7 +32,7 @@ mod tests {
         // 2. differential -> Passed (count=1)
         // Total = 9, Blocked=8, Passed=1, Bypassed=0
         if report.summary.blocked != 8 || report.summary.passed != 1 {
-             println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
         }
         assert_eq!(report.summary.blocked, 8, "Expected 8 blocked attacks");
         assert_eq!(report.summary.passed, 1, "Expected 1 passed check");

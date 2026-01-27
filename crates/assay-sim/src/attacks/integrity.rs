@@ -1,13 +1,13 @@
+use crate::mutators::inject::InjectFile;
+use crate::mutators::Mutator;
+use crate::report::SimReport;
 use anyhow::Result;
-use assay_evidence::{BundleWriter, verify_bundle, VerifyError};
 use assay_evidence::types::EvidenceEvent;
+use assay_evidence::{verify_bundle, BundleWriter, VerifyError};
 use chrono::{TimeZone, Utc};
-use std::io::Cursor;
 use rand::Rng;
 use rand::SeedableRng;
-use crate::mutators::Mutator;
-use crate::mutators::inject::InjectFile;
-use crate::report::SimReport;
+use std::io::Cursor;
 
 pub fn check_integrity_attacks(report: &mut SimReport) -> Result<()> {
     let valid_bundle = create_test_bundle()?;
@@ -25,12 +25,15 @@ pub fn check_integrity_attacks(report: &mut SimReport) -> Result<()> {
 
     // 2. Truncate
     run_attack(report, "integrity.truncate", || {
-        Ok(valid_bundle[..valid_bundle.len()/2].to_vec())
+        Ok(valid_bundle[..valid_bundle.len() / 2].to_vec())
     })?;
 
     // 3. Inject File
     run_attack(report, "integrity.inject_file", || {
-        let injector = InjectFile { name: "malicious.sh".into(), content: b"echo 'bad'".to_vec() };
+        let injector = InjectFile {
+            name: "malicious.sh".into(),
+            content: b"echo 'bad'".to_vec(),
+        };
         injector.mutate(&valid_bundle)
     })?;
 
@@ -141,7 +144,8 @@ fn create_event(seq: u64) -> EvidenceEvent {
 }
 
 fn run_attack<F>(report: &mut SimReport, name: &str, mutator: F) -> Result<()>
-where F: FnOnce() -> Result<Vec<u8>>
+where
+    F: FnOnce() -> Result<Vec<u8>>,
 {
     let data = mutator()?;
     let start = std::time::Instant::now();
@@ -154,7 +158,11 @@ where F: FnOnce() -> Result<Vec<u8>>
             if let Some(ve) = e.downcast_ref::<VerifyError>() {
                 report.add_attack(name, Ok((ve.class(), ve.code)), duration);
             } else {
-                report.add_attack(name, Err(anyhow::anyhow!("Unexpected error: {}", e)), duration);
+                report.add_attack(
+                    name,
+                    Err(anyhow::anyhow!("Unexpected error: {}", e)),
+                    duration,
+                );
             }
         }
     }
@@ -162,8 +170,8 @@ where F: FnOnce() -> Result<Vec<u8>>
 }
 
 fn create_zip_bomb(target_uncompressed: u64) -> Result<Vec<u8>> {
-    use flate2::Compression;
     use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::io::Write;
 
     let mut buf = Vec::new();

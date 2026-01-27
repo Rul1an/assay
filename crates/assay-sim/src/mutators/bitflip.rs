@@ -12,7 +12,9 @@ impl Mutator for BitFlip {
         let mut rng = rand::thread_rng();
 
         for _ in 0..self.count {
-            if corrupted.is_empty() { break; }
+            if corrupted.is_empty() {
+                break;
+            }
             let idx = rng.gen_range(0..corrupted.len());
             corrupted[idx] ^= 1 << rng.gen_range(0..8);
         }

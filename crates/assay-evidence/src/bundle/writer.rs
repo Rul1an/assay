@@ -519,10 +519,10 @@ pub struct VerifyLimits {
 impl Default for VerifyLimits {
     fn default() -> Self {
         Self {
-            max_bundle_bytes: 100 * 1024 * 1024, // 100 MB compressed
+            max_bundle_bytes: 100 * 1024 * 1024,  // 100 MB compressed
             max_decode_bytes: 1024 * 1024 * 1024, // 1 GB uncompressed (10x ratio)
             max_manifest_bytes: 10 * 1024 * 1024, // 10 MB
-            max_events_bytes: 500 * 1024 * 1024, // 500 MB
+            max_events_bytes: 500 * 1024 * 1024,  // 500 MB
             max_events: 100_000,
             max_line_bytes: 1024 * 1024, // 1 MB
             max_path_len: 256,
@@ -541,17 +541,22 @@ struct LimitReader<R> {
 
 impl<R: Read> LimitReader<R> {
     fn new(inner: R, limit: u64, error_tag: &'static str) -> Self {
-        Self { inner, limit, read: 0, error_tag }
+        Self {
+            inner,
+            limit,
+            read: 0,
+            error_tag,
+        }
     }
 }
 
 impl<R: Read> Read for LimitReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.read >= self.limit {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("{}: exceeded limit of {} bytes", self.error_tag, self.limit),
-            ));
+            return Err(std::io::Error::other(format!(
+                "{}: exceeded limit of {} bytes",
+                self.error_tag, self.limit
+            )));
         }
 
         let max_to_read = (self.limit - self.read).min(buf.len() as u64) as usize;
@@ -563,7 +568,11 @@ impl<R: Read> Read for LimitReader<R> {
 }
 
 /// Helper to read a line with a hard memory limit BEFORE allocation.
-fn read_line_bounded<R: BufRead>(reader: &mut R, buf: &mut Vec<u8>, max: usize) -> std::io::Result<usize> {
+fn read_line_bounded<R: BufRead>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    max: usize,
+) -> std::io::Result<usize> {
     let mut total_read = 0;
     loop {
         let (done, used) = {
@@ -577,10 +586,7 @@ fn read_line_bounded<R: BufRead>(reader: &mut R, buf: &mut Vec<u8>, max: usize) 
                 };
 
                 if total_read + line_end > max {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "LimitLineBytes: line exceeded limit",
-                    ));
+                    return Err(std::io::Error::other("LimitLineBytes: line exceeded limit"));
                 }
 
                 buf.extend_from_slice(&available[..line_end]);
@@ -593,11 +599,8 @@ fn read_line_bounded<R: BufRead>(reader: &mut R, buf: &mut Vec<u8>, max: usize) 
             return Ok(total_read);
         }
         if total_read >= max && !done {
-             // We reached max without finding a newline
-             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "LimitLineBytes: line exceeded limit",
-            ));
+            // We reached max without finding a newline
+            return Err(std::io::Error::other("LimitLineBytes: line exceeded limit"));
         }
     }
 }
@@ -655,7 +658,11 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             bail!(VerifyError::new(
                 ErrorClass::Limits,
                 ErrorCode::LimitPathLength,
-                format!("Path length {} exceeds limit {}", path_str.len(), limits.max_path_len)
+                format!(
+                    "Path length {} exceeds limit {}",
+                    path_str.len(),
+                    limits.max_path_len
+                )
             ));
         }
 
@@ -664,16 +671,19 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
         // Refined size limits
         let max_size = if path_str == "manifest.json" {
-             limits.max_manifest_bytes
+            limits.max_manifest_bytes
         } else {
-             limits.max_events_bytes
+            limits.max_events_bytes
         };
 
-         if header_size > max_size {
+        if header_size > max_size {
             bail!(VerifyError::new(
                 ErrorClass::Limits,
                 ErrorCode::LimitFileSize,
-                format!("File '{}' declared size {} exceeds limit {}", path_str, header_size, max_size)
+                format!(
+                    "File '{}' declared size {} exceeds limit {}",
+                    path_str, header_size, max_size
+                )
             ));
         }
 
@@ -692,74 +702,78 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
         // Check: Allowlist
         if !ALLOWED_FILES.contains(&path_str) {
-             bail!(VerifyError::new(
+            bail!(VerifyError::new(
                 ErrorClass::Contract,
                 ErrorCode::ContractUnexpectedFile,
                 format!("Unexpected file '{}'", path_str)
-             ));
+            ));
         }
 
         // Check: Duplicates
         if !seen_files.insert(path_str.to_string()) {
-             bail!(VerifyError::new(
+            bail!(VerifyError::new(
                 ErrorClass::Contract,
                 ErrorCode::ContractDuplicateFile,
                 format!("Duplicate file '{}'", path_str)
-             ));
+            ));
         }
 
         // Processing Logic
         if i == 0 {
-             if path_str != "manifest.json" {
-                  bail!(VerifyError::new(
+            if path_str != "manifest.json" {
+                bail!(VerifyError::new(
                     ErrorClass::Contract,
                     ErrorCode::ContractFileOrder,
                     "First file must be 'manifest.json'"
-                  ));
-             }
+                ));
+            }
 
-             // Manifest is small, read fully
-             let mut content = Vec::new();
-             let mut manifest_reader = LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
-             manifest_reader.read_to_end(&mut content).map_err(|e| {
-                 let mut ve = VerifyError::from(e);
-                 if ve.message.contains("LimitFileSize") {
-                     ve.code = ErrorCode::LimitFileSize;
-                     ve.class = ErrorClass::Limits;
-                 }
-                 ve
-             })?;
+            // Manifest is small, read fully
+            let mut content = Vec::new();
+            let mut manifest_reader =
+                LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
+            manifest_reader.read_to_end(&mut content).map_err(|e| {
+                let mut ve = VerifyError::from(e);
+                if ve.message.contains("LimitFileSize") {
+                    ve.code = ErrorCode::LimitFileSize;
+                    ve.class = ErrorClass::Limits;
+                }
+                ve
+            })?;
 
-             let m: Manifest = serde_json::from_slice(&content)
-                .map_err(|e| {
-                    let mut ve = VerifyError::from(e);
-                    ve.code = ErrorCode::ContractInvalidJson;
-                    ve
-                })?;
+            let m: Manifest = serde_json::from_slice(&content).map_err(|e| {
+                let mut ve = VerifyError::from(e);
+                ve.code = ErrorCode::ContractInvalidJson;
+                ve
+            })?;
 
-             if m.schema_version != 1 {
-                  bail!(VerifyError::new(
+            if m.schema_version != 1 {
+                bail!(VerifyError::new(
                     ErrorClass::Contract,
                     ErrorCode::ContractSchemaVersion,
                     format!("Unsupported schema version: {}", m.schema_version)
-                  ));
-             }
-             manifest = Some(m);
-             continue;
+                ));
+            }
+            manifest = Some(m);
+            continue;
         }
 
-        let m = manifest.as_ref().ok_or_else(|| VerifyError::new(
-             ErrorClass::Contract,
-             ErrorCode::ContractFileOrder,
-             "File encountered before manifest.json"
-        ))?;
+        let m = manifest.as_ref().ok_or_else(|| {
+            VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractFileOrder,
+                "File encountered before manifest.json",
+            )
+        })?;
 
         if path_str == "events.ndjson" {
-            let file_meta = m.files.get("events.ndjson").ok_or_else(|| VerifyError::new(
-                ErrorClass::Contract,
-                ErrorCode::ContractMissingFile,
-                "Manifest missing 'events.ndjson'"
-            ))?;
+            let file_meta = m.files.get("events.ndjson").ok_or_else(|| {
+                VerifyError::new(
+                    ErrorClass::Contract,
+                    ErrorCode::ContractMissingFile,
+                    "Manifest missing 'events.ndjson'",
+                )
+            })?;
 
             // Stream processing: Hash + Parse line-by-line
             let mut hasher = Sha256::new();
@@ -771,15 +785,18 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
             loop {
                 line_buf.clear();
-                let n = read_line_bounded(&mut reader, &mut line_buf, limits.max_line_bytes).map_err(|e| {
-                    let mut ve = VerifyError::from(e);
-                    if ve.message.contains("LimitLineBytes") {
-                        ve.code = ErrorCode::LimitLineBytes;
-                        ve.class = ErrorClass::Limits;
-                    }
-                    ve
-                })?;
-                if n == 0 { break; } // EOF
+                let n = read_line_bounded(&mut reader, &mut line_buf, limits.max_line_bytes)
+                    .map_err(|e| {
+                        let mut ve = VerifyError::from(e);
+                        if ve.message.contains("LimitLineBytes") {
+                            ve.code = ErrorCode::LimitLineBytes;
+                            ve.class = ErrorClass::Limits;
+                        }
+                        ve
+                    })?;
+                if n == 0 {
+                    break;
+                } // EOF
 
                 // SOTA 2026: Block BOM (\uFEFF)
                 if first_line && line_buf.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -803,45 +820,50 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 }
 
                 let mut line_content = if line_buf.ends_with(b"\n") {
-                    &line_buf[..n-1]
+                    &line_buf[..n - 1]
                 } else {
                     &line_buf[..n]
                 };
 
                 // SOTA 2026: Strip CR for CRLF compatibility
                 if line_content.ends_with(b"\r") {
-                    line_content = &line_content[..line_content.len()-1];
+                    line_content = &line_content[..line_content.len() - 1];
                 }
 
-                if line_content.is_empty() { continue; }
+                if line_content.is_empty() {
+                    continue;
+                }
 
-                let event: EvidenceEvent = serde_json::from_slice(line_content)
-                    .map_err(|e| {
-                        let mut ve = VerifyError::from(e);
-                        ve.code = ErrorCode::ContractInvalidJson;
-                        ve
-                    })?;
+                let event: EvidenceEvent = serde_json::from_slice(line_content).map_err(|e| {
+                    let mut ve = VerifyError::from(e);
+                    ve.code = ErrorCode::ContractInvalidJson;
+                    ve
+                })?;
 
                 // Contract checks on event...
                 if event.specversion != "1.0" {
-                     bail!(VerifyError::new(
+                    bail!(VerifyError::new(
                         ErrorClass::Contract,
                         ErrorCode::ContractSchemaVersion,
                         "Invalid specversion"
-                     ));
+                    ));
                 }
 
-                let claimed_hash = event.content_hash.as_deref().ok_or_else(|| VerifyError::new(
-                    ErrorClass::Contract,
-                    ErrorCode::ContractSchemaVersion,
-                    "Missing content_hash"
-                ))?;
+                let claimed_hash = event.content_hash.as_deref().ok_or_else(|| {
+                    VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractSchemaVersion,
+                        "Missing content_hash",
+                    )
+                })?;
 
-                let computed_hash = compute_content_hash(&event).map_err(|e| VerifyError::new(
-                    ErrorClass::Integrity,
-                    ErrorCode::IntegrityEventHash,
-                    e.to_string()
-                ))?;
+                let computed_hash = compute_content_hash(&event).map_err(|e| {
+                    VerifyError::new(
+                        ErrorClass::Integrity,
+                        ErrorCode::IntegrityEventHash,
+                        e.to_string(),
+                    )
+                })?;
 
                 if claimed_hash != computed_hash {
                     bail!(VerifyError::new(
@@ -853,17 +875,33 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 content_hashes.push(computed_hash);
 
                 match prev_seq {
-                    None => if event.seq != 0 {
-                        bail!(VerifyError::new(ErrorClass::Contract, ErrorCode::ContractSequenceGap, "First event seq != 0"));
-                    },
-                    Some(prev) => if event.seq != prev + 1 {
-                        bail!(VerifyError::new(ErrorClass::Contract, ErrorCode::ContractSequenceGap, "Sequence gap"));
+                    None => {
+                        if event.seq != 0 {
+                            bail!(VerifyError::new(
+                                ErrorClass::Contract,
+                                ErrorCode::ContractSequenceGap,
+                                "First event seq != 0"
+                            ));
+                        }
+                    }
+                    Some(prev) => {
+                        if event.seq != prev + 1 {
+                            bail!(VerifyError::new(
+                                ErrorClass::Contract,
+                                ErrorCode::ContractSequenceGap,
+                                "Sequence gap"
+                            ));
+                        }
                     }
                 }
                 prev_seq = Some(event.seq);
 
                 if event.run_id != m.run_id {
-                     bail!(VerifyError::new(ErrorClass::Contract, ErrorCode::ContractRunIdMismatch, "Inconsistent run_id"));
+                    bail!(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractRunIdMismatch,
+                        "Inconsistent run_id"
+                    ));
                 }
             }
 
@@ -871,28 +909,28 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             let expected_hash = normalize_hash(&file_meta.sha256);
 
             if actual_hash != expected_hash {
-                 bail!(VerifyError::new(
+                bail!(VerifyError::new(
                     ErrorClass::Integrity,
                     ErrorCode::IntegrityManifestHash,
                     "events.ndjson hash mismatch"
-                 ));
+                ));
             }
 
             if actual_event_count != m.event_count {
-                 bail!(VerifyError::new(
+                bail!(VerifyError::new(
                     ErrorClass::Contract,
                     ErrorCode::ContractSequenceGap,
                     "Event count mismatch"
-                 ));
+                ));
             }
 
             computed_run_root = compute_run_root(&content_hashes);
             if computed_run_root != m.run_root {
-                 bail!(VerifyError::new(
+                bail!(VerifyError::new(
                     ErrorClass::Integrity,
                     ErrorCode::IntegrityRunRootMismatch,
                     "Run root mismatch"
-                 ));
+                ));
             }
 
             events_verified = true;
@@ -928,6 +966,7 @@ mod tests {
     use super::*;
     use crate::types::EvidenceEvent;
     use chrono::{TimeZone, Utc};
+    use std::io::Cursor;
 
     #[test]
     fn test_bundle_roundtrip() {
@@ -1006,7 +1045,10 @@ mod tests {
         };
         let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_count_limit);
         assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("Event count exceeds limit"));
+        assert!(err
+            .unwrap_err()
+            .to_string()
+            .contains("Event count exceeds limit"));
 
         // 2. Test File Size Limit
         let strict_size_limit = VerifyLimits {

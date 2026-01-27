@@ -1,6 +1,6 @@
-use serde::Serialize;
-use assay_evidence::bundle::writer::{ErrorClass, ErrorCode};
 use anyhow::Result;
+use assay_evidence::bundle::writer::{ErrorClass, ErrorCode};
+use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SimReport {
@@ -13,10 +13,10 @@ pub struct SimReport {
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct SimSummary {
     pub total: usize,
-    pub passed: usize, // New: For invariants
-    pub blocked: usize, // For attacks
+    pub passed: usize,   // New: For invariants
+    pub blocked: usize,  // For attacks
     pub bypassed: usize, // For attacks
-    pub failed: usize, // New: For invariants
+    pub failed: usize,   // New: For invariants
     pub errors: usize,
 }
 
@@ -49,7 +49,12 @@ impl SimReport {
         }
     }
 
-    pub fn add_attack(&mut self, name: &str, result: Result<(ErrorClass, ErrorCode), anyhow::Error>, duration_ms: u64) {
+    pub fn add_attack(
+        &mut self,
+        name: &str,
+        result: Result<(ErrorClass, ErrorCode), anyhow::Error>,
+        duration_ms: u64,
+    ) {
         self.summary.total += 1;
         let res = match result {
             Ok((class, code)) => {

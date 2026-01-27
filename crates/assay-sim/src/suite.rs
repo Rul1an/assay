@@ -1,9 +1,9 @@
-use anyhow::Result;
-use std::path::PathBuf;
-use crate::report::SimReport;
 use crate::attacks;
 use crate::differential;
+use crate::report::SimReport;
+use anyhow::Result;
 use assay_evidence::VerifyLimits;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum SuiteTier {

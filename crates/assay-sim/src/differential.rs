@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use assay_evidence::types::EvidenceEvent;
 use assay_evidence::bundle::writer::BundleWriter;
+use assay_evidence::types::EvidenceEvent;
 use assay_evidence::{verify_bundle_with_limits, VerifyLimits};
 use chrono::{TimeZone, Utc};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::io::Cursor;
 
 pub fn check_invariants(iterations: usize, seed: Option<u64>) -> Result<()> {
@@ -29,7 +29,9 @@ pub fn check_invariants(iterations: usize, seed: Option<u64>) -> Result<()> {
                 let event = generate_random_event(&mut rng, &run_id, seq);
                 writer.add_event(event);
             }
-            writer.finish().context("Failed to write bundle in differential test")?;
+            writer
+                .finish()
+                .context("Failed to write bundle in differential test")?;
         }
 
         // 2. Verify Bundle

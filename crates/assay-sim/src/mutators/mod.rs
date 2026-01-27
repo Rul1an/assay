@@ -1,6 +1,6 @@
 pub mod bitflip;
-pub mod truncate;
 pub mod inject;
+pub mod truncate;
 
 use anyhow::Result;
 
