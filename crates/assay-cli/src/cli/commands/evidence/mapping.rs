@@ -65,7 +65,7 @@ impl EvidenceMapper {
         // 1. Started Event (Control)
         events.push(self.create_event(
             "assay.profile.started",
-            "urn:assay:phase:start",
+            "urn:assay:phase:profile", // Subject is the profile itself
             serde_json::json!({
                 "profile_name": profile.name,
                 "profile_version": profile.version,
@@ -107,7 +107,7 @@ impl EvidenceMapper {
         // 3. Finished Event (Control) - with summary counts
         events.push(self.create_event(
             "assay.profile.finished",
-            "urn:assay:phase:finish",
+            "urn:assay:phase:profile",
             serde_json::json!({
                 "files_count": profile.entries.files.len(),
                 "network_count": profile.entries.network.len(),
@@ -184,27 +184,31 @@ impl EvidenceMapper {
             }
         }
 
-        // 2. Token/Secret scrubbing
+        // 2. Token/Secret scrubbing (case-insensitive matching)
         let sensitive = [
-            "Authorization: Bearer ",
-            "Authorization: ",
+            "authorization: bearer ",
+            "authorization: ",
             "token=",
             "key=",
-            "Bearer ",
+            "bearer ",
             "api_key=",
             "apikey=",
             "secret=",
             "password=",
             "session=",
             "cookie=",
+            "x-api-key:",
+            "x-token:",
         ];
+        let lower_scrubbed = scrubbed.to_lowercase();
         for pattern in sensitive {
-            if let Some(idx) = scrubbed.find(pattern) {
-                // If already scrubbed at this position or after, skip?
-                // Simple approach: if we find it, truncate and break for this pattern
-                // but we want to allow multiple scrubs if they don't overlap.
+            if let Some(idx) = lower_scrubbed.find(pattern) {
+                // Once we match a sensitive pattern, we truncate and append ***.
+                // We use the original scrubbed string to preserve case of non-sensitive parts
+                // but truncate at the index found in lower_scrubbed.
                 scrubbed.truncate(idx + pattern.len());
                 scrubbed.push_str("***");
+                break;
             }
         }
 
@@ -281,9 +285,15 @@ mod tests {
     #[test]
     fn test_scrub_subject_secrets() {
         let mapper = EvidenceMapper::new(None, "test");
+        // Mixed case
         assert_eq!(
             mapper.scrub_subject("curl -H 'Authorization: Bearer xyz'"),
             "curl -H 'Authorization: Bearer ***"
+        );
+        // Lower case
+        assert_eq!(
+            mapper.scrub_subject("curl -H 'authorization: bearer xyz'"),
+            "curl -H 'authorization: bearer ***"
         );
         assert_eq!(
             mapper.scrub_subject("mysql --password=secret123"),
@@ -293,6 +303,8 @@ mod tests {
             mapper.scrub_subject("https://api.com?api_key=12345&other=val"),
             "https://api.com?api_key=***"
         );
+        // Variant header
+        assert_eq!(mapper.scrub_subject("X-API-Key: 12345"), "X-API-Key:***");
     }
 
     #[test]
