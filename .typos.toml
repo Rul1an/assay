@@ -1,13 +1,49 @@
 [default.extend-words]
+# Project & Tech
 ratatui = "ratatui"
 assay = "assay"
 ebpf = "ebpf"
 ndjson = "ndjson"
 sota = "sota"
 jcs = "jcs"
+trulens = "trulens"
+vmlinux = "vmlinux"
+# Kernel header abbreviations (false positives)
+filp = "filp"
+iput = "iput"
+opf = "opf"
+rto = "rto"
+unx = "unx"
+iif = "iif"
+oif = "oif"
+nd = "nd"
+parm = "parm"
+parms = "parms"
+prefered = "prefered"
+sems = "sems"
+lso = "lso"
+fils = "fils"
+sme = "sme"
+wronly = "wronly"
+ressize = "ressize"
+cotrol = "cotrol"
+wqs = "wqs"
+emac = "emac"
+sigfault = "sigfault"
+invald = "invald"
+
+# Dutch common words (false positives in traces/examples)
+controle = "controle"
+controles = "controles"
+productie = "productie"
+wil = "wil"
+als = "als"
 
 [files]
 extend-exclude = [
     "**/fixture/**",
     "**/golden/**",
+    "**/vmlinux.rs",
+    "**/traces/*.jsonl",
+    "**/*.jsonl",
 ]

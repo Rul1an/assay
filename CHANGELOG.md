@@ -292,7 +292,7 @@ Patch release to resolve build pipeline issues.
 ### 💅 Polish & Fixes
 Strictness doesn't have to be unfriendly. This release polishes the "Strict Schema" experience.
 
--   **Friendly Hints**: When unknown fields are detected (e.g. `requre_args`), Doctor now suggests the closest valid field ("Did you mean `require_args`?").
+-   **Friendly Hints**: When unknown fields are detected (e.g. `require_args`), Doctor now suggests the closest valid field ("Did you mean `require_args`?").
 -   **Output**: `assay doctor` now correctly displays diagnostic messages in human-readable output (previously they were counted but hidden).
 -   **Release Fix**: Removed legacy workflows to ensure smooth PyPI publishing.
 
