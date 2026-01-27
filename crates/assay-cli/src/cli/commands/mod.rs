@@ -33,6 +33,7 @@ pub mod profile_types;
 pub mod record;
 pub mod sandbox;
 pub mod setup;
+pub mod sim;
 pub mod validate;
 
 pub mod exit_codes {
@@ -79,6 +80,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Profile(args) => profile::run(args),
         Command::Sandbox(args) => sandbox::run(args).await,
         Command::Evidence(args) => evidence::run(args),
+        Command::Sim(args) => sim::run(args),
         Command::Setup(args) => setup::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

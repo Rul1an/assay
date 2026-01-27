@@ -24,7 +24,7 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     let mut report = SimReport::new(&format!("{:?}", cfg.tier), cfg.seed);
 
     // 1. Integrity Attacks
-    attacks::integrity::check_integrity_attacks(&mut report)?;
+    attacks::integrity::check_integrity_attacks(&mut report, cfg.seed)?;
 
     // 2. Differential Testing
     let iterations = match cfg.tier {

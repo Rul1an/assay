@@ -51,6 +51,8 @@ pub enum Command {
     Sandbox(SandboxArgs),
     /// Evidence Management (Audit/Compliance)
     Evidence(EvidenceArgs),
+    /// Attack Simulation (Hardening/Compliance)
+    Sim(SimArgs),
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
 }
@@ -916,4 +918,51 @@ pub struct SandboxArgs {
     /// Suppress banner output
     #[arg(long, short)]
     pub quiet: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct SimArgs {
+    #[command(subcommand)]
+    pub cmd: SimSub,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum SimSub {
+    /// Run an attack simulation suite
+    Run(SimRunArgs),
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct SimRunArgs {
+    /// Simulation suite to run (quick, nightly, stress)
+    #[arg(long, default_value = "quick")]
+    pub suite: String,
+
+    /// Specific attack vector to run (overrides suite)
+    #[arg(long)]
+    pub attack: Option<String>,
+
+    /// Target bundle for simulation
+    #[arg(long, short)]
+    pub target: std::path::PathBuf,
+
+    /// Seed for reproducible mutations
+    #[arg(long)]
+    pub seed: Option<u64>,
+
+    /// Number of iterations per attack
+    #[arg(long)]
+    pub iterations: Option<usize>,
+
+    /// Path to write machine-readable JSON report
+    #[arg(long)]
+    pub report: Option<std::path::PathBuf>,
+
+    /// Directory to write mutated artifacts for forensics
+    #[arg(long, short)]
+    pub output: Option<std::path::PathBuf>,
+
+    /// Verification limits (preset or JSON)
+    #[arg(long)]
+    pub limits: Option<String>,
 }

@@ -9,12 +9,12 @@ use rand::Rng;
 use rand::SeedableRng;
 use std::io::Cursor;
 
-pub fn check_integrity_attacks(report: &mut SimReport) -> Result<()> {
+pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> {
     let valid_bundle = create_test_bundle()?;
 
     // 1. BitFlip (Harder)
     run_attack(report, "integrity.bitflip", || {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut corrupted = valid_bundle.clone();
         for _ in 0..10 {
             let idx = rng.gen_range(0..corrupted.len());

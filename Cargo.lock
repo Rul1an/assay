@@ -114,6 +114,7 @@ dependencies = [
  "assay-metrics",
  "assay-monitor",
  "assay-policy",
+ "assay-sim",
  "assert_cmd",
  "async-trait",
  "chrono",
