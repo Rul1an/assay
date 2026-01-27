@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+description = "Tamper-evident, cryptographically verifiable evidence bundles for the Assay compliance framework."
 readme.workspace = true
 
 [dependencies]
