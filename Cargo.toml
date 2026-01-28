@@ -33,7 +33,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "2.10.0"
+version = "2.10.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
