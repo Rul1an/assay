@@ -2,6 +2,7 @@ pub mod bundle;
 pub mod crypto;
 pub mod diff;
 pub mod lint;
+pub mod mandate;
 pub mod ndjson;
 pub mod sanitize;
 pub mod store;
