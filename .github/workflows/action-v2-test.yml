@@ -18,10 +18,11 @@ jobs:
       - name: Build Assay CLI
         run: cargo build --release -p assay-cli
 
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
       - name: Test action with no bundles
         uses: ./assay-action
-        env:
-          PATH: ${{ github.workspace }}/target/release:$PATH
 
   test-with-bundle:
     name: Test (with bundle)
@@ -46,12 +47,13 @@ jobs:
           # For now, create a dummy tarball (real bundle creation requires proper tooling)
           tar czf .assay/evidence/test-bundle.tar.gz -C /tmp test_events.jsonl
 
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
       - name: Test action with bundle
         id: assay
         uses: ./assay-action
         continue-on-error: true
-        env:
-          PATH: ${{ github.workspace }}/target/release:$PATH
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
