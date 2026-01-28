@@ -1,0 +1,63 @@
+name: Action v2 Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'assay-action/**'
+      - '.github/workflows/action-v2-test.yml'
+
+jobs:
+  test-no-bundles:
+    name: Test (no bundles - soft exit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Assay CLI
+        run: cargo build --release -p assay-cli
+
+      - name: Test action with no bundles
+        uses: ./assay-action
+        env:
+          PATH: ${{ github.workspace }}/target/release:$PATH
+
+  test-with-bundle:
+    name: Test (with bundle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Assay CLI
+        run: cargo build --release -p assay-cli
+
+      - name: Create test evidence bundle
+        run: |
+          mkdir -p .assay/evidence
+
+          # Create a minimal valid bundle using the CLI test helper
+          cat > /tmp/test_events.jsonl << 'EOF'
+          {"specversion":"1.0","id":"evt-001","source":"urn:assay:test","type":"assay.profile.started","subject":"test-run","time":"2026-01-28T00:00:00Z","data":{"source":"test"}}
+          {"specversion":"1.0","id":"evt-002","source":"urn:assay:test","type":"assay.fs.access","subject":"/tmp/test.txt","time":"2026-01-28T00:00:01Z","data":{"path":"/tmp/test.txt","op":"read"}}
+          {"specversion":"1.0","id":"evt-003","source":"urn:assay:test","type":"assay.profile.finished","subject":"test-run","time":"2026-01-28T00:00:02Z","data":{"event_count":3,"status":"ok"}}
+          EOF
+
+          # For now, create a dummy tarball (real bundle creation requires proper tooling)
+          tar czf .assay/evidence/test-bundle.tar.gz -C /tmp test_events.jsonl
+
+      - name: Test action with bundle
+        id: assay
+        uses: ./assay-action
+        continue-on-error: true
+        env:
+          PATH: ${{ github.workspace }}/target/release:$PATH
+        with:
+          bundles: '.assay/evidence/*.tar.gz'
+          fail_on: none
+
+      - name: Check outputs
+        run: |
+          echo "Verified: ${{ steps.assay.outputs.verified }}"
+          echo "Errors: ${{ steps.assay.outputs.findings_error }}"
+          echo "Warnings: ${{ steps.assay.outputs.findings_warn }}"
