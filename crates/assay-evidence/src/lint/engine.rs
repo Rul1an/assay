@@ -1,4 +1,4 @@
-use super::packs::executor::{PackExecutionMeta, PackExecutor, PackInfo};
+use super::packs::executor::{PackExecutionMeta, PackExecutor};
 use super::packs::LoadedPack;
 use super::rules::{LintContext, RULES};
 use super::{LintFinding, LintReport, LintSummary, Severity};
@@ -63,20 +63,27 @@ pub fn lint_bundle_with_options<R: Read>(
 
     // 4. Run pack rules (if any)
     let pack_meta = if !options.packs.is_empty() {
-        let bundle_path = options.bundle_path.as_deref().unwrap_or("bundle.tar.gz");
+        let bundle_path = options
+            .bundle_path
+            .clone()
+            .unwrap_or_else(|| "bundle.tar.gz".to_string());
+        // manifest.bundle_id already has sha256: prefix
+        let bundle_id = Some(manifest.bundle_id.clone());
+
         // Take ownership of packs to avoid clone
         let executor = PackExecutor::new(options.packs)
             .map_err(|e| anyhow::anyhow!("Pack loading failed: {}", e))?;
 
-        let pack_findings = executor.execute(&events, &manifest, bundle_path);
+        let pack_findings = executor.execute(&events, &manifest, &bundle_path);
         findings.extend(pack_findings);
 
-        Some(PackExecutionMeta {
-            packs: executor.packs().iter().map(PackInfo::from).collect(),
-            disclaimer: executor.combined_disclaimer(),
-            truncated: false,   // Will be set below after combined truncation
-            truncated_count: 0, // Will be set below
-        })
+        // Build metadata using helper (includes rule_metadata and anchor_file)
+        Some(executor.build_meta(
+            Some(bundle_path),
+            bundle_id,
+            false, // Will be set below after combined truncation
+            0,     // Will be set below
+        ))
     } else {
         None
     };

@@ -97,7 +97,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         .collect();
 
     // Add pack rules if packs are present
-    if options.pack_meta.is_some() {
+    if let Some(ref meta) = options.pack_meta {
         // Extract unique pack rules from findings
         let mut pack_rule_ids = std::collections::HashSet::new();
         for finding in &report.findings {
@@ -132,18 +132,55 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                 props.insert("article_ref".into(), json!(aref));
             }
 
-            rules.push(json!({
+            // Get rule metadata for fullDescription and help.markdown
+            let rule_meta = meta.rule_metadata.get(&rule_id);
+
+            let short_desc = rule_meta
+                .map(|m| m.description.as_str())
+                .unwrap_or_else(|| short_id.as_deref().unwrap_or(&rule_id));
+
+            let mut rule = json!({
                 "id": rule_id,
                 "shortDescription": {
-                    "text": format!("Pack rule {}", short_id.as_deref().unwrap_or(&rule_id))
+                    "text": short_desc
                 },
                 "defaultConfiguration": {
                     "level": "error"
                 },
                 "properties": props
-            }));
+            });
+
+            // Add fullDescription (required for GitHub "rule help")
+            if let Some(meta) = rule_meta {
+                rule.as_object_mut().unwrap().insert(
+                    "fullDescription".into(),
+                    json!({ "text": meta.full_description }),
+                );
+
+                // Add help.markdown (shown in GitHub alert details)
+                rule.as_object_mut().unwrap().insert(
+                    "help".into(),
+                    json!({ "markdown": meta.help_markdown, "text": meta.description }),
+                );
+
+                // Add helpUri if available
+                if let Some(ref uri) = meta.help_uri {
+                    rule.as_object_mut()
+                        .unwrap()
+                        .insert("helpUri".into(), json!(uri));
+                }
+            }
+
+            rules.push(rule);
         }
     }
+
+    // Determine anchor file for global findings (repo-relative)
+    let anchor_file = options
+        .pack_meta
+        .as_ref()
+        .and_then(|m| m.anchor_file.as_deref())
+        .unwrap_or(bundle_path);
 
     // Build results with enhanced locations
     let results: Vec<serde_json::Value> = report
@@ -151,9 +188,11 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         .iter()
         .map(|f| {
             // Determine artifact URI and line
+            // For global findings (no location), use anchor file in repo
+            // For event-specific findings, use events.ndjson
             let (artifact_uri, start_line) = match &f.location {
                 Some(loc) => ("events.ndjson".to_string(), loc.line),
-                None => (bundle_path.to_string(), 1),
+                None => (anchor_file.to_string(), 1),
             };
 
             // Extract primaryLocationLineHash from tags if present
@@ -171,11 +210,11 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
             }
 
             // Build location (always present for GitHub)
+            // Use repo-relative URI without uriBaseId for simplicity
             let location = json!({
                 "physicalLocation": {
                     "artifactLocation": {
-                        "uri": artifact_uri,
-                        "uriBaseId": "%SRCROOT%"
+                        "uri": artifact_uri
                     },
                     "region": {
                         "startLine": start_line,
@@ -186,6 +225,17 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
 
             // Build result properties
             let mut result_props = serde_json::Map::new();
+
+            // Add bundle_path and bundle_id for traceability (not as location)
+            if let Some(ref meta) = options.pack_meta {
+                if let Some(ref bp) = meta.bundle_path {
+                    result_props.insert("bundle_path".into(), json!(bp));
+                }
+                if let Some(ref bid) = meta.bundle_id {
+                    result_props.insert("bundle_id".into(), json!(bid));
+                }
+            }
+
             if !f.tags.is_empty() {
                 // Filter out internal metadata tags
                 let visible_tags: Vec<&str> = f

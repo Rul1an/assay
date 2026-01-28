@@ -190,6 +190,29 @@ pub struct PackExecutionMeta {
     pub truncated: bool,
     /// Number of truncated findings.
     pub truncated_count: usize,
+    /// Rule metadata for SARIF (indexed by canonical rule ID).
+    pub rule_metadata: std::collections::HashMap<String, PackRuleMetadata>,
+    /// Anchor file for global findings (repo-relative path).
+    pub anchor_file: Option<String>,
+    /// Bundle path (for properties, not location).
+    pub bundle_path: Option<String>,
+    /// Bundle ID (sha256 digest).
+    pub bundle_id: Option<String>,
+}
+
+/// Metadata for a single pack rule (for SARIF help text).
+#[derive(Debug, Clone)]
+pub struct PackRuleMetadata {
+    /// Short description (one-line).
+    pub description: String,
+    /// Full description for SARIF fullDescription.
+    pub full_description: String,
+    /// Markdown help text (for SARIF help.markdown).
+    pub help_markdown: String,
+    /// Help URI if available.
+    pub help_uri: Option<String>,
+    /// Article reference (e.g., "12(2)(c)").
+    pub article_ref: Option<String>,
 }
 
 /// Information about a single pack.
@@ -212,6 +235,101 @@ impl From<&LoadedPack> for PackInfo {
             kind: pack.definition.kind,
         }
     }
+}
+
+impl PackExecutor {
+    /// Build execution metadata for SARIF output.
+    pub fn build_meta(
+        &self,
+        bundle_path: Option<String>,
+        bundle_id: Option<String>,
+        truncated: bool,
+        truncated_count: usize,
+    ) -> PackExecutionMeta {
+        let packs: Vec<PackInfo> = self.packs.iter().map(PackInfo::from).collect();
+        let disclaimer = self.combined_disclaimer();
+
+        // Collect rule metadata from all packs
+        let mut rule_metadata = std::collections::HashMap::new();
+        for pack in &self.packs {
+            for rule in &pack.definition.rules {
+                let canonical_id = pack.canonical_rule_id(&rule.id);
+
+                // Generate help_markdown if not provided
+                let help_markdown = rule.help_markdown.clone().unwrap_or_else(|| {
+                    generate_help_markdown(
+                        &rule.id,
+                        &rule.description,
+                        rule.article_ref.as_deref(),
+                        pack.definition.disclaimer.as_deref(),
+                    )
+                });
+
+                // Generate full description
+                let full_description = rule.description.clone();
+
+                rule_metadata.insert(
+                    canonical_id,
+                    PackRuleMetadata {
+                        description: rule.description.clone(),
+                        full_description,
+                        help_markdown,
+                        help_uri: pack.definition.source_url.clone(),
+                        article_ref: rule.article_ref.clone(),
+                    },
+                );
+            }
+        }
+
+        // Determine anchor file
+        let anchor_file = select_anchor_file(&self.packs);
+
+        PackExecutionMeta {
+            packs,
+            disclaimer,
+            truncated,
+            truncated_count,
+            rule_metadata,
+            anchor_file,
+            bundle_path,
+            bundle_id,
+        }
+    }
+}
+
+/// Generate help markdown when not provided in pack definition.
+fn generate_help_markdown(
+    rule_id: &str,
+    description: &str,
+    article_ref: Option<&str>,
+    disclaimer: Option<&str>,
+) -> String {
+    let mut markdown = format!("## {}\n\n", rule_id);
+    markdown.push_str(description);
+    markdown.push_str("\n\n");
+
+    if let Some(article) = article_ref {
+        markdown.push_str(&format!("**Article Reference:** {}\n\n", article));
+    }
+
+    if let Some(disc) = disclaimer {
+        markdown.push_str("**Disclaimer:**\n");
+        markdown.push_str(disc);
+    }
+
+    markdown
+}
+
+/// Select anchor file for global findings (deterministic order).
+///
+/// Order of preference:
+/// 1. Pack YAML file in repo (packs/{pack_name}.yaml)
+/// 2. Default to first pack's anchor
+fn select_anchor_file(packs: &[LoadedPack]) -> Option<String> {
+    // Use first pack's file in packs/ directory as anchor
+    packs
+        .first()
+        .map(|pack| format!("packs/{}.yaml", pack.definition.name))
 }
 
 #[cfg(test)]
