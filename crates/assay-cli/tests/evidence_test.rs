@@ -20,7 +20,7 @@ total_runs: 10
 run_ids: ["test_run_123"]
 entries:
   files:
-    "/Users/roelschuurkes/secret.txt":
+    "/home/user/secret.txt":
       first_seen: 100
       last_seen: 200
       runs_seen: 1

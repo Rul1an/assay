@@ -1,6 +1,8 @@
 [default.extend-words]
 # Project & Tech
 ratatui = "ratatui"
+flate = "flate"
+flate2 = "flate2"
 assay = "assay"
 ebpf = "ebpf"
 ndjson = "ndjson"
