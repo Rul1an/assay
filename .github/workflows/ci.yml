@@ -171,9 +171,11 @@ jobs:
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ci-smoke-logs-ubuntu
           path: /tmp/assay-lsm-verify/
+          if-no-files-found: ignore
 
 
   ebpf-smoke-self-hosted:
@@ -289,6 +291,8 @@ jobs:
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ci-smoke-logs-self-hosted
           path: /tmp/assay-lsm-verify/
+          if-no-files-found: ignore
