@@ -4,6 +4,7 @@ pub mod diff;
 pub mod lint;
 pub mod ndjson;
 pub mod sanitize;
+pub mod store;
 pub mod types;
 
 // Convenience re-exports
@@ -13,4 +14,8 @@ pub use bundle::{
     VerifyResult,
 };
 pub use ndjson::{read_events, write_events, NdjsonEvents};
+pub use store::{BundleMeta, BundleStore, ObjectStoreBundleStore, StoreError, StoreSpec};
 pub use types::{Envelope, EvidenceEvent, ProducerMeta, SPEC_VERSION};
+
+// Re-export bytes for CLI convenience
+pub use bytes::Bytes;

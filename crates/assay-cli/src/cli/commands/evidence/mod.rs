@@ -1,6 +1,9 @@
 pub mod diff;
 pub mod lint;
+pub mod list;
 pub mod mapping;
+pub mod pull;
+pub mod push;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
@@ -21,6 +24,12 @@ pub enum EvidenceCmd {
     Lint(lint::LintArgs),
     /// Diff two bundles and report changes
     Diff(diff::DiffArgs),
+    /// Upload a bundle to remote storage (BYOS)
+    Push(push::PushArgs),
+    /// Download a bundle from remote storage (BYOS)
+    Pull(pull::PullArgs),
+    /// List bundles in remote storage (BYOS)
+    List(list::ListArgs),
     /// Interactive TUI explorer for evidence bundles
     #[cfg(feature = "tui")]
     Explore(explore::ExploreArgs),
@@ -70,6 +79,16 @@ pub fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Lint(a) => lint::cmd_lint(a),
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
+        // BYOS commands (async)
+        EvidenceCmd::Push(a) => tokio::runtime::Runtime::new()
+            .expect("failed to create tokio runtime")
+            .block_on(push::cmd_push(a)),
+        EvidenceCmd::Pull(a) => tokio::runtime::Runtime::new()
+            .expect("failed to create tokio runtime")
+            .block_on(pull::cmd_pull(a)),
+        EvidenceCmd::List(a) => tokio::runtime::Runtime::new()
+            .expect("failed to create tokio runtime")
+            .block_on(list::cmd_list(a)),
         #[cfg(feature = "tui")]
         EvidenceCmd::Explore(a) => explore::cmd_explore(a),
     }

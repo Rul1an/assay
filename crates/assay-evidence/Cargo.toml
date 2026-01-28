@@ -29,11 +29,20 @@ tar = "0.4"
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 
+# BYOS: Object storage (S3, Azure, GCS, local, memory)
+object_store = { version = "0.11", features = ["aws", "http"] }
+async-trait = "0.1"
+bytes = "1.5"
+futures = "0.3"
+url = "2.5"
+tracing = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 jsonschema = "0.17"
 tempfile = "3"
 assert_fs = "1.0"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true
