@@ -2,6 +2,57 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v2.10.0] - 2026-01-28
+
+### 🎯 Pack Engine: Compliance Rule Packs
+
+This release introduces the **Pack Engine** - a YAML-driven compliance/security/quality rule system for evidence bundle linting, with the first built-in pack for EU AI Act Article 12.
+
+### ✨ Major Features
+
+-   **Pack Engine** (`crates/assay-evidence/src/lint/packs/`):
+    -   YAML-defined rule packs with typed checks
+    -   Check types: `event_count`, `event_pairs`, `event_field_present`, `event_type_exists`, `manifest_field`
+    -   JSON Pointer (RFC 6901) for field addressing
+    -   JCS canonicalization (RFC 8785) for deterministic pack digests
+    -   Collision policy: compliance packs hard-fail, security/quality last-wins
+
+-   **EU AI Act Baseline Pack** (`packs/eu-ai-act-baseline.yaml`):
+    -   `EU12-001`: Event recording (Article 12(1))
+    -   `EU12-002`: Operation monitoring - started/finished pairs (Article 12(2)(c))
+    -   `EU12-003`: Post-market monitoring - correlation IDs (Article 12(2)(b))
+    -   `EU12-004`: Risk identification - policy/denial fields (Article 12(2)(a))
+
+-   **CLI Integration**:
+    -   `--pack`: Comma-separated pack references (built-in or file path)
+    -   `--max-results`: Limit findings for GitHub SARIF size limits (default: 500)
+
+-   **GitHub Code Scanning Compatible SARIF**:
+    -   `locations[]` on all results (including global findings)
+    -   `primaryLocationLineHash` for GitHub deduplication
+    -   Pack metadata in `tool.driver.properties.assayPacks[]`
+    -   `run.properties.disclaimer` for compliance packs
+    -   Truncation policy with `run.properties.truncated/truncatedCount`
+
+### 📚 Documentation
+
+-   `docs/architecture/SPEC-Pack-Engine-v1.md` - Complete implementation spec
+-   `docs/architecture/ADR-013-EU-AI-Act-Pack.md` - EU AI Act pack design
+-   `docs/architecture/ADR-016-Pack-Taxonomy.md` - Pack taxonomy and open core model
+
+### Usage
+
+```bash
+# Run EU AI Act baseline checks
+assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline
+
+# SARIF output for GitHub Code Scanning
+assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline --format sarif
+
+# Custom pack file
+assay evidence lint bundle.tar.gz --pack ./my-pack.yaml
+```
+
 ## [v2.4.0] - 2026-01-26
 
 ### 🛡️ Phase 5: SOTA Sandbox Hardening
