@@ -35,6 +35,7 @@ pub mod sandbox;
 pub mod setup;
 #[cfg(feature = "sim")]
 pub mod sim;
+pub mod tool;
 pub mod validate;
 
 pub mod exit_codes {
@@ -84,6 +85,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         #[cfg(feature = "sim")]
         Command::Sim(args) => sim::run(args),
         Command::Setup(args) => setup::run(args).await,
+        Command::Tool(args) => Ok(tool::cmd_tool(args.cmd)),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::OK)

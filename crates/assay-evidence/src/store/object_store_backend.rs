@@ -33,8 +33,8 @@ impl ObjectStoreBundleStore {
         let inner: Arc<dyn ObjectStore> = match spec.scheme.as_str() {
             "memory" => Arc::new(object_store::memory::InMemory::new()),
             "file" => {
-                let path = if spec.bucket.is_some() {
-                    format!("/{}/{}", spec.bucket.as_ref().unwrap(), spec.prefix)
+                let path = if let Some(bucket) = &spec.bucket {
+                    format!("/{}/{}", bucket, spec.prefix)
                 } else if spec.prefix.is_empty() {
                     "/tmp/assay-store".to_string()
                 } else {

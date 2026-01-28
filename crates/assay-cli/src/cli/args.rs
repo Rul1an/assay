@@ -56,6 +56,14 @@ pub enum Command {
     Sim(SimArgs),
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
+    /// Tool signing and verification
+    Tool(ToolArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct ToolArgs {
+    #[command(subcommand)]
+    pub cmd: super::commands::tool::ToolCmd,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
