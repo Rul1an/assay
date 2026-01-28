@@ -15,12 +15,16 @@ pub use schema::{CheckDefinition, PackDefinition, PackKind, PackRequirements, Pa
 /// Built-in packs embedded at compile time.
 ///
 /// Format: (pack_name, pack_yaml_content)
+///
+/// Note: Pack files are stored in crates/assay-evidence/packs/ to ensure they're
+/// included in the published crate. The root /packs/ directory is the source of
+/// truth; sync changes manually or via build script.
 pub static BUILTIN_PACKS: &[(&str, &str)] = &[
     (
         "eu-ai-act-baseline",
-        include_str!("../../../../../packs/eu-ai-act-baseline.yaml"),
+        include_str!("../../../packs/eu-ai-act-baseline.yaml"),
     ),
-    // Future: ("soc2-baseline", include_str!("../../../../../packs/soc2-baseline.yaml")),
+    // Future: ("soc2-baseline", include_str!("../../../packs/soc2-baseline.yaml")),
 ];
 
 /// Look up a built-in pack by name.
