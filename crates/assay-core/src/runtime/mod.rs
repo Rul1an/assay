@@ -28,5 +28,7 @@ pub use authorizer::{
     AuthorizeError, Authorizer, AuthzConfig, MandateData, MandateKind, OperationClass, PolicyError,
     ToolCallData, DEFAULT_CLOCK_SKEW_SECONDS,
 };
-pub use mandate_store::{AuthzError, AuthzReceipt, ConsumeParams, MandateMetadata, MandateStore};
+pub use mandate_store::{
+    compute_use_id, AuthzError, AuthzReceipt, ConsumeParams, MandateMetadata, MandateStore,
+};
 pub use schema::MANDATE_SCHEMA;

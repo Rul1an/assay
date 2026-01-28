@@ -1,10 +1,17 @@
 # Mandate Evidence Specification v1
 
-**Status:** Draft v1.0.3 (January 2026)
+**Status:** Draft v1.0.4 (January 2026)
 **Scope:** Cryptographically-signed user authorization evidence for AI agent tool calls
 **ADR:** [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md)
 
 **Changelog:**
+- v1.0.4: Fixed normative inconsistencies:
+  - use_id MUST be deterministic (content-addressed), not UUID
+  - Fixed signature field names in examples (content_id + signed_payload_digest)
+  - Amount canonicalization: consistent "no trailing zeros" rule with examples
+  - Removed created_at from hashable transaction_object schema
+  - tool_call_id MUST in tool.decision schema
+  - require_signed_lifecycle_events type clarified as enum
 - v1.0.3: Added normative runtime enforcement section (§7), SQLite store schema, nonce replay prevention, transaction_ref verification flow, idempotency semantics, crash recovery model
 - v1.0.2: Fixed payload_digest semantics (DSSE alignment), removed mandate_kind=revocation, added conformance test vectors, normative transaction_ref schema, require_signed_lifecycle default for commit
 - v1.0.1: Fixed mandate_id circularity, added lifecycle event trust model, normative glob semantics, operation_class ordering
@@ -271,9 +278,9 @@ Computation: `transaction_ref = "sha256:" + hex(SHA256(JCS(transaction_object)))
 
 Where `transaction_object` is the cart, order, or payment intent that this mandate authorizes. This prevents mandate reuse for different transactions within the validity window.
 
-**Transaction Intent Object Schema (v1.0.2 NORMATIVE):**
+**Transaction Intent Object Schema (v1.0.4 NORMATIVE):**
 
-For interoperability, the `transaction_object` SHOULD conform to this minimal schema:
+For interoperability, the `transaction_object` MUST conform to this schema when computing `transaction_ref`:
 
 ```json
 {
@@ -282,19 +289,31 @@ For interoperability, the `transaction_object` SHOULD conform to this minimal sc
     {
       "product_id": "string",     // REQUIRED: Product identifier
       "quantity": 1,              // REQUIRED: Integer quantity
-      "unit_price": "10.00"       // OPTIONAL: Decimal string
+      "unit_price": "10"          // OPTIONAL: Decimal string (canonical form)
     }
   ],
   "total": {                      // REQUIRED: Total amount
-    "amount": "100.00",           // Decimal string, MUST NOT use float
+    "amount": "100",              // Decimal string, canonical form
     "currency": "USD"             // ISO 4217, MUST be uppercase
   },
-  "created_at": "2026-01-28T10:00:00Z"  // OPTIONAL: ISO 8601 UTC
+  "idempotency_key": "string"     // OPTIONAL: Stable idempotency key
 }
 ```
 
+**MUST NOT include in hashable transaction_object:**
+- `created_at`, `updated_at`, or any timestamps
+- Request-specific nonces or session IDs
+- Any fields that vary per-request
+
+**Amount canonicalization rules (NORMATIVE):**
+- MUST be decimal strings (never floats)
+- MUST strip leading zeros: `"007"` → `"7"`
+- MUST strip trailing zeros in fraction: `"10.00"` → `"10"`, `"10.50"` → `"10.5"`
+- MUST strip trailing dot if fraction empty: `"10."` → `"10"`
+- Examples: `"99.99"` (ok), `"100"` (ok), `"10.5"` (ok), `"100.00"` (WRONG)
+
 **Normalization rules for JCS hashing:**
-- `amount` fields MUST be decimal strings (no floats, no trailing zeros: "10" not "10.00")
+- `amount` fields MUST use canonical decimal form (see above)
 - `currency` MUST be uppercase ISO 4217
 - `items` array order MUST be preserved (JCS preserves array order)
 - No optional fields should be present with `null` values; omit them entirely
@@ -530,7 +549,8 @@ For high-risk deployments (commerce, financial), add `signature` to `used`/`revo
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate.used+json;v=1",
-      "payload_digest": "sha256:...",
+      "content_id": "sha256:...",
+      "signed_payload_digest": "sha256:...",
       "key_id": "sha256:...",
       "signature": "base64...",
       "signed_at": "2026-01-28T10:05:00Z"
@@ -561,9 +581,16 @@ Extended `assay.tool.decision` with mandate linkage.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `mandate_id` | string | Conditional | Mandate authorizing this decision |
+| `tool_call_id` | string | **MUST** | Unique identifier for this tool call (idempotency key) |
+| `mandate_id` | string | Conditional | Mandate authorizing this decision (MUST for commit tools) |
 | `mandate_scope_match` | boolean | No | Whether tool matched mandate scope |
 | `mandate_kind_match` | boolean | No | Whether mandate kind allows operation class |
+| `reason_code` | string | **MUST** | Machine-parseable decision reason (see Error Taxonomy §7.10) |
+
+**tool_call_id requirements:**
+- MUST be unique per tool call attempt
+- MUST be stable across retries (same logical call = same ID)
+- Used for idempotency in mandate consumption and crash recovery correlation
 
 ---
 
@@ -864,7 +891,7 @@ CREATE TABLE IF NOT EXISTS mandates (
 
 -- Use tracking (append-only, immutable)
 CREATE TABLE IF NOT EXISTS mandate_uses (
-    use_id           TEXT PRIMARY KEY,  -- UUID v4
+    use_id           TEXT PRIMARY KEY,  -- Content-addressed (see §7.4)
     mandate_id       TEXT NOT NULL REFERENCES mandates(mandate_id),
     tool_call_id     TEXT NOT NULL UNIQUE,  -- Idempotency key
     use_count        INTEGER NOT NULL,  -- 1-based, at time of use
@@ -974,6 +1001,19 @@ INSERT INTO mandate_uses (
 COMMIT;
 ```
 
+**use_id computation (NORMATIVE v1.0.4):**
+
+The `use_id` MUST be content-addressed (deterministic) for audit verifiability:
+
+```
+use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
+```
+
+Example: `mandate_id="sha256:abc...", tool_call_id="tc_001", use_count=1`
+→ `use_id = "sha256:" + hex(SHA256("sha256:abc...:tc_001:1"))`
+
+This allows third parties to recompute and verify use receipts without runtime access.
+
 **Critical invariants:**
 
 | Invariant | Enforcement |
@@ -983,6 +1023,7 @@ COMMIT;
 | Max uses | `use_count < max_uses` check before increment |
 | Nonce replay | `INSERT` into nonces table (not SELECT+INSERT) |
 | Monotonic counts | `UNIQUE(mandate_id, use_count)` constraint |
+| use_id determinism | Content-addressed from mandate_id + tool_call_id + use_count |
 
 ### 7.5 Nonce Replay Prevention (Normative)
 
@@ -1343,7 +1384,8 @@ rules:
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+      "content_id": "sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+      "signed_payload_digest": "sha256:b2c3d4e5f6789012345678901234567890123456789012345678901234abcdef",
       "key_id": "sha256:prod-signing-key-fingerprint-here-64-hex-chars-total-ok",
       "signature": "MEUCIQC...",
       "signed_at": "2026-01-28T08:55:00Z"
@@ -1376,7 +1418,8 @@ rules:
       "max_value": {
         "amount": "99.99",
         "currency": "USD"
-      }
+      },
+      "transaction_ref": "sha256:e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5"
     },
     "validity": {
       "not_before": "2026-01-28T10:30:00Z",
@@ -1398,7 +1441,8 @@ rules:
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:f1e2d3c4b5a6789012345678901234567890123456789012345678901234wxyz",
+      "content_id": "sha256:f1e2d3c4b5a6789012345678901234567890123456789012345678901234wxyz",
+      "signed_payload_digest": "sha256:c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
       "key_id": "sha256:prod-signing-key-fingerprint-here-64-hex-chars-total-ok",
       "signature": "MEYCIQDy...",
       "signed_at": "2026-01-28T10:30:00Z"

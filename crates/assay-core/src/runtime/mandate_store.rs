@@ -8,10 +8,10 @@
 use super::schema::MANDATE_SCHEMA;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use uuid::Uuid;
 
 /// Authorization receipt returned after successful consumption.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,7 +326,9 @@ impl MandateStore {
             params![new_count, mandate_id],
         )?;
 
-        let use_id = Uuid::new_v4().to_string();
+        // use_id is content-addressed (deterministic) per SPEC-Mandate-v1.0.4 §7.4
+        // use_id = sha256(mandate_id + ":" + tool_call_id + ":" + use_count)
+        let use_id = compute_use_id(mandate_id, tool_call_id, new_count as u32);
         let consumed_at = Utc::now();
 
         conn.execute(
@@ -397,6 +399,17 @@ impl MandateStore {
         )?;
         Ok(exists > 0)
     }
+}
+
+/// Compute deterministic use_id per SPEC-Mandate-v1.0.4 §7.4.
+///
+/// ```text
+/// use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
+/// ```
+pub fn compute_use_id(mandate_id: &str, tool_call_id: &str, use_count: u32) -> String {
+    let input = format!("{}:{}:{}", mandate_id, tool_call_id, use_count);
+    let hash = Sha256::digest(input.as_bytes());
+    format!("sha256:{}", hex::encode(hash))
 }
 
 #[cfg(test)]
