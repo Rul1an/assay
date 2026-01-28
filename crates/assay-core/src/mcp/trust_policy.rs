@@ -88,8 +88,20 @@ impl TrustPolicy {
     }
 
     /// Check if a key_id is trusted.
+    ///
+    /// # Security Note
+    ///
+    /// If no trusted keys are configured (`trusted_key_ids` and `trusted_keys` are both empty),
+    /// this returns `true` for ANY key_id (permissive mode). This is intentional for development
+    /// workflows but **must not be used in production**. Always configure explicit trusted keys
+    /// for production deployments.
+    ///
+    /// To enforce strict verification, either:
+    /// - Add at least one `trusted_key_ids` entry
+    /// - Add at least one `trusted_keys` entry with `key_id`
     pub fn is_key_trusted(&self, key_id: &str) -> bool {
-        // If no keys are configured, trust all (permissive mode)
+        // SECURITY: If no keys are configured, trust all (permissive mode for dev).
+        // Production deployments MUST configure explicit trusted keys.
         if self.trusted_key_ids.is_empty() && self.trusted_keys.is_empty() {
             return true;
         }

@@ -70,16 +70,25 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
         .to_public_key_pem(LineEnding::LF)
         .context("failed to encode public key as SPKI PEM")?;
 
-    // Write private key with restricted permissions
-    fs::write(&private_path, private_pem.as_bytes())
-        .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
-
+    // Write private key with restricted permissions (atomic on Unix)
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(&private_path, perms)
-            .with_context(|| format!("failed to set permissions on: {}", private_path.display()))?;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&private_path)
+            .with_context(|| format!("failed to create private key: {}", private_path.display()))?;
+        file.write_all(private_pem.as_bytes())
+            .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&private_path, private_pem.as_bytes())
+            .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
     }
 
     // Write public key

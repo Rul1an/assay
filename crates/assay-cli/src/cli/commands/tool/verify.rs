@@ -100,7 +100,14 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
                 )
             })?
     } else if args.allow_embedded_key {
-        // Use embedded key (dev mode)
+        // Use embedded key (dev mode) - print security warning
+        if !args.quiet {
+            eprintln!("WARNING: Using embedded public key from signature.");
+            eprintln!("         This provides NO security guarantee - anyone can sign and embed their own key!");
+            eprintln!("         Use --pubkey or --trust-policy for production verification.");
+            eprintln!();
+        }
+
         let sig = extract_signature(&tool).ok_or(VerifyError::NoSignature)?;
         let pubkey_b64 = sig.public_key.ok_or_else(|| {
             anyhow::anyhow!("--allow-embedded-key specified but no public_key in signature")

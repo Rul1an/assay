@@ -66,8 +66,9 @@ fn run_sign(args: SignArgs) -> Result<()> {
     // Extract signature for display
     let sig = extract_signature(&signed).expect("just signed");
 
-    // Write output
-    let output_json = serde_json::to_string_pretty(&signed)?;
+    // Write output (with trailing newline per POSIX)
+    let mut output_json = serde_json::to_string_pretty(&signed)?;
+    output_json.push('\n');
     fs::write(&output_path, output_json)
         .with_context(|| format!("failed to write output: {}", output_path.display()))?;
 
