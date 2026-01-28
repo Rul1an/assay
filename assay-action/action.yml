@@ -216,13 +216,12 @@ runs:
           # Use find with explicit paths (safer than glob expansion)
           BUNDLES=$(find . \( -path './.assay/evidence/*.tar.gz' -o -path './evidence/*.tar.gz' \) -type f 2>/dev/null | head -100 || true)
         else
-          # Use find with -name for safer pattern handling (avoids ls glob issues)
+          # Glob expansion: use compgen for safe pattern matching
           # shellcheck disable=SC2086
-          BUNDLES=$(find . -type f -name "$(basename "$BUNDLES_PATTERN")" -path "$BUNDLES_PATTERN" 2>/dev/null | head -100 || true)
-          # Fallback to simple expansion if find fails
-          if [ -z "$BUNDLES" ]; then
-            # shellcheck disable=SC2086
-            BUNDLES=$(ls "$BUNDLES_PATTERN" 2>/dev/null || true)
+          if compgen -G "$BUNDLES_PATTERN" > /dev/null 2>&1; then
+            BUNDLES=$(compgen -G "$BUNDLES_PATTERN" | head -100)
+          else
+            BUNDLES=""
           fi
         fi
 
