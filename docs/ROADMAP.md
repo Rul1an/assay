@@ -92,16 +92,18 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 ### Prioritized Deliverables
 
-| Priority | Item | Effort | Value | ADR |
-|----------|------|--------|-------|-----|
-| **P0** | GitHub Action v2 | Medium | High | [ADR-014](./architecture/ADR-014-GitHub-Action-v2.md) ✅ |
-| **P1** | BYOS CLI Commands | Low | High | [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md) |
-| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | [ADR-011](./architecture/ADR-011-Tool-Signing.md) |
-| **P2** | EU AI Act Compliance Pack | Medium | High | [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) |
-| **P2** | GitHub Action v2.1 | Low | Medium | [ADR-014](./architecture/ADR-014-GitHub-Action-v2.md) |
-| **P3** | Transparency Log Verification | Low | Medium | [ADR-012](./architecture/ADR-012-Transparency-Log.md) |
-| **Defer** | Managed Evidence Store | High | Medium | [ADR-009](./architecture/ADR-009-WORM-Storage.md), [ADR-010](./architecture/ADR-010-Evidence-Store-API.md) |
-| **Defer** | Dashboard | High | Medium | CLI queries first, UI in Q3+ |
+| Priority | Item | Effort | Value | Status |
+|----------|------|--------|-------|--------|
+| **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
+| **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
+| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | 🔜 Next |
+| **P2** | EU AI Act Compliance Pack | Medium | High | Pending |
+| **P2** | GitHub Action v2.1 | Low | Medium | Pending |
+| **P3** | Transparency Log Verification | Low | Medium | Pending |
+| **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
+| **Defer** | Dashboard | High | Medium | Q3+ |
+
+See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md)
 
 ### GitHub Action v2 ✅ Complete
 
@@ -118,29 +120,25 @@ Features:
 - Baseline comparison via cache
 - Job Summary reports
 
-### A. BYOS CLI Commands (Open Core)
+### A. BYOS CLI Commands ✅ Complete
 
 Per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md), evidence storage uses user-provided S3-compatible buckets:
 
 ```bash
-# Configure user's storage
-export ASSAY_STORE_ENDPOINT=s3.us-west-002.backblazeb2.com
-export ASSAY_STORE_BUCKET=my-evidence-bucket
-
 # CLI commands
-assay evidence push bundle.tar.gz
-assay evidence pull --bundle-id sha256:...
-assay evidence list --run-id run_123
-assay evidence store-status
+assay evidence push bundle.tar.gz --store s3://bucket/prefix
+assay evidence pull --bundle-id sha256:... --store s3://bucket/prefix
+assay evidence list --run-id run_123 --store s3://bucket/prefix
 ```
 
-- [ ] **Generic S3 Client**: Using `object_store` crate
-- [ ] **push command**: Upload verified bundle to user's storage
-- [ ] **pull command**: Download bundle by ID or run
-- [ ] **list command**: List bundles with filtering
-- [ ] **store-status**: Check storage connectivity and configuration
+- [x] **Generic S3 Client**: Using `object_store` crate
+- [x] **push command**: Upload verified bundle with immutability-safe writes
+- [x] **pull command**: Download bundle by ID or run
+- [x] **list command**: List bundles with filtering, JSON/table/plain output
+- [x] **Conditional writes**: `If-None-Match: "*"` for immutability
+- [x] **Content-addressed keys**: SHA-256 bundle_id as source of truth
 
-Supported providers: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Tigris
+Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Blob, GCS, local filesystem
 
 ### B. Tool Signing (Open Core)
 - [ ] **`x-assay-sig` field**: Ed25519 signature in bundle manifest
@@ -277,3 +275,40 @@ The core execution and policy engine is stable and production-ready.
 - [x] MCP Discovery: Auto-discovery of MCP servers
 - [x] MCP Management: Kill/terminate MCP servers
 - [x] Experimental: MCP process wrapper (hidden command)
+
+---
+
+## Open Core Philosophy
+
+Assay follows the **open core model**: the core evidence tooling is fully open source (Apache 2.0), while enterprise governance features are commercially licensed.
+
+### Open Source (Apache 2.0)
+
+Everything needed to create, verify, and analyze evidence locally:
+
+| Category | Components |
+|----------|------------|
+| **Evidence Contract** | Schema v1, JCS canonicalization, content-addressed IDs, deterministic bundles |
+| **CLI Workflow** | `export`, `verify`, `lint`, `diff`, `explore`, `show` |
+| **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
+| **Basic Signing** | Ed25519 local key signing and verification |
+| **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor |
+| **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
+| **Output Formats** | SARIF, JUnit, JSON, console |
+
+**Why open:** Standards adoption requires broad accessibility. The evidence format should become infrastructure, not a product moat.
+
+### Enterprise Features (Commercial)
+
+Governance, compliance, and scale capabilities for organizations:
+
+| Category | Components |
+|----------|------------|
+| **Identity & Access** | SSO/SAML/SCIM, RBAC, teams, approval workflows |
+| **Compliance** | EU AI Act Pack, SOC 2 mapping, compliance reporting |
+| **Advanced Signing** | Sigstore keyless, transparency log verification, trust policies |
+| **Managed Storage** | WORM retention, legal hold, compliance attestation |
+| **Integrations** | SIEM connectors (Splunk/Sentinel), OTel pipeline templates |
+| **Fleet Management** | Policy distribution, runtime agent management |
+
+**Principle:** Gate platform scale and operations, not basic workflow. Developers should always be able to create and verify evidence locally for free.
