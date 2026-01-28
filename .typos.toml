@@ -42,6 +42,9 @@ productie = "productie"
 wil = "wil"
 als = "als"
 
+# Hex strings in traceparent examples
+ba = "ba"
+
 [files]
 extend-exclude = [
     "**/fixture/**",
