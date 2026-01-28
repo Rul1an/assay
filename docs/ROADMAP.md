@@ -86,20 +86,22 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 ## Q2 2026: Supply Chain Security
 
-**Objective:** Launch the initial commercial features.
+**Objective:** Launch compliance and signing features with zero infrastructure cost.
+
+**Strategy:** BYOS-first (Bring Your Own Storage) per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md). Users provide their own S3-compatible storage. Managed infrastructure deferred until PMF.
 
 ### Prioritized Deliverables
 
 | Priority | Item | Effort | Value | ADR |
 |----------|------|--------|-------|-----|
 | **P0** | GitHub Action v2 | Medium | High | [ADR-014](./architecture/ADR-014-GitHub-Action-v2.md) ✅ |
-| **P0** | WORM Storage (90-day retention) | Low | High | [ADR-009](./architecture/ADR-009-WORM-Storage.md) |
-| **P1** | Evidence Store MVP (Ingest API) | Medium | High | [ADR-010](./architecture/ADR-010-Evidence-Store-API.md) |
-| **P2** | Tool Signing (`x-assay-sig`) | Medium | High | [ADR-011](./architecture/ADR-011-Tool-Signing.md) |
+| **P1** | BYOS CLI Commands | Low | High | [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md) |
+| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | [ADR-011](./architecture/ADR-011-Tool-Signing.md) |
 | **P2** | EU AI Act Compliance Pack | Medium | High | [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) |
+| **P2** | GitHub Action v2.1 | Low | Medium | [ADR-014](./architecture/ADR-014-GitHub-Action-v2.md) |
 | **P3** | Transparency Log Verification | Low | Medium | [ADR-012](./architecture/ADR-012-Transparency-Log.md) |
-| **Defer** | Registry Pinning | Medium | Low (Q2) | Requires signing + hosted service |
-| **Defer** | Dashboard | High | Medium | CLI queries first, UI in Q3 |
+| **Defer** | Managed Evidence Store | High | Medium | [ADR-009](./architecture/ADR-009-WORM-Storage.md), [ADR-010](./architecture/ADR-010-Evidence-Store-API.md) |
+| **Defer** | Dashboard | High | Medium | CLI queries first, UI in Q3+ |
 
 ### GitHub Action v2 ✅ Complete
 
@@ -116,22 +118,48 @@ Features:
 - Baseline comparison via cache
 - Job Summary reports
 
-### A. Evidence Store MVP (Paid)
-- [ ] **CLI Commands** (Open Core): `assay evidence push/pull/list`
-- [ ] **Ingest API**: REST endpoint for bundle upload → S3 with Object Lock
-- [ ] **WORM Storage**: 90-day immutable retention (SEC 17a-4, CFTC, FINRA compliant)
-- [ ] **Query API**: Basic bundle retrieval by `run_id`, `bundle_id`
-- [ ] **Legal Hold**: Endpoint for investigation freeze
+### A. BYOS CLI Commands (Open Core)
 
-### B. Tool Signing (Open Core Hooks + Paid Verification)
-- [ ] **Open Core**: `x-assay-sig` field, ed25519 local signing/verification
-- [ ] **Sigstore Keyless**: Fulcio certificate + Rekor transparency log
-- [ ] **Paid**: Managed identity monitoring, org trust policies
+Per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md), evidence storage uses user-provided S3-compatible buckets:
 
-### C. Compliance Packs (Open Baseline + Paid Managed)
+```bash
+# Configure user's storage
+export ASSAY_STORE_ENDPOINT=s3.us-west-002.backblazeb2.com
+export ASSAY_STORE_BUCKET=my-evidence-bucket
+
+# CLI commands
+assay evidence push bundle.tar.gz
+assay evidence pull --bundle-id sha256:...
+assay evidence list --run-id run_123
+assay evidence store-status
+```
+
+- [ ] **Generic S3 Client**: Using `object_store` crate
+- [ ] **push command**: Upload verified bundle to user's storage
+- [ ] **pull command**: Download bundle by ID or run
+- [ ] **list command**: List bundles with filtering
+- [ ] **store-status**: Check storage connectivity and configuration
+
+Supported providers: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Tigris
+
+### B. Tool Signing (Open Core)
+- [ ] **`x-assay-sig` field**: Ed25519 signature in bundle manifest
+- [ ] **Local signing**: `assay evidence sign bundle.tar.gz --key private.pem`
+- [ ] **Local verification**: `assay evidence verify bundle.tar.gz --pubkey public.pem`
+- [ ] **Keyless (future)**: Sigstore Fulcio + Rekor integration
+
+### C. Compliance Packs (Open Core)
 - [ ] **Pack Engine**: `--pack` CLI flag, pack composition
 - [ ] **EU AI Act Pack**: Article 12 mapping, SARIF output with `article_ref`
-- [ ] **Paid**: Org-specific exceptions, PDF audit reports
+- [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
+
+### D. GitHub Action v2.1
+
+After P1/P2 features:
+- [ ] `assay init` workflow generator
+- [ ] Compliance pack support (`--pack eu-ai-act`)
+- [ ] Coverage badge generation
+- [ ] Store integration (push to BYOS)
 
 ---
 
@@ -139,28 +167,45 @@ Features:
 
 **Objective:** Integration with the broader security ecosystem.
 
-### A. Connectors (Paid)
+### A. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
 - [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/Rul1an/assay-action)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
+- [ ] **GitLab CI**: Native integration
 
-### B. Compliance Packs (Open Baseline + Paid Managed)
-- [ ] **EU AI Act Pack**: Pre-configured Article 12 logging profiles
+### B. Additional Compliance Packs
+- [ ] **SOC 2 Pack**: Control mapping for Type II audits
 - [ ] **MCPTox**: Regression testing against jailbreak/poisoning patterns
-- [ ] **Managed Packs**: Org-specific exceptions, reporting templates
+- [ ] **Industry Packs**: Healthcare (HIPAA), Finance (PCI-DSS)
 
-### C. Governance Dashboard (Paid)
+### C. Managed Evidence Store (Evaluate)
+
+Only proceed if:
+1. Users explicitly request managed hosting
+2. Revenue model supports infrastructure costs
+3. PMF is validated
+
+If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR-010](./architecture/ADR-010-Evidence-Store-API.md):
+- [ ] **Cloudflare Workers + R2**: Non-SEC-compliant tier (lowest cost)
+- [ ] **Backblaze B2 Proxy**: SEC 17a-4 compliant tier
+- [ ] **Pricing**: Pass-through storage + margin
+
+---
+
+## Q4 2026: Platform Features
+
+**Objective:** Advanced capabilities for enterprise adoption.
+
+### A. Governance Dashboard (If Managed Store Exists)
 - [ ] **Policy Drift**: Trend lines, anomaly detection
 - [ ] **Degradation Reports**: Evidence health score
 - [ ] **Env Strictness Score**: Compliance posture metrics
 
----
+### B. Advanced Signing
+- [ ] **Sigstore Keyless**: Fulcio certificate + Rekor transparency log
+- [ ] **Org Trust Policies**: Managed identity verification
 
-## Q4 2026: Managed Execution (Platform)
-
-**Objective:** Zero-configuration secure runtime for untrusted code.
-
-### A. Managed Isolation (Paid)
+### C. Managed Isolation (Future)
 - [ ] **Managed Runners**: Cloud-hosted MicroVMs (Firecracker/gVisor)
 - [ ] **Zero-Infra**: `assay run --remote ...` transparent offloading
 

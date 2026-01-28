@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed (January 2026)
+**Deferred to Phase 3** (January 2026)
+
+> **Note:** This ADR describes a managed multi-tenant Evidence Store API. Per [ADR-015](./ADR-015-BYOS-Storage-Strategy.md), managed infrastructure is deferred until product-market fit is validated. Phase 1 implements BYOS (Bring Your Own Storage) CLI commands that work with any S3-compatible storage.
+>
+> The CLI commands (`push/pull/list`) from this ADR are implemented in Phase 1, but they target user-provided storage rather than a managed service.
+>
+> This design remains valid for when/if a managed store is implemented.
 
 ## Context
 

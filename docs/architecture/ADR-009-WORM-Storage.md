@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed (January 2026)
+**Deferred** (January 2026)
+
+> **Note:** This ADR describes the managed WORM storage design. Per [ADR-015](./ADR-015-BYOS-Storage-Strategy.md), managed infrastructure is deferred to Phase 3. Phase 1 uses BYOS (Bring Your Own Storage) where users configure their own S3-compatible storage with Object Lock.
+>
+> This design remains valid for when/if managed storage is implemented.
 
 ## Context
 
