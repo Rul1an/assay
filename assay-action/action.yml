@@ -231,6 +231,7 @@ runs:
 
         REPORTS_DIR="${GITHUB_WORKSPACE}/.assay-reports"
         mkdir -p "$REPORTS_DIR"
+        echo "reports_dir=$REPORTS_DIR" >> $GITHUB_OUTPUT
         BUNDLES=$(cat /tmp/assay-bundles.txt)
 
         # Verify all bundles
@@ -474,7 +475,7 @@ runs:
       uses: actions/cache/save@v4
       continue-on-error: true
       with:
-        path: ${{ github.workspace }}/.assay-reports/
+        path: ${{ steps.process.outputs.reports_dir }}
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
     - name: Upload artifacts
@@ -483,7 +484,7 @@ runs:
       continue-on-error: true
       with:
         name: assay-evidence-${{ github.run_id }}
-        path: ${{ github.workspace }}/.assay-reports/
+        path: ${{ steps.process.outputs.reports_dir }}
         retention-days: 30
         if-no-files-found: warn
         compression-level: 6
