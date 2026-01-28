@@ -57,9 +57,15 @@ PAE(type, payload) = "DSSEv1" SP LEN(type) SP type SP LEN(payload) SP payload
 
 Where:
 - `SP` = space character (0x20)
-- `LEN(s)` = ASCII decimal byte length of s, no leading zeros
-- `type` = `"application/vnd.assay.tool+json;v=1"`
+- `LEN(s)` = ASCII decimal byte length of UTF-8 encoding, no leading zeros
+- `type` = `"application/vnd.assay.tool+json;v=1"` (exactly 35 bytes UTF-8)
 - `payload` = UTF-8 bytes of JCS-canonicalized tool definition (without `x-assay-sig`)
+
+**Normative example:**
+```
+PAE("application/vnd.assay.tool+json;v=1", "{}") =
+  "DSSEv1 35 application/vnd.assay.tool+json;v=1 2 {}"
+```
 
 **Note:** The PAE format follows the DSSE specification exactly for future Sigstore/in-toto compatibility.
 
@@ -93,11 +99,13 @@ Where:
 | `key_id` | string | Yes | SHA-256 of SPKI-encoded public key: `sha256:<lowercase-hex>`. |
 | `signature` | string | Yes | Standard base64 (RFC 4648) encoded ed25519 signature over PAE, with padding. |
 | `signed_at` | string | Yes | ISO 8601 timestamp of signing (UTC). Not part of signed content. |
-| `public_key` | string | No | Standard base64 (RFC 4648) encoded SPKI public key, with padding. Optional; for development/testing only. |
+| `public_key` | string | No | Standard base64 (RFC 4648) encoded SPKI public key, with padding. Optional; for development/testing only. Producers SHOULD omit this field (not set to `null`) when not embedding. |
 
-**Encoding conventions:**
-- Hex digests: lowercase, no separators (e.g., `sha256:e3b0c44298fc1c14...`)
+**Encoding conventions (normative):**
+- `key_id`: `sha256:` prefix + 64 lowercase hex chars (SHA-256 of SPKI DER bytes)
+- `payload_digest`: `sha256:` prefix + 64 lowercase hex chars
 - Base64: standard alphabet with padding (RFC 4648 Section 4)
+- Hex MUST be lowercase with no separators (e.g., `sha256:e3b0c44298fc1c14...`)
 - Parsers MAY accept base64 without padding, but producers MUST include padding
 
 ### 3.3 Key ID Computation

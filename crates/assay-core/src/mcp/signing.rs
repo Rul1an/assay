@@ -26,6 +26,12 @@ pub enum SignatureAlgorithm {
 }
 
 /// The x-assay-sig structure.
+///
+/// # Field Serialization
+///
+/// Producers SHOULD omit `public_key` when not embedding the key.
+/// This is enforced via `skip_serializing_if = "Option::is_none"`.
+/// Verifiers MUST treat `null` as equivalent to absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSignature {
     pub version: u8,
@@ -35,7 +41,9 @@ pub struct ToolSignature {
     pub key_id: String,
     pub signature: String,
     pub signed_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Embedded public key (SPKI DER, base64).
+    /// Producers SHOULD omit (not set to null) when not embedding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
 }
 
@@ -404,6 +412,50 @@ mod tests {
         // "DSSEv1 16 application/json 4 test"
         let expected = b"DSSEv1 16 application/json 4 test";
         assert_eq!(pae, expected);
+    }
+
+    /// Normative test vector for PAYLOAD_TYPE_TOOL_V1 length.
+    ///
+    /// This test ensures the exact byte length of the payload type is
+    /// consistent across implementations. PAE uses decimal length encoding,
+    /// so any mismatch causes cross-impl verification failures.
+    #[test]
+    fn test_payload_type_length_normative() {
+        // "application/vnd.assay.tool+json;v=1" is exactly 35 bytes UTF-8
+        let payload_type = PAYLOAD_TYPE_TOOL_V1;
+        assert_eq!(
+            payload_type.len(),
+            35,
+            "PAYLOAD_TYPE_TOOL_V1 must be 35 bytes"
+        );
+        // Verify it's pure ASCII (each char = 1 byte)
+        assert!(payload_type.is_ascii());
+
+        // Verify PAE encoding uses correct length
+        let pae = build_pae(payload_type, b"{}");
+        let pae_str = String::from_utf8_lossy(&pae);
+        assert!(
+            pae_str.starts_with("DSSEv1 35 application/vnd.assay.tool+json;v=1 2 {}"),
+            "PAE must start with 'DSSEv1 35 ...' for tool signing"
+        );
+    }
+
+    /// Test that key_id uses lowercase hex (normative).
+    #[test]
+    fn test_key_id_lowercase_hex() {
+        let key = generate_keypair();
+        let key_id = compute_key_id_from_verifying_key(&key.verifying_key()).unwrap();
+
+        // Must be lowercase hex
+        assert!(key_id.starts_with("sha256:"));
+        let hex_part = &key_id[7..];
+        assert!(
+            hex_part
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "key_id hex must be lowercase: {}",
+            key_id
+        );
     }
 
     #[test]
