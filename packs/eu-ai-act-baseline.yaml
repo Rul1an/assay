@@ -1,0 +1,137 @@
+name: eu-ai-act-baseline
+version: "1.0.0"
+kind: compliance
+description: EU AI Act Article 12 record-keeping baseline for high-risk AI systems
+author: Assay Team
+license: Apache-2.0
+source_url: https://eur-lex.europa.eu/eli/reg/2024/1689/oj
+
+disclaimer: |
+  This pack provides technical checks that map to EU AI Act Article 12 requirements.
+  Passing these checks does NOT constitute legal compliance. Organizations remain
+  responsible for meeting all applicable legal requirements, including but not limited
+  to risk assessment, conformity assessment, and ongoing monitoring obligations.
+  Consult qualified legal counsel for compliance determination.
+
+  Reference: EU AI Act (Regulation 2024/1689), Article 12 - Record-keeping
+
+requires:
+  assay_min_version: ">=2.9.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: EU12-001
+    severity: error
+    description: Evidence bundle contains automatically recorded operational events
+    article_ref: "12(1)"
+    help_markdown: |
+      ## EU AI Act Article 12(1) - Automatic Event Recording
+
+      > High-risk AI systems shall technically allow for the automatic recording
+      > of events (logs) over the lifetime of the system.
+
+      This check verifies that the evidence bundle contains at least one operational
+      event, demonstrating that automatic event recording is technically enabled.
+
+      **What this checks:**
+      - Bundle contains at least 1 event
+
+      **Reference:** [Article 12(1)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
+
+      **Disclaimer:** This is a technical check only. Passing does not constitute
+      legal compliance with Article 12 requirements.
+    check:
+      type: event_count
+      min: 1
+
+  - id: EU12-002
+    severity: error
+    description: Events include run lifecycle fields for operation monitoring
+    article_ref: "12(2)(c)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(c) - Operation Monitoring
+
+      > Logging capabilities shall provide, at a minimum:
+      > (c) monitoring of the operation of high-risk AI systems
+
+      This check verifies that events include lifecycle fields that enable
+      monitoring of AI system operation, specifically started/finished event pairs.
+
+      **What this checks:**
+      - At least one event matching `*.started` pattern exists
+      - At least one event matching `*.finished` pattern exists
+
+      **Reference:** [Article 12(2)(c)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
+
+      **Disclaimer:** This is a technical check only. Passing does not constitute
+      legal compliance with Article 12 requirements.
+    check:
+      type: event_pairs
+      start_pattern: "*.started"
+      finish_pattern: "*.finished"
+
+  - id: EU12-003
+    severity: warning
+    description: Events include correlation IDs for post-market monitoring
+    article_ref: "12(2)(b)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(b) - Post-Market Monitoring
+
+      > Logging capabilities shall provide, at a minimum:
+      > (b) facilitation of post-market monitoring
+
+      This check verifies that events contain correlation identifiers that
+      facilitate post-market monitoring, such as run IDs, trace context,
+      or version/build identifiers.
+
+      **What this checks:**
+      - At least one event contains one of: `run_id`, `traceparent`, `build_id`, `version`
+
+      **Reference:** [Article 12(2)(b)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
+
+      **Disclaimer:** This is a technical check only. Passing does not constitute
+      legal compliance with Article 12 requirements.
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /run_id
+        - /traceparent
+        - /trace_state
+        - /data/run_id
+        - /data/traceparent
+        - /data/build_id
+        - /data/version
+
+  - id: EU12-004
+    severity: warning
+    description: Events include fields enabling risk situation identification
+    article_ref: "12(2)(a)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(a) - Risk Identification
+
+      > Logging capabilities shall provide, at a minimum:
+      > (a) recording of events relevant for identifying situations that may
+      >     result in the AI system presenting a risk
+
+      This check verifies that events contain fields that enable identification
+      of risk situations, such as policy decisions, denials, or configuration
+      changes.
+
+      **What this checks:**
+      - At least one event contains one of: `policy_decision`, `denied`, `policy_hash`,
+        `config_hash`, `violation` (in event data)
+
+      **Reference:** [Article 12(2)(a)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
+
+      **Disclaimer:** This is a technical check only. Passing does not constitute
+      legal compliance with Article 12 requirements.
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/policy_decision
+        - /data/denied
+        - /data/policy_hash
+        - /data/config_hash
+        - /data/violation
+        - /data/risk_level
+        - /data/anomaly_detected

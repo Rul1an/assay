@@ -13,6 +13,7 @@ pub use bundle::{
     BundleWriter, ErrorClass, ErrorCode, FileMeta, Manifest, VerifyError, VerifyLimits,
     VerifyResult,
 };
+pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};
 pub use store::{BundleMeta, BundleStore, ObjectStoreBundleStore, StoreError, StoreSpec};
 pub use types::{Envelope, EvidenceEvent, ProducerMeta, SPEC_VERSION};

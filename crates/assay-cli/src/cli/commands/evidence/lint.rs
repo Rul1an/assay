@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use assay_evidence::lint::engine::lint_bundle;
-use assay_evidence::lint::sarif::to_sarif;
+use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions};
+use assay_evidence::lint::packs::load_packs;
+use assay_evidence::lint::sarif::{to_sarif_with_options, SarifOptions};
 use assay_evidence::lint::Severity;
 use assay_evidence::VerifyLimits;
 use clap::Args;
@@ -19,6 +20,14 @@ pub struct LintArgs {
     /// Fail (exit 1) if findings at or above this severity exist
     #[arg(long, default_value = "error")]
     pub fail_on: String,
+
+    /// Comma-separated pack references (built-in name or file path)
+    #[arg(long, value_delimiter = ',')]
+    pub pack: Option<Vec<String>>,
+
+    /// Maximum results in output (for GitHub SARIF limits)
+    #[arg(long, default_value = "500")]
+    pub max_results: usize,
 }
 
 pub fn cmd_lint(args: LintArgs) -> Result<i32> {
@@ -27,7 +36,27 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 
     let limits = VerifyLimits::default();
 
-    let report = match lint_bundle(f, limits) {
+    // Load packs if specified
+    let packs = if let Some(pack_refs) = &args.pack {
+        match load_packs(pack_refs) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Pack loading failed: {}", e);
+                return Ok(3); // Exit code 3 = pack error
+            }
+        }
+    } else {
+        vec![]
+    };
+
+    // Build lint options
+    let options = LintOptions {
+        packs,
+        max_results: Some(args.max_results),
+        bundle_path: Some(args.bundle.display().to_string()),
+    };
+
+    let result = match lint_bundle_with_options(f, limits, options) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Verification failed: {}", e);
@@ -35,12 +64,42 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
         }
     };
 
+    let report = &result.report;
+    let pack_meta = &result.pack_meta;
+
     match args.format.as_str() {
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            // Add disclaimer to JSON output for compliance packs
+            let mut json_report = serde_json::to_value(report)?;
+            if let Some(meta) = pack_meta {
+                if let Some(disclaimer) = &meta.disclaimer {
+                    json_report
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("disclaimer".into(), serde_json::json!(disclaimer));
+                }
+                if meta.truncated {
+                    json_report
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("truncated".into(), serde_json::json!(true));
+                    json_report.as_object_mut().unwrap().insert(
+                        "truncated_count".into(),
+                        serde_json::json!(meta.truncated_count),
+                    );
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&json_report)?);
         }
         "sarif" => {
-            let sarif = to_sarif(&report);
+            let sarif_options = SarifOptions {
+                pack_meta: pack_meta.clone(),
+                bundle_path: Some(args.bundle.display().to_string()),
+                working_directory: std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string()),
+            };
+            let sarif = to_sarif_with_options(report, sarif_options);
             println!("{}", serde_json::to_string_pretty(&sarif)?);
         }
         _ => {
@@ -50,6 +109,33 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                 "Bundle: {} (events: {}, verified: {})",
                 report.bundle_meta.bundle_id, report.bundle_meta.event_count, report.verified
             );
+
+            // Print pack info
+            if let Some(meta) = pack_meta {
+                eprintln!(
+                    "Packs: {}",
+                    meta.packs
+                        .iter()
+                        .map(|p| format!("{}@{}", p.name, p.version))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+
+                // Print disclaimer for compliance packs
+                if let Some(disclaimer) = &meta.disclaimer {
+                    eprintln!();
+                    eprintln!("⚠️  COMPLIANCE DISCLAIMER");
+                    eprintln!("{}", disclaimer);
+                }
+
+                if meta.truncated {
+                    eprintln!();
+                    eprintln!(
+                        "⚠️  Results truncated: {} findings omitted (--max-results {})",
+                        meta.truncated_count, args.max_results
+                    );
+                }
+            }
             eprintln!();
 
             if report.findings.is_empty() {
@@ -60,10 +146,25 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                         Some(loc) => format!("seq:{} line:{}", loc.seq, loc.line),
                         None => "global".into(),
                     };
-                    eprintln!(
-                        "[{}] {} ({}) {}",
-                        finding.severity, finding.rule_id, loc_str, finding.message
-                    );
+
+                    // Extract article_ref from tags if present
+                    let article_ref = finding
+                        .tags
+                        .iter()
+                        .find(|t| t.starts_with("article_ref:"))
+                        .map(|t| t.strip_prefix("article_ref:").unwrap_or(""));
+
+                    if let Some(ref_) = article_ref {
+                        eprintln!(
+                            "[{}] {} ({}) {} [Article {}]",
+                            finding.severity, finding.rule_id, loc_str, finding.message, ref_
+                        );
+                    } else {
+                        eprintln!(
+                            "[{}] {} ({}) {}",
+                            finding.severity, finding.rule_id, loc_str, finding.message
+                        );
+                    }
                 }
                 eprintln!();
                 eprintln!(
@@ -77,7 +178,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
         }
     }
 
-    // Exit codes: 0 = no findings at/above threshold, 1 = findings found, 2 = verification failure
+    // Exit codes: 0 = no findings at/above threshold, 1 = findings found, 2 = verification failure, 3 = pack error
     let threshold = match args.fail_on.as_str() {
         "error" => Severity::Error,
         "warn" | "warning" => Severity::Warn,
