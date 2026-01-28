@@ -53,9 +53,9 @@ inputs:
     required: false
     default: 'true'
   upload_artifacts:
-    description: 'Upload bundles and reports as artifacts'
+    description: 'Deprecated. Use reports_dir output instead.'
     required: false
-    default: 'true'
+    default: 'false'
   version:
     description: 'Assay CLI version to install'
     required: false
@@ -77,6 +77,9 @@ outputs:
   diff_summary:
     description: 'One-line diff summary'
     value: ${{ steps.process.outputs.diff_summary }}
+  reports_dir:
+    description: 'Path to reports directory (for artifact upload)'
+    value: ${{ steps.process.outputs.reports_dir }}
 
 runs:
   using: 'composite'
@@ -478,13 +481,10 @@ runs:
         path: ${{ steps.process.outputs.reports_dir }}
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
-    - name: Upload artifacts
-      if: inputs.upload_artifacts == 'true' && steps.discover.outputs.found == 'true'
-      uses: actions/upload-artifact@v4
-      continue-on-error: true
-      with:
-        name: assay-evidence-${{ github.run_id }}
-        path: ${{ steps.process.outputs.reports_dir }}
-        retention-days: 30
-        if-no-files-found: warn
-        compression-level: 6
+    # Note: Artifact upload from composite actions has path resolution issues.
+    # Use the `reports_dir` output in your workflow to upload artifacts:
+    #
+    #   - uses: actions/upload-artifact@v4
+    #     with:
+    #       name: assay-reports
+    #       path: ${{ steps.assay.outputs.reports_dir }}
