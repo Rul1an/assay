@@ -1,6 +1,6 @@
 # ADR-014: GitHub Action v2 Design
 
-**Status:** Accepted
+**Status:** Implemented
 **Date:** 2026-01-28
 **Deciders:** @Rul1an
 
@@ -16,20 +16,23 @@ Two design proposals were evaluated. This ADR captures the combined decision.
 
 ## Decision
 
-### Architecture: Monorepo, Single Action
+### Architecture: Separate Repository
 
-**Location:** `assay/assay-action/`
+**Repository:** https://github.com/Rul1an/assay-action
+**Marketplace:** https://github.com/marketplace/actions/assay-ai-agent-security
 
 | Factor | Decision | Rationale |
 |--------|----------|-----------|
-| Repository | Monorepo | CLI + Action version sync, single release process |
-| Reference | `Rul1an/assay/assay-action@v2` | Clear structure, Trivy/Semgrep pattern |
+| Repository | Separate | GitHub Marketplace requires action.yml in root |
+| Reference | `Rul1an/assay-action@v2` | Simple, short, marketplace-friendly |
 | Composability | Deferred to v2.1 | Simplicity first, sub-actions later |
+
+> **Note:** Initial design was monorepo (`assay/assay-action/`), but GitHub Marketplace doesn't support subdirectory actions for automatic listing. Moved to separate repo for better DX and discoverability.
 
 ### Core Capability: Verify + Lint + Diff → SARIF
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
 ```
 
 **Default behavior (zero-config):**
@@ -167,14 +170,15 @@ Reusable workflows are powerful for enterprise standardization but:
 
 ## Implementation Phases
 
-### v2.0 (MVP)
+### v2.0 (MVP) ✅ Completed
 
-- [ ] Zero-config auto-discovery
-- [ ] SARIF upload with correct category discipline
-- [ ] PR comment with diff (no noise if clean)
-- [ ] Baseline regression gate
-- [ ] GitHub Job Summary
-- [ ] Artifact upload
+- [x] Zero-config auto-discovery
+- [x] SARIF upload with correct category discipline
+- [x] PR comment with diff (no noise if clean)
+- [x] Baseline regression gate (cache-based)
+- [x] GitHub Job Summary
+- [x] Artifact upload (with `include-hidden-files` fix for `.assay-reports/`)
+- [x] Separate repository for Marketplace publication
 
 ### v2.1
 

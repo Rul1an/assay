@@ -25,14 +25,18 @@ PR opened → Replay traces → 3ms → Deterministic pass/fail → Trust restor
 ### Using the Assay Action (Recommended)
 
 ```yaml
-# .github/workflows/agent-tests.yml
-name: Agent Quality Gate
+# .github/workflows/assay.yml
+name: AI Agent Security
 
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
 
 jobs:
   assay:
@@ -40,53 +44,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Assay Tests
-        uses: Rul1an/assay-action@v1
+      - name: Run tests with Assay
+        run: |
+          curl -fsSL https://getassay.dev/install.sh | sh
+          assay run --policy policy.yaml -- pytest tests/
+
+      - name: Verify AI agent behavior
+        uses: Rul1an/assay-action@v2
         with:
-          config: mcp-eval.yaml
-          trace_file: traces/golden.jsonl
-          strict: true
+          fail_on: error
 ```
 
 ### Action Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `config` | Path to `mcp-eval.yaml` | `mcp-eval.yaml` |
-| `trace_file` | Path to trace file(s) | Required |
-| `strict` | Fail on any violation | `false` |
-| `output` | Output format: `sarif`, `junit`, `json` | `sarif` |
+| `bundles` | Glob pattern for evidence bundles | Auto-detect |
+| `fail_on` | Fail threshold: `error`, `warn`, `info`, `none` | `error` |
+| `sarif` | Upload to GitHub Security tab | `true` |
+| `comment_diff` | Post PR comment (only if findings) | `true` |
+| `baseline_key` | Key for baseline comparison | - |
+| `write_baseline` | Save baseline (main branch only) | `false` |
 
 ### Action Outputs
 
 | Output | Description |
 |--------|-------------|
-| `passed` | Number of passed tests |
-| `failed` | Number of failed tests |
-| `exit_code` | 0 if all passed, 1 if any failed |
+| `verified` | `true` if all bundles verified |
+| `findings_error` | Count of error-level findings |
+| `findings_warn` | Count of warning-level findings |
 
-### SARIF Integration (Code Scanning)
+### SARIF Integration (Automatic)
 
-The action uploads SARIF results to GitHub Code Scanning:
+The action automatically uploads SARIF results to GitHub Code Scanning. Findings appear in the Security tab and inline in PR diffs.
 
-```yaml
-- uses: Rul1an/assay-action@v1
-  with:
-    config: mcp-eval.yaml
-    output: sarif
-
-- name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v2
-  with:
-    sarif_file: .assay/reports/results.sarif
-```
-
-This shows violations inline in the PR diff:
-
-```
-⚠️ args_valid: percent=50 exceeds max(30)
-   policies/discount.yaml:8
-```
+No manual SARIF upload step needed - just add `security-events: write` permission.
 
 ---
 
@@ -239,12 +231,12 @@ your-repo/
     └── golden.jsonl  # ← Commit this
 ```
 
-### 2. Use `--strict` Mode
+### 2. Use `fail_on` for Strict Mode
 
 ```yaml
-- uses: Rul1an/assay-action@v1
+- uses: Rul1an/assay-action@v2
   with:
-    strict: true  # Fail on ANY violation
+    fail_on: warn  # Fail on warnings AND errors
 ```
 
 ### 3. Cache Cargo Installation
@@ -271,14 +263,15 @@ on:
 
 ```yaml
 jobs:
-  assay-fast:
-    # Deterministic replay (ms)
+  assay:
+    # Evidence verification (fast)
     steps:
-      - uses: Rul1an/assay-action@v1
+      - uses: actions/checkout@v4
+      - uses: Rul1an/assay-action@v2
 
   integration:
-    needs: assay-fast
-    # Real LLM tests (minutes) — only if fast tests pass
+    needs: assay
+    # Real LLM tests (slow) — only if Assay passes
     steps:
       - run: pytest tests/integration
 ```

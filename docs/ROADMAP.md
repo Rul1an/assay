@@ -92,6 +92,7 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 | Priority | Item | Effort | Value | ADR |
 |----------|------|--------|-------|-----|
+| **P0** | GitHub Action v2 | Medium | High | [ADR-014](./architecture/ADR-014-GitHub-Action-v2.md) ✅ |
 | **P0** | WORM Storage (90-day retention) | Low | High | [ADR-009](./architecture/ADR-009-WORM-Storage.md) |
 | **P1** | Evidence Store MVP (Ingest API) | Medium | High | [ADR-010](./architecture/ADR-010-Evidence-Store-API.md) |
 | **P2** | Tool Signing (`x-assay-sig`) | Medium | High | [ADR-011](./architecture/ADR-011-Tool-Signing.md) |
@@ -99,6 +100,21 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | **P3** | Transparency Log Verification | Low | Medium | [ADR-012](./architecture/ADR-012-Transparency-Log.md) |
 | **Defer** | Registry Pinning | Medium | Low (Q2) | Requires signing + hosted service |
 | **Defer** | Dashboard | High | Medium | CLI queries first, UI in Q3 |
+
+### GitHub Action v2 ✅ Complete
+
+Published to GitHub Marketplace: [Rul1an/assay-action](https://github.com/Rul1an/assay-action)
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+Features:
+- Zero-config evidence bundle discovery
+- SARIF integration with GitHub Security tab
+- PR comments (only when findings)
+- Baseline comparison via cache
+- Job Summary reports
 
 ### A. Evidence Store MVP (Paid)
 - [ ] **CLI Commands** (Open Core): `assay evidence push/pull/list`
@@ -125,7 +141,7 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 ### A. Connectors (Paid)
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
-- [x] **CI/CD**: GitHub Actions / GitLab CI integration (already complete)
+- [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/Rul1an/assay-action)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
 
 ### B. Compliance Packs (Open Baseline + Paid Managed)

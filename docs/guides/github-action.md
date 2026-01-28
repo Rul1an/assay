@@ -1,283 +1,151 @@
-# GitHub Actions Example
+# GitHub Action Integration
 
-This example shows how to integrate Assay into your CI/CD pipeline.
+Assay provides a GitHub Action for automated AI agent security verification.
 
-## Basic Setup
+**GitHub Marketplace:** [Rul1an/assay-action](https://github.com/marketplace/actions/assay-ai-agent-security)
+
+## Quick Start
 
 ```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
-
-on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-
-jobs:
-  eval:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-
-      - name: Install Assay
-        run: cargo install assay-cli
-
-      - name: Run evaluations
-        run: |
-          assay run \
-            --config mcp-eval.yaml \
-            --trace-file traces/golden.jsonl \
-            --strict
+- uses: Rul1an/assay-action@v2
 ```
 
-## With Caching (Faster Builds)
+That's it. Zero config.
+
+## What It Does
+
+1. **Discovers** evidence bundles in your repo (`.assay/evidence/*.tar.gz`)
+2. **Verifies** bundle integrity (cryptographic proof)
+3. **Lints** for security issues (unauthorized file access, network calls, shell commands)
+4. **Reports** results to GitHub Security tab + PR comments
+
+## Full Workflow Example
 
 ```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
+# .github/workflows/assay.yaml
+name: AI Agent Security
 
 on:
-  pull_request:
+  push:
     branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
 
 jobs:
-  eval:
+  assay:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Run tests with Assay
+        run: |
+          # Install Assay CLI
+          curl -fsSL https://getassay.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
+          # Run your tests with evidence collection
+          assay run --policy policy.yaml -- pytest tests/
+
+      - name: Verify AI agent behavior
+        uses: Rul1an/assay-action@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-assay-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install Assay
-        run: |
-          if ! command -v assay &> /dev/null; then
-            cargo install assay-cli
-          fi
-
-      - name: Run evaluations
-        run: |
-          assay run \
-            --config mcp-eval.yaml \
-            --trace-file traces/golden.jsonl \
-            --strict \
-            --db :memory:
+          fail_on: error
+          baseline_key: ${{ github.event.repository.name }}
+          write_baseline: ${{ github.ref == 'refs/heads/main' }}
 ```
 
-## Multiple Test Suites
+## Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `bundles` | Auto-detect | Glob pattern for evidence bundles |
+| `fail_on` | `error` | Fail threshold: `error`, `warn`, `info`, `none` |
+| `sarif` | `true` | Upload to GitHub Security tab |
+| `comment_diff` | `true` | Post PR comment (only if findings) |
+| `baseline_key` | - | Key for baseline comparison |
+| `write_baseline` | `false` | Save baseline (main branch only) |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `verified` | `true` if all bundles verified |
+| `findings_error` | Count of error-level findings |
+| `findings_warn` | Count of warning-level findings |
+| `reports_dir` | Path to reports directory |
+
+## Permissions Required
 
 ```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
+permissions:
+  contents: read          # Checkout
+  security-events: write  # SARIF upload
+  pull-requests: write    # PR comments (optional)
+```
 
-on:
-  pull_request:
-    branches: [main]
+## Advanced Examples
 
+### Baseline Comparison
+
+Detect regressions against your main branch:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    baseline_key: unit-tests
+    write_baseline: ${{ github.ref == 'refs/heads/main' }}
+```
+
+### Custom Threshold
+
+Allow warnings but fail on errors:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    fail_on: error  # 'warn' would fail on warnings too
+```
+
+### Skip SARIF Upload
+
+If you only want PR comments:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    sarif: false
+```
+
+### Matrix Builds
+
+For multiple test suites:
+
+```yaml
 jobs:
-  eval:
-    runs-on: ubuntu-latest
+  test:
     strategy:
       matrix:
-        suite:
-          - name: core
-            config: evals/core.yaml
-            trace: traces/core.jsonl
-          - name: security
-            config: evals/security.yaml
-            trace: traces/security.jsonl
-          - name: edge-cases
-            config: evals/edge-cases.yaml
-            trace: traces/edge-cases.jsonl
-
+        suite: [unit, integration, e2e]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Run ${{ matrix.suite }} tests
+        run: assay run --policy policy.yaml -- pytest tests/${{ matrix.suite }}
 
-      - name: Install Assay
-        run: cargo install assay-cli
-
-      - name: Run ${{ matrix.suite.name }} evaluations
-        run: |
-          assay run \
-            --config ${{ matrix.suite.config }} \
-            --trace-file ${{ matrix.suite.trace }} \
-            --strict \
-            --db :memory:
-```
-
-## With Artifact Upload
-
-```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
-
-on:
-  pull_request:
-    branches: [main]
-
-jobs:
-  eval:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-
-      - name: Install Assay
-        run: cargo install assay-cli
-
-      - name: Run evaluations
-        id: eval
-        run: |
-          assay run \
-            --config mcp-eval.yaml \
-            --trace-file traces/golden.jsonl \
-            --strict \
-            --db .assay/eval.db
-        continue-on-error: true
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        if: always()
+      - uses: Rul1an/assay-action@v2
         with:
-          name: assay-results
-          path: |
-            .assay/
-            run.json
-          retention-days: 7
-
-      - name: Check result
-        if: steps.eval.outcome == 'failure'
-        run: exit 1
+          bundles: '.assay/evidence/${{ matrix.suite }}/*.tar.gz'
 ```
 
-## Monorepo Setup
+## Manual CLI Workflow
+
+If you prefer using the CLI directly instead of the action:
 
 ```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
-
-on:
-  pull_request:
-    paths:
-      - 'agents/**'
-      - 'evals/**'
-
-jobs:
-  eval:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-
-      - name: Install Assay
-        run: cargo install assay-cli
-
-      - name: Run evaluations
-        working-directory: ./agents/my-agent
-        run: |
-          assay run \
-            --config ../../evals/my-agent.yaml \
-            --trace-file ../../traces/my-agent.jsonl \
-            --strict
-```
-
-## Required Files
-
-Your repository should include:
-
-```
-your-repo/
-├── .github/
-│   └── workflows/
-│       └── eval.yaml          # This workflow
-├── mcp-eval.yaml              # Your eval config
-├── traces/
-│   └── golden.jsonl           # Golden trace file(s)
-└── ...
-```
-
-## Tips
-
-### Use In-Memory Database in CI
-
-```bash
-assay run --db :memory:
-```
-
-This avoids permission issues and ensures clean runs.
-
-### Fail Fast with --strict
-
-```bash
-assay run --strict
-```
-
-Returns exit code 1 on any failure, which fails the GitHub Action.
-
-### Debug Failures
-
-Add debug logging for troubleshooting:
-
-```yaml
-- name: Run evaluations (debug)
-  run: |
-    RUST_LOG=assay=debug assay run \
-      --config mcp-eval.yaml \
-      --trace-file traces/golden.jsonl
-```
-
-### Cache the Assay Binary
-
-The Cargo cache action above caches the compiled binary, making subsequent runs faster.
-
-## MCP Security Validation
-
-To validate your MCP policies on every PR (including SARIF upload for GitHub Security):
-
-```yaml
-# .github/workflows/assay-security.yml
-name: Assay MCP Security
-
-on:
-  push:
-    paths:
-      - "assay.yaml"
-      - "policy.yaml"
-      - "**/*.mcp.json"
-      - ".github/workflows/assay-security.yml"
-  pull_request:
-    paths:
-      - "assay.yaml"
-      - "policy.yaml"
-      - "**/*.mcp.json"
-      - ".github/workflows/assay-security.yml"
-
 jobs:
   assay:
     runs-on: ubuntu-latest
@@ -293,23 +161,52 @@ jobs:
           curl -fsSL https://getassay.dev/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Validate policy file (syntax + schema compile)
-        run: |
-          # Adjust to your policy path:
-          assay policy validate --input policy.yaml --deny-deprecations
+      - name: Run tests
+        run: assay run --policy policy.yaml -- pytest tests/
 
-      - name: Assay validate (SARIF)
-        run: |
-          assay validate --format sarif --output results.sarif
+      - name: Export evidence
+        run: assay evidence export --output evidence.tar.gz
+
+      - name: Lint evidence (SARIF)
+        run: assay evidence lint --format sarif --output results.sarif
         continue-on-error: true
 
-      - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: results.sarif
-
-      - name: Fail on issues (PR gating)
-        run: |
-          assay validate --format text
 ```
+
+## Troubleshooting
+
+### No evidence bundles found
+
+The action looks for bundles in:
+- `.assay/evidence/*.tar.gz`
+- `evidence/*.tar.gz`
+
+Generate bundles with:
+
+```bash
+assay run --policy policy.yaml -- your-test-command
+```
+
+### SARIF upload fails
+
+Ensure you have `security-events: write` permission:
+
+```yaml
+permissions:
+  security-events: write
+```
+
+### PR comments not appearing
+
+Ensure you have `pull-requests: write` permission and the action runs on a PR event.
+
+## Related
+
+- [Assay CLI Documentation](../getting-started/quickstart.md)
+- [Evidence Bundles](../concepts/traces.md)
+- [Policy Configuration](../reference/policies.md)
