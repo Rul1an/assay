@@ -5,12 +5,13 @@ This document provides a detailed mapping of important files, modules, and their
 ## File Structure Overview
 
 ```
-assay/                         # Version 2.8.0
+assay/                         # Version 2.9.0
 ├── crates/                    # Rust crates
 │   ├── assay-core/            # Core evaluation engine
 │   ├── assay-cli/             # CLI interface
 │   │   └── src/cli/commands/
-│   │       ├── evidence/      # Evidence subcommands (lint, diff, explore)
+│   │       ├── evidence/      # Evidence subcommands (lint, diff, explore, push, pull, list)
+│   │       ├── tool/          # Tool signing (keygen, sign, verify)
 │   │       └── policy/        # Policy subcommands (fmt, validate, migrate)
 │   ├── assay-metrics/         # Standard metrics
 │   ├── assay-mcp-server/      # MCP server
@@ -83,6 +84,9 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 - **`audit.rs`**: Audit logging
 - **`identity.rs`**: Tool identity management (Phase 9) - `ToolIdentity`, metadata hashing, pinning
 - **`runtime_features.rs`**: Runtime feature flags
+- **`jcs.rs`**: JCS canonicalization (RFC 8785) for tool signing
+- **`signing.rs`**: Ed25519 tool signing with DSSE PAE encoding
+- **`trust_policy.rs`**: Trust policy loading and key_id matching
 
 ### Report Module (`src/report/`)
 - **`console.rs`**: Console output formatter
@@ -165,6 +169,13 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
   - **`evidence/diff.rs`**: `assay evidence diff` - Semantic bundle comparison
   - **`evidence/explore.rs`**: `assay evidence explore` - TUI viewer (feature-gated)
   - **`evidence/mapping.rs`**: Profile to EvidenceEvent mapping
+  - **`evidence/push.rs`**: `assay evidence push` - Upload to BYOS storage
+  - **`evidence/pull.rs`**: `assay evidence pull` - Download from BYOS storage
+  - **`evidence/list.rs`**: `assay evidence list` - List bundles in storage
+- **`tool/mod.rs`**: `assay tool` command with subcommands:
+  - **`tool/keygen.rs`**: `assay tool keygen` - Generate ed25519 keypair
+  - **`tool/sign.rs`**: `assay tool sign` - Sign tool definition
+  - **`tool/verify.rs`**: `assay tool verify` - Verify signature
 - **`demo.rs`**: `assay demo` command
 - **`fix.rs`**: `assay fix` command (agentic policy fixing)
 - **`sim.rs`**: `assay sim` command

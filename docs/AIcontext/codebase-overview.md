@@ -87,6 +87,9 @@ The core crate is organized into these main modules:
 - **`proxy`**: Intercepts and validates tool calls
 - **`identity`**: Tool identity management (Phase 9) - tool metadata hashing and pinning
 - **`policy`**: `McpPolicy` with `tool_pins` for integrity verification
+- **`jcs`**: JCS canonicalization (RFC 8785) for deterministic JSON
+- **`signing`**: Ed25519 tool signing with DSSE PAE encoding (`sign_tool`, `verify_tool`)
+- **`trust_policy`**: Trust policy loading (`require_signed`, `trusted_key_ids`)
 
 #### Report (`report/`)
 - Output formatters: `console` (summary), `json`, `junit`, `sarif`
@@ -219,8 +222,10 @@ Key ADRs for understanding the codebase:
 | [ADR-008](../architecture/ADR-008-Evidence-Streaming.md) | Evidence Streaming | OTel Collector pattern, CloudEvents out of hot path |
 | [ADR-009](../architecture/ADR-009-WORM-Storage.md) | WORM Storage | S3 Object Lock for compliance retention |
 | [ADR-010](../architecture/ADR-010-Evidence-Store-API.md) | Evidence Store API | Multi-tenant REST API for bundle storage |
-| [ADR-011](../architecture/ADR-011-Tool-Signing.md) | Tool Signing | Sigstore-based `x-assay-sig` for supply chain security |
+| [ADR-011](../architecture/ADR-011-Tool-Signing.md) | Tool Signing | Ed25519 `x-assay-sig` for supply chain security ✅ |
+| [SPEC-Tool-Signing-v1](../architecture/SPEC-Tool-Signing-v1.md) | Tool Signing Spec | Formal spec: JCS, DSSE PAE, key_id trust ✅ |
 | [ADR-013](../architecture/ADR-013-EU-AI-Act-Pack.md) | EU AI Act Pack | Compliance pack system with Article 12 mapping |
 | [ADR-014](../architecture/ADR-014-GitHub-Action-v2.md) | GitHub Action v2 | Separate repo, SARIF discipline, zero-config ✅ |
+| [ADR-015](../architecture/ADR-015-BYOS-Storage-Strategy.md) | BYOS Storage | Bring-your-own S3 storage strategy ✅ |
 
 See [ADR Index](../architecture/adrs.md) for the complete list.

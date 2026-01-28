@@ -197,7 +197,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 #### `assay evidence`
 **Purpose**: Evidence management (audit/compliance)
 **Entry**: `crates/assay-cli/src/cli/commands/evidence/mod.rs::run()`
-**Flow**: Export/verify/lint/diff evidence artifacts
+**Flow**: Export/verify/lint/diff/push/pull evidence artifacts
 
 **Subcommands**:
 - `export`: Export evidence bundle from Profile
@@ -206,6 +206,9 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `lint`: Lint bundle for quality and security issues (SARIF output)
 - `diff`: Compare two bundles and report changes
 - `explore`: Interactive TUI explorer (requires `tui` feature)
+- `push`: Upload bundle to BYOS storage (S3/Azure/GCS/local)
+- `pull`: Download bundle from BYOS storage
+- `list`: List bundles in BYOS storage
 
 **Key Options**:
 - `export --profile <PATH>`: Input Profile trace
@@ -216,6 +219,36 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `lint --format sarif`: Output in SARIF format
 - `lint --fail-on <SEVERITY>`: Fail on severity threshold
 - `diff <BUNDLE1> <BUNDLE2>`: Compare two bundles
+- `push <BUNDLE> --store <URI>`: Upload to storage
+- `pull --bundle-id <ID> --store <URI>`: Download from storage
+- `list --store <URI>`: List bundles
+
+#### `assay tool`
+**Purpose**: Tool signing and verification
+**Entry**: `crates/assay-cli/src/cli/commands/tool/mod.rs::cmd_tool()`
+**Flow**: Generate keys, sign/verify tool definitions
+
+**Subcommands**:
+- `keygen`: Generate ed25519 keypair (PKCS#8/SPKI PEM)
+- `sign`: Sign tool definition with `x-assay-sig` field
+- `verify`: Verify tool signature with trust policy
+
+**Key Options**:
+- `keygen --out <DIR>`: Output directory for keypair
+- `keygen --force`: Overwrite existing files
+- `sign <TOOL> --key <PRIVATE_KEY> --out <OUTPUT>`: Sign tool
+- `sign --in-place`: Modify file in place (dangerous)
+- `sign --embed-pubkey`: Include public key in signature (dev only)
+- `verify <TOOL> --pubkey <PUBLIC_KEY>`: Verify with public key
+- `verify <TOOL> --trust-policy <YAML>`: Verify with trust policy
+- `verify --allow-embedded-key`: Use embedded key (dev only, insecure)
+- `verify --quiet`: Only exit code, no output
+
+**Exit Codes**:
+- `0`: Verification successful
+- `2`: Tool is unsigned (no `x-assay-sig` field)
+- `3`: Key not trusted (policy violation)
+- `4`: Signature invalid (tamper/wrong key)
 
 #### `assay sim`
 **Purpose**: Attack simulation (hardening/compliance)

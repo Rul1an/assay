@@ -1,6 +1,6 @@
 # Assay Developer Handoff Guide
 
-> **Version:** 2.8.0 | **Last Updated:** January 2026
+> **Version:** 2.9.0 | **Last Updated:** January 2026
 >
 > Complete onboarding document for Rust developers joining the Assay project.
 
@@ -242,42 +242,53 @@ Per [ROADMAP.md](./ROADMAP.md) and [ADR-015](./architecture/ADR-015-BYOS-Storage
 | Priority | Feature | Crate(s) | Status |
 |----------|---------|----------|--------|
 | ✅ | GitHub Action v2 | External repo | Complete |
-| **P1** | BYOS CLI (`push/pull/list`) | `assay-cli`, `assay-evidence` | **Next** |
-| **P1** | Tool Signing (`x-assay-sig`) | `assay-evidence` | **Next** |
-| **P2** | EU AI Act Compliance Pack | `assay-cli`, `assay-core` | Planned |
-| **P2** | Action v2.1 | External repo | After P1 |
+| ✅ | BYOS CLI (`push/pull/list`) | `assay-cli`, `assay-evidence` | Complete |
+| ✅ | Tool Signing (`x-assay-sig`) | `assay-cli`, `assay-core` | Complete |
+| **P2** | EU AI Act Compliance Pack | `assay-cli`, `assay-core` | Next |
+| **P2** | Mandate/Intent Evidence | `assay-core` | Planned |
+| **P2** | Action v2.1 | External repo | After P2 |
 
-### P1: BYOS CLI Commands
+### ✅ BYOS CLI Commands (Complete)
 
-Add S3-compatible storage support:
+S3-compatible storage support:
 
 ```bash
-assay evidence push bundle.tar.gz    # Upload to user's S3
-assay evidence pull --bundle-id ...  # Download from S3
-assay evidence list --run-id ...     # List bundles
+assay evidence push bundle.tar.gz --store s3://bucket/prefix
+assay evidence pull --bundle-id sha256:... --store s3://bucket/prefix
+assay evidence list --run-id run_123 --store s3://bucket/prefix
 ```
 
-**Key files to modify:**
-- `crates/assay-cli/src/cli/commands/evidence/mod.rs` - Add subcommands
-- `crates/assay-evidence/src/lib.rs` - Add S3 client (use `object_store` crate)
+Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Blob, GCS, local filesystem.
 
-### P1: Tool Signing
+### ✅ Tool Signing (Complete)
 
-Add `x-assay-sig` field to evidence bundles:
+MCP tool definition signing with `x-assay-sig` field:
 
-```rust
-// In manifest.json
-{
-  "bundle_id": "sha256:...",
-  "x-assay-sig": "ed25519:base64_signature",
-  "x-assay-sig-pubkey": "ed25519:base64_pubkey"
-}
+```bash
+assay tool keygen --out ~/.assay/keys/    # Generate PKCS#8/SPKI keypair
+assay tool sign tool.json --key priv.pem --out signed.json
+assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untrusted, 4=invalid
 ```
 
-**Key files to modify:**
-- `crates/assay-evidence/src/manifest.rs` - Add signature fields
-- `crates/assay-evidence/src/sign.rs` - New module for ed25519 signing
-- `crates/assay-cli/src/cli/commands/evidence/sign.rs` - New subcommand
+**Key files:**
+- `crates/assay-core/src/mcp/signing.rs` - Ed25519 sign/verify with DSSE PAE
+- `crates/assay-core/src/mcp/jcs.rs` - JCS canonicalization (RFC 8785)
+- `crates/assay-core/src/mcp/trust_policy.rs` - Trust policy loading
+- `crates/assay-cli/src/cli/commands/tool/` - CLI commands
+
+See [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md) for the formal specification.
+
+### P2: EU AI Act Compliance Pack (Next)
+
+Pack system with Article 12 mapping:
+
+```bash
+assay evidence lint --pack eu-ai-act    # Article 12 compliance checks
+```
+
+### P2: Mandate/Intent Evidence
+
+Support for AP2-style authorization evidence (agentic commerce).
 
 ---
 
@@ -289,7 +300,7 @@ Add `x-assay-sig` field to evidence bundles:
 // ✅ Good: Use Result with context
 fn load_bundle(path: &Path) -> Result<Bundle> {
     let file = File::open(path)
-        .with_context(|| format!("Failed to open bundle: {}", path.display()))?;
+        .with_context(| format!("Failed to open bundle: {}", path.display()))?;
     // ...
 }
 
