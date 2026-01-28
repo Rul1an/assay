@@ -352,11 +352,7 @@ fn json_pointer_get<'a>(
         return Some(value);
     }
 
-    let path = if pointer.starts_with('/') {
-        &pointer[1..]
-    } else {
-        pointer
-    };
+    let path = pointer.strip_prefix('/').unwrap_or(pointer);
 
     let mut current = value;
     for part in path.split('/') {
