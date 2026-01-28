@@ -21,10 +21,13 @@ The Pack Engine enables external rule definitions ("packs") for evidence bundle 
 ```bash
 assay evidence lint bundle.tar.gz [OPTIONS]
 
---pack <PACK>     Comma-separated list of pack references
-                  Built-in:  --pack eu-ai-act-baseline
-                  File:      --pack ./custom-pack.yaml
-                  Multiple:  --pack eu-ai-act-baseline,soc2-baseline
+--pack <PACK>       Comma-separated list of pack references
+                    Built-in:  --pack eu-ai-act-baseline
+                    File:      --pack ./custom-pack.yaml
+                    Multiple:  --pack eu-ai-act-baseline,soc2-baseline
+
+--max-results <N>   Maximum findings in output (default: 500)
+                    Truncates lowest severity first for GitHub compat
 ```
 
 ### Exit Codes
@@ -97,6 +100,19 @@ rules:
 
 ### Check Types
 
+#### Glob Pattern Semantics (Normative)
+
+Glob patterns used in checks follow these rules:
+- **Engine**: `globset`-compatible syntax (Rust ecosystem standard)
+- **Case sensitivity**: Case-sensitive matching
+- **Wildcards**: `*` matches any characters except `/`, `**` matches including `/`
+- **Target**: Matches against CloudEvents `type` field value
+
+**Examples**:
+- `*.started` matches `assay.run.started`, `mcp.tool.started`
+- `assay.*` matches `assay.run.started`, `assay.policy.denied`
+- `assay.**.finished` matches `assay.run.finished`, `assay.mcp.tool.finished`
+
 #### `event_count`
 
 Verify bundle contains minimum number of events.
@@ -125,8 +141,29 @@ Verify at least one event contains one of the specified fields.
 ```yaml
 check:
   type: event_field_present
-  any_of: [string]          # Field names to check (e.g., ["run_id", "traceparent"])
-  in_data: bool             # If true, check in `data.*` (default: false, check top-level)
+  paths_any_of: [string]    # JSON Pointer paths (RFC 6901) to check
+```
+
+**JSON Pointer paths** (RFC 6901):
+- `/run_id` — top-level field `run_id`
+- `/data/traceparent` — nested field `data.traceparent`
+- `/data/policy/hash` — deeply nested `data.policy.hash`
+
+**Backwards compatibility**: `any_of` + `in_data: bool` supported as alias:
+- `any_of: ["run_id"], in_data: false` → `paths_any_of: ["/run_id"]`
+- `any_of: ["traceparent"], in_data: true` → `paths_any_of: ["/data/traceparent"]`
+
+```yaml
+# Preferred (explicit paths)
+check:
+  type: event_field_present
+  paths_any_of: ["/run_id", "/traceparent", "/data/trace_context/traceparent"]
+
+# Legacy (still supported)
+check:
+  type: event_field_present
+  any_of: ["run_id", "traceparent"]
+  in_data: false
 ```
 
 #### `event_type_exists`
@@ -146,7 +183,7 @@ Verify manifest contains specified field.
 ```yaml
 check:
   type: manifest_field
-  field: string             # Field path (e.g., "x-assay-retention")
+  path: string              # JSON Pointer to field (e.g., "/x-assay-retention")
   required: bool            # If true, missing = error; if false, missing = warning
 ```
 
@@ -244,6 +281,25 @@ pack_digest = sha256( JCS( JSON( parse_yaml(pack_file) ) ) )
 5. Compute SHA-256 hash
 6. Format: `sha256:{hex_digest}`
 
+### YAML Parser Requirements (Normative)
+
+The YAML parser MUST:
+
+1. **Reject duplicate keys**: Duplicate mapping keys MUST cause validation failure (YAML spec violation, security footgun)
+2. **Reject anchors/aliases**: `&anchor` and `*alias` MUST be rejected (attack surface, complexity)
+3. **Use maintained parser**: Implementation MUST use actively maintained YAML parser (e.g., `serde_yaml_ng` or equivalent with security advisories addressed)
+4. **Limit recursion**: Parser MUST have recursion/depth limits to prevent stack overflow attacks
+
+```
+Error: Pack './malicious.yaml' validation failed:
+  - Duplicate key 'rules' at line 15 (duplicate keys not allowed)
+```
+
+```
+Error: Pack './complex.yaml' validation failed:
+  - YAML anchors/aliases not supported (line 8: '&base')
+```
+
 ### Unknown Fields Policy
 
 YAML files with fields not defined in the pack schema MUST fail validation with error:
@@ -316,19 +372,57 @@ Optional field for future schema evolution. Currently informational.
 
 ## SARIF Output
 
-### Pack Metadata Location
+### GitHub Code Scanning Compatibility (Normative)
 
-Pack metadata uses `properties` bags (SARIF-standard extensibility):
+GitHub Code Scanning requires specific SARIF fields for proper display and deduplication. This section is **normative** — implementations MUST follow these requirements.
+
+#### Required: `locations[]` on Every Result
+
+GitHub requires `locations[]` for alert display. Results without locations may not appear or behave inconsistently.
+
+**For global findings** (pack-level checks like `event_count`):
+- `artifactLocation.uri` = bundle file path (repo-relative)
+- `region.startLine` = 1
+
+**For event-specific findings**:
+- `artifactLocation.uri` = `"events.ndjson"`
+- `region.startLine` = event line number
+
+#### Required: `primaryLocationLineHash` Fingerprint
+
+GitHub uses `partialFingerprints.primaryLocationLineHash` for deduplication. Custom fingerprint keys are ignored by GitHub.
+
+**Algorithm**:
+```
+primaryLocationLineHash = sha256(
+    ruleId + ":" +
+    artifactLocation.uri + ":" +
+    region.startLine + ":" +
+    pack_digest
+)
+```
+
+#### SARIF Size Limits
+
+GitHub rejects SARIF uploads > 10 MB and has result count limits.
+
+**Mitigation**:
+- Default `--max-results 500`
+- Truncation policy: lowest severity first, then oldest
+- Add `run.properties.truncated: true` and `run.properties.truncatedCount: N` when truncated
+
+### Complete SARIF Example
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/...",
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
   "version": "2.1.0",
   "runs": [{
     "tool": {
       "driver": {
         "name": "assay-evidence-lint",
         "version": "2.9.0",
+        "semanticVersion": "2.9.0",
         "informationUri": "https://docs.assay.dev/lint",
         "properties": {
           "assayPacks": [
@@ -347,7 +441,7 @@ Pack metadata uses `properties` bags (SARIF-standard extensibility):
               "text": "Evidence bundle contains automatically recorded events"
             },
             "help": {
-              "markdown": "## EU AI Act Article 12(1)\\n\\n..."
+              "markdown": "## EU AI Act Article 12(1)\\n\\n**Disclaimer**: ..."
             },
             "defaultConfiguration": {
               "level": "error"
@@ -362,11 +456,18 @@ Pack metadata uses `properties` bags (SARIF-standard extensibility):
         ]
       }
     },
+    "invocations": [{
+      "executionSuccessful": true,
+      "workingDirectory": {
+        "uri": "file:///path/to/repo/"
+      }
+    }],
     "automationDetails": {
       "id": "assay-evidence/lint/{run_id}/{version}"
     },
     "properties": {
-      "disclaimer": "This pack provides technical checks..."
+      "disclaimer": "This pack provides technical checks...",
+      "truncated": false
     },
     "results": [
       {
@@ -375,7 +476,20 @@ Pack metadata uses `properties` bags (SARIF-standard extensibility):
         "message": {
           "text": "Bundle contains 0 events (minimum: 1)"
         },
+        "locations": [{
+          "physicalLocation": {
+            "artifactLocation": {
+              "uri": "evidence/bundle.tar.gz",
+              "uriBaseId": "%SRCROOT%"
+            },
+            "region": {
+              "startLine": 1,
+              "startColumn": 1
+            }
+          }
+        }],
         "partialFingerprints": {
+          "primaryLocationLineHash": "abc123def456...",
           "assayLintFingerprint/v1": "sha256:..."
         },
         "properties": {
@@ -389,16 +503,30 @@ Pack metadata uses `properties` bags (SARIF-standard extensibility):
 
 ### Fingerprint Computation
 
-For pack rules, fingerprint includes canonical rule ID:
-
+**primaryLocationLineHash** (GitHub dedup):
 ```rust
-let fingerprint = sha256(format!(
-    "{}:{}:{}",
-    canonical_rule_id,      // eu-ai-act-baseline@1.0.0:EU12-001
-    location_key,           // "global" or "seq:line"
-    pack_digest             // sha256:abc123...
-));
+let primary_fingerprint = hex::encode(sha256(format!(
+    "{}:{}:{}:{}",
+    canonical_rule_id,           // eu-ai-act-baseline@1.0.0:EU12-001
+    artifact_uri,                // evidence/bundle.tar.gz
+    start_line,                  // 1
+    pack_digest                  // sha256:abc123...
+)));
 ```
+
+**assayLintFingerprint/v1** (internal tracking):
+```rust
+let assay_fingerprint = format!("sha256:{}", hex::encode(sha256(format!(
+    "{}:{}:{}",
+    canonical_rule_id,
+    location_key,                // "global" or "seq:line"
+    pack_digest
+))));
+```
+
+### Multi-Run Policy
+
+GitHub is sensitive to multiple runs in single SARIF. **Always produce exactly one run per SARIF file**, with all packs merged into that single run.
 
 ## Disclaimer Output
 
@@ -558,6 +686,10 @@ pub struct LintArgs {
     /// Comma-separated pack references (built-in name or file path)
     #[arg(long, value_delimiter = ',')]
     pub pack: Option<Vec<String>>,
+
+    /// Maximum results in output (for GitHub SARIF limits)
+    #[arg(long, default_value = "500")]
+    pub max_results: usize,
 }
 ```
 
@@ -581,16 +713,20 @@ pub fn get_builtin_pack(name: &str) -> Option<&'static str> {
 }
 ```
 
-### Pack Resolution
+### Pack Resolution (Normative)
+
+Resolution order is deterministic and avoids heuristics:
 
 ```rust
 pub fn resolve_pack_reference(reference: &str) -> Result<LoadedPack, PackError> {
-    // 1. Check if it's a file path
-    if reference.starts_with("./") || reference.starts_with("/") || reference.ends_with(".yaml") {
-        return load_pack_from_file(Path::new(reference));
+    let path = Path::new(reference);
+
+    // 1. If path exists on filesystem → load as file
+    if path.exists() {
+        return load_pack_from_file(path);
     }
 
-    // 2. Check built-in packs
+    // 2. Check built-in packs by name
     if let Some(content) = get_builtin_pack(reference) {
         return load_pack_from_string(content, PackSource::BuiltIn(reference));
     }
@@ -602,6 +738,8 @@ pub fn resolve_pack_reference(reference: &str) -> Result<LoadedPack, PackError> 
     })
 }
 ```
+
+**Rationale**: Using `path.exists()` instead of heuristics (like checking for `.yaml` suffix) prevents surprising behavior when pack names happen to end in `.yaml`.
 
 ## Error Messages
 
@@ -718,28 +856,37 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 
 - [ ] `--pack` CLI argument parses comma-separated references
 - [ ] Built-in pack resolution (`eu-ai-act-baseline`)
-- [ ] File pack loading (`./custom.yaml`)
+- [ ] File pack loading via `path.exists()` check (not heuristics)
 - [ ] YAML schema validation with clear error messages
 - [ ] Unknown fields rejected (security)
+- [ ] Duplicate YAML keys rejected (security)
+- [ ] YAML anchors/aliases rejected (security)
 - [ ] `kind: compliance` requires disclaimer (hard fail)
 - [ ] `assay_min_version` checked on load
 - [ ] Pack digest computed (sha256 of JCS-canonical JSON)
 - [ ] Collision detection with hard-fail for compliance packs
 - [ ] Rule ID namespacing (`{pack}@{version}:{rule_id}`)
+- [ ] `--max-results` with truncation (lowest severity first)
 
 ### Check Types (Must Have)
 
 - [ ] `event_count` - minimum event count
-- [ ] `event_pairs` - start/finish matching
-- [ ] `event_field_present` - field existence check
+- [ ] `event_pairs` - start/finish matching with glob patterns
+- [ ] `event_field_present` - JSON Pointer path support
 
-### SARIF Output (Must Have)
+### SARIF Output (Must Have) — GitHub Code Scanning
 
+- [ ] `results[].locations[]` always present (bundle path for global, events.ndjson for event-specific)
+- [ ] `partialFingerprints.primaryLocationLineHash` for GitHub dedup
+- [ ] `invocations[].workingDirectory.uri` for path resolution
+- [ ] `tool.driver.semanticVersion` field
 - [ ] `tool.driver.properties.assayPacks[]` with name, version, digest
 - [ ] `rules[].id` uses canonical format
 - [ ] `rules[].properties` includes pack, pack_version, short_id, article_ref
 - [ ] `results[].properties` includes article_ref
 - [ ] `run.properties.disclaimer` for compliance packs
+- [ ] `run.properties.truncated` + `truncatedCount` when applicable
+- [ ] Single run per SARIF file (no multi-run)
 
 ### Console Output (Must Have)
 
@@ -756,8 +903,19 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 
 ## References
 
+### Related ADRs
 - [ADR-013: EU AI Act Compliance Pack](./ADR-013-EU-AI-Act-Pack.md)
 - [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md)
+
+### Standards
 - [RFC 8785: JSON Canonicalization Scheme](https://datatracker.ietf.org/doc/html/rfc8785)
+- [RFC 6901: JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901)
 - [SARIF 2.1.0 Specification](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
-- [EU AI Act Article 12](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
+
+### GitHub Code Scanning
+- [GitHub SARIF Support](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)
+- [GitHub SARIF Upload Limits](https://docs.github.com/en/code-security/code-scanning/troubleshooting-sarif-uploads)
+- [GitHub Fingerprint/Deduplication](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning#preventing-duplicate-alerts)
+
+### EU AI Act
+- [Article 12 - Record-keeping](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1)
