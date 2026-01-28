@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 /// |------|---------|---------------------------|
 /// | `Intent` | Standing authority for discovery | `read` |
 /// | `Transaction` | Final authorization for commits | `read`, `write`, `commit` |
-/// | `Revocation` | Cancel an existing mandate | N/A |
+///
+/// Note (v1.0.2): `Revocation` was removed as a kind. Revocation is handled
+/// via `assay.mandate.revoked.v1` events instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MandateKind {
@@ -28,8 +30,6 @@ pub enum MandateKind {
     Intent,
     /// Final authorization for commits/purchases
     Transaction,
-    /// Cancel an existing mandate
-    Revocation,
 }
 
 /// Operation class with normative ordering: read(0) < write(1) < commit(2)
@@ -404,7 +404,7 @@ impl Context {
     }
 }
 
-/// Signature object (DSSE-compatible).
+/// Signature object (DSSE-compatible, v1.0.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Signature {
     /// Schema version. MUST be 1
@@ -416,8 +416,11 @@ pub struct Signature {
     /// Payload type for type confusion prevention
     pub payload_type: String,
 
-    /// MUST equal mandate_id
-    pub payload_digest: String,
+    /// Content-addressed identifier = mandate_id
+    pub content_id: String,
+
+    /// SHA256 of signed payload bytes (DSSE standard)
+    pub signed_payload_digest: String,
 
     /// SHA-256 of SPKI public key
     pub key_id: String,
@@ -475,14 +478,13 @@ impl Mandate {
         MandateBuilder::default()
     }
 
-    /// Check if this mandate requires a transaction kind for the given operation.
+    /// Check if this mandate allows the given operation class.
     pub fn allows_operation(&self, op: OperationClass) -> bool {
         // Transaction mandates allow all operations up to their operation_class
         // Intent mandates only allow read
         match self.mandate_kind {
             MandateKind::Intent => op == OperationClass::Read,
             MandateKind::Transaction => self.scope.operation_class().allows(op),
-            MandateKind::Revocation => false,
         }
     }
 }
@@ -677,10 +679,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&MandateKind::Transaction).unwrap(),
             "\"transaction\""
-        );
-        assert_eq!(
-            serde_json::to_string(&MandateKind::Revocation).unwrap(),
-            "\"revocation\""
         );
     }
 

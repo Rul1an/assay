@@ -110,6 +110,15 @@ pub struct MandateUsedPayload {
 
 impl MandateUsedPayload {
     /// Create a new usage receipt.
+    ///
+    /// The `use_id` is computed as a content-addressed identifier per SPEC-Mandate-v1 §11.4:
+    /// ```text
+    /// use_id = "sha256:" + hex(SHA256(JCS({
+    ///   "mandate_id": "<mandate_id>",
+    ///   "tool_call_id": "<tool_call_id>",
+    ///   "use_count": <use_count>
+    /// })))
+    /// ```
     pub fn new(
         mandate_id: impl Into<String>,
         tool_call_id: impl Into<String>,
@@ -117,10 +126,17 @@ impl MandateUsedPayload {
     ) -> Self {
         let mandate_id = mandate_id.into();
         let tool_call_id = tool_call_id.into();
+
+        // Content-addressed use_id per SPEC-Mandate-v1 §11.4
+        let use_id_content = serde_json::json!({
+            "mandate_id": mandate_id,
+            "tool_call_id": tool_call_id,
+            "use_count": use_count
+        });
         let use_id = format!(
             "sha256:{}",
             hex::encode(sha2::Sha256::digest(
-                format!("{}:{}:{}", mandate_id, tool_call_id, use_count).as_bytes()
+                serde_jcs::to_vec(&use_id_content).unwrap_or_default()
             ))
         );
 

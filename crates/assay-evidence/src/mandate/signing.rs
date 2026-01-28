@@ -43,8 +43,11 @@ pub enum VerifyError {
     #[error("payload type mismatch: expected {expected}, got {got}")]
     PayloadTypeMismatch { expected: String, got: String },
 
-    #[error("mandate_id does not match payload_digest")]
-    IdDigestMismatch,
+    #[error("mandate_id does not match content_id")]
+    IdContentMismatch,
+
+    #[error("signed_payload_digest mismatch: computed {computed}, claimed {claimed}")]
+    SignedPayloadDigestMismatch { computed: String, claimed: String },
 
     #[error("computed mandate_id does not match claimed: computed {computed}, claimed {claimed}")]
     IdMismatch { computed: String, claimed: String },
@@ -67,9 +70,10 @@ impl VerifyError {
             Self::KeyNotTrusted { .. } => 3,
             Self::SignatureInvalid
             | Self::PayloadTypeMismatch { .. }
-            | Self::IdDigestMismatch
+            | Self::IdContentMismatch
             | Self::IdMismatch { .. }
-            | Self::KeyIdMismatch { .. } => 4,
+            | Self::KeyIdMismatch { .. }
+            | Self::SignedPayloadDigestMismatch { .. } => 4,
             Self::Malformed { .. }
             | Self::VersionMismatch { .. }
             | Self::AlgorithmMismatch { .. } => 1,
@@ -165,13 +169,16 @@ pub fn sign_mandate(content: &MandateContent, signing_key: &SigningKey) -> Resul
     // 3. Canonicalize for signing
     let canonical = jcs::to_vec(&signable).context("failed to canonicalize mandate for signing")?;
 
-    // 4. Build PAE
+    // 4. Compute signed_payload_digest (DSSE standard: digest of signed payload)
+    let signed_payload_digest = format!("sha256:{}", hex::encode(Sha256::digest(&canonical)));
+
+    // 5. Build PAE
     let pae = build_pae(MANDATE_PAYLOAD_TYPE, &canonical);
 
-    // 5. Sign
+    // 6. Sign
     let signature: ed25519_dalek::Signature = signing_key.sign(&pae);
 
-    // 6. Build signature object
+    // 7. Build signature object
     let verifying_key = signing_key.verifying_key();
     let key_id = compute_key_id_from_verifying_key(&verifying_key)?;
 
@@ -179,13 +186,14 @@ pub fn sign_mandate(content: &MandateContent, signing_key: &SigningKey) -> Resul
         version: 1,
         algorithm: "ed25519".to_string(),
         payload_type: MANDATE_PAYLOAD_TYPE.to_string(),
-        payload_digest: mandate_id.clone(),
+        content_id: mandate_id.clone(),
+        signed_payload_digest,
         key_id,
         signature: BASE64.encode(signature.to_bytes()),
         signed_at: Utc::now(),
     };
 
-    // 7. Build complete mandate
+    // 8. Build complete mandate
     Ok(Mandate {
         mandate_id,
         mandate_kind: content.mandate_kind,
@@ -221,14 +229,15 @@ struct SignableMandate {
 ///
 /// `VerifyResult` on success, `VerifyError` on failure.
 ///
-/// # Algorithm (SPEC-Mandate-v1 §5.1)
+/// # Algorithm (SPEC-Mandate-v1 §5.1 v1.0.2)
 ///
 /// 1. Extract and validate signature
-/// 2. Verify mandate_id == payload_digest
+/// 2. Verify mandate_id == content_id
 /// 3. Recompute mandate_id from content (proves content-addressed)
-/// 4. Build signable content and PAE
-/// 5. Verify ed25519 signature
-/// 6. Verify key_id matches
+/// 4. Verify signed_payload_digest
+/// 5. Build signable content and PAE
+/// 6. Verify ed25519 signature
+/// 7. Verify key_id matches
 pub fn verify_mandate(
     mandate: &Mandate,
     trusted_key: &VerifyingKey,
@@ -254,9 +263,9 @@ pub fn verify_mandate(
         });
     }
 
-    // 3. Verify mandate_id == payload_digest
-    if mandate.mandate_id != sig.payload_digest {
-        return Err(VerifyError::IdDigestMismatch);
+    // 3. Verify mandate_id == content_id (v1.0.2)
+    if mandate.mandate_id != sig.content_id {
+        return Err(VerifyError::IdContentMismatch);
     }
 
     // 4. Recompute mandate_id from content (proves content-addressed)
@@ -294,7 +303,16 @@ pub fn verify_mandate(
         reason: e.to_string(),
     })?;
 
-    // 6. Build PAE and verify signature
+    // 6. Verify signed_payload_digest (v1.0.2 DSSE alignment)
+    let computed_signed_digest = format!("sha256:{}", hex::encode(Sha256::digest(&canonical)));
+    if computed_signed_digest != sig.signed_payload_digest {
+        return Err(VerifyError::SignedPayloadDigestMismatch {
+            computed: computed_signed_digest,
+            claimed: sig.signed_payload_digest.clone(),
+        });
+    }
+
+    // 7. Build PAE and verify signature
     let pae = build_pae(&sig.payload_type, &canonical);
 
     let signature_bytes = BASE64

@@ -1,10 +1,11 @@
 # Mandate Evidence Specification v1
 
-**Status:** Draft v1.0.1 (January 2026)
+**Status:** Draft v1.0.2 (January 2026)
 **Scope:** Cryptographically-signed user authorization evidence for AI agent tool calls
 **ADR:** [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md)
 
 **Changelog:**
+- v1.0.2: Fixed payload_digest semantics (DSSE alignment), removed mandate_kind=revocation, added conformance test vectors, normative transaction_ref schema, require_signed_lifecycle default for commit
 - v1.0.1: Fixed mandate_id circularity, added lifecycle event trust model, normative glob semantics, operation_class ordering
 
 ---
@@ -27,7 +28,8 @@ This specification defines the mandate evidence format for proving user authoriz
 |------|---------|---------------------------|
 | `intent` | Standing authority for discovery/browsing | `read` |
 | `transaction` | Final authorization for commits/purchases | `read`, `write`, `commit` |
-| `revocation` | Cancel an existing mandate | N/A (administrative) |
+
+> **Note (v1.0.2):** `revocation` was removed as a mandate kind. Revocation is handled exclusively via `assay.mandate.revoked.v1` events. This simplifies the model: mandates authorize, events record lifecycle transitions.
 
 ---
 
@@ -67,11 +69,23 @@ Where:
 // Step 5: Proceed to signing (which signs the full content including mandate_id)
 ```
 
-**Binding rule:** `signature.payload_digest` MUST equal `mandate_id`. Verifiers check:
+**Digest semantics (v1.0.2):**
+
+The signature object contains TWO digest fields:
+
+| Field | Computed From | Purpose |
+|-------|---------------|---------|
+| `content_id` | `JCS(hashable_content)` without mandate_id/signature | Content-addressed identifier = `mandate_id` |
+| `signed_payload_digest` | `JCS(signable_content)` with mandate_id, without signature | Standard DSSE payload digest |
+
+**Binding rule:** Verifiers MUST check BOTH:
 
 ```
-mandate_id == signature.payload_digest == "sha256:" + hex(SHA256(JCS(content_without_mandate_id_and_signature)))
+1. mandate_id == signature.content_id == "sha256:" + hex(SHA256(JCS(content_without_mandate_id_and_signature)))
+2. signature.signed_payload_digest == "sha256:" + hex(SHA256(JCS(content_with_mandate_id_but_without_signature)))
 ```
+
+This separates the content-addressed identifier (for lookups/references) from the signed payload digest (for DSSE verification), avoiding implementer confusion.
 
 ### 2.2 Operation Classes (Normative Ordering)
 
@@ -113,9 +127,15 @@ CloudEvents envelope with mandate grant payload.
 | Field | Requirement |
 |-------|-------------|
 | `specversion` | MUST be `"1.0"` |
+| `id` | MUST be present, unique per source |
 | `type` | MUST be `"assay.mandate.v1"` |
+| `source` | MUST be present, valid URI |
+| `time` | MUST be present, RFC 3339 UTC timestamp |
 | `datacontenttype` | MUST be `"application/json"` |
 | `data` | MUST be JSON object (not string-encoded) |
+| `subject` | MAY be present for tool_call_id correlation |
+
+> **v1.0.2:** Explicit required attributes list aligns with CloudEvents v1.0 §2.1. The `subject` attribute MAY be used as CloudEvents-native correlation alternative to `data.tool_call_id`.
 
 ```json
 {
@@ -166,7 +186,8 @@ CloudEvents envelope with mandate grant payload.
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:abc123def456...",
+      "content_id": "sha256:abc123def456...",
+      "signed_payload_digest": "sha256:789abc012def...",
       "key_id": "sha256:signing-key-id...",
       "signature": "base64-encoded-signature...",
       "signed_at": "2026-01-28T09:55:00Z"
@@ -182,7 +203,7 @@ CloudEvents envelope with mandate grant payload.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `mandate_id` | string | Yes | Content-addressed identifier (see §2.1) |
-| `mandate_kind` | enum | Yes | One of: `intent`, `transaction`, `revocation` |
+| `mandate_kind` | enum | Yes | One of: `intent`, `transaction` |
 | `principal` | object | Yes | Who granted the mandate |
 | `scope` | object | Yes | What the mandate authorizes |
 | `validity` | object | Yes | When the mandate is valid |
@@ -249,6 +270,34 @@ Computation: `transaction_ref = "sha256:" + hex(SHA256(JCS(transaction_object)))
 
 Where `transaction_object` is the cart, order, or payment intent that this mandate authorizes. This prevents mandate reuse for different transactions within the validity window.
 
+**Transaction Intent Object Schema (v1.0.2 NORMATIVE):**
+
+For interoperability, the `transaction_object` SHOULD conform to this minimal schema:
+
+```json
+{
+  "merchant": "string",           // REQUIRED: Merchant identifier
+  "items": [                      // REQUIRED: Line items (order preserved)
+    {
+      "product_id": "string",     // REQUIRED: Product identifier
+      "quantity": 1,              // REQUIRED: Integer quantity
+      "unit_price": "10.00"       // OPTIONAL: Decimal string
+    }
+  ],
+  "total": {                      // REQUIRED: Total amount
+    "amount": "100.00",           // Decimal string, MUST NOT use float
+    "currency": "USD"             // ISO 4217, MUST be uppercase
+  },
+  "created_at": "2026-01-28T10:00:00Z"  // OPTIONAL: ISO 8601 UTC
+}
+```
+
+**Normalization rules for JCS hashing:**
+- `amount` fields MUST be decimal strings (no floats, no trailing zeros: "10" not "10.00")
+- `currency` MUST be uppercase ISO 4217
+- `items` array order MUST be preserved (JCS preserves array order)
+- No optional fields should be present with `null` values; omit them entirely
+
 **Verification:** Runtime MUST verify that the actual transaction content hashes to the same value as `transaction_ref` before allowing commit tools.
 
 **tools pattern syntax (NORMATIVE):**
@@ -275,6 +324,14 @@ fs.**         → matches: fs.read_file, fs.write.nested.path
 *             → matches: search, list (single-segment names only)
 **            → matches: any tool name (universal wildcard)
 ```
+
+**Implementation requirements (v1.0.2):**
+
+> ⚠️ **MUST NOT use OS glob libraries.** Standard glob implementations (Python's `fnmatch`, shell glob, Go's `filepath.Match`) use different semantics for `*` (often matches `.`). Implementers MUST use the Assay Glob v1 algorithm defined above, or a conforming implementation.
+
+Conforming implementations are available in:
+- Rust: `assay_evidence::mandate::glob`
+- Python: `assay.glob` (planned)
 
 **Canonicalization:** Tool names MUST be normalized to lowercase before matching if the runtime uses case-insensitive tool names. The `tools` array in mandates SHOULD use lowercase patterns for maximum compatibility.
 
@@ -423,16 +480,29 @@ mandate_trust:
     - "assay://myorg/myapp"
     - "assay://myorg/auth-service"
 
-  # Optional: require signed lifecycle events (recommended for high-risk)
-  require_signed_lifecycle_events: false
+  # Require signed lifecycle events
+  # DEFAULT (v1.0.2): true when mandate_kind=transaction OR tool ∈ commit_tools
+  require_signed_lifecycle_events: auto  # "auto" | true | false
 ```
+
+**v1.0.2 default behavior for `require_signed_lifecycle_events: auto`:**
+
+| Mandate Kind | Tool Classification | Lifecycle Events |
+|--------------|---------------------|------------------|
+| `intent` | read tools | Source check only |
+| `intent` | write tools | Source check only |
+| `transaction` | any tool | **MUST be signed** |
+| any | commit tools | **MUST be signed** |
+
+This default acknowledges that lifecycle events for high-value operations (transactions, commits) are high-risk injection targets.
 
 **Verification rules:**
 
 1. `event.source` MUST be in `trusted_event_sources` list
-2. If `require_signed_lifecycle_events: true`:
+2. If signatures required (see table above):
    - `used` and `revoked` events MUST include a `signature` object
-   - Signature verification follows same algorithm as mandates
+   - Signature verification follows same algorithm as mandates (see §4)
+   - Signature `payload_type` MUST be `application/vnd.assay.mandate.used+json;v=1` or `application/vnd.assay.mandate.revoked+json;v=1`
 3. Evidence bundles MUST be treated as tamper-evident containers; events from untrusted sources MUST be rejected at ingest
 
 **Adversarial model considerations:**
@@ -507,7 +577,8 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
   "version": 1,
   "algorithm": "ed25519",
   "payload_type": "application/vnd.assay.mandate+json;v=1",
-  "payload_digest": "sha256:abc123...",
+  "content_id": "sha256:abc123...",
+  "signed_payload_digest": "sha256:def789...",
   "key_id": "sha256:signing-key-id...",
   "signature": "base64-encoded-signature...",
   "signed_at": "2026-01-28T09:55:00Z"
@@ -519,10 +590,13 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
 | `version` | integer | Yes | Schema version. MUST be `1` |
 | `algorithm` | string | Yes | MUST be `"ed25519"` for v1 |
 | `payload_type` | string | Yes | MUST be `"application/vnd.assay.mandate+json;v=1"` |
-| `payload_digest` | string | Yes | MUST equal `mandate_id` |
+| `content_id` | string | Yes | MUST equal `mandate_id` (content-addressed identifier) |
+| `signed_payload_digest` | string | Yes | SHA256 of signed payload bytes (DSSE standard) |
 | `key_id` | string | Yes | SHA-256 of SPKI public key |
 | `signature` | string | Yes | Base64-encoded Ed25519 signature |
 | `signed_at` | datetime | Yes | Signing timestamp (metadata only) |
+
+> **v1.0.2 change:** Renamed `payload_digest` to `content_id` and added `signed_payload_digest` for DSSE alignment. This prevents implementer confusion where "payload_digest" is expected to be the digest of the signed payload.
 
 ### 4.2 Signing Algorithm
 
@@ -532,16 +606,23 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
 3. Compute mandate_id = "sha256:" + hex(SHA256(canonical_for_id))
 4. Build signable_content = hashable_content + {mandate_id: mandate_id}
 5. Compute canonical_for_sig = JCS(signable_content)
-6. Compute PAE = DSSEv1_PAE(payload_type, canonical_for_sig)
-7. Sign: signature_bytes = ed25519_sign(private_key, PAE)
-8. Build signature object:
-   - payload_digest = mandate_id
+6. Compute signed_payload_digest = "sha256:" + hex(SHA256(canonical_for_sig))
+7. Compute PAE = DSSEv1_PAE(payload_type, canonical_for_sig)
+8. Sign: signature_bytes = ed25519_sign(private_key, PAE)
+9. Build signature object:
+   - content_id = mandate_id
+   - signed_payload_digest = signed_payload_digest (from step 6)
    - signature = base64_encode_with_padding(signature_bytes)
-9. Build final_content = signable_content + {signature: signature_object}
-10. Emit CloudEvents envelope with data = final_content
+10. Build final_content = signable_content + {signature: signature_object}
+11. Emit CloudEvents envelope with data = final_content
 ```
 
-**Important:** Step 1-3 computes the ID from content WITHOUT mandate_id (avoiding circularity). Steps 4-7 sign content WITH mandate_id but WITHOUT signature.
+**Important:**
+- Steps 1-3 compute the content-addressed ID from content WITHOUT mandate_id (avoiding circularity)
+- Steps 4-6 compute the signed payload digest from content WITH mandate_id
+- Steps 7-8 sign using DSSE PAE encoding
+- `content_id` = identifier for lookups/references
+- `signed_payload_digest` = standard DSSE payload digest for verification
 
 ### 4.3 PAE Encoding (DSSE)
 
@@ -571,31 +652,35 @@ Where:
 4. Validate sig.version == 1
 5. Validate sig.algorithm == "ed25519"
 6. Validate sig.payload_type == "application/vnd.assay.mandate+json;v=1"
-7. Extract claimed_id = mandate_content.mandate_id
-8. Validate claimed_id == sig.payload_digest
 
-// Verify mandate_id computation (content-addressed)
+// Verify content_id == mandate_id (content-addressed)
+7. Extract claimed_id = mandate_content.mandate_id
+8. Validate claimed_id == sig.content_id
 9. Build hashable = mandate_content WITHOUT {mandate_id, signature}
 10. Compute canonical_for_id = JCS(hashable)
 11. Compute computed_id = "sha256:" + hex(SHA256(canonical_for_id))
 12. Validate computed_id == claimed_id  // CRITICAL: proves ID is content-addressed
 
-// Verify signature
+// Verify signed_payload_digest (DSSE alignment)
 13. Build signable = mandate_content WITHOUT {signature} (but WITH mandate_id)
 14. Compute canonical_for_sig = JCS(signable)
-15. Compute PAE = DSSEv1_PAE(sig.payload_type, canonical_for_sig)
-16. Obtain public_key by sig.key_id from trust policy
-17. Verify ed25519_verify(public_key, PAE, base64_decode(sig.signature))
-18. If invalid: FAIL (INVALID_SIGNATURE)
+15. Compute computed_signed_digest = "sha256:" + hex(SHA256(canonical_for_sig))
+16. Validate computed_signed_digest == sig.signed_payload_digest
+
+// Verify signature
+17. Compute PAE = DSSEv1_PAE(sig.payload_type, canonical_for_sig)
+18. Obtain public_key by sig.key_id from trust policy
+19. Verify ed25519_verify(public_key, PAE, base64_decode(sig.signature))
+20. If invalid: FAIL (INVALID_SIGNATURE)
 
 // Additional checks
-19. Check context binding (see §5.2)
-20. Check validity window with clock skew (see §5.3)
-21. Check revocation status (see §5.4)
-22. PASS
+21. Check context binding (see §5.2)
+22. Check validity window with clock skew (see §5.3)
+23. Check revocation status (see §5.4)
+24. PASS
 ```
 
-**Note:** Steps 9-12 verify that `mandate_id` is truly content-addressed (computed from content without ID). This prevents ID forgery attacks.
+**Note:** Steps 7-12 verify content addressing; steps 13-16 verify signed payload digest (DSSE standard). Both MUST pass.
 
 ### 5.2 Context Binding Verification
 
@@ -1129,7 +1214,100 @@ Parsers MAY accept Base64 without padding for compatibility, but producers MUST 
 
 ---
 
-## 11. Future Extensions (v2)
+## 11. Conformance Test Vectors (v1.0.2)
+
+Implementations MUST pass all test vectors in this section.
+
+### 11.1 Glob Matching Vectors
+
+| Pattern | Input | Expected | Reason |
+|---------|-------|----------|--------|
+| `search_*` | `search_products` | ✓ match | `*` matches `products` |
+| `search_*` | `search_users` | ✓ match | `*` matches `users` |
+| `search_*` | `search_` | ✓ match | `*` matches empty string |
+| `search_*` | `search.products` | ✗ no match | `*` stops at `.` |
+| `search_*` | `search` | ✗ no match | Missing `_` |
+| `search_*` | `Search_products` | ✗ no match | Case-sensitive |
+| `fs.read_*` | `fs.read_file` | ✓ match | Literal `.` matches |
+| `fs.read_*` | `fs.read.file` | ✗ no match | `*` stops at second `.` |
+| `fs.**` | `fs.read_file` | ✓ match | `**` matches any |
+| `fs.**` | `fs.write.nested.path` | ✓ match | `**` matches `.` |
+| `*` | `search` | ✓ match | `*` matches single segment |
+| `*` | `ns.tool` | ✗ no match | `*` stops at `.` |
+| `**` | `anything.at.all` | ✓ match | Universal wildcard |
+| `file\*name` | `file*name` | ✓ match | Escaped `*` |
+| `path\\to` | `path\to` | ✓ match | Escaped `\` |
+
+### 11.2 JCS Canonicalization Vector
+
+**Input (JSON with unordered keys):**
+
+```json
+{
+  "mandate_kind": "intent",
+  "context": {"issuer": "auth.myorg.com", "audience": "myorg/app"},
+  "principal": {"method": "oidc", "subject": "user-123"},
+  "validity": {"issued_at": "2026-01-28T10:00:00Z"},
+  "scope": {"tools": ["search_*"], "operation_class": "read"},
+  "constraints": {}
+}
+```
+
+**Expected JCS output (single line, sorted keys):**
+
+```
+{"constraints":{},"context":{"audience":"myorg/app","issuer":"auth.myorg.com"},"mandate_kind":"intent","principal":{"method":"oidc","subject":"user-123"},"scope":{"operation_class":"read","tools":["search_*"]},"validity":{"issued_at":"2026-01-28T10:00:00Z"}}
+```
+
+**Expected mandate_id:**
+
+```
+sha256:e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7
+```
+
+> Note: Actual hash value depends on exact JCS output bytes. Implementations MUST produce identical bytes to produce identical hashes.
+
+### 11.3 Time Validity Vectors
+
+| now (event time) | not_before | expires_at | skew_seconds | Expected |
+|------------------|------------|------------|--------------|----------|
+| 10:00:00 | 09:00:00 | 11:00:00 | 0 | ✓ valid |
+| 10:00:00 | 10:00:30 | 11:00:00 | 30 | ✓ valid (skew) |
+| 10:00:00 | 10:01:00 | 11:00:00 | 30 | ✗ not_yet_valid |
+| 10:00:00 | 09:00:00 | 10:00:00 | 0 | ✗ expired (exclusive) |
+| 10:00:00 | 09:00:00 | 09:59:30 | 30 | ✗ expired |
+| 10:00:00 | null | 11:00:00 | 0 | ✓ valid |
+| 10:00:00 | 09:00:00 | null | 0 | ✓ valid |
+
+### 11.4 use_id Generation (NORMATIVE v1.0.2)
+
+`use_id` MUST be content-addressed:
+
+```
+use_id = "sha256:" + hex(SHA256(JCS({
+  "mandate_id": "<mandate_id>",
+  "tool_call_id": "<tool_call_id>",
+  "use_count": <use_count>
+})))
+```
+
+This ensures:
+- Deterministic generation (same inputs → same ID)
+- Uniqueness (different tool_call_id or use_count → different ID)
+- Verifiability (third parties can recompute)
+
+### 11.5 JSON Parsing Requirements (NORMATIVE)
+
+Parsers MUST reject JSON with:
+- **Duplicate keys**: `{"a": 1, "a": 2}` MUST be rejected
+- **Trailing data**: `{"a": 1}garbage` MUST be rejected
+- **Comments**: `{"a": 1 /* comment */}` MUST be rejected (not valid JSON)
+
+Rationale: Canonicalization attacks exploit parser differences in duplicate key handling.
+
+---
+
+## 12. Future Extensions (v2)
 
 | Feature | Description |
 |---------|-------------|
