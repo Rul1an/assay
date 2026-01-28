@@ -215,7 +215,9 @@ impl From<&LoadedPack> for PackInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lint::packs::schema::{CheckDefinition, PackDefinition, PackRequirements, PackRule};
+    use crate::lint::packs::schema::{
+        CheckDefinition, PackDefinition, PackRequirements, PackRule, Severity,
+    };
 
     fn make_test_pack(name: &str, kind: PackKind, rules: Vec<PackRule>) -> LoadedPack {
         LoadedPack {
