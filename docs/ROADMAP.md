@@ -126,10 +126,10 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
 | **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete |
-| **P2** | Pack Engine (OSS) | Medium | High | **Next** |
-| **P2** | EU AI Act Baseline Pack (OSS) | Low | High | After Pack Engine |
-| **P2** | Mandate/Intent Evidence | Medium | High | Pending |
-| **P2** | GitHub Action v2.1 | Low | Medium | After packs |
+| **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |
+| **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
+| **P2** | Mandate/Intent Evidence | Medium | High | **Next** |
+| **P2** | GitHub Action v2.1 | Low | Medium | After mandate |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
@@ -204,7 +204,7 @@ Per [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md), we follow the Semgrep op
 - **Engine + Baseline packs** = Open Source (Apache 2.0)
 - **Pro packs + Managed workflows** = Enterprise (Commercial)
 
-#### Pack Engine (OSS)
+#### Pack Engine (OSS) ✅ Complete (v2.10.0)
 
 ```bash
 assay evidence lint --pack eu-ai-act-baseline        # Single pack
@@ -212,26 +212,28 @@ assay evidence lint --pack eu-ai-act-baseline,soc2   # Composition
 assay evidence lint --pack ./custom-pack.yaml        # Custom pack
 ```
 
-- [ ] **Pack loader**: YAML schema with `pack_kind` (compliance/security/quality)
-- [ ] **Rule ID namespacing**: `{pack}@{version}:{rule_id}` for collision handling
-- [ ] **Pack composition**: `--pack a,b` with deterministic merge
-- [ ] **Version resolution**: `assay_min_version` + `evidence_schema_version`
-- [ ] **Pack digest**: SHA256 for supply chain integrity
-- [ ] **SARIF output**: Pack metadata in `properties` bags (GitHub-safe)
-- [ ] **Disclaimer enforcement**: `pack_kind == compliance` requires disclaimer
+- [x] **Pack loader**: YAML schema with `pack_kind` (compliance/security/quality)
+- [x] **Rule ID namespacing**: `{pack}@{version}:{rule_id}` for collision handling
+- [x] **Pack composition**: `--pack a,b` with deterministic merge
+- [x] **Version resolution**: `assay_min_version` + `evidence_schema_version`
+- [x] **Pack digest**: SHA256 (JCS RFC 8785) for supply chain integrity
+- [x] **SARIF output**: Pack metadata in `properties` bags (GitHub Code Scanning compatible)
+- [x] **Disclaimer enforcement**: `pack_kind == compliance` requires disclaimer
+- [x] **GitHub dedup**: `primaryLocationLineHash` fingerprint
+- [x] **Truncation**: `--max-results` for SARIF size limits
 
-#### EU AI Act Baseline Pack (OSS)
+#### EU AI Act Baseline Pack (OSS) ✅ Complete (v2.10.0)
 
 Direct Article 12(1) + 12(2)(a)(b)(c) mapping:
 
-| Rule ID | Article | Check |
-|---------|---------|-------|
-| EU12-001 | 12(1) | Evidence bundle contains automatically recorded events |
-| EU12-002 | 12(2)(c) | Events include lifecycle fields for operation monitoring |
-| EU12-003 | 12(2)(b) | Events include correlation IDs for post-market monitoring |
-| EU12-004 | 12(2)(a) | Events include fields for risk situation identification |
+| Rule ID | Article | Check | Status |
+|---------|---------|-------|--------|
+| EU12-001 | 12(1) | Evidence bundle contains automatically recorded events | ✅ |
+| EU12-002 | 12(2)(c) | Events include lifecycle fields for operation monitoring | ✅ |
+| EU12-003 | 12(2)(b) | Events include correlation IDs for post-market monitoring | ✅ |
+| EU12-004 | 12(2)(a) | Events include fields for risk situation identification | ✅ |
 
-See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping.
+See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and [SPEC-Pack-Engine-v1](./architecture/SPEC-Pack-Engine-v1.md) for implementation spec.
 
 #### EU AI Act Pro Pack (Enterprise)
 
@@ -420,8 +422,8 @@ Everything needed to create, verify, and analyze evidence locally:
 | **CLI Workflow** | `export`, `verify`, `lint`, `diff`, `explore`, `show` |
 | **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
 | **Basic Signing** | Ed25519 local key signing and verification |
-| **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification |
-| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping), future `soc2-baseline` |
+| **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification (v2.10.0) |
+| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping, v2.10.0), future `soc2-baseline` |
 | **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor |
 | **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
 | **Output Formats** | SARIF, JUnit, JSON, console |

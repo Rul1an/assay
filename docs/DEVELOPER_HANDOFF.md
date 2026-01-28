@@ -1,6 +1,6 @@
 # Assay Developer Handoff Guide
 
-> **Version:** 2.9.0 | **Last Updated:** January 2026
+> **Version:** 2.10.0 | **Last Updated:** January 2026
 >
 > Complete onboarding document for Rust developers joining the Assay project.
 
@@ -244,10 +244,10 @@ Per [ROADMAP.md](./ROADMAP.md) and [ADR-016](./architecture/ADR-016-Pack-Taxonom
 | ✅ | GitHub Action v2 | External repo | Complete |
 | ✅ | BYOS CLI (`push/pull/list`) | `assay-cli`, `assay-evidence` | Complete |
 | ✅ | Tool Signing (`x-assay-sig`) | `assay-cli`, `assay-core` | Complete |
-| **P2** | Pack Engine (OSS) | `assay-evidence`, `assay-cli` | **Next** |
-| **P2** | EU AI Act Baseline Pack (OSS) | `packs/` | After engine |
-| **P2** | Mandate/Intent Evidence | `assay-core` | Planned |
-| **P2** | Action v2.1 | External repo | After packs |
+| ✅ | Pack Engine (OSS) | `assay-evidence`, `assay-cli` | Complete (v2.10.0) |
+| ✅ | EU AI Act Baseline Pack (OSS) | `packs/` | Complete (v2.10.0) |
+| **P2** | Mandate/Intent Evidence | `assay-core` | **Next** |
+| **P2** | Action v2.1 | External repo | After mandate |
 
 ### ✅ BYOS CLI Commands (Complete)
 
@@ -279,7 +279,7 @@ assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untr
 
 See [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md) for the formal specification.
 
-### P2: Pack Engine + EU AI Act Baseline (Next)
+### ✅ Pack Engine + EU AI Act Baseline (Complete v2.10.0)
 
 Following the Semgrep open core model (engine + baseline free, pro + workflows enterprise):
 
@@ -287,19 +287,22 @@ Following the Semgrep open core model (engine + baseline free, pro + workflows e
 assay evidence lint --pack eu-ai-act-baseline    # Article 12 baseline checks (OSS)
 assay evidence lint --pack eu-ai-act-baseline,soc2-baseline  # Composition
 assay evidence lint --pack ./custom-pack.yaml    # Custom pack
+assay evidence lint --pack eu-ai-act-baseline --format sarif  # GitHub Code Scanning
 ```
 
-**Key files to create:**
-- `crates/assay-evidence/src/lint/packs/` - Pack engine modules
+**Key files:**
+- `crates/assay-evidence/src/lint/packs/` - Pack engine modules (schema, loader, executor, checks)
 - `packs/eu-ai-act-baseline.yaml` - Baseline pack with Article 12 mapping
 
 **Key specs:**
 - Rule ID namespacing: `{pack}@{version}:{rule_id}`
-- Pack kind enforcement: `compliance` requires disclaimer
-- SARIF output via `properties` bags (GitHub-safe)
-- Pack digest for supply chain integrity
+- Pack kind enforcement: `compliance` requires disclaimer (hard fail if missing)
+- SARIF output via `properties` bags (GitHub Code Scanning compatible)
+- Pack digest: `sha256(JCS(JSON(yaml)))` for supply chain integrity
+- GitHub dedup: `primaryLocationLineHash` fingerprint
+- Truncation: `--max-results` for SARIF size limits (default: 500)
 
-See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) and [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md).
+See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md), and [SPEC-Pack-Engine-v1](./architecture/SPEC-Pack-Engine-v1.md).
 
 ### P2: Mandate/Intent Evidence
 
