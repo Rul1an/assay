@@ -8,6 +8,10 @@ on:
       - 'assay-action/**'
       - '.github/workflows/action-v2-test.yml'
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   test-no-bundles:
     name: Test (no bundles - soft exit)
