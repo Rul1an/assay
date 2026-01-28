@@ -85,8 +85,20 @@ runs:
     # E1: Foundation - Platform detection, caching, binary installation
     # =========================================================================
 
+    - name: Check if Assay already in PATH
+      id: check-existing
+      shell: bash
+      run: |
+        if command -v assay &> /dev/null; then
+          echo "Assay already installed: $(assay --version)"
+          echo "skip_install=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip_install=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Detect platform
       id: platform
+      if: steps.check-existing.outputs.skip_install != 'true'
       shell: bash
       run: |
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -116,13 +128,14 @@ runs:
 
     - name: Restore cached binary
       id: cache
+      if: steps.check-existing.outputs.skip_install != 'true'
       uses: actions/cache@v4
       with:
         path: ~/.assay/bin
         key: assay-${{ inputs.version }}-${{ steps.platform.outputs.target }}
 
     - name: Install Assay CLI
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.check-existing.outputs.skip_install != 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         ASSAY_VERSION: ${{ inputs.version }}
@@ -157,6 +170,7 @@ runs:
 
     - name: Add to PATH and verify
       id: verify-install
+      if: steps.check-existing.outputs.skip_install != 'true'
       shell: bash
       run: |
         echo "$HOME/.assay/bin" >> $GITHUB_PATH
