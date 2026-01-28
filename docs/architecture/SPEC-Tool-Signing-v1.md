@@ -16,7 +16,7 @@ This specification defines the `x-assay-sig` extension field for cryptographical
 ### Design Principles
 
 - **Deterministic** - Same tool definition always produces same signing input
-- **Self-contained** - Signature can be verified offline
+- **Offline-verifiable** - Verification requires only a trusted key source (policy file or explicitly allowed embedded key), no network
 - **DSSE-aligned** - Compatible with future Sigstore/in-toto migration
 - **Minimal** - No external dependencies for basic verification
 
@@ -33,10 +33,10 @@ Signing Input = JCS(tool_object - {"x-assay-sig"})
 ```
 
 **JCS (JSON Canonicalization Scheme, RFC 8785):**
-- Keys sorted lexicographically
-- No whitespace
-- Numbers in shortest form
-- Unicode normalized
+- Keys sorted lexicographically (per JCS sorting rules)
+- No whitespace between tokens
+- Numbers serialized per ECMAScript/IEEE 754 double constraints
+- Unicode preserved as-is (no normalization; lone surrogates are invalid and MUST cause an error)
 
 ### 2.2 What Is Signed
 
@@ -49,17 +49,19 @@ Signing Input = JCS(tool_object - {"x-assay-sig"})
 
 ### 2.3 Payload Type Binding
 
-To prevent type confusion attacks, the signature binds to a payload type:
+To prevent type confusion attacks, the signature binds to a payload type using DSSE Pre-Authentication Encoding (PAE):
 
 ```
-PAE = "DSSEv1" || len(payload_type) || payload_type || len(payload) || payload
+PAE(type, payload) = "DSSEv1" SP LEN(type) SP type SP LEN(payload) SP payload
 ```
 
 Where:
-- `payload_type` = `"application/vnd.assay.tool+json;v=1"`
-- `payload` = JCS-canonicalized tool definition (without `x-assay-sig`)
+- `SP` = space character (0x20)
+- `LEN(s)` = ASCII decimal byte length of s, no leading zeros
+- `type` = `"application/vnd.assay.tool+json;v=1"`
+- `payload` = UTF-8 bytes of JCS-canonicalized tool definition (without `x-assay-sig`)
 
-**Note:** The PAE (Pre-Authentication Encoding) format follows DSSE specification for future compatibility.
+**Note:** The PAE format follows the DSSE specification exactly for future Sigstore/in-toto compatibility.
 
 ---
 
@@ -87,11 +89,16 @@ Where:
 | `version` | integer | Yes | Schema version. Must be `1`. |
 | `algorithm` | string | Yes | Signature algorithm. Must be `"ed25519"` for v1. |
 | `payload_type` | string | Yes | Content type of signed payload. Must be `"application/vnd.assay.tool+json;v=1"`. |
-| `payload_digest` | string | Yes | SHA-256 of canonical payload: `sha256:<hex>`. |
-| `key_id` | string | Yes | SHA-256 of SPKI-encoded public key: `sha256:<hex>`. |
-| `signature` | string | Yes | Base64-encoded ed25519 signature over PAE. |
-| `signed_at` | string | Yes | ISO 8601 timestamp of signing. Not part of signed content. |
-| `public_key` | string | No | Base64-encoded SPKI public key. Optional; for convenience only. |
+| `payload_digest` | string | Yes | SHA-256 of canonical payload: `sha256:<lowercase-hex>`. |
+| `key_id` | string | Yes | SHA-256 of SPKI-encoded public key: `sha256:<lowercase-hex>`. |
+| `signature` | string | Yes | Standard base64 (RFC 4648) encoded ed25519 signature over PAE, with padding. |
+| `signed_at` | string | Yes | ISO 8601 timestamp of signing (UTC). Not part of signed content. |
+| `public_key` | string | No | Standard base64 (RFC 4648) encoded SPKI public key, with padding. Optional; for development/testing only. |
+
+**Encoding conventions:**
+- Hex digests: lowercase, no separators (e.g., `sha256:e3b0c44298fc1c14...`)
+- Base64: standard alphabet with padding (RFC 4648 Section 4)
+- Parsers MAY accept base64 without padding, but producers MUST include padding
 
 ### 3.3 Key ID Computation
 
@@ -154,12 +161,22 @@ assay tool keygen --out ~/.assay/keys/
 
 ```
 PAE(type, payload) =
-    "DSSEv1 " ||
-    len(type) as 8-byte little-endian ||
-    type ||
-    len(payload) as 8-byte little-endian ||
-    payload
+    "DSSEv1" + SP +
+    LEN(type) + SP + type + SP +
+    LEN(payload) + SP + payload
+
+Where:
+    SP = 0x20 (space character)
+    LEN(s) = ASCII decimal byte length of s, no leading zeros
+    + = concatenation
 ```
+
+**Example:** For `type = "application/vnd.assay.tool+json;v=1"` (38 bytes) and a 150-byte payload:
+```
+"DSSEv1 38 application/vnd.assay.tool+json;v=1 150 <payload-bytes>"
+```
+
+**Note:** `payload` is the raw UTF-8 bytes of the JCS-canonicalized JSON, not a string.
 
 ---
 
@@ -251,9 +268,11 @@ The `payload_type` field prevents attacks where a valid signature for one type o
 ### 8.3 Key ID vs Embedded Public Key
 
 - `key_id` is the authoritative identifier for trust decisions
-- `public_key` field is optional and for convenience only
-- Trust policies SHOULD use `key_id` matching, not embedded keys
-- `--allow-embedded-key` is for development/testing only
+- Verifiers MUST NOT base trust decisions on embedded `public_key` alone
+- The `public_key` field is for development/testing convenience only
+- Production verifiers MUST use trust policy (`key_id` matching) or explicit `--allow-embedded-key` flag
+- Trust policies SHOULD enumerate trusted `key_id` values, not embedded keys
+- `--allow-embedded-key` SHOULD only be used in development/testing environments
 
 ### 8.4 Replay Protection
 
@@ -323,6 +342,17 @@ v2 will add:
 - `certificate` field for Fulcio short-lived certs
 - `rekor_entry` field for transparency log proof
 - `identity` object with OIDC issuer/subject
+
+**Field mapping to DSSE/in-toto:**
+
+| v1 Field | DSSE/in-toto Equivalent |
+|----------|-------------------------|
+| `payload_type` | DSSE `payloadType` |
+| `signature` | DSSE envelope signature |
+| `public_key` | Fulcio certificate |
+| `key_id` | Certificate fingerprint |
+
+**Note:** v1 uses `snake_case` for field names. A future version may offer `camelCase` aliases (`payloadType`) for closer DSSE alignment, but v1 implementations MUST use `snake_case`.
 
 ### 10.2 Tool Bundles
 
