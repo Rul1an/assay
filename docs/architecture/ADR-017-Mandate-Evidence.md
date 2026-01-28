@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (January 2026)
+Accepted (January 2026, updated v1.0.3)
 
 ## Context
 
@@ -369,30 +369,55 @@ Pure log-based systems cannot atomically enforce single-use:
 2. **Evidence**: `assay.mandate.used.v1` event records consumption
 3. **Lint**: Detects violations via `use_count` analysis
 
+### Runtime Implementation (v1.0.3)
+
+See [SPEC-Mandate-v1 §7](./SPEC-Mandate-v1.md#7-runtime-enforcement-normative) for full normative specification.
+
+**Key design decisions:**
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Storage | SQLite + WAL | Atomic transactions, crash recovery, no external deps |
+| Idempotency | `tool_call_id UNIQUE` constraint | Retry-safe, no double-increment |
+| Nonce check | `INSERT` (not SELECT+INSERT) | Race-condition proof |
+| Crash semantics | Consume-before-exec | Single-use guarantee > execution guarantee |
+| Clock skew | Widened window (±30s default) | Tolerant but auditable |
+
+**MandateStore interface:**
+
 ```rust
-async fn consume_mandate(mandate_id: &str, tool_call_id: &str, store: &Store) -> Result<u32> {
-    // Atomic increment-and-check
-    let use_count = store.increment_use_count(mandate_id).await?;
-
-    let mandate = store.get_mandate(mandate_id).await?;
-
-    // Check single_use constraint
-    if mandate.constraints.single_use && use_count > 1 {
-        return Err(MandateError::AlreadyUsed);
-    }
-
-    // Check max_uses constraint (null = unlimited)
-    if let Some(max) = mandate.constraints.max_uses {
-        if use_count > max {
-            return Err(MandateError::MaxUsesExceeded);
-        }
-    }
-
-    // Emit receipt event
-    emit_mandate_use_event(mandate_id, tool_call_id, use_count);
-
-    Ok(use_count)
+pub struct MandateStore {
+    conn: Arc<Mutex<Connection>>,  // SQLite with WAL
 }
+
+impl MandateStore {
+    /// Upsert mandate metadata (immutable after first insert)
+    pub async fn upsert_mandate(&self, mandate: &Mandate) -> Result<()>;
+
+    /// Atomic consume with idempotency on tool_call_id
+    pub async fn consume_mandate(
+        &self,
+        mandate_id: &str,
+        tool_call_id: &str,
+        nonce: Option<&str>,
+        audience: &str,
+        issuer: &str,
+        single_use: bool,
+        max_uses: Option<u32>,
+        tool_name: &str,
+        operation_class: OperationClass,
+    ) -> Result<AuthzReceipt, AuthzError>;
+}
+```
+
+**Invariants (MUST):**
+
+- Same `tool_call_id` → same receipt (idempotent)
+- `single_use=true` + `use_count>0` → `AlreadyUsed` error
+- `use_count >= max_uses` → `MaxUsesExceeded` error
+- Duplicate nonce (same audience+issuer) → `NonceReplay` error
+- `mandate.used` event MUST be emitted before tool execution
+- `tool.decision` event MUST be emitted even on execution failure
 ```
 
 ## Pack Rules

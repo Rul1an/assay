@@ -1,10 +1,11 @@
 # Mandate Evidence Specification v1
 
-**Status:** Draft v1.0.2 (January 2026)
+**Status:** Draft v1.0.3 (January 2026)
 **Scope:** Cryptographically-signed user authorization evidence for AI agent tool calls
 **ADR:** [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md)
 
 **Changelog:**
+- v1.0.3: Added normative runtime enforcement section (§7), SQLite store schema, nonce replay prevention, transaction_ref verification flow, idempotency semantics, crash recovery model
 - v1.0.2: Fixed payload_digest semantics (DSSE alignment), removed mandate_kind=revocation, added conformance test vectors, normative transaction_ref schema, require_signed_lifecycle default for commit
 - v1.0.1: Fixed mandate_id circularity, added lifecycle event trust model, normative glob semantics, operation_class ordering
 
@@ -809,47 +810,392 @@ To determine if a tool requires `transaction` mandate:
 
 ---
 
-## 7. Single-Use Enforcement
+## 7. Runtime Enforcement (Normative)
 
-### 7.1 Runtime Enforcement
+This section defines the **runtime** behavior for mandate authorization. Runtime enforcement provides real-time guarantees that lint-time analysis cannot (e.g., atomic single-use, nonce replay prevention).
+
+### 7.1 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        MCP Proxy                                │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ Policy Check │───▶│ Mandate Auth │───▶│ Forward to Tool  │  │
+│  └──────────────┘    └──────┬───────┘    └────────┬─────────┘  │
+│                             │                      │            │
+│                     ┌───────▼───────┐      ┌──────▼──────┐     │
+│                     │ MandateStore  │      │ Tool Server │     │
+│                     │   (SQLite)    │      └─────────────┘     │
+│                     └───────────────┘                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Execution order (consume-before-exec):**
+
+1. Policy check (deny/allow lists, rate limits)
+2. Mandate verification (signature, validity, scope)
+3. Mandate consumption (atomic, idempotent)
+4. Emit `assay.mandate.used.v1` event
+5. Forward to tool server
+6. Emit `assay.tool.decision` event (ALWAYS, even on failure)
+
+### 7.2 SQLite Store Schema (Normative)
+
+Implementations MUST use a durable store with atomic transactions. SQLite with WAL mode is the reference implementation.
+
+```sql
+-- Schema version: 2 (mandate runtime enforcement)
+PRAGMA journal_mode = WAL;
+
+-- Mandate metadata (immutable after insert)
+CREATE TABLE IF NOT EXISTS mandates (
+    mandate_id       TEXT PRIMARY KEY,  -- sha256:...
+    mandate_kind     TEXT NOT NULL,     -- intent | transaction
+    audience         TEXT NOT NULL,
+    issuer           TEXT NOT NULL,
+    expires_at       TEXT,              -- ISO8601, nullable = no expiry
+    single_use       INTEGER NOT NULL DEFAULT 0,
+    max_uses         INTEGER,           -- nullable = unlimited
+    use_count        INTEGER NOT NULL DEFAULT 0,
+    canonical_digest TEXT NOT NULL,     -- sha256 of JCS(hashable_content)
+    key_id           TEXT NOT NULL,
+    inserted_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Use tracking (append-only, immutable)
+CREATE TABLE IF NOT EXISTS mandate_uses (
+    use_id           TEXT PRIMARY KEY,  -- UUID v4
+    mandate_id       TEXT NOT NULL REFERENCES mandates(mandate_id),
+    tool_call_id     TEXT NOT NULL UNIQUE,  -- Idempotency key
+    use_count        INTEGER NOT NULL,  -- 1-based, at time of use
+    consumed_at      TEXT NOT NULL,     -- ISO8601
+    tool_name        TEXT,
+    operation_class  TEXT,              -- read | write | commit
+    nonce            TEXT,              -- Copy from context (for audit)
+    source_run_id    TEXT,
+    UNIQUE(mandate_id, use_count)       -- Enforce monotonic
+);
+
+-- Nonce replay prevention (transaction mandates)
+CREATE TABLE IF NOT EXISTS nonces (
+    audience         TEXT NOT NULL,
+    issuer           TEXT NOT NULL,
+    nonce            TEXT NOT NULL,
+    mandate_id       TEXT NOT NULL,
+    first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (audience, issuer, nonce)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mandates_audience_issuer
+    ON mandates(audience, issuer);
+CREATE INDEX IF NOT EXISTS idx_mandate_uses_mandate_id
+    ON mandate_uses(mandate_id);
+```
+
+### 7.3 Mandate Upsert (MUST)
+
+Before consuming a mandate, it MUST exist in the store. Implementations MUST use upsert semantics:
+
+```sql
+INSERT INTO mandates (
+    mandate_id, mandate_kind, audience, issuer, expires_at,
+    single_use, max_uses, use_count, canonical_digest, key_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+ON CONFLICT(mandate_id) DO NOTHING;
+```
+
+**Collision detection (SHOULD):** After upsert, implementations SHOULD verify that stored metadata matches the mandate being consumed. Mismatches indicate either:
+- Hash collision (cryptographically unlikely)
+- Store corruption
+- Attempted mandate_id spoofing
 
 ```rust
-async fn consume_mandate(
-    mandate_id: &str,
-    tool_call_id: &str,
-    store: &Store
-) -> Result<u32> {
-    // Atomic increment-and-check
-    let use_count = store.increment_use_count(mandate_id).await?;
-
-    let mandate = store.get_mandate(mandate_id).await?;
-
-    // Check single_use constraint
-    if mandate.constraints.single_use && use_count > 1 {
-        return Err(MandateError::AlreadyUsed);
-    }
-
-    // Check max_uses constraint
-    if let Some(max) = mandate.constraints.max_uses {
-        if use_count > max {
-            return Err(MandateError::MaxUsesExceeded);
-        }
-    }
-
-    // Emit receipt event
-    emit_mandate_use_event(mandate_id, tool_call_id, use_count);
-
-    Ok(use_count)
+// After upsert, verify consistency
+let stored = store.get_mandate(mandate_id)?;
+if stored.canonical_digest != computed_digest
+   || stored.audience != mandate.context.audience
+   || stored.issuer != mandate.context.issuer {
+    return Err(MandateError::StoreInconsistency);
 }
 ```
 
-### 7.2 Lint Enforcement
+### 7.4 Consume Flow (Normative)
+
+The `consume_mandate()` function MUST be atomic and idempotent.
+
+**Function signature:**
+
+```rust
+async fn consume_mandate(
+    store: &MandateStore,
+    mandate_id: &str,
+    tool_call_id: &str,       // Idempotency key
+    nonce: Option<&str>,      // From mandate.context.nonce
+    audience: &str,
+    issuer: &str,
+    single_use: bool,
+    max_uses: Option<u32>,
+    tool_name: &str,
+    operation_class: OperationClass,
+) -> Result<AuthzReceipt, AuthzError>
+```
+
+**Atomic transaction (pseudocode):**
+
+```sql
+BEGIN IMMEDIATE;  -- Acquire write lock immediately
+
+-- Step 1: Idempotency check
+SELECT use_id, use_count, consumed_at
+FROM mandate_uses WHERE tool_call_id = ?;
+-- If found: COMMIT and return existing receipt (no increment)
+
+-- Step 2: Nonce replay check (transaction mandates only)
+-- Use INSERT to atomically check+insert (no SELECT first)
+INSERT INTO nonces (audience, issuer, nonce, mandate_id)
+VALUES (?, ?, ?, ?);
+-- If UNIQUE constraint fails: ROLLBACK, return NonceReplay error
+
+-- Step 3: Get current use count
+SELECT use_count FROM mandates WHERE mandate_id = ?;
+-- If not found: ROLLBACK, return MandateNotFound error
+
+-- Step 4: Check constraints
+-- If single_use AND use_count > 0: ROLLBACK, return AlreadyUsed
+-- If max_uses AND use_count >= max_uses: ROLLBACK, return MaxUsesExceeded
+
+-- Step 5: Atomic increment + insert use record
+UPDATE mandates SET use_count = use_count + 1 WHERE mandate_id = ?;
+INSERT INTO mandate_uses (
+    use_id, mandate_id, tool_call_id, use_count, consumed_at,
+    tool_name, operation_class, nonce, source_run_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+COMMIT;
+```
+
+**Critical invariants:**
+
+| Invariant | Enforcement |
+|-----------|-------------|
+| Idempotency | `tool_call_id UNIQUE` constraint + check-before-increment |
+| Single-use | `single_use=true` → reject if `use_count > 0` |
+| Max uses | `use_count < max_uses` check before increment |
+| Nonce replay | `INSERT` into nonces table (not SELECT+INSERT) |
+| Monotonic counts | `UNIQUE(mandate_id, use_count)` constraint |
+
+### 7.5 Nonce Replay Prevention (Normative)
+
+For `mandate_kind=transaction`, nonces provide session binding and replay prevention.
+
+**Requirements:**
+
+| Requirement | Specification |
+|-------------|---------------|
+| Scope | Nonces are scoped to `(audience, issuer)` tuple |
+| Atomicity | Check+insert MUST be atomic (single INSERT, not SELECT+INSERT) |
+| Persistence | Nonces MUST survive process restart |
+| Error | Replay attempt MUST return `NonceReplay` error |
+
+**Implementation pattern:**
+
+```rust
+// WRONG: Race condition between SELECT and INSERT
+if store.nonce_exists(audience, issuer, nonce) {
+    return Err(NonceReplay);
+}
+store.insert_nonce(audience, issuer, nonce, mandate_id);
+
+// CORRECT: Atomic INSERT, handle constraint violation
+match store.insert_nonce(audience, issuer, nonce, mandate_id) {
+    Ok(_) => { /* continue */ }
+    Err(e) if e.is_unique_violation() => {
+        return Err(AuthzError::NonceReplay { nonce: nonce.to_string() });
+    }
+    Err(e) => return Err(e.into()),
+}
+```
+
+### 7.6 Validity Window Enforcement (Normative)
+
+**Clock skew tolerance:**
+
+Runtime MUST allow configurable clock skew (default: 30 seconds).
+
+```yaml
+mandate_trust:
+  clock_skew_tolerance_seconds: 30
+```
+
+**Normative validity check:**
+
+```rust
+let now = Utc::now();
+let skew = Duration::seconds(config.clock_skew_tolerance_seconds);
+
+// Not yet valid check
+if let Some(not_before) = &mandate.validity.not_before {
+    if now < *not_before - skew {
+        return Err(AuthzError::NotYetValid {
+            not_before: *not_before,
+            now,
+        });
+    }
+}
+
+// Expired check (widened window)
+if let Some(expires_at) = &mandate.validity.expires_at {
+    if now >= *expires_at + skew {
+        return Err(AuthzError::Expired {
+            expires_at: *expires_at,
+            now,
+        });
+    }
+}
+```
+
+**Semantics:**
+
+| Check | Condition | Result |
+|-------|-----------|--------|
+| Not yet valid | `now < not_before - skew` | Reject |
+| Valid | `not_before - skew <= now < expires_at + skew` | Accept |
+| Expired | `now >= expires_at + skew` | Reject |
+
+### 7.7 transaction_ref Verification (Normative)
+
+For `operation_class=commit` tools with `scope.transaction_ref`, runtime MUST verify the transaction binding.
+
+**Verification flow:**
+
+```rust
+if operation_class == OperationClass::Commit {
+    if let Some(expected_ref) = &mandate.scope.transaction_ref {
+        // 1. Extract transaction object from tool call
+        let tx_object = extract_transaction_object(&tool_call)
+            .ok_or(AuthzError::MissingTransactionObject)?;
+
+        // 2. Compute hash using same algorithm as mandate creation
+        let actual_ref = compute_transaction_ref(&tx_object)?;
+
+        // 3. Compare
+        if actual_ref != *expected_ref {
+            return Err(AuthzError::TransactionRefMismatch {
+                expected: expected_ref.clone(),
+                actual: actual_ref,
+            });
+        }
+    }
+}
+```
+
+**Transaction object extraction:**
+
+The transaction object MUST be deterministically extractable from the tool call. Implementations SHOULD support:
+
+| Method | Description | Use When |
+|--------|-------------|----------|
+| Explicit field | `tool_call.args.transaction` | Tool contract specifies transaction field |
+| Session lookup | Lookup by `tool_call.args.transaction_id` | Transaction stored in session state |
+
+**Anti-patterns (MUST NOT):**
+
+- Using entire `args` object without explicit contract
+- Including timestamps or request-specific nonces in transaction object
+- Silent fallback to different extraction method
+
+### 7.8 Idempotency Semantics (Normative)
+
+**Mandate layer:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Same `tool_call_id`, first call | Consume, increment, return receipt |
+| Same `tool_call_id`, retry | Return existing receipt, NO increment |
+| Different `tool_call_id`, same mandate | Consume again (subject to constraints) |
+
+**Tool layer integration:**
+
+Runtime SHOULD propagate `tool_call_id` to tool execution for downstream idempotency:
+
+```rust
+// In tool call forwarding
+let mut request = tool_call.clone();
+request.metadata.insert(
+    "idempotency_key".to_string(),
+    tool_call.id.clone().into()
+);
+```
+
+### 7.9 Crash Recovery (Normative)
+
+**Chosen semantics: Consume-before-exec**
+
+The mandate is consumed BEFORE tool execution. This guarantees single-use constraints but may result in "consumed but not executed" on crash.
+
+**Invariants:**
+
+| Event | Guaranteed |
+|-------|------------|
+| `mandate.used` emitted | Mandate was consumed in store |
+| Tool executed | NOT guaranteed (may crash before exec) |
+| `tool.decision` emitted | SHOULD be guaranteed (see below) |
+
+**Tool decision guarantee:**
+
+Implementations MUST emit `assay.tool.decision` even on execution failure:
+
+```rust
+// WRONG: Decision only on success
+let response = forward_to_tool(request).await?;
+emit_tool_decision(request, response, receipt);
+
+// CORRECT: Decision always emitted
+let response = forward_to_tool(request).await;
+emit_tool_decision(
+    request,
+    response.as_ref().ok(),
+    receipt,
+    response.as_ref().err().map(|e| e.to_string())
+);
+```
+
+**Recovery detection (lint-time):**
+
+Lint rules can detect potential crash scenarios:
+
+```
+IF mandate.used EXISTS
+   AND tool.decision NOT EXISTS for same tool_call_id
+THEN WARN "Mandate consumed but tool decision not recorded (possible crash)"
+```
+
+### 7.10 Error Taxonomy
+
+| Error | Code | When | Severity |
+|-------|------|------|----------|
+| `MandateNotFound` | `E_MANDATE_NOT_FOUND` | mandate_id not in store | Error |
+| `AlreadyUsed` | `E_MANDATE_ALREADY_USED` | single_use=true, use_count>0 | Error |
+| `MaxUsesExceeded` | `E_MANDATE_MAX_USES` | use_count >= max_uses | Error |
+| `NonceReplay` | `E_NONCE_REPLAY` | Nonce already used | Error |
+| `Expired` | `E_MANDATE_EXPIRED` | now >= expires_at + skew | Error |
+| `NotYetValid` | `E_MANDATE_NOT_YET_VALID` | now < not_before - skew | Error |
+| `TransactionRefMismatch` | `E_TRANSACTION_REF_MISMATCH` | Hash mismatch | Error |
+| `MissingTransactionObject` | `E_MISSING_TRANSACTION` | Commit tool without tx obj | Error |
+| `StoreInconsistency` | `E_STORE_INCONSISTENT` | Metadata mismatch after upsert | Error |
+| `ScopeMismatch` | `E_SCOPE_MISMATCH` | Tool not in mandate.scope.tools | Error |
+| `KindMismatch` | `E_KIND_MISMATCH` | Wrong mandate_kind for operation | Error |
+
+### 7.11 Lint Enforcement
+
+Lint provides post-hoc verification complementing runtime enforcement.
 
 ```
 1. Collect all assay.mandate.used.v1 events for mandate_id
 2. Count unique use_id values
 3. If mandate.constraints.single_use && count > 1: FAIL
 4. If mandate.constraints.max_uses && count > max_uses: FAIL
+5. If mandate.used exists without matching tool.decision: WARN (crash recovery)
 ```
 
 ---
