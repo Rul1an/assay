@@ -1,4 +1,8 @@
 use super::audit::{AuditEvent, AuditLog};
+use super::decision::{
+    reason_codes, Decision, DecisionEmitter, DecisionEvent, FileDecisionEmitter,
+    NullDecisionEmitter,
+};
 use super::jsonrpc::JsonRpcRequest;
 use super::policy::{make_deny_response, McpPolicy, PolicyDecision, PolicyState};
 use std::{
@@ -15,6 +19,10 @@ pub struct ProxyConfig {
     pub verbose: bool,
     pub audit_log_path: Option<std::path::PathBuf>,
     pub server_id: String,
+    /// Path for CloudEvents decision log (NDJSON)
+    pub decision_log_path: Option<std::path::PathBuf>,
+    /// Event source URI for decision events (I3: fixed configured value)
+    pub event_source: Option<String>,
 }
 
 pub struct McpProxy {
@@ -63,6 +71,18 @@ impl McpProxy {
         let config = self.config.clone();
         let identity_cache_a = self.identity_cache.clone();
         let identity_cache_b = self.identity_cache.clone();
+
+        // Initialize decision emitter (I1: always emit decision)
+        let decision_emitter: Arc<dyn DecisionEmitter> =
+            if let Some(path) = &config.decision_log_path {
+                Arc::new(FileDecisionEmitter::new(path)?)
+            } else {
+                Arc::new(NullDecisionEmitter)
+            };
+        let event_source = config
+            .event_source
+            .clone()
+            .unwrap_or_else(|| format!("assay://{}", config.server_id));
 
         // Thread A: server -> client passthrough
         let stdout_a = stdout.clone();
@@ -129,6 +149,8 @@ impl McpProxy {
 
         // Thread B: client -> server passthrough with Policy Check
         let stdout_b = stdout.clone();
+        let emitter_b = decision_emitter.clone();
+        let event_source_b = event_source.clone();
         let t_client_to_server = thread::spawn(move || -> io::Result<()> {
             let stdin = io::stdin();
             let mut reader = stdin.lock();
@@ -150,8 +172,11 @@ impl McpProxy {
                             None
                         };
 
+                        let tool_name = req.tool_params().map(|p| p.name).unwrap_or_default();
+                        let tool_call_id = Self::extract_tool_call_id(&req);
+
                         match policy.evaluate(
-                            &req.tool_params().map(|p| p.name).unwrap_or_default(),
+                            &tool_name,
                             &req.tool_params()
                                 .map(|p| p.arguments)
                                 .unwrap_or(serde_json::Value::Null),
@@ -160,6 +185,19 @@ impl McpProxy {
                         ) {
                             PolicyDecision::Allow => {
                                 Self::handle_allow(&req, &mut audit_log, config.verbose);
+                                // Emit decision event (I1: always emit)
+                                if req.is_tool_call() {
+                                    Self::emit_decision(
+                                        &emitter_b,
+                                        &event_source_b,
+                                        &tool_call_id,
+                                        &tool_name,
+                                        Decision::Allow,
+                                        reason_codes::P_POLICY_DENY, // TODO: Better code
+                                        None,
+                                        req.id.clone(),
+                                    );
+                                }
                             }
                             PolicyDecision::AllowWithWarning { tool, code, reason } => {
                                 // Log warning about allowing a tool invocation with issues
@@ -179,13 +217,24 @@ impl McpProxy {
                                     request_id: req.id.clone(),
                                     agentic: None,
                                 });
+                                // Emit decision event (I1: always emit)
+                                Self::emit_decision(
+                                    &emitter_b,
+                                    &event_source_b,
+                                    &tool_call_id,
+                                    &tool,
+                                    Decision::Allow,
+                                    &code,
+                                    Some(reason),
+                                    req.id.clone(),
+                                );
                                 // Then proceed as a normal allow
                                 Self::handle_allow(&req, &mut audit_log, false);
                                 // false = don't double log ALLOW
                             }
                             PolicyDecision::Deny {
                                 tool,
-                                code: _,
+                                code,
                                 reason,
                                 contract,
                             } => {
@@ -210,6 +259,23 @@ impl McpProxy {
                                     request_id: req.id.clone(),
                                     agentic: Some(contract.clone()),
                                 });
+
+                                // Emit decision event (I1: always emit)
+                                let reason_code = Self::map_policy_code(&code);
+                                Self::emit_decision(
+                                    &emitter_b,
+                                    &event_source_b,
+                                    &tool_call_id,
+                                    &tool,
+                                    if config.dry_run {
+                                        Decision::Allow
+                                    } else {
+                                        Decision::Deny
+                                    },
+                                    &reason_code,
+                                    Some(reason),
+                                    req.id.clone(),
+                                );
 
                                 if config.dry_run {
                                     // DRY RUN: Forward anyway
@@ -289,5 +355,66 @@ impl McpProxy {
                 agentic: None,
             });
         }
+    }
+
+    /// Extract tool_call_id from request (I4: idempotency key).
+    fn extract_tool_call_id(request: &JsonRpcRequest) -> String {
+        // Try to get from params._meta.tool_call_id (MCP standard)
+        if let Some(params) = request.tool_params() {
+            if let Some(meta) = params.arguments.get("_meta") {
+                if let Some(id) = meta.get("tool_call_id").and_then(|v| v.as_str()) {
+                    return id.to_string();
+                }
+            }
+        }
+
+        // Fall back to request.id if present
+        if let Some(id) = &request.id {
+            if let Some(s) = id.as_str() {
+                return format!("req_{}", s);
+            }
+            if let Some(n) = id.as_i64() {
+                return format!("req_{}", n);
+            }
+        }
+
+        // Generate one if none found
+        format!("gen_{}", uuid::Uuid::new_v4())
+    }
+
+    /// Map policy error code to reason code.
+    fn map_policy_code(code: &str) -> String {
+        match code {
+            "E_TOOL_DENIED" => reason_codes::P_TOOL_DENIED.to_string(),
+            "E_TOOL_NOT_ALLOWED" => reason_codes::P_TOOL_NOT_ALLOWED.to_string(),
+            "E_ARG_SCHEMA" => reason_codes::P_ARG_SCHEMA.to_string(),
+            "E_RATE_LIMIT" => reason_codes::P_RATE_LIMIT.to_string(),
+            "E_TOOL_DRIFT" => reason_codes::P_TOOL_DRIFT.to_string(),
+            _ => reason_codes::P_POLICY_DENY.to_string(),
+        }
+    }
+
+    /// Emit a decision event (I1: always emit).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_decision(
+        emitter: &Arc<dyn DecisionEmitter>,
+        source: &str,
+        tool_call_id: &str,
+        tool: &str,
+        decision: Decision,
+        reason_code: &str,
+        reason: Option<String>,
+        request_id: Option<serde_json::Value>,
+    ) {
+        let mut event = DecisionEvent::new(
+            source.to_string(),
+            tool_call_id.to_string(),
+            tool.to_string(),
+        );
+        event.data.decision = decision;
+        event.data.reason_code = reason_code.to_string();
+        event.data.reason = reason;
+        event.data.request_id = request_id;
+        emitter.emit(&event);
     }
 }
