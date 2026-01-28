@@ -92,12 +92,11 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&json_report)?);
         }
         "sarif" => {
+            #[allow(deprecated)]
             let sarif_options = SarifOptions {
                 pack_meta: pack_meta.clone(),
                 bundle_path: Some(args.bundle.display().to_string()),
-                working_directory: std::env::current_dir()
-                    .ok()
-                    .map(|p| p.display().to_string()),
+                working_directory: None, // Deprecated: no longer included in output
             };
             let sarif = to_sarif_with_options(report, sarif_options);
             println!("{}", serde_json::to_string_pretty(&sarif)?);

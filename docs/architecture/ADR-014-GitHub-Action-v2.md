@@ -48,13 +48,16 @@ Two design proposals were evaluated. This ADR captures the combined decision.
 Per GitHub's July 2025 change:
 
 ```yaml
-# MUST: unique category per job/matrix combination
-category: "assay-${{ github.workflow }}-${{ github.job }}-${{ matrix.os || 'default' }}"
+# Auto-generated (matrix-safe): workflow + job + runner.os
+# Default: "assay-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}"
+category: "assay-ci-lint-Linux"
 ```
 
+- **Matrix-safe**: Auto-includes `runner.os` to prevent collisions in matrix builds
 - One SARIF run per bundle per job
 - Explicit `automationDetails.id` for fingerprint stability
 - SARIF 2.1.0 only
+- `upload-sarif` pinned to SHA for supply-chain security
 
 ### Input Contract
 
@@ -79,7 +82,9 @@ category: "assay-${{ github.workflow }}-${{ github.job }}-${{ matrix.os || 'defa
 | `findings_error` | int | Count of error-level findings |
 | `findings_warn` | int | Count of warn-level findings |
 | `sarif_path` | path | Path to generated SARIF |
+| `sarif_uploaded` | bool | Whether SARIF was uploaded to Code Scanning |
 | `diff_summary` | string | One-line diff summary |
+| `diff_new_findings` | int | Count of new findings vs baseline |
 
 ### Exit Codes
 
@@ -173,12 +178,16 @@ Reusable workflows are powerful for enterprise standardization but:
 ### v2.0 (MVP) ✅ Completed
 
 - [x] Zero-config auto-discovery
-- [x] SARIF upload with correct category discipline
+- [x] SARIF upload with correct category discipline (matrix-safe: includes `runner.os`)
 - [x] PR comment with diff (no noise if clean)
-- [x] Baseline regression gate (cache-based)
-- [x] GitHub Job Summary
+- [x] Baseline regression gate (cache-based, fingerprint comparison)
+- [x] GitHub Job Summary (includes SARIF upload status warning)
 - [x] Artifact upload (with `include-hidden-files` fix for `.assay-reports/`)
 - [x] Separate repository for Marketplace publication
+- [x] Upload failure detection (`sarif_uploaded` output + warning)
+- [x] Cross-platform temp file handling (`RUNNER_TEMP`)
+- [x] Supply-chain security: `upload-sarif` pinned to SHA
+- [x] Privacy: `workingDirectory` removed from SARIF (no path leakage)
 
 ### v2.1
 
