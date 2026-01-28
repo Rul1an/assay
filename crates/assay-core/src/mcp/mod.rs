@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod decision;
 pub mod identity;
 pub mod jcs;
 pub mod jsonrpc;
@@ -8,6 +9,7 @@ pub mod policy;
 pub mod proxy;
 pub mod runtime_features;
 pub mod signing;
+pub mod tool_call_handler;
 pub mod trust_policy;
 pub mod types;
 
