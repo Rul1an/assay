@@ -365,6 +365,38 @@ sequenceDiagram
 - `pyo3` - Rust-Python bindings
 - `assay-core` (workspace) - Core functionality
 
+## GitHub Action Integration
+
+**Repository**: https://github.com/Rul1an/assay-action (separate repo)
+
+**Architecture**: Composite action (no Docker overhead)
+
+**Key Dependencies**:
+- Assay CLI binary (downloaded from releases)
+- `actions/cache@v4` - Binary caching
+- `actions/upload-artifact@v4` - Report artifacts
+- `github/codeql-action/upload-sarif@v4` - SARIF upload
+
+**Flow**:
+```
+GitHub Actions Runner
+    ↓
+Rul1an/assay-action@v2
+    ├─→ Cache check / Binary install
+    ├─→ Evidence discovery (.assay/evidence/*.tar.gz)
+    ├─→ assay evidence verify (per bundle)
+    ├─→ assay evidence lint --format sarif (per bundle)
+    ├─→ SARIF upload to GitHub Security
+    ├─→ Job Summary
+    └─→ Artifact upload
+```
+
+**Outputs consumed by callers**:
+- `verified`: boolean
+- `findings_error`: integer count
+- `findings_warn`: integer count
+- `reports_dir`: path to reports
+
 ## Build-Time vs Runtime Dependencies
 
 ### Build-Time Only

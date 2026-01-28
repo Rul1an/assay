@@ -21,12 +21,26 @@ assay/                         # Version 2.8.0
 │   ├── assay-ebpf/            # eBPF programs
 │   └── assay-sim/             # Attack simulation
 ├── assay-python-sdk/          # Python SDK
+├── assay-action/              # GitHub Action (legacy, see below)
 ├── docs/                      # Documentation
 │   ├── architecture/          # ADRs and architecture docs
 │   └── AIcontext/             # This directory
 ├── examples/                  # Example configs and traces
 ├── tests/                     # Integration tests
 └── .github/workflows/         # CI/CD workflows
+
+## GitHub Action (Separate Repository)
+
+**Repository:** https://github.com/Rul1an/assay-action
+
+The GitHub Action is maintained in a separate repository for GitHub Marketplace publication.
+
+**Usage:**
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+**Note:** The `assay-action/` directory in this monorepo is legacy and redirects to the separate repository.
 ```
 
 ## Core Crate (`assay-core`)
@@ -278,6 +292,12 @@ assay/                         # Version 2.8.0
 - **`kernel-matrix.yml`**: Kernel version matrix tests
 - **`release.yml`**: Release workflow
 - **`docs.yml`**: Documentation deployment
+- **`action-v2-test.yml`**: GitHub Action v2 tests
+
+### GitHub Action (Separate Repo)
+- **Repository:** https://github.com/Rul1an/assay-action
+- **Marketplace:** https://github.com/marketplace/actions/assay-ai-agent-security
+- **Usage:** `Rul1an/assay-action@v2`
 
 ## Key Data Structures
 

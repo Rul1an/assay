@@ -37,6 +37,23 @@ Located in `assay-python-sdk/python/assay/`:
 - **`explain.py`**: Human-readable explanations of policy violations
 - **`pytest_plugin.py`**: Pytest integration for automatic trace capture
 
+### GitHub Action
+
+**Repository:** https://github.com/Rul1an/assay-action
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+Features:
+- Zero-config evidence bundle discovery
+- SARIF integration with GitHub Security tab
+- PR comments (only when findings)
+- Baseline comparison via cache
+- Artifact upload
+
+See [ADR-014](../architecture/ADR-014-GitHub-Action-v2.md) for design details.
+
 ### Documentation & Examples
 
 - **`docs/`**: Concepts, use cases, integration guides, reference documentation
@@ -204,5 +221,6 @@ Key ADRs for understanding the codebase:
 | [ADR-010](../architecture/ADR-010-Evidence-Store-API.md) | Evidence Store API | Multi-tenant REST API for bundle storage |
 | [ADR-011](../architecture/ADR-011-Tool-Signing.md) | Tool Signing | Sigstore-based `x-assay-sig` for supply chain security |
 | [ADR-013](../architecture/ADR-013-EU-AI-Act-Pack.md) | EU AI Act Pack | Compliance pack system with Article 12 mapping |
+| [ADR-014](../architecture/ADR-014-GitHub-Action-v2.md) | GitHub Action v2 | Separate repo, SARIF discipline, zero-config ✅ |
 
 See [ADR Index](../architecture/adrs.md) for the complete list.

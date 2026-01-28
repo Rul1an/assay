@@ -385,6 +385,36 @@ flowchart TD
 
 ## CI/CD Integration Flow
 
+### Using GitHub Action (Recommended)
+
+```mermaid
+flowchart LR
+    PR[Pull Request] --> Trigger[CI Trigger]
+    Trigger --> Checkout[Checkout Code]
+    Checkout --> Tests[Run Tests]
+    Tests --> Bundles[Evidence Bundles]
+    Bundles --> Action[assay-action@v2]
+    Action --> Cache{Cache Hit?}
+    Cache -->|Yes| CLI[Use Cached CLI]
+    Cache -->|No| Download[Download CLI]
+    Download --> CLI
+    CLI --> Discover[Auto-Discover Bundles]
+    Discover --> Verify[Verify Bundles]
+    Verify --> Lint[Lint Bundles]
+    Lint --> SARIF[Generate SARIF]
+    SARIF --> Upload[Upload to Security Tab]
+    Upload --> Summary[Job Summary]
+    Summary --> Comment{Findings?}
+    Comment -->|Yes| PRComment[PR Comment]
+    Comment -->|No| Pass[Pass]
+    PRComment --> ExitCode{Threshold?}
+    Pass --> Merge[Allow Merge]
+    ExitCode -->|Exceeded| Fail[Block PR]
+    ExitCode -->|OK| Merge
+```
+
+### Using CLI Directly
+
 ```mermaid
 flowchart LR
     PR[Pull Request] --> Trigger[CI Trigger]

@@ -349,6 +349,56 @@ def test_agent():
     pass
 ```
 
+## GitHub Action
+
+**Repository:** https://github.com/Rul1an/assay-action
+
+### Basic Usage
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+### With Options
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    bundles: '.assay/evidence/*.tar.gz'
+    fail_on: error
+    sarif: true
+    comment_diff: true
+```
+
+### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `bundles` | Auto-detect | Glob pattern for evidence bundles |
+| `fail_on` | `error` | Fail threshold: `error`, `warn`, `info`, `none` |
+| `sarif` | `true` | Upload to GitHub Security tab |
+| `comment_diff` | `true` | Post PR comment (only if findings) |
+| `baseline_key` | - | Key for baseline comparison |
+| `write_baseline` | `false` | Save baseline (main branch only) |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `verified` | `true` if all bundles verified |
+| `findings_error` | Count of error-level findings |
+| `findings_warn` | Count of warning-level findings |
+| `reports_dir` | Path to reports directory |
+
+### Permissions Required
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+```
+
 ## MCP Server Endpoints
 
 The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
