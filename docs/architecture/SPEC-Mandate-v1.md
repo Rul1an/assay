@@ -722,15 +722,21 @@ Where:
 
 ### 5.3 Validity Window Verification
 
-**Runtime (wall clock):**
+**Runtime (wall clock with clock skew):**
+
+For runtime enforcement with clock skew tolerance, see §7.6.
 
 ```rust
-fn check_validity(mandate: &Mandate, now: DateTime<Utc>) -> Result<()> {
+fn check_validity(
+    mandate: &Mandate,
+    now: DateTime<Utc>,
+    clock_skew: Duration,  // default: 30 seconds
+) -> Result<()> {
     if let Some(nb) = mandate.validity.not_before {
-        if now < nb { return Err(NotYetValid); }
+        if now < nb - clock_skew { return Err(NotYetValid); }
     }
     if let Some(exp) = mandate.validity.expires_at {
-        if now >= exp { return Err(Expired); }
+        if now >= exp + clock_skew { return Err(Expired); }
     }
     Ok(())
 }
@@ -740,7 +746,8 @@ fn check_validity(mandate: &Mandate, now: DateTime<Utc>) -> Result<()> {
 
 ```rust
 fn check_validity_lint(mandate: &Mandate, event_time: DateTime<Utc>) -> Result<()> {
-    // Same logic, but using event.time instead of Utc::now()
+    // Same logic but WITHOUT clock skew (audit context)
+    // Uses event.time instead of Utc::now()
 }
 ```
 
@@ -1709,7 +1716,7 @@ Rationale: Canonicalization attacks exploit parser differences in duplicate key 
 
 ---
 
-## 12. References
+## 13. References
 
 - [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md) - Design decision
 - [SPEC-Tool-Signing-v1](./SPEC-Tool-Signing-v1.md) - Signing format (reused)
