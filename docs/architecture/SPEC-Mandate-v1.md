@@ -1676,22 +1676,25 @@ sha256:e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7
 | 10:00:00 | null | 11:00:00 | 0 | ✓ valid |
 | 10:00:00 | 09:00:00 | null | 0 | ✓ valid |
 
-### 11.4 use_id Generation (NORMATIVE v1.0.2)
+### 11.4 use_id Generation (NORMATIVE v1.0.4)
 
-`use_id` MUST be content-addressed:
+`use_id` MUST be content-addressed (deterministic):
 
 ```
-use_id = "sha256:" + hex(SHA256(JCS({
-  "mandate_id": "<mandate_id>",
-  "tool_call_id": "<tool_call_id>",
-  "use_count": <use_count>
-})))
+use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
 ```
+
+**Test vector:**
+
+| mandate_id | tool_call_id | use_count | use_id |
+|------------|--------------|-----------|--------|
+| `sha256:abc123` | `tc_001` | `1` | `sha256:` + hex(SHA256("sha256:abc123:tc_001:1")) |
 
 This ensures:
 - Deterministic generation (same inputs → same ID)
 - Uniqueness (different tool_call_id or use_count → different ID)
-- Verifiability (third parties can recompute)
+- Verifiability (third parties can recompute from receipt data)
+- No JSON parsing required (simple string concatenation)
 
 ### 11.5 JSON Parsing Requirements (NORMATIVE)
 
