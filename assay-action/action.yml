@@ -78,13 +78,13 @@ outputs:
     value: ${{ steps.process.outputs.sarif_path }}
   sarif_uploaded:
     description: 'true if SARIF was successfully uploaded to Code Scanning'
-    value: ${{ steps.sarif-status.outputs.uploaded }}
+    value: ${{ steps.sarif-status.outputs.uploaded || 'false' }}
   diff_summary:
     description: 'One-line diff summary'
     value: ${{ steps.process.outputs.diff_summary }}
   diff_new_findings:
     description: 'Count of new findings vs baseline'
-    value: ${{ steps.baseline-diff.outputs.new_findings }}
+    value: ${{ steps.baseline-diff.outputs.new_findings || '0' }}
   reports_dir:
     description: 'Path to reports directory (for artifact upload)'
     value: ${{ steps.process.outputs.reports_dir }}
@@ -221,7 +221,8 @@ runs:
           BUNDLES=$(find . -type f -name "$(basename "$BUNDLES_PATTERN")" -path "$BUNDLES_PATTERN" 2>/dev/null | head -100 || true)
           # Fallback to simple expansion if find fails
           if [ -z "$BUNDLES" ]; then
-            BUNDLES=$(ls $BUNDLES_PATTERN 2>/dev/null || true)
+            # shellcheck disable=SC2086
+            BUNDLES=$(ls "$BUNDLES_PATTERN" 2>/dev/null || true)
           fi
         fi
 
@@ -372,8 +373,8 @@ runs:
     - name: Upload SARIF to GitHub Security
       id: upload-sarif
       if: inputs.sarif == 'true' && steps.discover.outputs.found == 'true'
-      # Pin to SHA for supply-chain security (security tool best practice)
-      uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30 # v4
+      # Pin to SHA for supply-chain security (verified: v4.32.0, 2026-01-26)
+      uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30 # v4.32.0
       continue-on-error: true
       with:
         sarif_file: ${{ github.workspace }}/.assay-reports/lint.sarif
@@ -565,9 +566,26 @@ runs:
         # Extract fingerprints from current
         CURRENT_FPS=$(jq -r '.runs[0].results // [] | .[].partialFingerprints["assayLintFingerprint/v1"] // empty' "$CURRENT_SARIF" 2>/dev/null | sort -u || true)
 
-        # Find new fingerprints (in current but not in baseline)
-        NEW_FPS=$(comm -23 <(echo "$CURRENT_FPS") <(echo "$BASELINE_FPS") 2>/dev/null || true)
-        NEW_COUNT=$(echo "$NEW_FPS" | grep -c . 2>/dev/null || echo "0")
+        # Find new fingerprints (in current but not in baseline), robust to empty inputs
+        if [ -z "$CURRENT_FPS" ]; then
+          # No current fingerprints => no new findings
+          NEW_FPS=""
+          NEW_COUNT="0"
+        else
+          if [ -z "$BASELINE_FPS" ]; then
+            # No baseline fingerprints => everything current is new
+            NEW_FPS="$CURRENT_FPS"
+          else
+            # Both baseline and current have fingerprints: compute set difference
+            NEW_FPS=$(comm -23 <(printf '%s\n' "$CURRENT_FPS") <(printf '%s\n' "$BASELINE_FPS") 2>/dev/null || true)
+          fi
+
+          if [ -z "$NEW_FPS" ]; then
+            NEW_COUNT="0"
+          else
+            NEW_COUNT=$(printf '%s\n' "$NEW_FPS" | grep -c . 2>/dev/null || echo "0")
+          fi
+        fi
 
         echo "new_findings=$NEW_COUNT" >> $GITHUB_OUTPUT
 
