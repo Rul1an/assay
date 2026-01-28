@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions};
 use assay_evidence::lint::packs::load_packs;
-use assay_evidence::lint::sarif::to_sarif;
+use assay_evidence::lint::sarif::{to_sarif_with_options, SarifOptions};
 use assay_evidence::lint::Severity;
 use assay_evidence::VerifyLimits;
 use clap::Args;
@@ -92,8 +92,14 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&json_report)?);
         }
         "sarif" => {
-            let sarif = to_sarif(report);
-            // TODO: Enhance SARIF with pack metadata (Epic 6)
+            let sarif_options = SarifOptions {
+                pack_meta: pack_meta.clone(),
+                bundle_path: Some(args.bundle.display().to_string()),
+                working_directory: std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string()),
+            };
+            let sarif = to_sarif_with_options(report, sarif_options);
             println!("{}", serde_json::to_string_pretty(&sarif)?);
         }
         _ => {
