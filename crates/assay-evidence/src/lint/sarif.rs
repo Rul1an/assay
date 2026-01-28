@@ -18,7 +18,9 @@ pub struct SarifOptions {
     pub pack_meta: Option<PackExecutionMeta>,
     /// Bundle path for locations (default: "bundle.tar.gz").
     pub bundle_path: Option<String>,
-    /// Working directory for invocations.
+    /// Deprecated: Working directory is no longer included in SARIF output
+    /// to avoid leaking local filesystem paths. This field is ignored.
+    #[deprecated(note = "workingDirectory is no longer included in SARIF to avoid path leakage")]
     pub working_directory: Option<String>,
 }
 
@@ -333,19 +335,11 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     );
 
     // Build invocations
-    let mut invocation = json!({
+    // Note: workingDirectory is intentionally omitted to avoid leaking local paths
+    // (e.g., /Users/... or /home/...). GitHub Code Scanning doesn't require it.
+    let invocation = json!({
         "executionSuccessful": true
     });
-    if let Some(ref wd) = options.working_directory {
-        // Construct proper file:// URI using url crate
-        let wd_path = std::path::Path::new(wd);
-        if let Ok(url) = url::Url::from_directory_path(wd_path) {
-            invocation
-                .as_object_mut()
-                .unwrap()
-                .insert("workingDirectory".into(), json!({ "uri": url.as_str() }));
-        }
-    }
 
     // Build tool.driver
     let mut driver = json!({
