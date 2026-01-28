@@ -64,24 +64,33 @@ pub fn lint_bundle_with_options<R: Read>(
     // 4. Run pack rules (if any)
     let pack_meta = if !options.packs.is_empty() {
         let bundle_path = options.bundle_path.as_deref().unwrap_or("bundle.tar.gz");
-        let executor = PackExecutor::new(options.packs.clone())
+        // Take ownership of packs to avoid clone
+        let executor = PackExecutor::new(options.packs)
             .map_err(|e| anyhow::anyhow!("Pack loading failed: {}", e))?;
 
-        let max_results = options.max_results.unwrap_or(500);
-        let (pack_findings, truncated, truncated_count) =
-            executor.execute_with_limit(&events, &manifest, bundle_path, max_results);
-
+        let pack_findings = executor.execute(&events, &manifest, bundle_path);
         findings.extend(pack_findings);
 
         Some(PackExecutionMeta {
             packs: executor.packs().iter().map(PackInfo::from).collect(),
             disclaimer: executor.combined_disclaimer(),
-            truncated,
-            truncated_count,
+            truncated: false,   // Will be set below after combined truncation
+            truncated_count: 0, // Will be set below
         })
     } else {
         None
     };
+
+    // 5. Apply max_results to combined findings (builtin + pack)
+    let max_results = options.max_results.unwrap_or(500);
+    let (findings, truncated, truncated_count) = truncate_findings(findings, max_results);
+
+    // Update pack_meta with truncation info
+    let pack_meta = pack_meta.map(|mut meta| {
+        meta.truncated = truncated;
+        meta.truncated_count = truncated_count;
+        meta
+    });
 
     let summary = compute_summary(&findings);
 
@@ -168,5 +177,45 @@ fn compute_summary(findings: &[LintFinding]) -> LintSummary {
         errors,
         warnings,
         infos,
+    }
+}
+
+/// Truncate findings to max_results, removing lowest severity first.
+/// Returns (findings, truncated, truncated_count).
+fn truncate_findings(
+    mut findings: Vec<LintFinding>,
+    max_results: usize,
+) -> (Vec<LintFinding>, bool, usize) {
+    if findings.len() <= max_results {
+        return (findings, false, 0);
+    }
+
+    // Sort by severity priority (lowest first for truncation)
+    findings.sort_by(|a, b| {
+        let a_priority = severity_priority(&a.severity);
+        let b_priority = severity_priority(&b.severity);
+        a_priority.cmp(&b_priority)
+    });
+
+    // Truncate lowest severity first
+    let truncated_count = findings.len() - max_results;
+    findings.truncate(max_results);
+
+    // Re-sort for display (highest severity first)
+    findings.sort_by(|a, b| {
+        let a_priority = severity_priority(&a.severity);
+        let b_priority = severity_priority(&b.severity);
+        b_priority.cmp(&a_priority)
+    });
+
+    (findings, true, truncated_count)
+}
+
+/// Get severity priority for sorting.
+fn severity_priority(severity: &Severity) -> u8 {
+    match severity {
+        Severity::Info => 0,
+        Severity::Warn => 1,
+        Severity::Error => 2,
     }
 }

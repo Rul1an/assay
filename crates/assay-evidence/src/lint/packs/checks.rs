@@ -142,8 +142,14 @@ fn check_event_field_present(
     paths: &[String],
 ) -> CheckResult {
     for event in ctx.events {
+        // Serialize once per event, then check all paths
+        let json = match serde_json::to_value(event) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
         for path in paths {
-            if event_has_field(event, path) {
+            if json_pointer_get(&json, path).is_some() {
                 return CheckResult {
                     passed: true,
                     finding: None,
@@ -331,16 +337,6 @@ fn convert_severity(severity: Severity) -> crate::lint::Severity {
 /// Compile a glob pattern.
 fn compile_glob(pattern: &str) -> Option<GlobMatcher> {
     Glob::new(pattern).ok().map(|g| g.compile_matcher())
-}
-
-/// Check if an event has a field at the given JSON Pointer path.
-fn event_has_field(event: &EvidenceEvent, path: &str) -> bool {
-    let json = match serde_json::to_value(event) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-
-    json_pointer_get(&json, path).is_some()
 }
 
 /// Get a value from JSON using a JSON Pointer path (RFC 6901).

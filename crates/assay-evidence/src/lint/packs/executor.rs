@@ -43,9 +43,11 @@ impl PackExecutor {
                     }
 
                     // For non-compliance packs, warn and use last definition
-                    eprintln!(
-                        "Warning: Rule '{}' defined in both '{}' and '{}', using definition from '{}'",
-                        canonical_id, existing_pack, pack.definition.name, pack.definition.name
+                    tracing::warn!(
+                        rule_id = %canonical_id,
+                        existing_pack = %existing_pack,
+                        new_pack = %pack.definition.name,
+                        "Rule collision: using definition from new pack"
                     );
                 }
 

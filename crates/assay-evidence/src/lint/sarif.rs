@@ -107,6 +107,10 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
             }
         }
 
+        // Sort for deterministic SARIF output
+        let mut pack_rule_ids: Vec<String> = pack_rule_ids.into_iter().collect();
+        pack_rule_ids.sort();
+
         for rule_id in pack_rule_ids {
             // Extract pack info from tags
             let short_id = extract_tag(&report.findings, &rule_id, "short_id:");
@@ -283,10 +287,14 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         "executionSuccessful": true
     });
     if let Some(ref wd) = options.working_directory {
-        invocation.as_object_mut().unwrap().insert(
-            "workingDirectory".into(),
-            json!({ "uri": format!("file://{}/", wd) }),
-        );
+        // Construct proper file:// URI using url crate
+        let wd_path = std::path::Path::new(wd);
+        if let Ok(url) = url::Url::from_directory_path(wd_path) {
+            invocation
+                .as_object_mut()
+                .unwrap()
+                .insert("workingDirectory".into(), json!({ "uri": url.as_str() }));
+        }
     }
 
     // Build tool.driver

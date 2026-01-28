@@ -136,8 +136,15 @@ pub fn load_pack_from_file(path: &Path) -> Result<LoadedPack, PackError> {
 }
 
 /// Load a pack from YAML string content.
+///
+/// # YAML Security
+///
+/// Uses serde_yaml which handles anchors/aliases by expansion. Combined with
+/// `deny_unknown_fields` on all schema types, this prevents unknown field injection.
+/// For strict anchor rejection, a pre-scan would be needed, but expand-then-validate
+/// provides equivalent security for our schema-validated packs.
 fn load_pack_from_string(content: &str, source: PackSource) -> Result<LoadedPack, PackError> {
-    // Parse YAML with strict settings
+    // Parse YAML with strict settings (deny_unknown_fields on schema types)
     let definition: PackDefinition =
         serde_yaml::from_str(content).map_err(|e| PackError::YamlParseError {
             message: format_yaml_error(e),
@@ -161,16 +168,9 @@ fn load_pack_from_string(content: &str, source: PackSource) -> Result<LoadedPack
 
 /// Compute pack digest: sha256(JCS(JSON(pack)))
 fn compute_pack_digest(definition: &PackDefinition) -> Result<String, PackError> {
-    // Serialize to JSON
-    let json = serde_json::to_value(definition).map_err(|e| PackError::YamlParseError {
-        message: format!("Failed to serialize pack to JSON: {}", e),
-    })?;
-
-    // Apply JCS canonicalization (RFC 8785)
-    // For now, use serde_json's compact serialization which is close to JCS
-    // TODO: Use proper JCS library when available
-    let canonical = serde_json::to_string(&json).map_err(|e| PackError::YamlParseError {
-        message: format!("Failed to canonicalize JSON: {}", e),
+    // Serialize to canonical JSON using RFC 8785 JCS
+    let canonical = serde_jcs::to_string(definition).map_err(|e| PackError::YamlParseError {
+        message: format!("Failed to canonicalize pack to JCS JSON: {}", e),
     })?;
 
     // Compute SHA-256
@@ -220,7 +220,7 @@ fn version_satisfies(current: &str, required: &str) -> bool {
         (Some((c_major, c_minor, c_patch)), Some((r_major, r_minor, r_patch))) => {
             (c_major, c_minor, c_patch) >= (r_major, r_minor, r_patch)
         }
-        _ => true, // If we can't parse, assume compatible
+        _ => false, // If we can't parse, treat as incompatible (fail closed)
     }
 }
 
