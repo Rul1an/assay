@@ -477,13 +477,22 @@ runs:
         path: ${{ github.workspace }}/.assay-reports/
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
+    - name: Debug reports directory
+      if: inputs.upload_artifacts == 'true' && steps.discover.outputs.found == 'true'
+      shell: bash
+      run: |
+        echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+        echo "Contents of .assay-reports:"
+        ls -la "$GITHUB_WORKSPACE/.assay-reports/" || echo "Directory not found"
+
     - name: Upload artifacts
       if: inputs.upload_artifacts == 'true' && steps.discover.outputs.found == 'true'
       uses: actions/upload-artifact@v4
       continue-on-error: true
       with:
         name: assay-evidence-${{ github.run_id }}
-        path: ${{ github.workspace }}/.assay-reports/
+        path: |
+          .assay-reports/**/*
         retention-days: 30
         if-no-files-found: warn
         compression-level: 6
