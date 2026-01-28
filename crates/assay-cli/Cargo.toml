@@ -48,6 +48,12 @@ chrono = { workspace = true, features = ["std", "clock"] }
 sha2 = { workspace = true }
 hex = { workspace = true }
 dirs = "5.0"
+
+# Tool signing
+ed25519-dalek = { version = "2.1", features = ["pkcs8", "pem", "rand_core"] }
+rand = "0.8"
+pkcs8 = { version = "0.10", features = ["pem"] }
+base64 = "0.22"
 sysinfo = "0.30"
 humantime = "2"
 tokio-stream = "0.1"
