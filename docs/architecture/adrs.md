@@ -19,16 +19,18 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-011](./ADR-011-Tool-Signing.md) | MCP Tool Signing with Sigstore | Proposed | **P2** |
 | [ADR-012](./ADR-012-Transparency-Log.md) | Transparency Log Integration | Proposed | **P3** |
 | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | EU AI Act Compliance Pack | Proposed | **P2** |
+| [ADR-014](./ADR-014-GitHub-Action-v2.md) | GitHub Action v2 Design | Accepted | **P0** |
 
 ## Q2 2026 Priorities
 
 The following ADRs are prioritized for Q2 2026:
 
-1. **P0: ADR-009** - WORM Storage (Low effort, High compliance value)
-2. **P1: ADR-010** - Evidence Store API (Medium effort, Core commercial offering)
-3. **P2: ADR-011** - Tool Signing (Medium effort, Security differentiator)
-4. **P2: ADR-013** - EU AI Act Compliance Pack (Medium effort, Regulatory differentiator)
-5. **P3: ADR-012** - Transparency Log (Low effort, Builds on ADR-011)
+1. **P0: ADR-014** - GitHub Action v2 (High DX value, adoption accelerator)
+2. **P0: ADR-009** - WORM Storage (Low effort, High compliance value)
+3. **P1: ADR-010** - Evidence Store API (Medium effort, Core commercial offering)
+4. **P2: ADR-011** - Tool Signing (Medium effort, Security differentiator)
+5. **P2: ADR-013** - EU AI Act Compliance Pack (Medium effort, Regulatory differentiator)
+6. **P3: ADR-012** - Transparency Log (Low effort, Builds on ADR-011)
 
 ## Template
 
