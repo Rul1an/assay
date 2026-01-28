@@ -13,7 +13,7 @@ The EU AI Act (Regulation 2024/1689) establishes record-keeping and logging requ
 Key challenges:
 - Article 12 requirements are principles-based, not prescriptive
 - Compliance is context-dependent (risk assessment, intended purpose)
-- Technical implementation guidance (prEN ISO/IEC 24970) is still draft
+- Technical implementation guidance (DIS 24970:2025 / prEN ISO/IEC 24970) is in draft; consultation runs through early 2026
 - "Passing checks" ≠ "legal compliance" (disclaimer required)
 
 ## Decision
@@ -81,16 +81,17 @@ Direct mapping to Article 12(1) and 12(2)(a)(b)(c):
 | EU12-003 | 12(2)(b) | Post-market monitoring | Events include correlation IDs (run_id, trace_context, version/build_id) |
 | EU12-004 | 12(2)(a) | Risk identification | Events include fields for risk situation identification (policy denials, config changes) |
 
-**Note**: "Retention metadata" is governance/records management, not Article 12 itself. Moved to Pro pack.
+**Note**: Log retention is governed by Article 19, not Article 12. Biometric-specific rules are Article 12(3).
 
 ### Pro Pack Rules (Enterprise)
 
 | Rule ID | Article | Check | Description |
 |---------|---------|-------|-------------|
-| EU12-005 | 12(2)(b) | Retention validation | Bundle has retention policy attached |
-| EU12-006 | 12(3)(b) | Biometric: reference DB | Biometric systems log reference database |
-| EU12-007 | 12(3)(c) | Biometric: match results | Biometric systems log match results |
-| EU12-008 | 12(3)(d) | Human reviewer | Human reviewer is identified |
+| EU19-001 | 19(1) | Retention validation | Logs retained for appropriate period (min 6 months unless otherwise specified) |
+| EU12-005 | 12(3)(a) | Biometric: use period | Biometric systems log each use period (start/end dates) |
+| EU12-006 | 12(3)(b) | Biometric: reference DB | Biometric systems log reference database consulted |
+| EU12-007 | 12(3)(c) | Biometric: match results | Biometric systems log input data that resulted in match |
+| EU12-008 | 12(3)(d) | Human reviewer | Natural person verifying results is identified |
 
 ## Pack Engine Specification
 
@@ -106,7 +107,27 @@ Example:      eu-ai-act-baseline@1.0.0:EU12-001
 **Collision policy**:
 - Same canonical ID from same pack = dedupe
 - Same short_id from different packs = both run (canonical IDs differ)
-- Same canonical ID from different packs = last wins + warning
+- Same canonical ID from different packs:
+  - For `kind: compliance` packs = **hard fail** (no silent override of compliance checks)
+  - For `kind: security/quality` packs = last wins + warning
+
+**Rationale**: Compliance tooling must not silently change behavior based on pack order. Explicit `overrides:` mechanism (future) required for intentional override.
+
+### Pack Digest (Normative)
+
+Pack digest provides supply chain integrity verification:
+
+```
+pack_digest = sha256( JCS( JSON( parse_yaml(pack_file) ) ) )
+```
+
+**Algorithm**:
+1. Parse YAML pack file into native data structure
+2. Serialize to JSON (only known schema fields; unknown fields MUST cause validation error)
+3. Apply JCS canonicalization (RFC 8785)
+4. Compute SHA-256 hash
+
+**Unknown fields policy**: YAML files with fields not defined in the pack schema MUST fail validation. This prevents "invisible" metadata injection that wouldn't be reflected in the digest.
 
 ### Pack Schema
 
@@ -118,6 +139,7 @@ kind: compliance          # compliance | security | quality
 description: EU AI Act Article 12 record-keeping baseline for high-risk AI systems
 author: Assay Team
 license: Apache-2.0
+source_url: https://eur-lex.europa.eu/eli/reg/2024/1689/oj  # EUR-Lex primary source
 
 # REQUIRED for kind: compliance
 disclaimer: |
@@ -185,6 +207,17 @@ rules:
       type: event_field_present
       any_of: ["policy_decision", "denied", "policy_hash", "config_hash", "violation"]
 ```
+
+### Disclaimer Output (Belt & Suspenders)
+
+Disclaimers for compliance packs appear in multiple locations to ensure visibility:
+
+| Output | Location |
+|--------|----------|
+| Console | Header line before findings |
+| JSON | Top-level `disclaimer` field |
+| SARIF | `run.properties.disclaimer` |
+| SARIF | `rules[].help.markdown` (per rule) |
 
 ### SARIF Output (GitHub-Compatible)
 
@@ -303,13 +336,47 @@ assay evidence audit bundle.tar.gz \
 - Clear baseline/pro boundary management
 
 ### Neutral
-- prEN ISO/IEC 24970 may require pack updates when finalized
+- DIS 24970:2025 / prEN ISO/IEC 24970 may require pack updates when finalized
 - Different jurisdictions may need localized baseline packs
+
+## Future Extensions
+
+### Pack Signing (Enterprise)
+
+Packs are signable artefacts using the same trust policy model as tool signing ([SPEC-Tool-Signing-v1](./SPEC-Tool-Signing-v1.md)):
+
+- `x-assay-sig` field in pack YAML (or detached `.sig` file)
+- Same Ed25519 + DSSE PAE encoding
+- Managed pack registry enforces signature verification
+- Enables cryptographically strong supply chain for compliance packs
+
+### Override Mechanism
+
+Future `overrides:` section for explicit rule modification:
+
+```yaml
+overrides:
+  - rule: eu-ai-act-baseline@1.0.0:EU12-003
+    severity: error  # Escalate from warning
+    justification: "Org policy requires correlation IDs"
+```
 
 ## References
 
-- [EU AI Act Article 12](https://artificialintelligenceact.eu/article/12/)
-- [EU AI Act Full Text (Regulation 2024/1689)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj)
-- [Draft prEN ISO/IEC 24970](https://www.iso.org/standard/79799.html) (AI System Logging)
-- [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md)
+### EU AI Act (Primary Sources)
+
+- [EU AI Act Full Text (Regulation 2024/1689)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj) — EUR-Lex (authoritative)
+- [Article 12 - Record-keeping](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3029-1-1) — Logging capabilities
+- [Article 19 - Automatically Generated Logs](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e3522-1-1) — Retention requirements (min 6 months)
+- [Annex III, Point 1(a)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj#d1e6234-1-1) — Biometric identification systems
+
+### Standards
+
+- [DIS 24970:2025 / prEN ISO/IEC 24970](https://www.iso.org/standard/79799.html) — AI System Logging (draft, consultation through early 2026)
 - [SARIF 2.1.0 Spec](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+- [RFC 8785 - JCS](https://datatracker.ietf.org/doc/html/rfc8785) — JSON Canonicalization Scheme
+
+### Related ADRs
+
+- [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md)
+- [SPEC-Tool-Signing-v1](./SPEC-Tool-Signing-v1.md)
