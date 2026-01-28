@@ -14,6 +14,35 @@ Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, ma
 - **W3C Trace Context** (`traceparent`) — correlation with existing distributed tracing
 - **SARIF 2.1.0** — GitHub Code Scanning integration (single run + `automationDetails.id` discipline)
 - **EU AI Act Article 12** — record-keeping requirements make "evidence" commercially relevant
+- **OTel GenAI Semantic Conventions** — vendor-agnostic observability for LLM/agent workloads
+
+---
+
+## Strategic Positioning: Protocol-Agnostic Governance
+
+The agentic commerce/interop space is fragmenting (Jan 2026):
+
+| Protocol | Owner | Focus |
+|----------|-------|-------|
+| **ACP** (Agentic Commerce Protocol) | OpenAI/Stripe | Buyer/agent/business transactions |
+| **UCP** (Universal Commerce Protocol) | Google/Shopify | Discover→buy→post-purchase journeys |
+| **AP2** (Agent Payments Protocol) | Google | Secure transactions + mandates |
+| **A2A** (Agent2Agent) | Google | Agent discovery/capabilities/tasks |
+| **x402** | Community | Internet-native (crypto) agent payments |
+
+**Assay's moat:** Protocol-agnostic evidence + governance layer.
+
+> "Regardless of protocol: verifiable evidence, policy enforcement, trust verification, SIEM/OTel-ready."
+
+All these protocols converge on "tool calls + state transitions" — exactly what Assay captures as trace-linked evidence.
+
+### Why This Matters
+
+1. **Tool Signing** becomes critical: "tool substitution" and "merchant tool spoofing" are real commerce risks
+2. **Mandates/Intents** need audit trails: AP2's authorization model requires provable evidence
+3. **Agent Identity** is enterprise-core: who/what authorized a transaction?
+
+See [Protocol Landscape Analysis](.private/docs/strategy/PROTOCOL-LANDSCAPE-2026.md) for detailed research
 
 ---
 
@@ -96,14 +125,16 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 |----------|------|--------|-------|--------|
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
-| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | 🔜 Next |
+| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete |
 | **P2** | EU AI Act Compliance Pack | Medium | High | Pending |
+| **P2** | Mandate/Intent Evidence | Medium | High | Pending |
 | **P2** | GitHub Action v2.1 | Low | Medium | Pending |
 | **P3** | Transparency Log Verification | Low | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
 
 See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md)
+See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
 
 ### GitHub Action v2 ✅ Complete
 
@@ -140,18 +171,39 @@ assay evidence list --run-id run_123 --store s3://bucket/prefix
 
 Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Blob, GCS, local filesystem
 
-### B. Tool Signing (Open Core)
-- [ ] **`x-assay-sig` field**: Ed25519 signature in bundle manifest
-- [ ] **Local signing**: `assay evidence sign bundle.tar.gz --key private.pem`
-- [ ] **Local verification**: `assay evidence verify bundle.tar.gz --pubkey public.pem`
-- [ ] **Keyless (future)**: Sigstore Fulcio + Rekor integration
+### B. Tool Signing ✅ Complete
 
-### C. Compliance Packs (Open Core)
+Per [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md):
+
+```bash
+assay tool keygen --out ~/.assay/keys/      # Generate PKCS#8/SPKI keypair
+assay tool sign tool.json --key priv.pem --out signed.json
+assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untrusted, 4=invalid
+```
+
+- [x] **`x-assay-sig` field**: Ed25519 + DSSE PAE encoding
+- [x] **JCS canonicalization**: RFC 8785 deterministic JSON
+- [x] **key_id trust model**: SHA-256 of SPKI bytes
+- [x] **Trust policies**: `require_signed`, `trusted_key_ids`
+- [ ] **Keyless (Enterprise)**: Sigstore Fulcio + Rekor integration
+
+### C. Mandate/Intent Evidence (P2)
+
+Support for AP2-style authorization evidence (agentic commerce):
+
+- [ ] **Evidence fields**: `mandate_id`, `scope`, `constraints`, `ttl`
+- [ ] **Policy rules**: "tool call within mandate scope"
+- [ ] **Audit trail**: Link tool calls to user authorization
+
+This strengthens EU AI Act Article 12 compliance for commerce workflows.
+
+### D. Compliance Packs (Open Core)
 - [ ] **Pack Engine**: `--pack` CLI flag, pack composition
 - [ ] **EU AI Act Pack**: Article 12 mapping, SARIF output with `article_ref`
+- [ ] **Commerce Pack**: Mandate/intent required, signed-tools required
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
 
-### D. GitHub Action v2.1
+### E. GitHub Action v2.1
 
 After P1/P2 features:
 - [ ] `assay init` workflow generator
@@ -163,20 +215,38 @@ After P1/P2 features:
 
 ## Q3 2026: Enterprise Scale (Growth)
 
-**Objective:** Integration with the broader security ecosystem.
+**Objective:** Integration with the broader security ecosystem + agentic protocol support.
 
-### A. Connectors
+### A. Protocol Adapters (Adapter-First Strategy)
+
+Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent` + policy hooks:
+
+| Adapter | Protocol | Focus |
+|---------|----------|-------|
+| `assay-adapter-acp` | Agentic Commerce Protocol | OpenAI/Stripe checkout flows |
+| `assay-adapter-ucp` | Universal Commerce Protocol | Google/Shopify commerce journeys |
+| `assay-adapter-a2a` | Agent2Agent | Agent discovery/tasks/messages |
+
+- [ ] **Adapter trait**: Common interface for protocol → EvidenceEvent mapping
+- [ ] **ACP adapter**: Tool calls, checkout events, payment intents
+- [ ] **UCP adapter**: Discover/buy/post-purchase state transitions
+- [ ] **A2A adapter**: Agent capabilities, task delegation, artifacts
+
+**Why adapters:** The market is fragmenting (ACP vs UCP vs AP2 vs x402). Assay's value is protocol-agnostic governance, not protocol lock-in.
+
+### B. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
 - [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/Rul1an/assay-action)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
 - [ ] **GitLab CI**: Native integration
+- [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
 
-### B. Additional Compliance Packs
+### C. Additional Compliance Packs
 - [ ] **SOC 2 Pack**: Control mapping for Type II audits
 - [ ] **MCPTox**: Regression testing against jailbreak/poisoning patterns
 - [ ] **Industry Packs**: Healthcare (HIPAA), Finance (PCI-DSS)
 
-### C. Managed Evidence Store (Evaluate)
+### D. Managed Evidence Store (Evaluate)
 
 Only proceed if:
 1. Users explicitly request managed hosting
@@ -199,9 +269,21 @@ If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR
 - [ ] **Degradation Reports**: Evidence health score
 - [ ] **Env Strictness Score**: Compliance posture metrics
 
-### B. Advanced Signing
+### B. Advanced Signing & Attestation
 - [ ] **Sigstore Keyless**: Fulcio certificate + Rekor transparency log
+- [ ] **SCITT Integration**: Transparency log for signed statements (IETF draft)
 - [ ] **Org Trust Policies**: Managed identity verification
+
+### C. Identity & Authorization Stack
+
+Enterprise identity for agentic workloads:
+
+- [ ] **SPIFFE/SPIRE**: Workload identity for non-human actors
+- [ ] **FAPI 2.0 Profile**: High-security OAuth for agent commerce APIs
+- [ ] **OpenID4VP/VCI**: Verifiable credentials for mandate attestation
+- [ ] **OAuth 2.0 BCP (RFC 9700)**: DPoP sender-constrained tokens
+
+**Why:** AP2/UCP mandate flows require provable authorization. FAPI/OpenID4VP are the emerging standards.
 
 ### C. Managed Isolation (Future)
 - [ ] **Managed Runners**: Cloud-hosted MicroVMs (Firecracker/gVisor)
