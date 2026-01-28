@@ -78,9 +78,4 @@ jobs:
             echo "Note: SARIF file not created (lint may not have output)"
           fi
 
-      - name: Upload artifacts (via output)
-        uses: actions/upload-artifact@v4
-        with:
-          name: assay-reports-${{ github.run_id }}
-          path: .assay-reports/
-          if-no-files-found: warn
+      # Artifact upload is handled by the action itself (tar + upload)

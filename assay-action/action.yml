@@ -481,10 +481,26 @@ runs:
         path: ${{ steps.process.outputs.reports_dir }}
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
-    # Note: Artifact upload from composite actions has path resolution issues.
-    # Use the `reports_dir` output in your workflow to upload artifacts:
-    #
-    #   - uses: actions/upload-artifact@v4
-    #     with:
-    #       name: assay-reports
-    #       path: ${{ steps.assay.outputs.reports_dir }}
+    - name: Package reports for upload
+      id: package
+      if: steps.discover.outputs.found == 'true'
+      shell: bash
+      run: |
+        REPORTS_DIR="${{ steps.process.outputs.reports_dir }}"
+        if [ -d "$REPORTS_DIR" ] && [ -n "$(ls -A "$REPORTS_DIR" 2>/dev/null)" ]; then
+          tar -czf "${GITHUB_WORKSPACE}/assay-reports.tar.gz" -C "$REPORTS_DIR" .
+          echo "archive=${GITHUB_WORKSPACE}/assay-reports.tar.gz" >> $GITHUB_OUTPUT
+          echo "Packaged reports to assay-reports.tar.gz"
+        else
+          echo "No reports to package"
+          echo "archive=" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload reports artifact
+      if: steps.package.outputs.archive != ''
+      uses: actions/upload-artifact@v4
+      continue-on-error: true
+      with:
+        name: assay-reports-${{ github.run_id }}
+        path: ${{ steps.package.outputs.archive }}
+        retention-days: 30
