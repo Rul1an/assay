@@ -347,7 +347,7 @@ runs:
         category: ${{ steps.sarif-category.outputs.category }}
 
     # =========================================================================
-    # E4: Job Summary (always write)
+    # E4: PR Feedback - Job Summary + PR Comment
     # =========================================================================
 
     - name: Write Job Summary
@@ -357,34 +357,124 @@ runs:
         FOUND: ${{ steps.discover.outputs.found }}
         COUNT: ${{ steps.discover.outputs.count }}
         VERIFIED: ${{ steps.process.outputs.verified }}
+        VERIFIED_COUNT: ${{ steps.process.outputs.verified_count }}
+        FAILED_COUNT: ${{ steps.process.outputs.failed_count }}
         ERRORS: ${{ steps.process.outputs.findings_error }}
         WARNS: ${{ steps.process.outputs.findings_warn }}
       run: |
         {
-          echo "## 🛡️ Assay Evidence Report"
+          echo "## Assay Evidence Report"
           echo ""
 
           if [ "$FOUND" != "true" ]; then
-            echo "No evidence bundles found."
+            echo "### No Evidence Bundles Found"
             echo ""
-            echo "Generate bundles with: \`assay run --policy policy.yaml -- your-test-command\`"
+            echo "To generate evidence bundles, run your tests with Assay:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "assay run --policy policy.yaml -- pytest"
+            echo "\`\`\`"
+            echo ""
+            echo "Bundles will be created in \`.assay/evidence/\`"
           else
+            # Status badge
+            if [ "$VERIFIED" = "true" ] && [ "${ERRORS:-0}" = "0" ]; then
+              echo "**Status:** Passed"
+            else
+              echo "**Status:** Failed"
+            fi
+            echo ""
+
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Bundles | $COUNT |"
-            echo "| Verified | ${VERIFIED:-N/A} |"
+            echo "| Bundles processed | $COUNT |"
+            echo "| Verified | ${VERIFIED_COUNT:-0} |"
+            if [ "${FAILED_COUNT:-0}" -gt 0 ]; then
+              echo "| Verification failed | ${FAILED_COUNT} |"
+            fi
             echo "| Errors | ${ERRORS:-0} |"
             echo "| Warnings | ${WARNS:-0} |"
+
+            # Show findings summary if any
+            if [ "${ERRORS:-0}" -gt 0 ] || [ "${WARNS:-0}" -gt 0 ]; then
+              echo ""
+              echo "### Findings"
+              echo ""
+              echo "Review findings in the **Security** tab or download the SARIF artifact."
+            fi
           fi
 
           echo ""
           echo "---"
-          echo "📦 [Assay Documentation](https://github.com/Rul1an/assay)"
+          echo "[Assay Documentation](https://github.com/Rul1an/assay) | [Report Issue](https://github.com/Rul1an/assay/issues)"
         } >> $GITHUB_STEP_SUMMARY
 
+    - name: Find existing PR comment
+      id: find-comment
+      if: github.event_name == 'pull_request' && inputs.comment_diff == 'true' && steps.discover.outputs.found == 'true'
+      uses: peter-evans/find-comment@v3
+      continue-on-error: true
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: '<!-- assay-report -->'
+
+    - name: Post or update PR comment
+      if: github.event_name == 'pull_request' && inputs.comment_diff == 'true' && steps.discover.outputs.found == 'true' && (steps.process.outputs.findings_error != '0' || steps.process.outputs.findings_warn != '0')
+      uses: peter-evans/create-or-update-comment@v4
+      continue-on-error: true
+      with:
+        comment-id: ${{ steps.find-comment.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        edit-mode: replace
+        body: |
+          <!-- assay-report -->
+          ## Assay Report
+
+          | Metric | Value |
+          |--------|-------|
+          | Bundles | ${{ steps.discover.outputs.count }} |
+          | Errors | ${{ steps.process.outputs.findings_error }} |
+          | Warnings | ${{ steps.process.outputs.findings_warn }} |
+
+          View details in the [Security tab](${{ github.server_url }}/${{ github.repository }}/security/code-scanning) or [Job Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
     # =========================================================================
-    # E5: Artifacts
+    # E5: Baseline & Artifacts
     # =========================================================================
+
+    - name: Restore baseline from cache
+      id: baseline-restore
+      if: inputs.baseline_key != '' && steps.discover.outputs.found == 'true'
+      uses: actions/cache/restore@v4
+      continue-on-error: true
+      with:
+        path: .assay-baseline/
+        key: assay-baseline-${{ inputs.baseline_key }}-${{ github.base_ref || 'main' }}
+        restore-keys: |
+          assay-baseline-${{ inputs.baseline_key }}-
+
+    - name: Compare with baseline
+      id: baseline-diff
+      if: steps.baseline-restore.outputs.cache-hit == 'true' && steps.discover.outputs.found == 'true'
+      shell: bash
+      run: |
+        # Baseline comparison placeholder
+        # TODO: Implement assay evidence diff command
+        if [ -d ".assay-baseline" ]; then
+          echo "Baseline found, comparison available in future version"
+          echo "baseline_found=true" >> $GITHUB_OUTPUT
+        else
+          echo "baseline_found=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Save baseline to cache
+      if: inputs.write_baseline == 'true' && github.ref == 'refs/heads/main' && steps.discover.outputs.found == 'true' && steps.process.outputs.verified == 'true'
+      uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: .assay-reports/
+        key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
     - name: Upload artifacts
       if: inputs.upload_artifacts == 'true' && steps.discover.outputs.found == 'true'
@@ -392,8 +482,7 @@ runs:
       continue-on-error: true
       with:
         name: assay-evidence-${{ github.run_id }}
-        path: |
-          .assay-reports/
+        path: .assay-reports/
         retention-days: 30
         if-no-files-found: warn
         compression-level: 6

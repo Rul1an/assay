@@ -63,3 +63,16 @@ jobs:
             echo "ERROR: Expected verified=true"
             exit 1
           fi
+
+      - name: Verify reports created
+        run: |
+          echo "Checking .assay-reports/ directory..."
+          ls -la .assay-reports/ || echo "Directory not found"
+
+          # Check SARIF file exists
+          if [ -f ".assay-reports/lint.sarif" ]; then
+            echo "SARIF file created"
+            head -20 .assay-reports/lint.sarif
+          else
+            echo "Note: SARIF file not created (lint may not have output)"
+          fi
