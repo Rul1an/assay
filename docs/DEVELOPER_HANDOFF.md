@@ -237,16 +237,17 @@ Tier 1 (kernel)    Tier 2 (userspace)
 
 ## Current Priorities (Q2 2026)
 
-Per [ROADMAP.md](./ROADMAP.md) and [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md):
+Per [ROADMAP.md](./ROADMAP.md) and [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md):
 
 | Priority | Feature | Crate(s) | Status |
 |----------|---------|----------|--------|
 | ✅ | GitHub Action v2 | External repo | Complete |
 | ✅ | BYOS CLI (`push/pull/list`) | `assay-cli`, `assay-evidence` | Complete |
 | ✅ | Tool Signing (`x-assay-sig`) | `assay-cli`, `assay-core` | Complete |
-| **P2** | EU AI Act Compliance Pack | `assay-cli`, `assay-core` | Next |
+| **P2** | Pack Engine (OSS) | `assay-evidence`, `assay-cli` | **Next** |
+| **P2** | EU AI Act Baseline Pack (OSS) | `packs/` | After engine |
 | **P2** | Mandate/Intent Evidence | `assay-core` | Planned |
-| **P2** | Action v2.1 | External repo | After P2 |
+| **P2** | Action v2.1 | External repo | After packs |
 
 ### ✅ BYOS CLI Commands (Complete)
 
@@ -278,13 +279,27 @@ assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untr
 
 See [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md) for the formal specification.
 
-### P2: EU AI Act Compliance Pack (Next)
+### P2: Pack Engine + EU AI Act Baseline (Next)
 
-Pack system with Article 12 mapping:
+Following the Semgrep open core model (engine + baseline free, pro + workflows enterprise):
 
 ```bash
-assay evidence lint --pack eu-ai-act    # Article 12 compliance checks
+assay evidence lint --pack eu-ai-act-baseline    # Article 12 baseline checks (OSS)
+assay evidence lint --pack eu-ai-act-baseline,soc2-baseline  # Composition
+assay evidence lint --pack ./custom-pack.yaml    # Custom pack
 ```
+
+**Key files to create:**
+- `crates/assay-evidence/src/lint/packs/` - Pack engine modules
+- `packs/eu-ai-act-baseline.yaml` - Baseline pack with Article 12 mapping
+
+**Key specs:**
+- Rule ID namespacing: `{pack}@{version}:{rule_id}`
+- Pack kind enforcement: `compliance` requires disclaimer
+- SARIF output via `properties` bags (GitHub-safe)
+- Pack digest for supply chain integrity
+
+See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) and [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md).
 
 ### P2: Mandate/Intent Evidence
 

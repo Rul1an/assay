@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed (January 2026)
+Accepted (January 2026)
+
+Updated with baseline/pro taxonomy per [ADR-016](./ADR-016-Pack-Taxonomy.md).
 
 ## Context
 
@@ -16,170 +18,177 @@ Key challenges:
 
 ## Decision
 
-We will implement a **compliance pack system** with:
-1. **Open baseline pack**: Technical checks mapping to Article 12 requirements
-2. **Pack composition**: Multiple packs can be combined
-3. **Versioned packs**: Semver for tracking changes
-4. **Paid managed packs**: Org-specific tailoring, exceptions, audit reporting
+We implement a **compliance pack system** following the Semgrep open core model:
 
-### Pack Architecture
+| Component | License | Description |
+|-----------|---------|-------------|
+| **Pack Engine** | Apache 2.0 | Loader, composition, SARIF output |
+| **Baseline Packs** | Apache 2.0 | `eu-ai-act-baseline`, basic Article 12 checks |
+| **Pro Packs** | Commercial | `eu-ai-act-pro`, biometric rules, PDF reports |
+| **Managed Workflows** | Commercial | Exceptions, approvals, scheduled scans |
+
+See [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md) for the complete open core split.
+
+## Pack Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Compliance Pack System                      │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Built-in Packs (Open Core)                               │   │
+│  │ Baseline Packs (Open Source - Apache 2.0)               │   │
 │  │                                                          │   │
-│  │  • eu-ai-act@1.0.0     (Article 12 baseline)            │   │
-│  │  • sec-17a-4@1.0.0     (Financial records)              │   │
-│  │  • soc2@1.0.0          (Security controls)              │   │
+│  │  • eu-ai-act-baseline@1.0.0  (Article 12 core)          │   │
+│  │  • soc2-baseline@1.0.0       (Control mapping)          │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              │                                   │
 │                              ▼                                   │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Custom Packs (Paid)                                      │   │
+│  │ Pro Packs (Enterprise - Commercial License)             │   │
 │  │                                                          │   │
-│  │  • myorg/ai-policy@2.1.0  (Org-specific rules)          │   │
-│  │  • myorg/exceptions@1.0.0 (Approved deviations)         │   │
+│  │  • eu-ai-act-pro@1.0.0       (Biometric, PDF reports)   │   │
+│  │  • soc2-pro@1.0.0            (Advanced controls)        │   │
+│  │  • myorg/exceptions@1.0.0    (Org-specific)             │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              │                                   │
 │                              ▼                                   │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Lint Engine                                              │   │
+│  │ Pack Engine (Open Source)                               │   │
 │  │                                                          │   │
-│  │  assay evidence lint --pack eu-ai-act@1.0.0             │   │
-│  │  assay evidence lint --pack eu-ai-act,myorg/exceptions  │   │
+│  │  assay evidence lint --pack eu-ai-act-baseline          │   │
+│  │  assay evidence lint --pack eu-ai-act-baseline,soc2     │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### EU AI Act Article 12 Mapping
+## EU AI Act Article 12 Mapping
 
-| Article 12 Requirement | Technical Check | Rule ID |
-|------------------------|-----------------|---------|
-| "Automatic recording of events" | Bundle contains events | `EU12-001` |
-| "Over the lifetime of the system" | Retention policy attached | `EU12-002` |
-| "Recording of each use period" | `*.started` / `*.finished` event pairs | `EU12-003` |
-| "Identify situations presenting risk" | Lint findings present (if any) | `EU12-004` |
-| "Post-market monitoring" | Bundle linked to Store (optional) | `EU12-005` |
-| "Reference database checked" (biometric) | `data.reference_db` field present | `EU12-006` |
-| "Input data that matched" (biometric) | `data.match_result` field present | `EU12-007` |
-| "Natural persons verifying results" | `data.reviewer` field present | `EU12-008` |
+### Source: Article 12 Requirements
 
-### Pack Definition Format
+> High-risk AI systems shall technically allow for the automatic recording of events (logs) over the lifetime of the system. Logging capabilities shall provide, at a minimum:
+> - (a) recording of events relevant for identifying situations that may result in risk or substantial modification
+> - (b) facilitation of post-market monitoring
+> - (c) monitoring of the operation of high-risk AI systems
+
+### Baseline Pack Rules (Open Source)
+
+Direct mapping to Article 12(1) and 12(2)(a)(b)(c):
+
+| Rule ID | Article | Check | Description |
+|---------|---------|-------|-------------|
+| EU12-001 | 12(1) | Event presence | Evidence bundle contains automatically recorded operational events |
+| EU12-002 | 12(2)(c) | Operation monitoring | Events include run lifecycle fields (started/finished, status, environment) |
+| EU12-003 | 12(2)(b) | Post-market monitoring | Events include correlation IDs (run_id, trace_context, version/build_id) |
+| EU12-004 | 12(2)(a) | Risk identification | Events include fields for risk situation identification (policy denials, config changes) |
+
+**Note**: "Retention metadata" is governance/records management, not Article 12 itself. Moved to Pro pack.
+
+### Pro Pack Rules (Enterprise)
+
+| Rule ID | Article | Check | Description |
+|---------|---------|-------|-------------|
+| EU12-005 | 12(2)(b) | Retention validation | Bundle has retention policy attached |
+| EU12-006 | 12(3)(b) | Biometric: reference DB | Biometric systems log reference database |
+| EU12-007 | 12(3)(c) | Biometric: match results | Biometric systems log match results |
+| EU12-008 | 12(3)(d) | Human reviewer | Human reviewer is identified |
+
+## Pack Engine Specification
+
+### Rule ID Namespacing
+
+To prevent collision when composing packs (`--pack a,b`):
+
+```
+Canonical ID: {pack_name}@{pack_version}:{rule_id}
+Example:      eu-ai-act-baseline@1.0.0:EU12-001
+```
+
+**Collision policy**:
+- Same canonical ID from same pack = dedupe
+- Same short_id from different packs = both run (canonical IDs differ)
+- Same canonical ID from different packs = last wins + warning
+
+### Pack Schema
 
 ```yaml
-# packs/eu-ai-act.yaml
-name: eu-ai-act
-version: 1.0.0
-description: EU AI Act Article 12 record-keeping baseline
+# packs/eu-ai-act-baseline.yaml
+name: eu-ai-act-baseline
+version: "1.0.0"
+kind: compliance          # compliance | security | quality
+description: EU AI Act Article 12 record-keeping baseline for high-risk AI systems
 author: Assay Team
 license: Apache-2.0
 
-# Legal disclaimer (REQUIRED)
+# REQUIRED for kind: compliance
 disclaimer: |
-  This pack provides technical checks that map to EU AI Act Article 12
-  requirements. Passing these checks does NOT constitute legal compliance.
-  Consult legal counsel for compliance determination.
+  This pack provides technical checks that map to EU AI Act Article 12 requirements.
+  Passing these checks does NOT constitute legal compliance. Organizations remain
+  responsible for meeting all applicable legal requirements. Consult qualified
+  legal counsel for compliance determination.
 
-# Minimum assay version
 requires:
-  assay: ">=2.7.0"
+  assay_min_version: ">=2.9.0"
+  evidence_schema_version: "1.0"
 
-# Rule definitions
 rules:
   - id: EU12-001
     severity: error
-    description: "Bundle must contain at least one event"
+    description: Evidence bundle contains automatically recorded operational events
+    article_ref: "12(1)"
+    help_markdown: |
+      ## EU AI Act Article 12(1) - Automatic Event Recording
+
+      High-risk AI systems must technically allow for automatic recording of events.
+      This check verifies that the evidence bundle contains at least one operational event.
     check:
       type: event_count
       min: 1
-    article_ref: "Article 12(1)"
 
   - id: EU12-002
-    severity: warning
-    description: "Bundle should have retention metadata"
-    check:
-      type: manifest_field
-      field: "x-assay-retention"
-      required: false  # Warning, not error
-    article_ref: "Article 12(1)"
-
-  - id: EU12-003
     severity: error
-    description: "Use periods must have start and finish events"
+    description: Events include run lifecycle fields for operation monitoring
+    article_ref: "12(2)(c)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(c) - Operation Monitoring
+
+      Logs must enable monitoring of AI system operation. This check verifies
+      events contain lifecycle fields (started/finished events, status, environment).
     check:
       type: event_pairs
       start_pattern: "*.started"
       finish_pattern: "*.finished"
-    article_ref: "Article 12(2)"
+
+  - id: EU12-003
+    severity: warning
+    description: Events include correlation IDs for post-market monitoring
+    article_ref: "12(2)(b)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(b) - Post-Market Monitoring
+
+      Logs must facilitate post-market monitoring. This check verifies events
+      contain correlation identifiers (run_id, trace_context, version/build_id).
+    check:
+      type: event_field_present
+      any_of: ["run_id", "traceparent", "build_id", "version"]
 
   - id: EU12-004
-    severity: info
-    description: "Risk-related findings should be documented"
-    check:
-      type: lint_findings
-      categories: ["security", "privacy", "safety"]
-    article_ref: "Article 12(2)(a)"
-
-# Biometric-specific rules (Annex III, point 1(a))
-biometric_rules:
-  - id: EU12-006
-    severity: error
-    description: "Biometric systems must log reference database"
-    check:
-      type: event_field
-      event_type: "assay.biometric.*"
-      field: "data.reference_db"
-    article_ref: "Article 12(3)(b)"
-
-  - id: EU12-007
-    severity: error
-    description: "Biometric systems must log match results"
-    check:
-      type: event_field
-      event_type: "assay.biometric.*"
-      field: "data.match_result"
-    article_ref: "Article 12(3)(c)"
-
-  - id: EU12-008
     severity: warning
-    description: "Human reviewer should be identified"
+    description: Events include fields enabling risk situation identification
+    article_ref: "12(2)(a)"
+    help_markdown: |
+      ## EU AI Act Article 12(2)(a) - Risk Identification
+
+      Logs must enable identification of risk situations or substantial modifications.
+      This check verifies events contain fields like policy decisions, denials,
+      or configuration/policy changes.
     check:
-      type: event_field
-      event_type: "assay.*.verified"
-      field: "data.reviewer"
-    article_ref: "Article 12(3)(d)"
+      type: event_field_present
+      any_of: ["policy_decision", "denied", "policy_hash", "config_hash", "violation"]
 ```
 
-### CLI Usage
+### SARIF Output (GitHub-Compatible)
 
-```bash
-# Lint with EU AI Act pack
-assay evidence lint bundle.tar.gz --pack eu-ai-act@1.0.0
-
-# Multiple packs (composition)
-assay evidence lint bundle.tar.gz --pack eu-ai-act@1.0.0,sec-17a-4@1.0.0
-
-# With org exceptions (paid)
-assay evidence lint bundle.tar.gz \
-  --pack eu-ai-act@1.0.0 \
-  --pack myorg/exceptions@1.0.0
-
-# Output formats
-assay evidence lint bundle.tar.gz --pack eu-ai-act --format sarif
-assay evidence lint bundle.tar.gz --pack eu-ai-act --format json
-assay evidence lint bundle.tar.gz --pack eu-ai-act --format markdown
-
-# Audit report (paid)
-assay evidence audit bundle.tar.gz \
-  --pack eu-ai-act@1.0.0 \
-  --format pdf \
-  --out compliance-report.pdf
-```
-
-### SARIF Output with Pack Metadata
+Pack metadata uses `properties` bags (SARIF-standard extensibility):
 
 ```json
 {
@@ -189,84 +198,118 @@ assay evidence audit bundle.tar.gz \
     "tool": {
       "driver": {
         "name": "assay-evidence-lint",
-        "version": "2.7.0",
-        "rules": [
-          {
-            "id": "EU12-001",
-            "shortDescription": { "text": "Bundle must contain at least one event" },
-            "helpUri": "https://docs.assay.dev/packs/eu-ai-act#EU12-001",
-            "properties": {
-              "pack": "eu-ai-act@1.0.0",
-              "article_ref": "Article 12(1)",
-              "tags": ["compliance", "eu-ai-act"]
-            }
-          }
-        ]
-      },
-      "extensions": [{
-        "name": "eu-ai-act",
-        "version": "1.0.0",
+        "version": "2.9.0",
         "properties": {
-          "disclaimer": "This pack provides technical checks..."
-        }
-      }]
+          "assayPacks": [
+            {"name": "eu-ai-act-baseline", "version": "1.0.0", "digest": "sha256:abc..."}
+          ]
+        },
+        "rules": [{
+          "id": "eu-ai-act-baseline@1.0.0:EU12-001",
+          "shortDescription": {"text": "Evidence bundle contains automatically recorded events"},
+          "help": {
+            "markdown": "## EU AI Act Article 12(1)\\n\\n**Disclaimer**: This check provides technical verification..."
+          },
+          "properties": {
+            "pack": "eu-ai-act-baseline",
+            "pack_version": "1.0.0",
+            "short_id": "EU12-001",
+            "article_ref": "12(1)"
+          }
+        }]
+      }
     },
-    "results": [...]
+    "properties": {
+      "disclaimer": "This pack provides technical checks..."
+    },
+    "results": [{
+      "ruleId": "eu-ai-act-baseline@1.0.0:EU12-001",
+      "properties": {
+        "article_ref": "12(1)"
+      }
+    }]
   }]
 }
 ```
 
+### CLI Usage
+
+```bash
+# Baseline pack (open source)
+assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline
+
+# Multiple packs (composition)
+assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline,soc2-baseline
+
+# Custom pack from file
+assay evidence lint bundle.tar.gz --pack ./my-custom-pack.yaml
+
+# Pro pack (requires enterprise license)
+assay evidence lint bundle.tar.gz --pack eu-ai-act-pro
+
+# Audit report (enterprise)
+assay evidence audit bundle.tar.gz \
+  --pack eu-ai-act-pro \
+  --format pdf \
+  --out compliance-report.pdf
+```
+
 ## Implementation Plan
 
-### Phase 1: Pack Engine (Week 1-2)
-- [ ] Pack definition YAML schema
-- [ ] Pack loader and validator
-- [ ] Built-in `eu-ai-act@1.0.0` pack
-- [ ] `--pack` CLI flag for `assay evidence lint`
-- [ ] Pack metadata in SARIF output
+### Phase 1: Pack Engine (P2)
+- [x] Pack definition YAML schema with `pack_kind`
+- [x] Rule ID namespacing (`{pack}@{version}:{rule_id}`)
+- [x] Pack loader with digest computation
+- [x] `--pack` CLI flag for `assay evidence lint`
+- [x] Pack metadata in SARIF `properties` bags
+- [x] Disclaimer enforcement for compliance packs
 
-### Phase 2: Additional Packs (Week 3-4)
-- [ ] `sec-17a-4@1.0.0` pack (financial)
-- [ ] `soc2@1.0.0` pack (security)
-- [ ] Pack composition logic
-- [ ] Pack versioning (semver resolution)
+### Phase 2: EU AI Act Baseline Pack (P2)
+- [x] Direct Article 12(1) + 12(2)(a)(b)(c) mapping
+- [x] Built-in `eu-ai-act-baseline@1.0.0` pack
+- [x] Help markdown with Article references
 
-### Phase 3: Advanced Features (Week 5-6)
-- [ ] Org pack registry
-- [ ] Exception workflow
+### Phase 3: Pro Packs (Enterprise)
+- [ ] `eu-ai-act-pro@1.0.0` with biometric rules
 - [ ] PDF audit report generation
-- [ ] Evidence Store linkage
+- [ ] Exception workflow support
+- [ ] Managed pack registry
 
 ## Acceptance Criteria
 
-- [ ] `assay evidence lint --pack eu-ai-act@1.0.0` produces findings
-- [ ] SARIF output includes pack metadata and article references
-- [ ] Disclaimer is included in all pack outputs
-- [ ] Pack composition works (`--pack a,b`)
-- [ ] Custom pack definitions can be loaded from file
-- [ ] Version mismatch produces clear error
+### Pack Engine (OSS)
+- [ ] Rule ID canonical format prevents collisions
+- [ ] `pack_kind == compliance` requires disclaimer (hard fail)
+- [ ] Pack digest (sha256) in SARIF output
+- [ ] `assay_min_version` checked on load
+- [ ] SARIF metadata in `properties` (not `tool.extensions`)
+
+### EU AI Act Baseline Pack (OSS)
+- [ ] 4 rules with direct Article 12(1) + 12(2)(a)(b)(c) mapping
+- [ ] Disclaimer in `help.markdown` + `run.properties`
+- [ ] `article_ref` in rule and result `properties`
 
 ## Consequences
 
 ### Positive
-- Clear technical mapping to regulatory requirements
-- Versioned packs enable tracking of compliance over time
-- Composition allows layering org-specific rules
-- SARIF integration with existing CI/CD workflows
+- Legally defensible Article 12 mapping (direct to source)
+- Open baseline drives adoption
+- Versioned packs enable compliance tracking
+- SARIF integration with GitHub Code Scanning
 
 ### Negative
 - Risk of "compliance theater" (passing ≠ compliant)
-- Pack maintenance burden as regulations evolve
-- Legal disclaimer management
+- Pack maintenance as regulations evolve
+- Clear baseline/pro boundary management
 
 ### Neutral
 - prEN ISO/IEC 24970 may require pack updates when finalized
-- Different jurisdictions may need localized packs
+- Different jurisdictions may need localized baseline packs
 
 ## References
 
 - [EU AI Act Article 12](https://artificialintelligenceact.eu/article/12/)
 - [EU AI Act Full Text (Regulation 2024/1689)](https://eur-lex.europa.eu/eli/reg/2024/1689/oj)
 - [Draft prEN ISO/IEC 24970](https://www.iso.org/standard/79799.html) (AI System Logging)
-- [ADR-009: WORM Storage](./ADR-009-WORM-Storage.md)
-- [ADR-010: Evidence Store API](./ADR-010-Evidence-Store-API.md)
+- [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md)
+- [SARIF 2.1.0 Spec](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)

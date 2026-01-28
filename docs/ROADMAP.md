@@ -126,14 +126,15 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
 | **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete |
-| **P2** | EU AI Act Compliance Pack | Medium | High | Pending |
+| **P2** | Pack Engine (OSS) | Medium | High | **Next** |
+| **P2** | EU AI Act Baseline Pack (OSS) | Low | High | After Pack Engine |
 | **P2** | Mandate/Intent Evidence | Medium | High | Pending |
-| **P2** | GitHub Action v2.1 | Low | Medium | Pending |
-| **P3** | Transparency Log Verification | Low | Medium | Pending |
+| **P2** | GitHub Action v2.1 | Low | Medium | After packs |
+| **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
 
-See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md)
+See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md), [ADR-016 (Pack Taxonomy)](./architecture/ADR-016-Pack-Taxonomy.md)
 See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
 
 ### GitHub Action v2 ✅ Complete
@@ -197,10 +198,53 @@ Support for AP2-style authorization evidence (agentic commerce):
 
 This strengthens EU AI Act Article 12 compliance for commerce workflows.
 
-### D. Compliance Packs (Open Core)
-- [ ] **Pack Engine**: `--pack` CLI flag, pack composition
-- [ ] **EU AI Act Pack**: Article 12 mapping, SARIF output with `article_ref`
+### C. Compliance Packs (P2) — Semgrep Model
+
+Per [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md), we follow the Semgrep open core pattern:
+- **Engine + Baseline packs** = Open Source (Apache 2.0)
+- **Pro packs + Managed workflows** = Enterprise (Commercial)
+
+#### Pack Engine (OSS)
+
+```bash
+assay evidence lint --pack eu-ai-act-baseline        # Single pack
+assay evidence lint --pack eu-ai-act-baseline,soc2   # Composition
+assay evidence lint --pack ./custom-pack.yaml        # Custom pack
+```
+
+- [ ] **Pack loader**: YAML schema with `pack_kind` (compliance/security/quality)
+- [ ] **Rule ID namespacing**: `{pack}@{version}:{rule_id}` for collision handling
+- [ ] **Pack composition**: `--pack a,b` with deterministic merge
+- [ ] **Version resolution**: `assay_min_version` + `evidence_schema_version`
+- [ ] **Pack digest**: SHA256 for supply chain integrity
+- [ ] **SARIF output**: Pack metadata in `properties` bags (GitHub-safe)
+- [ ] **Disclaimer enforcement**: `pack_kind == compliance` requires disclaimer
+
+#### EU AI Act Baseline Pack (OSS)
+
+Direct Article 12(1) + 12(2)(a)(b)(c) mapping:
+
+| Rule ID | Article | Check |
+|---------|---------|-------|
+| EU12-001 | 12(1) | Evidence bundle contains automatically recorded events |
+| EU12-002 | 12(2)(c) | Events include lifecycle fields for operation monitoring |
+| EU12-003 | 12(2)(b) | Events include correlation IDs for post-market monitoring |
+| EU12-004 | 12(2)(a) | Events include fields for risk situation identification |
+
+See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping.
+
+#### EU AI Act Pro Pack (Enterprise)
+
+- [ ] Biometric-specific rules (Article 12(3))
+- [ ] Retention policy validation
+- [ ] Advanced risk scoring
+- [ ] Org-specific exception workflows
+- [ ] PDF audit report generation
+
+#### Additional Packs (Future)
+
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required
+- [ ] **SOC2 Baseline/Pro**: Control mapping packs
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
 
 ### E. GitHub Action v2.1
@@ -362,7 +406,9 @@ The core execution and policy engine is stable and production-ready.
 
 ## Open Core Philosophy
 
-Assay follows the **open core model**: the core evidence tooling is fully open source (Apache 2.0), while enterprise governance features are commercially licensed.
+Assay follows the **open core model** (Semgrep pattern): engine + baseline packs are open source, managed workflows + pro packs are enterprise.
+
+See [ADR-016: Pack Taxonomy](./architecture/ADR-016-Pack-Taxonomy.md) for formal definition.
 
 ### Open Source (Apache 2.0)
 
@@ -374,23 +420,26 @@ Everything needed to create, verify, and analyze evidence locally:
 | **CLI Workflow** | `export`, `verify`, `lint`, `diff`, `explore`, `show` |
 | **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
 | **Basic Signing** | Ed25519 local key signing and verification |
+| **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification |
+| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping), future `soc2-baseline` |
 | **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor |
 | **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
 | **Output Formats** | SARIF, JUnit, JSON, console |
 
-**Why open:** Standards adoption requires broad accessibility. The evidence format should become infrastructure, not a product moat.
+**Why open:** Standards adoption requires broad accessibility. The evidence format and baseline compliance checks should become infrastructure, not a product moat.
 
 ### Enterprise Features (Commercial)
 
-Governance, compliance, and scale capabilities for organizations:
+Governance workflows and premium compliance for organizations:
 
 | Category | Components |
 |----------|------------|
 | **Identity & Access** | SSO/SAML/SCIM, RBAC, teams, approval workflows |
-| **Compliance** | EU AI Act Pack, SOC 2 mapping, compliance reporting |
-| **Advanced Signing** | Sigstore keyless, transparency log verification, trust policies |
+| **Pro Compliance Packs** | `eu-ai-act-pro` (biometric rules, PDF reports), `soc2-pro`, industry packs |
+| **Managed Workflows** | Exception approvals, scheduled scans, compliance dashboards |
+| **Advanced Signing** | Sigstore keyless, transparency log verification, org trust policies |
 | **Managed Storage** | WORM retention, legal hold, compliance attestation |
 | **Integrations** | SIEM connectors (Splunk/Sentinel), OTel pipeline templates |
 | **Fleet Management** | Policy distribution, runtime agent management |
 
-**Principle:** Gate platform scale and operations, not basic workflow. Developers should always be able to create and verify evidence locally for free.
+**Principle:** Gate *workflow scale* and *org operations*, not basic compliance checks. The "workflow moat" strategy: engine free, baseline free, managed workflows paid.
