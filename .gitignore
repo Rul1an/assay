@@ -1,3 +1,6 @@
+# Private/internal docs (not for public repo)
+.private/
+
 /target
 archive/
 **/*.rs.bk

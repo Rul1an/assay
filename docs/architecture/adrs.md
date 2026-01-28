@@ -22,15 +22,13 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 
 ## Q2 2026 Priorities
 
-The following ADRs are prioritized for Q2 2026 (Commercial Alpha):
+The following ADRs are prioritized for Q2 2026:
 
 1. **P0: ADR-009** - WORM Storage (Low effort, High compliance value)
 2. **P1: ADR-010** - Evidence Store API (Medium effort, Core commercial offering)
 3. **P2: ADR-011** - Tool Signing (Medium effort, Security differentiator)
 4. **P2: ADR-013** - EU AI Act Compliance Pack (Medium effort, Regulatory differentiator)
 5. **P3: ADR-012** - Transparency Log (Low effort, Builds on ADR-011)
-
-See [Q2 2026 PR Checklist](./Q2-2026-PR-Checklist.md) for implementation sequence and acceptance criteria.
 
 ## Template
 

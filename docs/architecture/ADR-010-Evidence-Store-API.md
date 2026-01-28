@@ -86,7 +86,7 @@ POST /v1/bundles/search
 }
 ```
 
-#### Legal Hold Endpoint (Paid Tier)
+#### Legal Hold Endpoint
 
 ```http
 POST /v1/bundles/{bundle_id}/legal-hold
@@ -381,13 +381,12 @@ async fn ingest_bundle(body: Bytes, tenant_id: &str) -> Result<IngestResponse> {
 
 ### Rate Limiting
 
-| Tier | Ingest | Query | Burst |
-|------|--------|-------|-------|
-| Free | 10/min | 100/min | 20 |
-| Pro | 100/min | 1000/min | 200 |
-| Enterprise | Custom | Custom | Custom |
+Default rate limits per API key:
+- Ingest: 100 requests/min
+- Query: 1000 requests/min
+- Burst: 200 requests
 
-Implemented via API Gateway usage plans + Lambda Powertools.
+Implemented via API Gateway usage plans.
 
 ### CloudEvents Observability Integration
 

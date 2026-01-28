@@ -371,19 +371,6 @@ This enables interoperability with other MCP security tools.
 
 **Decision:** Sigstore uses OIDC but produces proper X.509 certificates.
 
-## Open Core vs Paid Split
-
-| Feature | Open Core | Paid |
-|---------|-----------|------|
-| `assay tool sign --keyless` | ✅ | ✅ |
-| `assay tool verify` | ✅ | ✅ |
-| Public Rekor verification | ✅ | ✅ |
-| Trust policy in assay.yaml | ✅ | ✅ |
-| Private Rekor instance | ❌ | ✅ |
-| Org-wide trust policies | ❌ | ✅ |
-| Signing identity monitoring | ❌ | ✅ |
-| Revocation management | ❌ | ✅ |
-
 ## Implementation Plan
 
 ### Phase 1: Signing CLI (Week 1)

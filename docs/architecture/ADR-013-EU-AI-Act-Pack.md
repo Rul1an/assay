@@ -216,32 +216,6 @@ assay evidence audit bundle.tar.gz \
 }
 ```
 
-## Open Core vs Paid Split
-
-| Feature | Open Core | Paid |
-|---------|-----------|------|
-| Built-in packs (`eu-ai-act`, etc.) | ✅ | ✅ |
-| `--pack` CLI flag | ✅ | ✅ |
-| SARIF/JSON/Markdown output | ✅ | ✅ |
-| Pack composition | ✅ | ✅ |
-| Custom pack definitions | ✅ | ✅ |
-| **Org-hosted pack registry** | ❌ | ✅ |
-| **Exception management** | ❌ | ✅ |
-| **Audit report generation (PDF)** | ❌ | ✅ |
-| **Compliance dashboard** | ❌ | ✅ |
-| **Evidence Store linkage** | ❌ | ✅ |
-| **Auditor export workflow** | ❌ | ✅ |
-
-### Monetization
-
-| Item | Model |
-|------|-------|
-| Base packs | Free (open core) |
-| Custom pack hosting | Per-pack/month |
-| Exception management | Per-org/month |
-| Audit reports | Per-report or included in tier |
-| Compliance dashboard | Included in Pro/Enterprise |
-
 ## Implementation Plan
 
 ### Phase 1: Pack Engine (Week 1-2)
@@ -257,8 +231,8 @@ assay evidence audit bundle.tar.gz \
 - [ ] Pack composition logic
 - [ ] Pack versioning (semver resolution)
 
-### Phase 3: Paid Features (Week 5-6)
-- [ ] Org pack registry (S3-backed)
+### Phase 3: Advanced Features (Week 5-6)
+- [ ] Org pack registry
 - [ ] Exception workflow
 - [ ] PDF audit report generation
 - [ ] Evidence Store linkage

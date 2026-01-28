@@ -1,7 +1,7 @@
 # Assay Roadmap 2026
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
-**Moat:** Verifiable Evidence (Open Standard) + Governance Platform (Paid Service).
+**Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
 
 ---
 
@@ -84,11 +84,9 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 ---
 
-## Q2 2026: Supply Chain Moat (Commercial Alpha)
+## Q2 2026: Supply Chain Security
 
-**Objective:** Launch the initial "Moat" features that enterprises pay for.
-
-**Implementation:** See [Q2 2026 PR Checklist](./architecture/Q2-2026-PR-Checklist.md) for detailed PR sequence and acceptance criteria.
+**Objective:** Launch the initial commercial features.
 
 ### Prioritized Deliverables
 
@@ -174,52 +172,6 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 ### HITL Implementation (Epic L)
 - [ ] Decision Variant + Receipts: Human-in-the-loop tracking
 - [ ] Guardrail Hooks: NeMo/Superagent integration
-
----
-
-## Open Core vs Paid: The Split
-
-### Open Core (The Standard)
-
-**Goal:** Anyone can create/validate evidence locally and do basic governance.
-
-**License:** Apache 2.0 / MIT
-
-| Component | Included | Purpose |
-|-----------|----------|---------|
-| `assay-cli` | ✅ | All commands (happy path + power tools) |
-| `assay-evidence` | ✅ | Contract, verifier, deterministic bundles |
-| `assay-core` | ✅ | Policy engine, trace replay |
-| `assay-metrics` | ✅ | Evaluation metrics |
-| `assay-mcp-server` | ✅ | Runtime policy proxy |
-| `assay-monitor` | ✅ | eBPF/LSM integration |
-| `assay-sim` | ✅ | Chaos/differential testing (feature-gated) |
-| `assay-python-sdk` | ✅ | Python bindings + pytest plugin |
-| SARIF/JSON outputs | ✅ | CI integration, no lock-in |
-| Base lint rules | ✅ | Secrets/PII detection (community baseline) |
-| Tool signing hooks | ✅ | `x-assay-sig` field, local verification |
-
-**Value:** Local reproducibility, developer DX, standard schemas, portable bundles.
-
-### Paid (Governance Platform)
-
-**Goal:** Org-wide governance, retention, trust, integrations, liability.
-
-| Feature | Buyer | Pricing Model |
-|---------|-------|---------------|
-| **Evidence Store** | Security/Compliance | Retained GB + Ingest volume |
-| **WORM Retention** | Legal/Compliance | Included with Store |
-| **Trust & Signing Service** | Security | Per-verification or flat |
-| **SSO/SAML/SCIM** | IT/Security | Per-seat |
-| **RBAC + Audit Logs** | Compliance | Per-seat |
-| **SIEM Connectors** | SecOps | Per-connector |
-| **Compliance Analytics** | Compliance | Per-org |
-| **Managed Packs** | Compliance | Per-pack |
-| **SLA / Support** | All | Tier-based |
-
-**Value:** Governance at scale, retention policies, trust verification, compliance reporting, liability transfer.
-
-**Key Principle:** Open core bundles remain portable and valid without SaaS. SaaS is superior in scale, query, governance, trust, and retention.
 
 ---
 

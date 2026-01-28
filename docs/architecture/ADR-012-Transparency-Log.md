@@ -351,43 +351,6 @@ evidence_verification:
   require_transparency: true
 ```
 
-## Open Core vs Paid Split
-
-| Feature | Open Core | Paid |
-|---------|-----------|------|
-| Public Rekor verification | ✅ | ✅ |
-| Inclusion proof validation | ✅ | ✅ |
-| Consistency proof validation | ✅ | ✅ |
-| Offline bundle verification | ✅ | ✅ |
-| `--rekor-required` flag | ✅ | ✅ |
-| rekor-monitor integration | ✅ | ✅ |
-| Private Rekor instance | ❌ | ✅ |
-| Managed identity monitoring | ❌ | ✅ |
-| Alert webhooks | ❌ | ✅ |
-| Historical analysis dashboard | ❌ | ✅ |
-| **Rate-limited API proxy** | ❌ | ✅ |
-
-### Rate Limits & Monetization
-
-**Open Core (direct Rekor access):**
-- Subject to public Rekor rate limits
-- No SLA guarantees
-- User responsible for caching
-
-**Paid (managed Rekor proxy):**
-- Assay-managed caching layer (99.9% cache hit rate)
-- Higher rate limits via paid tier
-- SLA-backed availability
-- Aggregated monitoring across org
-
-| Tier | Verifications/min | Cache | SLA |
-|------|-------------------|-------|-----|
-| Free (direct) | ~10 (Rekor limit) | Local only | None |
-| Pro | 1000 | Managed | 99.5% |
-| Enterprise | Unlimited | Dedicated | 99.9% |
-
-**Pricing model:** Per-verification above free tier, or flat monthly for Pro/Enterprise.
-
 ## Implementation Plan
 
 ### Phase 1: Basic Verification (Week 1)
