@@ -169,7 +169,7 @@ impl ObjectStoreBundleStore {
         {
             Ok(_) => return Ok(()),
             Err(object_store::Error::AlreadyExists { .. }) => {
-                // Object exists - idempotent success
+                // Object exists - return AlreadyExists error for caller to handle as idempotent
                 return Err(StoreError::AlreadyExists {
                     bundle_id: key.as_ref().to_string(),
                 });
