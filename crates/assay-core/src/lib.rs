@@ -29,6 +29,7 @@ pub mod agent_assertions;
 pub mod agentic;
 pub mod fix;
 pub mod report;
+pub mod runtime;
 pub mod storage;
 pub mod thresholds;
 pub mod trace;
