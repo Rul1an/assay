@@ -1,42 +1,70 @@
 # Security Policy
 
-Assay is a security-critical component in the AI Agent stack. We take vulnerability reporting and supply chain security seriously.
+Assay is security-critical infrastructure for AI agents. We take vulnerabilities seriously.
 
 ## Supported Versions
 
-We provide security updates for the latest major version.
-
 | Version | Status |
-| :--- | :--- |
-| **v1.x** | ✅ **Supported** |
+|---------|--------|
+| **v2.x** | ✅ Supported |
+| v1.x | ⚠️ Maintenance only |
 | v0.x | ❌ EOL |
 
-## Reporting a Vulnerability
+## Reporting Vulnerabilities
 
-**Please do not report security vulnerabilities through public GitHub issues.**
+**Do not report security issues through public GitHub issues.**
 
-If you believe you have found a security vulnerability in Assay (Core, CLI, or MCP Server), please report it privately:
+Report privately:
+- **Email**: security@assay.dev
+- **GitHub**: Use "Report a vulnerability" tab
 
-*   **Email**: `security@assay.dev`
-*   **GitHub**: Use the "Report a vulnerability" tab in this repository.
-
-We aim to acknowledge receipt within 24 hours and provide a timeline for triage.
+Response time: 24 hours acknowledgment, 72 hours triage.
 
 ## Threat Model
 
-Assay is designed to run in untrusted environments (CI/CD, Agent Sandbox).
+Assay runs in untrusted environments (CI/CD, agent sandboxes).
 
 ### In Scope
-*   **Policy Bypass**: Bypassing configured `deny` lists or regex constraints.
-*   **Remote Code Execution (RCE)**: Triggering arbitrary code execution via a malicious configuration file or trace payload.
-*   **MCP Protocol Violation**: Exploits that allow unauthorized tool calls to leak through the `assay-mcp-server` proxy.
+
+| Category | Examples |
+|----------|----------|
+| **Policy Bypass** | Circumventing `deny` lists, regex constraints |
+| **RCE** | Code execution via malicious config/trace |
+| **MCP Violations** | Unauthorized tool calls through proxy |
+| **Evidence Tampering** | Bundle modification, manifest spoofing |
+| **Terminal Injection** | ANSI escape attacks in `evidence explore` |
 
 ### Out of Scope
-*   **Physical Access**: Attacks requiring physical access to the machine.
-*   **Denial of Service (DoS)**: While we aim for resilience, extreme resource exhaustion attacks are currently lower priority than integrity violations.
 
-## Supply Chain Security
+- Physical access attacks
+- DoS (lower priority than integrity)
+- Social engineering
 
-*   **Crates.io**: We use Trusted Publishing (OIDC) to link GitHub Actions directly to Crates.io, eliminating long-lived secret tokens.
-*   **PyPI**: We use Trusted Publishing for Python wheels.
-*   **Dependencies**: We audit dependencies using `cargo-deny` in our CI pipeline.
+## Security Features
+
+### Evidence Integrity
+
+- Content-addressed bundle IDs (SHA-256)
+- JCS canonicalization (RFC 8785)
+- Verification gate before any processing
+
+### Tool Signing (Planned)
+
+- `x-assay-sig` extension field
+- Sigstore/Rekor transparency logging
+- Trust policy enforcement
+
+### Runtime Isolation
+
+- Landlock (rootless containment)
+- eBPF/LSM (kernel enforcement)
+- Environment scrubbing
+
+## Supply Chain
+
+| Component | Protection |
+|-----------|------------|
+| Crates.io | Trusted Publishing (OIDC) |
+| PyPI | Trusted Publishing |
+| Dependencies | `cargo-deny` audit in CI |
+| Releases | GitHub Actions, no manual tokens |

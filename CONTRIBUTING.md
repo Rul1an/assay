@@ -1,50 +1,101 @@
 # Contributing to Assay
 
-Assay is a security-critical tool. We maintain high standards for code quality, safety, and performance.
+Security-critical tool. High standards for code quality, safety, and performance.
 
-## 1. Development Environment
-
-Assay uses a hybrid build model (Safe Rust + eBPF).
-
-- **Rust**: Latest stable (for host).
-- **Nightly Rust**: Specifically for eBPF bytecode generation (managed via Docker).
-- **Docker**: Required for eBPF builds on macOS/Windows.
-
-### The Build Toolchain (`xtask`)
-We use `cargo xtask` to abstract complex build requirements:
+## Development Setup
 
 ```bash
-# 1. Prepare the build environment
-cargo xtask build-image
+# Clone
+git clone https://github.com/Rul1an/assay.git
+cd assay
 
-# 2. Build eBPF programs
-cargo xtask build-ebpf --docker
+# Build
+cargo build --workspace
+
+# Test
+cargo test --workspace
+
+# Lint
+cargo clippy --workspace -- -D warnings
 ```
 
-## 2. Workspace Structure
+### eBPF (Linux only)
 
-- `crates/assay-core`: Policy engine and business logic (no-std compatible where possible).
-- `crates/assay-ebpf`: Kernel-space programs (LSM, Tracepoints).
-- `crates/assay-monitor`: BPF loader and event streamer.
-- `crates/assay-cli`: Main entry point.
+```bash
+cargo xtask build-image
+cargo xtask build-ebpf --docker
+./scripts/verify_lsm_docker.sh
+```
 
-## 3. Standards
+### Python SDK
 
-- **Zero Unwraps**: Use `?` or `Result`. Panics are unacceptable in `assay-core`.
-- **Clippy**: Must pass `-D warnings`.
-- **LSM Verification**: If you touch `assay-ebpf`, you must run `./scripts/verify_lsm_docker.sh`.
+```bash
+cd assay-python-sdk
+pip install maturin
+maturin develop
+pytest python/tests/
+```
 
-## 4. Pull Request Process
+## Workspace Structure
 
-1. Feature branch: `feat/description` or `fix/description`.
-2. Clean commits using [Conventional Commits](https://www.conventionalcommits.org/).
-3. All CI gates (Linux/macOS/Windows) must be green.
-# Aya Upgrade Protocol
-1. Sync `aya` and `aya-ebpf` versions across all `Cargo.toml` files.
-2. Run eBPF build (docker) for target `bpfel-unknown-none`.
-3. Verify with `verify_lsm_docker.sh`:
+| Crate | Purpose |
+|-------|---------|
+| `assay-cli` | CLI binary, commands, reporting |
+| `assay-core` | Policy engine, trace replay, storage |
+| `assay-evidence` | Evidence bundles, verification, lint |
+| `assay-metrics` | Evaluation metrics (MustContain, ArgsValid, etc.) |
+| `assay-mcp-server` | MCP proxy with policy enforcement |
+| `assay-monitor` | eBPF loader, event streaming |
+| `assay-policy` | Policy compilation (Tier 1/2) |
+| `assay-ebpf` | Kernel-space LSM programs |
+| `assay-common` | Shared types (no_std compatible) |
+| `assay-sim` | Attack simulation |
+| `assay-python-sdk` | Python bindings + pytest plugin |
 
-   ```bash
-   ./scripts/verify_lsm_docker.sh
-   # Expect: eBPF build success + detected Lima/Docker env + passing runtime test
-   ```
+## Code Standards
+
+- **No panics**: Use `?` and `Result`. No `.unwrap()` in `assay-core`.
+- **Clippy clean**: `cargo clippy -- -D warnings`
+- **Formatted**: `cargo fmt`
+- **Tested**: New features require tests
+
+## Testing
+
+```bash
+# All tests
+cargo test --workspace
+
+# Specific crate
+cargo test -p assay-core
+cargo test -p assay-evidence
+
+# E2E tests
+cargo test -p assay-cli --test evidence_test
+
+# Python
+cd assay-python-sdk && pytest
+```
+
+## Pull Requests
+
+1. Branch: `feat/description` or `fix/description`
+2. Commits: [Conventional Commits](https://www.conventionalcommits.org/)
+3. CI must pass (Linux/macOS/Windows)
+4. Update docs if behavior changes
+
+## Aya/eBPF Upgrades
+
+When upgrading `aya` or `aya-ebpf`:
+
+1. Sync versions across all `Cargo.toml`
+2. Build: `cargo xtask build-ebpf --docker`
+3. Verify: `./scripts/verify_lsm_docker.sh`
+
+## Pre-commit
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Runs `cargo fmt`, `cargo clippy`, and `typos` on commit.
