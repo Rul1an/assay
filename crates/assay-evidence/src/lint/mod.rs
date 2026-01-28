@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod packs;
 pub mod rules;
 pub mod sarif;
 

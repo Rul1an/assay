@@ -29,6 +29,10 @@ tar = "0.4"
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 
+# Pack engine
+serde_yaml = "0.9"
+globset = "0.4"
+
 # BYOS: Object storage (S3, Azure, GCS, local, memory)
 object_store = { version = "0.11", features = ["aws", "http"] }
 async-trait = "0.1"
