@@ -1,0 +1,31 @@
+{
+  "_comment": "Golden test vector - signed with test key (DO NOT USE IN PRODUCTION)",
+  "_key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+  "mandate_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+  "mandate_kind": "intent",
+  "principal": {
+    "subject": "user-123",
+    "method": "oidc"
+  },
+  "scope": {
+    "tools": ["search_*"],
+    "operation_class": "read"
+  },
+  "validity": {
+    "issued_at": "2026-01-28T10:00:00Z"
+  },
+  "constraints": {},
+  "context": {
+    "audience": "myorg/app",
+    "issuer": "auth.myorg.com"
+  },
+  "signature": {
+    "version": 1,
+    "algorithm": "ed25519",
+    "payload_type": "application/vnd.assay.mandate+json;v=1",
+    "content_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+    "signed_payload_digest": "sha256:39098db3ab9530a5735f14cdef309d8f6755f2245a62079d8463a9bba13c470a",
+    "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+    "signature": "yNdcG9PJoghOnhL4TYURDFl6ZivyeKqlWfsDqT3qLWhlmJCIuYIFyv3wuR7SsB9nE1Wl7hSw/RHwiNLAGKUXDA=="
+  }
+}

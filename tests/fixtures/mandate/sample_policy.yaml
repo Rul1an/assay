@@ -1,0 +1,57 @@
+# Sample Mandate Trust Policy
+# For testing mandate evidence verification
+
+mandate_trust:
+  # Require all mandates to be cryptographically signed
+  require_signed: true
+
+  # Expected audience - mandate.context.audience must match exactly
+  # Format: {org}/{app} or {org}/{app}/{env}
+  expected_audience: "acme/shopping-agent"
+
+  # Trusted issuers - mandate.context.issuer must be in this list
+  # Comparison is exact string match (no URL normalization)
+  trusted_issuers:
+    - "auth.acme.com"
+    - "idp.partner.com"
+
+  # Trusted signing key IDs (sha256 of SPKI public key)
+  # These are the ONLY keys that can sign valid mandates
+  trusted_key_ids:
+    - "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # test key
+
+  # Allow embedded public key in signature (DEVELOPMENT ONLY)
+  # Set to false in production
+  allow_embedded_key: false
+
+  # Clock skew tolerance in seconds
+  # Allows for clock drift between signing and verification systems
+  clock_skew_tolerance_seconds: 30
+
+  # Trusted sources for lifecycle events (used, revoked)
+  # Events from other sources are rejected
+  trusted_event_sources:
+    - "assay://acme/shopping-agent"
+    - "assay://acme/auth-service"
+
+  # Require signed lifecycle events
+  # "auto" = required for transaction mandates and commit tools
+  # "true" = always required
+  # "false" = never required (not recommended)
+  require_signed_lifecycle_events: auto
+
+  # Tool patterns classified as commit operations (require transaction mandate)
+  commit_tools:
+    - "purchase_*"
+    - "transfer_*"
+    - "order_*"
+    - "payment_*"
+    - "checkout_*"
+
+  # Tool patterns classified as write operations (require intent or transaction mandate)
+  write_tools:
+    - "update_*"
+    - "edit_*"
+    - "delete_*"
+    - "fs.write_*"
+    - "fs.delete_*"

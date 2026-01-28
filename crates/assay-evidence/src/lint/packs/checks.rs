@@ -23,6 +23,8 @@ pub struct CheckContext<'a> {
     pub pack_version: &'a str,
     /// Pack digest.
     pub pack_digest: &'a str,
+    /// Pack kind (compliance/security/quality).
+    pub pack_kind: super::schema::PackKind,
 }
 
 /// Result of a check execution.
@@ -33,8 +35,29 @@ pub struct CheckResult {
     pub finding: Option<LintFinding>,
 }
 
+/// Current pack engine version.
+pub const ENGINE_VERSION: &str = "1.0";
+
 /// Execute a pack rule check.
+///
+/// For unsupported check types, behavior depends on `pack_kind`:
+/// - Compliance packs: unsupported check = error (no compliance theater)
+/// - Security/Quality: unsupported check = warning + skip
 pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
+    // Check engine version requirement if specified
+    if let Some(required_version) = &rule.engine_min_version {
+        if !engine_version_satisfies(ENGINE_VERSION, required_version) {
+            return handle_unsupported_check(
+                rule,
+                ctx,
+                &format!(
+                    "Rule requires engine v{}, current is v{}",
+                    required_version, ENGINE_VERSION
+                ),
+            );
+        }
+    }
+
     match &rule.check {
         CheckDefinition::EventCount { min } => check_event_count(rule, ctx, *min),
         CheckDefinition::EventPairs {
@@ -49,6 +72,97 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
         CheckDefinition::ManifestField { path, required } => {
             check_manifest_field(rule, ctx, path, *required)
         }
+        CheckDefinition::JsonPathExists { paths } => check_json_path_exists(rule, ctx, paths),
+        CheckDefinition::Conditional { .. } => {
+            handle_unsupported_check(rule, ctx, "Conditional checks require engine v1.1")
+        }
+        CheckDefinition::Unsupported => handle_unsupported_check(
+            rule,
+            ctx,
+            &format!("Unknown check type '{}'", rule.check.type_name()),
+        ),
+    }
+}
+
+/// Handle unsupported check types based on pack kind.
+fn handle_unsupported_check(rule: &PackRule, ctx: &CheckContext<'_>, reason: &str) -> CheckResult {
+    // For compliance packs: unsupported = hard fail (no compliance theater)
+    // For security/quality: skip with warning
+    use super::schema::PackKind;
+
+    if ctx.pack_kind == PackKind::Compliance {
+        CheckResult {
+            passed: false,
+            finding: Some(create_finding(
+                rule,
+                ctx,
+                format!(
+                    "Cannot execute rule: {}. Compliance packs require all rules to be executable.",
+                    reason
+                ),
+                None,
+            )),
+        }
+    } else {
+        tracing::warn!(
+            rule_id = %rule.id,
+            pack = %ctx.pack_name,
+            reason = %reason,
+            "Skipping unsupported check"
+        );
+        CheckResult {
+            passed: true, // Skip = pass (but logged)
+            finding: None,
+        }
+    }
+}
+
+/// Check if current engine version satisfies requirement.
+fn engine_version_satisfies(current: &str, required: &str) -> bool {
+    // Parse simple semver (major.minor)
+    let parse = |v: &str| -> Option<(u32, u32)> {
+        let parts: Vec<&str> = v.split('.').collect();
+        Some((parts.first()?.parse().ok()?, parts.get(1)?.parse().ok()?))
+    };
+
+    match (parse(current), parse(required)) {
+        (Some((c_major, c_minor)), Some((r_major, r_minor))) => {
+            (c_major, c_minor) >= (r_major, r_minor)
+        }
+        _ => false,
+    }
+}
+
+/// Check: JSON path exists in events.
+fn check_json_path_exists(
+    rule: &PackRule,
+    ctx: &CheckContext<'_>,
+    paths: &[String],
+) -> CheckResult {
+    for event in ctx.events {
+        let json = match serde_json::to_value(event) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        for path in paths {
+            if json_pointer_get(&json, path).is_some() {
+                return CheckResult {
+                    passed: true,
+                    finding: None,
+                };
+            }
+        }
+    }
+
+    CheckResult {
+        passed: false,
+        finding: Some(create_finding(
+            rule,
+            ctx,
+            format!("No event contains paths: {}", paths.join(", ")),
+            None,
+        )),
     }
 }
 

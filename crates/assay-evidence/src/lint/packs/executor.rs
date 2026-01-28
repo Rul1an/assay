@@ -113,6 +113,7 @@ impl PackExecutor {
                 pack_name: &pack.definition.name,
                 pack_version: &pack.definition.version,
                 pack_digest: &pack.digest,
+                pack_kind: pack.definition.kind,
             };
 
             for rule in &pack.definition.rules {
@@ -373,6 +374,8 @@ mod tests {
             article_ref: None,
             help_markdown: None,
             check: CheckDefinition::EventCount { min: 1 },
+            engine_min_version: None,
+            event_types: None,
         }
     }
 

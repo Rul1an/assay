@@ -1,0 +1,359 @@
+{
+  "meta": {
+    "format_version": "1",
+    "payload_type": "application/vnd.assay.mandate+json;v=1",
+    "hash": "sha256",
+    "jcs": "rfc8785",
+    "dsse_pae": "dssev1",
+    "signature_algorithm": "ed25519",
+    "base64": "rfc4648_padded"
+  },
+  "test_key": {
+    "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+    "public_key_spki_der_b64": "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+    "private_key_pkcs8_der_b64": "MFECAQEwBQYDK2VwBCIEIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8ggSEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+    "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "_warning": "TEST KEY ONLY - DO NOT USE IN PRODUCTION"
+  },
+  "vectors": [
+    {
+      "name": "intent-basic",
+      "description": "Minimal intent mandate for discovery operations",
+      "hashable_content": {
+        "constraints": {},
+        "context": {
+          "audience": "myorg/app",
+          "issuer": "auth.myorg.com"
+        },
+        "mandate_kind": "intent",
+        "principal": {
+          "method": "oidc",
+          "subject": "user-123"
+        },
+        "scope": {
+          "operation_class": "read",
+          "tools": [
+            "search_*"
+          ]
+        },
+        "validity": {
+          "issued_at": "2026-01-28T10:00:00Z"
+        }
+      },
+      "hashable_canonical_jcs": "{\"constraints\":{},\"context\":{\"audience\":\"myorg/app\",\"issuer\":\"auth.myorg.com\"},\"mandate_kind\":\"intent\",\"principal\":{\"method\":\"oidc\",\"subject\":\"user-123\"},\"scope\":{\"operation_class\":\"read\",\"tools\":[\"search_*\"]},\"validity\":{\"issued_at\":\"2026-01-28T10:00:00Z\"}}",
+      "expected_mandate_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+      "signable_content": {
+        "constraints": {},
+        "context": {
+          "audience": "myorg/app",
+          "issuer": "auth.myorg.com"
+        },
+        "mandate_kind": "intent",
+        "principal": {
+          "method": "oidc",
+          "subject": "user-123"
+        },
+        "scope": {
+          "operation_class": "read",
+          "tools": [
+            "search_*"
+          ]
+        },
+        "validity": {
+          "issued_at": "2026-01-28T10:00:00Z"
+        },
+        "mandate_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0"
+      },
+      "signable_canonical_jcs": "{\"constraints\":{},\"context\":{\"audience\":\"myorg/app\",\"issuer\":\"auth.myorg.com\"},\"mandate_id\":\"sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0\",\"mandate_kind\":\"intent\",\"principal\":{\"method\":\"oidc\",\"subject\":\"user-123\"},\"scope\":{\"operation_class\":\"read\",\"tools\":[\"search_*\"]},\"validity\":{\"issued_at\":\"2026-01-28T10:00:00Z\"}}",
+      "expected_pae_b64": "RFNTRXYxIDM4IGFwcGxpY2F0aW9uL3ZuZC5hc3NheS5tYW5kYXRlK2pzb247dj0xIDM0NSB7ImNvbnN0cmFpbnRzIjp7fSwiY29udGV4dCI6eyJhdWRpZW5jZSI6Im15b3JnL2FwcCIsImlzc3VlciI6ImF1dGgubXlvcmcuY29tIn0sIm1hbmRhdGVfaWQiOiJzaGEyNTY6MTMyNDNlODZhYzgxZGExYTBlNTFmYTcwMzM3MWQyOTFiZTY0MjRkZDNmZTNlN2E5YjM4MGQ5NDk3ZTY4YzdjMCIsIm1hbmRhdGVfa2luZCI6ImludGVudCIsInByaW5jaXBhbCI6eyJtZXRob2QiOiJvaWRjIiwic3ViamVjdCI6InVzZXItMTIzIn0sInNjb3BlIjp7Im9wZXJhdGlvbl9jbGFzcyI6InJlYWQiLCJ0b29scyI6WyJzZWFyY2hfKiJdfSwidmFsaWRpdHkiOnsiaXNzdWVkX2F0IjoiMjAyNi0wMS0yOFQxMDowMDowMFoifX0=",
+      "signature": {
+        "version": 1,
+        "algorithm": "ed25519",
+        "payload_type": "application/vnd.assay.mandate+json;v=1",
+        "content_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+        "signed_payload_digest": "sha256:39098db3ab9530a5735f14cdef309d8f6755f2245a62079d8463a9bba13c470a",
+        "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+        "expected_signature_b64": "yNdcG9PJoghOnhL4TYURDFl6ZivyeKqlWfsDqT3qLWhlmJCIuYIFyv3wuR7SsB9nE1Wl7hSw/RHwiNLAGKUXDA=="
+      },
+      "final_event": {
+        "specversion": "1.0",
+        "id": "evt_intent_basic",
+        "type": "assay.mandate.v1",
+        "source": "assay://test/golden-vectors",
+        "time": "2026-01-28T10:00:00Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "constraints": {},
+          "context": {
+            "audience": "myorg/app",
+            "issuer": "auth.myorg.com"
+          },
+          "mandate_kind": "intent",
+          "principal": {
+            "method": "oidc",
+            "subject": "user-123"
+          },
+          "scope": {
+            "operation_class": "read",
+            "tools": [
+              "search_*"
+            ]
+          },
+          "validity": {
+            "issued_at": "2026-01-28T10:00:00Z"
+          },
+          "mandate_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+          "signature": {
+            "version": 1,
+            "algorithm": "ed25519",
+            "payload_type": "application/vnd.assay.mandate+json;v=1",
+            "content_id": "sha256:13243e86ac81da1a0e51fa703371d291be6424dd3fe3e7a9b380d9497e68c7c0",
+            "signed_payload_digest": "sha256:39098db3ab9530a5735f14cdef309d8f6755f2245a62079d8463a9bba13c470a",
+            "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+            "signature": "yNdcG9PJoghOnhL4TYURDFl6ZivyeKqlWfsDqT3qLWhlmJCIuYIFyv3wuR7SsB9nE1Wl7hSw/RHwiNLAGKUXDA=="
+          }
+        }
+      }
+    },
+    {
+      "name": "txn-commit-with-transaction-ref",
+      "description": "Transaction mandate with commit scope + transaction_ref binding",
+      "hashable_content": {
+        "constraints": {
+          "max_uses": 1,
+          "require_confirmation": true,
+          "single_use": true
+        },
+        "context": {
+          "audience": "acme-corp/shopping-agent",
+          "issuer": "auth.acme-corp.com",
+          "nonce": "confirm_session_xyz789",
+          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+        },
+        "mandate_kind": "transaction",
+        "principal": {
+          "method": "oidc",
+          "subject": "usr_test_001"
+        },
+        "scope": {
+          "max_value": {
+            "amount": "99.99",
+            "currency": "USD"
+          },
+          "operation_class": "commit",
+          "tools": [
+            "purchase_item"
+          ],
+          "transaction_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "validity": {
+          "expires_at": "2026-01-28T10:35:00Z",
+          "issued_at": "2026-01-28T10:30:00Z",
+          "not_before": "2026-01-28T10:30:00Z"
+        }
+      },
+      "hashable_canonical_jcs": "{\"constraints\":{\"max_uses\":1,\"require_confirmation\":true,\"single_use\":true},\"context\":{\"audience\":\"acme-corp/shopping-agent\",\"issuer\":\"auth.acme-corp.com\",\"nonce\":\"confirm_session_xyz789\",\"traceparent\":\"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01\"},\"mandate_kind\":\"transaction\",\"principal\":{\"method\":\"oidc\",\"subject\":\"usr_test_001\"},\"scope\":{\"max_value\":{\"amount\":\"99.99\",\"currency\":\"USD\"},\"operation_class\":\"commit\",\"tools\":[\"purchase_item\"],\"transaction_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"validity\":{\"expires_at\":\"2026-01-28T10:35:00Z\",\"issued_at\":\"2026-01-28T10:30:00Z\",\"not_before\":\"2026-01-28T10:30:00Z\"}}",
+      "expected_mandate_id": "sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589",
+      "signable_content": {
+        "constraints": {
+          "max_uses": 1,
+          "require_confirmation": true,
+          "single_use": true
+        },
+        "context": {
+          "audience": "acme-corp/shopping-agent",
+          "issuer": "auth.acme-corp.com",
+          "nonce": "confirm_session_xyz789",
+          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+        },
+        "mandate_kind": "transaction",
+        "principal": {
+          "method": "oidc",
+          "subject": "usr_test_001"
+        },
+        "scope": {
+          "max_value": {
+            "amount": "99.99",
+            "currency": "USD"
+          },
+          "operation_class": "commit",
+          "tools": [
+            "purchase_item"
+          ],
+          "transaction_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "validity": {
+          "expires_at": "2026-01-28T10:35:00Z",
+          "issued_at": "2026-01-28T10:30:00Z",
+          "not_before": "2026-01-28T10:30:00Z"
+        },
+        "mandate_id": "sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589"
+      },
+      "signable_canonical_jcs": "{\"constraints\":{\"max_uses\":1,\"require_confirmation\":true,\"single_use\":true},\"context\":{\"audience\":\"acme-corp/shopping-agent\",\"issuer\":\"auth.acme-corp.com\",\"nonce\":\"confirm_session_xyz789\",\"traceparent\":\"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01\"},\"mandate_id\":\"sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589\",\"mandate_kind\":\"transaction\",\"principal\":{\"method\":\"oidc\",\"subject\":\"usr_test_001\"},\"scope\":{\"max_value\":{\"amount\":\"99.99\",\"currency\":\"USD\"},\"operation_class\":\"commit\",\"tools\":[\"purchase_item\"],\"transaction_ref\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"validity\":{\"expires_at\":\"2026-01-28T10:35:00Z\",\"issued_at\":\"2026-01-28T10:30:00Z\",\"not_before\":\"2026-01-28T10:30:00Z\"}}",
+      "expected_pae_b64": "RFNTRXYxIDM4IGFwcGxpY2F0aW9uL3ZuZC5hc3NheS5tYW5kYXRlK2pzb247dj0xIDc1NSB7ImNvbnN0cmFpbnRzIjp7Im1heF91c2VzIjoxLCJyZXF1aXJlX2NvbmZpcm1hdGlvbiI6dHJ1ZSwic2luZ2xlX3VzZSI6dHJ1ZX0sImNvbnRleHQiOnsiYXVkaWVuY2UiOiJhY21lLWNvcnAvc2hvcHBpbmctYWdlbnQiLCJpc3N1ZXIiOiJhdXRoLmFjbWUtY29ycC5jb20iLCJub25jZSI6ImNvbmZpcm1fc2Vzc2lvbl94eXo3ODkiLCJ0cmFjZXBhcmVudCI6IjAwLTRiZjkyZjM1NzdiMzRkYTZhM2NlOTI5ZDBlMGU0NzM2LWI3YWQ2YjcxNjkyMDMzMzEtMDEifSwibWFuZGF0ZV9pZCI6InNoYTI1Njo0NjNlN2VmZjMxZDJhOWY4NzU0NzJiZDc0MmU0YzM0MGIwYzM5YzFmNGVmYTU4ZGFiNThhOWZlMjU1MDFlNTg5IiwibWFuZGF0ZV9raW5kIjoidHJhbnNhY3Rpb24iLCJwcmluY2lwYWwiOnsibWV0aG9kIjoib2lkYyIsInN1YmplY3QiOiJ1c3JfdGVzdF8wMDEifSwic2NvcGUiOnsibWF4X3ZhbHVlIjp7ImFtb3VudCI6Ijk5Ljk5IiwiY3VycmVuY3kiOiJVU0QifSwib3BlcmF0aW9uX2NsYXNzIjoiY29tbWl0IiwidG9vbHMiOlsicHVyY2hhc2VfaXRlbSJdLCJ0cmFuc2FjdGlvbl9yZWYiOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJ2YWxpZGl0eSI6eyJleHBpcmVzX2F0IjoiMjAyNi0wMS0yOFQxMDozNTowMFoiLCJpc3N1ZWRfYXQiOiIyMDI2LTAxLTI4VDEwOjMwOjAwWiIsIm5vdF9iZWZvcmUiOiIyMDI2LTAxLTI4VDEwOjMwOjAwWiJ9fQ==",
+      "signature": {
+        "version": 1,
+        "algorithm": "ed25519",
+        "payload_type": "application/vnd.assay.mandate+json;v=1",
+        "content_id": "sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589",
+        "signed_payload_digest": "sha256:c65f74372a01e43a1fc5653655e908b0ffcaa3b2b11a022142a9538e483e702b",
+        "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+        "expected_signature_b64": "UkgRyYlzB+mzJN2xvtrbnXStSJsabE2KaALQWxoeetuhBFIUDaxwsn+/UUeOlQJYnkfuT5lvngCztV/VjSo4Cg=="
+      },
+      "final_event": {
+        "specversion": "1.0",
+        "id": "evt_txn_commit_with_transaction_ref",
+        "type": "assay.mandate.v1",
+        "source": "assay://test/golden-vectors",
+        "time": "2026-01-28T10:00:00Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "constraints": {
+            "max_uses": 1,
+            "require_confirmation": true,
+            "single_use": true
+          },
+          "context": {
+            "audience": "acme-corp/shopping-agent",
+            "issuer": "auth.acme-corp.com",
+            "nonce": "confirm_session_xyz789",
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+          },
+          "mandate_kind": "transaction",
+          "principal": {
+            "method": "oidc",
+            "subject": "usr_test_001"
+          },
+          "scope": {
+            "max_value": {
+              "amount": "99.99",
+              "currency": "USD"
+            },
+            "operation_class": "commit",
+            "tools": [
+              "purchase_item"
+            ],
+            "transaction_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "validity": {
+            "expires_at": "2026-01-28T10:35:00Z",
+            "issued_at": "2026-01-28T10:30:00Z",
+            "not_before": "2026-01-28T10:30:00Z"
+          },
+          "mandate_id": "sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589",
+          "signature": {
+            "version": 1,
+            "algorithm": "ed25519",
+            "payload_type": "application/vnd.assay.mandate+json;v=1",
+            "content_id": "sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589",
+            "signed_payload_digest": "sha256:c65f74372a01e43a1fc5653655e908b0ffcaa3b2b11a022142a9538e483e702b",
+            "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+            "signature": "UkgRyYlzB+mzJN2xvtrbnXStSJsabE2KaALQWxoeetuhBFIUDaxwsn+/UUeOlQJYnkfuT5lvngCztV/VjSo4Cg=="
+          }
+        }
+      }
+    },
+    {
+      "name": "intent-escaped-glob",
+      "description": "Intent mandate with escaped glob patterns (\\* and \\\\)",
+      "hashable_content": {
+        "constraints": {},
+        "context": {
+          "audience": "test/escaped-globs",
+          "issuer": "auth.test.com"
+        },
+        "mandate_kind": "intent",
+        "principal": {
+          "method": "oidc",
+          "subject": "user-glob-test"
+        },
+        "scope": {
+          "operation_class": "read",
+          "tools": [
+            "fs.\\*\\*",
+            "path\\\\to\\*"
+          ]
+        },
+        "validity": {
+          "issued_at": "2026-01-28T10:00:00Z"
+        }
+      },
+      "hashable_canonical_jcs": "{\"constraints\":{},\"context\":{\"audience\":\"test/escaped-globs\",\"issuer\":\"auth.test.com\"},\"mandate_kind\":\"intent\",\"principal\":{\"method\":\"oidc\",\"subject\":\"user-glob-test\"},\"scope\":{\"operation_class\":\"read\",\"tools\":[\"fs.\\\\*\\\\*\",\"path\\\\\\\\to\\\\*\"]},\"validity\":{\"issued_at\":\"2026-01-28T10:00:00Z\"}}",
+      "expected_mandate_id": "sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687",
+      "signable_content": {
+        "constraints": {},
+        "context": {
+          "audience": "test/escaped-globs",
+          "issuer": "auth.test.com"
+        },
+        "mandate_kind": "intent",
+        "principal": {
+          "method": "oidc",
+          "subject": "user-glob-test"
+        },
+        "scope": {
+          "operation_class": "read",
+          "tools": [
+            "fs.\\*\\*",
+            "path\\\\to\\*"
+          ]
+        },
+        "validity": {
+          "issued_at": "2026-01-28T10:00:00Z"
+        },
+        "mandate_id": "sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687"
+      },
+      "signable_canonical_jcs": "{\"constraints\":{},\"context\":{\"audience\":\"test/escaped-globs\",\"issuer\":\"auth.test.com\"},\"mandate_id\":\"sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687\",\"mandate_kind\":\"intent\",\"principal\":{\"method\":\"oidc\",\"subject\":\"user-glob-test\"},\"scope\":{\"operation_class\":\"read\",\"tools\":[\"fs.\\\\*\\\\*\",\"path\\\\\\\\to\\\\*\"]},\"validity\":{\"issued_at\":\"2026-01-28T10:00:00Z\"}}",
+      "expected_pae_b64": "RFNTRXYxIDM4IGFwcGxpY2F0aW9uL3ZuZC5hc3NheS5tYW5kYXRlK2pzb247dj0xIDM3NiB7ImNvbnN0cmFpbnRzIjp7fSwiY29udGV4dCI6eyJhdWRpZW5jZSI6InRlc3QvZXNjYXBlZC1nbG9icyIsImlzc3VlciI6ImF1dGgudGVzdC5jb20ifSwibWFuZGF0ZV9pZCI6InNoYTI1Njo0N2ZhYzMxNGZiMWFlNzJlNWRkMjFiNGU0ODQwOTU3ZDA0OWM1YWEyMjJkY2ZmYmYwNDgxMTVlZmZiNjZmNjg3IiwibWFuZGF0ZV9raW5kIjoiaW50ZW50IiwicHJpbmNpcGFsIjp7Im1ldGhvZCI6Im9pZGMiLCJzdWJqZWN0IjoidXNlci1nbG9iLXRlc3QifSwic2NvcGUiOnsib3BlcmF0aW9uX2NsYXNzIjoicmVhZCIsInRvb2xzIjpbImZzLlxcKlxcKiIsInBhdGhcXFxcdG9cXCoiXX0sInZhbGlkaXR5Ijp7Imlzc3VlZF9hdCI6IjIwMjYtMDEtMjhUMTA6MDA6MDBaIn19",
+      "signature": {
+        "version": 1,
+        "algorithm": "ed25519",
+        "payload_type": "application/vnd.assay.mandate+json;v=1",
+        "content_id": "sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687",
+        "signed_payload_digest": "sha256:f8b2fc948abdb1f608aa4b655060d17a13603e3f4d2f86627d35f8e4f3ef8e0b",
+        "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+        "expected_signature_b64": "hYokVQyvc6nXNlZBCEiBUWewt5acOPD43Pu+/k1XCwpQkZNhVHjncXpgv6w+k6PIFmfymG2upRV2RlcpiFhABQ=="
+      },
+      "final_event": {
+        "specversion": "1.0",
+        "id": "evt_intent_escaped_glob",
+        "type": "assay.mandate.v1",
+        "source": "assay://test/golden-vectors",
+        "time": "2026-01-28T10:00:00Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "constraints": {},
+          "context": {
+            "audience": "test/escaped-globs",
+            "issuer": "auth.test.com"
+          },
+          "mandate_kind": "intent",
+          "principal": {
+            "method": "oidc",
+            "subject": "user-glob-test"
+          },
+          "scope": {
+            "operation_class": "read",
+            "tools": [
+              "fs.\\*\\*",
+              "path\\\\to\\*"
+            ]
+          },
+          "validity": {
+            "issued_at": "2026-01-28T10:00:00Z"
+          },
+          "mandate_id": "sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687",
+          "signature": {
+            "version": 1,
+            "algorithm": "ed25519",
+            "payload_type": "application/vnd.assay.mandate+json;v=1",
+            "content_id": "sha256:47fac314fb1ae72e5dd21b4e4840957d049c5aa222dcffbf048115effb66f687",
+            "signed_payload_digest": "sha256:f8b2fc948abdb1f608aa4b655060d17a13603e3f4d2f86627d35f8e4f3ef8e0b",
+            "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
+            "signature": "hYokVQyvc6nXNlZBCEiBUWewt5acOPD43Pu+/k1XCwpQkZNhVHjncXpgv6w+k6PIFmfymG2upRV2RlcpiFhABQ=="
+          }
+        }
+      }
+    }
+  ]
+}

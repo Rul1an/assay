@@ -13,6 +13,13 @@
 //! | **Literal characters** | All non-glob characters match themselves exactly |
 //! | **Escaping** | Use `\*` to match literal `*`; use `\\` to match literal `\` |
 //!
+//! # Security Limits
+//!
+//! To prevent ReDoS attacks:
+//! - Max tool name length: 256 characters
+//! - Max pattern length: 256 characters
+//! - Max segments per pattern: 32
+//!
 //! # Examples
 //!
 //! ```text
@@ -26,6 +33,11 @@
 //! ```
 
 use std::fmt;
+
+// Security limits to prevent ReDoS
+const MAX_TOOL_NAME_LENGTH: usize = 256;
+const MAX_PATTERN_LENGTH: usize = 256;
+const MAX_SEGMENTS: usize = 32;
 
 /// Error returned when a glob pattern is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,9 +80,34 @@ impl GlobPattern {
     ///
     /// # Errors
     ///
-    /// Returns error for invalid patterns (e.g., unclosed escape).
+    /// Returns error for invalid patterns (e.g., unclosed escape, too long).
     pub fn new(pattern: &str) -> Result<Self, GlobError> {
+        // Security: bound pattern length
+        if pattern.len() > MAX_PATTERN_LENGTH {
+            return Err(GlobError {
+                pattern: pattern.chars().take(50).collect::<String>() + "...",
+                message: format!(
+                    "pattern length {} exceeds maximum {}",
+                    pattern.len(),
+                    MAX_PATTERN_LENGTH
+                ),
+            });
+        }
+
         let segments = parse_pattern(pattern)?;
+
+        // Security: bound segment count
+        if segments.len() > MAX_SEGMENTS {
+            return Err(GlobError {
+                pattern: pattern.to_string(),
+                message: format!(
+                    "pattern has {} segments, exceeds maximum {}",
+                    segments.len(),
+                    MAX_SEGMENTS
+                ),
+            });
+        }
+
         Ok(Self {
             pattern: pattern.to_string(),
             segments,
@@ -82,7 +119,13 @@ impl GlobPattern {
     /// Matching is:
     /// - Case-sensitive
     /// - Anchored (must match full name)
+    ///
+    /// Returns `false` for names exceeding the security limit (256 chars).
     pub fn matches(&self, name: &str) -> bool {
+        // Security: bound input length to prevent ReDoS
+        if name.len() > MAX_TOOL_NAME_LENGTH {
+            return false;
+        }
         match_segments(&self.segments, name)
     }
 
@@ -395,5 +438,87 @@ mod tests {
         let glob = GlobPattern::new("**").unwrap();
         assert!(glob.matches("anything"));
         assert!(glob.matches("any.thing.at.all"));
+    }
+
+    // === Anchoring tests (full string match, not substring) ===
+
+    #[test]
+    fn test_anchoring_no_prefix_match() {
+        // read_* must NOT match "xread_file" (pattern is anchored at start)
+        let glob = GlobPattern::new("read_*").unwrap();
+        assert!(glob.matches("read_file"));
+        assert!(glob.matches("read_dir"));
+        assert!(
+            !glob.matches("xread_file"),
+            "Pattern must be anchored at start"
+        );
+        assert!(
+            !glob.matches("prefix_read_file"),
+            "Pattern must be anchored at start"
+        );
+    }
+
+    #[test]
+    fn test_anchoring_no_suffix_match() {
+        // *_file must NOT match "read_file_extra" (pattern is anchored at end)
+        let glob = GlobPattern::new("*_file").unwrap();
+        assert!(glob.matches("read_file"));
+        assert!(glob.matches("write_file"));
+        assert!(
+            !glob.matches("read_file_extra"),
+            "Pattern must be anchored at end"
+        );
+        assert!(
+            !glob.matches("read_file.bak"),
+            "Pattern must be anchored at end"
+        );
+    }
+
+    #[test]
+    fn test_anchoring_exact_match_required() {
+        // Pattern must match the FULL tool name, not a substring
+        let glob = GlobPattern::new("search").unwrap();
+        assert!(glob.matches("search"));
+        assert!(
+            !glob.matches("search_products"),
+            "Exact pattern requires exact match"
+        );
+        assert!(
+            !glob.matches("my_search"),
+            "Exact pattern requires exact match"
+        );
+        assert!(
+            !glob.matches("searching"),
+            "Exact pattern requires exact match"
+        );
+    }
+
+    // === Literal escaping tests ===
+
+    #[test]
+    fn test_literal_double_star() {
+        // fs.\*\* should match literal "fs.**" not glob
+        let glob = GlobPattern::new(r"fs.\*\*").unwrap();
+        assert!(glob.matches("fs.**"), "Escaped ** should match literal");
+        assert!(!glob.matches("fs.read"), "Escaped ** should not glob");
+        assert!(
+            !glob.matches("fs.anything.here"),
+            "Escaped ** should not glob"
+        );
+    }
+
+    #[test]
+    fn test_literal_backslash_star() {
+        // fs.\\* should match "fs.\x" where x is any char (backslash is literal)
+        let glob = GlobPattern::new(r"fs.\\*").unwrap();
+        assert!(
+            glob.matches(r"fs.\file"),
+            "Should match backslash + wildcard"
+        );
+        assert!(
+            glob.matches(r"fs.\dir"),
+            "Should match backslash + wildcard"
+        );
+        assert!(!glob.matches("fs.file"), "Backslash is literal, not escape");
     }
 }

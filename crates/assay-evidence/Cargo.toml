@@ -12,7 +12,9 @@ readme.workspace = true
 # Core serialization
 serde = { workspace = true, features = ["derive", "std", "alloc"] }
 serde_json = { workspace = true, features = ["preserve_order", "std", "alloc"] }
-serde_jcs = "0.1"
+# CRITICAL: Pinned exactly - any change affects mandate_id computation!
+# If upgrading, MUST verify all golden vectors still pass.
+serde_jcs = "=0.1.0"
 
 # Crypto & IDs
 sha2 = "0.10"

@@ -1,6 +1,7 @@
 pub mod bundle;
 pub mod crypto;
 pub mod diff;
+pub mod json_strict;
 pub mod lint;
 pub mod mandate;
 pub mod ndjson;

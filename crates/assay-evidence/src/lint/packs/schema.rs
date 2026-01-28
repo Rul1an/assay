@@ -149,7 +149,6 @@ pub struct PackRequirements {
 
 /// Rule definition within a pack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PackRule {
     /// Short rule ID (unique within pack).
     pub id: String,
@@ -170,6 +169,15 @@ pub struct PackRule {
 
     /// Check to perform.
     pub check: CheckDefinition,
+
+    /// Minimum engine version required for this rule.
+    /// Rules with unsupported check types should set this to a future version.
+    #[serde(default)]
+    pub engine_min_version: Option<String>,
+
+    /// Event types this rule applies to (for filtering).
+    #[serde(default)]
+    pub event_types: Option<Vec<String>>,
 }
 
 impl PackRule {
@@ -191,8 +199,11 @@ impl PackRule {
 }
 
 /// Check definition (tagged union).
+///
+/// Uses `#[serde(other)]` to capture unknown check types for forward compatibility.
+/// Unknown types will be parsed as `Unsupported` and handled based on `PackKind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum CheckDefinition {
     /// Verify bundle contains minimum number of events.
     EventCount {
@@ -237,6 +248,29 @@ pub enum CheckDefinition {
         #[serde(default)]
         required: bool,
     },
+
+    /// JSON path existence check (simple version for mandate rules).
+    JsonPathExists {
+        /// JSON Pointer paths to check.
+        paths: Vec<String>,
+    },
+
+    /// Conditional check (requires engine v1.1).
+    /// Captured but not executed in current engine version.
+    #[serde(rename = "conditional")]
+    Conditional {
+        /// Condition definition (opaque for now).
+        #[serde(default)]
+        condition: Option<serde_json::Value>,
+        /// Check to run if condition is true.
+        #[serde(default, rename = "then")]
+        then_check: Option<serde_json::Value>,
+    },
+
+    /// Unknown check type - forward compatibility.
+    /// Captured when deserializing unknown check types.
+    #[serde(other)]
+    Unsupported,
 }
 
 impl CheckDefinition {
@@ -297,8 +331,46 @@ impl CheckDefinition {
                     });
                 }
             }
+            CheckDefinition::JsonPathExists { paths } => {
+                if paths.is_empty() {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "json_path_exists.paths cannot be empty".to_string(),
+                    });
+                }
+            }
+            CheckDefinition::Conditional { .. } => {
+                // Conditional checks are captured but validation is deferred to execution
+                // (requires engine v1.1)
+            }
+            CheckDefinition::Unsupported => {
+                // Unknown check types - validation handled by engine version check
+            }
         }
         Ok(())
+    }
+
+    /// Check if this is an unsupported/future check type.
+    pub fn is_unsupported(&self) -> bool {
+        matches!(
+            self,
+            CheckDefinition::Unsupported | CheckDefinition::Conditional { .. }
+        )
+    }
+
+    /// Get the check type name for error messages.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            CheckDefinition::EventCount { .. } => "event_count",
+            CheckDefinition::EventPairs { .. } => "event_pairs",
+            CheckDefinition::EventFieldPresent { .. } => "event_field_present",
+            CheckDefinition::EventTypeExists { .. } => "event_type_exists",
+            CheckDefinition::ManifestField { .. } => "manifest_field",
+            CheckDefinition::JsonPathExists { .. } => "json_path_exists",
+            CheckDefinition::Conditional { .. } => "conditional",
+            CheckDefinition::Unsupported => "unsupported",
+        }
     }
 
     /// Get normalized JSON Pointer paths for EventFieldPresent.

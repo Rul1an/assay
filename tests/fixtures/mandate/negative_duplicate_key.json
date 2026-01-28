@@ -1,0 +1,14 @@
+{
+    "_comment": "NEGATIVE TEST: Duplicate key attack - must be rejected by strict JSON parser",
+    "specversion": "1.0",
+    "id": "evt_attack_001",
+    "type": "assay.mandate.v1",
+    "source": "assay://attacker",
+    "time": "2026-01-28T10:00:00Z",
+    "datacontenttype": "application/json",
+    "data": {
+        "mandate_id": "sha256:legit",
+        "mandate_id": "sha256:evil",
+        "mandate_kind": "intent"
+    }
+}

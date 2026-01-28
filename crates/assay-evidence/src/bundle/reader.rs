@@ -15,6 +15,7 @@
 //! or the `into_events()` consuming pattern in a future version.
 
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
+use crate::json_strict::validate_json_strict;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
@@ -181,8 +182,18 @@ impl BundleInfo {
             let path = entry.path()?.to_string_lossy().to_string();
 
             if path == "manifest.json" {
+                // Read manifest to string for strict validation
+                let mut content = String::new();
+                entry
+                    .read_to_string(&mut content)
+                    .context("Failed to read manifest.json")?;
+
+                // Security: Validate JSON strictly before parsing
+                validate_json_strict(&content)
+                    .context("Security: Invalid JSON in manifest.json")?;
+
                 let manifest: Manifest =
-                    serde_json::from_reader(&mut entry).context("Failed to parse manifest.json")?;
+                    serde_json::from_str(&content).context("Failed to parse manifest.json")?;
                 return Ok(Self { manifest });
             }
         }
