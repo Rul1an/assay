@@ -1,23 +1,25 @@
-# Assay GitHub Action v2
+# Assay GitHub Action
 # Verify, lint, and diff evidence bundles from AI agent runs.
 #
+# Marketplace: https://github.com/marketplace/actions/assay-ai-agent-security
+#
 # Usage (zero-config):
-#   - uses: Rul1an/assay/assay-action@v2
+#   - uses: Rul1an/assay-action@v2
 #
 # Usage (with options):
-#   - uses: Rul1an/assay/assay-action@v2
+#   - uses: Rul1an/assay-action@v2
 #     with:
 #       bundles: '.assay/evidence/*.tar.gz'
 #       fail_on: warn
 #       sarif: true
 
-name: 'Assay Evidence'
-description: 'Verify, lint, and diff AI agent evidence bundles. Results in GitHub Security tab.'
-author: 'Assay'
+name: 'Assay - AI Agent Security'
+description: 'Verify and lint AI agent evidence bundles. Catch security issues before production. Native GitHub Security tab integration.'
+author: 'Assay Contributors'
 
 branding:
   icon: 'shield'
-  color: 'green'
+  color: 'blue'
 
 inputs:
   bundles:

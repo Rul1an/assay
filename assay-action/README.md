@@ -1,6 +1,11 @@
-# Assay GitHub Action
+# Assay - AI Agent Security
+
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Assay-blue?logo=github)](https://github.com/marketplace/actions/assay-ai-agent-security)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Catch AI agent security issues before they hit production.**
+
+> Verify AI agent behavior, detect unauthorized access, and get results in your GitHub Security tab.
 
 ## What It Does
 
@@ -31,6 +36,8 @@ Your AI Agent → Generates Traces → Assay Verifies → PR Feedback
 ```
 
 That's it. Zero config.
+
+> **Note:** This action is part of the [Assay](https://github.com/Rul1an/assay) monorepo.
 
 **What happens:**
 1. Finds evidence bundles in your repo (`.assay/evidence/*.tar.gz`)
@@ -118,8 +125,8 @@ Detect regressions against your main branch:
 ```yaml
 - uses: Rul1an/assay/assay-action@v2
   with:
-    baseline_dir: .assay/baselines
     baseline_key: unit-tests
+    write_baseline: true  # On main branch
 ```
 
 ### Custom Threshold
@@ -140,6 +147,40 @@ If you only want PR comments:
 - uses: Rul1an/assay/assay-action@v2
   with:
     sarif: false
+```
+
+## Complete Workflow Example
+
+```yaml
+name: AI Agent Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests with Assay
+        run: |
+          # Your test command that generates evidence bundles
+          assay run --policy policy.yaml -- pytest tests/
+
+      - name: Verify AI agent behavior
+        uses: Rul1an/assay/assay-action@v2
+        with:
+          fail_on: error
+          baseline_key: ${{ github.event.repository.name }}
+          write_baseline: ${{ github.ref == 'refs/heads/main' }}
 ```
 
 ## FAQ
