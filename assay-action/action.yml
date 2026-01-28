@@ -229,7 +229,8 @@ runs:
         set -euo pipefail
         export PATH="$HOME/.assay/bin:$PATH"
 
-        mkdir -p .assay-reports
+        REPORTS_DIR="${GITHUB_WORKSPACE}/.assay-reports"
+        mkdir -p "$REPORTS_DIR"
         BUNDLES=$(cat /tmp/assay-bundles.txt)
 
         # Verify all bundles
@@ -256,7 +257,7 @@ runs:
         # Lint all bundles (one at a time, aggregate results)
         TOTAL_ERRORS=0
         TOTAL_WARNS=0
-        echo '{"findings":[]}' > .assay-reports/lint.json
+        echo '{"findings":[]}' > "$REPORTS_DIR/lint.json"
 
         for bundle in $BUNDLES; do
           echo "Linting: $bundle"
@@ -275,16 +276,16 @@ runs:
           echo "$LINT_JSON" | jq '.findings // []' >> /tmp/all-findings.json 2>/dev/null || true
 
           # Generate SARIF for this bundle
-          assay evidence lint --format sarif "$bundle" > ".assay-reports/lint-$(basename "$bundle" .tar.gz).sarif" 2>/dev/null || true
+          assay evidence lint --format sarif "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).sarif" 2>/dev/null || true
         done
 
         # Merge SARIF files if multiple
-        FIRST_SARIF=$(ls .assay-reports/*.sarif 2>/dev/null | head -1)
+        FIRST_SARIF=$(ls "$REPORTS_DIR"/*.sarif 2>/dev/null | head -1)
         if [ -n "$FIRST_SARIF" ]; then
-          cp "$FIRST_SARIF" .assay-reports/lint.sarif
+          cp "$FIRST_SARIF" "$REPORTS_DIR/lint.sarif"
         fi
 
-        echo "sarif_path=.assay-reports/lint.sarif" >> $GITHUB_OUTPUT
+        echo "sarif_path=$REPORTS_DIR/lint.sarif" >> $GITHUB_OUTPUT
 
         ERRORS=$TOTAL_ERRORS
         WARNS=$TOTAL_WARNS
@@ -343,7 +344,7 @@ runs:
       uses: github/codeql-action/upload-sarif@v4
       continue-on-error: true
       with:
-        sarif_file: .assay-reports/lint.sarif
+        sarif_file: ${{ github.workspace }}/.assay-reports/lint.sarif
         category: ${{ steps.sarif-category.outputs.category }}
 
     # =========================================================================
@@ -473,7 +474,7 @@ runs:
       uses: actions/cache/save@v4
       continue-on-error: true
       with:
-        path: .assay-reports/
+        path: ${{ github.workspace }}/.assay-reports/
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-main-${{ github.sha }}
 
     - name: Upload artifacts
@@ -482,7 +483,7 @@ runs:
       continue-on-error: true
       with:
         name: assay-evidence-${{ github.run_id }}
-        path: .assay-reports/
+        path: ${{ github.workspace }}/.assay-reports/
         retention-days: 30
         if-no-files-found: warn
         compression-level: 6
