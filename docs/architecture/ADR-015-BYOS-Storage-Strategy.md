@@ -128,51 +128,75 @@ evidence_store:
   verify_on_push: true  # Verify bundle before upload
 ```
 
-### Object Key Schema
+### Object Key Schema (Simplified)
 
 ```
-{path_prefix}/{year}/{month}/{run_id}/{bundle_id}.tar.gz
+{prefix}/bundles/{bundle_id}.tar.gz        # Primary (content-addressed, immutable)
+{prefix}/runs/{run_id}/{bundle_id}.ref     # Run index (small reference file)
 
-Example:
-assay/bundles/2026/01/run_baseline_001/sha256:ade9c15d....tar.gz
+Examples:
+assay/evidence/bundles/sha256:ade9c15d....tar.gz
+assay/evidence/runs/run_001/sha256:ade9c15d....ref
 ```
+
+**Design rationale:**
+- **O(1) operations**: `pull --bundle-id` = direct key lookup; `list --run-id` = prefix list
+- **No date folders**: Lifecycle policies use object metadata/tags, not path structure
+- **Content-addressed**: `bundle_id` (SHA-256 of run_root) is the single source of truth
+- **Immutability**: Enforced via conditional writes (`PutMode::Create` / If-None-Match)
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `ASSAY_STORE_URL` | Store URL (`s3://bucket/prefix`) | Yes |
+| `AWS_ACCESS_KEY_ID` | AWS/S3-compatible credentials | Yes* |
+| `AWS_SECRET_ACCESS_KEY` | AWS/S3-compatible credentials | Yes* |
+| `AWS_REGION` | Default region | No |
+| `ASSAY_STORE_REGION` | Override region (highest precedence) | No |
+| `ASSAY_STORE_ALLOW_HTTP` | Allow HTTP for dev (MinIO, LocalStack) | No |
+| `ASSAY_STORE_PATH_STYLE` | Use path-style URLs for S3-compat | No |
+
+\* Or use IAM roles/instance profiles
 
 ### Verification Flow
 
 ```rust
-async fn push_bundle(path: &Path, config: &StoreConfig) -> Result<PushResult> {
+async fn push_bundle(path: &Path, store: &BundleStore) -> Result<PushResult> {
     // 1. Verify bundle integrity locally
     let result = verify_bundle(File::open(path)?, VerifyLimits::default())?;
     let manifest = result.manifest;
 
-    // 2. Generate object key
-    let key = format!(
-        "{}{}/{}/{}/{}.tar.gz",
-        config.path_prefix,
-        Utc::now().format("%Y/%m"),
-        manifest.run_id,
-        manifest.bundle_id,
-        manifest.bundle_id
-    );
-
-    // 3. Check if already exists (idempotency)
-    if client.head_object(&key).await.is_ok() {
-        return Ok(PushResult::AlreadyExists { key });
+    // 2. Upload with conditional write (immutability)
+    // Uses PutMode::Create (If-None-Match: "*")
+    match store.put_bundle(&manifest.bundle_id, bytes).await {
+        Ok(()) => {
+            // 3. Link to run_id for list queries
+            if let Some(run_id) = &manifest.run_id {
+                store.link_run_bundle(run_id, &manifest.bundle_id).await?;
+            }
+            Ok(PushResult::Uploaded { bundle_id: manifest.bundle_id })
+        }
+        Err(StoreError::AlreadyExists { .. }) => {
+            // Idempotent: same bundle_id = same bytes
+            Ok(PushResult::AlreadyExists { bundle_id: manifest.bundle_id })
+        }
+        Err(e) => Err(e.into()),
     }
-
-    // 4. Upload to user's bucket
-    client.put_object()
-        .key(&key)
-        .body(ByteStream::from_path(path).await?)
-        .content_type("application/gzip")
-        .metadata("x-assay-bundle-id", &manifest.bundle_id)
-        .metadata("x-assay-run-id", &manifest.run_id)
-        .send()
-        .await?;
-
-    Ok(PushResult::Uploaded { key, bundle_id: manifest.bundle_id })
 }
 ```
+
+**Immutability guarantees:**
+
+| Backend | Conditional Write | Guarantee |
+|---------|-------------------|-----------|
+| AWS S3 | ✅ `PutMode::Create` | Strong |
+| MinIO (recent) | ✅ | Strong |
+| R2/B2/Wasabi | ⚠️ Varies | Check docs |
+| file:// | ✅ | Strong |
+| memory:// | ✅ | Strong |
+
+If conditional writes fail with "not supported", Assay falls back to check-then-put with a warning ("immutability not guaranteed").
 
 ## Phases
 

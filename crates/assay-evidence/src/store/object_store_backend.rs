@@ -22,13 +22,21 @@ use super::{BundleMeta, BundleStore, KeyBuilder, StoreError, StoreResult, StoreS
 pub struct ObjectStoreBundleStore {
     inner: Arc<dyn ObjectStore>,
     keys: KeyBuilder,
-    /// Whether the backend supports conditional writes (If-None-Match).
-    /// We attempt conditional writes first, and fall back if unsupported.
-    conditional_writes_supported: bool,
 }
 
 impl ObjectStoreBundleStore {
     /// Create a store from a parsed spec.
+    ///
+    /// # Environment Variables (S3)
+    ///
+    /// | Variable | Description |
+    /// |----------|-------------|
+    /// | `AWS_ACCESS_KEY_ID` | AWS credentials |
+    /// | `AWS_SECRET_ACCESS_KEY` | AWS credentials |
+    /// | `AWS_REGION` | Default region (overridden by URL query param) |
+    /// | `ASSAY_STORE_REGION` | Override region (highest precedence) |
+    /// | `ASSAY_STORE_ALLOW_HTTP` | Allow HTTP (for MinIO dev), default: false |
+    /// | `ASSAY_STORE_PATH_STYLE` | Use path-style URLs (for some S3-compat), default: false |
     pub async fn from_spec(spec: &StoreSpec) -> StoreResult<Self> {
         let inner: Arc<dyn ObjectStore> = match spec.scheme.as_str() {
             "memory" => Arc::new(object_store::memory::InMemory::new()),
@@ -61,12 +69,30 @@ impl ObjectStoreBundleStore {
                         reason: "S3 URL must include bucket name".to_string(),
                     })?;
 
-                let mut builder = object_store::aws::AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket)
-                    .with_allow_http(false);
+                // Start with env-based config (AWS_* vars)
+                let mut builder =
+                    object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
 
-                if let Some(region) = &spec.region {
-                    builder = builder.with_region(region);
+                // Region precedence: ASSAY_STORE_REGION > URL param > AWS_REGION
+                let region = std::env::var("ASSAY_STORE_REGION")
+                    .ok()
+                    .or_else(|| spec.region.clone());
+                if let Some(r) = region {
+                    builder = builder.with_region(&r);
+                }
+
+                // Allow HTTP for dev (MinIO, LocalStack)
+                let allow_http = std::env::var("ASSAY_STORE_ALLOW_HTTP")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                builder = builder.with_allow_http(allow_http);
+
+                // Path-style URLs for some S3-compatible endpoints
+                if std::env::var("ASSAY_STORE_PATH_STYLE")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false)
+                {
+                    builder = builder.with_virtual_hosted_style_request(false);
                 }
 
                 Arc::new(builder.build().map_err(|e| StoreError::Io {
@@ -81,14 +107,9 @@ impl ObjectStoreBundleStore {
             }
         };
 
-        // For S3, assume conditional writes are supported (AWS added this in 2024)
-        // For memory/file, they're always supported via object_store
-        let conditional_writes_supported = true;
-
         Ok(Self {
             inner,
             keys: KeyBuilder::new(&spec.prefix),
-            conditional_writes_supported,
         })
     }
 
@@ -103,7 +124,6 @@ impl ObjectStoreBundleStore {
         Self {
             inner: Arc::new(object_store::memory::InMemory::new()),
             keys: KeyBuilder::new(""),
-            conditional_writes_supported: true,
         }
     }
 
@@ -112,48 +132,63 @@ impl ObjectStoreBundleStore {
         Self {
             inner: Arc::new(object_store::memory::InMemory::new()),
             keys: KeyBuilder::new(prefix),
-            conditional_writes_supported: true,
         }
     }
 
     /// Attempt a conditional put (If-None-Match: "*").
-    /// Falls back to regular put if conditional writes aren't supported.
+    /// Falls back to check-then-put if conditional writes aren't supported.
+    ///
+    /// # Immutability Guarantees
+    ///
+    /// | Backend | Conditional Write | Guarantee |
+    /// |---------|-------------------|-----------|
+    /// | AWS S3 | ✅ PutMode::Create | Strong |
+    /// | MinIO | ✅ (recent versions) | Strong |
+    /// | R2/B2 | ⚠️ Varies | Check docs |
+    /// | file:// | ✅ | Strong |
+    /// | memory:// | ✅ | Strong |
+    ///
+    /// If conditional writes fail with "not supported", we fall back to
+    /// check-then-put with a warning. This has a race window but is
+    /// acceptable for non-critical backends.
     async fn put_if_not_exists(
         &self,
         key: &object_store::path::Path,
         bytes: Bytes,
     ) -> StoreResult<()> {
-        if self.conditional_writes_supported {
-            // Try conditional write first
-            let opts = PutOptions {
-                mode: PutMode::Create, // Fails if object exists
-                ..Default::default()
-            };
+        // Try conditional write first (preferred)
+        let opts = PutOptions {
+            mode: PutMode::Create, // Fails if object exists
+            ..Default::default()
+        };
 
-            match self
-                .inner
-                .put_opts(key, PutPayload::from_bytes(bytes.clone()), opts)
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(object_store::Error::AlreadyExists { .. }) => {
-                    // Object exists - this is fine for idempotency
-                    return Err(StoreError::AlreadyExists {
-                        bundle_id: key.as_ref().to_string(),
-                    });
-                }
-                Err(object_store::Error::NotSupported { .. }) => {
-                    // Fall through to regular put
-                    tracing::warn!(
-                        "Conditional writes not supported by backend, falling back to check-then-put"
-                    );
-                }
-                Err(e) => return Err(e.into()),
+        match self
+            .inner
+            .put_opts(key, PutPayload::from_bytes(bytes.clone()), opts)
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(object_store::Error::AlreadyExists { .. }) => {
+                // Object exists - return AlreadyExists error for caller to handle as idempotent
+                return Err(StoreError::AlreadyExists {
+                    bundle_id: key.as_ref().to_string(),
+                });
             }
+            Err(object_store::Error::NotSupported { .. }) => {
+                // Fall through to check-then-put
+                tracing::warn!(
+                    key = %key.as_ref(),
+                    "Conditional writes not supported by backend. \
+                     Falling back to check-then-put (race window exists). \
+                     Immutability not guaranteed for this store."
+                );
+            }
+            Err(e) => return Err(e.into()),
         }
 
         // Fallback: check if exists, then put
-        // Note: This has a race condition, but it's best-effort for non-compliant backends
+        // ⚠️ Race condition: another writer could put between head and put
+        // This is best-effort for non-compliant backends
         if self.inner.head(key).await.is_ok() {
             return Err(StoreError::AlreadyExists {
                 bundle_id: key.as_ref().to_string(),
