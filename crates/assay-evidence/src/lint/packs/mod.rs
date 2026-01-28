@@ -9,7 +9,7 @@ pub mod loader;
 pub mod schema;
 
 pub use executor::PackExecutor;
-pub use loader::{load_pack, load_packs, LoadedPack, PackSource};
+pub use loader::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use schema::{CheckDefinition, PackDefinition, PackKind, PackRequirements, PackRule, Severity};
 
 /// Built-in packs embedded at compile time.
