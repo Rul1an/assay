@@ -82,5 +82,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: assay-reports-${{ github.run_id }}
-          path: ${{ steps.assay.outputs.reports_dir }}
+          path: ${{ steps.assay.outputs.reports_dir }}/
           if-no-files-found: warn
