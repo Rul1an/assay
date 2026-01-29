@@ -56,6 +56,10 @@ dirs = { version = "5", optional = true }
 nix = { version = "0.27", features = ["signal", "process"], optional = true }
 schemars = "1.2.0"
 
+# SQLite: use system lib on Linux, bundled on Windows/macOS/cross-compile
+# Enable bundled-sqlite feature for cross-compilation or Windows
+rusqlite = "0.31"
+
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature
 [target.'cfg(unix)'.dependencies]
@@ -65,11 +69,6 @@ libc = "0.2"
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", optional = true }
-
-# SQLite: use bundled for cross-compilation via bundled-sqlite feature
-[dependencies.rusqlite]
-version = "0.31"
-features = []
 
 [dev-dependencies]
 tempfile = "3.23.0"
