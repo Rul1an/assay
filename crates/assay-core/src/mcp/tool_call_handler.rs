@@ -95,13 +95,25 @@ impl ToolCallHandler {
         let params = match request.tool_params() {
             Some(p) => p,
             None => {
-                // Not a tool call - this shouldn't happen but handle gracefully
+                // Not a tool call - still must emit decision (I1 invariant)
+                let tool_call_id = self.extract_tool_call_id(request);
+                let guard = DecisionEmitterGuard::new(
+                    self.emitter.clone(),
+                    self.config.event_source.clone(),
+                    tool_call_id.clone(),
+                    "unknown".to_string(),
+                );
+                guard.emit_error(
+                    reason_codes::S_INTERNAL_ERROR,
+                    Some("Not a tool call".to_string()),
+                );
+
                 return HandleResult::Error {
                     reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
                     reason: "Not a tool call".to_string(),
                     decision_event: DecisionEvent::new(
                         self.config.event_source.clone(),
-                        "unknown".to_string(),
+                        tool_call_id,
                         "unknown".to_string(),
                     )
                     .error(

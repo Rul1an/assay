@@ -284,6 +284,44 @@ fn test_tool_call_id_propagated() {
 }
 
 // =============================================================================
+// Test: Non-tool-call request still emits decision (I1 edge case)
+// =============================================================================
+#[test]
+fn test_non_tool_call_emits_error() {
+    let emitter = Arc::new(TestEmitter::new());
+    let policy = McpPolicy::default();
+    let handler = ToolCallHandler::new(
+        policy,
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    // Request that is NOT a tool call (method != tools/call)
+    let request = assay_core::mcp::jsonrpc::JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(99)),
+        method: "resources/list".to_string(), // NOT tools/call
+        params: serde_json::json!({}),
+    };
+
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    // Must still emit exactly 1 decision (I1 invariant)
+    assert!(matches!(result, HandleResult::Error { .. }));
+    assert_eq!(
+        emitter.event_count(),
+        1,
+        "I1: must emit even for non-tool-call"
+    );
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.decision, Decision::Error);
+    assert_eq!(event.data.reason_code, reason_codes::S_INTERNAL_ERROR);
+}
+
+// =============================================================================
 // Test: Event contains required fields per SPEC
 // =============================================================================
 #[test]
