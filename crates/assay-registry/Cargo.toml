@@ -1,0 +1,54 @@
+[package]
+name = "assay-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description = "Pack registry client for remote pack distribution (SPEC-Pack-Registry-v1)"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Enable OIDC token exchange for CI environments (Epic 6)
+oidc = []
+
+[dependencies]
+# Core
+anyhow.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+serde_yaml.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "fs"] }
+async-trait.workspace = true
+chrono = { workspace = true, features = ["std", "clock", "serde"] }
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Crypto (for signature verification)
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+
+# Pack parsing (reuse from evidence)
+serde_jcs = "=0.1.0"
+
+# URL parsing
+url = "2.5"
+
+# Directories for cache
+dirs = "5"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"
+rand = "0.8"
+serial_test = "3"

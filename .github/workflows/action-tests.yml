@@ -7,6 +7,326 @@ on:
   pull_request:
 
 jobs:
+  # ===========================================================================
+  # Test 1: Pack lint with eu-ai-act-baseline
+  # ===========================================================================
+  pack_lint_baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CLI
+        run: cargo build --release --workspace --exclude assay-ebpf
+
+      - name: Verify test bundle exists
+        run: |
+          if [ -f tests/fixtures/evidence/test-bundle.tar.gz ]; then
+            echo "✅ Test bundle exists"
+            ls -la tests/fixtures/evidence/
+          else
+            echo "❌ Test bundle not found - regenerating..."
+            cargo test -p assay-evidence --test generate_fixture -- --ignored --nocapture
+          fi
+
+      - name: Lint with eu-ai-act-baseline pack
+        id: pack-lint
+        run: |
+          mkdir -p output
+          ${{ github.workspace }}/target/release/assay evidence lint \
+            --format sarif \
+            --pack eu-ai-act-baseline \
+            tests/fixtures/evidence/test-bundle.tar.gz > output/lint.sarif 2>&1 || true
+
+          # Verify SARIF was generated
+          if [ -f output/lint.sarif ] && [ -s output/lint.sarif ]; then
+            echo "✅ SARIF file generated"
+          else
+            echo "❌ SARIF file missing or empty"
+            # Show what the command output
+            ${{ github.workspace }}/target/release/assay evidence lint \
+              --format sarif \
+              --pack eu-ai-act-baseline \
+              tests/fixtures/evidence/test-bundle.tar.gz || true
+            exit 1
+          fi
+
+      - name: Verify pack output structure
+        run: |
+          SARIF=output/lint.sarif
+
+          # Check SARIF parses as JSON
+          if jq '.' "$SARIF" > /dev/null 2>&1; then
+            echo "✅ Pack lint SARIF is valid JSON"
+          else
+            echo "❌ SARIF is not valid JSON"
+            cat "$SARIF"
+            exit 1
+          fi
+
+          # Check SARIF structure
+          SCHEMA=$(jq -r '.["$schema"] // .version // "unknown"' "$SARIF")
+          echo "SARIF schema: $SCHEMA"
+
+          # Check for tool driver
+          TOOL=$(jq -r '.runs[0].tool.driver.name // "missing"' "$SARIF")
+          echo "Tool driver: $TOOL"
+
+          # Check for rules (pack may or may not add rules depending on bundle content)
+          RULE_COUNT=$(jq '.runs[0].tool.driver.rules | length // 0' "$SARIF")
+          echo "Rule count: $RULE_COUNT"
+
+          # Verify SARIF 2.1.0 structure
+          if jq -e '.runs[0].tool' "$SARIF" > /dev/null; then
+            echo "✅ SARIF has valid tool section"
+          else
+            echo "❌ SARIF missing tool section"
+            exit 1
+          fi
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-lint-sarif
+          path: output/lint.sarif
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Test 2: Fork PR simulation (SARIF skip logic)
+  # ===========================================================================
+  fork_pr_sarif_skip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test fork detection logic
+        env:
+          # Simulate fork PR context
+          GITHUB_EVENT_NAME: pull_request
+          GITHUB_REPOSITORY: owner/repo
+          FORK_REPO: forker/repo
+        run: |
+          # Test the fork detection expression from action.yml
+          IS_FORK_PR() {
+            local event_name="$1"
+            local head_repo="$2"
+            local base_repo="$3"
+
+            if [ "$event_name" = "pull_request" ] && [ "$head_repo" != "$base_repo" ]; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+
+          # Test case 1: Fork PR (should skip SARIF)
+          RESULT=$(IS_FORK_PR "pull_request" "$FORK_REPO" "$GITHUB_REPOSITORY")
+          if [ "$RESULT" = "true" ]; then
+            echo "✅ Fork PR correctly detected"
+          else
+            echo "❌ Fork PR not detected"
+            exit 1
+          fi
+
+          # Test case 2: Same-repo PR (should upload SARIF)
+          RESULT=$(IS_FORK_PR "pull_request" "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY")
+          if [ "$RESULT" = "false" ]; then
+            echo "✅ Same-repo PR correctly detected"
+          else
+            echo "❌ Same-repo PR incorrectly flagged as fork"
+            exit 1
+          fi
+
+          # Test case 3: Push event (not a PR)
+          RESULT=$(IS_FORK_PR "push" "" "$GITHUB_REPOSITORY")
+          if [ "$RESULT" = "false" ]; then
+            echo "✅ Push event correctly handled"
+          else
+            echo "❌ Push event incorrectly flagged as fork PR"
+            exit 1
+          fi
+
+  # ===========================================================================
+  # Test 3: OIDC provider auto-detection
+  # ===========================================================================
+  oidc_provider_detection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test store URL provider detection
+        run: |
+          # Provider detection function (mirrors action.yml line 887-893)
+          detect_provider() {
+            local url="$1"
+            case "$url" in
+              s3://*) echo "aws" ;;
+              gs://*) echo "gcp" ;;
+              az://*|https://*.blob.core.windows.net/*) echo "azure" ;;
+              *) echo "ERROR" ;;
+            esac
+          }
+
+          # Test cases
+          test_detection() {
+            local url="$1"
+            local expected="$2"
+            local result
+            result=$(detect_provider "$url")
+            if [ "$result" = "$expected" ]; then
+              echo "✅ $url → $result"
+            else
+              echo "❌ $url → $result (expected $expected)"
+              exit 1
+            fi
+          }
+
+          test_detection "s3://my-bucket/prefix" "aws"
+          test_detection "gs://my-bucket/prefix" "gcp"
+          test_detection "az://my-container/prefix" "azure"
+          test_detection "https://myaccount.blob.core.windows.net/container" "azure"
+          test_detection "http://myaccount.blob.core.windows.net/container" "ERROR"  # http not https
+          test_detection "https://unknown.com/bucket" "ERROR"
+
+          echo "✅ All provider detection tests passed"
+
+  # ===========================================================================
+  # Test 4: Attestation conditional (dry-run validation)
+  # ===========================================================================
+  attestation_conditional:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test attestation gating logic
+        run: |
+          # Attestation should only run when (action.yml lines 991-995):
+          # 1. attest input is 'true'
+          # 2. event_name == 'push'
+          # 3. ref == refs/heads/{default_branch}
+          # 4. verified == 'true' (from process step)
+          #
+          # Note: workflow_dispatch does NOT enable attestation
+          # Note: fork PRs are implicitly excluded (no push to default branch)
+
+          should_attest() {
+            local attest_input="$1"
+            local event_name="$2"
+            local ref="$3"
+            local default_branch="$4"
+            local verified="$5"
+
+            # Must have attest=true
+            if [ "$attest_input" != "true" ]; then
+              echo "skip:attest_disabled"
+              return
+            fi
+
+            # Must be push event (not pull_request, not workflow_dispatch)
+            if [ "$event_name" != "push" ]; then
+              echo "skip:not_push"
+              return
+            fi
+
+            # Must be on default branch
+            if [ "$ref" != "refs/heads/$default_branch" ]; then
+              echo "skip:not_default_branch"
+              return
+            fi
+
+            # Must have verified=true from process step
+            if [ "$verified" != "true" ]; then
+              echo "skip:not_verified"
+              return
+            fi
+
+            echo "attest"
+          }
+
+          # Test cases (args: attest_input, event_name, ref, default_branch, verified)
+          test_attest() {
+            local desc="$1"
+            local expected="$2"
+            shift 2
+            local result
+            result=$(should_attest "$@")
+            if [ "$result" = "$expected" ]; then
+              echo "✅ $desc → $result"
+            else
+              echo "❌ $desc → $result (expected $expected)"
+              exit 1
+            fi
+          }
+
+          # Happy path
+          test_attest "attest=true, push, main, verified" "attest" "true" "push" "refs/heads/main" "main" "true"
+
+          # Disabled
+          test_attest "attest=false" "skip:attest_disabled" "false" "push" "refs/heads/main" "main" "true"
+
+          # Wrong event
+          test_attest "pull_request event" "skip:not_push" "true" "pull_request" "refs/heads/main" "main" "true"
+          test_attest "workflow_dispatch event" "skip:not_push" "true" "workflow_dispatch" "refs/heads/main" "main" "true"
+
+          # Wrong branch
+          test_attest "feature branch" "skip:not_default_branch" "true" "push" "refs/heads/feature" "main" "true"
+
+          # Not verified
+          test_attest "not verified" "skip:not_verified" "true" "push" "refs/heads/main" "main" "false"
+
+          echo "✅ All attestation conditional tests passed"
+
+  # ===========================================================================
+  # Test 5: Coverage calculation logic
+  # ===========================================================================
+  coverage_calculation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test coverage formula
+        run: |
+          # Coverage = floor((tools_with_decisions / tools_observed) * 100)
+          # Mirrors action.yml lines 854-858
+          calculate_coverage() {
+            local with_decisions="$1"
+            local observed="$2"
+
+            if [ "$observed" -eq 0 ]; then
+              echo "0"  # No tools observed = 0% coverage (matches action.yml)
+              return
+            fi
+
+            # Integer math: (with_decisions * 100) / observed
+            echo $(( (with_decisions * 100) / observed ))
+          }
+
+          test_coverage() {
+            local desc="$1"
+            local expected="$2"
+            local with_decisions="$3"
+            local observed="$4"
+            local result
+            result=$(calculate_coverage "$with_decisions" "$observed")
+            if [ "$result" = "$expected" ]; then
+              echo "✅ $desc: $with_decisions/$observed = $result%"
+            else
+              echo "❌ $desc: $with_decisions/$observed = $result% (expected $expected%)"
+              exit 1
+            fi
+          }
+
+          test_coverage "All covered" "100" 10 10
+          test_coverage "Half covered" "50" 5 10
+          test_coverage "None covered" "0" 0 10
+          test_coverage "No tools observed" "0" 0 0  # action.yml returns 0, not 100
+          test_coverage "Partial" "75" 3 4
+          test_coverage "One of three" "33" 1 3
+
+          echo "✅ All coverage calculation tests passed"
+
+  # ===========================================================================
+  # Existing tests below
+  # ===========================================================================
   smoke_monorepo_workdir:
     runs-on: ubuntu-latest
     steps:
