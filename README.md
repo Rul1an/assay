@@ -3,9 +3,14 @@
 [![Crates.io](https://img.shields.io/crates/v/assay-cli.svg)](https://crates.io/crates/assay-cli)
 [![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
+[![Open Core](https://img.shields.io/badge/Open%20Core-ADR--016-blue)](docs/architecture/ADR-016-Pack-Taxonomy.md)
 
 **Policy-as-Code for AI Agents.**
 Deterministic testing, runtime enforcement, and verifiable evidence for the Model Context Protocol.
+
+> **Open Core:** Engine + baseline packs are open source (MIT/Apache-2.0).
+> Enterprise packs and managed workflows are commercial.
+> See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md) for details.
 
 ## Install
 

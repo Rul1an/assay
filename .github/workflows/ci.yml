@@ -40,6 +40,16 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  open-core-boundary:
+    name: Open Core Boundary Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check open core boundary
+        run: ./scripts/ci/check-open-core-boundary.sh
+
   test:
     name: Build + Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
