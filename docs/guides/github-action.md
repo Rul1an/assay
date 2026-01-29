@@ -1,6 +1,6 @@
 # GitHub Action Integration
 
-Assay provides a GitHub Action for automated AI agent security verification.
+Assay provides a GitHub Action for automated evidence verification.
 
 **GitHub Marketplace:** [Rul1an/assay-action](https://github.com/marketplace/actions/assay-ai-agent-security)
 
@@ -10,20 +10,20 @@ Assay provides a GitHub Action for automated AI agent security verification.
 - uses: Rul1an/assay-action@v2
 ```
 
-That's it. Zero config.
+Zero config. Discovers evidence bundles, verifies integrity, uploads SARIF.
 
 ## What It Does
 
 1. **Discovers** evidence bundles in your repo (`.assay/evidence/*.tar.gz`)
-2. **Verifies** bundle integrity (cryptographic proof)
-3. **Lints** for security issues (unauthorized file access, network calls, shell commands)
-4. **Reports** results to GitHub Security tab + PR comments
+2. **Verifies** bundle integrity (content-addressed IDs)
+3. **Lints** for security issues with optional compliance packs
+4. **Reports** to GitHub Security tab + PR comments
 
 ## Full Workflow Example
 
 ```yaml
 # .github/workflows/assay.yaml
-name: AI Agent Security
+name: Evidence Verification
 
 on:
   push:
@@ -41,24 +41,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run tests with Assay
+      - name: Run tests with evidence collection
         run: |
-          # Install Assay CLI
           curl -fsSL https://getassay.dev/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-          # Run your tests with evidence collection
           assay run --policy policy.yaml -- pytest tests/
 
-      - name: Verify AI agent behavior
+      - name: Verify evidence
         uses: Rul1an/assay-action@v2
         with:
           fail_on: error
           baseline_key: ${{ github.event.repository.name }}
-          write_baseline: ${{ github.ref == 'refs/heads/main' }}
+          write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 ```
 
 ## Inputs
+
+### Core Inputs (v2.0)
 
 | Input | Default | Description |
 |-------|---------|-------------|
@@ -67,62 +66,168 @@ jobs:
 | `sarif` | `true` | Upload to GitHub Security tab |
 | `comment_diff` | `true` | Post PR comment (only if findings) |
 | `baseline_key` | - | Key for baseline comparison |
-| `write_baseline` | `false` | Save baseline (main branch only) |
+| `write_baseline` | `false` | Save baseline (default branch only) |
+| `version` | `latest` | Assay CLI version |
+
+### Compliance Pack Input (v2.1)
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `pack` | - | Compliance pack(s): `eu-ai-act-baseline`, `soc2-baseline`, `./custom.yaml` |
+
+### BYOS Input (v2.1)
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `store` | - | BYOS URL: `s3://bucket/prefix`, `gs://bucket`, `az://container` |
+| `store_provider` | `auto` | `aws`, `gcp`, `azure`, or `auto` |
+| `store_role` | - | IAM role/identity for OIDC |
+
+### Attestation Input (v2.1)
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `attest` | `false` | Generate artifact attestation |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `verified` | `true` if all bundles verified |
-| `findings_error` | Count of error-level findings |
-| `findings_warn` | Count of warning-level findings |
-| `reports_dir` | Path to reports directory |
+| `findings_error` | Error count |
+| `findings_warn` | Warning count |
+| `reports_dir` | Reports directory path |
+| `pack_applied` | Applied pack IDs (v2.1) |
+| `pack_score` | Compliance score 0-100 (v2.1) |
+| `bundle_url` | BYOS bundle URL (v2.1) |
+| `attestation_id` | Attestation UUID (v2.1) |
 
-## Permissions Required
+## Permission Model
+
+```yaml
+# Minimal (lint only)
+permissions:
+  contents: read
+
+# With SARIF upload
+permissions:
+  contents: read
+  security-events: write
+
+# With PR comments
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+# With attestation + OIDC (v2.1)
+permissions:
+  contents: read
+  security-events: write
+  attestations: write
+  id-token: write
+```
+
+## Compliance Packs
+
+Lint evidence against regulatory requirements:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    pack: eu-ai-act-baseline
+```
+
+SARIF output includes article references (`Article 12(1)`, etc.) for audit trails.
+
+**Available packs:**
+
+| Pack | Coverage |
+|------|----------|
+| `eu-ai-act-baseline` | Article 12 logging requirements |
+| `soc2-baseline` | Control mapping (coming soon) |
+
+Custom packs:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    pack: ./my-org-rules.yaml
+```
+
+## BYOS Push with OIDC
+
+Push evidence to your own storage. No static credentials.
+
+### AWS S3
 
 ```yaml
 permissions:
-  contents: read          # Checkout
-  security-events: write  # SARIF upload
-  pull-requests: write    # PR comments (optional)
+  id-token: write
+  contents: read
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Rul1an/assay-action@v2
+        with:
+          store: s3://my-bucket/evidence
+          store_provider: aws
+          store_role: arn:aws:iam::123456789:role/assay-evidence-push
 ```
 
-## Advanced Examples
+Requires IAM trust policy for `token.actions.githubusercontent.com`.
+
+### GCP Cloud Storage
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    store: gs://my-bucket/evidence
+    store_provider: gcp
+    store_role: projects/my-project/locations/global/workloadIdentityPools/github/providers/github
+```
+
+## Artifact Attestation
+
+Generate SLSA-aligned provenance for evidence bundles:
+
+```yaml
+permissions:
+  attestations: write
+  id-token: write
+
+steps:
+  - uses: Rul1an/assay-action@v2
+    with:
+      attest: true
+```
+
+Verify locally:
+
+```bash
+gh attestation verify bundle.tar.gz --owner Rul1an
+```
+
+Attestations only run on push to default branch (security).
+
+## Examples
 
 ### Baseline Comparison
 
-Detect regressions against your main branch:
+Detect regressions against your default branch:
 
 ```yaml
 - uses: Rul1an/assay-action@v2
   with:
     baseline_key: unit-tests
-    write_baseline: ${{ github.ref == 'refs/heads/main' }}
-```
-
-### Custom Threshold
-
-Allow warnings but fail on errors:
-
-```yaml
-- uses: Rul1an/assay-action@v2
-  with:
-    fail_on: error  # 'warn' would fail on warnings too
-```
-
-### Skip SARIF Upload
-
-If you only want PR comments:
-
-```yaml
-- uses: Rul1an/assay-action@v2
-  with:
-    sarif: false
+    write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 ```
 
 ### Matrix Builds
 
-For multiple test suites:
+Multiple test suites:
 
 ```yaml
 jobs:
@@ -141,9 +246,49 @@ jobs:
           bundles: '.assay/evidence/${{ matrix.suite }}/*.tar.gz'
 ```
 
+### Full v2.1 Workflow
+
+```yaml
+name: Evidence Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  attestations: write
+  id-token: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          curl -fsSL https://getassay.dev/install.sh | sh
+          assay run --policy policy.yaml -- pytest tests/
+
+      - name: Verify with compliance pack
+        uses: Rul1an/assay-action@v2
+        with:
+          pack: eu-ai-act-baseline
+          store: s3://my-bucket/evidence
+          store_provider: aws
+          store_role: ${{ secrets.AWS_ROLE_ARN }}
+          attest: true
+          baseline_key: main
+          write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+```
+
 ## Manual CLI Workflow
 
-If you prefer using the CLI directly instead of the action:
+Using the CLI directly:
 
 ```yaml
 jobs:
@@ -167,8 +312,8 @@ jobs:
       - name: Export evidence
         run: assay evidence export --output evidence.tar.gz
 
-      - name: Lint evidence (SARIF)
-        run: assay evidence lint --format sarif --output results.sarif
+      - name: Lint with pack
+        run: assay evidence lint --pack eu-ai-act-baseline --format sarif --output results.sarif
         continue-on-error: true
 
       - name: Upload SARIF
@@ -182,11 +327,11 @@ jobs:
 
 ### No evidence bundles found
 
-The action looks for bundles in:
+The action looks for:
 - `.assay/evidence/*.tar.gz`
 - `evidence/*.tar.gz`
 
-Generate bundles with:
+Generate with:
 
 ```bash
 assay run --policy policy.yaml -- your-test-command
@@ -194,19 +339,35 @@ assay run --policy policy.yaml -- your-test-command
 
 ### SARIF upload fails
 
-Ensure you have `security-events: write` permission:
-
-```yaml
-permissions:
-  security-events: write
-```
+Check `security-events: write` permission.
 
 ### PR comments not appearing
 
-Ensure you have `pull-requests: write` permission and the action runs on a PR event.
+Check `pull-requests: write` permission and that the action runs on a `pull_request` event.
+
+### OIDC authentication fails
+
+Verify IAM trust relationship includes your repo:
+
+```json
+{
+  "Condition": {
+    "StringLike": {
+      "token.actions.githubusercontent.com:sub": "repo:YOUR-ORG/YOUR-REPO:*"
+    }
+  }
+}
+```
+
+## Security Notes
+
+- **Write operations** (baseline, BYOS push, attestation) only run on push to default branch
+- **Fork PRs** cannot trigger write operations (GitHub Actions security model)
+- **BYOS push** requires OIDC trust relationship configured in cloud IAM
 
 ## Related
 
-- [Assay CLI Documentation](../getting-started/quickstart.md)
 - [Evidence Bundles](../concepts/traces.md)
-- [Policy Configuration](../reference/policies.md)
+- [Compliance Packs](../architecture/SPEC-Pack-Engine-v1.md)
+- [Tool Signing](../architecture/SPEC-Tool-Signing-v1.md)
+- [ADR-018: Action v2.1](../architecture/ADR-018-GitHub-Action-v2.1.md)

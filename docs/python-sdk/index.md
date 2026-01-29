@@ -1,66 +1,150 @@
-# Python SDK Reference
+# Python SDK
 
-The `assay-it` package allows you to record traces from your Python agents for use with Assay.
+The `assay` package provides trace recording, validation, and coverage analysis.
 
 ## Installation
 
 ```bash
-pip install assay-it
+pip install assay
 ```
 
 ## Quick Start
 
-Wrap your OpenAI client to automatically record traces:
+### Record Traces
 
 ```python
-import os
-from assay import record_chat_completions_with_tools, TraceWriter
+from assay import AssayClient
+
+client = AssayClient("traces.jsonl")
+client.record_trace({
+    "tool": "read_file",
+    "args": {"path": "/app/data.json"}
+})
+```
+
+### Validate
+
+```python
+from assay import validate
+
+result = validate("policy.yaml", "traces.jsonl")
+if not result["passed"]:
+    for finding in result["findings"]:
+        print(f"{finding['level']}: {finding['message']}")
+```
+
+### OpenAI Integration
+
+Record tool calls from OpenAI completions:
+
+```python
+from assay import TraceWriter, record_chat_completions_with_tools
 import openai
 
-# 1. Setup
 client = openai.OpenAI()
-writer = TraceWriter("traces/my_trace.jsonl")
+writer = TraceWriter("traces/session.jsonl")
 
-# 2. Record
 result = record_chat_completions_with_tools(
     writer=writer,
     client=client,
     model="gpt-4o",
-    messages=[{"role": "user", "content": "Hello"}],
+    messages=[{"role": "user", "content": "Read the config file"}],
     tools=[...],
-    tool_executors={...},
-    test_id="basic_greeting"
+    tool_executors={"read_file": read_file_fn},
 )
 ```
 
-## Core Functions
+## Pytest Plugin
 
-### `record_chat_completions_with_tools`
+Automatic trace capture in tests:
 
-Executes the agent loop (call LLM -> execute tools -> call LLM) and records the entire interaction to the `writer`.
+```python
+import pytest
 
-**Arguments:**
+@pytest.mark.assay(trace_file="test_traces.jsonl")
+def test_agent_workflow():
+    # Traces are automatically captured
+    pass
 
-*   `writer`: `TraceWriter` instance.
-*   `client`: `openai.Client`.
-*   `model`: Model ID string.
-*   `messages`: List of initial messages.
-*   `tools`: JSON schema for tools.
-*   `tool_executors`: Dictionary mapping tool names to python functions.
-*   `test_id`: (Optional) ID to link this trace to a test case in `eval.yaml`.
+@pytest.mark.assay(policy="strict.yaml")
+def test_with_policy():
+    # Validates against policy after test
+    pass
+```
+
+Enable in `conftest.py`:
+
+```python
+pytest_plugins = ["assay.pytest_plugin"]
+```
+
+## Coverage Analysis
+
+```python
+from assay import Coverage
+
+coverage = Coverage("policy.yaml", "traces.jsonl")
+report = coverage.analyze()
+
+print(f"Coverage: {report['percent']}%")
+print(f"Covered tools: {report['covered']}")
+print(f"Missing: {report['uncovered']}")
+```
+
+## Evidence Export
+
+```python
+from assay import export_evidence
+
+bundle_path = export_evidence(
+    profile="profile.yaml",
+    output="evidence.tar.gz"
+)
+```
+
+## API Reference
+
+### `AssayClient`
+
+| Method | Description |
+|--------|-------------|
+| `record_trace(event)` | Record a tool call event |
+| `flush()` | Write pending events to disk |
+| `close()` | Close the trace file |
+
+### `validate(policy, traces)`
+
+Returns:
+```python
+{
+    "passed": bool,
+    "findings": [
+        {"level": "error", "rule": "...", "message": "..."}
+    ]
+}
+```
 
 ### `TraceWriter`
 
-Handles writing traces to disk in the correct JSONL format.
+| Method | Description |
+|--------|-------------|
+| `write(event)` | Write event to trace file |
+| `close()` | Close file handle |
 
-```python
-writer = TraceWriter("path/to/trace.jsonl", mode="a") # Append mode
-```
-
-## Integrations
+## Framework Integration
 
 ### LangChain / LlamaIndex
 
-For framework integration, we recommend using the `assay import` command with OpenTelemetry or custom callbacks, rather than wrapping the client directly, as frameworks often abstract the client access.
+Use the CLI import command with OpenTelemetry:
 
-See [Importing Traces](../cli/import.md).
+```bash
+assay trace ingest-otel otel-export.json --out traces.jsonl
+```
+
+Or configure callbacks to write directly to `TraceWriter`.
+
+## See Also
+
+- [Quickstart](../getting-started/python-quickstart.md)
+- [Trace Format](../concepts/traces.md)
+- [Policy Reference](../reference/policies.md)

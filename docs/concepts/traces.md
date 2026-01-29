@@ -1,19 +1,69 @@
-# Traces
+# Traces and Evidence
 
-Traces are recorded agent sessions — the "golden" behavior you test against.
+Traces are recorded agent sessions. Evidence bundles are verifiable, tamper-evident packages of those traces for audit and compliance.
 
 ---
 
-## What is a Trace?
+## Traces
 
-A **trace** is a normalized log of every tool call your AI agent made during a session:
+A **trace** is a normalized log of every tool call your agent made:
 
 - Which tools were called
 - What arguments were passed
 - What results were returned
 - In what order
 
-Traces are the foundation of Assay's deterministic testing. Instead of calling your LLM again (slow, expensive, flaky), Assay replays the recorded trace and validates it against your policies.
+Traces enable deterministic testing. Replay recorded behavior instead of calling your LLM again.
+
+---
+
+## Evidence Bundles
+
+An **evidence bundle** is a tamper-evident package containing:
+
+- Trace data (CloudEvents v1.0 format)
+- Metadata (run ID, timestamps, tool manifest)
+- Content-addressed ID (SHA-256)
+- Optional signatures (Ed25519, mandate signatures)
+
+```bash
+# Create bundle
+assay evidence export --out bundle.tar.gz
+
+# Verify integrity
+assay evidence verify bundle.tar.gz
+
+# Lint for issues
+assay evidence lint bundle.tar.gz --format sarif
+
+# Lint with compliance pack
+assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
+
+# Compare bundles
+assay evidence diff baseline.tar.gz current.tar.gz
+```
+
+### Bundle ID
+
+Each bundle has a content-addressed ID:
+
+```
+sha256:a3f2b1c4d5e6f7890...
+```
+
+Any modification changes the ID. Tamper-evident by design.
+
+### BYOS Storage
+
+Push bundles to your own S3-compatible storage:
+
+```bash
+assay evidence push bundle.tar.gz --store s3://bucket/evidence
+assay evidence pull --bundle-id sha256:abc... --store s3://bucket/evidence
+assay evidence list --store s3://bucket/evidence
+```
+
+Supported: AWS S3, Backblaze B2, Cloudflare R2, MinIO, Azure Blob, GCS.
 
 ---
 

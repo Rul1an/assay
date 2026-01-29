@@ -6,87 +6,121 @@
   <br>
 </h1>
 
-<p class="subtitle">The CI/CD Standard for Agentic Systems</p>
+<p class="subtitle">Policy-as-Code for AI Agents</p>
 
-Assay is a strict **Policy-as-Code** engine for Model Context Protocol (MCP). It validates that your AI Agents use tools correctly, enforcing schema limits and sequence rules before they hit production.
+Assay is a **Policy-as-Code** engine for the Model Context Protocol (MCP). Deterministic testing, verifiable evidence bundles, and runtime enforcement.
 
 ---
 
-## What is Assay?
+## Install
 
--   :material-flash:{ .lg .middle } __Install Now__
+```bash
+curl -fsSL https://getassay.dev/install.sh | sh
+```
 
-    ---
+## Core Capabilities
 
-    Get the binary in seconds via our new installer.
+<div class="grid cards" markdown>
 
-    [:octicons-arrow-right-24: getassay.dev](https://getassay.dev)
-
--   :material-robot:{ .lg .middle } __For Agent Developers__
-
-    ---
-
-    You build agents with natural language. Assay is your **Guardrail**. Connect your traces, run `assay validate`, or use `assay monitor` to block attacks at the kernel level.
-
-    [:octicons-arrow-right-24: Getting Started](getting-started/index.md)
-
--   :material-console:{ .lg .middle } __For Engineers__
+-   :material-shield-check:{ .lg .middle } __Policy Enforcement__
 
     ---
 
-    You need **Determinism**. Assay is a high-performance Rust binary that enforces rigid JSON Schemas and sequence constraints in CI. No flaky evals.
+    Validate tool calls against JSON Schema constraints, sequence rules, and allowlists. No LLM calls in CI.
 
-    [:octicons-arrow-right-24: CLI Reference](reference/cli/index.md)
+    [:octicons-arrow-right-24: Policy Reference](reference/policies.md)
+
+-   :material-package-variant-closed:{ .lg .middle } __Evidence Bundles__
+
+    ---
+
+    Tamper-evident audit trails with content-addressed IDs. CloudEvents v1.0 format. SARIF output for GitHub Security.
+
+    [:octicons-arrow-right-24: Evidence Guide](concepts/traces.md)
+
+-   :material-clipboard-check:{ .lg .middle } __Compliance Packs__
+
+    ---
+
+    Built-in rule packs for EU AI Act, SOC 2, and custom policies. Article-referenced findings for auditors.
+
+    [:octicons-arrow-right-24: Pack Engine](architecture/SPEC-Pack-Engine-v1.md)
+
+-   :material-key:{ .lg .middle } __Tool Signing__
+
+    ---
+
+    Ed25519 signatures for tool definitions. DSSE envelope format. Trust policies for supply chain security.
+
+    [:octicons-arrow-right-24: Signing Spec](architecture/SPEC-Tool-Signing-v1.md)
 
 </div>
 
-## How it Works
+## Quick Start
 
-### 1. Initialize
-Run the wizard to auto-detect your project type and generate secure defaults.
-
-```bash
-assay init
-```
-
-### 2. Capture Traces
-Log your agent's MCP tool calls to a JSONL file.
-
-```json
-{"tool": "run_tests", "args": {}}
-{"tool": "deploy_service", "args": {"env": "prod"}}
-```
-
-### 3. Validate
-Run the validation engine (Stateless). Supports **SARIF** for GitHub Advanced Security.
+### 1. Capture Traces
 
 ```bash
-assay validate --trace-file traces.jsonl --format sarif
+assay import --format mcp-inspector session.json --out trace.jsonl
 ```
 
-### 4. Enable Runtime Security (Linux)
-Block IO and Network access at the kernel level.
+### 2. Validate
 
 ```bash
-sudo assay monitor --policy policy.yaml
+assay validate --trace-file trace.jsonl --format sarif
 ```
 
-| Result | Status | Output |
-| :--- | :--- | :--- |
-| **Pass** | ✅ | `exit code 0` |
-| **Fail** | ❌ | `exit code 1` + SARIF report |
-| **Error** | ⚠️ | `exit code 2` (Config/Schema validation) |
+### 3. Export Evidence
 
-## Key Features
+```bash
+assay evidence export --out bundle.tar.gz
+assay evidence verify bundle.tar.gz
+```
 
-- **Stateless**: No database required. Validate in GitHub Actions, GitLab CI, or local `pytest`.
-- **The Doctor**: `assay doctor` automatically diagnoses config errors.
-- **Agentic Contract**: JSON output optimized for AI agents (`--format json`).
-- **CI-Native**: `assay init --ci` generates GitHub Actions workflows.
-- **Fast**: Written in Rust. <10ms overhead.
+### 4. Lint with Compliance Pack
+
+```bash
+assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
+```
+
+| Result | Exit Code | Output |
+|--------|-----------|--------|
+| Pass | `0` | Summary |
+| Fail | `1` | SARIF with findings |
+| Error | `2` | Config/Schema validation |
+
+## GitHub Action
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+Zero-config. Discovers evidence bundles, verifies integrity, uploads SARIF to GitHub Security.
+
+[:octicons-arrow-right-24: GitHub Action Guide](guides/github-action.md)
+
+## Runtime Enforcement (Linux)
+
+```bash
+# Landlock sandbox (rootless)
+assay sandbox --policy policy.yaml -- python agent.py
+
+# eBPF/LSM kernel-level enforcement
+sudo assay monitor --policy policy.yaml --pid <agent-pid>
+```
+
+## Standards Alignment
+
+| Standard | Integration |
+|----------|-------------|
+| CloudEvents v1.0 | Evidence envelope format |
+| W3C Trace Context | `traceparent` correlation |
+| SARIF 2.1.0 | GitHub Code Scanning |
+| EU AI Act Article 12 | Compliance pack mapping |
 
 ## Next Steps
 
-- [**Get Started**](getting-started/index.md)
+- [**Getting Started**](getting-started/index.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
-- [**Config Reference**](reference/config/index.md)
+- [**CLI Reference**](reference/cli/index.md)
+- [**Architecture**](architecture/index.md)

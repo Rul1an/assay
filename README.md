@@ -47,7 +47,7 @@ assay profile update --profile profile.yaml -i trace.jsonl --run-id ci-123
 assay generate --profile profile.yaml --min-stability 0.8
 ```
 
-### 3. Evidence Bundles (Audit/Compliance)
+### 3. Evidence Bundles
 
 Tamper-evident bundles with content-addressed IDs. CloudEvents v1.0 format.
 
@@ -58,12 +58,64 @@ assay evidence export --profile profile.yaml --out bundle.tar.gz
 # Verify integrity
 assay evidence verify bundle.tar.gz
 
-# Lint for security issues (SARIF)
+# Lint for security issues (SARIF output)
 assay evidence lint bundle.tar.gz --format sarif
+
+# Lint with compliance pack
+assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
 
 # Compare runs
 assay evidence diff baseline.tar.gz current.tar.gz
 ```
+
+### 4. Compliance Packs
+
+Built-in rule packs for regulatory compliance. Article-referenced, auditor-friendly.
+
+```bash
+# EU AI Act Article 12 (logging requirements)
+assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
+
+# Multiple packs
+assay evidence lint --pack eu-ai-act-baseline,soc2-baseline bundle.tar.gz
+
+# Custom pack
+assay evidence lint --pack ./my-org-rules.yaml bundle.tar.gz
+```
+
+SARIF output includes article references for audit trails.
+
+### 5. Tool Signing
+
+Cryptographic signatures for tool definitions. Ed25519 + DSSE.
+
+```bash
+# Generate keypair
+assay tool keygen --out ~/.assay/keys/
+
+# Sign tool definition
+assay tool sign tool.json --key priv.pem --out signed.json
+
+# Verify signature
+assay tool verify signed.json --pubkey pub.pem
+```
+
+### 6. BYOS (Bring Your Own Storage)
+
+Push evidence to your own S3-compatible storage. No vendor lock-in.
+
+```bash
+# Push bundle
+assay evidence push bundle.tar.gz --store s3://my-bucket/evidence
+
+# Pull by ID
+assay evidence pull --bundle-id sha256:abc... --store s3://my-bucket/evidence
+
+# List bundles
+assay evidence list --store s3://my-bucket/evidence
+```
+
+Supports: AWS S3, Backblaze B2, Cloudflare R2, MinIO, Azure Blob, GCS.
 
 ## Runtime Enforcement
 
@@ -83,6 +135,16 @@ assay sandbox --policy policy.yaml -- python agent.py
 # eBPF/LSM enforcement (requires capabilities)
 sudo assay monitor --policy policy.yaml --pid <agent-pid>
 ```
+
+## GitHub Action
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+Zero-config evidence verification. SARIF integration with GitHub Security tab.
+
+See [GitHub Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security).
 
 ## Configuration
 
@@ -131,11 +193,11 @@ def test_agent():
 
 ## Documentation
 
-- [Getting Started](https://getassay.dev/docs/quickstart)
-- [Policy Reference](docs/reference/policies.md)
-- [Evidence Contract](docs/architecture/ADR-006-Evidence-Contract.md)
-- [Runtime Architecture](docs/architecture/runtime.md)
-- [Python SDK](docs/python-sdk/)
+- [Getting Started](https://getassay.dev/getting-started/)
+- [Policy Reference](https://getassay.dev/reference/policies/)
+- [Evidence Bundles](https://getassay.dev/concepts/traces/)
+- [GitHub Action](https://getassay.dev/guides/github-action/)
+- [Python SDK](https://getassay.dev/python-sdk/)
 
 ## Contributing
 
