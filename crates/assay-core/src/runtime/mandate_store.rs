@@ -124,6 +124,9 @@ impl MandateStore {
         conn.execute("PRAGMA foreign_keys = ON", [])?;
         // WAL mode for file-backed DBs (no-op for in-memory)
         let _ = conn.execute("PRAGMA journal_mode = WAL", []);
+        // Busy timeout: wait up to 5s for locks (Windows needs this for concurrency)
+        // Use let _ = because PRAGMA returns a result set
+        let _ = conn.execute("PRAGMA busy_timeout = 5000", []);
         conn.execute_batch(MANDATE_SCHEMA)?;
         Ok(())
     }
