@@ -262,18 +262,22 @@ fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
             trimmed
         };
 
-        // Handle scope changes for list items even if there's no inline key
+        // Handle scope changes for list items
+        // Each list item gets its own fresh scope for keys, even at indent 0
+        // This ensures `- a: 1\n- a: 2` is valid (different items) while
+        // `- a: 1\n  a: 2` is invalid (duplicate in same item)
         if is_list_item {
-            // List items start a completely new scope - pop all child scopes
+            // Pop all scopes at or deeper than current indent (leaving parent scopes)
             while key_stack.len() > 1
                 && key_stack.last().map(|(i, _)| *i >= indent).unwrap_or(false)
             {
                 key_stack.pop();
             }
-            // Push new scope for this list item
-            if key_stack.last().map(|(i, _)| *i < indent).unwrap_or(true) {
-                key_stack.push((indent, std::collections::HashSet::new()));
-            }
+
+            // Always push a fresh scope for this list item
+            // Use indent+1 as "effective indent" so each list item at same level
+            // still gets its own scope (the +1 is just a marker, not real indent)
+            key_stack.push((indent + 1, std::collections::HashSet::new()));
         }
 
         // Extract and check keys
@@ -1036,6 +1040,115 @@ mod tests {
         assert!(
             result.is_err(),
             "Complex keys should be rejected: {:?}",
+            result
+        );
+    }
+
+    // ==================== List Item Scoping Tests ====================
+
+    #[test]
+    fn test_list_items_same_key_allowed() {
+        // Different list items can have the same key (separate scopes)
+        let yaml = "items:\n  - name: first\n  - name: second";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Same keys in different list items should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_list_item_duplicate_within_same_item() {
+        // Duplicate keys within same list item should be rejected
+        // May be detected by pre-scan (DuplicateKey) or serde_yaml (ParseError)
+        let yaml = "items:\n  - name: first\n    name: second";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(
+                result,
+                Err(CanonicalizeError::DuplicateKey { .. })
+                    | Err(CanonicalizeError::ParseError { .. })
+            ),
+            "Duplicate keys within same list item should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_top_level_sequence_same_keys() {
+        // Top-level sequence: `- a: 1\n- a: 2` should be valid
+        let yaml = "- a: 1\n- a: 2";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Top-level sequence items with same keys should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_top_level_sequence_duplicate_in_item() {
+        // Top-level sequence with duplicate in one item: invalid
+        // May be detected by pre-scan (DuplicateKey) or serde_yaml (ParseError)
+        let yaml = "- a: 1\n  a: 2";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(
+                result,
+                Err(CanonicalizeError::DuplicateKey { .. })
+                    | Err(CanonicalizeError::ParseError { .. })
+            ),
+            "Duplicate within top-level sequence item should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_nested_list_with_mappings() {
+        // Nested list items with multiple keys each
+        let yaml = r#"rules:
+  - id: rule1
+    name: First Rule
+  - id: rule2
+    name: Second Rule"#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Nested list with multiple keys per item should work: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_list_same_keys() {
+        // Deeply nested: each list item has same structure
+        let yaml = r#"outer:
+  inner:
+    - key: val1
+      other: a
+    - key: val2
+      other: b"#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Deeply nested list items with same keys should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_mixed_sequence_and_mapping() {
+        // Mixed: sequence items followed by regular mapping
+        let yaml = r#"items:
+  - name: item1
+  - name: item2
+metadata:
+  name: should_not_conflict"#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Sequence keys should not conflict with sibling mapping keys: {:?}",
             result
         );
     }

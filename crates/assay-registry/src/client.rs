@@ -1208,7 +1208,7 @@ mod integration_tests {
             "Should fail with RateLimited"
         );
 
-        // With retry-after: 1 and ±10% jitter, we expect at least ~900ms of backoff
+        // With retry-after: 1 and jitter, we expect at least ~850ms of backoff
         assert!(
             elapsed.as_millis() >= 850,
             "Should have waited for retry-after (with jitter), elapsed: {:?}",
