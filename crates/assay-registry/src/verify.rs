@@ -8,7 +8,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
-use crate::canonicalize::{compute_canonical_digest, CanonicalizeError};
+use crate::canonicalize::{
+    compute_canonical_digest, parse_yaml_strict, to_canonical_jcs_bytes, CanonicalizeError,
+};
 use crate::error::{RegistryError, RegistryResult};
 use crate::trust::TrustStore;
 use crate::types::{DsseEnvelope, FetchResult};
@@ -110,15 +112,32 @@ pub fn verify_pack(
         });
     }
 
-    // 4. Parse and verify DSSE signature
+    // 4. Canonicalize content for DSSE verification
+    // CRITICAL: DSSE payload is canonical JCS bytes, not raw YAML
+    let canonical_bytes = canonicalize_for_dsse(&result.content)?;
+
+    // 5. Parse and verify DSSE signature
     let sig_b64 = signature.as_ref().unwrap();
     let envelope = parse_dsse_envelope(sig_b64)?;
-    verify_dsse_signature(&result.content, &envelope, trust_store)?;
+    verify_dsse_signature_bytes(&canonical_bytes, &envelope, trust_store)?;
 
     Ok(VerifyResult {
         signed: true,
         key_id: envelope.signatures.first().map(|s| s.key_id.clone()),
         digest: result.computed_digest.clone(),
+    })
+}
+
+/// Canonicalize YAML content to JCS bytes for DSSE verification.
+///
+/// Per SPEC §6.3: DSSE payload is the JCS canonical form of the pack content.
+fn canonicalize_for_dsse(content: &str) -> RegistryResult<Vec<u8>> {
+    let json_value = parse_yaml_strict(content).map_err(|e| RegistryError::InvalidResponse {
+        message: format!("failed to parse YAML for signature verification: {}", e),
+    })?;
+
+    to_canonical_jcs_bytes(&json_value).map_err(|e| RegistryError::InvalidResponse {
+        message: format!("failed to canonicalize for signature verification: {}", e),
     })
 }
 
@@ -216,9 +235,12 @@ fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     pae
 }
 
-/// Verify DSSE signature over content.
-fn verify_dsse_signature(
-    content: &str,
+/// Verify DSSE signature over canonical content bytes.
+///
+/// Per SPEC §6.3: The DSSE payload MUST be the JCS canonical form of the content.
+/// This function compares canonical bytes, not raw YAML strings.
+fn verify_dsse_signature_bytes(
+    canonical_bytes: &[u8],
     envelope: &DsseEnvelope,
     trust_store: &TrustStore,
 ) -> RegistryResult<()> {
@@ -232,39 +254,36 @@ fn verify_dsse_signature(
         });
     }
 
-    // 2. Decode and verify payload matches content
+    // 2. Decode payload from envelope
     let payload_bytes =
         BASE64
             .decode(&envelope.payload)
             .map_err(|e| RegistryError::SignatureInvalid {
                 reason: format!("invalid base64 payload: {}", e),
             })?;
-    let payload_str =
-        String::from_utf8(payload_bytes.clone()).map_err(|e| RegistryError::SignatureInvalid {
-            reason: format!("payload not valid UTF-8: {}", e),
-        })?;
 
-    // Content should match payload
-    if payload_str != content {
+    // 3. CRITICAL: Compare canonical bytes directly (not as strings)
+    // This ensures we're comparing apples to apples: canonical form to canonical form
+    if payload_bytes != canonical_bytes {
         return Err(RegistryError::DigestMismatch {
             name: "pack".to_string(),
             version: "unknown".to_string(),
-            expected: "envelope payload".to_string(),
-            actual: "content".to_string(),
+            expected: format!("canonical payload ({} bytes)", payload_bytes.len()),
+            actual: format!("canonical content ({} bytes)", canonical_bytes.len()),
         });
     }
 
-    // 3. Verify at least one signature
+    // 4. Verify at least one signature
     if envelope.signatures.is_empty() {
         return Err(RegistryError::SignatureInvalid {
             reason: "no signatures in envelope".to_string(),
         });
     }
 
-    // 4. Build PAE
+    // 5. Build PAE over the canonical payload bytes
     let pae = build_pae(&envelope.payload_type, &payload_bytes);
 
-    // 5. Verify each signature until one succeeds
+    // 6. Verify each signature until one succeeds
     let mut last_error = None;
     for sig in &envelope.signatures {
         match verify_single_signature(&pae, &sig.key_id, &sig.signature, trust_store) {
@@ -278,6 +297,21 @@ fn verify_dsse_signature(
             reason: "no valid signatures".to_string(),
         }),
     )
+}
+
+/// Legacy: Verify DSSE signature over content string.
+///
+/// **Deprecated**: Use `verify_dsse_signature_bytes` which properly handles
+/// canonical byte comparison per SPEC §6.3.
+#[allow(dead_code)]
+fn verify_dsse_signature(
+    content: &str,
+    envelope: &DsseEnvelope,
+    trust_store: &TrustStore,
+) -> RegistryResult<()> {
+    // Canonicalize content first
+    let canonical_bytes = canonicalize_for_dsse(content)?;
+    verify_dsse_signature_bytes(&canonical_bytes, envelope, trust_store)
 }
 
 /// Verify a single signature.
@@ -571,5 +605,405 @@ mod tests {
         // Conservative choice: 8KB
 
         assert_eq!(RECOMMENDED_HEADER_LIMIT, 8192);
+    }
+
+    // ==================== DSSE Test Vectors (SPEC §6.3) ====================
+
+    /// Helper to create a signing key from a deterministic seed.
+    fn keypair_from_seed(seed: [u8; 32]) -> SigningKey {
+        SigningKey::from_bytes(&seed)
+    }
+
+    /// Helper to create a DSSE envelope with real signature.
+    fn create_signed_envelope(signing_key: &SigningKey, content: &str) -> (DsseEnvelope, String) {
+        use ed25519_dalek::Signer;
+        use pkcs8::EncodePublicKey;
+
+        // Canonicalize content
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+
+        // Compute key ID
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let key_id = compute_key_id(spki_der.as_bytes());
+
+        // Build PAE and sign
+        let payload_b64 = BASE64.encode(&canonical);
+        let pae = build_pae(PAYLOAD_TYPE_PACK_V1, &canonical);
+        let signature = signing_key.sign(&pae);
+
+        let envelope = DsseEnvelope {
+            payload_type: PAYLOAD_TYPE_PACK_V1.to_string(),
+            payload: payload_b64,
+            signatures: vec![crate::types::DsseSignature {
+                key_id: key_id.clone(),
+                signature: BASE64.encode(signature.to_bytes()),
+            }],
+        };
+
+        (envelope, key_id)
+    }
+
+    #[test]
+    fn test_dsse_valid_signature_real_ed25519() {
+        // SPEC §6.3.4: Valid DSSE with real Ed25519 signature
+        // Use deterministic seed for reproducibility
+        let seed: [u8; 32] = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ];
+        let signing_key = keypair_from_seed(seed);
+        let content = "name: test-pack\nversion: \"1.0.0\"\nrules: []";
+
+        let (envelope, key_id) = create_signed_envelope(&signing_key, content);
+
+        // Build trust store with this key
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id: key_id.clone(),
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: Some("Test key".to_string()),
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        // Use blocking runtime for sync test
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        // Verify signature
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+        let content_str = String::from_utf8(canonical.clone()).unwrap();
+
+        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        assert!(result.is_ok(), "DSSE signature should verify: {:?}", result);
+    }
+
+    #[test]
+    fn test_dsse_payload_mismatch() {
+        // SPEC §6.3.3: Payload in envelope must match content
+        // Envelope contains "original", verify against "tampered"
+        let seed: [u8; 32] = [0x42; 32];
+        let signing_key = keypair_from_seed(seed);
+
+        // Create envelope for original content
+        let original_content = "name: original\nversion: \"1.0.0\"";
+        let (envelope, key_id) = create_signed_envelope(&signing_key, original_content);
+
+        // Build trust store
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        // Try to verify with DIFFERENT content (attack scenario)
+        let tampered_content = "name: tampered\nversion: \"1.0.0\"";
+        let tampered_canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(tampered_content).unwrap(),
+        )
+        .unwrap();
+        let tampered_str = String::from_utf8(tampered_canonical).unwrap();
+
+        let result = verify_dsse_signature(&tampered_str, &envelope, &trust_store);
+        assert!(
+            matches!(result, Err(RegistryError::DigestMismatch { .. })),
+            "Should return DigestMismatch for payload != content: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dsse_untrusted_key_rejected() {
+        // SPEC §6.4.4: Unknown keys MUST be rejected for commercial packs
+        let seed: [u8; 32] = [0x55; 32];
+        let signing_key = keypair_from_seed(seed);
+        let content = "name: commercial-pack\nversion: \"1.0.0\"";
+
+        let (envelope, _key_id) = create_signed_envelope(&signing_key, content);
+
+        // Empty trust store - key is NOT trusted
+        let trust_store = TrustStore::new();
+
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+        let content_str = String::from_utf8(canonical).unwrap();
+
+        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        assert!(
+            matches!(result, Err(RegistryError::KeyNotTrusted { .. })),
+            "Should return KeyNotTrusted for unknown key: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dsse_wrong_payload_type_rejected() {
+        // SPEC §6.3.2: Payload type must match expected type
+        let envelope = DsseEnvelope {
+            payload_type: "application/json".to_string(), // Wrong type!
+            payload: BASE64.encode(b"test"),
+            signatures: vec![],
+        };
+
+        let trust_store = TrustStore::new();
+        let result = verify_dsse_signature("test", &envelope, &trust_store);
+
+        assert!(
+            matches!(result, Err(RegistryError::SignatureInvalid { .. })),
+            "Should reject wrong payload type: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dsse_empty_signatures_rejected() {
+        // SPEC §6.3: At least one signature required
+        let content = "name: test\nversion: \"1.0.0\"";
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+
+        let envelope = DsseEnvelope {
+            payload_type: PAYLOAD_TYPE_PACK_V1.to_string(),
+            payload: BASE64.encode(&canonical),
+            signatures: vec![], // No signatures!
+        };
+
+        let trust_store = TrustStore::new();
+        let content_str = String::from_utf8(canonical).unwrap();
+        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+
+        assert!(
+            matches!(result, Err(RegistryError::SignatureInvalid { .. })),
+            "Should reject empty signatures: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dsse_invalid_signature_rejected() {
+        // Invalid signature bytes should be rejected
+        let seed: [u8; 32] = [0x77; 32];
+        let signing_key = keypair_from_seed(seed);
+        let content = "name: test\nversion: \"1.0.0\"";
+
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+
+        // Compute key ID
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let key_id = compute_key_id(spki_der.as_bytes());
+
+        // Create envelope with INVALID signature (all zeros)
+        let envelope = DsseEnvelope {
+            payload_type: PAYLOAD_TYPE_PACK_V1.to_string(),
+            payload: BASE64.encode(&canonical),
+            signatures: vec![crate::types::DsseSignature {
+                key_id: key_id.clone(),
+                signature: BASE64.encode([0u8; 64]), // Invalid signature!
+            }],
+        };
+
+        // Add key to trust store
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        let content_str = String::from_utf8(canonical).unwrap();
+        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+
+        assert!(
+            matches!(result, Err(RegistryError::SignatureInvalid { .. })),
+            "Should reject invalid signature: {:?}",
+            result
+        );
+    }
+
+    // ==================== P0 Fix: Canonical Bytes Verification Tests ====================
+
+    #[test]
+    fn test_verify_pack_uses_canonical_bytes() {
+        // This test verifies the P0 fix: verify_pack canonicalizes content
+        // before DSSE verification (not comparing raw YAML to canonical payload)
+        let seed: [u8; 32] = [0x88; 32];
+        let signing_key = keypair_from_seed(seed);
+
+        // Content with keys in non-canonical order
+        let content = "z: 3\na: 1\nm: 2";
+
+        // Create envelope (uses canonical form internally)
+        let (envelope, key_id) = create_signed_envelope(&signing_key, content);
+
+        // Add key to trust store
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        // Create FetchResult with RAW YAML content (not canonical)
+        let fetch_result = FetchResult {
+            content: content.to_string(), // Raw YAML, keys NOT sorted
+            headers: crate::types::PackHeaders {
+                digest: Some(compute_digest(content)),
+                signature: Some(BASE64.encode(serde_json::to_vec(&envelope).unwrap())),
+                key_id: envelope.signatures.first().map(|s| s.key_id.clone()),
+                etag: None,
+                cache_control: None,
+                content_length: None,
+            },
+            computed_digest: compute_digest(content),
+        };
+
+        // verify_pack should work because it canonicalizes before comparison
+        let result = verify_pack(&fetch_result, &trust_store, &VerifyOptions::default());
+        assert!(
+            result.is_ok(),
+            "verify_pack should canonicalize content before DSSE verification: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_canonical_bytes_differ_from_raw() {
+        // Demonstrate why the fix matters: raw != canonical
+        let yaml = "z: 1\na: 2\nm: 3"; // Keys not sorted
+
+        // Raw YAML bytes
+        let raw_bytes = yaml.as_bytes();
+
+        // Canonical JCS bytes (keys sorted: a, m, z)
+        let canonical_bytes = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(yaml).unwrap(),
+        )
+        .unwrap();
+
+        // They MUST be different!
+        assert_ne!(
+            raw_bytes,
+            &canonical_bytes[..],
+            "Raw YAML and canonical JCS MUST differ for non-sorted keys"
+        );
+
+        // Canonical form should have sorted keys
+        let canonical_str = String::from_utf8(canonical_bytes).unwrap();
+        assert!(
+            canonical_str.starts_with(r#"{"a":"#),
+            "JCS must sort keys alphabetically, got: {}",
+            canonical_str
+        );
+    }
+
+    #[test]
+    fn test_verify_dsse_signature_bytes_directly() {
+        // Test verify_dsse_signature_bytes function directly
+        let seed: [u8; 32] = [0x99; 32];
+        let signing_key = keypair_from_seed(seed);
+        let content = "name: test\nversion: \"1.0.0\"";
+
+        let (envelope, key_id) = create_signed_envelope(&signing_key, content);
+
+        // Add key to trust store
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        // Get canonical bytes
+        let canonical_bytes = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+
+        // Verify with canonical bytes should succeed
+        let result = verify_dsse_signature_bytes(&canonical_bytes, &envelope, &trust_store);
+        assert!(
+            result.is_ok(),
+            "Canonical bytes verification should succeed: {:?}",
+            result
+        );
+
+        // Verify with raw YAML bytes should FAIL
+        let raw_bytes = content.as_bytes();
+        let result = verify_dsse_signature_bytes(raw_bytes, &envelope, &trust_store);
+        assert!(
+            matches!(result, Err(RegistryError::DigestMismatch { .. })),
+            "Raw bytes should not match canonical payload: {:?}",
+            result
+        );
     }
 }

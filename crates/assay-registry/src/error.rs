@@ -23,6 +23,8 @@ pub enum RegistryError {
         name: String,
         version: String,
         reason: String,
+        /// Suggested safe version to use instead (if available).
+        safe_version: Option<String>,
     },
 
     /// Digest verification failed.

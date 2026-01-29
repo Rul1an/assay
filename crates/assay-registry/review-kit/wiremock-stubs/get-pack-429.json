@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/packs/rate-limited/.*"
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-RateLimit-Limit": "100",
+      "X-RateLimit-Remaining": "0",
+      "X-RateLimit-Reset": "1706529600",
+      "Retry-After": "30"
+    },
+    "jsonBody": {
+      "error": "rate_limit_exceeded",
+      "retry_after": 30
+    }
+  }
+}

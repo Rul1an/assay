@@ -8,9 +8,28 @@
 //! - Anchors and aliases (`&name`, `*name`)
 //! - Tags (`!!timestamp`, `!<custom>`)
 //! - Multi-document (`---`)
-//! - Duplicate keys
+//! - Duplicate keys (detected via pre-scan for block mappings, serde_yaml for flow)
 //! - Floats (only integers allowed)
 //! - Integers outside safe range (> 2^53)
+//! - Non-string keys (complex keys like `? [a, b]`)
+//!
+//! # Supported Mapping Styles
+//!
+//! **Recommended**: Block mappings (one key per line)
+//! ```yaml
+//! name: my-pack
+//! version: "1.0.0"
+//! config:
+//!   nested: value
+//! ```
+//!
+//! **Allowed but not recommended**: Flow mappings
+//! ```yaml
+//! config: {a: 1, b: 2}
+//! ```
+//!
+//! Flow mapping duplicate keys are detected by `serde_yaml` during parsing,
+//! not by the pre-scan. Both detection methods result in rejection.
 //!
 //! # DoS Limits (§12.4)
 //!
@@ -168,98 +187,168 @@ pub fn parse_yaml_strict(content: &str) -> CanonicalizeResult<JsonValue> {
 /// Pre-scan YAML for forbidden patterns.
 ///
 /// This is a fast check before full parsing to reject obviously invalid input.
+/// Uses a line-based approach to avoid false positives from string content.
 fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
-    let mut in_string = false;
-    let mut escape_next = false;
-    let mut prev_char = '\0';
-    let mut line_start = true;
+    // Track indentation levels and keys for duplicate detection
+    // Key: (indent_level, key_name) -> seen
+    let mut key_stack: Vec<(usize, std::collections::HashSet<String>)> =
+        vec![(0, std::collections::HashSet::new())];
 
-    for (i, c) in content.char_indices() {
-        if escape_next {
-            escape_next = false;
-            prev_char = c;
+    for (line_num, line) in content.lines().enumerate() {
+        // Skip empty lines and comments
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        match c {
-            // Track string state (simplified - doesn't handle all edge cases)
-            '"' if !in_string => in_string = true,
-            '"' if in_string => in_string = false,
-            '\\' if in_string => escape_next = true,
+        // Calculate indentation (number of leading spaces)
+        let indent = line.len() - line.trim_start().len();
 
-            // Check for anchors: &name (not in string, not &amp; entity)
-            '&' if !in_string => {
-                // Look ahead for valid anchor name char
-                let rest = &content[i..];
-                if rest.len() > 1 {
-                    let next = rest.chars().nth(1);
-                    if let Some(nc) = next {
-                        if nc.is_alphanumeric() || nc == '_' {
-                            return Err(CanonicalizeError::AnchorFound {
-                                position: format!("byte {}", i),
-                            });
-                        }
-                    }
-                }
-            }
+        // Check for multi-document separator at line start
+        if trimmed == "---" || trimmed.starts_with("--- ") || trimmed == "..." {
+            return Err(CanonicalizeError::MultiDocumentFound);
+        }
 
-            // Check for aliases: *name (not in string)
-            '*' if !in_string => {
-                let rest = &content[i..];
-                if rest.len() > 1 {
-                    let next = rest.chars().nth(1);
-                    if let Some(nc) = next {
-                        if nc.is_alphanumeric() || nc == '_' {
-                            return Err(CanonicalizeError::AliasFound {
-                                position: format!("byte {}", i),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Check for tags: !! or !<
-            '!' if !in_string => {
-                let rest = &content[i..];
-                if rest.starts_with("!!") || rest.starts_with("!<") {
-                    // Extract tag for error message
-                    let tag_end = rest
-                        .find(|c: char| c.is_whitespace() || c == ':' || c == '\n')
-                        .unwrap_or(rest.len().min(20));
-                    return Err(CanonicalizeError::TagFound {
-                        tag: rest[..tag_end].to_string(),
+        // Check for anchors: &name at start of value (line-based, more conservative)
+        // Pattern: key: &anchor or just &anchor as value
+        if let Some(colon_pos) = trimmed.find(':') {
+            let value_part = trimmed[colon_pos + 1..].trim_start();
+            if value_part.starts_with('&') && value_part.len() > 1 {
+                let next_char = value_part.chars().nth(1).unwrap_or(' ');
+                if next_char.is_alphanumeric() || next_char == '_' {
+                    return Err(CanonicalizeError::AnchorFound {
+                        position: format!("line {}", line_num + 1),
                     });
                 }
             }
-
-            // Check for multi-document: --- at line start
-            '-' if !in_string && line_start => {
-                let rest = &content[i..];
-                if rest.starts_with("---") {
-                    // Check if it's actually a document separator
-                    let after = rest.get(3..4);
-                    if after.is_none()
-                        || after == Some("\n")
-                        || after == Some(" ")
-                        || after == Some("\r")
-                    {
-                        return Err(CanonicalizeError::MultiDocumentFound);
-                    }
+            // Check for aliases: *name as value
+            if value_part.starts_with('*') && value_part.len() > 1 {
+                let next_char = value_part.chars().nth(1).unwrap_or(' ');
+                if next_char.is_alphanumeric() || next_char == '_' {
+                    return Err(CanonicalizeError::AliasFound {
+                        position: format!("line {}", line_num + 1),
+                    });
                 }
             }
-
-            '\n' => line_start = true,
-            _ if !c.is_whitespace() => line_start = false,
-            _ => {}
         }
 
-        prev_char = c;
+        // Check for tags: !! or !<
+        if trimmed.contains("!!") || trimmed.contains("!<") {
+            // Make sure it's not inside a quoted string
+            if !is_inside_quotes(trimmed, "!!") && !is_inside_quotes(trimmed, "!<") {
+                let tag_start = trimmed.find("!!").or_else(|| trimmed.find("!<")).unwrap();
+                let tag_end = trimmed[tag_start..]
+                    .find(|c: char| c.is_whitespace() || c == ':')
+                    .map(|p| tag_start + p)
+                    .unwrap_or(trimmed.len().min(tag_start + 20));
+                return Err(CanonicalizeError::TagFound {
+                    tag: trimmed[tag_start..tag_end].to_string(),
+                });
+            }
+        }
+
+        // Duplicate key detection: extract key from mapping lines
+        // A mapping line looks like: key: value or key:
+        if let Some(key) = extract_yaml_key(trimmed) {
+            // Pop stack levels that are deeper than current indent
+            while key_stack.len() > 1
+                && key_stack.last().map(|(i, _)| *i >= indent).unwrap_or(false)
+            {
+                key_stack.pop();
+            }
+
+            // If we're at a new indent level, push a new scope
+            if key_stack.last().map(|(i, _)| *i < indent).unwrap_or(true) {
+                key_stack.push((indent, std::collections::HashSet::new()));
+            }
+
+            // Check for duplicate at current level
+            if let Some((_, keys)) = key_stack.last_mut() {
+                if !keys.insert(key.clone()) {
+                    return Err(CanonicalizeError::DuplicateKey { key });
+                }
+            }
+        }
     }
 
-    // Suppress unused variable warning
-    let _ = prev_char;
-
     Ok(())
+}
+
+/// Check if a pattern appears inside quotes in a line.
+fn is_inside_quotes(line: &str, pattern: &str) -> bool {
+    if let Some(pos) = line.find(pattern) {
+        let before = &line[..pos];
+        // Count unescaped quotes before the pattern
+        let double_quotes = before.matches('"').count() - before.matches("\\\"").count();
+        let single_quotes = before.matches('\'').count() - before.matches("\\'").count();
+        // If odd number of quotes, we're inside a string
+        double_quotes % 2 == 1 || single_quotes % 2 == 1
+    } else {
+        false
+    }
+}
+
+/// Extract a YAML mapping key from a line.
+/// Returns None for non-mapping lines (arrays, scalars, etc.)
+fn extract_yaml_key(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+
+    // Skip array items
+    if trimmed.starts_with('-') {
+        return None;
+    }
+
+    // Skip block scalar indicators
+    if trimmed == "|" || trimmed == ">" || trimmed == "|-" || trimmed == ">-" {
+        return None;
+    }
+
+    // Find the colon that separates key from value
+    // Handle quoted keys: "key": value or 'key': value
+    if let Some(after_dquote) = trimmed.strip_prefix('"') {
+        // Double-quoted key
+        if let Some(end_quote) = after_dquote.find('"') {
+            let key = &after_dquote[..end_quote];
+            // Check there's a colon after the closing quote
+            let after_key = &after_dquote[end_quote + 1..];
+            if after_key.trim_start().starts_with(':') {
+                return Some(key.to_string());
+            }
+        }
+        return None;
+    }
+
+    if let Some(after_squote) = trimmed.strip_prefix('\'') {
+        // Single-quoted key
+        if let Some(end_quote) = after_squote.find('\'') {
+            let key = &after_squote[..end_quote];
+            let after_key = &after_squote[end_quote + 1..];
+            if after_key.trim_start().starts_with(':') {
+                return Some(key.to_string());
+            }
+        }
+        return None;
+    }
+
+    // Unquoted key: find the first colon not inside brackets
+    let mut depth: usize = 0;
+    for (i, c) in trimmed.char_indices() {
+        match c {
+            '[' | '{' => depth += 1,
+            ']' | '}' => depth = depth.saturating_sub(1),
+            ':' if depth == 0 => {
+                // Found the key separator
+                let key = trimmed[..i].trim();
+                if !key.is_empty() && !key.contains(' ') {
+                    return Some(key.to_string());
+                }
+                return None;
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 /// Convert YAML value to JSON value with validation.
@@ -728,5 +817,197 @@ mod tests {
         // All should produce same canonical form
         assert_eq!(digest1, digest2);
         assert_eq!(digest2, digest3);
+    }
+
+    // ==================== Duplicate Key Detection Tests (P0 Fix) ====================
+
+    #[test]
+    fn test_reject_duplicate_keys_top_level() {
+        // serde_yaml would merge these with "last wins", but we catch it in pre-scan
+        let yaml = "name: first\nversion: \"1.0.0\"\nname: second";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(result, Err(CanonicalizeError::DuplicateKey { ref key }) if key == "name"),
+            "Should reject duplicate top-level key 'name': {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_reject_duplicate_keys_nested() {
+        // Duplicate keys at nested level
+        // Note: serde_yaml may detect nested duplicates as ParseError, which is also acceptable
+        let yaml = "outer:\n  inner: 1\n  inner: 2";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(
+                result,
+                Err(CanonicalizeError::DuplicateKey { .. })
+                    | Err(CanonicalizeError::ParseError { .. })
+            ),
+            "Should reject duplicate nested key 'inner' (via DuplicateKey or ParseError): {:?}",
+            result
+        );
+        // Verify the error message mentions the duplicate key
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("inner") || msg.contains("duplicate"),
+                "Error should mention duplicate: {}",
+                msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_reject_duplicate_keys_different_values() {
+        // Duplicate keys with completely different value types
+        let yaml = "config: true\nconfig: some_string";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(result, Err(CanonicalizeError::DuplicateKey { .. })),
+            "Should reject duplicate key 'config': {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_allow_same_key_different_levels() {
+        // Same key name at different nesting levels is OK
+        let yaml = "name: outer\nnested:\n  name: inner";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Same key at different levels should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_allow_unique_keys() {
+        // All unique keys should work
+        let yaml = "name: test\nversion: \"1.0.0\"\nkind: pack";
+        let result = parse_yaml_strict(yaml);
+        assert!(result.is_ok());
+    }
+
+    // ==================== Single Quote / Block Scalar Tests (P1 Fix) ====================
+
+    #[test]
+    fn test_ampersand_in_single_quoted_string() {
+        // Single-quoted string with & should NOT be rejected as anchor
+        let yaml = "text: 'this & that'";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Single-quoted ampersand should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_asterisk_in_single_quoted_string() {
+        // Single-quoted string with * should NOT be rejected as alias
+        let yaml = "pattern: '*.txt'";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Single-quoted asterisk should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_tag_in_quoted_string_allowed() {
+        // !! inside a quoted string should be fine
+        let yaml = r#"message: "Use !!binary for base64""#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Tag syntax in quoted string should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quoted_key_with_special_chars() {
+        // Quoted keys with special characters
+        let yaml = r#""key:with:colons": value"#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Quoted key with colons should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_duplicate_quoted_keys() {
+        // Duplicate keys even when quoted
+        let yaml = r#""name": first
+"name": second"#;
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            matches!(result, Err(CanonicalizeError::DuplicateKey { .. })),
+            "Should reject duplicate quoted keys: {:?}",
+            result
+        );
+    }
+
+    // ==================== Flow Mapping Policy Tests ====================
+    // Per SPEC: Packs SHOULD use block mappings. Flow mappings are parsed
+    // but duplicate detection relies on serde_yaml (not pre-scan).
+
+    #[test]
+    fn test_flow_mapping_simple_allowed() {
+        // Simple flow mappings without duplicates are allowed
+        let yaml = "config: {a: 1, b: 2}";
+        let result = parse_yaml_strict(yaml);
+        assert!(
+            result.is_ok(),
+            "Simple flow mapping should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_flow_mapping_duplicate_detected_by_serde() {
+        // Flow mapping duplicates are detected by serde_yaml, not pre-scan
+        // This is acceptable - duplicates are still rejected
+        let yaml = "config: {a: 1, a: 2}";
+        let result = parse_yaml_strict(yaml);
+        // serde_yaml detects this as ParseError
+        assert!(
+            matches!(result, Err(CanonicalizeError::ParseError { .. })),
+            "Flow mapping duplicates should be rejected (via serde_yaml): {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_top_level_flow_mapping_duplicate() {
+        // Top-level flow mapping with duplicates
+        let yaml = "{a: 1, a: 2}";
+        let result = parse_yaml_strict(yaml);
+        // Detected by serde_yaml
+        assert!(
+            matches!(result, Err(CanonicalizeError::ParseError { .. })),
+            "Top-level flow mapping duplicates should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_complex_key_rejected() {
+        // Complex keys (? syntax) should be rejected or cause parse error
+        // This is not supported in pack YAML subset
+        let yaml = "? [a, b]\n: value";
+        let result = parse_yaml_strict(yaml);
+        // This may parse but produces non-string key which is rejected
+        assert!(
+            result.is_err(),
+            "Complex keys should be rejected: {:?}",
+            result
+        );
     }
 }

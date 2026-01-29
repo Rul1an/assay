@@ -1,0 +1,20 @@
+# Test pack for E2E verification
+# SPEC: SPEC-Pack-Registry-v1 §6.1 Canonical Form
+name: test-pack
+version: "1.0.0"
+kind: compliance
+description: Test pack for review kit verification
+
+rules:
+  - name: sample-rule-1
+    description: A sample rule for testing
+    pattern: "test_pattern"
+    severity: warning
+  - name: sample-rule-2
+    description: Another sample rule
+    pattern: "another_pattern"
+    severity: error
+
+metadata:
+  author: Assay Test Team
+  license: Apache-2.0

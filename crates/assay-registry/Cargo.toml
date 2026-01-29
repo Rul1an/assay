@@ -46,6 +46,9 @@ url = "2.5"
 # Directories for cache
 dirs = "5"
 
+# Random for jitter (used in retry backoff)
+rand = "0.8"
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

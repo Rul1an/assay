@@ -226,12 +226,17 @@ impl RegistryClient {
     }
 
     /// Make an authenticated request with retry and rate limit handling.
+    ///
+    /// Uses exponential backoff with full jitter to prevent thundering herd.
+    /// Note: Server-specified Retry-After is respected without jitter.
     async fn request(
         &self,
         method: reqwest::Method,
         url: &str,
         etag: Option<&str>,
     ) -> RegistryResult<reqwest::Response> {
+        use rand::Rng;
+
         let mut retries = 0;
         let max_retries = self.config.max_retries;
 
@@ -243,22 +248,32 @@ impl RegistryClient {
                 Err(e) if e.is_retryable() && retries < max_retries => {
                     retries += 1;
 
-                    // Calculate backoff with exponential increase
+                    // Calculate backoff - server-specified Retry-After is respected exactly
                     let backoff = match &e {
-                        RegistryError::RateLimited { retry_after } => {
-                            retry_after.unwrap_or(Duration::from_secs(1 << retries))
+                        RegistryError::RateLimited {
+                            retry_after: Some(retry_after),
+                        } => {
+                            // Server specified delay - respect it without jitter
+                            (*retry_after).min(Duration::from_secs(30))
                         }
-                        _ => Duration::from_secs(1 << retries),
-                    };
+                        _ => {
+                            // Exponential backoff with full jitter for other errors
+                            let base_backoff = Duration::from_secs(1 << retries);
+                            let base_backoff = base_backoff.min(Duration::from_secs(30));
 
-                    // Cap at 30 seconds
-                    let backoff = backoff.min(Duration::from_secs(30));
+                            // Apply full jitter: sleep = rand(0..base_backoff)
+                            // This prevents thundering herd when many clients retry simultaneously
+                            let jittered_ms =
+                                rand::thread_rng().gen_range(0..=base_backoff.as_millis() as u64);
+                            Duration::from_millis(jittered_ms.max(100)) // At least 100ms
+                        }
+                    };
 
                     warn!(
                         error = %e,
                         retry = retries,
                         max_retries = max_retries,
-                        backoff_secs = backoff.as_secs(),
+                        backoff_ms = backoff.as_millis(),
                         "retrying request"
                     );
 
@@ -306,19 +321,33 @@ impl RegistryClient {
             }
 
             410 => {
-                // Pack revoked
+                // Pack revoked - parse body for detailed info, fallback to header
                 let (name, version) = parse_pack_url(url);
-                let reason = response
+
+                // Try to extract reason from header first (fast path)
+                let header_reason = response
                     .headers()
                     .get("x-revocation-reason")
                     .and_then(|v| v.to_str().ok())
-                    .unwrap_or("no reason provided")
-                    .to_string();
+                    .map(String::from);
+
+                // Parse body for structured revocation info
+                // Body format: {"reason": "...", "safe_version": "1.0.1"}
+                let body = response.text().await.ok();
+                let (reason, safe_version) = if let Some(body_text) = body {
+                    parse_revocation_body(&body_text, header_reason)
+                } else {
+                    (
+                        header_reason.unwrap_or_else(|| "no reason provided".to_string()),
+                        None,
+                    )
+                };
 
                 Err(RegistryError::Revoked {
                     name,
                     version,
                     reason,
+                    safe_version,
                 })
             }
 
@@ -383,6 +412,39 @@ fn parse_pack_url(url: &str) -> (String, String) {
         )
     } else {
         ("unknown".to_string(), "unknown".to_string())
+    }
+}
+
+/// Parse 410 revocation response body.
+///
+/// Expected format: `{"reason": "...", "safe_version": "1.0.1"}`
+/// Falls back to header_reason if body parsing fails.
+fn parse_revocation_body(body: &str, header_reason: Option<String>) -> (String, Option<String>) {
+    // Try to parse as JSON
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        let reason = json
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or(header_reason)
+            .unwrap_or_else(|| "no reason provided".to_string());
+
+        let safe_version = json
+            .get("safe_version")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        (reason, safe_version)
+    } else {
+        // Not JSON - use body as reason if header not available
+        let reason = header_reason.unwrap_or_else(|| {
+            if body.is_empty() {
+                "no reason provided".to_string()
+            } else {
+                body.chars().take(200).collect() // Limit reason length
+            }
+        });
+        (reason, None)
     }
 }
 
@@ -543,7 +605,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_pack_revoked() {
+    async fn test_fetch_pack_revoked_header_only() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -563,12 +625,50 @@ mod integration_tests {
                 name,
                 version,
                 reason,
+                safe_version,
             }) => {
                 assert_eq!(name, "revoked-pack");
                 assert_eq!(version, "1.0.0");
                 assert_eq!(reason, "security vulnerability");
+                assert!(
+                    safe_version.is_none(),
+                    "Header-only should have no safe_version"
+                );
             }
             _ => panic!("expected Revoked error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pack_revoked_with_body() {
+        // P1 fix: Parse body for safe_version
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/packs/revoked-pack/1.0.0"))
+            .respond_with(ResponseTemplate::new(410).set_body_json(serde_json::json!({
+                "reason": "critical CVE",
+                "safe_version": "1.0.1"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client.fetch_pack("revoked-pack", "1.0.0", None).await;
+
+        match result {
+            Err(RegistryError::Revoked {
+                name,
+                version,
+                reason,
+                safe_version,
+            }) => {
+                assert_eq!(name, "revoked-pack");
+                assert_eq!(version, "1.0.0");
+                assert_eq!(reason, "critical CVE");
+                assert_eq!(safe_version, Some("1.0.1".to_string()));
+            }
+            _ => panic!("expected Revoked error with safe_version"),
         }
     }
 
@@ -948,5 +1048,193 @@ mod integration_tests {
 
         // Document the policy: signature cache is tied to pack ETag/digest
         // If pack unchanged (304), signature is also unchanged
+    }
+
+    // ==================== Protocol Correctness Tests (SPEC §4) ====================
+
+    #[tokio::test]
+    async fn test_etag_is_strong_etag_format() {
+        // SPEC §4.3: ETag MUST be strong ETag (quoted string)
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: test\nversion: \"1.0.0\"";
+        let digest = compute_digest(pack_yaml);
+        // Strong ETag format: "value" (quoted)
+        let etag = format!("\"{}\"", digest);
+
+        Mock::given(method("GET"))
+            .and(path("/packs/test/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("etag", etag.as_str())
+                    .insert_header("x-pack-digest", digest.as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client.fetch_pack("test", "1.0.0", None).await.unwrap();
+        let fetch = result.unwrap();
+
+        // ETag should be the quoted digest
+        assert_eq!(fetch.headers.etag, Some(etag));
+        // And should match X-Pack-Digest when unquoted
+        let etag_unquoted = fetch.headers.etag.unwrap().trim_matches('"').to_string();
+        assert_eq!(etag_unquoted, digest);
+    }
+
+    #[tokio::test]
+    async fn test_vary_header_for_authenticated_response() {
+        // SPEC §4.3: Vary: Authorization, Accept-Encoding for authenticated responses
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: test\nversion: \"1.0.0\"";
+
+        Mock::given(method("GET"))
+            .and(path("/packs/test/1.0.0"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("vary", "Authorization, Accept-Encoding")
+                    .insert_header("cache-control", "private, max-age=86400"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client.fetch_pack("test", "1.0.0", None).await;
+
+        // Should succeed - we're just verifying the server can set Vary header
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_content_digest_vs_canonical_digest() {
+        // SPEC §4.3: X-Pack-Digest is canonical (JCS), Content-Digest may differ
+        // Wire bytes may have different whitespace but X-Pack-Digest is source of truth
+        let mock_server = MockServer::start().await;
+
+        // Wire content with extra whitespace
+        let wire_content = "name:   test\nversion:    \"1.0.0\"\n\n";
+        // Canonical content (what JCS produces)
+        let canonical_content = "name: test\nversion: \"1.0.0\"";
+        let canonical_digest = compute_digest(canonical_content);
+
+        Mock::given(method("GET"))
+            .and(path("/packs/test/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(wire_content)
+                    // X-Pack-Digest is the canonical digest
+                    .insert_header("x-pack-digest", canonical_digest.as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client.fetch_pack("test", "1.0.0", None).await.unwrap();
+        let fetch = result.unwrap();
+
+        // Content is wire bytes
+        assert_eq!(fetch.content, wire_content);
+        // X-Pack-Digest header is canonical
+        assert_eq!(fetch.headers.digest, Some(canonical_digest.clone()));
+        // Computed digest should match canonical (JCS normalization)
+        assert_eq!(fetch.computed_digest, canonical_digest);
+    }
+
+    #[tokio::test]
+    async fn test_304_cache_hit_flow() {
+        // SPEC §7.3: 304 response → use cached pack
+        // This test verifies the client correctly handles 304 Not Modified
+        let mock_server = MockServer::start().await;
+
+        // When client sends If-None-Match with valid ETag, server returns 304
+        Mock::given(method("GET"))
+            .and(path("/packs/cached-pack/1.0.0"))
+            .and(header("if-none-match", "\"sha256:abc123\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+
+        // Fetch with valid ETag - should get None (use cached)
+        let result = client
+            .fetch_pack("cached-pack", "1.0.0", Some("\"sha256:abc123\""))
+            .await
+            .unwrap();
+
+        assert!(result.is_none(), "304 should return None - use cached pack");
+    }
+
+    #[tokio::test]
+    async fn test_retry_on_429_with_retry_after() {
+        // SPEC §4.4: 429 triggers retry with Retry-After header
+        let mock_server = MockServer::start().await;
+
+        // All requests return 429 - test that retry happens and eventually fails
+        Mock::given(method("GET"))
+            .and(path("/packs/retry-test/1.0.0"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "1"))
+            .expect(2) // Initial + 1 retry (with max_retries=1)
+            .mount(&mock_server)
+            .await;
+
+        let config = RegistryConfig {
+            url: mock_server.uri(),
+            token: Some("test-token".to_string()),
+            max_retries: 1, // 1 retry = 2 total attempts
+            timeout_secs: 30,
+            ..Default::default()
+        };
+        let client = RegistryClient::new(config).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = client.fetch_pack("retry-test", "1.0.0", None).await;
+        let elapsed = start.elapsed();
+
+        // Should fail after max retries
+        assert!(
+            matches!(result, Err(RegistryError::RateLimited { .. })),
+            "Should fail with RateLimited"
+        );
+
+        // With retry-after: 1, we expect at least 1 second of backoff
+        assert!(
+            elapsed.as_secs() >= 1,
+            "Should have waited for retry-after, elapsed: {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn test_max_retries_exceeded() {
+        // SPEC §4.4: Stop retrying after max_retries
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/packs/fail-test/1.0.0"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "1"))
+            .expect(2) // Initial + 1 retry
+            .mount(&mock_server)
+            .await;
+
+        let config = RegistryConfig {
+            url: mock_server.uri(),
+            token: Some("test-token".to_string()),
+            max_retries: 1, // Only 1 retry
+            timeout_secs: 30,
+            ..Default::default()
+        };
+        let client = RegistryClient::new(config).unwrap();
+
+        let result = client.fetch_pack("fail-test", "1.0.0", None).await;
+        assert!(
+            matches!(result, Err(RegistryError::RateLimited { .. })),
+            "Should fail with RateLimited after max retries"
+        );
     }
 }

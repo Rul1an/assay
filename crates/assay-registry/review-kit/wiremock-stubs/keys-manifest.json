@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/keys"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=86400"
+    },
+    "jsonBody": {
+      "version": 1,
+      "keys": [
+        {
+          "key_id": "sha256:keyid123keyid123keyid123keyid123keyid123keyid123keyid123keyid12",
+          "algorithm": "Ed25519",
+          "public_key": "MCowBQYDK2VwAyEAI0b/C3CK4M7qJGP3w1W2Tj5jCQ5gZKP4hYLJQiQ6Vao=",
+          "description": "Assay Pack Signing Key 2026",
+          "added_at": "2026-01-01T00:00:00Z",
+          "expires_at": "2027-01-01T00:00:00Z",
+          "revoked": false
+        }
+      ],
+      "expires_at": "2026-01-30T10:00:00Z"
+    }
+  }
+}
