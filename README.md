@@ -166,7 +166,7 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 ## GitHub Action
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 Zero-config evidence verification. Native GitHub Security tab integration.
@@ -179,7 +179,7 @@ Zero-config evidence verification. Native GitHub Security tab integration.
 
 ```yaml
 # Full example
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
   with:
     pack: eu-ai-act-baseline
     store: s3://my-bucket/evidence

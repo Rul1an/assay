@@ -18,13 +18,13 @@ Two design proposals were evaluated. This ADR captures the combined decision.
 
 ### Architecture: Separate Repository
 
-**Repository:** https://github.com/Rul1an/assay-action
+**Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 **Marketplace:** https://github.com/marketplace/actions/assay-ai-agent-security
 
 | Factor | Decision | Rationale |
 |--------|----------|-----------|
 | Repository | Separate | GitHub Marketplace requires action.yml in root |
-| Reference | `Rul1an/assay-action@v2` | Simple, short, marketplace-friendly |
+| Reference | `Rul1an/assay/assay-action@v2` | Simple, short, marketplace-friendly |
 | Composability | Deferred to v2.1 | Simplicity first, sub-actions later |
 
 > **Note:** Initial design was monorepo (`assay/assay-action/`), but GitHub Marketplace doesn't support subdirectory actions for automatic listing. Moved to separate repo for better DX and discoverability.
@@ -32,7 +32,7 @@ Two design proposals were evaluated. This ADR captures the combined decision.
 ### Core Capability: Verify + Lint + Diff → SARIF
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 **Default behavior (zero-config):**

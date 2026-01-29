@@ -92,7 +92,7 @@ assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
 ## GitHub Action
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 Zero-config. Discovers evidence bundles, verifies integrity, uploads SARIF to GitHub Security.

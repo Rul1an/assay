@@ -50,7 +50,7 @@ jobs:
           assay run --policy policy.yaml -- pytest tests/
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay/assay-action@v2
         with:
           fail_on: error
 ```
@@ -234,7 +234,7 @@ your-repo/
 ### 2. Use `fail_on` for Strict Mode
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
   with:
     fail_on: warn  # Fail on warnings AND errors
 ```
@@ -267,7 +267,7 @@ jobs:
     # Evidence verification (fast)
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay/assay-action@v2
 
   integration:
     needs: assay

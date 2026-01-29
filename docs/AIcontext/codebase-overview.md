@@ -40,10 +40,10 @@ Located in `assay-python-sdk/python/assay/`:
 
 ### GitHub Action
 
-**Repository:** https://github.com/Rul1an/assay-action
+**Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 Features:

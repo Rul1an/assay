@@ -402,7 +402,7 @@ sequenceDiagram
 
 ## GitHub Action Integration
 
-**Repository**: https://github.com/Rul1an/assay-action (separate repo)
+**Repository**: https://github.com/Rul1an/assay/tree/main/assay-action
 
 **Architecture**: Composite action (no Docker overhead)
 
@@ -416,7 +416,7 @@ sequenceDiagram
 ```
 GitHub Actions Runner
     ↓
-Rul1an/assay-action@v2
+Rul1an/assay/assay-action@v2
     ├─→ Cache check / Binary install
     ├─→ Evidence discovery (.assay/evidence/*.tar.gz)
     ├─→ assay evidence verify (per bundle)

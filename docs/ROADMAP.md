@@ -139,10 +139,10 @@ See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
 
 ### GitHub Action v2 ✅ Complete
 
-Published to GitHub Marketplace: [Rul1an/assay-action](https://github.com/Rul1an/assay-action)
+Published to GitHub Marketplace: [assay-ai-agent-security](https://github.com/marketplace/actions/assay-ai-agent-security)
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 Features:
@@ -300,7 +300,7 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 
 ### B. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
-- [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/Rul1an/assay-action)) / GitLab CI integration
+- [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay/assay-action@v2](https://github.com/marketplace/actions/assay-ai-agent-security)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
 - [ ] **GitLab CI**: Native integration
 - [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)

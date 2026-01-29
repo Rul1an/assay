@@ -400,18 +400,18 @@ def test_agent():
 
 ## GitHub Action
 
-**Repository:** https://github.com/Rul1an/assay-action
+**Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 
 ### Basic Usage
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 ### With Options
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
   with:
     bundles: '.assay/evidence/*.tar.gz'
     fail_on: error

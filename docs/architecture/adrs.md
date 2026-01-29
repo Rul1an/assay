@@ -28,7 +28,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 
 | Priority | ADR | Status | Notes |
 |----------|-----|--------|-------|
-| ✅ | [ADR-014](./ADR-014-GitHub-Action-v2.md) | Implemented | [Marketplace](https://github.com/Rul1an/assay-action) |
+| ✅ | [ADR-014](./ADR-014-GitHub-Action-v2.md) | Implemented | [Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security) |
 | **P1** | [ADR-015](./ADR-015-BYOS-Storage-Strategy.md) | Accepted | `push/pull/list` with S3-compatible storage |
 | **P1** | [ADR-011](./ADR-011-Tool-Signing.md) | Proposed | `x-assay-sig` field, ed25519 signing |
 | **P2** | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | Proposed | Article 12 mapping, `--pack` flag |

@@ -41,7 +41,7 @@ flowchart TD
     pr[Pull Request Created] --> trigger[CI Pipeline Triggered]
     trigger --> checkout[Checkout Code]
     checkout --> tests[Run Tests with Assay]
-    tests --> action[Rul1an/assay-action@v2]
+    tests --> action[Rul1an/assay/assay-action@v2]
     action --> verify[Verify Evidence Bundles]
     verify --> lint[Lint for Security Issues]
     lint --> sarif[Upload SARIF to Security Tab]
@@ -57,7 +57,7 @@ flowchart TD
 1. **PR created**: Developer opens pull request
 2. **CI triggered**: GitHub Actions runs
 3. **Tests run**: Tests generate evidence bundles (`.assay/evidence/*.tar.gz`)
-4. **Action verifies**: `Rul1an/assay-action@v2` verifies and lints bundles
+4. **Action verifies**: `Rul1an/assay/assay-action@v2` verifies and lints bundles
 5. **Reporting**: SARIF uploaded to GitHub Security tab, PR comment if issues
 6. **Gate decision**: Exit code 0 = pass, 1 = fail
 
@@ -88,7 +88,7 @@ jobs:
           assay run --policy policy.yaml -- pytest tests/
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay/assay-action@v2
         with:
           fail_on: error
 ```
@@ -391,7 +391,7 @@ flowchart TD
 | Use Case | Flow | Key Command/Action |
 |----------|------|-------------|
 | First-time setup | Flow 1 | `assay init` |
-| CI integration | Flow 2 | `Rul1an/assay-action@v2` |
+| CI integration | Flow 2 | `Rul1an/assay/assay-action@v2` |
 | Recording traces | Flow 3 | `AssayClient` or `assay import` |
 | Policy development | Flow 4 | `assay generate` |
 | Production security | Flow 5 | `assay mcp-server` + `assay monitor` |

@@ -18,7 +18,7 @@ This specification defines the GitHub Action v2.1 interface, behavior, and imple
 ### Zero-Config (Just Works)
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 Auto-discovers evidence bundles, verifies integrity, uploads SARIF to Security tab.
@@ -26,7 +26,7 @@ Auto-discovers evidence bundles, verifies integrity, uploads SARIF to Security t
 ### With EU AI Act Compliance Pack
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
   with:
     pack: eu-ai-act-baseline
 ```
@@ -61,7 +61,7 @@ jobs:
           assay run --policy policy.yaml -- pytest tests/
 
       - name: Verify & Report
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay/assay-action@v2
         with:
           pack: eu-ai-act-baseline
           store: s3://my-bucket/evidence

@@ -7,23 +7,23 @@
 # Marketplace: https://github.com/marketplace/actions/assay-ai-agent-security
 #
 # Usage (zero-config):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay/assay-action@v2
 #
 # Usage (with compliance pack):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay/assay-action@v2
 #     with:
 #       pack: eu-ai-act-baseline
 #       sarif: true
 #
 # Usage (with BYOS push + attestation):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay/assay-action@v2
 #     with:
 #       store: s3://my-bucket/evidence
 #       store_role: arn:aws:iam::123456789012:role/AssayEvidence
 #       attest: true
 #
 # Usage (with coverage badge):
-#   - uses: Rul1an/assay-action@v2
+#   - uses: Rul1an/assay/assay-action@v2
 #     with:
 #       badge_gist: abc123def456
 #       badge_token: ${{ secrets.GIST_TOKEN }}

@@ -32,13 +32,13 @@ assay/                         # Version 2.9.0
 
 ## GitHub Action (Separate Repository)
 
-**Repository:** https://github.com/Rul1an/assay-action
+**Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 
 The GitHub Action is maintained in a separate repository for GitHub Marketplace publication.
 
 **Usage:**
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay/assay-action@v2
 ```
 
 **Note:** The `assay-action/` directory in this monorepo is legacy and redirects to the separate repository.
@@ -306,9 +306,9 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 - **`action-v2-test.yml`**: GitHub Action v2 tests
 
 ### GitHub Action (Separate Repo)
-- **Repository:** https://github.com/Rul1an/assay-action
+- **Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 - **Marketplace:** https://github.com/marketplace/actions/assay-ai-agent-security
-- **Usage:** `Rul1an/assay-action@v2`
+- **Usage:** `Rul1an/assay/assay-action@v2`
 
 ## Key Data Structures
 
