@@ -2,6 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v2.12.0] - 2026-01-29
+
+### 🔐 Pack Registry: Enterprise-Grade Supply Chain Security
+
+This release introduces the **Pack Registry Client** (`assay-registry` crate) - a complete implementation of SPEC-Pack-Registry-v1.0.3 for secure remote pack distribution.
+
+### ✨ Major Features
+
+-   **Pack Registry Client** (`crates/assay-registry/`):
+    -   HTTP client with token + OIDC authentication
+    -   Pack resolution: local → bundled → registry → BYOS
+    -   Local caching with TOCTOU protection (integrity verified on every read)
+    -   Lockfile v2 for reproducible builds (`assay.packs.lock`)
+
+-   **JCS Canonicalization (RFC 8785)**:
+    -   Deterministic JSON serialization for pack digests
+    -   Uses `serde_jcs::to_vec()` (bytes, not string) to eliminate encoding issues
+    -   Canonical digest format: `sha256:{hex}`
+
+-   **Strict YAML Validation (SPEC §6.1)**:
+    -   Pre-scan rejects anchors (`&`), aliases (`*`), tags (`!!`), multi-document (`---`)
+    -   Duplicate key detection with correct list-item scoping
+    -   DoS limits: max depth 50, keys 10k, string 1MB, input 10MB
+    -   Integer range checks: ±2^53 (IEEE 754 safe integer)
+
+-   **DSSE Signature Verification**:
+    -   Ed25519 + PAE encoding per DSSE spec
+    -   Sidecar endpoint (`GET /packs/{name}/{version}.sig`) for large signatures
+    -   Client always prefers sidecar over `X-Pack-Signature` header
+
+-   **Trust Model (No-TOFU)**:
+    -   Pinned root keys compiled into binary
+    -   Key rotation via signed manifest
+    -   Pinned roots survive remote revocation attempts
+    -   Runtime expiry checks for manifest keys
+
+### 🧪 GitHub Action v2.1 Test Coverage
+
+-   Contract tests for all v2.1 features:
+    -   Pack lint with `eu-ai-act-baseline` + SARIF validation
+    -   Fork PR SARIF skip logic
+    -   OIDC provider auto-detection (AWS/GCP/Azure patterns)
+    -   Attestation gating (push-only, default branch, verified)
+    -   Coverage calculation formula
+
+### 🐛 Security Fixes (P0)
+
+-   **Duplicate Key Detection**: Pre-scan catches block mapping duplicates; serde_yaml catches flow mapping duplicates
+-   **DSSE Verification**: Signature verification uses canonical JCS bytes (not raw YAML)
+-   **List-Item Scoping**: Each list item gets its own scope (fixes false positives for `- a: 1\n- a: 2`)
+
+### 📦 New Crate Published
+
+-   `assay-registry` v2.11.0 on [crates.io](https://crates.io/crates/assay-registry)
+
+### 📚 Documentation
+
+-   `docs/architecture/SPEC-Pack-Registry-v1.md` updated to v1.0.3
+-   `docs/architecture/ADR-018-GitHub-Action-v2.1.md` - Action v2.1 design
+-   `docs/architecture/SPEC-GitHub-Action-v2.1.md` - Action v2.1 specification
+-   Security review documentation in `crates/assay-registry/docs/`
+
+### Test Coverage
+
+-   185 tests in `assay-registry` crate
+-   Golden vectors for JCS digest verification
+-   DSSE real signature verification tests
+-   Trust rotation and revocation tests
+-   Cache tamper detection tests
+-   Protocol edge cases (304/410/429)
+
+---
+
 ## [v2.10.0] - 2026-01-28
 
 ### 🎯 Pack Engine: Compliance Rule Packs
