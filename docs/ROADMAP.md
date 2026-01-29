@@ -125,11 +125,11 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 |----------|------|--------|-------|--------|
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
-| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete |
+| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete (v2.9.0) |
 | **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |
 | **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
-| **P2** | Mandate/Intent Evidence | Medium | High | **Next** |
-| **P2** | GitHub Action v2.1 | Low | Medium | After mandate |
+| **P2** | Mandate/Intent Evidence | Medium | High | ✅ Complete (v2.11.0) |
+| **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
@@ -188,15 +188,20 @@ assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untr
 - [x] **Trust policies**: `require_signed`, `trusted_key_ids`
 - [ ] **Keyless (Enterprise)**: Sigstore Fulcio + Rekor integration
 
-### C. Mandate/Intent Evidence (P2)
+### C. Mandate/Intent Evidence (P2) ✅ Complete (v2.11.0)
 
-Support for AP2-style authorization evidence (agentic commerce):
+Full mandate evidence implementation per [SPEC-Mandate-v1.0.5](./architecture/SPEC-Mandate-v1.md):
 
-- [ ] **Evidence fields**: `mandate_id`, `scope`, `constraints`, `ttl`
-- [ ] **Policy rules**: "tool call within mandate scope"
-- [ ] **Audit trail**: Link tool calls to user authorization
+- [x] **Evidence types**: Mandate content (intent/transaction), signed envelopes, lifecycle events
+- [x] **Runtime enforcement**: MandateStore (SQLite), 7-step Authorizer flow, revocation support
+- [x] **CloudEvents**: `mandate.used`, `mandate.revoked`, `tool.decision` lifecycle events
+- [x] **CLI integration**: `--audit-log`, `--decision-log`, `--event-source` flags
+- [x] **Idempotent retries**: Deterministic `use_id` + `was_new` flag for audit-log deduplication
+- [x] **Revocation**: Hard cutoff (no clock skew tolerance) per SPEC §7.6
 
-This strengthens EU AI Act Article 12 compliance for commerce workflows.
+See [ADR-017](./architecture/ADR-017-Mandate-Evidence.md) for architecture decision.
+
+This strengthens EU AI Act Articles 12 & 14 compliance for commerce workflows.
 
 ### C. Compliance Packs (P2) — Semgrep Model
 
@@ -245,7 +250,7 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 
 #### Additional Packs (Future)
 
-- [ ] **Commerce Pack**: Mandate/intent required, signed-tools required
+- [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
 - [ ] **SOC2 Baseline/Pro**: Control mapping packs
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
 
@@ -274,11 +279,13 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 | `assay-adapter-a2a` | Agent2Agent | Agent discovery/tasks/messages |
 
 - [ ] **Adapter trait**: Common interface for protocol → EvidenceEvent mapping
-- [ ] **ACP adapter**: Tool calls, checkout events, payment intents
+- [ ] **ACP adapter**: Tool calls, checkout events, payment intents (leverages v2.11.0 mandate support)
 - [ ] **UCP adapter**: Discover/buy/post-purchase state transitions
 - [ ] **A2A adapter**: Agent capabilities, task delegation, artifacts
 
 **Why adapters:** The market is fragmenting (ACP vs UCP vs AP2 vs x402). Assay's value is protocol-agnostic governance, not protocol lock-in.
+
+**Enabled by v2.11.0:** The mandate evidence module provides the foundation for AP2-style authorization tracking in these adapters.
 
 ### B. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
@@ -421,12 +428,13 @@ Everything needed to create, verify, and analyze evidence locally:
 | **Evidence Contract** | Schema v1, JCS canonicalization, content-addressed IDs, deterministic bundles |
 | **CLI Workflow** | `export`, `verify`, `lint`, `diff`, `explore`, `show` |
 | **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
-| **Basic Signing** | Ed25519 local key signing and verification |
+| **Basic Signing** | Ed25519 local key signing and verification (v2.9.0) |
 | **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification (v2.10.0) |
 | **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping, v2.10.0), future `soc2-baseline` |
-| **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor |
+| **Mandate Evidence** | Mandate types, signing, runtime enforcement, CloudEvents lifecycle (v2.11.0) |
+| **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor, mandate authorization |
 | **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
-| **Output Formats** | SARIF, JUnit, JSON, console |
+| **Output Formats** | SARIF, JUnit, JSON, console, NDJSON (audit/decision logs) |
 
 **Why open:** Standards adoption requires broad accessibility. The evidence format and baseline compliance checks should become infrastructure, not a product moat.
 
