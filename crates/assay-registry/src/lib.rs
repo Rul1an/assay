@@ -47,6 +47,7 @@
 
 pub mod auth;
 pub mod cache;
+pub mod canonicalize;
 pub mod client;
 pub mod error;
 pub mod lockfile;
@@ -73,3 +74,10 @@ pub use types::{
     TrustedKey, VersionInfo, VersionsResponse,
 };
 pub use verify::{compute_digest, verify_digest, verify_pack, VerifyOptions, VerifyResult};
+
+// Canonical digest (SPEC §6.2)
+pub use canonicalize::{
+    compute_canonical_digest, compute_canonical_digest_result, parse_yaml_strict,
+    to_canonical_jcs_bytes, CanonicalizeError, MAX_DEPTH, MAX_KEYS_PER_MAPPING, MAX_SAFE_INTEGER,
+    MAX_STRING_LENGTH, MAX_TOTAL_SIZE, MIN_SAFE_INTEGER,
+};

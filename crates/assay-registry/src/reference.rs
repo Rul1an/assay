@@ -276,7 +276,9 @@ mod tests {
     #[test]
     fn test_parse_local_relative() {
         let pack_ref = PackRef::parse("./custom.yaml").unwrap();
-        assert!(matches!(pack_ref, PackRef::Local(p) if p == PathBuf::from("./custom.yaml")));
+        assert!(
+            matches!(pack_ref, PackRef::Local(p) if p.as_path() == std::path::Path::new("./custom.yaml"))
+        );
     }
 
     #[test]

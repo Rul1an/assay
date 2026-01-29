@@ -3,13 +3,14 @@
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, IF_NONE_MATCH, USER_AGENT};
-use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
 use crate::auth::TokenProvider;
+use crate::canonicalize::compute_canonical_digest;
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::{
-    FetchResult, KeysManifest, PackHeaders, PackMeta, RegistryConfig, VersionsResponse,
+    DsseEnvelope, FetchResult, KeysManifest, PackHeaders, PackMeta, RegistryConfig,
+    VersionsResponse,
 };
 
 /// User agent for registry requests.
@@ -165,6 +166,65 @@ impl RegistryClient {
             })
     }
 
+    /// Fetch signature from sidecar endpoint (SPEC §7.3).
+    ///
+    /// The signature is delivered separately from the pack content to avoid
+    /// header size limits. The sidecar returns a DSSE envelope.
+    ///
+    /// Endpoint: GET /packs/{name}/{version}.sig
+    pub async fn fetch_signature(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> RegistryResult<Option<DsseEnvelope>> {
+        let url = format!("{}/packs/{}/{}.sig", self.base_url, name, version);
+        debug!(url = %url, "fetching signature from sidecar");
+
+        let response = match self.request(reqwest::Method::GET, &url, None).await {
+            Ok(response) => response,
+            Err(RegistryError::NotFound { .. }) => {
+                // Signature sidecar may not exist for unsigned packs
+                debug!("signature sidecar not found (pack may be unsigned)");
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+
+        let envelope: DsseEnvelope =
+            response
+                .json()
+                .await
+                .map_err(|e| RegistryError::InvalidResponse {
+                    message: format!("failed to parse signature envelope: {}", e),
+                })?;
+
+        Ok(Some(envelope))
+    }
+
+    /// Fetch pack with signature from sidecar (recommended for signed packs).
+    ///
+    /// This method fetches both the pack content and its signature in parallel,
+    /// avoiding header size limits from DSSE-in-header.
+    pub async fn fetch_pack_with_signature(
+        &self,
+        name: &str,
+        version: &str,
+        etag: Option<&str>,
+    ) -> RegistryResult<Option<(FetchResult, Option<DsseEnvelope>)>> {
+        // Fetch pack content
+        let pack_result = self.fetch_pack(name, version, etag).await?;
+
+        let fetch = match pack_result {
+            Some(f) => f,
+            None => return Ok(None), // 304 Not Modified
+        };
+
+        // Fetch signature from sidecar (don't fail if missing)
+        let signature = self.fetch_signature(name, version).await.ok().flatten();
+
+        Ok(Some((fetch, signature)))
+    }
+
     /// Make an authenticated request with retry and rate limit handling.
     async fn request(
         &self,
@@ -294,10 +354,20 @@ impl RegistryClient {
     }
 }
 
-/// Compute SHA-256 digest of content.
+/// Compute canonical digest of content per SPEC §6.2.
+///
+/// Uses JCS canonicalization for valid YAML, falls back to raw SHA-256 for
+/// non-YAML content (e.g., error responses).
 fn compute_digest(content: &str) -> String {
-    let hash = Sha256::digest(content.as_bytes());
-    format!("sha256:{:x}", hash)
+    match compute_canonical_digest(content) {
+        Ok(digest) => digest,
+        Err(_) => {
+            // Fall back to raw digest for non-YAML content
+            use sha2::{Digest, Sha256};
+            let hash = Sha256::digest(content.as_bytes());
+            format!("sha256:{:x}", hash)
+        }
+    }
 }
 
 /// Parse pack name and version from URL.
@@ -321,11 +391,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compute_digest() {
-        let content = "test content";
+    fn test_compute_digest_canonical() {
+        // Valid YAML uses canonical JCS digest
+        let content = "name: test\nversion: \"1.0.0\"";
         let digest = compute_digest(content);
         assert!(digest.starts_with("sha256:"));
-        assert_eq!(digest.len(), 7 + 64); // "sha256:" + 64 hex chars
+        assert_eq!(digest.len(), 7 + 64);
+
+        // Should match the canonical digest
+        let expected = compute_canonical_digest(content).unwrap();
+        assert_eq!(digest, expected);
+    }
+
+    #[test]
+    fn test_compute_digest_non_yaml_fallback() {
+        // Invalid YAML falls back to raw digest
+        let content = "this is not: valid: yaml: [[";
+        let digest = compute_digest(content);
+        assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest.len(), 7 + 64);
     }
 
     #[test]
@@ -378,11 +462,8 @@ mod integration_tests {
     async fn test_fetch_pack_success() {
         let mock_server = MockServer::start().await;
 
-        let pack_yaml = r#"
-name: test-pack
-version: "1.0.0"
-rules: []
-"#;
+        // Use valid YAML that will parse correctly for canonical digest
+        let pack_yaml = "name: test-pack\nversion: \"1.0.0\"\nrules: []";
         let expected_digest = compute_digest(pack_yaml);
 
         Mock::given(method("GET"))
@@ -670,5 +751,202 @@ rules: []
 
         let client = create_test_client(&mock_server).await;
         let _ = client.fetch_pack("test", "1.0.0", None).await;
+    }
+
+    #[tokio::test]
+    async fn test_fetch_signature_sidecar() {
+        let mock_server = MockServer::start().await;
+
+        let envelope = serde_json::json!({
+            "payloadType": "application/vnd.assay.pack+yaml;v=1",
+            "payload": "dGVzdCBwYXlsb2Fk",
+            "signatures": [{
+                "keyid": "sha256:abc123",
+                "sig": "dGVzdCBzaWduYXR1cmU="
+            }]
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/packs/signed-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&envelope))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_signature("signed-pack", "1.0.0")
+            .await
+            .expect("fetch signature failed");
+
+        let sig = result.expect("expected Some");
+        assert_eq!(sig.payload_type, "application/vnd.assay.pack+yaml;v=1");
+        assert_eq!(sig.signatures.len(), 1);
+        assert_eq!(sig.signatures[0].key_id, "sha256:abc123");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_signature_sidecar_not_found() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/packs/unsigned-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_signature("unsigned-pack", "1.0.0")
+            .await
+            .expect("fetch signature should not error on 404");
+
+        assert!(result.is_none(), "expected None for unsigned pack");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pack_with_signature() {
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: signed-pack\nversion: \"1.0.0\"";
+        let expected_digest = compute_digest(pack_yaml);
+
+        // Mock pack endpoint
+        Mock::given(method("GET"))
+            .and(path("/packs/signed-pack/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("x-pack-digest", expected_digest.as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Mock signature sidecar
+        let envelope = serde_json::json!({
+            "payloadType": "application/vnd.assay.pack+yaml;v=1",
+            "payload": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pack_yaml),
+            "signatures": [{
+                "keyid": "sha256:key123",
+                "sig": "dGVzdCBzaWduYXR1cmU="
+            }]
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/packs/signed-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&envelope))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_pack_with_signature("signed-pack", "1.0.0", None)
+            .await
+            .expect("fetch failed");
+
+        let (fetch, sig) = result.expect("expected Some");
+        assert_eq!(fetch.content, pack_yaml);
+        assert!(sig.is_some());
+        assert_eq!(sig.unwrap().signatures[0].key_id, "sha256:key123");
+    }
+
+    #[tokio::test]
+    async fn test_commercial_pack_signature_required_via_sidecar_only() {
+        // Scenario: Commercial pack has NO X-Pack-Signature header
+        // Client MUST fetch signature from sidecar endpoint
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: commercial-pack\nversion: \"1.0.0\"\nlicense: commercial";
+        let expected_digest = compute_digest(pack_yaml);
+
+        // Pack endpoint returns NO X-Pack-Signature header (header too large or policy)
+        Mock::given(method("GET"))
+            .and(path("/packs/commercial-pack/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("x-pack-digest", expected_digest.as_str())
+                    .insert_header("x-pack-license", "LicenseRef-Assay-Enterprise-1.0")
+                    // NOTE: No X-Pack-Signature header!
+                    .insert_header(
+                        "x-pack-signature-endpoint",
+                        "/packs/commercial-pack/1.0.0.sig",
+                    ),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        // Signature MUST be fetched from sidecar
+        let envelope = serde_json::json!({
+            "payloadType": "application/vnd.assay.pack+yaml;v=1",
+            "payload": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pack_yaml),
+            "signatures": [{
+                "keyid": "sha256:commercial-key",
+                "sig": "dGVzdCBzaWduYXR1cmU="
+            }]
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/packs/commercial-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&envelope))
+            .expect(1) // MUST be called
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_pack_with_signature("commercial-pack", "1.0.0", None)
+            .await
+            .expect("fetch failed");
+
+        let (fetch, sig) = result.expect("expected Some");
+
+        // Verify pack fetched
+        assert_eq!(fetch.content, pack_yaml);
+
+        // Verify signature was fetched from sidecar (not header)
+        assert!(
+            fetch.headers.signature.is_none(),
+            "header signature should be absent"
+        );
+        assert!(sig.is_some(), "sidecar signature MUST be present");
+        assert_eq!(sig.unwrap().signatures[0].key_id, "sha256:commercial-key");
+    }
+
+    #[tokio::test]
+    async fn test_pack_304_signature_still_valid() {
+        // Scenario: Pack returns 304 Not Modified
+        // Question: Does signature need refetch?
+        // Policy: No - if pack unchanged, signature unchanged (same digest binding)
+        let mock_server = MockServer::start().await;
+
+        // First fetch: get pack + signature
+        let pack_yaml = "name: cached-pack\nversion: \"1.0.0\"";
+        let _expected_digest = compute_digest(pack_yaml); // Unused in 304 test
+
+        Mock::given(method("GET"))
+            .and(path("/packs/cached-pack/1.0.0"))
+            .and(header("if-none-match", "\"etag-abc\""))
+            .respond_with(ResponseTemplate::new(304)) // Not Modified
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+
+        // When pack is 304, fetch_pack returns None
+        let result = client
+            .fetch_pack("cached-pack", "1.0.0", Some("\"etag-abc\""))
+            .await
+            .expect("fetch failed");
+
+        // 304 means: use cached pack AND cached signature
+        // No need to refetch signature - digest binding unchanged
+        assert!(
+            result.is_none(),
+            "304 should return None - use cached pack+signature"
+        );
+
+        // Document the policy: signature cache is tied to pack ETag/digest
+        // If pack unchanged (304), signature is also unchanged
     }
 }

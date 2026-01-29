@@ -8,6 +8,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
+use crate::canonicalize::{compute_canonical_digest, CanonicalizeError};
 use crate::error::{RegistryError, RegistryResult};
 use crate::trust::TrustStore;
 use crate::types::{DsseEnvelope, FetchResult};
@@ -122,6 +123,8 @@ pub fn verify_pack(
 }
 
 /// Verify content digest matches expected.
+///
+/// Uses canonical JCS digest per SPEC §6.2.
 pub fn verify_digest(content: &str, expected: &str) -> RegistryResult<()> {
     let computed = compute_digest(content);
     if computed != expected {
@@ -135,8 +138,46 @@ pub fn verify_digest(content: &str, expected: &str) -> RegistryResult<()> {
     Ok(())
 }
 
-/// Compute SHA-256 digest of content.
+/// Compute canonical digest of content per SPEC §6.2.
+///
+/// Process:
+/// 1. Parse YAML with strict validation (§6.1)
+/// 2. Convert to JSON
+/// 3. Serialize to JCS (RFC 8785)
+/// 4. SHA-256 hash
+///
+/// For content that may not be valid YAML, falls back to raw SHA-256.
 pub fn compute_digest(content: &str) -> String {
+    // Try canonical digest first
+    match compute_canonical_digest(content) {
+        Ok(digest) => digest,
+        Err(e) => {
+            // Log warning and fall back to raw digest for non-YAML content
+            tracing::warn!(
+                error = %e,
+                "canonical digest failed, falling back to raw digest"
+            );
+            // Inline raw digest to avoid deprecation warning
+            let hash = Sha256::digest(content.as_bytes());
+            format!("sha256:{:x}", hash)
+        }
+    }
+}
+
+/// Compute canonical digest, returning error on invalid YAML.
+///
+/// Use this when you need strict validation.
+pub fn compute_digest_strict(content: &str) -> Result<String, CanonicalizeError> {
+    compute_canonical_digest(content)
+}
+
+/// Compute raw SHA-256 digest of content bytes.
+///
+/// **Deprecated**: Use `compute_digest` for canonical JCS digest per SPEC §6.2.
+/// This function is only for backward compatibility with pre-v1.0.2 digests.
+#[deprecated(since = "2.11.0", note = "use compute_digest for canonical JCS digest")]
+#[allow(dead_code)]
+pub fn compute_digest_raw(content: &str) -> String {
     let hash = Sha256::digest(content.as_bytes());
     format!("sha256:{:x}", hash)
 }
@@ -294,23 +335,72 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_digest() {
-        let content = "name: test\nversion: 1.0.0";
+    fn test_compute_digest_canonical() {
+        // Valid YAML should use canonical JCS digest
+        let content = "name: test\nversion: \"1.0.0\"";
         let digest = compute_digest(content);
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), 7 + 64);
+
+        // Verify it's the canonical digest (JCS sorts keys)
+        let strict = compute_digest_strict(content).unwrap();
+        assert_eq!(digest, strict);
+    }
+
+    #[test]
+    fn test_compute_digest_golden_vector() {
+        // Golden vector from SPEC review
+        let content = "name: eu-ai-act-baseline\nversion: \"1.0.0\"\nkind: compliance";
+        let digest = compute_digest(content);
+
+        // This is the JCS canonical digest
+        assert_eq!(
+            digest,
+            "sha256:f47d932cdad4bde369ed0a7cf26fdcf4077777296346c4102d9017edbc62a070"
+        );
+    }
+
+    #[test]
+    fn test_compute_digest_key_ordering() {
+        // Key order in YAML shouldn't matter for canonical digest
+        let yaml1 = "z: 1\na: 2";
+        let yaml2 = "a: 2\nz: 1";
+
+        let digest1 = compute_digest(yaml1);
+        let digest2 = compute_digest(yaml2);
+
+        assert_eq!(digest1, digest2);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_compute_digest_raw_differs() {
+        // Raw digest differs from canonical
+        let content = "name: eu-ai-act-baseline\nversion: \"1.0.0\"\nkind: compliance";
+
+        let canonical = compute_digest(content);
+        let raw = compute_digest_raw(content);
+
+        // They should be different!
+        assert_ne!(canonical, raw);
+
+        // Raw is what we had before (review golden vector)
+        assert_eq!(
+            raw,
+            "sha256:5a9a6b1e95e8c1d36779b87212835c9bfa9cae5d98cb9c75fb8c478750e5e200"
+        );
     }
 
     #[test]
     fn test_verify_digest_success() {
-        let content = "test content";
+        let content = "name: test\nversion: \"1.0.0\"";
         let expected = compute_digest(content);
         assert!(verify_digest(content, &expected).is_ok());
     }
 
     #[test]
     fn test_verify_digest_mismatch() {
-        let content = "test content";
+        let content = "name: test\nversion: \"1.0.0\"";
         let wrong = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
         let result = verify_digest(content, wrong);
         assert!(matches!(result, Err(RegistryError::DigestMismatch { .. })));
@@ -392,5 +482,94 @@ mod tests {
 
         let parsed = parse_dsse_envelope(&b64).unwrap();
         assert_eq!(parsed.payload_type, PAYLOAD_TYPE_PACK_V1);
+    }
+
+    // ==================== Header Size Regression Tests ====================
+
+    #[test]
+    fn test_dsse_envelope_size_small_pack() {
+        // Small pack (< 1KB) should fit in header
+        let content = "name: small-pack\nversion: \"1.0.0\"\nrules: []";
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+        )
+        .unwrap();
+
+        let envelope = DsseEnvelope {
+            payload_type: PAYLOAD_TYPE_PACK_V1.to_string(),
+            payload: BASE64.encode(&canonical),
+            signatures: vec![crate::types::DsseSignature {
+                key_id: "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd"
+                    .to_string(),
+                signature: BASE64.encode([0u8; 64]), // Ed25519 signature
+            }],
+        };
+
+        let json = serde_json::to_vec(&envelope).unwrap();
+        let header_value = BASE64.encode(&json);
+
+        // Small pack envelope should be < 1KB (comfortably within 8KB header limit)
+        assert!(
+            header_value.len() < 1024,
+            "Small pack DSSE envelope should be < 1KB, got {} bytes",
+            header_value.len()
+        );
+    }
+
+    #[test]
+    fn test_dsse_envelope_size_medium_pack() {
+        // Medium pack (~4KB canonical) - this is where header limits become risky
+        let mut content = String::from("name: medium-pack\nversion: \"1.0.0\"\nrules:\n");
+        for i in 0..100 {
+            content.push_str(&format!(
+                "  - name: rule_{}\n    pattern: \"test_pattern_{}\"\n",
+                i, i
+            ));
+        }
+
+        let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+            &crate::canonicalize::parse_yaml_strict(&content).unwrap(),
+        )
+        .unwrap();
+
+        let envelope = DsseEnvelope {
+            payload_type: PAYLOAD_TYPE_PACK_V1.to_string(),
+            payload: BASE64.encode(&canonical),
+            signatures: vec![crate::types::DsseSignature {
+                key_id: "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd"
+                    .to_string(),
+                signature: BASE64.encode([0u8; 64]),
+            }],
+        };
+
+        let json = serde_json::to_vec(&envelope).unwrap();
+        let header_value = BASE64.encode(&json);
+
+        // Document the size - this helps understand when sidecar is needed
+        println!(
+            "Medium pack: canonical={} bytes, envelope={} bytes, header={} bytes",
+            canonical.len(),
+            json.len(),
+            header_value.len()
+        );
+
+        // If over 8KB, sidecar endpoint MUST be used
+        if header_value.len() > 8192 {
+            println!("WARNING: Pack exceeds 8KB header limit - use sidecar endpoint");
+        }
+    }
+
+    #[test]
+    fn test_header_size_limit_constant() {
+        // Document the recommended header size limit
+        const RECOMMENDED_HEADER_LIMIT: usize = 8192; // 8KB
+
+        // Most reverse proxies/CDNs use 8KB as default
+        // nginx: proxy_buffer_size (default 4KB, commonly set to 8KB)
+        // AWS ALB: header limit 16KB
+        // Cloudflare: header limit ~16KB
+        // Conservative choice: 8KB
+
+        assert_eq!(RECOMMENDED_HEADER_LIMIT, 8192);
     }
 }

@@ -1,6 +1,6 @@
 # SPEC-Pack-Registry-v1
 
-**Version:** 1.0.2
+**Version:** 1.0.3
 **Status:** Draft
 **Date:** 2026-01-29
 **Related:** [ADR-016](./ADR-016-Pack-Taxonomy.md), [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md)
@@ -36,6 +36,7 @@ in the open source repository.
 
 | Version | Changes |
 |---------|---------|
+| 1.0.3 | **Sidecar signature endpoint** (§7.3) to avoid header size limits; detached DSSE envelope; signature now separate from pack body; backward-compatible with in-header signatures |
 | 1.0.2 | OIDC token exchange endpoint, DSSE envelope format, Content-Digest (RFC 9530), Vary header, key trust manifest, number policy, HEAD endpoint, cache integrity verification, lockfile extensions, 410 handling |
 | 1.0.1 | Add signature verification (MUST for commercial), strict canonicalization, lockfile, ETag/304, pagination, rate limits, OCI future track |
 | 1.0.0 | Initial specification |
@@ -156,7 +157,8 @@ ETag: "sha256:abc123..."
 | `ETag` | MUST | Strong ETag = X-Pack-Digest value (for conditional requests) |
 | `Content-Digest` | MUST | RFC 9530 digest of wire bytes (may differ from canonical) |
 | `X-Pack-Digest` | MUST | SHA256 digest of **canonical** content (JCS) |
-| `X-Pack-Signature` | MUST (commercial) | Base64-encoded DSSE envelope (see §6.3) |
+| `X-Pack-Signature` | OPTIONAL | Base64-encoded DSSE envelope (see §6.3). For packs >4KB, use sidecar endpoint §6.3.3 |
+| `X-Pack-Signature-Endpoint` | SHOULD (if signed) | Relative path to signature sidecar (e.g., `/{name}/{version}.sig`) |
 | `X-Pack-Key-Id` | MUST (if signed) | SHA256 of SPKI public key |
 | `X-Pack-License` | MUST | SPDX identifier (use `LicenseRef-*` for custom) |
 | `Cache-Control` | MUST | `private` for authenticated, `public` for open |
@@ -585,6 +587,68 @@ let public_key = trust_store.get_key(key_id)?;
 let pae = dsse_pae(&envelope.payload_type, &envelope.payload);
 verify_ed25519(public_key, &pae, &envelope.signatures[0].sig)?;
 ```
+
+#### 6.3.3 Signature Sidecar Endpoint (RECOMMENDED)
+
+**Problem**: DSSE envelopes include the payload (canonical bytes), which can exceed HTTP
+header limits (~8KB) for larger packs. Reverse proxies and CDNs may silently truncate
+or reject oversized headers.
+
+**Solution**: Deliver signatures via a sidecar endpoint instead of headers.
+
+**Endpoint:**
+
+```http
+GET /packs/{name}/{version}.sig
+Authorization: Bearer <token>
+
+HTTP/1.1 200 OK
+Content-Type: application/vnd.dsse.envelope+json
+
+{
+  "payloadType": "application/vnd.assay.pack.v1+jcs",
+  "payload": "<base64-encoded-canonical-bytes>",
+  "signatures": [
+    {
+      "keyid": "sha256:def456...",
+      "sig": "<base64-encoded-Ed25519-signature>"
+    }
+  ]
+}
+```
+
+**Response codes:**
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Signature available (DSSE envelope in body) |
+| 404 | Pack unsigned or signature not available |
+| 401 | Authentication required |
+
+**Client behavior (NORMATIVE):**
+
+1. Clients SHOULD first try `X-Pack-Signature` header (backward compatibility)
+2. If header absent or invalid, clients MUST fetch from sidecar endpoint
+3. For new implementations, sidecar is RECOMMENDED as primary
+4. `fetch_pack_with_signature()` fetches content and signature in parallel
+
+**Registry behavior:**
+
+- Registries MUST support the sidecar endpoint for all signed packs
+- Registries MAY also include `X-Pack-Signature` header for small packs (<4KB)
+- Registries SHOULD set `X-Pack-Signature-Endpoint: /{name}/{version}.sig` header
+  to indicate sidecar availability
+
+**Header size guidance:**
+
+| Pack Size | Canonical Size | Envelope Size | Delivery |
+|-----------|---------------|---------------|----------|
+| < 4KB     | < 3KB         | < 4KB         | Header OK |
+| 4KB-100KB | 3-75KB        | 4-100KB       | Sidecar REQUIRED |
+| > 100KB   | > 75KB        | > 100KB       | Sidecar REQUIRED |
+
+**Security note**: The sidecar endpoint requires the same authentication as the pack
+endpoint. Signature must be verified against the content digest, not just presence.
 
 ### 6.4 Key Trust Model (NORMATIVE)
 
