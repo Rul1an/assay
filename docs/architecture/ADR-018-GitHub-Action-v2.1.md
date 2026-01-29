@@ -47,11 +47,17 @@ Current v2.0 limitations:
 | Attestation | ❌ | ❌ | ✅ |
 | Badge Update | ❌ | ❌ | ✅ |
 
-**Implementation**: All write steps have explicit conditionals:
+**Implementation**: All write steps have explicit conditionals using default branch detection:
 
 ```yaml
-if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+# Use default branch detection (works with main, master, or custom default)
+if: |
+  github.event_name == 'push' &&
+  github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
 ```
+
+> **Why not hardcode `main`**: Repos may use `master`, `trunk`, or custom default branches.
+> Using `github.event.repository.default_branch` ensures portability.
 
 ### Permission Model (Minimal by Default)
 
@@ -71,6 +77,7 @@ permissions:
   security-events: write
   attestations: write
   id-token: write
+  packages: write  # Required for container attestations (optional)
 
 # With PR comment
 permissions:
@@ -79,6 +86,9 @@ permissions:
 ```
 
 **Principle**: Action documents required permissions per feature; users enable incrementally.
+
+> **Note**: The `actions/attest-build-provenance` action requires `attestations: write` and
+> `id-token: write`. For container images, `packages: write` is also needed.
 
 ### New Input Contract (v2.1)
 
@@ -189,10 +199,14 @@ outputs:
     description: 'Comma-separated list of applied pack IDs'
   pack_score:
     description: 'Compliance score (0-100) across all packs'
+  pack_articles:
+    description: 'Comma-separated list of covered articles (e.g., "12(1),12(2)(a)")'
   bundle_url:
     description: 'URL of pushed evidence bundle in BYOS (if store set)'
   attestation_id:
     description: 'Artifact attestation UUID (if attest=true)'
+  attestation_url:
+    description: 'URL to view attestation in GitHub UI (if attest=true)'
   coverage_percent:
     description: 'Evidence coverage percentage (tools with policy / total tools)'
 ```
@@ -215,11 +229,26 @@ outputs:
       $BUNDLES
 
     # Extract pack metadata for Job Summary
-    PACK_SCORE=$(jq -r '.runs[0].properties.complianceScore // 100' "$REPORTS_DIR/lint.sarif")
+    SARIF="$REPORTS_DIR/lint.sarif"
+
+    PACK_APPLIED=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.pack // empty] | unique | join(",")' "$SARIF")
+    PACK_SCORE=$(jq -r '.runs[0].properties.complianceScore // 100' "$SARIF")
+    PACK_ARTICLES=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.article_ref // empty] | unique | join(",")' "$SARIF")
+    DISCLAIMER=$(jq -r '.runs[0].properties.disclaimer // empty' "$SARIF")
+
+    echo "pack_applied=$PACK_APPLIED" >> $GITHUB_OUTPUT
     echo "pack_score=$PACK_SCORE" >> $GITHUB_OUTPUT
+    echo "pack_articles=$PACK_ARTICLES" >> $GITHUB_OUTPUT
+
+    # Store disclaimer for Job Summary
+    if [ -n "$DISCLAIMER" ]; then
+      echo "pack_disclaimer<<EOF" >> $GITHUB_OUTPUT
+      echo "$DISCLAIMER" >> $GITHUB_OUTPUT
+      echo "EOF" >> $GITHUB_OUTPUT
+    fi
 ```
 
-**SARIF Enhancement (already in Pack Engine v2.10.0):**
+**SARIF Contract (per SPEC-Pack-Engine-v1):**
 
 ```json
 {
@@ -247,18 +276,45 @@ outputs:
 
 **Job Summary Enhancement:**
 
-```markdown
-## Compliance Pack Results
+The Job Summary MUST display disclaimer when present in SARIF:
 
-| Pack | Version | Score | Articles Covered |
-|------|---------|-------|------------------|
-| eu-ai-act-baseline | 1.0.0 | 85% | 12(1), 12(2)(a-c) |
+```yaml
+- name: Write Job Summary
+  shell: bash
+  run: |
+    {
+      echo "## Compliance Pack Results"
+      echo ""
+      echo "| Pack | Version | Score | Articles |"
+      echo "|------|---------|-------|----------|"
+      echo "| $PACK_APPLIED | 1.0.0 | ${PACK_SCORE}% | $PACK_ARTICLES |"
 
-> ⚠️ **Disclaimer**: This pack provides guidance only and does not constitute
-> legal advice. Consult qualified legal counsel for compliance obligations.
+      # MANDATORY: Display disclaimer if present
+      if [ -n "$DISCLAIMER" ]; then
+        echo ""
+        echo "> ⚠️ **Disclaimer**: $DISCLAIMER"
+      fi
+    } >> $GITHUB_STEP_SUMMARY
 ```
 
+**Disclaimer requirement (NORMATIVE):**
+- If `runs[0].properties.disclaimer` is present in SARIF, Job Summary MUST display it
+- This is enforced by Pack Engine for `pack_kind == compliance`
+- Failure to display disclaimer is a compliance risk
+
 ### P2: BYOS Push with OIDC
+
+**Concurrency control (recommended for workflows using BYOS push):**
+
+```yaml
+# In calling workflow, add concurrency group to prevent parallel writes
+concurrency:
+  group: assay-evidence-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel in-progress evidence push
+```
+
+> **Why**: Parallel pushes to BYOS may race on baseline updates or cause duplicate bundles.
+> Concurrency group ensures sequential execution per branch.
 
 **Provider-specific authentication (explicit, tested):**
 
@@ -288,14 +344,14 @@ outputs:
     subscription-id: ${{ inputs.azure_subscription_id }}
 ```
 
-**Push step (main branch only):**
+**Push step (default branch only):**
 
 ```yaml
 - name: Push evidence to BYOS
   if: |
     inputs.store != '' &&
     github.event_name == 'push' &&
-    github.ref == 'refs/heads/main' &&
+    github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
     steps.process.outputs.verified == 'true'
   shell: bash
   run: |
@@ -314,15 +370,30 @@ outputs:
 
 ```yaml
 - name: Generate artifact attestation
+  id: attest
   if: |
     inputs.attest == 'true' &&
     github.event_name == 'push' &&
-    github.ref == 'refs/heads/main' &&
+    github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
     steps.process.outputs.verified == 'true'
   uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v3.0.0
   with:
     subject-path: ${{ steps.process.outputs.reports_dir }}/*.tar.gz
+
+- name: Export attestation outputs
+  if: steps.attest.outcome == 'success'
+  shell: bash
+  run: |
+    echo "attestation_id=${{ steps.attest.outputs.attestation-id }}" >> $GITHUB_OUTPUT
+    echo "attestation_url=${{ steps.attest.outputs.attestation-url }}" >> $GITHUB_OUTPUT
 ```
+
+**Action Outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `attestation-id` | UUID of the attestation |
+| `attestation-url` | URL to view attestation in GitHub UI |
 
 **Verification (user-side):**
 
@@ -341,14 +412,14 @@ This creates an end-to-end integrity chain from user authorization to CI/CD outp
 
 ### P4: Coverage Badge
 
-**Security consideration**: Requires `GIST_TOKEN` secret with minimal scope (`gist` only). Only runs on main branch to prevent exfiltration.
+**Security consideration**: Requires `GIST_TOKEN` secret with minimal scope (`gist` only). Only runs on default branch to prevent exfiltration.
 
 ```yaml
 - name: Update coverage badge
   if: |
     inputs.badge_gist != '' &&
     github.event_name == 'push' &&
-    github.ref == 'refs/heads/main'
+    github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
   uses: schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483 # v1.7.0
   with:
     auth: ${{ secrets.GIST_TOKEN }}
@@ -361,26 +432,43 @@ This creates an end-to-end integrity chain from user authorization to CI/CD outp
     minColorRange: 0
 ```
 
-### EU AI Act Timeline (Corrected)
+**GIST_TOKEN requirements:**
+- Fine-grained PAT with `gist` scope only
+- Scope limited to single gist if possible
+- Never used on fork PRs (default branch guard enforces this)
 
-The EU AI Act has a **phased implementation schedule**:
+### EU AI Act Timeline
 
-| Date | Milestone | Relevant Obligations |
-|------|-----------|---------------------|
-| Aug 2024 | Entry into force | - |
-| Feb 2025 | Chapter I-II apply | Prohibited practices, AI literacy |
-| Aug 2025 | Chapter III (GPAI) applies | General-purpose AI obligations |
-| Aug 2026 | High-risk AI (Annex III) | Full compliance for high-risk systems |
+The EU AI Act (Regulation 2024/1689) has a **phased implementation schedule**. Obligations apply at different times depending on AI system classification.
+
+| Date | Milestone | Scope |
+|------|-----------|-------|
+| Aug 2024 | Entry into force | Regulation published, transition begins |
+| Feb 2025 | Chapter I-II apply | Prohibited practices (Art. 5), AI literacy (Art. 4) |
+| Aug 2025 | Chapter III applies | General-purpose AI (GPAI) model obligations |
+| Aug 2026 | High-risk obligations | Full Annex III compliance for high-risk AI |
+| Aug 2027 | Extended scope | Certain Annex I systems |
+
+**Important**: The timeline above is a summary. Specific obligations may have different effective dates based on system classification, sector, and transitional provisions. Always consult the official regulation text and legal counsel.
 
 **Pack scope mapping:**
 
-| Pack | Scope | Timeline |
-|------|-------|----------|
-| `eu-ai-act-baseline` | Article 12 (logging) | All AI systems, Feb 2025+ |
-| `eu-ai-act-gpai` (future) | GPAI obligations | Aug 2025+ |
-| `eu-ai-act-high-risk` (future) | Full Annex III | Aug 2026+ |
+| Pack | Scope | Effective |
+|------|-------|-----------|
+| `eu-ai-act-baseline` | Article 12 (automatic logging) | Applies to all AI systems with logging obligations |
+| `eu-ai-act-gpai` (future) | GPAI provider obligations | Aug 2025+ |
+| `eu-ai-act-high-risk` (future) | Full Annex III requirements | Aug 2026+ |
 
-**Messaging guidance**: Always specify which obligations/articles a pack covers and their effective dates.
+**Pack requirements (NORMATIVE):**
+1. Each pack MUST specify which articles it covers in `rules[].properties.article_ref`
+2. Each pack MUST include effective dates in documentation
+3. Compliance packs MUST include disclaimer per ADR-016
+4. Pack version MUST be included in SARIF output for audit traceability
+
+**Messaging guidance**: Never claim "EU AI Act compliant" without specifying:
+- Which articles/obligations are covered
+- Which AI system classification applies
+- Effective dates of those obligations
 
 ### Supply Chain Hardening
 
@@ -417,7 +505,53 @@ Auto-detecting provider from URL is convenient but:
 - May select wrong auth method
 - Harder to document required IAM setup
 
-Decision: `store_provider: auto` as default with explicit override option.
+Decision: `store_provider: auto` as default with **fail-closed** behavior:
+
+**Auto-detection rules (fail-closed):**
+
+| URL Prefix | Detected Provider | Required Input |
+|------------|-------------------|----------------|
+| `s3://` | `aws` | `store_role` (IAM role ARN) |
+| `gs://` | `gcp` | `store_role` (Workload Identity) |
+| `az://` or `https://*.blob.core.windows.net` | `azure` | Azure inputs |
+| Other | **ERROR** | Must set `store_provider` explicitly |
+
+**Fail-closed validation:**
+
+```yaml
+- name: Validate store configuration
+  if: inputs.store != ''
+  shell: bash
+  run: |
+    STORE="${{ inputs.store }}"
+    PROVIDER="${{ inputs.store_provider }}"
+    ROLE="${{ inputs.store_role }}"
+
+    # Auto-detect provider if not set
+    if [ "$PROVIDER" = "auto" ]; then
+      case "$STORE" in
+        s3://*) PROVIDER="aws" ;;
+        gs://*) PROVIDER="gcp" ;;
+        az://*|https://*.blob.core.windows.net/*) PROVIDER="azure" ;;
+        *)
+          echo "::error::Unknown store URL scheme. Set store_provider explicitly."
+          exit 1
+          ;;
+      esac
+    fi
+
+    # Require store_role for OIDC providers
+    if [ "$PROVIDER" = "aws" ] || [ "$PROVIDER" = "gcp" ]; then
+      if [ -z "$ROLE" ]; then
+        echo "::error::store_role is required for $PROVIDER OIDC authentication."
+        echo "::error::AWS: arn:aws:iam::ACCOUNT:role/ROLE"
+        echo "::error::GCP: projects/PROJECT/locations/global/workloadIdentityPools/POOL/providers/PROVIDER"
+        exit 1
+      fi
+    fi
+
+    echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
+```
 
 ### Why Not SLSA Level Claims
 
