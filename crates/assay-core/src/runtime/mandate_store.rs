@@ -130,11 +130,13 @@ impl MandateStore {
 
     /// Upsert mandate metadata. Idempotent for same content, errors on conflict.
     pub fn upsert_mandate(&self, meta: &MandateMetadata) -> Result<(), AuthzError> {
-        // Validate constraints
-        if meta.single_use && meta.max_uses.is_some() && meta.max_uses != Some(1) {
-            return Err(AuthzError::InvalidConstraints {
-                max_uses: meta.max_uses.unwrap(),
-            });
+        // Validate constraints: single_use implies max_uses == 1
+        if meta.single_use {
+            if let Some(max) = meta.max_uses {
+                if max != 1 {
+                    return Err(AuthzError::InvalidConstraints { max_uses: max });
+                }
+            }
         }
 
         let conn = self.conn.lock().unwrap();

@@ -1,0 +1,8 @@
+# GitGuardian configuration
+# https://docs.gitguardian.com/ggshield-docs/reference/gitguardian-yaml
+
+# Ignore test fixtures containing intentionally fake cryptographic material
+paths-ignore:
+  - "crates/assay-evidence/tests/fixtures/**"
+  - "**/test_vectors*.json"
+  - "**/golden_vectors*.json"
