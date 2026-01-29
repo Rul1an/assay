@@ -11,8 +11,8 @@
   "test_key": {
     "key_id": "sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0",
     "public_key_spki_der_b64": "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
-    "private_key_pkcs8_der_b64": "MFECAQEwBQYDK2VwBCIEIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8ggSEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
     "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "_note": "Generate SigningKey from seed_hex: SigningKey::from_bytes(&hex::decode(seed_hex))",
     "_warning": "TEST KEY ONLY - DO NOT USE IN PRODUCTION"
   },
   "vectors": [

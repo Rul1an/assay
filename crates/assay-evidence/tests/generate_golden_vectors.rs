@@ -254,8 +254,8 @@ fn generate_golden_vectors_json() {
         "test_key": {
             "key_id": key_id,
             "public_key_spki_der_b64": public_spki_b64,
-            "private_key_pkcs8_der_b64": private_pkcs8_b64,
             "seed_hex": hex::encode(TEST_KEY_SEED),
+            "_note": "Generate SigningKey from seed_hex: SigningKey::from_bytes(&hex::decode(seed_hex))",
             "_warning": "TEST KEY ONLY - DO NOT USE IN PRODUCTION"
         },
         "vectors": [v1, v2, v3]
