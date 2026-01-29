@@ -7,6 +7,7 @@ members = [
   "crates/assay-xtask", "crates/assay-monitor",
   "crates/assay-ebpf", "crates/assay-common",
   "assay-python-sdk", "crates/assay-policy", "crates/assay-evidence", "crates/assay-sim",
+  "crates/assay-registry",
 ]
 default-members = [
   "crates/assay-core",
@@ -72,6 +73,7 @@ assay-policy = { path = "crates/assay-policy", version = "2.9.0" }
 assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.9.0" }
 assay-evidence = { path = "crates/assay-evidence", version = "2.9.0" }
 assay-sim = { path = "crates/assay-sim", version = "2.9.0" }
+assay-registry = { path = "crates/assay-registry", version = "2.9.0" }
 
 # Common dependencies
 anyhow = "1"
