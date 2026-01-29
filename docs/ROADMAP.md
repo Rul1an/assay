@@ -254,13 +254,24 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 - [ ] **SOC2 Baseline/Pro**: Control mapping packs
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
 
-### E. GitHub Action v2.1
+### E. GitHub Action v2.1 (Next)
 
-After P1/P2 features:
-- [ ] `assay init` workflow generator
-- [ ] Compliance pack support (`--pack eu-ai-act`)
-- [ ] Coverage badge generation
-- [ ] Store integration (push to BYOS)
+Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
+
+| Priority | Feature | Rationale |
+|----------|---------|-----------|
+| **P1** | Compliance pack support | EU AI Act compliance story |
+| **P2** | BYOS push with OIDC | Zero-credential enterprise posture |
+| **P3** | Artifact attestation | Supply chain integrity |
+| **P4** | Coverage badge | Developer DX |
+
+**Key design decisions:**
+- Write operations (push, attest, badge) only on `push` to main (fork PR threat model)
+- OIDC authentication per provider (explicit, not auto-detect)
+- Attestations provide "SLSA-aligned provenance" (no specific level claims)
+- EU AI Act timeline accurately documented (phased: Feb 2025, Aug 2025, Aug 2026)
+
+See [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md) for full specification.
 
 ---
 
