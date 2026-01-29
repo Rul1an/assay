@@ -25,6 +25,7 @@ Assay is a **Rust monorepo** with multiple crates, a **Python SDK**, and compreh
 | `assay-monitor` | Runtime monitoring | eBPF/LSM integration, kernel-level enforcement |
 | `assay-policy` | Policy compilation | Compiles policies into Tier 1 (kernel/LSM) and Tier 2 (userspace) |
 | `assay-evidence` | Evidence management | Generates verifiable evidence artifacts for audit/compliance (CloudEvents v1.0, JCS canonicalization, content-addressed IDs) |
+| `assay-registry` | Pack Registry client | Secure pack fetching (JCS canonicalization, DSSE verification, OIDC auth, local caching, lockfile v2) |
 | `assay-common` | Shared types | Common structs for eBPF/userspace communication |
 | `assay-sim` | Attack simulation | Hardening/compliance testing via attack suites |
 
@@ -244,5 +245,6 @@ Key ADRs for understanding the codebase:
 | [ADR-013](../architecture/ADR-013-EU-AI-Act-Pack.md) | EU AI Act Pack | Compliance pack system with Article 12 mapping |
 | [ADR-014](../architecture/ADR-014-GitHub-Action-v2.md) | GitHub Action v2 | Separate repo, SARIF discipline, zero-config ✅ |
 | [ADR-015](../architecture/ADR-015-BYOS-Storage-Strategy.md) | BYOS Storage | Bring-your-own S3 storage strategy ✅ |
+| [SPEC-Pack-Registry-v1](../architecture/SPEC-Pack-Registry-v1.md) | Pack Registry | Secure pack fetching: JCS, DSSE sidecar, no-TOFU trust ✅ |
 
 See [ADR Index](../architecture/adrs.md) for the complete list.

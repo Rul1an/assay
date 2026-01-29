@@ -124,6 +124,20 @@ graph TD
 
     [:octicons-arrow-right-24: Mandates](mandates.md)
 
+-   :material-package-variant-closed:{ .lg .middle } __Pack Registry__
+
+    ---
+
+    Secure, reproducible fetching of compliance packs from remote registries.
+
+    - Resolution order (local → bundled → registry → BYOS)
+    - Canonical digests (JCS + SHA-256)
+    - DSSE signature verification
+    - No-TOFU trust model
+    - Lockfile for CI reproducibility
+
+    [:octicons-arrow-right-24: Pack Registry](pack-registry.md)
+
 </div>
 
 ---
@@ -138,6 +152,7 @@ graph TD
 | Replay | Execute | `assay run` |
 | Cache | Optimize | `.assay/store.db` |
 | Mandates | User authorization | `audit.ndjson`, `decisions.ndjson` |
+| Pack Registry | Fetch compliance packs | `assay.packs.lock`, `~/.assay/cache/packs/` |
 
 ---
 

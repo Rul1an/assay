@@ -149,6 +149,7 @@ nav:
     - Cache & Fingerprints: concepts/cache.md
     - Scope & Boundaries: concepts/scope.md
     - Fail-Safe Config: concepts/fail-safe.md
+    - Pack Registry: concepts/pack-registry.md
 
   - Python SDK:
     - python-sdk/index.md

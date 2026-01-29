@@ -14,6 +14,7 @@ graph TD
     cli --> mcpServer[assay-mcp-server]
     cli --> common[assay-common]
     cli --> sim[assay-sim]
+    cli --> registry[assay-registry]
 
     mcpServer --> core
     mcpServer --> policy
@@ -34,6 +35,9 @@ graph TD
 
     evidence --> core
     evidence --> common
+    evidence --> registry
+
+    registry --> common
 
     pySdk[assay-python-sdk] --> core
 
@@ -42,6 +46,7 @@ graph TD
     style metrics fill:#e8f5e9
     style mcpServer fill:#f3e5f5
     style monitor fill:#ffebee
+    style registry fill:#e3f2fd
 ```
 
 ## Detailed Crate Dependencies
@@ -133,6 +138,7 @@ graph TD
 **Internal Crates:**
 - `assay-core` (workspace) - Profile types, event mapping
 - `assay-common` (workspace) - Shared types
+- `assay-registry` (workspace) - Pack fetching for lint rules
 
 **External Dependencies:**
 - `serde`, `serde_json` - Serialization
@@ -145,6 +151,33 @@ graph TD
 - `EvidenceEvent` - CloudEvents v1.0 format
 - `BundleWriter` / `BundleReader` - Tar.gz bundle I/O
 - `Manifest` - Bundle metadata with content-addressed ID
+
+### `assay-registry` Dependencies
+
+**Internal Crates:**
+- `assay-common` (workspace) - Shared types
+
+**External Dependencies:**
+- `reqwest` - HTTP client with retry logic
+- `serde`, `serde_json`, `serde_yaml` - Serialization
+- `serde_jcs` - JCS canonicalization (RFC 8785)
+- `ed25519-dalek` - Ed25519 signatures
+- `sha2` - SHA-256 digests
+- `tokio` - Async runtime
+- `thiserror`, `anyhow` - Error handling
+
+**Key Types:**
+- `RegistryClient` - HTTP client with auth/retry/rate-limiting
+- `PackCache` - Local cache with TOCTOU protection
+- `TrustStore` - Key manifest verification
+- `Lockfile` - v2 lockfile for reproducible builds
+
+**Key Features:**
+- Strict YAML validation (no anchors/aliases/tags)
+- JCS canonicalization for deterministic digests
+- DSSE signature verification with sidecar endpoint
+- No-TOFU trust model with pinned roots
+- OIDC token exchange for CI environments
 
 ### `assay-common` Dependencies
 
@@ -320,8 +353,10 @@ sequenceDiagram
 
 **None**: The dependency graph is acyclic. All dependencies flow in one direction:
 - CLI → Core → Metrics
+- CLI → Registry → Common
 - MCP Server → Core → Policy
 - Monitor → Policy → Common
+- Evidence → Registry → Common
 
 ## Feature Flags
 
@@ -412,7 +447,7 @@ Rul1an/assay-action@v2
 **Workspace Version**: All crates share version from `Cargo.toml` workspace:
 ```toml
 [workspace.package]
-version = "2.8.0"
+version = "2.12.0"
 ```
 
 **Patch Section**: Internal crates are patched to use local paths:
@@ -420,6 +455,7 @@ version = "2.8.0"
 [patch.crates-io]
 assay-core = { path = "crates/assay-core" }
 assay-metrics = { path = "crates/assay-metrics" }
+assay-registry = { path = "crates/assay-registry" }
 ```
 
 ## Related Documentation

@@ -586,9 +586,132 @@ flowchart TD
     CONSUME --> ALLOW[Allow]
 ```
 
+## Pack Registry Architecture
+
+### Pack Resolution Flow (Basic Path)
+
+This diagram shows the basic flow when resolving, fetching, and verifying packs:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User as CLI/CI
+  participant CLI as assay-cli
+  participant RES as PackResolver
+  participant CACHE as Local Cache
+  participant REG as RegistryClient
+  participant SIG as .sig endpoint
+  participant KEYS as /keys manifest
+  participant LOCK as assay.packs.lock
+
+  User->>CLI: assay evidence lint --pack <ref>
+  CLI->>RES: resolve(<ref>)
+
+  RES->>CACHE: get(name, version)
+  alt Cache hit (not expired)
+    CACHE-->>RES: pack + metadata + signature
+    RES->>CLI: verify cached
+    CLI->>CLI: strict YAML -> JCS -> digest
+    CLI->>CLI: verify signature if required
+  else Cache miss/expired
+    RES->>REG: GET /packs/{name}/{version}
+    REG-->>RES: 200 (pack, X-Pack-Digest, ETag)
+    RES->>REG: GET /packs/{name}/{version}.sig
+    REG-->>RES: 200 (DSSE envelope or 404 if unsigned)
+    RES->>CLI: verify downloaded
+    CLI->>CLI: strict YAML -> JCS -> digest == X-Pack-Digest
+    CLI->>KEYS: GET /keys (if needed)
+    KEYS-->>CLI: DSSE-signed manifest
+    CLI->>CLI: verify /keys via pinned roots
+    CLI->>CLI: verify DSSE via manifest key
+    CLI->>CACHE: write_atomic(pack+metadata+signature)
+  end
+
+  alt Lockfile present
+    CLI->>LOCK: enforce digest/signature metadata
+    LOCK-->>CLI: ok / mismatch error
+  end
+
+  CLI-->>User: proceed / verified
+```
+
+### Pack Resolution Flow (Auth Required)
+
+This diagram shows the OIDC token exchange flow for authenticated pack fetching:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor CI as GitHub Actions / CI
+  participant CLI as assay-cli
+  participant REG as Registry
+  participant GH as GitHub OIDC
+  participant EX as /auth/oidc/exchange
+  participant SIG as .sig endpoint
+  participant KEYS as /keys manifest
+
+  CI->>CLI: assay evidence lint --pack commercial@1.2.0
+  CLI->>GH: request OIDC ID token (aud=registry)
+  GH-->>CLI: id_token (JWT)
+
+  CLI->>EX: POST /auth/oidc/exchange {id_token, scope}
+  EX-->>CLI: access_token ast_... (expires_in)
+
+  CLI->>REG: GET /packs/name/version (Bearer ast_...)
+  REG-->>CLI: 200 (pack, X-Pack-Digest, ETag, Vary)
+  CLI->>SIG: GET /packs/name/version.sig (Bearer ast_...)
+  SIG-->>CLI: 200 (DSSE envelope)
+
+  CLI->>KEYS: GET /keys (Bearer ast_... or public)
+  KEYS-->>CLI: DSSE-signed keys manifest
+  CLI->>CLI: verify manifest via pinned roots
+  CLI->>CLI: verify pack DSSE via manifest key
+  CLI-->>CI: verified
+```
+
+### Pack Registry Trust Chain
+
+This diagram shows how trust is established from pinned roots through the keys manifest to pack signatures:
+
+```mermaid
+flowchart TB
+  subgraph CLI["assay-cli (client)"]
+    PR["Pinned Root Key IDs<br/>(shipped with CLI)"]
+    TS["TrustStore"]
+    PR --> TS
+  end
+
+  subgraph Registry["Assay Registry"]
+    KM["/keys manifest<br/>(keys + validity + revocation)<br/>DSSE-signed"]
+    PK["Pack YAML<br/>canonical digest header"]
+    SG["Pack signature sidecar<br/>/packs/{name}/{version}.sig<br/>DSSE envelope"]
+  end
+
+  PR -->|verifies DSSE| KM
+  KM -->|provides pack-signing keys| TS
+  PK -->|canonicalize + compute digest| CLI
+  SG -->|DSSE verify with manifest key| CLI
+
+  note1["No-TOFU: keys manifest is verified against pinned roots<br/>Revocation/expiry enforced<br/>Pinned roots cannot be remotely revoked"]:::note
+  TS --> note1
+
+  classDef note fill:#f8f8f8,stroke:#999,color:#333
+```
+
+### Key Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **No-TOFU** | Keys manifest must be verified against pinned roots on first use |
+| **Sidecar-First** | Client always fetches `.sig` sidecar instead of relying on headers |
+| **Canonical Digest** | Pack integrity uses strict YAML → JCS → SHA-256, not raw bytes |
+| **Cache Untrusted** | Digest (and signature if required) verified on every cache read |
+| **Lockfile Hard Fail** | Digest mismatches with lockfile are always hard errors |
+
 ## Related Documentation
 
 - [Codebase Overview](codebase-overview.md) - Detailed component descriptions
 - [Interdependencies](interdependencies.md) - Dependency relationships
 - [User Flows](user-flows.md) - User journey mappings
 - [SPEC-Mandate-v1](../architecture/SPEC-Mandate-v1.md) - Mandate specification
+- [SPEC-Pack-Registry-v1](../architecture/SPEC-Pack-Registry-v1.md) - Pack Registry protocol specification

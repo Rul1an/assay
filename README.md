@@ -90,7 +90,29 @@ assay evidence lint --pack ./my-org-rules.yaml bundle.tar.gz
 
 SARIF output includes article references for audit trails.
 
-### 5. Tool Signing
+### 5. Pack Registry (Secure, Reproducible Pack Fetching)
+
+Assay resolves `--pack` references in a deterministic order:
+1. **Local** (`./custom.yaml`)
+2. **Bundled** (`packs/open/<name>`)
+3. **Registry** (`name@version` or pinned `name@version#sha256:...`)
+4. **BYOS** (`s3://`, `gs://`, `az://`)
+
+All remote packs are verified before use:
+- **Canonical digest**: strict YAML subset → JSON → JCS (RFC 8785) → SHA-256
+- **Authenticity**: Ed25519 + DSSE signature verification for commercial packs
+- **Sidecar signatures**: `GET /packs/{name}/{version}.sig` (avoids header size limits)
+
+Trust model is **no-TOFU**:
+- CLI ships with pinned root key IDs
+- Registry publishes a DSSE-signed keys manifest (`GET /keys`)
+- Pack signatures must chain to manifest keys (revocation/expiry enforced)
+
+For reproducible CI, `assay.packs.lock` (v2) pins name/version/digest/signature metadata. Lockfile mismatches are hard errors.
+
+See [SPEC-Pack-Registry-v1](docs/architecture/SPEC-Pack-Registry-v1.md) for the full protocol specification.
+
+### 6. Tool Signing
 
 Cryptographic signatures for tool definitions. Ed25519 + DSSE.
 
@@ -105,7 +127,7 @@ assay tool sign tool.json --key priv.pem --out signed.json
 assay tool verify signed.json --pubkey pub.pem
 ```
 
-### 6. BYOS (Bring Your Own Storage)
+### 7. BYOS (Bring Your Own Storage)
 
 Push evidence to your own S3-compatible storage. No vendor lock-in.
 
