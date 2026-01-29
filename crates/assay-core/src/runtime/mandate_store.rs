@@ -21,6 +21,9 @@ pub struct AuthzReceipt {
     pub use_count: u32,
     pub consumed_at: DateTime<Utc>,
     pub tool_call_id: String,
+    /// True if this was a new consumption, false if idempotent retry.
+    /// Used to avoid emitting duplicate lifecycle events on retries.
+    pub was_new: bool,
 }
 
 /// Authorization errors.
@@ -43,6 +46,9 @@ pub enum AuthzError {
 
     #[error("Invalid mandate constraints: single_use=true with max_uses={max_uses}")]
     InvalidConstraints { max_uses: u32 },
+
+    #[error("Mandate revoked at {revoked_at}")]
+    Revoked { revoked_at: DateTime<Utc> },
 
     #[error("Database error: {0}")]
     Database(String),
@@ -257,7 +263,7 @@ impl MandateStore {
             .optional()?;
 
         if let Some((use_id, use_count, consumed_at)) = existing {
-            // Return existing receipt (idempotent)
+            // Return existing receipt (idempotent retry)
             return Ok(AuthzReceipt {
                 mandate_id: mandate_id.to_string(),
                 use_id,
@@ -266,6 +272,7 @@ impl MandateStore {
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now()),
                 tool_call_id: tool_call_id.to_string(),
+                was_new: false, // Idempotent retry
             });
         }
 
@@ -357,6 +364,7 @@ impl MandateStore {
             use_count: new_count as u32,
             consumed_at,
             tool_call_id: tool_call_id.to_string(),
+            was_new: true, // First consumption
         })
     }
 
@@ -399,6 +407,78 @@ impl MandateStore {
         )?;
         Ok(exists > 0)
     }
+
+    // =========================================================================
+    // Revocation API (P0-A)
+    // =========================================================================
+
+    /// Insert or update a revocation record.
+    ///
+    /// Idempotent: re-inserting with same mandate_id updates the record.
+    pub fn upsert_revocation(&self, r: &RevocationRecord) -> Result<(), AuthzError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO mandate_revocations (mandate_id, revoked_at, reason, revoked_by, source, event_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(mandate_id) DO UPDATE SET
+                revoked_at = excluded.revoked_at,
+                reason = excluded.reason,
+                revoked_by = excluded.revoked_by,
+                source = excluded.source,
+                event_id = excluded.event_id
+            "#,
+            params![
+                r.mandate_id,
+                r.revoked_at.to_rfc3339(),
+                r.reason,
+                r.revoked_by,
+                r.source,
+                r.event_id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get revoked_at timestamp for a mandate (if revoked).
+    pub fn get_revoked_at(&self, mandate_id: &str) -> Result<Option<DateTime<Utc>>, AuthzError> {
+        let conn = self.conn.lock().unwrap();
+        let s: Option<String> = conn
+            .query_row(
+                "SELECT revoked_at FROM mandate_revocations WHERE mandate_id = ?1",
+                [mandate_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        match s {
+            Some(ts) => {
+                let dt = DateTime::parse_from_rfc3339(&ts)
+                    .map_err(|e| {
+                        AuthzError::Database(format!("Invalid revoked_at timestamp: {e}"))
+                    })?
+                    .with_timezone(&Utc);
+                Ok(Some(dt))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Check if a mandate is revoked (convenience method).
+    pub fn is_revoked(&self, mandate_id: &str) -> Result<bool, AuthzError> {
+        Ok(self.get_revoked_at(mandate_id)?.is_some())
+    }
+}
+
+/// Revocation record for upsert.
+#[derive(Debug, Clone)]
+pub struct RevocationRecord {
+    pub mandate_id: String,
+    pub revoked_at: DateTime<Utc>,
+    pub reason: Option<String>,
+    pub revoked_by: Option<String>,
+    pub source: Option<String>,
+    pub event_id: Option<String>,
 }
 
 /// Compute deterministic use_id per SPEC-Mandate-v1.0.4 §7.4.
@@ -593,6 +673,10 @@ mod tests {
         // Same receipt (idempotent)
         assert_eq!(receipt1.use_id, receipt2.use_id);
         assert_eq!(receipt1.use_count, receipt2.use_count);
+
+        // was_new distinguishes first vs retry
+        assert!(receipt1.was_new, "First consume should be was_new=true");
+        assert!(!receipt2.was_new, "Retry should be was_new=false");
 
         // Count didn't increment
         assert_eq!(store.get_use_count(&meta.mandate_id).unwrap(), Some(1));
@@ -888,5 +972,70 @@ mod tests {
         // Only one actual use
         assert_eq!(store.get_use_count(&meta.mandate_id).unwrap(), Some(1));
         assert_eq!(store.count_uses(&meta.mandate_id).unwrap(), 1);
+    }
+
+    // === H) Revocation API ===
+
+    #[test]
+    fn test_revocation_roundtrip() {
+        let store = MandateStore::memory().unwrap();
+
+        let revoked_at = Utc::now();
+        let record = RevocationRecord {
+            mandate_id: "sha256:revoked123".to_string(),
+            revoked_at,
+            reason: Some("User requested".to_string()),
+            revoked_by: Some("admin@example.com".to_string()),
+            source: Some("assay://myorg/myapp".to_string()),
+            event_id: Some("evt_revoke_001".to_string()),
+        };
+
+        store.upsert_revocation(&record).unwrap();
+
+        let got = store.get_revoked_at(&record.mandate_id).unwrap();
+        assert!(got.is_some());
+        // Compare within 1 second tolerance (RFC3339 loses sub-second precision)
+        let diff = (got.unwrap() - revoked_at).num_seconds().abs();
+        assert!(diff <= 1, "revoked_at timestamps differ by {}s", diff);
+    }
+
+    #[test]
+    fn test_revocation_is_revoked_helper() {
+        let store = MandateStore::memory().unwrap();
+
+        assert!(!store.is_revoked("sha256:not_revoked").unwrap());
+
+        store
+            .upsert_revocation(&RevocationRecord {
+                mandate_id: "sha256:is_revoked".to_string(),
+                revoked_at: Utc::now(),
+                reason: None,
+                revoked_by: None,
+                source: None,
+                event_id: None,
+            })
+            .unwrap();
+
+        assert!(store.is_revoked("sha256:is_revoked").unwrap());
+    }
+
+    #[test]
+    fn test_revocation_upsert_is_idempotent() {
+        let store = MandateStore::memory().unwrap();
+
+        let record = RevocationRecord {
+            mandate_id: "sha256:idem".to_string(),
+            revoked_at: Utc::now(),
+            reason: Some("First".to_string()),
+            revoked_by: None,
+            source: None,
+            event_id: None,
+        };
+
+        store.upsert_revocation(&record).unwrap();
+        store.upsert_revocation(&record).unwrap(); // Should not fail
+        store.upsert_revocation(&record).unwrap();
+
+        assert!(store.is_revoked(&record.mandate_id).unwrap());
     }
 }

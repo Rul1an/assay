@@ -263,11 +263,54 @@ The generated policy might not match your tool signatures. Edit `policies/defaul
 
 ---
 
+## Step 8: Enable Mandate Logging (Optional)
+
+For audit compliance and user authorization tracking, enable CloudEvents logging:
+
+```bash
+assay mcp wrap \
+  --policy assay.yaml \
+  --audit-log audit.ndjson \
+  --decision-log decisions.ndjson \
+  --event-source "assay://myorg/myapp" \
+  -- your-mcp-server
+```
+
+| Log | Purpose | Events |
+|-----|---------|--------|
+| `audit.ndjson` | Mandate lifecycle (audit trail) | `mandate.used`, `mandate.revoked` |
+| `decisions.ndjson` | Tool decisions (high volume) | `tool.decision` (allow/deny) |
+
+**Note:** `--event-source` is required when any logging is enabled. Use an absolute URI like `assay://org/app`.
+
+### Audit Log Output
+
+Each mandate consumption produces a CloudEvents record:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "assay.mandate.used.v1",
+  "id": "sha256:deterministic_use_id",
+  "source": "assay://myorg/myapp",
+  "data": {
+    "mandate_id": "sha256:...",
+    "tool_call_id": "tc_123",
+    "use_count": 1
+  }
+}
+```
+
+The `id` field equals `use_id` (content-addressed), enabling deduplication on retries.
+
+---
+
 ## Next Steps
 
 - [Sequence Rules DSL](../config/sequences.md) — Advanced ordering constraints
 - [Assay MCP Server](server.md) — Runtime validation for agents
 - [CI Integration](../getting-started/ci-integration.md) — GitHub Actions, GitLab, Azure
+- [Mandates Concept](../concepts/mandates.md) — User authorization for AI agents
 
 ---
 

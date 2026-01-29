@@ -4,10 +4,11 @@
 //! - `mandates`: Immutable mandate metadata
 //! - `mandate_uses`: Append-only consumption log
 //! - `nonces`: Replay prevention for transaction mandates
+//! - `mandate_revocations`: Revocation records (P0-A)
 
 /// DDL for mandate runtime enforcement tables.
 ///
-/// Schema version: 2
+/// Schema version: 3 (added mandate_revocations)
 pub const MANDATE_SCHEMA: &str = r#"
 -- Mandate metadata (immutable after insert)
 CREATE TABLE IF NOT EXISTS mandates (
@@ -46,6 +47,17 @@ CREATE TABLE IF NOT EXISTS nonces (
     mandate_id       TEXT NOT NULL,
     first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (audience, issuer, nonce)
+);
+
+-- Mandate revocation records (P0-A)
+CREATE TABLE IF NOT EXISTS mandate_revocations (
+    mandate_id       TEXT PRIMARY KEY,
+    revoked_at       TEXT NOT NULL,   -- RFC3339 UTC
+    reason           TEXT,
+    revoked_by       TEXT,
+    source           TEXT,            -- CloudEvents source
+    event_id         TEXT,            -- CloudEvents id for dedup
+    inserted_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Indexes for performance

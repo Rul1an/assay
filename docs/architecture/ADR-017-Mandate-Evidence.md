@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (January 2026, updated v1.0.3)
+Accepted (January 2026, updated v1.0.5)
 
 ## Context
 
@@ -63,6 +63,40 @@ We implement **Mandate Evidence** as a first-class evidence type that links tool
 
 ### Mandate Lifecycle
 
+```mermaid
+flowchart LR
+    subgraph Creation["1. Creation"]
+        IM[Intent Mandate<br/>standing authority]
+        TM[Transaction Mandate<br/>final authorization]
+    end
+
+    subgraph Runtime["2. Runtime Enforcement"]
+        VAL{Validity<br/>Check}
+        REV{Revocation<br/>Check}
+        CONSUME[Consume<br/>mandate_uses]
+    end
+
+    subgraph Evidence["3. Evidence"]
+        USED[mandate.used<br/>event]
+        DEC[tool.decision<br/>event]
+        REVOKED[mandate.revoked<br/>event]
+    end
+
+    IM --> VAL
+    TM --> VAL
+    VAL -->|valid| REV
+    VAL -->|expired/not yet| DEC
+    REV -->|not revoked| CONSUME
+    REV -->|revoked| DEC
+    CONSUME -->|was_new=true| USED
+    CONSUME --> DEC
+
+    style IM fill:#e1f5fe
+    style TM fill:#fff3e0
+    style REVOKED fill:#ffebee
+```
+
+**ASCII fallback:**
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │  Intent Mandate │      │Transaction Mand.│      │  MandateUse     │
@@ -83,7 +117,6 @@ We implement **Mandate Evidence** as a first-class evidence type that links tool
 |------|---------|-------------------|
 | `intent` | Standing authority | Discovery, read-only, browsing |
 | `transaction` | Final authorization | Commit, purchase, write, transfer |
-| `revocation` | Cancel existing mandate | N/A (administrative) |
 
 ### Event Types
 
@@ -245,7 +278,10 @@ Where `credential_bytes` is:
 | **Effect** | Mandate MUST NOT be used after `revoked_at` |
 | **Retroactivity** | NOT retroactive; uses before `revoked_at` remain valid |
 | **Ordering** | Runtime: `now >= revoked_at` → reject; Lint: compare `tool.decision.time` vs `revoked_at` |
+| **Clock skew** | **None** - revocation is a hard cutoff (unlike expiry which has ±30s tolerance) |
 | **Propagation** | Revocation applies only to the specified mandate, not derived/delegated mandates (v2) |
+
+> **v1.0.5 clarification:** Revocation timing uses no clock skew tolerance. This is intentional: revocation is an explicit control-plane action, not subject to clock drift between systems. See [SPEC-Mandate-v1 §7.6](./SPEC-Mandate-v1.md#76-validity-window-enforcement-normative) for normative rules.
 
 ### Tool Decision Extension
 
@@ -390,35 +426,40 @@ pub struct MandateStore {
     conn: Arc<Mutex<Connection>>,  // SQLite with WAL
 }
 
+/// Receipt returned after successful mandate consumption
+pub struct AuthzReceipt {
+    pub mandate_id: String,
+    pub use_id: String,        // Deterministic: sha256(mandate_id:tool_call_id:use_count)
+    pub use_count: u32,
+    pub consumed_at: DateTime<Utc>,
+    pub tool_call_id: String,
+    pub was_new: bool,         // v1.0.5: true=first consume, false=idempotent retry
+}
+
 impl MandateStore {
     /// Upsert mandate metadata (immutable after first insert)
-    pub async fn upsert_mandate(&self, mandate: &Mandate) -> Result<()>;
+    pub fn upsert_mandate(&self, mandate: &MandateMetadata) -> Result<()>;
 
     /// Atomic consume with idempotency on tool_call_id
-    pub async fn consume_mandate(
-        &self,
-        mandate_id: &str,
-        tool_call_id: &str,
-        nonce: Option<&str>,
-        audience: &str,
-        issuer: &str,
-        single_use: bool,
-        max_uses: Option<u32>,
-        tool_name: &str,
-        operation_class: OperationClass,
-    ) -> Result<AuthzReceipt, AuthzError>;
+    pub fn consume_mandate(&self, params: &ConsumeParams) -> Result<AuthzReceipt, AuthzError>;
+
+    /// Check revocation status (v1.0.5)
+    pub fn get_revoked_at(&self, mandate_id: &str) -> Result<Option<DateTime<Utc>>>;
+
+    /// Insert/update revocation record
+    pub fn upsert_revocation(&self, record: &RevocationRecord) -> Result<()>;
 }
 ```
 
 **Invariants (MUST):**
 
-- Same `tool_call_id` → same receipt (idempotent)
+- Same `tool_call_id` → same receipt with `was_new=false` (idempotent)
 - `single_use=true` + `use_count>0` → `AlreadyUsed` error
 - `use_count >= max_uses` → `MaxUsesExceeded` error
+- `now >= revoked_at` → `Revoked` error (no skew)
 - Duplicate nonce (same audience+issuer) → `NonceReplay` error
-- `mandate.used` event MUST be emitted before tool execution
+- `mandate.used` event emitted only when `receipt.was_new=true` (v1.0.5)
 - `tool.decision` event MUST be emitted even on execution failure
-```
 
 ## Pack Rules
 

@@ -519,8 +519,76 @@ flowchart TD
     Log --> ExitCode2
 ```
 
+## Mandate Runtime Flow
+
+This diagram shows the mandate authorization flow when a tool call is processed:
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Proxy as MCP Proxy
+    participant Handler as ToolCallHandler
+    participant Auth as Authorizer
+    participant Store as MandateStore
+    participant AuditLog as Audit Log
+    participant DecisionLog as Decision Log
+
+    Agent->>Proxy: tools/call request
+    Proxy->>Handler: handle_tool_call
+
+    Note over Handler: Policy evaluation
+    Handler->>Handler: Check policy allow/deny
+
+    alt Mandate required
+        Handler->>Auth: authorize_and_consume
+        Auth->>Store: get_revoked_at
+        Store-->>Auth: not revoked
+        Auth->>Auth: Check validity window with skew
+        Auth->>Auth: Check scope and kind
+        Auth->>Store: consume_mandate atomic
+        Store-->>Auth: AuthzReceipt was_new=true
+        Auth-->>Handler: receipt
+
+        Note over Handler: Emit lifecycle event
+        Handler->>AuditLog: mandate.used CloudEvent
+    end
+
+    Note over Handler: Always emit decision
+    Handler->>DecisionLog: tool.decision CloudEvent
+    Handler-->>Proxy: HandleResult
+
+    alt Allow
+        Proxy-->>Agent: Forward to tool
+    else Deny
+        Proxy-->>Agent: Error response
+    end
+```
+
+### Key Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| I1: Always Emit | Exactly 1 tool.decision per tool_call_id |
+| I2: Consume Before Exec | mandate.used only after SQLite commit |
+| I3: Fixed Source | event_source from config, not dynamic |
+| I4: Idempotent | Same tool_call_id returns same receipt |
+
+### Revocation Check (No Skew)
+
+```mermaid
+flowchart TD
+    REQ[Tool Request] --> VAL{Validity Check}
+    VAL -->|with skew| REV{Revocation Check}
+    REV -->|no skew| CONSUME[Consume Mandate]
+
+    VAL -->|expired/not_yet| DENY1[Deny M_EXPIRED]
+    REV -->|revoked| DENY2[Deny M_REVOKED]
+    CONSUME --> ALLOW[Allow]
+```
+
 ## Related Documentation
 
 - [Codebase Overview](codebase-overview.md) - Detailed component descriptions
 - [Interdependencies](interdependencies.md) - Dependency relationships
 - [User Flows](user-flows.md) - User journey mappings
+- [SPEC-Mandate-v1](../architecture/SPEC-Mandate-v1.md) - Mandate specification

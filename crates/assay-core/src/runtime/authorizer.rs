@@ -199,6 +199,13 @@ impl Authorizer {
             }
         }
 
+        // 1b. Check revocation status (P0-A)
+        if let Some(revoked_at) = self.store.get_revoked_at(&mandate.mandate_id)? {
+            if now >= revoked_at {
+                return Err(AuthzError::Revoked { revoked_at }.into());
+            }
+        }
+
         // 2. Verify context
         if !self.config.expected_audience.is_empty()
             && mandate.audience != self.config.expected_audience
@@ -702,5 +709,66 @@ mod tests {
             result,
             Err(AuthorizeError::Policy(PolicyError::IssuerNotTrusted { .. }))
         ));
+    }
+
+    // === Revocation tests (P0-A) ===
+
+    #[test]
+    fn test_authorize_rejects_revoked_mandate() {
+        let store = MandateStore::memory().unwrap();
+        let config = test_config();
+        let authorizer = Authorizer::new(store.clone(), config);
+
+        let mandate = test_mandate();
+
+        // Revoke it before first use
+        store
+            .upsert_revocation(&super::super::mandate_store::RevocationRecord {
+                mandate_id: mandate.mandate_id.clone(),
+                revoked_at: Utc::now() - chrono::Duration::minutes(5),
+                reason: Some("User requested".to_string()),
+                revoked_by: None,
+                source: None,
+                event_id: None,
+            })
+            .unwrap();
+
+        let tool_call = test_tool_call("search_products");
+        let result = authorizer.authorize_and_consume(&mandate, &tool_call);
+
+        assert!(
+            matches!(
+                result,
+                Err(AuthorizeError::Store(AuthzError::Revoked { .. }))
+            ),
+            "Expected Revoked error, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_authorize_allows_if_revoked_in_future() {
+        let store = MandateStore::memory().unwrap();
+        let config = test_config();
+        let authorizer = Authorizer::new(store.clone(), config);
+
+        let mandate = test_mandate();
+
+        // Revocation is in the future (shouldn't block yet)
+        store
+            .upsert_revocation(&super::super::mandate_store::RevocationRecord {
+                mandate_id: mandate.mandate_id.clone(),
+                revoked_at: Utc::now() + chrono::Duration::hours(1),
+                reason: Some("Scheduled revocation".to_string()),
+                revoked_by: None,
+                source: None,
+                event_id: None,
+            })
+            .unwrap();
+
+        let tool_call = test_tool_call("search_products");
+        let result = authorizer.authorize_and_consume(&mandate, &tool_call);
+
+        assert!(result.is_ok(), "Should allow use before revoked_at");
     }
 }

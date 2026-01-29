@@ -150,8 +150,7 @@ fn test_guard_drop_emits_on_early_return() {
             "tc_001".to_string(),
             "test_tool".to_string(),
         );
-        // Early return without calling emit_*
-        return;
+        // Early return without calling emit_* - guard drops here
     }
 
     simulate_early_return(emitter.clone());

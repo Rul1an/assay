@@ -7,6 +7,7 @@
 use super::decision::{reason_codes, DecisionEmitter, DecisionEmitterGuard, DecisionEvent};
 use super::identity::ToolIdentity;
 use super::jsonrpc::JsonRpcRequest;
+use super::lifecycle::{mandate_used_event, LifecycleEmitter};
 use super::policy::{McpPolicy, PolicyDecision, PolicyState};
 use crate::runtime::{Authorizer, AuthzReceipt, MandateData, OperationClass, ToolCallData};
 use serde_json::Value;
@@ -61,6 +62,8 @@ pub struct ToolCallHandler {
     policy: McpPolicy,
     authorizer: Option<Authorizer>,
     emitter: Arc<dyn DecisionEmitter>,
+    /// Emitter for mandate lifecycle events (audit log)
+    lifecycle_emitter: Option<Arc<dyn LifecycleEmitter>>,
     config: ToolCallHandlerConfig,
 }
 
@@ -76,8 +79,15 @@ impl ToolCallHandler {
             policy,
             authorizer,
             emitter,
+            lifecycle_emitter: None,
             config,
         }
+    }
+
+    /// Set the lifecycle emitter for mandate.used events (P0-B).
+    pub fn with_lifecycle_emitter(mut self, emitter: Arc<dyn LifecycleEmitter>) -> Self {
+        self.lifecycle_emitter = Some(emitter);
+        self
     }
 
     /// Handle a tool call with full authorization and always-emit guarantee.
@@ -224,6 +234,15 @@ impl ToolCallHandler {
                     );
                     guard.set_latencies(Some(authz_ms), None);
                     guard.emit_allow(reason_codes::P_MANDATE_VALID);
+
+                    // Emit mandate.used lifecycle event (P0-B)
+                    // Only emit on first consumption, not on idempotent retries
+                    if receipt.was_new {
+                        if let Some(ref lifecycle) = self.lifecycle_emitter {
+                            let event = mandate_used_event(&self.config.event_source, &receipt);
+                            lifecycle.emit(&event);
+                        }
+                    }
 
                     return HandleResult::Allow {
                         receipt: Some(receipt),
@@ -391,6 +410,10 @@ impl ToolCallHandler {
                         reason_codes::M_NOT_FOUND.to_string(),
                         format!("Mandate not found: {}", mandate_id),
                     ),
+                    AuthzError::Revoked { revoked_at } => (
+                        reason_codes::M_REVOKED.to_string(),
+                        format!("Mandate revoked at {}", revoked_at),
+                    ),
                     AuthzError::MandateConflict { .. }
                     | AuthzError::InvalidConstraints { .. }
                     | AuthzError::Database(_) => (
@@ -411,6 +434,7 @@ impl ToolCallHandler {
 mod tests {
     use super::*;
     use crate::mcp::decision::NullDecisionEmitter;
+    use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingEmitter(AtomicUsize);
@@ -524,5 +548,42 @@ mod tests {
         assert!(handler.is_commit_tool("delete_account"));
         assert!(!handler.is_commit_tool("search_products"));
         assert!(!handler.is_commit_tool("purchase")); // Doesn't match purchase_*
+    }
+
+    // === P0-B: Lifecycle event emission tests ===
+
+    #[allow(dead_code)] // Prepared for future tests with mandate authorization
+    struct CountingLifecycleEmitter(AtomicUsize, std::sync::Mutex<Vec<LifecycleEvent>>);
+
+    impl LifecycleEmitter for CountingLifecycleEmitter {
+        fn emit(&self, event: &LifecycleEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            if let Ok(mut events) = self.1.lock() {
+                events.push(event.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn test_lifecycle_emitter_not_called_when_none() {
+        // When no lifecycle emitter is set, handler should still work
+        let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+        let policy = McpPolicy::default();
+
+        let handler = ToolCallHandler::new(
+            policy,
+            None,
+            emitter.clone(),
+            ToolCallHandlerConfig::default(),
+        );
+        // No lifecycle emitter set
+
+        let request = make_tool_call_request("safe_tool", serde_json::json!({}));
+        let mut state = PolicyState::default();
+
+        let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+        assert!(matches!(result, HandleResult::Allow { .. }));
+        assert_eq!(emitter.0.load(Ordering::SeqCst), 1); // Decision emitted
     }
 }

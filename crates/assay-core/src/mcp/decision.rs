@@ -32,6 +32,7 @@ pub mod reason_codes {
     pub const M_ISSUER_NOT_TRUSTED: &str = "M_ISSUER_NOT_TRUSTED";
     pub const M_TRANSACTION_REF_MISMATCH: &str = "M_TRANSACTION_REF_MISMATCH";
     pub const M_NOT_FOUND: &str = "M_NOT_FOUND";
+    pub const M_REVOKED: &str = "M_REVOKED";
 
     // Store/system errors (S_*)
     pub const S_DB_ERROR: &str = "S_DB_ERROR";

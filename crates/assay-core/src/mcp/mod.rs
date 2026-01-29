@@ -3,6 +3,7 @@ pub mod decision;
 pub mod identity;
 pub mod jcs;
 pub mod jsonrpc;
+pub mod lifecycle;
 pub mod mapper_v2;
 pub mod parser;
 pub mod policy;

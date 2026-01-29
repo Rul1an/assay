@@ -1,10 +1,13 @@
 # Mandate Evidence Specification v1
 
-**Status:** Draft v1.0.4 (January 2026)
+**Status:** Draft v1.0.5 (January 2026)
 **Scope:** Cryptographically-signed user authorization evidence for AI agent tool calls
 **ADR:** [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md)
 
 **Changelog:**
+- v1.0.5: Runtime semantics clarifications:
+  - Revocation timing: explicit "no skew" rule (hard cutoff at revoked_at)
+  - Audit log deduplication: normative guidance for retry scenarios
 - v1.0.4: Fixed normative inconsistencies:
   - use_id MUST be deterministic (content-addressed), not UUID
   - Fixed signature field names in examples (content_id + signed_payload_digest)
@@ -1110,6 +1113,27 @@ if let Some(expires_at) = &mandate.validity.expires_at {
 | Valid | `not_before - skew <= now < expires_at + skew` | Accept |
 | Expired | `now >= expires_at + skew` | Reject |
 
+**Revocation timing (NORMATIVE):**
+
+`revoked_at` is interpreted as a **hard cutoff**: runtime MUST reject if `now >= revoked_at` (without skew tolerance).
+
+```rust
+// Revocation check (NO skew - intentional)
+if let Some(revoked_at) = store.get_revoked_at(&mandate.mandate_id)? {
+    if now >= revoked_at {
+        return Err(AuthzError::Revoked { revoked_at });
+    }
+}
+```
+
+| Check | Condition | Skew Applied | Result |
+|-------|-----------|--------------|--------|
+| Not yet valid | `now < not_before - skew` | Yes | Reject |
+| Expired | `now >= expires_at + skew` | Yes | Reject |
+| Revoked | `now >= revoked_at` | **No** | Reject |
+
+> **Rationale:** Revocation is an intentional control-plane action (human or automated policy decision). Applying clock skew would create an unintended "revocation grace period" that could allow continued use after explicit revocation. Expiry/not_before are tolerant for clock drift between systems; revocation is not.
+
 ### 7.7 transaction_ref Verification (Normative)
 
 For `operation_class=commit` tools with `scope.transaction_ref`, runtime MUST verify the transaction binding.
@@ -1217,6 +1241,22 @@ IF mandate.used EXISTS
    AND tool.decision NOT EXISTS for same tool_call_id
 THEN WARN "Mandate consumed but tool decision not recorded (possible crash)"
 ```
+
+**Audit log deduplication (NORMATIVE):**
+
+Implementations MAY emit `assay.mandate.used.v1` events on retries of the same `tool_call_id`. When this occurs:
+
+1. CloudEvents.id MUST equal `use_id` (deterministic, content-addressed)
+2. Consumers MUST deduplicate by CloudEvents.id
+3. Producers SHOULD use `CloudEvents.id = use_id` to make deduplication trivial
+
+| Scenario | Events Emitted | Consumer Action |
+|----------|---------------|-----------------|
+| First consume | 1 × `mandate.used` | Accept |
+| Retry (same tool_call_id) | 1 × `mandate.used` (same id) | Deduplicate by id |
+| Different tool_call_id | 1 × `mandate.used` (new id) | Accept |
+
+> **Rationale:** Retries can occur after partial failures (e.g., event emission succeeded but acknowledgment lost). Duplicates in append-only audit logs are acceptable as long as deduplication is deterministic. The `use_id` formula guarantees identical event IDs for identical logical operations.
 
 ### 7.10 Error Taxonomy
 
