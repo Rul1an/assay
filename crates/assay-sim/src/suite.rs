@@ -40,9 +40,11 @@ impl TimeBudget {
         }
     }
 
-    /// Default suite budget: 30 seconds.
+    /// Default suite budget: 60 seconds.
+    /// Note: Raised from 30s because zip bomb attack (1.1GB decompression)
+    /// can take 30+ seconds on slower CI runners (macOS).
     pub fn default_suite() -> Self {
-        Self::new(Duration::from_secs(30))
+        Self::new(Duration::from_secs(60))
     }
 
     pub fn exceeded(&self) -> bool {
