@@ -121,13 +121,12 @@ jobs:
           # 3) Rewrite any */ubuntu-ports to the chosen mirror + robust update
           sudo bash scripts/ci/apt_ports_failover.sh
 
-          # Toolchain + sysroot + target libs
+          # Toolchain + sysroot (no arm64 libs needed - using bundled sqlite)
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu \
             libc6-dev-arm64-cross \
             linux-libc-dev-arm64-cross \
-            pkg-config \
-            libsqlite3-dev:arm64
+            pkg-config
 
           {
             echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
@@ -141,7 +140,15 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} --package assay-cli
+        shell: bash
+        run: |
+          FEATURES=""
+          # Use bundled sqlite for cross-compilation (avoids arm64 sysroot complexity)
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            FEATURES="--features assay-core/bundled-sqlite"
+          fi
+          # shellcheck disable=SC2086 # $FEATURES intentionally word-split
+          cargo build --release --target ${{ matrix.target }} --package assay-cli $FEATURES
 
       - name: Get version
         id: version

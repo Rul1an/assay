@@ -16,6 +16,7 @@ experimental = []
 discovery = ["dep:sysinfo", "dep:dirs"]
 kill-switch = ["dep:nix", "dep:sysinfo"]
 kill-switch-capture = ["kill-switch", "dep:procfs"]
+bundled-sqlite = ["rusqlite/bundled"]
 runtime-monitor = []
 
 [dependencies]
@@ -64,10 +65,11 @@ libc = "0.2"
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", optional = true }
-rusqlite = { version = "0.31", features = [] }
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-rusqlite = { version = "0.31", features = ["bundled"] }
+# SQLite: use bundled for cross-compilation via bundled-sqlite feature
+[dependencies.rusqlite]
+version = "0.31"
+features = []
 
 [dev-dependencies]
 tempfile = "3.23.0"
