@@ -716,17 +716,30 @@ runs:
           echo "No new findings vs baseline"
         fi
 
-    - name: Save baseline to cache
+    - name: Prepare baseline for cache
+      id: prepare-baseline
       if: |
         inputs.write_baseline == 'true' &&
         github.event_name == 'push' &&
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
         steps.discover.outputs.found == 'true' &&
         steps.process.outputs.verified == 'true'
+      shell: bash
+      env:
+        REPORTS_DIR: ${{ steps.process.outputs.reports_dir }}
+      run: |
+        # Copy SARIF to .assay-baseline/ to match restore path
+        mkdir -p .assay-baseline
+        if [ -f "$REPORTS_DIR/lint.sarif" ]; then
+          cp "$REPORTS_DIR/lint.sarif" .assay-baseline/lint.sarif
+        fi
+
+    - name: Save baseline to cache
+      if: steps.prepare-baseline.outcome == 'success'
       uses: actions/cache/save@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
       continue-on-error: true
       with:
-        path: ${{ steps.process.outputs.reports_dir }}
+        path: .assay-baseline/
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-${{ github.event.repository.default_branch }}-${{ github.sha }}
 
     - name: Upload reports artifact
@@ -755,29 +768,35 @@ runs:
         set -euo pipefail
         export PATH="$HOME/.assay/bin:$PATH"
 
-        BUNDLES=$(cat "$BUNDLES_FILE")
-
         # Lint with packs (generates pack-enhanced SARIF)
-        for bundle in $BUNDLES; do
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
           echo "Linting with packs: $bundle"
           assay evidence lint \
             --format sarif \
             --pack "$PACKS" \
             --output "$REPORTS_DIR/pack-lint-$(basename "$bundle" .tar.gz).sarif" \
             "$bundle" || true
-        done
+        done < "$BUNDLES_FILE"
 
-        # Merge into single SARIF and extract pack metadata
-        SARIF=$(ls "$REPORTS_DIR"/pack-lint-*.sarif 2>/dev/null | head -1 || echo "")
-        if [ -z "$SARIF" ]; then
+        # Merge SARIF files (or copy if only one)
+        SARIF_FILES=$(ls "$REPORTS_DIR"/pack-lint-*.sarif 2>/dev/null || echo "")
+        if [ -z "$SARIF_FILES" ]; then
           echo "pack_applied=" >> $GITHUB_OUTPUT
           echo "pack_score=100" >> $GITHUB_OUTPUT
           echo "pack_articles=" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        # Copy primary pack SARIF to reports
-        cp "$SARIF" "$REPORTS_DIR/pack-lint.sarif"
+        # Count SARIF files and merge if multiple
+        SARIF_COUNT=$(echo "$SARIF_FILES" | wc -w | tr -d ' ')
+        if [ "$SARIF_COUNT" -eq 1 ]; then
+          cp $SARIF_FILES "$REPORTS_DIR/pack-lint.sarif"
+        else
+          # Merge all SARIF runs into single file
+          jq -s '.[0] * { runs: [.[].runs[]] }' $SARIF_FILES > "$REPORTS_DIR/pack-lint.sarif" 2>/dev/null || cp $(echo $SARIF_FILES | cut -d' ' -f1) "$REPORTS_DIR/pack-lint.sarif"
+        fi
+        SARIF="$REPORTS_DIR/pack-lint.sarif"
 
         # Extract pack metadata from SARIF
         PACK_APPLIED=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.pack // empty] | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
@@ -808,24 +827,28 @@ runs:
       shell: bash
       env:
         BUNDLES_FILE: ${{ steps.discover.outputs.bundles_file }}
+        RUNNER_TEMP: ${{ runner.temp }}
       run: |
         set -euo pipefail
         export PATH="$HOME/.assay/bin:$PATH"
 
-        BUNDLES=$(cat "$BUNDLES_FILE")
+        TEMP_DIR="${RUNNER_TEMP:-/tmp}"
+        ALL_TOOLS="$TEMP_DIR/all-tools.txt"
+        DECIDED_TOOLS="$TEMP_DIR/decided-tools.txt"
+        > "$ALL_TOOLS"
+        > "$DECIDED_TOOLS"
 
-        # Extract unique tools observed and tools with decisions
-        TOOLS_OBSERVED=0
-        TOOLS_WITH_DECISIONS=0
+        # Collect unique tools across all bundles (single call per bundle)
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
+          STATS=$(assay evidence stats "$bundle" --json 2>/dev/null || echo '{}')
+          echo "$STATS" | jq -r '.tools_observed_list // [] | .[]' >> "$ALL_TOOLS" 2>/dev/null || true
+          echo "$STATS" | jq -r '.tools_with_decisions_list // [] | .[]' >> "$DECIDED_TOOLS" 2>/dev/null || true
+        done < "$BUNDLES_FILE"
 
-        for bundle in $BUNDLES; do
-          # Count unique tools from evidence (simplified - real impl uses assay CLI)
-          BUNDLE_TOOLS=$(assay evidence stats "$bundle" --json 2>/dev/null | jq -r '.tools_observed // 0' || echo "0")
-          BUNDLE_DECIDED=$(assay evidence stats "$bundle" --json 2>/dev/null | jq -r '.tools_with_decisions // 0' || echo "0")
-
-          TOOLS_OBSERVED=$((TOOLS_OBSERVED + BUNDLE_TOOLS))
-          TOOLS_WITH_DECISIONS=$((TOOLS_WITH_DECISIONS + BUNDLE_DECIDED))
-        done
+        # Deduplicate and count
+        TOOLS_OBSERVED=$(sort -u "$ALL_TOOLS" | grep -c . 2>/dev/null || echo "0")
+        TOOLS_WITH_DECISIONS=$(sort -u "$DECIDED_TOOLS" | grep -c . 2>/dev/null || echo "0")
 
         # Calculate coverage (floor)
         if [ "$TOOLS_OBSERVED" -gt 0 ]; then
@@ -843,7 +866,10 @@ runs:
 
     - name: Validate store configuration
       id: store-validate
-      if: inputs.store != ''
+      if: |
+        inputs.store != '' &&
+        github.event_name == 'push' &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       shell: bash
       env:
         STORE: ${{ inputs.store }}
@@ -851,6 +877,7 @@ runs:
         ROLE: ${{ inputs.store_role }}
         AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
         AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
       run: |
         set -euo pipefail
 
@@ -879,8 +906,8 @@ runs:
             fi
             ;;
           azure)
-            if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ]; then
-              echo "::error::azure_client_id and azure_tenant_id are required for Azure OIDC."
+            if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ] || [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+              echo "::error::azure_client_id, azure_tenant_id, and azure_subscription_id are required for Azure OIDC."
               exit 3
             fi
             ;;
@@ -959,17 +986,34 @@ runs:
     # v2.1: P3 - Artifact Attestation
     # =========================================================================
 
-    - name: Generate artifact attestation
-      id: attest
+    - name: Prepare bundles for attestation
+      id: prepare-attest
       if: |
         inputs.attest == 'true' &&
         github.event_name == 'push' &&
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
         steps.process.outputs.verified == 'true'
+      shell: bash
+      env:
+        BUNDLES_FILE: ${{ steps.discover.outputs.bundles_file }}
+        REPORTS_DIR: ${{ steps.process.outputs.reports_dir }}
+      run: |
+        # Copy evidence bundles to reports dir for attestation
+        ATTEST_DIR="$REPORTS_DIR/attested-bundles"
+        mkdir -p "$ATTEST_DIR"
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
+          cp "$bundle" "$ATTEST_DIR/"
+        done < "$BUNDLES_FILE"
+        echo "attest_dir=$ATTEST_DIR" >> $GITHUB_OUTPUT
+
+    - name: Generate artifact attestation
+      id: attest
+      if: steps.prepare-attest.outcome == 'success'
       uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v3.0.0
       continue-on-error: true
       with:
-        subject-path: ${{ steps.process.outputs.reports_dir }}/*.tar.gz
+        subject-path: ${{ steps.prepare-attest.outputs.attest_dir }}/*.tar.gz
 
     - name: Export attestation outputs
       id: export-attestation
@@ -1033,6 +1077,8 @@ runs:
         ATTEST_ENABLED: ${{ inputs.attest }}
         ATTEST_OUTCOME: ${{ steps.attest.outcome }}
         COVERAGE: ${{ steps.coverage.outputs.coverage_percent }}
+        EVENT_NAME: ${{ github.event_name }}
+        IS_DEFAULT_BRANCH: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       run: |
         {
           # Compliance Pack Results
@@ -1061,8 +1107,12 @@ runs:
               echo "|-------|-------|"
               echo "| ID | \`$ATTESTATION_ID\` |"
               echo "| URL | [View Attestation]($ATTESTATION_URL) |"
+            elif [ "$EVENT_NAME" != "push" ] || [ "$IS_DEFAULT_BRANCH" != "true" ]; then
+              echo "> ℹ️ **Attestation skipped**: Only runs on push to default branch."
+            elif [ "$ATTEST_OUTCOME" = "failure" ]; then
+              echo "> ⚠️ **Attestation failed**: Check workflow logs for details."
             else
-              echo "> ⚠️ **Attestation skipped**: Artifact attestations require GitHub Enterprise Cloud for private repositories. [Learn more](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)"
+              echo "> ⚠️ **Attestation unavailable**: Artifact attestations require GitHub Enterprise Cloud for private repositories. [Learn more](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)"
             fi
           fi
 
