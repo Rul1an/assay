@@ -140,15 +140,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build release binary
-        shell: bash
-        run: |
-          FEATURES=""
-          # Use bundled sqlite for cross-compilation (avoids arm64 sysroot complexity)
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            FEATURES="--features assay-core/bundled-sqlite"
-          fi
-          # shellcheck disable=SC2086 # $FEATURES intentionally word-split
-          cargo build --release --target ${{ matrix.target }} --package assay-cli $FEATURES
+        run: cargo build --release --target ${{ matrix.target }} --package assay-cli
 
       - name: Get version
         id: version

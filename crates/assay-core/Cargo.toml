@@ -16,7 +16,6 @@ experimental = []
 discovery = ["dep:sysinfo", "dep:dirs"]
 kill-switch = ["dep:nix", "dep:sysinfo"]
 kill-switch-capture = ["kill-switch", "dep:procfs"]
-bundled-sqlite = ["rusqlite/bundled"]
 runtime-monitor = []
 
 [dependencies]
@@ -56,9 +55,8 @@ dirs = { version = "5", optional = true }
 nix = { version = "0.27", features = ["signal", "process"], optional = true }
 schemars = "1.2.0"
 
-# SQLite: use system lib on Linux, bundled on Windows/macOS/cross-compile
-# Enable bundled-sqlite feature for cross-compilation or Windows
-rusqlite = "0.31"
+# SQLite: always use bundled to avoid cross-platform/cross-compilation issues
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature

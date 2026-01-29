@@ -124,15 +124,11 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
-      # macOS: Exclude OS-specific crates (assay-monitor, assay-cli)
-      - name: Test Workspace (macOS)
-        if: runner.os == 'macOS'
+      # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
+      # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
+      - name: Test Workspace (Cross-Platform)
+        if: runner.os != 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli
-
-      # Windows: Use bundled sqlite (no system sqlite available)
-      - name: Test Workspace (Windows)
-        if: runner.os == 'Windows'
-        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli --features assay-core/bundled-sqlite
 
   ebpf-smoke-ubuntu:
     name: eBPF monitor smoke (Linux - Ubuntu)
