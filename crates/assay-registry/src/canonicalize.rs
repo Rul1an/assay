@@ -249,17 +249,46 @@ fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
 
         // Duplicate key detection: extract key from mapping lines
         // A mapping line looks like: key: value or key:
-        if let Some(key) = extract_yaml_key(trimmed) {
-            // Pop stack levels that are deeper than current indent
+        // List items (starting with -) create a new scope for each item
+        let is_list_item = trimmed.starts_with('-');
+
+        // For list items like "- key: value", extract key from the part after "-"
+        let key_source = if is_list_item {
+            trimmed
+                .strip_prefix('-')
+                .map(|s| s.trim_start())
+                .unwrap_or("")
+        } else {
+            trimmed
+        };
+
+        // Handle scope changes for list items even if there's no inline key
+        if is_list_item {
+            // List items start a completely new scope - pop all child scopes
             while key_stack.len() > 1
                 && key_stack.last().map(|(i, _)| *i >= indent).unwrap_or(false)
             {
                 key_stack.pop();
             }
-
-            // If we're at a new indent level, push a new scope
+            // Push new scope for this list item
             if key_stack.last().map(|(i, _)| *i < indent).unwrap_or(true) {
                 key_stack.push((indent, std::collections::HashSet::new()));
+            }
+        }
+
+        // Extract and check keys
+        if let Some(key) = extract_yaml_key(key_source) {
+            if !is_list_item {
+                // Normal key: pop scopes that are strictly deeper than current indent
+                while key_stack.len() > 1
+                    && key_stack.last().map(|(i, _)| *i > indent).unwrap_or(false)
+                {
+                    key_stack.pop();
+                }
+                // If we're at a new indent level, push a new scope
+                if key_stack.last().map(|(i, _)| *i < indent).unwrap_or(true) {
+                    key_stack.push((indent, std::collections::HashSet::new()));
+                }
             }
 
             // Check for duplicate at current level

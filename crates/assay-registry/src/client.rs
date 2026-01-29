@@ -248,13 +248,19 @@ impl RegistryClient {
                 Err(e) if e.is_retryable() && retries < max_retries => {
                     retries += 1;
 
-                    // Calculate backoff - server-specified Retry-After is respected exactly
+                    // Calculate backoff - apply jitter to avoid synchronized retries
                     let backoff = match &e {
                         RegistryError::RateLimited {
                             retry_after: Some(retry_after),
                         } => {
-                            // Server specified delay - respect it without jitter
-                            (*retry_after).min(Duration::from_secs(30))
+                            // Server specified delay - respect it approximately, but add small jitter
+                            let capped = (*retry_after).min(Duration::from_secs(30));
+                            let base_ms = capped.as_millis() as u64;
+                            // Apply small jitter of ±10% to avoid thundering herd on 429
+                            let jitter_factor: f64 =
+                                rand::thread_rng().gen_range(0.9_f64..=1.1_f64);
+                            let jittered_ms = ((base_ms as f64) * jitter_factor).round() as u64;
+                            Duration::from_millis(jittered_ms.max(100)) // At least 100ms
                         }
                         _ => {
                             // Exponential backoff with full jitter for other errors
@@ -265,7 +271,7 @@ impl RegistryClient {
                             // This prevents thundering herd when many clients retry simultaneously
                             let jittered_ms =
                                 rand::thread_rng().gen_range(0..=base_backoff.as_millis() as u64);
-                            Duration::from_millis(jittered_ms.max(100)) // At least 100ms
+                            Duration::from_millis(jittered_ms.max(10)) // At least 10ms
                         }
                     };
 
@@ -1202,10 +1208,10 @@ mod integration_tests {
             "Should fail with RateLimited"
         );
 
-        // With retry-after: 1, we expect at least 1 second of backoff
+        // With retry-after: 1 and ±10% jitter, we expect at least ~900ms of backoff
         assert!(
-            elapsed.as_secs() >= 1,
-            "Should have waited for retry-after, elapsed: {:?}",
+            elapsed.as_millis() >= 850,
+            "Should have waited for retry-after (with jitter), elapsed: {:?}",
             elapsed
         );
     }

@@ -6,6 +6,7 @@ echo "📦 Starting Idempotent Publisher..."
 # Crates published in dependency order
 CRATES=(
   "assay-common"
+  "assay-registry"
   "assay-evidence"
   "assay-core"
   "assay-metrics"
