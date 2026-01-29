@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/packs/test-pack/1\\.0\\.0"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/x-yaml",
+      "ETag": "\"sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd\"",
+      "X-Pack-Digest": "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd",
+      "X-Pack-Key-Id": "sha256:keyid123keyid123keyid123keyid123keyid123keyid123keyid123keyid12",
+      "X-Pack-License": "LicenseRef-Assay-Enterprise-1.0",
+      "Cache-Control": "private, max-age=86400",
+      "Vary": "Authorization, Accept-Encoding"
+    },
+    "body": "name: test-pack\nversion: \"1.0.0\"\nkind: compliance\nrules: []\n"
+  }
+}

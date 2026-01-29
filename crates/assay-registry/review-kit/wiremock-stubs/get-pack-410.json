@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/packs/revoked-pack/1\\.0\\.0"
+  },
+  "response": {
+    "status": 410,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "security_revocation",
+      "reason": "CVE-2026-1234 - rule bypass vulnerability",
+      "safe_version": "1.0.1"
+    }
+  }
+}

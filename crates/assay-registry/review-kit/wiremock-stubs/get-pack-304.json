@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/packs/test-pack/1\\.0\\.0",
+    "headers": {
+      "If-None-Match": {
+        "matches": "\"sha256:.*\""
+      }
+    }
+  },
+  "response": {
+    "status": 304,
+    "headers": {
+      "ETag": "\"sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd\""
+    }
+  }
+}

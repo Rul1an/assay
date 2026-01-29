@@ -1,0 +1,15 @@
+# Deterministic Ed25519 seed for reproducible testing
+# WARNING: FOR TESTING ONLY - NEVER USE IN PRODUCTION
+#
+# Seed bytes (hex):
+9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60
+
+# To generate keypair from this seed:
+# 1. Decode hex to 32 bytes
+# 2. Use as Ed25519 SigningKey::from_bytes()
+# 3. Derive verifying key for SPKI encoding
+
+# Expected key properties:
+# Algorithm: Ed25519
+# Public key format: SPKI DER (Base64 encoded)
+# Key ID format: sha256:<hex-of-spki-der>
