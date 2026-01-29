@@ -155,14 +155,13 @@ jobs:
 
       - name: Test store URL provider detection
         run: |
-          # Provider detection function (mirrors action.yml logic)
+          # Provider detection function (mirrors action.yml line 887-893)
           detect_provider() {
             local url="$1"
             case "$url" in
               s3://*) echo "aws" ;;
               gs://*) echo "gcp" ;;
-              az://*) echo "azure" ;;
-              *.blob.core.windows.net*) echo "azure" ;;
+              az://*|https://*.blob.core.windows.net/*) echo "azure" ;;
               *) echo "ERROR" ;;
             esac
           }
@@ -185,6 +184,7 @@ jobs:
           test_detection "gs://my-bucket/prefix" "gcp"
           test_detection "az://my-container/prefix" "azure"
           test_detection "https://myaccount.blob.core.windows.net/container" "azure"
+          test_detection "http://myaccount.blob.core.windows.net/container" "ERROR"  # http not https
           test_detection "https://unknown.com/bucket" "ERROR"
 
           echo "✅ All provider detection tests passed"
@@ -199,17 +199,21 @@ jobs:
 
       - name: Test attestation gating logic
         run: |
-          # Attestation should only run when:
+          # Attestation should only run when (action.yml lines 991-995):
           # 1. attest input is 'true'
-          # 2. Not a fork PR
-          # 3. On default branch OR workflow_dispatch
+          # 2. event_name == 'push'
+          # 3. ref == refs/heads/{default_branch}
+          # 4. verified == 'true' (from process step)
+          #
+          # Note: workflow_dispatch does NOT enable attestation
+          # Note: fork PRs are implicitly excluded (no push to default branch)
 
           should_attest() {
             local attest_input="$1"
-            local is_fork="$2"
-            local event_name="$3"
-            local ref="$4"
-            local default_branch="$5"
+            local event_name="$2"
+            local ref="$3"
+            local default_branch="$4"
+            local verified="$5"
 
             # Must have attest=true
             if [ "$attest_input" != "true" ]; then
@@ -217,27 +221,28 @@ jobs:
               return
             fi
 
-            # Must not be fork PR
-            if [ "$is_fork" = "true" ]; then
-              echo "skip:fork_pr"
+            # Must be push event (not pull_request, not workflow_dispatch)
+            if [ "$event_name" != "push" ]; then
+              echo "skip:not_push"
               return
             fi
 
-            # Must be on default branch or workflow_dispatch
-            if [ "$event_name" = "workflow_dispatch" ]; then
-              echo "attest"
+            # Must be on default branch
+            if [ "$ref" != "refs/heads/$default_branch" ]; then
+              echo "skip:not_default_branch"
               return
             fi
 
-            if [ "$ref" = "refs/heads/$default_branch" ]; then
-              echo "attest"
+            # Must have verified=true from process step
+            if [ "$verified" != "true" ]; then
+              echo "skip:not_verified"
               return
             fi
 
-            echo "skip:not_default_branch"
+            echo "attest"
           }
 
-          # Test cases
+          # Test cases (args: attest_input, event_name, ref, default_branch, verified)
           test_attest() {
             local desc="$1"
             local expected="$2"
@@ -252,11 +257,21 @@ jobs:
             fi
           }
 
-          test_attest "attest=true, main branch, push" "attest" "true" "false" "push" "refs/heads/main" "main"
-          test_attest "attest=true, fork PR" "skip:fork_pr" "true" "true" "pull_request" "refs/heads/feature" "main"
-          test_attest "attest=false" "skip:attest_disabled" "false" "false" "push" "refs/heads/main" "main"
-          test_attest "attest=true, feature branch" "skip:not_default_branch" "true" "false" "push" "refs/heads/feature" "main"
-          test_attest "attest=true, workflow_dispatch" "attest" "true" "false" "workflow_dispatch" "refs/heads/feature" "main"
+          # Happy path
+          test_attest "attest=true, push, main, verified" "attest" "true" "push" "refs/heads/main" "main" "true"
+
+          # Disabled
+          test_attest "attest=false" "skip:attest_disabled" "false" "push" "refs/heads/main" "main" "true"
+
+          # Wrong event
+          test_attest "pull_request event" "skip:not_push" "true" "pull_request" "refs/heads/main" "main" "true"
+          test_attest "workflow_dispatch event" "skip:not_push" "true" "workflow_dispatch" "refs/heads/main" "main" "true"
+
+          # Wrong branch
+          test_attest "feature branch" "skip:not_default_branch" "true" "push" "refs/heads/feature" "main" "true"
+
+          # Not verified
+          test_attest "not verified" "skip:not_verified" "true" "push" "refs/heads/main" "main" "false"
 
           echo "✅ All attestation conditional tests passed"
 
@@ -271,12 +286,13 @@ jobs:
       - name: Test coverage formula
         run: |
           # Coverage = floor((tools_with_decisions / tools_observed) * 100)
+          # Mirrors action.yml lines 854-858
           calculate_coverage() {
             local with_decisions="$1"
             local observed="$2"
 
             if [ "$observed" -eq 0 ]; then
-              echo "100"  # No tools = 100% coverage (vacuous truth)
+              echo "0"  # No tools observed = 0% coverage (matches action.yml)
               return
             fi
 
@@ -302,7 +318,7 @@ jobs:
           test_coverage "All covered" "100" 10 10
           test_coverage "Half covered" "50" 5 10
           test_coverage "None covered" "0" 0 10
-          test_coverage "No tools" "100" 0 0
+          test_coverage "No tools observed" "0" 0 0  # action.yml returns 0, not 100
           test_coverage "Partial" "75" 3 4
           test_coverage "One of three" "33" 1 3
 
