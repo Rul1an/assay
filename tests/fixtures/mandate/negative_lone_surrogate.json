@@ -1,0 +1,13 @@
+{
+    "_comment": "NEGATIVE TEST: Lone surrogate - must be rejected",
+    "specversion": "1.0",
+    "id": "evt_attack_002",
+    "type": "assay.mandate.v1",
+    "source": "assay://attacker",
+    "time": "2026-01-28T10:00:00Z",
+    "datacontenttype": "application/json",
+    "data": {
+        "mandate_id": "sha256:test",
+        "value": "\uD800"
+    }
+}

@@ -1,0 +1,168 @@
+name: mandate-baseline
+version: "1.0.0"
+kind: security
+description: Mandate evidence validation rules for AI agent authorization
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack verifies that AI agent tool decisions are properly authorized
+  via mandate evidence. Passing these checks demonstrates that authorization
+  evidence exists and is structurally valid, but does not guarantee that
+  the mandate was issued by a legitimate authority.
+
+  For production use, combine with trust policy configuration that specifies
+  trusted issuers and signing keys.
+
+requires:
+  assay_min_version: ">=2.11.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: MANDATE-001
+    severity: error
+    description: Commit tool decisions must have mandate authorization
+    help_markdown: |
+      ## MANDATE-001: Mandate Required for Commit Operations
+
+      Tool decisions that allow commit operations (financial transactions,
+      irreversible actions) MUST be linked to a valid mandate.
+
+      **What this checks:**
+      - `assay.tool.decision` events with `decision=allow`
+      - For tools matching commit_tools patterns
+      - Must have a `mandate_id` field
+
+      **Configuration:**
+      Configure `mandate_trust.commit_tools` in your policy to specify
+      which tools are considered commit operations.
+
+      **Example fix:**
+      Ensure the agent requests user authorization before allowing
+      commit operations, and link the mandate_id to the tool decision.
+    check:
+      type: conditional
+      condition:
+        all:
+          - path: /data/decision
+            equals: allow
+      then:
+        type: json_path_exists
+        paths:
+          - /data/mandate_id
+    event_types:
+      - assay.tool.decision
+    # Note: Full implementation requires commit_tools pattern matching
+    # which is configured via mandate_trust.commit_tools in policy
+
+  - id: MANDATE-002
+    severity: error
+    description: mandate_id must reference existing mandate
+    help_markdown: |
+      ## MANDATE-002: Mandate Reference Validity
+
+      When a tool decision references a mandate_id, that mandate must
+      exist in the evidence bundle.
+
+      **What this checks:**
+      - Tool decisions with `mandate_id` field
+      - Referenced mandate must exist as `assay.mandate.v1` event
+
+      **Common causes:**
+      - Mandate was not included in the evidence bundle
+      - Incorrect mandate_id value
+      - Mandate was generated in a different session
+
+      **Note:** This check requires engine v1.1 (reference_exists).
+    check:
+      # Requires engine v1.1: reference_exists check type
+      type: json_path_exists
+      paths:
+        - /data/mandate_id
+    event_types:
+      - assay.tool.decision
+    engine_min_version: "1.1"
+
+  - id: MANDATE-003
+    severity: error
+    description: Tool decision must be within mandate validity window
+    help_markdown: |
+      ## MANDATE-003: Temporal Validity
+
+      Tool decisions must occur within the mandate's validity window.
+      A mandate specifies `not_before` and `expires_at` timestamps;
+      the tool decision's timestamp must fall within this range.
+
+      **What this checks:**
+      - Tool decision timestamp vs mandate validity
+      - Uses lint-time comparison (CloudEvents `time` field)
+
+      **Clock skew:**
+      Configure `mandate_trust.clock_skew_tolerance_seconds` to allow
+      for reasonable clock differences. Reports include skew applied.
+
+      **Note:** This check requires engine v1.1 (temporal_range).
+    check:
+      # Requires engine v1.1: temporal_range check type
+      type: json_path_exists
+      paths:
+        - /data/mandate_id
+    event_types:
+      - assay.tool.decision
+    engine_min_version: "1.1"
+
+  - id: MANDATE-004
+    severity: error
+    description: Single-use mandate must have exactly one use receipt
+    help_markdown: |
+      ## MANDATE-004: Usage Constraint Enforcement
+
+      Mandates with `single_use: true` or `max_uses: N` constraints
+      must not be used more than the allowed number of times.
+
+      **What this checks:**
+      - Mandates with usage constraints
+      - Count of `assay.mandate.used.v1` events referencing the mandate
+      - Fails if use count exceeds constraint
+
+      **Runtime vs Lint:**
+      - Runtime: Atomic check prevents concurrent violations
+      - Lint: Post-hoc detection via use receipt analysis
+
+      **Note:** This check requires engine v1.1 (use_count_valid).
+    check:
+      # Requires engine v1.1: use_count_valid check type
+      type: json_path_exists
+      paths:
+        - /data/constraints/single_use
+        - /data/constraints/max_uses
+    event_types:
+      - assay.mandate.v1
+    engine_min_version: "1.1"
+
+  - id: MANDATE-005
+    severity: warning
+    description: Commit tools require transaction mandate
+    help_markdown: |
+      ## MANDATE-005: Mandate Kind Enforcement
+
+      Commit operations (financial, irreversible) require a `transaction`
+      mandate. `intent` mandates are only valid for read operations.
+
+      **Mandate kinds:**
+      - `intent`: Standing authority for discovery/browsing (read only)
+      - `transaction`: Final authorization for commits/purchases
+
+      **What this checks:**
+      - Tool decisions for commit tools
+      - Referenced mandate must have `mandate_kind: transaction`
+
+      **Note:** This check requires engine v1.1 (mandate_kind_check).
+    check:
+      # Requires engine v1.1: mandate_kind_check
+      type: json_path_exists
+      paths:
+        - /data/mandate_id
+    event_types:
+      - assay.tool.decision
+    engine_min_version: "1.1"

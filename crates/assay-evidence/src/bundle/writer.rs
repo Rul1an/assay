@@ -24,6 +24,7 @@
 
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::crypto::jcs;
+use crate::json_strict::validate_json_strict;
 use crate::types::{EvidenceEvent, ProducerMeta};
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
@@ -912,7 +913,25 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     continue;
                 }
 
-                let event: EvidenceEvent = serde_json::from_slice(line_content).map_err(|e| {
+                // Security: Validate JSON strictly before parsing to detect
+                // duplicate keys and lone surrogates that could cause verification bypass.
+                let line_str = std::str::from_utf8(line_content).map_err(|e| {
+                    VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidJson,
+                        format!("Invalid UTF-8 in event: {}", e),
+                    )
+                })?;
+
+                validate_json_strict(line_str).map_err(|e| {
+                    VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidJson,
+                        format!("Security: {}", e),
+                    )
+                })?;
+
+                let event: EvidenceEvent = serde_json::from_str(line_str).map_err(|e| {
                     let mut ve = VerifyError::from(e);
                     ve.code = ErrorCode::ContractInvalidJson;
                     ve

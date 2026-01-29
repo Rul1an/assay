@@ -167,6 +167,22 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 
 ### MCP Management
 
+#### `assay mcp wrap`
+**Purpose**: Wrap MCP server with policy enforcement and audit logging
+**Entry**: `crates/assay-cli/src/cli/commands/mcp.rs::cmd_wrap()`
+**Flow**: Load policy → spawn MCP server → proxy tool calls → emit CloudEvents
+
+**Key Options**:
+- `--policy <PATH>`: Policy file (default: `assay.yaml`)
+- `--dry-run`: Log decisions but do not block
+- `--verbose`: Print decisions to stderr
+- `--label <LABEL>`: Unique label for this server (tool identity)
+- `--audit-log <PATH>`: NDJSON log for mandate lifecycle events (mandate.used, mandate.revoked)
+- `--decision-log <PATH>`: NDJSON log for tool.decision events
+- `--event-source <URI>`: CloudEvents source URI (e.g. `assay://org/app`), required when logging enabled
+
+**New in v2.10**: `--decision-log`, `--event-source`, `--audit-log` flags for mandate runtime enforcement.
+
 #### `assay discover`
 **Purpose**: Discover MCP servers on machine
 **Entry**: `crates/assay-cli/src/cli/commands/discover.rs::run()`

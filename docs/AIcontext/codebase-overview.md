@@ -84,12 +84,29 @@ The core crate is organized into these main modules:
 #### MCP (`mcp/`)
 - JSON-RPC parsing, tool call mapping to policies, audit logging
 - **`mapper_v2`**: Maps MCP tool calls to policy checks
-- **`proxy`**: Intercepts and validates tool calls
+- **`proxy`**: Intercepts and validates tool calls, `ProxyConfig` with logging paths
 - **`identity`**: Tool identity management (Phase 9) - tool metadata hashing and pinning
 - **`policy`**: `McpPolicy` with `tool_pins` for integrity verification
 - **`jcs`**: JCS canonicalization (RFC 8785) for deterministic JSON
 - **`signing`**: Ed25519 tool signing with DSSE PAE encoding (`sign_tool`, `verify_tool`)
 - **`trust_policy`**: Trust policy loading (`require_signed`, `trusted_key_ids`)
+- **`decision`**: `DecisionEmitter` for tool.decision events, reason codes (P_*, M_*, S_*)
+- **`lifecycle`**: `LifecycleEmitter` for mandate.used/revoked events (CloudEvents)
+- **`tool_call_handler`**: Central handler integrating policy + mandate authorization
+
+#### Runtime (`runtime/`)
+- **`mandate_store`**: SQLite-backed mandate consumption tracking
+  - `AuthzReceipt` with `was_new` flag for idempotent retries
+  - `RevocationRecord` for mandate cancellation
+  - Deterministic `use_id` computation (content-addressed SHA256)
+  - Tables: `mandates`, `mandate_uses`, `nonces`, `mandate_revocations`
+- **`authorizer`**: 7-step authorization flow per SPEC-Mandate §7.6-7.8
+  - Validity window check (with ±30s skew)
+  - Revocation check (no skew - hard cutoff)
+  - Scope and kind verification
+  - transaction_ref verification for commit tools
+  - Atomic consumption
+- **`schema`**: SQLite DDL for mandate runtime tables (schema v3)
 
 #### Report (`report/`)
 - Output formatters: `console` (summary), `json`, `junit`, `sarif`

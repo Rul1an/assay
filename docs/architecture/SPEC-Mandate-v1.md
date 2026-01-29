@@ -1,10 +1,22 @@
 # Mandate Evidence Specification v1
 
-**Status:** Draft v1.0.1 (January 2026)
+**Status:** Draft v1.0.5 (January 2026)
 **Scope:** Cryptographically-signed user authorization evidence for AI agent tool calls
 **ADR:** [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md)
 
 **Changelog:**
+- v1.0.5: Runtime semantics clarifications:
+  - Revocation timing: explicit "no skew" rule (hard cutoff at revoked_at)
+  - Audit log deduplication: normative guidance for retry scenarios
+- v1.0.4: Fixed normative inconsistencies:
+  - use_id MUST be deterministic (content-addressed), not UUID
+  - Fixed signature field names in examples (content_id + signed_payload_digest)
+  - Amount canonicalization: consistent "no trailing zeros" rule with examples
+  - Removed created_at from hashable transaction_object schema
+  - tool_call_id MUST in tool.decision schema
+  - require_signed_lifecycle_events type clarified as enum
+- v1.0.3: Added normative runtime enforcement section (§7), SQLite store schema, nonce replay prevention, transaction_ref verification flow, idempotency semantics, crash recovery model
+- v1.0.2: Fixed payload_digest semantics (DSSE alignment), removed mandate_kind=revocation, added conformance test vectors, normative transaction_ref schema, require_signed_lifecycle default for commit
 - v1.0.1: Fixed mandate_id circularity, added lifecycle event trust model, normative glob semantics, operation_class ordering
 
 ---
@@ -27,7 +39,8 @@ This specification defines the mandate evidence format for proving user authoriz
 |------|---------|---------------------------|
 | `intent` | Standing authority for discovery/browsing | `read` |
 | `transaction` | Final authorization for commits/purchases | `read`, `write`, `commit` |
-| `revocation` | Cancel an existing mandate | N/A (administrative) |
+
+> **Note (v1.0.2):** `revocation` was removed as a mandate kind. Revocation is handled exclusively via `assay.mandate.revoked.v1` events. This simplifies the model: mandates authorize, events record lifecycle transitions.
 
 ---
 
@@ -67,11 +80,23 @@ Where:
 // Step 5: Proceed to signing (which signs the full content including mandate_id)
 ```
 
-**Binding rule:** `signature.payload_digest` MUST equal `mandate_id`. Verifiers check:
+**Digest semantics (v1.0.2):**
+
+The signature object contains TWO digest fields:
+
+| Field | Computed From | Purpose |
+|-------|---------------|---------|
+| `content_id` | `JCS(hashable_content)` without mandate_id/signature | Content-addressed identifier = `mandate_id` |
+| `signed_payload_digest` | `JCS(signable_content)` with mandate_id, without signature | Standard DSSE payload digest |
+
+**Binding rule:** Verifiers MUST check BOTH:
 
 ```
-mandate_id == signature.payload_digest == "sha256:" + hex(SHA256(JCS(content_without_mandate_id_and_signature)))
+1. mandate_id == signature.content_id == "sha256:" + hex(SHA256(JCS(content_without_mandate_id_and_signature)))
+2. signature.signed_payload_digest == "sha256:" + hex(SHA256(JCS(content_with_mandate_id_but_without_signature)))
 ```
+
+This separates the content-addressed identifier (for lookups/references) from the signed payload digest (for DSSE verification), avoiding implementer confusion.
 
 ### 2.2 Operation Classes (Normative Ordering)
 
@@ -113,9 +138,15 @@ CloudEvents envelope with mandate grant payload.
 | Field | Requirement |
 |-------|-------------|
 | `specversion` | MUST be `"1.0"` |
+| `id` | MUST be present, unique per source |
 | `type` | MUST be `"assay.mandate.v1"` |
+| `source` | MUST be present, valid URI |
+| `time` | MUST be present, RFC 3339 UTC timestamp |
 | `datacontenttype` | MUST be `"application/json"` |
 | `data` | MUST be JSON object (not string-encoded) |
+| `subject` | MAY be present for tool_call_id correlation |
+
+> **v1.0.2:** Explicit required attributes list aligns with CloudEvents v1.0 §2.1. The `subject` attribute MAY be used as CloudEvents-native correlation alternative to `data.tool_call_id`.
 
 ```json
 {
@@ -166,7 +197,8 @@ CloudEvents envelope with mandate grant payload.
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:abc123def456...",
+      "content_id": "sha256:abc123def456...",
+      "signed_payload_digest": "sha256:789abc012def...",
       "key_id": "sha256:signing-key-id...",
       "signature": "base64-encoded-signature...",
       "signed_at": "2026-01-28T09:55:00Z"
@@ -182,7 +214,7 @@ CloudEvents envelope with mandate grant payload.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `mandate_id` | string | Yes | Content-addressed identifier (see §2.1) |
-| `mandate_kind` | enum | Yes | One of: `intent`, `transaction`, `revocation` |
+| `mandate_kind` | enum | Yes | One of: `intent`, `transaction` |
 | `principal` | object | Yes | Who granted the mandate |
 | `scope` | object | Yes | What the mandate authorizes |
 | `validity` | object | Yes | When the mandate is valid |
@@ -249,6 +281,46 @@ Computation: `transaction_ref = "sha256:" + hex(SHA256(JCS(transaction_object)))
 
 Where `transaction_object` is the cart, order, or payment intent that this mandate authorizes. This prevents mandate reuse for different transactions within the validity window.
 
+**Transaction Intent Object Schema (v1.0.4 NORMATIVE):**
+
+For interoperability, the `transaction_object` MUST conform to this schema when computing `transaction_ref`:
+
+```json
+{
+  "merchant": "string",           // REQUIRED: Merchant identifier
+  "items": [                      // REQUIRED: Line items (order preserved)
+    {
+      "product_id": "string",     // REQUIRED: Product identifier
+      "quantity": 1,              // REQUIRED: Integer quantity
+      "unit_price": "10"          // OPTIONAL: Decimal string (canonical form)
+    }
+  ],
+  "total": {                      // REQUIRED: Total amount
+    "amount": "100",              // Decimal string, canonical form
+    "currency": "USD"             // ISO 4217, MUST be uppercase
+  },
+  "idempotency_key": "string"     // OPTIONAL: Stable idempotency key
+}
+```
+
+**MUST NOT include in hashable transaction_object:**
+- `created_at`, `updated_at`, or any timestamps
+- Request-specific nonces or session IDs
+- Any fields that vary per-request
+
+**Amount canonicalization rules (NORMATIVE):**
+- MUST be decimal strings (never floats)
+- MUST strip leading zeros: `"007"` → `"7"`
+- MUST strip trailing zeros in fraction: `"10.00"` → `"10"`, `"10.50"` → `"10.5"`
+- MUST strip trailing dot if fraction empty: `"10."` → `"10"`
+- Examples: `"99.99"` (ok), `"100"` (ok), `"10.5"` (ok), `"100.00"` (WRONG)
+
+**Normalization rules for JCS hashing:**
+- `amount` fields MUST use canonical decimal form (see above)
+- `currency` MUST be uppercase ISO 4217
+- `items` array order MUST be preserved (JCS preserves array order)
+- No optional fields should be present with `null` values; omit them entirely
+
 **Verification:** Runtime MUST verify that the actual transaction content hashes to the same value as `transaction_ref` before allowing commit tools.
 
 **tools pattern syntax (NORMATIVE):**
@@ -275,6 +347,14 @@ fs.**         → matches: fs.read_file, fs.write.nested.path
 *             → matches: search, list (single-segment names only)
 **            → matches: any tool name (universal wildcard)
 ```
+
+**Implementation requirements (v1.0.2):**
+
+> ⚠️ **MUST NOT use OS glob libraries.** Standard glob implementations (Python's `fnmatch`, shell glob, Go's `filepath.Match`) use different semantics for `*` (often matches `.`). Implementers MUST use the Assay Glob v1 algorithm defined above, or a conforming implementation.
+
+Conforming implementations are available in:
+- Rust: `assay_evidence::mandate::glob`
+- Python: `assay.glob` (planned)
 
 **Canonicalization:** Tool names MUST be normalized to lowercase before matching if the runtime uses case-insensitive tool names. The `tools` array in mandates SHOULD use lowercase patterns for maximum compatibility.
 
@@ -423,16 +503,29 @@ mandate_trust:
     - "assay://myorg/myapp"
     - "assay://myorg/auth-service"
 
-  # Optional: require signed lifecycle events (recommended for high-risk)
-  require_signed_lifecycle_events: false
+  # Require signed lifecycle events
+  # DEFAULT (v1.0.2): true when mandate_kind=transaction OR tool ∈ commit_tools
+  require_signed_lifecycle_events: auto  # "auto" | true | false
 ```
+
+**v1.0.2 default behavior for `require_signed_lifecycle_events: auto`:**
+
+| Mandate Kind | Tool Classification | Lifecycle Events |
+|--------------|---------------------|------------------|
+| `intent` | read tools | Source check only |
+| `intent` | write tools | Source check only |
+| `transaction` | any tool | **MUST be signed** |
+| any | commit tools | **MUST be signed** |
+
+This default acknowledges that lifecycle events for high-value operations (transactions, commits) are high-risk injection targets.
 
 **Verification rules:**
 
 1. `event.source` MUST be in `trusted_event_sources` list
-2. If `require_signed_lifecycle_events: true`:
+2. If signatures required (see table above):
    - `used` and `revoked` events MUST include a `signature` object
-   - Signature verification follows same algorithm as mandates
+   - Signature verification follows same algorithm as mandates (see §4)
+   - Signature `payload_type` MUST be `application/vnd.assay.mandate.used+json;v=1` or `application/vnd.assay.mandate.revoked+json;v=1`
 3. Evidence bundles MUST be treated as tamper-evident containers; events from untrusted sources MUST be rejected at ingest
 
 **Adversarial model considerations:**
@@ -459,7 +552,8 @@ For high-risk deployments (commerce, financial), add `signature` to `used`/`revo
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate.used+json;v=1",
-      "payload_digest": "sha256:...",
+      "content_id": "sha256:...",
+      "signed_payload_digest": "sha256:...",
       "key_id": "sha256:...",
       "signature": "base64...",
       "signed_at": "2026-01-28T10:05:00Z"
@@ -490,9 +584,16 @@ Extended `assay.tool.decision` with mandate linkage.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `mandate_id` | string | Conditional | Mandate authorizing this decision |
+| `tool_call_id` | string | **MUST** | Unique identifier for this tool call (idempotency key) |
+| `mandate_id` | string | Conditional | Mandate authorizing this decision (MUST for commit tools) |
 | `mandate_scope_match` | boolean | No | Whether tool matched mandate scope |
 | `mandate_kind_match` | boolean | No | Whether mandate kind allows operation class |
+| `reason_code` | string | **MUST** | Machine-parseable decision reason (see Error Taxonomy §7.10) |
+
+**tool_call_id requirements:**
+- MUST be unique per tool call attempt
+- MUST be stable across retries (same logical call = same ID)
+- Used for idempotency in mandate consumption and crash recovery correlation
 
 ---
 
@@ -507,7 +608,8 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
   "version": 1,
   "algorithm": "ed25519",
   "payload_type": "application/vnd.assay.mandate+json;v=1",
-  "payload_digest": "sha256:abc123...",
+  "content_id": "sha256:abc123...",
+  "signed_payload_digest": "sha256:def789...",
   "key_id": "sha256:signing-key-id...",
   "signature": "base64-encoded-signature...",
   "signed_at": "2026-01-28T09:55:00Z"
@@ -519,10 +621,13 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
 | `version` | integer | Yes | Schema version. MUST be `1` |
 | `algorithm` | string | Yes | MUST be `"ed25519"` for v1 |
 | `payload_type` | string | Yes | MUST be `"application/vnd.assay.mandate+json;v=1"` |
-| `payload_digest` | string | Yes | MUST equal `mandate_id` |
+| `content_id` | string | Yes | MUST equal `mandate_id` (content-addressed identifier) |
+| `signed_payload_digest` | string | Yes | SHA256 of signed payload bytes (DSSE standard) |
 | `key_id` | string | Yes | SHA-256 of SPKI public key |
 | `signature` | string | Yes | Base64-encoded Ed25519 signature |
 | `signed_at` | datetime | Yes | Signing timestamp (metadata only) |
+
+> **v1.0.2 change:** Renamed `payload_digest` to `content_id` and added `signed_payload_digest` for DSSE alignment. This prevents implementer confusion where "payload_digest" is expected to be the digest of the signed payload.
 
 ### 4.2 Signing Algorithm
 
@@ -532,16 +637,23 @@ Mandate signing follows the same DSSE-compatible process as [SPEC-Tool-Signing-v
 3. Compute mandate_id = "sha256:" + hex(SHA256(canonical_for_id))
 4. Build signable_content = hashable_content + {mandate_id: mandate_id}
 5. Compute canonical_for_sig = JCS(signable_content)
-6. Compute PAE = DSSEv1_PAE(payload_type, canonical_for_sig)
-7. Sign: signature_bytes = ed25519_sign(private_key, PAE)
-8. Build signature object:
-   - payload_digest = mandate_id
+6. Compute signed_payload_digest = "sha256:" + hex(SHA256(canonical_for_sig))
+7. Compute PAE = DSSEv1_PAE(payload_type, canonical_for_sig)
+8. Sign: signature_bytes = ed25519_sign(private_key, PAE)
+9. Build signature object:
+   - content_id = mandate_id
+   - signed_payload_digest = signed_payload_digest (from step 6)
    - signature = base64_encode_with_padding(signature_bytes)
-9. Build final_content = signable_content + {signature: signature_object}
-10. Emit CloudEvents envelope with data = final_content
+10. Build final_content = signable_content + {signature: signature_object}
+11. Emit CloudEvents envelope with data = final_content
 ```
 
-**Important:** Step 1-3 computes the ID from content WITHOUT mandate_id (avoiding circularity). Steps 4-7 sign content WITH mandate_id but WITHOUT signature.
+**Important:**
+- Steps 1-3 compute the content-addressed ID from content WITHOUT mandate_id (avoiding circularity)
+- Steps 4-6 compute the signed payload digest from content WITH mandate_id
+- Steps 7-8 sign using DSSE PAE encoding
+- `content_id` = identifier for lookups/references
+- `signed_payload_digest` = standard DSSE payload digest for verification
 
 ### 4.3 PAE Encoding (DSSE)
 
@@ -571,31 +683,35 @@ Where:
 4. Validate sig.version == 1
 5. Validate sig.algorithm == "ed25519"
 6. Validate sig.payload_type == "application/vnd.assay.mandate+json;v=1"
-7. Extract claimed_id = mandate_content.mandate_id
-8. Validate claimed_id == sig.payload_digest
 
-// Verify mandate_id computation (content-addressed)
+// Verify content_id == mandate_id (content-addressed)
+7. Extract claimed_id = mandate_content.mandate_id
+8. Validate claimed_id == sig.content_id
 9. Build hashable = mandate_content WITHOUT {mandate_id, signature}
 10. Compute canonical_for_id = JCS(hashable)
 11. Compute computed_id = "sha256:" + hex(SHA256(canonical_for_id))
 12. Validate computed_id == claimed_id  // CRITICAL: proves ID is content-addressed
 
-// Verify signature
+// Verify signed_payload_digest (DSSE alignment)
 13. Build signable = mandate_content WITHOUT {signature} (but WITH mandate_id)
 14. Compute canonical_for_sig = JCS(signable)
-15. Compute PAE = DSSEv1_PAE(sig.payload_type, canonical_for_sig)
-16. Obtain public_key by sig.key_id from trust policy
-17. Verify ed25519_verify(public_key, PAE, base64_decode(sig.signature))
-18. If invalid: FAIL (INVALID_SIGNATURE)
+15. Compute computed_signed_digest = "sha256:" + hex(SHA256(canonical_for_sig))
+16. Validate computed_signed_digest == sig.signed_payload_digest
+
+// Verify signature
+17. Compute PAE = DSSEv1_PAE(sig.payload_type, canonical_for_sig)
+18. Obtain public_key by sig.key_id from trust policy
+19. Verify ed25519_verify(public_key, PAE, base64_decode(sig.signature))
+20. If invalid: FAIL (INVALID_SIGNATURE)
 
 // Additional checks
-19. Check context binding (see §5.2)
-20. Check validity window with clock skew (see §5.3)
-21. Check revocation status (see §5.4)
-22. PASS
+21. Check context binding (see §5.2)
+22. Check validity window with clock skew (see §5.3)
+23. Check revocation status (see §5.4)
+24. PASS
 ```
 
-**Note:** Steps 9-12 verify that `mandate_id` is truly content-addressed (computed from content without ID). This prevents ID forgery attacks.
+**Note:** Steps 7-12 verify content addressing; steps 13-16 verify signed payload digest (DSSE standard). Both MUST pass.
 
 ### 5.2 Context Binding Verification
 
@@ -609,15 +725,21 @@ Where:
 
 ### 5.3 Validity Window Verification
 
-**Runtime (wall clock):**
+**Runtime (wall clock with clock skew):**
+
+For runtime enforcement with clock skew tolerance, see §7.6.
 
 ```rust
-fn check_validity(mandate: &Mandate, now: DateTime<Utc>) -> Result<()> {
+fn check_validity(
+    mandate: &Mandate,
+    now: DateTime<Utc>,
+    clock_skew: Duration,  // default: 30 seconds
+) -> Result<()> {
     if let Some(nb) = mandate.validity.not_before {
-        if now < nb { return Err(NotYetValid); }
+        if now < nb - clock_skew { return Err(NotYetValid); }
     }
     if let Some(exp) = mandate.validity.expires_at {
-        if now >= exp { return Err(Expired); }
+        if now >= exp + clock_skew { return Err(Expired); }
     }
     Ok(())
 }
@@ -627,7 +749,8 @@ fn check_validity(mandate: &Mandate, now: DateTime<Utc>) -> Result<()> {
 
 ```rust
 fn check_validity_lint(mandate: &Mandate, event_time: DateTime<Utc>) -> Result<()> {
-    // Same logic, but using event.time instead of Utc::now()
+    // Same logic but WITHOUT clock skew (audit context)
+    // Uses event.time instead of Utc::now()
 }
 ```
 
@@ -724,47 +847,443 @@ To determine if a tool requires `transaction` mandate:
 
 ---
 
-## 7. Single-Use Enforcement
+## 7. Runtime Enforcement (Normative)
 
-### 7.1 Runtime Enforcement
+This section defines the **runtime** behavior for mandate authorization. Runtime enforcement provides real-time guarantees that lint-time analysis cannot (e.g., atomic single-use, nonce replay prevention).
+
+### 7.1 Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        MCP Proxy                                │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ Policy Check │───▶│ Mandate Auth │───▶│ Forward to Tool  │  │
+│  └──────────────┘    └──────┬───────┘    └────────┬─────────┘  │
+│                             │                      │            │
+│                     ┌───────▼───────┐      ┌──────▼──────┐     │
+│                     │ MandateStore  │      │ Tool Server │     │
+│                     │   (SQLite)    │      └─────────────┘     │
+│                     └───────────────┘                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Execution order (consume-before-exec):**
+
+1. Policy check (deny/allow lists, rate limits)
+2. Mandate verification (signature, validity, scope)
+3. Mandate consumption (atomic, idempotent)
+4. Emit `assay.mandate.used.v1` event
+5. Forward to tool server
+6. Emit `assay.tool.decision` event (ALWAYS, even on failure)
+
+### 7.2 SQLite Store Schema (Normative)
+
+Implementations MUST use a durable store with atomic transactions. SQLite with WAL mode is the reference implementation.
+
+```sql
+-- Schema version: 2 (mandate runtime enforcement)
+PRAGMA journal_mode = WAL;
+
+-- Mandate metadata (immutable after insert)
+CREATE TABLE IF NOT EXISTS mandates (
+    mandate_id       TEXT PRIMARY KEY,  -- sha256:...
+    mandate_kind     TEXT NOT NULL,     -- intent | transaction
+    audience         TEXT NOT NULL,
+    issuer           TEXT NOT NULL,
+    expires_at       TEXT,              -- ISO8601, nullable = no expiry
+    single_use       INTEGER NOT NULL DEFAULT 0,
+    max_uses         INTEGER,           -- nullable = unlimited
+    use_count        INTEGER NOT NULL DEFAULT 0,
+    canonical_digest TEXT NOT NULL,     -- sha256 of JCS(hashable_content)
+    key_id           TEXT NOT NULL,
+    inserted_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Use tracking (append-only, immutable)
+CREATE TABLE IF NOT EXISTS mandate_uses (
+    use_id           TEXT PRIMARY KEY,  -- Content-addressed (see §7.4)
+    mandate_id       TEXT NOT NULL REFERENCES mandates(mandate_id),
+    tool_call_id     TEXT NOT NULL UNIQUE,  -- Idempotency key
+    use_count        INTEGER NOT NULL,  -- 1-based, at time of use
+    consumed_at      TEXT NOT NULL,     -- ISO8601
+    tool_name        TEXT,
+    operation_class  TEXT,              -- read | write | commit
+    nonce            TEXT,              -- Copy from context (for audit)
+    source_run_id    TEXT,
+    UNIQUE(mandate_id, use_count)       -- Enforce monotonic
+);
+
+-- Nonce replay prevention (transaction mandates)
+CREATE TABLE IF NOT EXISTS nonces (
+    audience         TEXT NOT NULL,
+    issuer           TEXT NOT NULL,
+    nonce            TEXT NOT NULL,
+    mandate_id       TEXT NOT NULL,
+    first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (audience, issuer, nonce)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mandates_audience_issuer
+    ON mandates(audience, issuer);
+CREATE INDEX IF NOT EXISTS idx_mandate_uses_mandate_id
+    ON mandate_uses(mandate_id);
+```
+
+### 7.3 Mandate Upsert (MUST)
+
+Before consuming a mandate, it MUST exist in the store. Implementations MUST use upsert semantics:
+
+```sql
+INSERT INTO mandates (
+    mandate_id, mandate_kind, audience, issuer, expires_at,
+    single_use, max_uses, use_count, canonical_digest, key_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+ON CONFLICT(mandate_id) DO NOTHING;
+```
+
+**Collision detection (SHOULD):** After upsert, implementations SHOULD verify that stored metadata matches the mandate being consumed. Mismatches indicate either:
+- Hash collision (cryptographically unlikely)
+- Store corruption
+- Attempted mandate_id spoofing
 
 ```rust
-async fn consume_mandate(
-    mandate_id: &str,
-    tool_call_id: &str,
-    store: &Store
-) -> Result<u32> {
-    // Atomic increment-and-check
-    let use_count = store.increment_use_count(mandate_id).await?;
-
-    let mandate = store.get_mandate(mandate_id).await?;
-
-    // Check single_use constraint
-    if mandate.constraints.single_use && use_count > 1 {
-        return Err(MandateError::AlreadyUsed);
-    }
-
-    // Check max_uses constraint
-    if let Some(max) = mandate.constraints.max_uses {
-        if use_count > max {
-            return Err(MandateError::MaxUsesExceeded);
-        }
-    }
-
-    // Emit receipt event
-    emit_mandate_use_event(mandate_id, tool_call_id, use_count);
-
-    Ok(use_count)
+// After upsert, verify consistency
+let stored = store.get_mandate(mandate_id)?;
+if stored.canonical_digest != computed_digest
+   || stored.audience != mandate.context.audience
+   || stored.issuer != mandate.context.issuer {
+    return Err(MandateError::StoreInconsistency);
 }
 ```
 
-### 7.2 Lint Enforcement
+### 7.4 Consume Flow (Normative)
+
+The `consume_mandate()` function MUST be atomic and idempotent.
+
+**Function signature:**
+
+```rust
+async fn consume_mandate(
+    store: &MandateStore,
+    mandate_id: &str,
+    tool_call_id: &str,       // Idempotency key
+    nonce: Option<&str>,      // From mandate.context.nonce
+    audience: &str,
+    issuer: &str,
+    single_use: bool,
+    max_uses: Option<u32>,
+    tool_name: &str,
+    operation_class: OperationClass,
+) -> Result<AuthzReceipt, AuthzError>
+```
+
+**Atomic transaction (pseudocode):**
+
+```sql
+BEGIN IMMEDIATE;  -- Acquire write lock immediately
+
+-- Step 1: Idempotency check
+SELECT use_id, use_count, consumed_at
+FROM mandate_uses WHERE tool_call_id = ?;
+-- If found: COMMIT and return existing receipt (no increment)
+
+-- Step 2: Nonce replay check (transaction mandates only)
+-- Use INSERT to atomically check+insert (no SELECT first)
+INSERT INTO nonces (audience, issuer, nonce, mandate_id)
+VALUES (?, ?, ?, ?);
+-- If UNIQUE constraint fails: ROLLBACK, return NonceReplay error
+
+-- Step 3: Get current use count
+SELECT use_count FROM mandates WHERE mandate_id = ?;
+-- If not found: ROLLBACK, return MandateNotFound error
+
+-- Step 4: Check constraints
+-- If single_use AND use_count > 0: ROLLBACK, return AlreadyUsed
+-- If max_uses AND use_count >= max_uses: ROLLBACK, return MaxUsesExceeded
+
+-- Step 5: Atomic increment + insert use record
+UPDATE mandates SET use_count = use_count + 1 WHERE mandate_id = ?;
+INSERT INTO mandate_uses (
+    use_id, mandate_id, tool_call_id, use_count, consumed_at,
+    tool_name, operation_class, nonce, source_run_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+COMMIT;
+```
+
+**use_id computation (NORMATIVE v1.0.4):**
+
+The `use_id` MUST be content-addressed (deterministic) for audit verifiability:
+
+```
+use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
+```
+
+Example: `mandate_id="sha256:abc...", tool_call_id="tc_001", use_count=1`
+→ `use_id = "sha256:" + hex(SHA256("sha256:abc...:tc_001:1"))`
+
+This allows third parties to recompute and verify use receipts without runtime access.
+
+**Critical invariants:**
+
+| Invariant | Enforcement |
+|-----------|-------------|
+| Idempotency | `tool_call_id UNIQUE` constraint + check-before-increment |
+| Single-use | `single_use=true` → reject if `use_count > 0` |
+| Max uses | `use_count < max_uses` check before increment |
+| Nonce replay | `INSERT` into nonces table (not SELECT+INSERT) |
+| Monotonic counts | `UNIQUE(mandate_id, use_count)` constraint |
+| use_id determinism | Content-addressed from mandate_id + tool_call_id + use_count |
+
+### 7.5 Nonce Replay Prevention (Normative)
+
+For `mandate_kind=transaction`, nonces provide session binding and replay prevention.
+
+**Requirements:**
+
+| Requirement | Specification |
+|-------------|---------------|
+| Scope | Nonces are scoped to `(audience, issuer)` tuple |
+| Atomicity | Check+insert MUST be atomic (single INSERT, not SELECT+INSERT) |
+| Persistence | Nonces MUST survive process restart |
+| Error | Replay attempt MUST return `NonceReplay` error |
+
+**Implementation pattern:**
+
+```rust
+// WRONG: Race condition between SELECT and INSERT
+if store.nonce_exists(audience, issuer, nonce) {
+    return Err(NonceReplay);
+}
+store.insert_nonce(audience, issuer, nonce, mandate_id);
+
+// CORRECT: Atomic INSERT, handle constraint violation
+match store.insert_nonce(audience, issuer, nonce, mandate_id) {
+    Ok(_) => { /* continue */ }
+    Err(e) if e.is_unique_violation() => {
+        return Err(AuthzError::NonceReplay { nonce: nonce.to_string() });
+    }
+    Err(e) => return Err(e.into()),
+}
+```
+
+### 7.6 Validity Window Enforcement (Normative)
+
+**Clock skew tolerance:**
+
+Runtime MUST allow configurable clock skew (default: 30 seconds).
+
+```yaml
+mandate_trust:
+  clock_skew_tolerance_seconds: 30
+```
+
+**Normative validity check:**
+
+```rust
+let now = Utc::now();
+let skew = Duration::seconds(config.clock_skew_tolerance_seconds);
+
+// Not yet valid check
+if let Some(not_before) = &mandate.validity.not_before {
+    if now < *not_before - skew {
+        return Err(AuthzError::NotYetValid {
+            not_before: *not_before,
+            now,
+        });
+    }
+}
+
+// Expired check (widened window)
+if let Some(expires_at) = &mandate.validity.expires_at {
+    if now >= *expires_at + skew {
+        return Err(AuthzError::Expired {
+            expires_at: *expires_at,
+            now,
+        });
+    }
+}
+```
+
+**Semantics:**
+
+| Check | Condition | Result |
+|-------|-----------|--------|
+| Not yet valid | `now < not_before - skew` | Reject |
+| Valid | `not_before - skew <= now < expires_at + skew` | Accept |
+| Expired | `now >= expires_at + skew` | Reject |
+
+**Revocation timing (NORMATIVE):**
+
+`revoked_at` is interpreted as a **hard cutoff**: runtime MUST reject if `now >= revoked_at` (without skew tolerance).
+
+```rust
+// Revocation check (NO skew - intentional)
+if let Some(revoked_at) = store.get_revoked_at(&mandate.mandate_id)? {
+    if now >= revoked_at {
+        return Err(AuthzError::Revoked { revoked_at });
+    }
+}
+```
+
+| Check | Condition | Skew Applied | Result |
+|-------|-----------|--------------|--------|
+| Not yet valid | `now < not_before - skew` | Yes | Reject |
+| Expired | `now >= expires_at + skew` | Yes | Reject |
+| Revoked | `now >= revoked_at` | **No** | Reject |
+
+> **Rationale:** Revocation is an intentional control-plane action (human or automated policy decision). Applying clock skew would create an unintended "revocation grace period" that could allow continued use after explicit revocation. Expiry/not_before are tolerant for clock drift between systems; revocation is not.
+
+### 7.7 transaction_ref Verification (Normative)
+
+For `operation_class=commit` tools with `scope.transaction_ref`, runtime MUST verify the transaction binding.
+
+**Verification flow:**
+
+```rust
+if operation_class == OperationClass::Commit {
+    if let Some(expected_ref) = &mandate.scope.transaction_ref {
+        // 1. Extract transaction object from tool call
+        let tx_object = extract_transaction_object(&tool_call)
+            .ok_or(AuthzError::MissingTransactionObject)?;
+
+        // 2. Compute hash using same algorithm as mandate creation
+        let actual_ref = compute_transaction_ref(&tx_object)?;
+
+        // 3. Compare
+        if actual_ref != *expected_ref {
+            return Err(AuthzError::TransactionRefMismatch {
+                expected: expected_ref.clone(),
+                actual: actual_ref,
+            });
+        }
+    }
+}
+```
+
+**Transaction object extraction:**
+
+The transaction object MUST be deterministically extractable from the tool call. Implementations SHOULD support:
+
+| Method | Description | Use When |
+|--------|-------------|----------|
+| Explicit field | `tool_call.args.transaction` | Tool contract specifies transaction field |
+| Session lookup | Lookup by `tool_call.args.transaction_id` | Transaction stored in session state |
+
+**Anti-patterns (MUST NOT):**
+
+- Using entire `args` object without explicit contract
+- Including timestamps or request-specific nonces in transaction object
+- Silent fallback to different extraction method
+
+### 7.8 Idempotency Semantics (Normative)
+
+**Mandate layer:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Same `tool_call_id`, first call | Consume, increment, return receipt |
+| Same `tool_call_id`, retry | Return existing receipt, NO increment |
+| Different `tool_call_id`, same mandate | Consume again (subject to constraints) |
+
+**Tool layer integration:**
+
+Runtime SHOULD propagate `tool_call_id` to tool execution for downstream idempotency:
+
+```rust
+// In tool call forwarding
+let mut request = tool_call.clone();
+request.metadata.insert(
+    "idempotency_key".to_string(),
+    tool_call.id.clone().into()
+);
+```
+
+### 7.9 Crash Recovery (Normative)
+
+**Chosen semantics: Consume-before-exec**
+
+The mandate is consumed BEFORE tool execution. This guarantees single-use constraints but may result in "consumed but not executed" on crash.
+
+**Invariants:**
+
+| Event | Guaranteed |
+|-------|------------|
+| `mandate.used` emitted | Mandate was consumed in store |
+| Tool executed | NOT guaranteed (may crash before exec) |
+| `tool.decision` emitted | SHOULD be guaranteed (see below) |
+
+**Tool decision guarantee:**
+
+Implementations MUST emit `assay.tool.decision` even on execution failure:
+
+```rust
+// WRONG: Decision only on success
+let response = forward_to_tool(request).await?;
+emit_tool_decision(request, response, receipt);
+
+// CORRECT: Decision always emitted
+let response = forward_to_tool(request).await;
+emit_tool_decision(
+    request,
+    response.as_ref().ok(),
+    receipt,
+    response.as_ref().err().map(|e| e.to_string())
+);
+```
+
+**Recovery detection (lint-time):**
+
+Lint rules can detect potential crash scenarios:
+
+```
+IF mandate.used EXISTS
+   AND tool.decision NOT EXISTS for same tool_call_id
+THEN WARN "Mandate consumed but tool decision not recorded (possible crash)"
+```
+
+**Audit log deduplication (NORMATIVE):**
+
+Implementations MAY emit `assay.mandate.used.v1` events on retries of the same `tool_call_id`. When this occurs:
+
+1. CloudEvents.id MUST equal `use_id` (deterministic, content-addressed)
+2. Consumers MUST deduplicate by CloudEvents.id
+3. Producers SHOULD use `CloudEvents.id = use_id` to make deduplication trivial
+
+| Scenario | Events Emitted | Consumer Action |
+|----------|---------------|-----------------|
+| First consume | 1 × `mandate.used` | Accept |
+| Retry (same tool_call_id) | 1 × `mandate.used` (same id) | Deduplicate by id |
+| Different tool_call_id | 1 × `mandate.used` (new id) | Accept |
+
+> **Rationale:** Retries can occur after partial failures (e.g., event emission succeeded but acknowledgment lost). Duplicates in append-only audit logs are acceptable as long as deduplication is deterministic. The `use_id` formula guarantees identical event IDs for identical logical operations.
+
+### 7.10 Error Taxonomy
+
+| Error | Code | When | Severity |
+|-------|------|------|----------|
+| `MandateNotFound` | `E_MANDATE_NOT_FOUND` | mandate_id not in store | Error |
+| `AlreadyUsed` | `E_MANDATE_ALREADY_USED` | single_use=true, use_count>0 | Error |
+| `MaxUsesExceeded` | `E_MANDATE_MAX_USES` | use_count >= max_uses | Error |
+| `NonceReplay` | `E_NONCE_REPLAY` | Nonce already used | Error |
+| `Expired` | `E_MANDATE_EXPIRED` | now >= expires_at + skew | Error |
+| `NotYetValid` | `E_MANDATE_NOT_YET_VALID` | now < not_before - skew | Error |
+| `TransactionRefMismatch` | `E_TRANSACTION_REF_MISMATCH` | Hash mismatch | Error |
+| `MissingTransactionObject` | `E_MISSING_TRANSACTION` | Commit tool without tx obj | Error |
+| `StoreInconsistency` | `E_STORE_INCONSISTENT` | Metadata mismatch after upsert | Error |
+| `ScopeMismatch` | `E_SCOPE_MISMATCH` | Tool not in mandate.scope.tools | Error |
+| `KindMismatch` | `E_KIND_MISMATCH` | Wrong mandate_kind for operation | Error |
+
+### 7.11 Lint Enforcement
+
+Lint provides post-hoc verification complementing runtime enforcement.
 
 ```
 1. Collect all assay.mandate.used.v1 events for mandate_id
 2. Count unique use_id values
 3. If mandate.constraints.single_use && count > 1: FAIL
 4. If mandate.constraints.max_uses && count > max_uses: FAIL
+5. If mandate.used exists without matching tool.decision: WARN (crash recovery)
 ```
 
 ---
@@ -912,7 +1431,8 @@ rules:
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+      "content_id": "sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd",
+      "signed_payload_digest": "sha256:b2c3d4e5f6789012345678901234567890123456789012345678901234abcdef",
       "key_id": "sha256:prod-signing-key-fingerprint-here-64-hex-chars-total-ok",
       "signature": "MEUCIQC...",
       "signed_at": "2026-01-28T08:55:00Z"
@@ -945,7 +1465,8 @@ rules:
       "max_value": {
         "amount": "99.99",
         "currency": "USD"
-      }
+      },
+      "transaction_ref": "sha256:e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5"
     },
     "validity": {
       "not_before": "2026-01-28T10:30:00Z",
@@ -967,7 +1488,8 @@ rules:
       "version": 1,
       "algorithm": "ed25519",
       "payload_type": "application/vnd.assay.mandate+json;v=1",
-      "payload_digest": "sha256:f1e2d3c4b5a6789012345678901234567890123456789012345678901234wxyz",
+      "content_id": "sha256:f1e2d3c4b5a6789012345678901234567890123456789012345678901234wxyz",
+      "signed_payload_digest": "sha256:c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
       "key_id": "sha256:prod-signing-key-fingerprint-here-64-hex-chars-total-ok",
       "signature": "MEYCIQDy...",
       "signed_at": "2026-01-28T10:30:00Z"
@@ -1129,7 +1651,103 @@ Parsers MAY accept Base64 without padding for compatibility, but producers MUST 
 
 ---
 
-## 11. Future Extensions (v2)
+## 11. Conformance Test Vectors (v1.0.2)
+
+Implementations MUST pass all test vectors in this section.
+
+### 11.1 Glob Matching Vectors
+
+| Pattern | Input | Expected | Reason |
+|---------|-------|----------|--------|
+| `search_*` | `search_products` | ✓ match | `*` matches `products` |
+| `search_*` | `search_users` | ✓ match | `*` matches `users` |
+| `search_*` | `search_` | ✓ match | `*` matches empty string |
+| `search_*` | `search.products` | ✗ no match | `*` stops at `.` |
+| `search_*` | `search` | ✗ no match | Missing `_` |
+| `search_*` | `Search_products` | ✗ no match | Case-sensitive |
+| `fs.read_*` | `fs.read_file` | ✓ match | Literal `.` matches |
+| `fs.read_*` | `fs.read.file` | ✗ no match | `*` stops at second `.` |
+| `fs.**` | `fs.read_file` | ✓ match | `**` matches any |
+| `fs.**` | `fs.write.nested.path` | ✓ match | `**` matches `.` |
+| `*` | `search` | ✓ match | `*` matches single segment |
+| `*` | `ns.tool` | ✗ no match | `*` stops at `.` |
+| `**` | `anything.at.all` | ✓ match | Universal wildcard |
+| `file\*name` | `file*name` | ✓ match | Escaped `*` |
+| `path\\to` | `path\to` | ✓ match | Escaped `\` |
+
+### 11.2 JCS Canonicalization Vector
+
+**Input (JSON with unordered keys):**
+
+```json
+{
+  "mandate_kind": "intent",
+  "context": {"issuer": "auth.myorg.com", "audience": "myorg/app"},
+  "principal": {"method": "oidc", "subject": "user-123"},
+  "validity": {"issued_at": "2026-01-28T10:00:00Z"},
+  "scope": {"tools": ["search_*"], "operation_class": "read"},
+  "constraints": {}
+}
+```
+
+**Expected JCS output (single line, sorted keys):**
+
+```
+{"constraints":{},"context":{"audience":"myorg/app","issuer":"auth.myorg.com"},"mandate_kind":"intent","principal":{"method":"oidc","subject":"user-123"},"scope":{"operation_class":"read","tools":["search_*"]},"validity":{"issued_at":"2026-01-28T10:00:00Z"}}
+```
+
+**Expected mandate_id:**
+
+```
+sha256:e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7
+```
+
+> Note: Actual hash value depends on exact JCS output bytes. Implementations MUST produce identical bytes to produce identical hashes.
+
+### 11.3 Time Validity Vectors
+
+| now (event time) | not_before | expires_at | skew_seconds | Expected |
+|------------------|------------|------------|--------------|----------|
+| 10:00:00 | 09:00:00 | 11:00:00 | 0 | ✓ valid |
+| 10:00:00 | 10:00:30 | 11:00:00 | 30 | ✓ valid (skew) |
+| 10:00:00 | 10:01:00 | 11:00:00 | 30 | ✗ not_yet_valid |
+| 10:00:00 | 09:00:00 | 10:00:00 | 0 | ✗ expired (exclusive) |
+| 10:00:00 | 09:00:00 | 09:59:30 | 30 | ✗ expired |
+| 10:00:00 | null | 11:00:00 | 0 | ✓ valid |
+| 10:00:00 | 09:00:00 | null | 0 | ✓ valid |
+
+### 11.4 use_id Generation (NORMATIVE v1.0.4)
+
+`use_id` MUST be content-addressed (deterministic):
+
+```
+use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
+```
+
+**Test vector:**
+
+| mandate_id | tool_call_id | use_count | use_id |
+|------------|--------------|-----------|--------|
+| `sha256:abc123` | `tc_001` | `1` | `sha256:` + hex(SHA256("sha256:abc123:tc_001:1")) |
+
+This ensures:
+- Deterministic generation (same inputs → same ID)
+- Uniqueness (different tool_call_id or use_count → different ID)
+- Verifiability (third parties can recompute from receipt data)
+- No JSON parsing required (simple string concatenation)
+
+### 11.5 JSON Parsing Requirements (NORMATIVE)
+
+Parsers MUST reject JSON with:
+- **Duplicate keys**: `{"a": 1, "a": 2}` MUST be rejected
+- **Trailing data**: `{"a": 1}garbage` MUST be rejected
+- **Comments**: `{"a": 1 /* comment */}` MUST be rejected (not valid JSON)
+
+Rationale: Canonicalization attacks exploit parser differences in duplicate key handling.
+
+---
+
+## 12. Future Extensions (v2)
 
 | Feature | Description |
 |---------|-------------|
@@ -1141,7 +1759,7 @@ Parsers MAY accept Base64 without padding for compatibility, but producers MUST 
 
 ---
 
-## 12. References
+## 13. References
 
 - [ADR-017: Mandate/Intent Evidence](./ADR-017-Mandate-Evidence.md) - Design decision
 - [SPEC-Tool-Signing-v1](./SPEC-Tool-Signing-v1.md) - Signing format (reused)

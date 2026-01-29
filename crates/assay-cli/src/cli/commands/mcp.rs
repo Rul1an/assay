@@ -1,7 +1,6 @@
 use super::super::args::{McpArgs, McpSub, McpWrapArgs};
-// use super::exit_codes;
 use assay_core::mcp::policy::McpPolicy;
-use assay_core::mcp::proxy::McpProxy;
+use assay_core::mcp::proxy::{McpProxy, ProxyConfig, ProxyConfigRaw};
 
 pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
     match args.cmd {
@@ -36,12 +35,16 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         );
     };
 
-    let config = assay_core::mcp::proxy::ProxyConfig {
+    // Build and validate config (fail-fast on invalid event_source)
+    let raw = ProxyConfigRaw {
         dry_run: args.dry_run,
         verbose: args.verbose,
         audit_log_path: args.audit_log,
+        decision_log_path: args.decision_log,
+        event_source: args.event_source,
         server_id: args.label.unwrap_or_else(|| "default-mcp-server".into()),
     };
+    let config = ProxyConfig::try_from_raw(raw)?;
 
     if config.dry_run {
         eprintln!("[assay] DRY RUN MODE: No actions will be blocked.");

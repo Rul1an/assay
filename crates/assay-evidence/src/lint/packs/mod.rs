@@ -24,7 +24,10 @@ pub static BUILTIN_PACKS: &[(&str, &str)] = &[
         "eu-ai-act-baseline",
         include_str!("../../../packs/eu-ai-act-baseline.yaml"),
     ),
-    // Future: ("soc2-baseline", include_str!("../../../packs/soc2-baseline.yaml")),
+    (
+        "mandate-baseline",
+        include_str!("../../../packs/mandate-baseline.yaml"),
+    ),
 ];
 
 /// Look up a built-in pack by name.

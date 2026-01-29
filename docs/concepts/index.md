@@ -111,6 +111,19 @@ graph TD
 
     [:octicons-arrow-right-24: Cache](cache.md)
 
+-   :material-shield-lock:{ .lg .middle } __Mandates__
+
+    ---
+
+    Cryptographic proof of user authorization for AI agent actions.
+
+    - What is a mandate?
+    - Intent vs transaction
+    - Revocation and expiry
+    - Evidence output
+
+    [:octicons-arrow-right-24: Mandates](mandates.md)
+
 </div>
 
 ---
@@ -124,6 +137,7 @@ graph TD
 | Metrics | Validate | Built into Assay |
 | Replay | Execute | `assay run` |
 | Cache | Optimize | `.assay/store.db` |
+| Mandates | User authorization | `audit.ndjson`, `decisions.ndjson` |
 
 ---
 

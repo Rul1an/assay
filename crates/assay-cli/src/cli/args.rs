@@ -716,9 +716,20 @@ pub struct McpWrapArgs {
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Path to append-only audit log (JSONL)
-    #[arg(long)]
+    /// Write lifecycle events (mandate.used, mandate.revoked) to this NDJSON log.
+    /// Requires --event-source. May contain duplicates on retries; deduplicate by CloudEvents.id.
+    #[arg(long, requires = "event_source")]
     pub audit_log: Option<PathBuf>,
+
+    /// Write tool decision events (assay.tool.decision) to this NDJSON log.
+    /// Requires --event-source.
+    #[arg(long, requires = "event_source")]
+    pub decision_log: Option<PathBuf>,
+
+    /// CloudEvents source URI (e.g. assay://org/app).
+    /// Must be absolute URI with scheme://. Required when --audit-log or --decision-log is set.
+    #[arg(long, value_name = "URI")]
+    pub event_source: Option<String>,
 
     /// Command to wrap (use -- to separate args)
     #[arg(required = true, last = true, allow_hyphen_values = true)]

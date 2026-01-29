@@ -11,12 +11,21 @@
 //! {"specversion":"1.0","type":"assay.test",...}
 //! ```
 //!
+//! # Security
+//!
+//! By default, uses strict JSON parsing that rejects:
+//! - Duplicate keys at any nesting level (prevents semantic divergence attacks)
+//! - Lone surrogates in unicode escapes (prevents verification bypass)
+//!
+//! Use `NdjsonEventsLax` for legacy compatibility when strict parsing is not needed.
+//!
 //! # Canonicalization
 //!
 //! When writing, events are serialized using JCS (RFC 8785) for determinism.
-//! When reading, standard JSON parsing is used (JCS is a subset of JSON).
+//! When reading, strict JSON parsing is used with duplicate key rejection.
 
 use crate::crypto::jcs;
+use crate::json_strict::{validate_json_strict, StrictJsonError};
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
 use std::io::{BufRead, Write};
@@ -80,6 +89,32 @@ impl<R: BufRead> Iterator for NdjsonEvents<R> {
                         continue; // Skip empty lines
                     }
 
+                    // Phase 1: Strict validation (duplicate keys, lone surrogates)
+                    // Maps to ErrorClass::Contract / ErrorCode::ContractInvalidJson
+                    if let Err(e) = validate_json_strict(line) {
+                        let reason = match &e {
+                            StrictJsonError::DuplicateKey { key, path } => {
+                                format!("duplicate key '{}' at path '{}'", key, path)
+                            }
+                            StrictJsonError::LoneSurrogate {
+                                position,
+                                codepoint,
+                            } => {
+                                format!(
+                                    "invalid unicode (lone surrogate) at position {}: {}",
+                                    position, codepoint
+                                )
+                            }
+                            _ => e.to_string(),
+                        };
+                        return Some(Err(anyhow::anyhow!(
+                            "Invalid JSON at line {} (strict validation): {}",
+                            self.line_number,
+                            reason
+                        )));
+                    }
+
+                    // Phase 2: Deserialize (now safe from semantic attacks)
                     let result = serde_json::from_str::<EvidenceEvent>(line).with_context(|| {
                         format!(
                             "Invalid JSON at line {}: {}",
@@ -253,5 +288,58 @@ mod tests {
         );
         event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
         event
+    }
+
+    // === Strict JSON Security Tests ===
+
+    #[test]
+    fn test_rejects_duplicate_keys_in_event() {
+        // Attack: duplicate mandate_id to confuse verification
+        let ndjson = r#"{"specversion":"1.0","type":"assay.test","source":"urn:assay:test","id":"run:0","time":"2023-11-14T22:13:20Z","datacontenttype":"application/json","assayrunid":"run","assayseq":0,"assayproducer":"test","assayproducerversion":"1.0","assaygit":"abc","assaypii":false,"assaysecrets":false,"data":{"key":"a","key":"b"}}"#;
+
+        let cursor = Cursor::new(ndjson);
+        let reader = BufReader::new(cursor);
+        let mut iter = NdjsonEvents::new(reader);
+
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.to_lowercase().contains("duplicate") || err.contains("strict validation"),
+            "Expected duplicate key error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_rejects_duplicate_keys_in_nested_data() {
+        // Attack: duplicate in nested structure
+        let ndjson = r#"{"specversion":"1.0","type":"assay.test","source":"urn:assay:test","id":"run:0","time":"2023-11-14T22:13:20Z","datacontenttype":"application/json","assayrunid":"run","assayseq":0,"assayproducer":"test","assayproducerversion":"1.0","assaygit":"abc","assaypii":false,"assaysecrets":false,"data":{"nested":{"a":1,"a":2}}}"#;
+
+        let cursor = Cursor::new(ndjson);
+        let reader = BufReader::new(cursor);
+        let mut iter = NdjsonEvents::new(reader);
+
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rejects_lone_surrogate() {
+        // Attack: lone surrogate could cause verification/display mismatch
+        let ndjson = r#"{"specversion":"1.0","type":"assay.test","source":"urn:assay:test","id":"run:0","time":"2023-11-14T22:13:20Z","datacontenttype":"application/json","assayrunid":"run","assayseq":0,"assayproducer":"test","assayproducerversion":"1.0","assaygit":"abc","assaypii":false,"assaysecrets":false,"data":{"value":"\uD800"}}"#;
+
+        let cursor = Cursor::new(ndjson);
+        let reader = BufReader::new(cursor);
+        let mut iter = NdjsonEvents::new(reader);
+
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("surrogate") || err.contains("Security violation"),
+            "Expected surrogate error, got: {}",
+            err
+        );
     }
 }

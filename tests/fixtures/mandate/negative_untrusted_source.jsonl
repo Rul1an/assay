@@ -1,0 +1,1 @@
+{"specversion":"1.0","id":"evt_used_untrusted","type":"assay.mandate.used.v1","source":"assay://untrusted/attacker","time":"2026-01-28T10:31:01Z","datacontenttype":"application/json","data":{"mandate_id":"sha256:463e7eff31d2a9f875472bd742e4c340b0c39c1f4efa58dab58a9fe25501e589","use_id":"sha256:fake","tool_call_id":"tc_attack","consumed_at":"2026-01-28T10:31:01Z","use_count":999}}

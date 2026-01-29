@@ -1,4 +1,8 @@
 use super::audit::{AuditEvent, AuditLog};
+use super::decision::{
+    reason_codes, Decision, DecisionEmitter, DecisionEvent, FileDecisionEmitter,
+    NullDecisionEmitter,
+};
 use super::jsonrpc::JsonRpcRequest;
 use super::policy::{make_deny_response, McpPolicy, PolicyDecision, PolicyState};
 use std::{
@@ -9,12 +13,98 @@ use std::{
     thread,
 };
 
-#[derive(Clone, Debug, Default)]
+/// Validated proxy configuration.
+///
+/// Use `ProxyConfig::try_from_raw()` to create from CLI/config input.
+#[derive(Clone, Debug)]
 pub struct ProxyConfig {
+    pub dry_run: bool,
+    pub verbose: bool,
+    /// NDJSON log for mandate lifecycle events (audit trail)
+    pub audit_log_path: Option<std::path::PathBuf>,
+    pub server_id: String,
+    /// NDJSON log for tool decision events (high volume)
+    pub decision_log_path: Option<std::path::PathBuf>,
+    /// CloudEvents source URI (validated, required when logging enabled)
+    pub event_source: Option<String>,
+}
+
+/// Raw config as provided by CLI/config files before validation.
+#[derive(Clone, Debug, Default)]
+pub struct ProxyConfigRaw {
     pub dry_run: bool,
     pub verbose: bool,
     pub audit_log_path: Option<std::path::PathBuf>,
     pub server_id: String,
+    pub decision_log_path: Option<std::path::PathBuf>,
+    pub event_source: Option<String>,
+}
+
+impl ProxyConfig {
+    /// Create validated config from raw input.
+    ///
+    /// Fails if:
+    /// - Logging is enabled but event_source is missing
+    /// - event_source is not a valid absolute URI (scheme://...)
+    pub fn try_from_raw(raw: ProxyConfigRaw) -> anyhow::Result<Self> {
+        let logging_enabled = raw.audit_log_path.is_some() || raw.decision_log_path.is_some();
+
+        let event_source = raw
+            .event_source
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        if logging_enabled && event_source.is_none() {
+            anyhow::bail!(
+                "event_source is required when logging is enabled (e.g. --event-source assay://org/app)"
+            );
+        }
+
+        if let Some(ref src) = event_source {
+            validate_event_source(src)?;
+        }
+
+        Ok(ProxyConfig {
+            dry_run: raw.dry_run,
+            verbose: raw.verbose,
+            audit_log_path: raw.audit_log_path,
+            server_id: raw.server_id,
+            decision_log_path: raw.decision_log_path,
+            event_source,
+        })
+    }
+}
+
+/// Validate event_source URI (must be absolute with scheme://).
+fn validate_event_source(s: &str) -> anyhow::Result<()> {
+    let s = s.trim();
+    if s.is_empty() {
+        anyhow::bail!("event_source must be absolute URI with scheme (e.g. assay://org/app)");
+    }
+    if s.chars().any(|c| c.is_whitespace()) {
+        anyhow::bail!("event_source must not contain whitespace");
+    }
+
+    // Require scheme://...
+    let Some(pos) = s.find("://") else {
+        anyhow::bail!("event_source must be absolute URI with scheme (e.g. assay://org/app)");
+    };
+    if pos == 0 {
+        anyhow::bail!("event_source must have scheme before :// (e.g. assay://org/app)");
+    }
+
+    // Validate scheme charset (RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ))
+    let scheme = &s[..pos];
+    let mut chars = scheme.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => {}
+        _ => anyhow::bail!("event_source URI scheme must start with a letter"),
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') {
+        anyhow::bail!("event_source URI scheme contains invalid characters");
+    }
+
+    Ok(())
 }
 
 pub struct McpProxy {
@@ -63,6 +153,18 @@ impl McpProxy {
         let config = self.config.clone();
         let identity_cache_a = self.identity_cache.clone();
         let identity_cache_b = self.identity_cache.clone();
+
+        // Initialize decision emitter (I1: always emit decision)
+        let decision_emitter: Arc<dyn DecisionEmitter> =
+            if let Some(path) = &config.decision_log_path {
+                Arc::new(FileDecisionEmitter::new(path)?)
+            } else {
+                Arc::new(NullDecisionEmitter)
+            };
+        let event_source = config
+            .event_source
+            .clone()
+            .unwrap_or_else(|| format!("assay://{}", config.server_id));
 
         // Thread A: server -> client passthrough
         let stdout_a = stdout.clone();
@@ -129,6 +231,8 @@ impl McpProxy {
 
         // Thread B: client -> server passthrough with Policy Check
         let stdout_b = stdout.clone();
+        let emitter_b = decision_emitter.clone();
+        let event_source_b = event_source.clone();
         let t_client_to_server = thread::spawn(move || -> io::Result<()> {
             let stdin = io::stdin();
             let mut reader = stdin.lock();
@@ -150,8 +254,11 @@ impl McpProxy {
                             None
                         };
 
+                        let tool_name = req.tool_params().map(|p| p.name).unwrap_or_default();
+                        let tool_call_id = Self::extract_tool_call_id(&req);
+
                         match policy.evaluate(
-                            &req.tool_params().map(|p| p.name).unwrap_or_default(),
+                            &tool_name,
                             &req.tool_params()
                                 .map(|p| p.arguments)
                                 .unwrap_or(serde_json::Value::Null),
@@ -160,6 +267,19 @@ impl McpProxy {
                         ) {
                             PolicyDecision::Allow => {
                                 Self::handle_allow(&req, &mut audit_log, config.verbose);
+                                // Emit decision event (I1: always emit)
+                                if req.is_tool_call() {
+                                    Self::emit_decision(
+                                        &emitter_b,
+                                        &event_source_b,
+                                        &tool_call_id,
+                                        &tool_name,
+                                        Decision::Allow,
+                                        reason_codes::P_POLICY_DENY, // TODO: Better code
+                                        None,
+                                        req.id.clone(),
+                                    );
+                                }
                             }
                             PolicyDecision::AllowWithWarning { tool, code, reason } => {
                                 // Log warning about allowing a tool invocation with issues
@@ -179,13 +299,24 @@ impl McpProxy {
                                     request_id: req.id.clone(),
                                     agentic: None,
                                 });
+                                // Emit decision event (I1: always emit)
+                                Self::emit_decision(
+                                    &emitter_b,
+                                    &event_source_b,
+                                    &tool_call_id,
+                                    &tool,
+                                    Decision::Allow,
+                                    &code,
+                                    Some(reason),
+                                    req.id.clone(),
+                                );
                                 // Then proceed as a normal allow
                                 Self::handle_allow(&req, &mut audit_log, false);
                                 // false = don't double log ALLOW
                             }
                             PolicyDecision::Deny {
                                 tool,
-                                code: _,
+                                code,
                                 reason,
                                 contract,
                             } => {
@@ -210,6 +341,23 @@ impl McpProxy {
                                     request_id: req.id.clone(),
                                     agentic: Some(contract.clone()),
                                 });
+
+                                // Emit decision event (I1: always emit)
+                                let reason_code = Self::map_policy_code(&code);
+                                Self::emit_decision(
+                                    &emitter_b,
+                                    &event_source_b,
+                                    &tool_call_id,
+                                    &tool,
+                                    if config.dry_run {
+                                        Decision::Allow
+                                    } else {
+                                        Decision::Deny
+                                    },
+                                    &reason_code,
+                                    Some(reason),
+                                    req.id.clone(),
+                                );
 
                                 if config.dry_run {
                                     // DRY RUN: Forward anyway
@@ -289,5 +437,177 @@ impl McpProxy {
                 agentic: None,
             });
         }
+    }
+
+    /// Extract tool_call_id from request (I4: idempotency key).
+    fn extract_tool_call_id(request: &JsonRpcRequest) -> String {
+        // Try to get from params._meta.tool_call_id (MCP standard)
+        if let Some(params) = request.tool_params() {
+            if let Some(meta) = params.arguments.get("_meta") {
+                if let Some(id) = meta.get("tool_call_id").and_then(|v| v.as_str()) {
+                    return id.to_string();
+                }
+            }
+        }
+
+        // Fall back to request.id if present
+        if let Some(id) = &request.id {
+            if let Some(s) = id.as_str() {
+                return format!("req_{}", s);
+            }
+            if let Some(n) = id.as_i64() {
+                return format!("req_{}", n);
+            }
+        }
+
+        // Generate one if none found
+        format!("gen_{}", uuid::Uuid::new_v4())
+    }
+
+    /// Map policy error code to reason code.
+    fn map_policy_code(code: &str) -> String {
+        match code {
+            "E_TOOL_DENIED" => reason_codes::P_TOOL_DENIED.to_string(),
+            "E_TOOL_NOT_ALLOWED" => reason_codes::P_TOOL_NOT_ALLOWED.to_string(),
+            "E_ARG_SCHEMA" => reason_codes::P_ARG_SCHEMA.to_string(),
+            "E_RATE_LIMIT" => reason_codes::P_RATE_LIMIT.to_string(),
+            "E_TOOL_DRIFT" => reason_codes::P_TOOL_DRIFT.to_string(),
+            _ => reason_codes::P_POLICY_DENY.to_string(),
+        }
+    }
+
+    /// Emit a decision event (I1: always emit).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_decision(
+        emitter: &Arc<dyn DecisionEmitter>,
+        source: &str,
+        tool_call_id: &str,
+        tool: &str,
+        decision: Decision,
+        reason_code: &str,
+        reason: Option<String>,
+        request_id: Option<serde_json::Value>,
+    ) {
+        let mut event = DecisionEvent::new(
+            source.to_string(),
+            tool_call_id.to_string(),
+            tool.to_string(),
+        );
+        event.data.decision = decision;
+        event.data.reason_code = reason_code.to_string();
+        event.data.reason = reason;
+        event.data.request_id = request_id;
+        emitter.emit(&event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_source_accepts_assay_uri() {
+        validate_event_source("assay://myorg/myapp").unwrap();
+    }
+
+    #[test]
+    fn event_source_accepts_https_uri() {
+        validate_event_source("https://example.com/agent").unwrap();
+    }
+
+    #[test]
+    fn event_source_rejects_empty() {
+        assert!(validate_event_source("").is_err());
+        assert!(validate_event_source("   ").is_err());
+    }
+
+    #[test]
+    fn event_source_rejects_whitespace() {
+        assert!(validate_event_source("assay://myorg/my app").is_err());
+        assert!(validate_event_source("assay://myorg/\tmyapp").is_err());
+    }
+
+    #[test]
+    fn event_source_rejects_missing_scheme() {
+        assert!(validate_event_source("myorg/myapp").is_err());
+        assert!(validate_event_source("://myorg/myapp").is_err());
+    }
+
+    #[test]
+    fn event_source_rejects_did_and_urn() {
+        // We require scheme:// not just scheme:
+        assert!(validate_event_source("did:example:123").is_err());
+        assert!(validate_event_source("urn:example:foo").is_err());
+    }
+
+    #[test]
+    fn event_source_rejects_scheme_starting_with_non_letter() {
+        assert!(validate_event_source("1assay://myorg/myapp").is_err());
+        assert!(validate_event_source("-assay://myorg/myapp").is_err());
+    }
+
+    #[test]
+    fn event_source_rejects_scheme_with_invalid_chars() {
+        assert!(validate_event_source("as_say://myorg/myapp").is_err());
+        assert!(validate_event_source("as@say://myorg/myapp").is_err());
+    }
+
+    #[test]
+    fn config_requires_event_source_when_logging_enabled() {
+        let raw = ProxyConfigRaw {
+            dry_run: false,
+            verbose: false,
+            audit_log_path: None,
+            decision_log_path: Some(std::path::PathBuf::from("decisions.ndjson")),
+            event_source: None,
+            server_id: "srv".to_string(),
+        };
+
+        let err = ProxyConfig::try_from_raw(raw).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("event_source is required"));
+    }
+
+    #[test]
+    fn config_allows_no_event_source_when_logging_disabled() {
+        let raw = ProxyConfigRaw {
+            dry_run: false,
+            verbose: false,
+            audit_log_path: None,
+            decision_log_path: None,
+            event_source: None,
+            server_id: "srv".to_string(),
+        };
+
+        ProxyConfig::try_from_raw(raw).unwrap();
+    }
+
+    #[test]
+    fn config_accepts_valid_event_source() {
+        let raw = ProxyConfigRaw {
+            dry_run: false,
+            verbose: false,
+            audit_log_path: None,
+            decision_log_path: Some(std::path::PathBuf::from("decisions.ndjson")),
+            event_source: Some("assay://myorg/myapp".to_string()),
+            server_id: "srv".to_string(),
+        };
+
+        let cfg = ProxyConfig::try_from_raw(raw).unwrap();
+        assert_eq!(cfg.event_source.as_deref(), Some("assay://myorg/myapp"));
+    }
+
+    #[test]
+    fn config_rejects_invalid_event_source_uri() {
+        let raw = ProxyConfigRaw {
+            dry_run: false,
+            verbose: false,
+            audit_log_path: None,
+            decision_log_path: Some(std::path::PathBuf::from("decisions.ndjson")),
+            event_source: Some("not a uri".to_string()),
+            server_id: "srv".to_string(),
+        };
+
+        assert!(ProxyConfig::try_from_raw(raw).is_err());
     }
 }

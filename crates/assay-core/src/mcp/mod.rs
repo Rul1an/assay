@@ -1,13 +1,16 @@
 pub mod audit;
+pub mod decision;
 pub mod identity;
 pub mod jcs;
 pub mod jsonrpc;
+pub mod lifecycle;
 pub mod mapper_v2;
 pub mod parser;
 pub mod policy;
 pub mod proxy;
 pub mod runtime_features;
 pub mod signing;
+pub mod tool_call_handler;
 pub mod trust_policy;
 pub mod types;
 
