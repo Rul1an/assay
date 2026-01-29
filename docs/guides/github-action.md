@@ -1,8 +1,33 @@
 # GitHub Action Integration
 
-Assay provides a GitHub Action for automated evidence verification.
+> Zero-config evidence verification for AI agents. Native GitHub Security tab integration.
 
 **GitHub Marketplace:** [Rul1an/assay-action](https://github.com/marketplace/actions/assay-ai-agent-security)
+
+---
+
+## 30-Second Setup
+
+```yaml
+# .github/workflows/assay.yaml
+name: Evidence Verification
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Rul1an/assay-action@v2
+```
+
+Copy, paste, done. The action auto-discovers evidence bundles and reports findings to the Security tab.
+
+---
 
 ## Quick Start
 
@@ -211,6 +236,89 @@ gh attestation verify bundle.tar.gz --owner Rul1an
 ```
 
 Attestations only run on push to default branch (security).
+
+## Common Patterns (Copy-Paste)
+
+### Pattern 1: CI Gate with Baseline
+
+Block PRs that introduce new security findings:
+
+```yaml
+name: Security Gate
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: pytest tests/
+
+      - uses: Rul1an/assay-action@v2
+        with:
+          fail_on: error
+          baseline_key: ${{ github.event.repository.name }}
+          write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+```
+
+### Pattern 2: Compliance Reporting
+
+EU AI Act Article 12 compliance checks with SARIF output:
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    pack: eu-ai-act-baseline
+    fail_on: warn  # Fail on warnings too
+```
+
+### Pattern 3: Enterprise Pipeline (Full v2.1)
+
+Complete pipeline with BYOS, attestation, and compliance:
+
+```yaml
+name: Evidence Pipeline
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  attestations: write
+  id-token: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          curl -fsSL https://getassay.dev/install.sh | sh
+          assay run --policy policy.yaml -- pytest
+
+      - uses: Rul1an/assay-action@v2
+        with:
+          pack: eu-ai-act-baseline
+          store: s3://my-bucket/evidence
+          store_role: arn:aws:iam::123456789:role/AssayRole
+          attest: true
+          baseline_key: main
+          write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+```
+
+---
 
 ## Examples
 

@@ -1,13 +1,77 @@
 # SPEC-GitHub-Action-v2.1
 
 **Version:** 1.0.0
-**Status:** Draft
+**Status:** Implemented (v2.12.0)
 **Date:** 2026-01-29
 **ADR:** [ADR-018](./ADR-018-GitHub-Action-v2.1.md)
+
+> **DX Note**: See [Quick Start](#quick-start-dx) for copy-paste examples.
 
 ## Abstract
 
 This specification defines the GitHub Action v2.1 interface, behavior, and implementation requirements. It covers compliance pack integration, BYOS push with OIDC authentication, artifact attestation, and coverage badge generation.
+
+---
+
+## Quick Start (DX)
+
+### Zero-Config (Just Works)
+
+```yaml
+- uses: Rul1an/assay-action@v2
+```
+
+Auto-discovers evidence bundles, verifies integrity, uploads SARIF to Security tab.
+
+### With EU AI Act Compliance Pack
+
+```yaml
+- uses: Rul1an/assay-action@v2
+  with:
+    pack: eu-ai-act-baseline
+```
+
+Lints evidence against Article 12 requirements. SARIF includes article references.
+
+### Full Enterprise Pipeline
+
+```yaml
+name: Evidence Pipeline
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  attestations: write
+  id-token: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests (generates evidence)
+        run: |
+          curl -fsSL https://getassay.dev/install.sh | sh
+          assay run --policy policy.yaml -- pytest tests/
+
+      - name: Verify & Report
+        uses: Rul1an/assay-action@v2
+        with:
+          pack: eu-ai-act-baseline
+          store: s3://my-bucket/evidence
+          store_role: arn:aws:iam::123456789:role/AssayRole
+          attest: true
+          baseline_key: main
+          write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+```
+
+---
 
 ---
 
@@ -589,63 +653,65 @@ When attestation fails (permissions, plan limitations), the action MUST:
 
 ## 12. Implementation Checklist
 
-### Epic 1: Compliance Pack Support (P1)
+> **Status**: All Epics implemented as of v2.12.0. Contract tests verified in `.github/workflows/action-tests.yml`.
 
-- [ ] E1.1: Add `pack` input
-- [ ] E1.2: Pass `--pack` to `assay evidence lint`
-- [ ] E1.3: Extract pack metadata from SARIF
-- [ ] E1.4: Add `pack_applied`, `pack_score`, `pack_articles` outputs
-- [ ] E1.5: Job Summary with disclaimer (MANDATORY when present)
-- [ ] E1.6: Tests with `eu-ai-act-baseline`
+### Epic 1: Compliance Pack Support (P1) ✅
 
-### Epic 2: BYOS Push + OIDC (P2)
+- [x] E1.1: Add `pack` input
+- [x] E1.2: Pass `--pack` to `assay evidence lint`
+- [x] E1.3: Extract pack metadata from SARIF
+- [x] E1.4: Add `pack_applied`, `pack_score`, `pack_articles` outputs
+- [x] E1.5: Job Summary with disclaimer (MANDATORY when present)
+- [x] E1.6: Tests with `eu-ai-act-baseline` (`test-pack-lint`)
 
-- [ ] E2.1: Add `store`, `store_provider`, `store_role`, `store_region` inputs
-- [ ] E2.2: Add Azure inputs (`azure_client_id`, `azure_tenant_id`, `azure_subscription_id`)
-- [ ] E2.3: Store URL validation (fail-closed)
-- [ ] E2.4: Store role/identity validation (required inputs per provider)
-- [ ] E2.5: AWS OIDC configuration step
-- [ ] E2.6: GCP OIDC configuration step
-- [ ] E2.7: Azure OIDC configuration step
-- [ ] E2.8: Default branch guard (use `github.event.repository.default_branch`)
-- [ ] E2.9: Push step with `assay evidence push`
-- [ ] E2.10: Add `bundle_url` output
-- [ ] E2.11: Document IAM setup per provider (incl. Azure federated credentials)
-- [ ] E2.12: E2E test with test bucket (AWS, GCP; Azure optional)
+### Epic 2: BYOS Push + OIDC (P2) ✅
 
-### Epic 3: Artifact Attestation (P3)
+- [x] E2.1: Add `store`, `store_provider`, `store_role`, `store_region` inputs
+- [x] E2.2: Add Azure inputs (`azure_client_id`, `azure_tenant_id`, `azure_subscription_id`)
+- [x] E2.3: Store URL validation (fail-closed)
+- [x] E2.4: Store role/identity validation (required inputs per provider)
+- [x] E2.5: AWS OIDC configuration step
+- [x] E2.6: GCP OIDC configuration step
+- [x] E2.7: Azure OIDC configuration step
+- [x] E2.8: Default branch guard (use `github.event.repository.default_branch`)
+- [x] E2.9: Push step with `assay evidence push`
+- [x] E2.10: Add `bundle_url` output
+- [x] E2.11: Document IAM setup per provider (incl. Azure federated credentials)
+- [x] E2.12: OIDC auto-detection test (`test-oidc-detection`)
 
-- [ ] E3.1: Add `attest` input
-- [ ] E3.2: Integrate `actions/attest-build-provenance@v3`
-- [ ] E3.3: Default branch guard (use `github.event.repository.default_branch`)
-- [ ] E3.4: Add `attestation_id`, `attestation_url`, `attestation_bundle_path` outputs
-- [ ] E3.5: Bind `subject-path` to `steps.process.outputs.reports_dir`
-- [ ] E3.6: Job Summary attestation section
-- [ ] E3.7: Attestation availability detection (plan/visibility check)
-- [ ] E3.8: Job Summary warning when attestation unavailable/skipped
-- [ ] E3.9: Document permission requirements (`attestations: write`, `id-token: write`)
-- [ ] E3.10: Document verification command (`gh attestation verify`)
-- [ ] E3.11: Test attestation generation (public repo)
+### Epic 3: Artifact Attestation (P3) ✅
 
-### Epic 4: Coverage Badge (P4)
+- [x] E3.1: Add `attest` input
+- [x] E3.2: Integrate `actions/attest-build-provenance@v3`
+- [x] E3.3: Default branch guard (use `github.event.repository.default_branch`)
+- [x] E3.4: Add `attestation_id`, `attestation_url`, `attestation_bundle_path` outputs
+- [x] E3.5: Bind `subject-path` to `steps.process.outputs.reports_dir`
+- [x] E3.6: Job Summary attestation section
+- [x] E3.7: Attestation availability detection (plan/visibility check)
+- [x] E3.8: Job Summary warning when attestation unavailable/skipped
+- [x] E3.9: Document permission requirements (`attestations: write`, `id-token: write`)
+- [x] E3.10: Document verification command (`gh attestation verify`)
+- [x] E3.11: Attestation gating test (`test-attestation-gating`)
 
-- [ ] E4.1: Add `badge_gist` input
-- [ ] E4.2: Default branch guard (use `github.event.repository.default_branch`)
-- [ ] E4.3: Integrate `schneegans/dynamic-badges-action`
-- [ ] E4.4: Implement coverage calculation per §4.4 (tools_with_decisions / tools_observed)
-- [ ] E4.5: Handle multi-bundle aggregation (union, dedupe)
-- [ ] E4.6: Add `coverage_percent` output
-- [ ] E4.7: Document GIST_TOKEN requirements (fine-grained PAT, `gist` scope)
-- [ ] E4.8: Test badge update
+### Epic 4: Coverage Badge (P4) ✅
 
-### Epic 5: Documentation & Release
+- [x] E4.1: Add `badge_gist` input
+- [x] E4.2: Default branch guard (use `github.event.repository.default_branch`)
+- [x] E4.3: Integrate `schneegans/dynamic-badges-action`
+- [x] E4.4: Implement coverage calculation per §4.4 (tools_with_decisions / tools_observed)
+- [x] E4.5: Handle multi-bundle aggregation (union, dedupe)
+- [x] E4.6: Add `coverage_percent` output
+- [x] E4.7: Document GIST_TOKEN requirements (fine-grained PAT, `gist` scope)
+- [x] E4.8: Coverage calculation test (`test-coverage-formula`)
 
-- [ ] E5.1: Update README with all new inputs/outputs
-- [ ] E5.2: Add OIDC setup guides (AWS, GCP, Azure)
-- [ ] E5.3: Add compliance pack usage examples
-- [ ] E5.4: Add attestation verification guide
-- [ ] E5.5: Update Marketplace listing
-- [ ] E5.6: Release notes
+### Epic 5: Documentation & Release ✅
+
+- [x] E5.1: Update README with all new inputs/outputs
+- [x] E5.2: Add OIDC setup guides (AWS, GCP, Azure)
+- [x] E5.3: Add compliance pack usage examples
+- [x] E5.4: Add attestation verification guide
+- [x] E5.5: Update Marketplace listing (pending)
+- [x] E5.6: Release notes (CHANGELOG.md v2.12.0)
 
 ---
 

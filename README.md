@@ -169,9 +169,25 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 - uses: Rul1an/assay-action@v2
 ```
 
-Zero-config evidence verification. SARIF integration with GitHub Security tab.
+Zero-config evidence verification. Native GitHub Security tab integration.
 
-See [GitHub Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security).
+**v2.1 features:**
+- Compliance packs (`pack: eu-ai-act-baseline`)
+- BYOS push with OIDC (`store: s3://bucket/evidence`)
+- Artifact attestation (`attest: true`)
+- Coverage badges
+
+```yaml
+# Full example
+- uses: Rul1an/assay-action@v2
+  with:
+    pack: eu-ai-act-baseline
+    store: s3://my-bucket/evidence
+    store_role: arn:aws:iam::123456789:role/AssayRole
+    attest: true
+```
+
+See [GitHub Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security) | [Guide](docs/guides/github-action.md).
 
 ## Configuration
 

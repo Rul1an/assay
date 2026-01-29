@@ -1,9 +1,12 @@
 # ADR-018: GitHub Action v2.1 - Attestation, OIDC & Compliance
 
-**Status:** Proposed
+**Status:** Accepted (implemented v2.12.0)
 **Date:** 2026-01-29
 **Deciders:** @Rul1an
 **Supersedes:** Extends ADR-014 (GitHub Action v2)
+
+> **Implementation**: See [SPEC-GitHub-Action-v2.1](./SPEC-GitHub-Action-v2.1.md) for full specification.
+> **Contract Tests**: `.github/workflows/action-tests.yml` validates all v2.1 features.
 
 ## Context
 
