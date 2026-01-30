@@ -96,7 +96,8 @@ fn bench_suite_run_worstcase(c: &mut Criterion) {
         group.sample_size(20);
     }
 
-    group.bench_function("file_backed_wal_worstcase", |b: &mut Bencher<'_>| {
+    // Short ID so Criterion doesn't wrap; Bencher rust_criterion expects "id time: [...]" on one line.
+    group.bench_function("fb_wal", |b: &mut Bencher<'_>| {
         b.iter(|| {
             let dir = TempDir::new().unwrap();
             let (eval, trace, db) = write_worstcase_fixtures(&dir);
