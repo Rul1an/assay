@@ -62,4 +62,5 @@ extend-exclude = [
     "**/vmlinux.rs",
     "**/traces/*.jsonl",
     "**/*.jsonl",
+    "**/PERFORMANCE-ASSESSMENT.md",
 ]

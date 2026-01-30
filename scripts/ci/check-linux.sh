@@ -32,8 +32,8 @@ run_multipass_check() {
 
   # Execute in VM. Assumes repo available at $WORKDIR in VM.
   # (Mount or git clone inside VM; see notes below.)
-  # NOTE: We only run clippy on pre-push (not tests) to keep iteration fast.
-  # Full tests run in CI on the self-hosted runner.
+  # NOTE: Full clippy in VM can take 2–5 min on cold/heavy build; script times out at 180s.
+  # Use ASSAY_LINUX_CHECK_MODE=target for faster cross-compile-only check (no VM).
   timeout 180 multipass exec "$VM_NAME" -- bash -lc "
     export PATH=\"\$HOME/.cargo/bin:\$PATH\"
     if [ -f \"\$HOME/.cargo/env\" ]; then . \"\$HOME/.cargo/env\"; fi
