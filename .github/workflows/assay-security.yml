@@ -10,6 +10,8 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   security-check:
     runs-on: ubuntu-latest

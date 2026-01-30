@@ -6,11 +6,25 @@ on:
       - "examples/baseline-gate/**"
       - ".github/workflows/baseline-gate-demo.yml"
 
+permissions: {}
+
 jobs:
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Assay store (baseline-gate)
+        id: assay-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            examples/baseline-gate/.eval
+            examples/baseline-gate/.assay
+          key: assay-baseline-gate-${{ runner.os }}-${{ hashFiles('examples/baseline-gate/eval.yaml', 'examples/baseline-gate/traces/run.jsonl') }}
+          restore-keys: assay-baseline-gate-${{ runner.os }}-
 
       - name: Fetch baseline from base branch (anti-tamper)
         shell: bash
@@ -40,3 +54,9 @@ jobs:
           # 2. Check for regression against baseline
           $ASSAY_BIN baseline check \
             --baseline baseline.json
+
+      - name: Prove cache hit (job summary)
+        if: always()
+        run: |
+          echo "cache-hit=${{ steps.assay-cache.outputs.cache-hit }}"
+          echo "cache-hit=${{ steps.assay-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"

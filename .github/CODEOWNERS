@@ -1,0 +1,14 @@
+# CODEOWNERS — require review for supply-chain and release-critical paths.
+# Used with branch protection: "Require review from Code Owners".
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Workflows, releases, supply-chain
+/.github/workflows/     @Rul1an
+/.github/workflows/release.yml   @Rul1an
+/assay-action/          @Rul1an
+/infra/                 @Rul1an
+
+# Security policy / config
+/assay.yaml             @Rul1an
+/policy.yaml            @Rul1an
+/examples/              @Rul1an

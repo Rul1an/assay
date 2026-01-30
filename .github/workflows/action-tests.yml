@@ -6,12 +6,16 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions: {}
+
 jobs:
   # ===========================================================================
   # Test 1: Pack lint with eu-ai-act-baseline
   # ===========================================================================
   pack_lint_baseline:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +99,8 @@ jobs:
   # ===========================================================================
   fork_pr_sarif_skip:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -194,6 +200,8 @@ jobs:
   # ===========================================================================
   attestation_conditional:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -280,6 +288,8 @@ jobs:
   # ===========================================================================
   coverage_calculation:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -376,6 +386,8 @@ jobs:
 
   export_baseline_artifact:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 

@@ -24,6 +24,9 @@ on:
         description: 'Version tag (e.g., v1.1.0)'
         required: true
 
+# Default deny; each job declares minimal permissions.
+permissions: {}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -35,6 +38,8 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -193,6 +198,7 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
 
@@ -276,9 +282,10 @@ jobs:
     needs: [build]
     # Manual check only, to prevent release blocking on runner availability
     if: github.event_name == 'workflow_dispatch'
-    # Manual check only; self-hosted runner optional
     runs-on: [self-hosted]
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -313,6 +320,7 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     if: "!contains(github.ref, '-rc') && !contains(github.ref, '-beta')"
+    environment: crates
     permissions:
       id-token: write
       contents: read
@@ -344,6 +352,8 @@ jobs:
   wheels:
     name: Build Wheels
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -380,8 +390,9 @@ jobs:
     needs: [release, wheels]
     runs-on: ubuntu-latest
     if: "!contains(github.ref, '-rc') && !contains(github.ref, '-beta')"
+    environment: pypi
     permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write  # Required for PyPI trusted publishing
 
     steps:
       - uses: actions/download-artifact@v4
