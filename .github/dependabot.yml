@@ -40,6 +40,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "rand_core"
         update-types: ["version-update:semver-major"]
+      # nix 0.31 triggers Clippy ICE (Internal Compiler Error)
+      # Revisit when Clippy is updated or nix stabilizes
+      - dependency-name: "nix"
+        update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"
