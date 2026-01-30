@@ -1,7 +1,8 @@
 # ADR-019: PR Gate 2026 SOTA — Implementation Plan v1
 
-**Status:** Proposed
+**Status:** Partially Implemented
 **Date:** 2026-01
+**Last Updated:** 2026-01-30
 **Extends:** ADR-004 (exit code 3, judge strategy); complements ADR-017 (main store only; ADR-017 covers MandateStore WAL).
 
 **Related:** [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [ADR-003 Gate Semantics](./ADR-003-Gate-Semantics.md), [ADR-014 GitHub Action v2](./ADR-014-GitHub-Action-v2.md), [ADR-018 GitHub Action v2.1](./ADR-018-GitHub-Action-v2.1.md)
@@ -108,7 +109,9 @@ A PR gate that teams do not turn off because it is:
 - sqlite_busy_count == 0 under standard concurrency configuration.
 - Throughput: at least 5k inserts/sec sustained in a synthetic benchmark (no tail spikes/locks).
 
-**Status: opgelost (met scope)** — Zie [PERFORMANCE-ASSESSMENT](../PERFORMANCE-ASSESSMENT.md). Voor de **huidige worstcase workload + parallelmatrix** (zoals gemeten) is P0.3 opgelost: batching (insert_results_batch aan het einde van de run) + BEGIN IMMEDIATE + busy handler; store_wait_ms (parallel 16) daalde van 27→3 ms (median), 28→5 ms (p95); wall p95 van 50→34 ms. **Scope:** Opgelost voor deze workload; niet universeel bewezen voor andere workloads (grotere payloads, meerdere readers, CI filesystem jitter). **Writer-queue + bounded channel** blijft als contingency/“next level” voor wanneer store_wait_ms weer oploopt, meer write-paths bijkomen, of meerdere DB consumers (bijv. background ingest / parallel suites). Gebruik dan een **bounded** mpsc (backpressure); unbounded is een perf/memory footgun.
+**Status: opgelost + CI gate operationeel** — Zie [PERFORMANCE-ASSESSMENT](../PERFORMANCE-ASSESSMENT.md). Voor de **huidige worstcase workload + parallelmatrix** (zoals gemeten) is P0.3 opgelost: batching (insert_results_batch aan het einde van de run) + BEGIN IMMEDIATE + busy handler; store_wait_ms (parallel 16) daalde van 27→3 ms (median), 28→5 ms (p95); wall p95 van 50→34 ms. **Scope:** Opgelost voor deze workload; niet universeel bewezen voor andere workloads (grotere payloads, meerdere readers, CI filesystem jitter). **Writer-queue + bounded channel** blijft als contingency/“next level” voor wanneer store_wait_ms weer oploopt, meer write-paths bijkomen, of meerdere DB consumers (bijv. background ingest / parallel suites). Gebruik dan een **bounded** mpsc (backpressure); unbounded is een perf/memory footgun.
+
+**Bencher CI gate (jan 2026):** Production-grade thresholds operationeel — percentage test 25% upper boundary, `--err` voor hard fail. Nightly forensic met tail_ratio/sqlite_busy_count monitoring via BMF JSON → Bencher custom measures. Zie `perf_main.yml`, `perf_pr.yml`, `perf_nightly.yml`.
 
 ---
 
