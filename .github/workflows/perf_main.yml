@@ -34,6 +34,7 @@ jobs:
         with:
           components: rustfmt
       - uses: bencherdev/bencher@main
+      # script -q -c "..." /dev/null: Criterion prints timing only when stdout is a TTY; bencher run pipes stdout so we fake a TTY so Bencher receives benchmarks (no "No benchmarks found!").
       - name: Criterion (store_write_heavy)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
@@ -52,7 +53,7 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- cargo bench -p assay-core --bench store_write_heavy
+            -- script -q -c "cargo bench -p assay-core --bench store_write_heavy" /dev/null
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
@@ -71,4 +72,4 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- cargo bench -p assay-cli --bench suite_run_worstcase
+            -- script -q -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null

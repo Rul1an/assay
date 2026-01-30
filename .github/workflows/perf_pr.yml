@@ -51,7 +51,7 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- cargo bench -p assay-core --bench store_write_heavy
+            -- script -q -c "cargo bench -p assay-core --bench store_write_heavy" /dev/null
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
@@ -69,4 +69,4 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- cargo bench -p assay-cli --bench suite_run_worstcase
+            -- script -q -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null

@@ -667,7 +667,7 @@ Zie ook: [Bencher: Create an API Token](https://bencher.dev/docs/how-to/claim/#c
 
 ### Adapter outputs + Criterion flags + VCR hygiene
 
-- **Criterion:** Bencher-adapter `rust_criterion` verwacht Criterion stdout; meet `latency` (ns). Gebruik altijd `--bench <name> -- …` voor extra args (bijv. `-- --quick`).
+- **Criterion:** Bencher-adapter `rust_criterion` verwacht Criterion stdout; meet `latency` (ns). Gebruik altijd `--bench <name> -- …` voor extra args (bijv. `-- --quick`). In CI onderdrukt Criterion output als stdout geen TTY is; daarom draaien we `cargo bench` binnen `script -q -c "..." /dev/null` zodat Bencher de timing-lijnen ontvangt (geen "No benchmarks found!").
 - **Hyperfine:** Bencher kan `--file results.json` (Hyperfine JSON) innemen voor e2e-tracking.
 - **VCR-hygiene:** Cassette-store in repo: scrub secrets/PII; matching op method + url + body (gecanonicaliseerde JSON), niet op Authorization; CI default = replay, record alleen lokaal.
 
