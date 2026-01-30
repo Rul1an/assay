@@ -40,7 +40,7 @@ jobs:
       - name: Debug Criterion output (store_write_heavy)
         run: |
           set -euo pipefail
-          script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null | sed -n '1,120p'
+          script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null | grep -v "Gnuplot not found" | sed -n '1,120p'
       # script -q -e -c "..." 2>&1 /dev/null: pseudo-TTY + stderr→stdout so Bencher's rust_criterion adapter sees all Criterion output.
       - name: Criterion (store_write_heavy)
         env:
@@ -61,7 +61,7 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null
+            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null | grep -v "Gnuplot not found"'
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
       - name: Criterion (suite_run_worstcase)
@@ -83,6 +83,6 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null
+            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null | grep -v "Gnuplot not found"'
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

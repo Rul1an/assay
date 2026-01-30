@@ -73,6 +73,6 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null
+            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null | grep -v "Gnuplot not found"'
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
