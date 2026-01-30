@@ -574,7 +574,7 @@ Als je alles wat al geïmplementeerd is meerekent (store_metrics, pragmas, wal_c
 | 5 | **Busy handler/timeout in doc** | ✅ In dit doc toegevoegd: sectie “Busy handler en checkpoint” — PRAGMA vs custom handler, één per connection, waarom PRAGMA 0 kan zijn; onze keuze + hoe we loggen. |
 | 6 | **CI cache voor perf jobs** | ✅ Perf-job in ci.yml logt **cache-hit** (rust-cache) in job summary; sectie “CI cache voor perf jobs” in dit doc. Norm: waar cache leeft (.assay vs target/) en wat gecached wordt. |
 
-**Kort:** De **performance assessment is volledig uitvoerbaar**. VCR-middleware is geïmplementeerd (`vcr/mod.rs`) en geïntegreerd met OpenAI providers (`with_vcr()`/`from_env()`). Bencher is operationeel. Optionele stap: lokaal cassettes opnemen met `ASSAY_VCR_MODE=record` + API key.
+**Kort:** De **performance assessment is 100% compleet**. Alle tooling is operationeel, VCR-middleware geïntegreerd met providers, en cassettes opgenomen (`cassettes/openai/{embeddings,judge}/`).
 
 ---
 

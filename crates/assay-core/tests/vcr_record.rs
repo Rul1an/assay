@@ -86,6 +86,74 @@ async fn record_judge_cassettes() {
     println!("Cassettes saved to tests/fixtures/perf/semantic_vcr/cassettes/judge/");
 }
 
+/// Verify VCR replay works with recorded cassettes (no network).
+///
+/// This test should pass in CI with ASSAY_VCR_MODE=replay_strict.
+#[tokio::test]
+async fn verify_vcr_replay() {
+    let cassette_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(CASSETTE_DIR);
+
+    // Force replay_strict mode
+    let mut vcr = VcrClient::new(VcrMode::ReplayStrict, cassette_dir);
+
+    if vcr.cassette_count() == 0 {
+        println!("⚠️  No cassettes found - skipping replay test");
+        println!("   Run with ASSAY_VCR_MODE=record to create cassettes first");
+        return;
+    }
+
+    println!("Loaded {} cassettes", vcr.cassette_count());
+
+    // Test embedding replay
+    let url = "https://api.openai.com/v1/embeddings";
+    let body = json!({
+        "input": "Reference text for similarity.",
+        "model": "text-embedding-3-small",
+        "encoding_format": "float"
+    });
+
+    let resp = vcr
+        .post_json(url, &body, None)
+        .await
+        .expect("Embedding replay should succeed");
+    assert!(resp.from_cache, "Embedding should be from cache");
+    assert!(resp.is_success(), "Embedding status should be 200");
+    println!(
+        "✅ Embedding replay: status={}, from_cache={}",
+        resp.status, resp.from_cache
+    );
+
+    // Test judge replay
+    let url = "https://api.openai.com/v1/chat/completions";
+    let body = json!({
+        "model": "gpt-4o-mini",
+        "messages": [{
+            "role": "user",
+            "content": "Evaluate the faithfulness of this response. Score from 0.0 to 1.0.\n\nResponse: The answer is faithful to the source.\n\nReturn only a JSON object with 'score' and 'reason' fields."
+        }],
+        "temperature": 0.0,
+        "max_tokens": 256
+    });
+
+    let resp = vcr
+        .post_json(url, &body, None)
+        .await
+        .expect("Judge replay should succeed");
+    assert!(resp.from_cache, "Judge should be from cache");
+    assert!(resp.is_success(), "Judge status should be 200");
+    println!(
+        "✅ Judge replay: status={}, from_cache={}",
+        resp.status, resp.from_cache
+    );
+
+    println!("\n✅ VCR replay verification complete!");
+}
+
 /// Record all cassettes in one test.
 ///
 /// This creates cassettes for the semantic_vcr fixture:
