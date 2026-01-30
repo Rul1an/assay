@@ -33,6 +33,9 @@ updates:
       # Ignore patch versions for stable deps to reduce noise
       - dependency-name: "*"
         update-types: ["version-update:semver-patch"]
+      # rand 0.9 requires coordinated updates with ed25519-dalek (crypto RNG trait changes)
+      - dependency-name: "rand"
+        update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"
