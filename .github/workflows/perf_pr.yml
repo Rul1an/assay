@@ -56,6 +56,10 @@ jobs:
                 --testbed ubuntu-latest \
                 --adapter rust_criterion \
                 --ci-id store_write_heavy \
+                --threshold-measure latency \
+                --threshold-test t_test \
+                --threshold-max-sample-size 64 \
+                --threshold-upper-boundary 0.99 \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

@@ -708,6 +708,48 @@ cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
 
 **Robuustheid later:** Overweeg overstap naar json-adapter + BMF file (Criterion JSON of eigen export) zodat wijzigingen in Criterion-output de ingest niet breken.
 
+### Bencher policy: reports, warn vs fail, thresholds
+
+**A) Eén report vs meerdere:** Huidige keuze = **meerdere reports** (één per `bencher run`). Voordeel: duidelijk per workload, thresholds en failures per bench los. Nadeel: twee reports bekijken in Bencher. Alternatief (één report) zou aggregator-bench of BMF/JSON-combinatie vragen; aanbevolen is meerdere reports aanhouden tot PR-gating stabiel is.
+
+**B) Warn vs fail:**
+- **perf_pr.yml:** warning-only (geen `--err`). Bencher post vergelijking als check/comment; bij regressie waarschuwing, merge niet geblokkeerd.
+- **Later (optioneel):** aparte workflow `perf_pr_gate.yml` die alleen draait op label `perf-gate` of “ready for review”, mét `--err`, zodat regressies de merge blokkeren. Pas toevoegen zodra ruis onder controle is.
+
+**C) Thresholds per benchmark:** Upper boundary staat nu op Bencher-default (o.a. upper_boundary 0.99). Voor strikte policy: bv. +10% warn, +20% fail; per benchmark overrulen in Bencher UI als één bench inherent noisy is. Thresholds worden van main gecloned naar PR via `--start-point-clone-thresholds` en `--start-point-reset`.
+
+**Exacte PR bencher run-regels (perf_pr.yml, voor diff/warning-policy):**
+
+```bash
+# PR step 1: store_write_heavy
+cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+  | grep -v "Gnuplot not found" \
+  | bencher run \
+      --project "$BENCHER_PROJECT" --token "$BENCHER_API_TOKEN" \
+      --branch "$GITHUB_HEAD_REF" \
+      --start-point "$GITHUB_BASE_REF" --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+      --start-point-clone-thresholds --start-point-reset \
+      --testbed ubuntu-latest --adapter rust_criterion --ci-id store_write_heavy \
+      --threshold-measure latency --threshold-test t_test \
+      --threshold-max-sample-size 64 --threshold-upper-boundary 0.99 \
+      --github-actions "$GITHUB_TOKEN"
+
+# PR step 2: suite_run_worstcase
+cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
+  | grep -v "Gnuplot not found" \
+  | bencher run \
+      --project "$BENCHER_PROJECT" --token "$BENCHER_API_TOKEN" \
+      --branch "$GITHUB_HEAD_REF" \
+      --start-point "$GITHUB_BASE_REF" --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+      --start-point-clone-thresholds --start-point-reset \
+      --testbed ubuntu-latest --adapter rust_criterion --ci-id suite_run_worstcase \
+      --threshold-measure latency --threshold-test t_test \
+      --threshold-max-sample-size 64 --threshold-upper-boundary 0.99 \
+      --github-actions "$GITHUB_TOKEN"
+```
+
+(Voor consistent +10% warn / +20% fail: threshold-waarden in Bencher UI of via API aanpassen; voor hard-fail gate: kopie van perf_pr.yml met `--err` en bv. `if: contains(github.event.pull_request.labels.*.name, 'perf-gate')`.)
+
 ### summary.json-velden (phase + store)
 
 Vaste velden zodat elke run vergelijkbaar is en regressies automatisch te detecteren:
