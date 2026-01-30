@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 libc = "0.2"
-nix = { version = "0.27", features = ["fs", "ioctl"], optional = true }
+nix = { version = "0.31", features = ["fs", "ioctl"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"], optional = true }
 chrono = { workspace = true, optional = true }

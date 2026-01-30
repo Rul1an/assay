@@ -53,7 +53,7 @@ globset = "0.4"
 # Discovery dependencies
 sysinfo = { version = "0.30", optional = true }
 dirs = { version = "5", optional = true }
-nix = { version = "0.27", features = ["signal", "process"], optional = true }
+nix = { version = "0.31", features = ["signal", "process"], optional = true }
 schemars = "1.2.0"
 
 # SQLite: always use bundled to avoid cross-platform/cross-compilation issues
