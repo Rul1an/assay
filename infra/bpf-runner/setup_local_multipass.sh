@@ -70,7 +70,15 @@ echo "⏳ Waiting for Cloud-Init completion (Kernel params & Updates)..."
 # SOTA: Wait for cloud-init to signal completion
 multipass exec "$VM_NAME" -- cloud-init status --wait
 
-# 4. Final Instructions
+# 4. Install free_disk cron on VM (run every hour to prevent "No space left on device")
+echo "📋 Installing free_disk cron on VM..."
+multipass exec "$VM_NAME" -- sudo mkdir -p /opt/actions-runner/scripts
+multipass exec "$VM_NAME" -- sudo tee /opt/actions-runner/scripts/free_disk.sh < infra/bpf-runner/free_disk.sh
+multipass exec "$VM_NAME" -- sudo chmod +x /opt/actions-runner/scripts/free_disk.sh
+multipass exec "$VM_NAME" -- bash -c '(crontab -l 2>/dev/null | grep -q free_disk.sh) || (crontab -l 2>/dev/null; echo "0 * * * * /opt/actions-runner/scripts/free_disk.sh >> /var/log/assay-free_disk.log 2>&1") | crontab -'
+echo "   -> Hourly free_disk cron installed."
+
+# 5. Final Instructions
 IP=$(multipass info "$VM_NAME" | grep IPv4 | awk '{print $2}')
 echo ""
 echo "========================================================================"

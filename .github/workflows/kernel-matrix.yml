@@ -141,12 +141,33 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  cleanup-runner:
+    name: Free disk (before matrix)
+    needs: [lint, build-artifacts]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 5
+    steps:
+      - name: Free disk (always before matrix-test)
+        shell: bash
+        run: |
+          set +e
+          echo "=== Disk before ==="
+          df -h / || true
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo apt-get clean 2>/dev/null || true
+          sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* 2>/dev/null || true
+          RUNNER_DIR="/opt/actions-runner"
+          sudo rm -rf "${RUNNER_DIR}/_work/_temp" "${RUNNER_DIR}/_work/_tool" "${RUNNER_DIR}/_work/_actions" 2>/dev/null || true
+          echo "=== Disk after ==="
+          df -h / || true
+
   matrix-test:
     permissions:
       contents: read
       actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
-    needs: [lint, build-artifacts]
+    needs: [lint, build-artifacts, cleanup-runner]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10

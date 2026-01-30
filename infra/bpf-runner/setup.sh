@@ -84,6 +84,16 @@ fi
 mkdir -p "$RUNNER_DIR"
 chown "$RUNNER_USER":"$RUNNER_USER" "$RUNNER_DIR"
 
+# 5a. Install free_disk cron (run every hour to prevent "No space left on device")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$RUNNER_DIR/scripts"
+cp "$SCRIPT_DIR/free_disk.sh" "$RUNNER_DIR/scripts/free_disk.sh"
+chmod +x "$RUNNER_DIR/scripts/free_disk.sh"
+if ! (crontab -l 2>/dev/null | grep -q "free_disk.sh"); then
+    (crontab -l 2>/dev/null; echo "0 * * * * $RUNNER_DIR/scripts/free_disk.sh >> /var/log/assay-free_disk.log 2>&1") | crontab -
+    echo "   -> Installed hourly cron: $RUNNER_DIR/scripts/free_disk.sh"
+fi
+
 if [ ! -f "$RUNNER_DIR/.runner" ]; then
     echo "   -> Downloading Runner Agent..."
     # Dynamic latest version fetch would be SOTA, but hardcoding known stable for reliability
