@@ -44,6 +44,8 @@ updates:
       # Revisit when Clippy is updated or nix stabilizes
       - dependency-name: "nix"
         update-types: ["version-update:semver-major"]
+      # assay-ebpf pins aya-ebpf and aya-log-ebpf to the same git tag; bump both together manually
+      - dependency-name: "aya-log-ebpf"
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"
