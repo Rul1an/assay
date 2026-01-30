@@ -70,6 +70,10 @@ landlock = "=0.4.3"
 
 
 
+[[bench]]
+name = "suite_run_worstcase"
+harness = false
+
 [dev-dependencies]
 tempfile = "3"
 regex = "1"

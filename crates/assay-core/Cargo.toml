@@ -68,6 +68,10 @@ libc = "0.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", optional = true }
 
+[[bench]]
+name = "store_write_heavy"
+harness = false
+
 [dev-dependencies]
 tempfile = "3.23.0"
 serial_test = "3"
