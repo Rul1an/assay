@@ -10,7 +10,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 
 | Item | Bron | Actie |
 |------|------|--------|
-| **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | Third-party actions staan nu op @v1/@v2/@v4/@v5 of @main. Aanbevolen: high-risk eerst (Bencher, gh-release, upload-sarif, test-reporter, actions/checkout, dtolnay/rust-toolchain) op commit-SHA zetten; daarna in Settings → Actions "Require SHA pinning" aanzetten. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md). |
+| ✅ **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | **Gedaan:** Alle 16 third-party actions zijn SHA-pinned. Dependabot.yml toegevoegd voor wekelijkse SHA-bump PRs. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md) voor de volledige mapping. |
 | **Allowed actions beperken** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: "Allow [org] and verified creators" of allowlist i.p.v. "Allow all actions". |
 | **Fork PR policy vastleggen** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: (1) Draaien fork-PR workflows? (2) Read-only of write token? (3) Secrets geblokkeerd? Documenteer keuze (screenshot of één regel). |
 | **GHAS** | REVIEWER-PACK sectie 2 | Beslissen: Code scanning (CodeQL), Secret scanning (push protection), Dependency review aan/uit? |
