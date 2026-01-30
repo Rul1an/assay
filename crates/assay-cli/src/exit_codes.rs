@@ -245,3 +245,171 @@ impl RunOutcome {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_exit_code_constants() {
+        assert_eq!(EXIT_SUCCESS, 0);
+        assert_eq!(EXIT_TEST_FAILURE, 1);
+        assert_eq!(EXIT_CONFIG_ERROR, 2);
+        assert_eq!(EXIT_INFRA_ERROR, 3);
+        assert_eq!(EXIT_WOULD_BLOCK, 4);
+    }
+
+    #[test]
+    fn test_reason_code_exit_mapping() {
+        // Success maps to 0
+        assert_eq!(ReasonCode::Success.exit_code(), EXIT_SUCCESS);
+
+        // Config errors map to 2
+        assert_eq!(ReasonCode::ECfgParse.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(ReasonCode::ETraceNotFound.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(ReasonCode::EMissingConfig.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(ReasonCode::EBaselineInvalid.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(ReasonCode::EPolicyParse.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(ReasonCode::EInvalidArgs.exit_code(), EXIT_CONFIG_ERROR);
+
+        // Infra errors map to 3
+        assert_eq!(ReasonCode::EJudgeUnavailable.exit_code(), EXIT_INFRA_ERROR);
+        assert_eq!(ReasonCode::ERateLimit.exit_code(), EXIT_INFRA_ERROR);
+        assert_eq!(ReasonCode::EProvider5xx.exit_code(), EXIT_INFRA_ERROR);
+        assert_eq!(ReasonCode::ETimeout.exit_code(), EXIT_INFRA_ERROR);
+        assert_eq!(ReasonCode::ENetworkError.exit_code(), EXIT_INFRA_ERROR);
+
+        // Test failures map to 1
+        assert_eq!(ReasonCode::ETestFailed.exit_code(), EXIT_TEST_FAILURE);
+        assert_eq!(ReasonCode::EPolicyViolation.exit_code(), EXIT_TEST_FAILURE);
+        assert_eq!(
+            ReasonCode::ESequenceViolation.exit_code(),
+            EXIT_TEST_FAILURE
+        );
+        assert_eq!(ReasonCode::EArgSchema.exit_code(), EXIT_TEST_FAILURE);
+    }
+
+    #[test]
+    fn test_reason_code_as_str() {
+        assert_eq!(ReasonCode::Success.as_str(), "");
+        assert_eq!(ReasonCode::ECfgParse.as_str(), "E_CFG_PARSE");
+        assert_eq!(ReasonCode::ETraceNotFound.as_str(), "E_TRACE_NOT_FOUND");
+        assert_eq!(ReasonCode::EMissingConfig.as_str(), "E_MISSING_CONFIG");
+        assert_eq!(ReasonCode::EBaselineInvalid.as_str(), "E_BASELINE_INVALID");
+        assert_eq!(ReasonCode::EPolicyParse.as_str(), "E_POLICY_PARSE");
+        assert_eq!(ReasonCode::EInvalidArgs.as_str(), "E_INVALID_ARGS");
+        assert_eq!(
+            ReasonCode::EJudgeUnavailable.as_str(),
+            "E_JUDGE_UNAVAILABLE"
+        );
+        assert_eq!(ReasonCode::ERateLimit.as_str(), "E_RATE_LIMIT");
+        assert_eq!(ReasonCode::EProvider5xx.as_str(), "E_PROVIDER_5XX");
+        assert_eq!(ReasonCode::ETimeout.as_str(), "E_TIMEOUT");
+        assert_eq!(ReasonCode::ENetworkError.as_str(), "E_NETWORK_ERROR");
+        assert_eq!(ReasonCode::ETestFailed.as_str(), "E_TEST_FAILED");
+        assert_eq!(ReasonCode::EPolicyViolation.as_str(), "E_POLICY_VIOLATION");
+        assert_eq!(
+            ReasonCode::ESequenceViolation.as_str(),
+            "E_SEQUENCE_VIOLATION"
+        );
+        assert_eq!(ReasonCode::EArgSchema.as_str(), "E_ARG_SCHEMA");
+    }
+
+    #[test]
+    fn test_reason_code_next_step() {
+        // Success returns empty string
+        assert!(ReasonCode::Success.next_step(None).is_empty());
+
+        // Config errors provide actionable next steps
+        assert!(ReasonCode::ECfgParse
+            .next_step(Some("test.yaml"))
+            .contains("test.yaml"));
+        assert!(ReasonCode::ETraceNotFound
+            .next_step(Some("traces/ci.jsonl"))
+            .contains("traces/ci.jsonl"));
+        assert!(ReasonCode::EMissingConfig
+            .next_step(None)
+            .contains("assay init"));
+        assert!(ReasonCode::EBaselineInvalid
+            .next_step(None)
+            .contains("baseline"));
+        assert!(ReasonCode::EPolicyParse
+            .next_step(None)
+            .contains("policy validate"));
+        assert!(ReasonCode::EInvalidArgs.next_step(None).contains("--help"));
+
+        // Infra errors provide recovery guidance
+        assert!(ReasonCode::EJudgeUnavailable
+            .next_step(None)
+            .contains("provider"));
+        assert!(ReasonCode::ERateLimit
+            .next_step(None)
+            .contains("rate limit"));
+        assert!(ReasonCode::EProvider5xx.next_step(None).contains("retry"));
+        assert!(ReasonCode::ETimeout.next_step(None).contains("timeout"));
+        assert!(ReasonCode::ENetworkError
+            .next_step(None)
+            .contains("network"));
+
+        // Test failures point to explain command
+        assert!(ReasonCode::ETestFailed
+            .next_step(None)
+            .contains("assay explain"));
+        assert!(ReasonCode::EPolicyViolation
+            .next_step(None)
+            .contains("explain"));
+        assert!(ReasonCode::ESequenceViolation
+            .next_step(None)
+            .contains("explain"));
+        assert!(ReasonCode::EArgSchema.next_step(None).contains("explain"));
+    }
+
+    #[test]
+    fn test_reason_code_display() {
+        assert_eq!(
+            format!("{}", ReasonCode::ETraceNotFound),
+            "E_TRACE_NOT_FOUND"
+        );
+        assert_eq!(format!("{}", ReasonCode::Success), "");
+    }
+
+    #[test]
+    fn test_run_outcome_success() {
+        let outcome = RunOutcome::success();
+        assert_eq!(outcome.exit_code, EXIT_SUCCESS);
+        assert_eq!(outcome.reason_code, "");
+        assert!(outcome.message.is_none());
+        assert!(outcome.next_step.is_none());
+    }
+
+    #[test]
+    fn test_run_outcome_from_reason() {
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::ETraceNotFound,
+            Some("File not found: test.jsonl".to_string()),
+            Some("test.jsonl"),
+        );
+        assert_eq!(outcome.exit_code, EXIT_CONFIG_ERROR);
+        assert_eq!(outcome.reason_code, "E_TRACE_NOT_FOUND");
+        assert!(outcome.message.as_ref().unwrap().contains("test.jsonl"));
+        assert!(outcome.next_step.as_ref().unwrap().contains("test.jsonl"));
+    }
+
+    #[test]
+    fn test_run_outcome_test_failure() {
+        let outcome = RunOutcome::test_failure(3);
+        assert_eq!(outcome.exit_code, EXIT_TEST_FAILURE);
+        assert_eq!(outcome.reason_code, "E_TEST_FAILED");
+        assert!(outcome.message.as_ref().unwrap().contains("3 test(s)"));
+        assert!(outcome.next_step.as_ref().unwrap().contains("explain"));
+    }
+
+    #[test]
+    fn test_run_outcome_serialization() {
+        let outcome = RunOutcome::test_failure(2);
+        let json = serde_json::to_string(&outcome).unwrap();
+        assert!(json.contains("\"exit_code\":1"));
+        assert!(json.contains("\"reason_code\":\"E_TEST_FAILED\""));
+        assert!(json.contains("2 test(s) failed"));
+    }
+}

@@ -125,6 +125,23 @@ pub struct PhaseTimings {
     pub report_ms: Option<u64>,
 }
 
+impl Provenance {
+    /// Create a new Provenance with version and verify mode
+    fn new(assay_version: &str, verify_enabled: bool) -> Self {
+        Self {
+            assay_version: assay_version.to_string(),
+            verify_mode: if verify_enabled {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            policy_pack_digest: None,
+            baseline_digest: None,
+            trace_digest: None,
+        }
+    }
+}
+
 impl Summary {
     /// Create a success summary
     pub fn success(assay_version: &str, verify_enabled: bool) -> Self {
@@ -134,17 +151,7 @@ impl Summary {
             reason_code: String::new(),
             message: Some("All tests passed".to_string()),
             next_step: None,
-            provenance: Provenance {
-                assay_version: assay_version.to_string(),
-                verify_mode: if verify_enabled {
-                    "enabled".to_string()
-                } else {
-                    "disabled".to_string()
-                },
-                policy_pack_digest: None,
-                baseline_digest: None,
-                trace_digest: None,
-            },
+            provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
         }
@@ -165,17 +172,7 @@ impl Summary {
             reason_code: reason_code.to_string(),
             message: Some(message.to_string()),
             next_step: Some(next_step.to_string()),
-            provenance: Provenance {
-                assay_version: assay_version.to_string(),
-                verify_mode: if verify_enabled {
-                    "enabled".to_string()
-                } else {
-                    "disabled".to_string()
-                },
-                policy_pack_digest: None,
-                baseline_digest: None,
-                trace_digest: None,
-            },
+            provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
         }
