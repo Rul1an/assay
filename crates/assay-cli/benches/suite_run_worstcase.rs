@@ -84,7 +84,8 @@ fn bench_suite_run_worstcase(c: &mut Criterion) {
         return;
     }
 
-    let mut group = c.benchmark_group("suite_run_worstcase");
+    // Short group name "sr" (suite_run) so Criterion ID fits on one line for Bencher parsing.
+    let mut group = c.benchmark_group("sr");
     if std::env::var("QUICK").is_ok() {
         // Criterion 0.5.x requires sample_size >= 10 (assertion n >= 10).
         // Short timing so CI/local finish in ~20–40s; each iteration = full assay run.
@@ -97,7 +98,7 @@ fn bench_suite_run_worstcase(c: &mut Criterion) {
     }
 
     // Short ID so Criterion doesn't wrap; Bencher rust_criterion expects "id time: [...]" on one line.
-    group.bench_function("fb_wal", |b: &mut Bencher<'_>| {
+    group.bench_function("wc", |b: &mut Bencher<'_>| {
         b.iter(|| {
             let dir = TempDir::new().unwrap();
             let (eval, trace, db) = write_worstcase_fixtures(&dir);

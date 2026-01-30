@@ -64,7 +64,8 @@ fn minimal_llm_response(payload_size: usize) -> LlmResponse {
 }
 
 fn bench_store_write_heavy(c: &mut Criterion) {
-    let mut group = c.benchmark_group("store_write_heavy");
+    // Short group name "sw" (store_write) so Criterion ID fits on one line for Bencher parsing.
+    let mut group = c.benchmark_group("sw");
     if std::env::var("QUICK").is_ok() {
         group
             .sample_size(10)
@@ -74,7 +75,7 @@ fn bench_store_write_heavy(c: &mut Criterion) {
     }
 
     // Many result rows per run (insert/txn stress). Short IDs so Criterion doesn't wrap; Bencher rust_criterion expects "id time: [...]" on one line.
-    group.bench_function("cr_50x_400b", |b: &mut Bencher<'_>| {
+    group.bench_function("50x400b", |b: &mut Bencher<'_>| {
         b.iter(|| {
             let (store, _f) = make_store();
             let cfg = minimal_config("bench_50");
@@ -92,7 +93,7 @@ fn bench_store_write_heavy(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("cr_12x_large", |b: &mut Bencher<'_>| {
+    group.bench_function("12xlarge", |b: &mut Bencher<'_>| {
         b.iter(|| {
             let (store, _f) = make_store();
             let cfg = minimal_config("bench_12");
