@@ -79,10 +79,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Run Criterion benches
+      - name: Criterion (store_write_heavy)
         env:
           QUICK: "1"
-        run: cargo bench -p assay-core -p assay-cli --no-fail-fast
+        run: cargo bench -q -p assay-core --bench store_write_heavy
+      - name: Criterion (suite_run_worstcase)
+        env:
+          QUICK: "1"
+        run: cargo bench -q -p assay-cli --bench suite_run_worstcase
       - name: List Criterion output (debug)
         run: |
           echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>}"

@@ -76,6 +76,6 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null
+            -- script -q -e -c "cargo bench -q -p assay-cli --bench suite_run_worstcase" /dev/null
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

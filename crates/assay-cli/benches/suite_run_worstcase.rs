@@ -2,11 +2,14 @@
 //! Generates enough writes so WAL/checkpointing can occur; for P0.3 regression.
 //! Run with: cargo bench -p assay-cli --bench suite_run_worstcase
 //! Requires: assay binary (cargo build --release or CARGO_BIN_EXE_assay when run via cargo bench).
+//!
+//! **Duration:** Each iteration runs a full `assay run` subprocess (12 episodes, file-backed DB).
+//! With QUICK=1 (10 samples, 300ms warm-up, 1s measurement): expect ~20–40s total. Not a hang.
 
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -83,11 +86,14 @@ fn bench_suite_run_worstcase(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("suite_run_worstcase");
     if std::env::var("QUICK").is_ok() {
+        // Criterion 0.5.x requires sample_size >= 10 (assertion n >= 10).
+        // Short timing so CI/local finish in ~20–40s; each iteration = full assay run.
         group
-            .sample_size(5)
-            .measurement_time(Duration::from_secs(2));
+            .sample_size(10)
+            .warm_up_time(Duration::from_millis(300))
+            .measurement_time(Duration::from_secs(1));
     } else {
-        group.sample_size(10);
+        group.sample_size(20);
     }
 
     group.bench_function("file_backed_wal_worstcase", |b: &mut Bencher<'_>| {
@@ -104,6 +110,7 @@ fn bench_suite_run_worstcase(c: &mut Criterion) {
                     "--db",
                     db.as_os_str().to_str().unwrap(),
                 ])
+                .stdin(Stdio::null())
                 .output()
                 .unwrap();
             assert!(out.status.success(), "assay run failed: {:?}", out);

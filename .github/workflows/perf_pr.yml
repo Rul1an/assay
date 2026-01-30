@@ -52,7 +52,7 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "cargo bench -p assay-core --bench store_write_heavy" /dev/null
+            -- script -q -e -c "cargo bench -q -p assay-core --bench store_write_heavy" /dev/null
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
       - name: Criterion (suite_run_worstcase)
@@ -73,6 +73,6 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null
+            -- script -q -e -c "cargo bench -q -p assay-cli --bench suite_run_worstcase" /dev/null
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

@@ -599,7 +599,7 @@ Concrete vertaling naar wat er in dit repo moet komen zodat **performance-regres
 | **bench_suite_run_worstcase** | Runner → Store → report, file-backed WAL; genoeg writes voor checkpointing. | Criterion median/p95. |
 | (uitbreiding) store_insert_single, fingerprint_compute, report_render_junit/sarif | Zie vorige versie van dit doc. | median_ms, p95_ms. |
 
-Plaats: `crates/assay-core/benches/store_write_heavy.rs`, `crates/assay-cli/benches/suite_run_worstcase.rs`. Run: `cargo bench -p assay-core --bench store_write_heavy`, `cargo bench -p assay-cli --bench suite_run_worstcase`. Criterion bewaart history in `target/criterion/`; CI kan `cargo bench` draaien en artifact uploaden, of integratie met Bencher/andere continuous benchmarking.
+Plaats: `crates/assay-core/benches/store_write_heavy.rs`, `crates/assay-cli/benches/suite_run_worstcase.rs`. Run: `cargo bench -p assay-core --bench store_write_heavy`, `cargo bench -p assay-cli --bench suite_run_worstcase`. Criterion bewaart history in `target/criterion/`; CI kan `cargo bench` draaien en artifact uploaden, of integratie met Bencher/andere continuous benchmarking. **Duur:** `suite_run_worstcase` doet per iteratie een volledige `assay run` subprocess (12 episodes, file-backed DB); met QUICK=1 duurt de bench ~20–40s — dat is geen hang.
 
 ### Hyperfine e2e: blessed flow
 
