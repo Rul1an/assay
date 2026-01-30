@@ -63,4 +63,6 @@ extend-exclude = [
     "**/traces/*.jsonl",
     "**/*.jsonl",
     "**/PERFORMANCE-ASSESSMENT.md",
+    "**/CI-ASSESSMENT-TODO.md",
+    "**/WORKFLOWS-OVERVIEW.md",
 ]

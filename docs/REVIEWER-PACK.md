@@ -21,8 +21,8 @@ De **user-github** MCP in Cursor heeft **geen** toegang tot de Actions-API, bran
 
 - **Actions permissions** (`gh api repos/Rul1an/assay/actions/permissions`): `enabled: true`, `allowed_actions: "all"`, **`sha_pinning_required: false`**.
 - **Workflow default permissions** (`gh api repos/Rul1an/assay/actions/permissions/workflow`): **`default_workflow_permissions: "read"`** (read-only default), `can_approve_pull_request_reviews: false`.
-- **Branch protection (main)** (`gh api repos/Rul1an/assay/branches/main/protection`): **Branch not protected** (404). Geen required checks op main.
-- **Rulesets** (`gh api repos/Rul1an/assay/rulesets`): **`[]`** — geen repo rulesets. Bevestigt dat er naast branch protection ook geen rulesets elders gelden (UI kan rulesets tonen; hier is de lijst leeg).
+- **Branch protection (main)** (`gh api repos/Rul1an/assay/branches/main/protection`): **Ingeschakeld.** Required status checks: CI, Smoke Install (E2E), assay-action-contract-tests, MCP Security (Assay); require PR + 1 approval, Code Owner review, geen force-push. Zie [Branch protection setup](BRANCH-PROTECTION-SETUP.md).
+- **Rulesets** (`gh api repos/Rul1an/assay/rulesets`): **`[]`** — geen repo rulesets; classic branch protection wordt gebruikt.
 - **Org-niveau:** Rul1an is een **user**-account (geen org). `gh api orgs/Rul1an/actions/permissions` geeft 404; er is geen org-level override voor allowed actions of SHA-pinning. Repo-instellingen zijn dus leidend.
 - **Secrets** (`gh secret list -R Rul1an/assay`): leeg (geen repo-secrets zichtbaar, of geen rechten). Uit YAML: BENCHER_PROJECT, BENCHER_API_TOKEN (verwacht repo); GITHUB_TOKEN is automatisch.
 - **Environments** (`gh api repos/Rul1an/assay/environments`): **github-pages** (branch_policy, custom_branch_policies: true), **pypi** (geen protection_rules). Geen `environment:` in release/workflow YAML voor publish; pypi-environment bestaat maar wordt niet gebruikt voor approval gate.
@@ -32,7 +32,7 @@ De **user-github** MCP in Cursor heeft **geen** toegang tot de Actions-API, bran
 - **Repo:** `default_branch`: main, `allow_forking`: true, `web_commit_signoff_required`: false, `has_pages`: true, `visibility`: public.
 - **Releases (voor release-run bewijs):** [v2](https://github.com/Rul1an/assay/releases/tag/v2), [v2.12.0](https://github.com/Rul1an/assay/releases/tag/v2.12.0), [v2.11.0](https://github.com/Rul1an/assay/releases/tag/v2.11.0) – open een release en controleer “This workflow run” / link naar de Release workflow.
 - **Recente PR’s (voor PR-run + cache-hit):** [PR #65](https://github.com/Rul1an/assay/pull/65), [PR #64](https://github.com/Rul1an/assay/pull/64), [PR #63](https://github.com/Rul1an/assay/pull/63) – tab **Checks** toont workflow runs en job summary (cache-hit).
-- **CODEOWNERS:** Bestand `.github/CODEOWNERS` **bestaat niet** in de repo (MCP get_file_contents).
+- **CODEOWNERS:** Bestand `.github/CODEOWNERS` **bestaat**; eigenaar o.a. voor `.github/workflows/`, `release.yml`, `assay-action/`, `infra/`, `assay.yaml`, `policy.yaml`, `examples/` (zie repo root).
 
 **Run-links zelf samenstellen:**
 
@@ -709,9 +709,9 @@ Deze sectie vul je aan met screenshots of korte beschrijvingen. Zij bepalen of w
 
 - **Rulesets / Branch protection (main)**
   *(SHA-pinning: indien beschikbaar in org/repo, policy aanzetten zodat alleen actions met volledige SHA zijn toegestaan.)*
-  - [ ] **Branch protection:** gh: **main niet protected** (404). **Rulesets:** gh: **geen** (`[]`). Als dat bewust is: bevestigen en documenteren; anders branch protection of ruleset toevoegen voor required checks.
-  - [ ] **Required status checks** (indien later): welke jobs groen vóór merge? **Require signed commits?** **Require linear history?** **Restrict force-push**?
-  - [ ] **CODEOWNERS / required reviews** (voor `.github/workflows/**`, `release.yml`, `assay-action/**`)? *`.github/CODEOWNERS` bestaat niet (MCP-check).*
+  - [x] **Branch protection:** main is protected via classic branch protection. Required status checks: **CI**, **Smoke Install (E2E)**, **assay-action-contract-tests**, **MCP Security (Assay)**. Geen force-push, geen branch deletion. Zie [BRANCH-PROTECTION-SETUP.md](BRANCH-PROTECTION-SETUP.md).
+  - [ ] **Require signed commits?** **Require linear history?** (optioneel; nu uit.)
+  - [x] **CODEOWNERS / required reviews:** `.github/CODEOWNERS` bestaat; branch protection vereist Code Owner review. Eigenaar voor workflows, release, assay-action, infra, config paths.
   - [ ] **GHAS:** aan/uit? **Code scanning** (CodeQL)? **Secret scanning** (push protection)? **Dependency review**?
 
 - **Environments**

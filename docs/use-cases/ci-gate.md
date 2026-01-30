@@ -218,7 +218,9 @@ on:
 
 In GitHub: **Settings → Branches → Branch protection rules**
 - ✅ Require status checks to pass
-- ✅ Require "Agent Quality Gate" to pass
+- ✅ Require your CI job (e.g. "Agent Quality Gate") to pass
+
+For the Assay repo, required status checks are: **CI**, **Smoke Install (E2E)**, **assay-action-contract-tests**, and **MCP Security (Assay)**. See [Branch protection setup](../BRANCH-PROTECTION-SETUP.md).
 
 ### 3. Keep Tests Fast
 

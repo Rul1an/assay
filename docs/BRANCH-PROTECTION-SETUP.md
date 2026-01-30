@@ -46,22 +46,35 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 
 ## Option B: `gh` CLI (branch protection)
 
-Classic branch protection via API (no rulesets).
+Classic branch protection via API (no rulesets). The API expects a **JSON body** with real booleans; form fields (`-f`) can send strings and cause 422 "Validation Failed". Use `--input -` with a JSON payload below.
+
+**User-owned repos:** Do not send `restrictions` with users/teams or `dismissal_restrictions` with users/teams (only org repos support those). Use `restrictions: null` and omit or empty `dismissal_restrictions`.
 
 ```bash
-# Required status checks: use the exact names from your workflows (e.g. "CI", "Smoke Install (E2E)")
-gh api repos/OWNER/REPO/branches/main/protection \
-  -X PUT \
+# Replace OWNER/REPO (e.g. Rul1an/assay) and status check contexts to match your workflow job names.
+gh api repos/OWNER/REPO/branches/main/protection -X PUT \
   -H "Accept: application/vnd.github+json" \
-  -f required_status_checks='{"strict":true,"contexts":["CI","Smoke Install (E2E)","assay-action-contract-tests"]}' \
-  -f enforce_admins=false \
-  -f required_pull_request_reviews='{"dismissal_restrictions":{},"dismiss_stale_reviews":false,"require_code_owner_reviews":true,"required_approving_review_count":1}' \
-  -f restrictions=null \
-  -f allow_force_pushes=false \
-  -f allow_deletions=false
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["CI", "Smoke Install (E2E)", "assay-action-contract-tests", "MCP Security (Assay)"]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": true,
+    "required_approving_review_count": 1
+  },
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
 ```
 
-Replace `OWNER/REPO` (e.g. `Rul1an/assay`) and adjust `contexts` to match your workflow/job names. Use `required_approving_review_count: 2` if you want two approvals.
+Use `required_approving_review_count: 2` in the JSON if you want two approvals. The listed contexts match this repo’s workflows (CI, Smoke Install, action tests, MCP Security); add e.g. `Kernel Matrix CI` if eBPF checks must be required.
 
 To **inspect** current protection:
 
@@ -94,7 +107,7 @@ See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the c
 
 ## Checklist
 
-- [ ] Branch protection or ruleset on `main` with: require PR, approvals, status checks, up to date, no force-push.
-- [ ] Required status checks include: CI, Smoke Install (E2E), MCP Security (and Kernel Matrix if needed).
-- [ ] CODEOWNERS in place; “Require review from Code Owners” enabled if desired.
+- [x] Branch protection or ruleset on `main` with: require PR, approvals, status checks, up to date, no force-push.
+- [x] Required status checks include: CI, Smoke Install (E2E), assay-action-contract-tests, MCP Security (Assay) (and Kernel Matrix CI if eBPF required).
+- [x] CODEOWNERS in place; “Require review from Code Owners” enabled.
 - [ ] Environments `release` / `crates` / `pypi` configured with required reviewers; release workflow uses `environment:` on publish jobs.
