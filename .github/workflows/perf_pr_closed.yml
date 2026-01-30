@@ -19,8 +19,15 @@ jobs:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
         run: |
-          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          bencher archive \
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then
+            echo "Bencher not configured, skipping."
+            exit 0
+          fi
+          # Archive may fail if PR was closed before any benchmarks ran (branch doesn't exist in Bencher)
+          # This is expected and non-fatal
+          if ! bencher archive \
             --project "$BENCHER_PROJECT" \
             --token "$BENCHER_API_TOKEN" \
-            --branch "$GITHUB_HEAD_REF"
+            --branch "$GITHUB_HEAD_REF" 2>&1; then
+            echo "::notice::Branch '$GITHUB_HEAD_REF' not found in Bencher (no benchmarks ran). Skipping archive."
+          fi
