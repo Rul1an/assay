@@ -57,7 +57,7 @@ nix = { version = "0.27", features = ["signal", "process"], optional = true }
 schemars = "1.2.0"
 
 # SQLite: always use bundled to avoid cross-platform/cross-compilation issues
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature
