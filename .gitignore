@@ -12,6 +12,7 @@ junit.xml
 sarif.json
 run.json
 otel.jsonl
+perf_e2e_results.json
 out/
 venv/
 .venv/
