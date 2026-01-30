@@ -393,7 +393,7 @@ flowchart LR
     Trigger --> Checkout[Checkout Code]
     Checkout --> Tests[Run Tests]
     Tests --> Bundles[Evidence Bundles]
-    Bundles --> Action[assay-action@v2]
+    Bundles --> Action["assay-action@v2"]
     Action --> Cache{Cache Hit?}
     Cache -->|Yes| CLI[Use Cached CLI]
     Cache -->|No| Download[Download CLI]

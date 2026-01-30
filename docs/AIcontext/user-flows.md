@@ -41,7 +41,7 @@ flowchart TD
     pr[Pull Request Created] --> trigger[CI Pipeline Triggered]
     trigger --> checkout[Checkout Code]
     checkout --> tests[Run Tests with Assay]
-    tests --> action[Rul1an/assay/assay-action@v2]
+    tests --> action["Rul1an/assay/assay-action@v2"]
     action --> verify[Verify Evidence Bundles]
     verify --> lint[Lint for Security Issues]
     lint --> sarif[Upload SARIF to Security Tab]
