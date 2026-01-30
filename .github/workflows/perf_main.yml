@@ -36,53 +36,55 @@ jobs:
         with:
           components: rustfmt
       - uses: bencherdev/bencher@main
-      # Debug: prove Criterion output is on stdout (if Bencher still fails, stream capture is the cause)
-      - name: Debug Criterion output (store_write_heavy)
-        run: |
-          set -euo pipefail
-          script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null | grep -v "Gnuplot not found" | sed -n '1,120p'
-      # script -q -e -c "..." 2>&1 /dev/null: pseudo-TTY + stderr→stdout so Bencher's rust_criterion adapter sees all Criterion output.
+      # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
+      # This is more reliable than exec mode for capturing Criterion output.
       - name: Criterion (store_write_heavy)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          bencher run \
-            --project "$BENCHER_PROJECT" \
-            --token "$BENCHER_API_TOKEN" \
-            --branch main \
-            --testbed ubuntu-latest \
-            --adapter rust_criterion \
-            --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-max-sample-size 64 \
-            --threshold-upper-boundary 0.99 \
-            --thresholds-reset \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null | grep -v "Gnuplot not found"'
+          cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+            | grep -v "Gnuplot not found" \
+            | bencher run \
+                --project "$BENCHER_PROJECT" \
+                --token "$BENCHER_API_TOKEN" \
+                --branch main \
+                --testbed ubuntu-latest \
+                --adapter rust_criterion \
+                --ci-id store_write_heavy \
+                --threshold-measure latency \
+                --threshold-test t_test \
+                --threshold-max-sample-size 64 \
+                --threshold-upper-boundary 0.99 \
+                --thresholds-reset \
+                --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          bencher run \
-            --project "$BENCHER_PROJECT" \
-            --token "$BENCHER_API_TOKEN" \
-            --branch main \
-            --testbed ubuntu-latest \
-            --adapter rust_criterion \
-            --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-max-sample-size 64 \
-            --threshold-upper-boundary 0.99 \
-            --thresholds-reset \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null | grep -v "Gnuplot not found"'
+          cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
+            | grep -v "Gnuplot not found" \
+            | bencher run \
+                --project "$BENCHER_PROJECT" \
+                --token "$BENCHER_API_TOKEN" \
+                --branch main \
+                --testbed ubuntu-latest \
+                --adapter rust_criterion \
+                --ci-id suite_run_worstcase \
+                --threshold-measure latency \
+                --threshold-test t_test \
+                --threshold-max-sample-size 64 \
+                --threshold-upper-boundary 0.99 \
+                --thresholds-reset \
+                --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

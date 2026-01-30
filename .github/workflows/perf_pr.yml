@@ -34,45 +34,52 @@ jobs:
         with:
           components: rustfmt
       - uses: bencherdev/bencher@main
+      # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
       - name: Criterion (store_write_heavy)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          bencher run \
-            --project "$BENCHER_PROJECT" \
-            --token "$BENCHER_API_TOKEN" \
-            --branch "$GITHUB_HEAD_REF" \
-            --start-point "$GITHUB_BASE_REF" \
-            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
-            --start-point-clone-thresholds \
-            --start-point-reset \
-            --testbed ubuntu-latest \
-            --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -e -c "stty cols 200; cargo bench -q -p assay-core --bench store_write_heavy 2>&1" /dev/null
+          cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+            | grep -v "Gnuplot not found" \
+            | bencher run \
+                --project "$BENCHER_PROJECT" \
+                --token "$BENCHER_API_TOKEN" \
+                --branch "$GITHUB_HEAD_REF" \
+                --start-point "$GITHUB_BASE_REF" \
+                --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+                --start-point-clone-thresholds \
+                --start-point-reset \
+                --testbed ubuntu-latest \
+                --adapter rust_criterion \
+                --ci-id store_write_heavy \
+                --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          bencher run \
-            --project "$BENCHER_PROJECT" \
-            --token "$BENCHER_API_TOKEN" \
-            --branch "$GITHUB_HEAD_REF" \
-            --start-point "$GITHUB_BASE_REF" \
-            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
-            --start-point-clone-thresholds \
-            --start-point-reset \
-            --testbed ubuntu-latest \
-            --adapter rust_criterion \
-            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- bash -c 'script -q -e -c "stty cols 200; cargo bench -q -p assay-cli --bench suite_run_worstcase 2>&1" /dev/null | grep -v "Gnuplot not found"'
+          cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
+            | grep -v "Gnuplot not found" \
+            | bencher run \
+                --project "$BENCHER_PROJECT" \
+                --token "$BENCHER_API_TOKEN" \
+                --branch "$GITHUB_HEAD_REF" \
+                --start-point "$GITHUB_BASE_REF" \
+                --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+                --start-point-clone-thresholds \
+                --start-point-reset \
+                --testbed ubuntu-latest \
+                --adapter rust_criterion \
+                --ci-id suite_run_worstcase \
+                --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
