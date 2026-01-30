@@ -34,12 +34,13 @@ jobs:
         with:
           components: rustfmt
       - uses: bencherdev/bencher@main
-      # script -q -c "..." /dev/null: Criterion prints timing only when stdout is a TTY; bencher run pipes stdout so we fake a TTY so Bencher receives benchmarks (no "No benchmarks found!").
+      # script -q -e -c "..." /dev/null: pseudo-TTY so Criterion prints timing (Bencher parses stdout); -e propagates exit code.
       - name: Criterion (store_write_heavy)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
         run: |
+          set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
           bencher run \
             --project "$BENCHER_PROJECT" \
@@ -53,12 +54,15 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -c "cargo bench -p assay-core --bench store_write_heavy" /dev/null
+            -- script -q -e -c "cargo bench -p assay-core --bench store_write_heavy" /dev/null
+          test -d target/criterion
+          find target/criterion -name estimates.json -print -quit | grep -q .
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
         run: |
+          set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
           bencher run \
             --project "$BENCHER_PROJECT" \
@@ -72,4 +76,6 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            -- script -q -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null
+            -- script -q -e -c "cargo bench -p assay-cli --bench suite_run_worstcase" /dev/null
+          test -d target/criterion
+          find target/criterion -name estimates.json -print -quit | grep -q .

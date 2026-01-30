@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 readme.workspace = true
 description = "High-performance evaluation framework for LLM agents (Core)"
+autobenches = false
 
 [lints]
 workspace = true
@@ -70,6 +71,7 @@ procfs = { version = "0.16", optional = true }
 
 [[bench]]
 name = "store_write_heavy"
+path = "benches/store_write_heavy.rs"
 harness = false
 
 [dev-dependencies]

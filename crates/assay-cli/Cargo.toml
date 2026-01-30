@@ -72,6 +72,7 @@ landlock = "=0.4.3"
 
 [[bench]]
 name = "suite_run_worstcase"
+path = "benches/suite_run_worstcase.rs"
 harness = false
 
 [dev-dependencies]
