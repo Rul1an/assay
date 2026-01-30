@@ -663,7 +663,7 @@ Zie ook: [Bencher: Create an API Token](https://bencher.dev/docs/how-to/claim/#c
 
 - **Fixture-structuur:** `tests/fixtures/perf/semantic_vcr/` — eval_semantic_vcr.yaml (1× semantic_similarity_to, 1× faithfulness), trace_semantic_vcr.jsonl, cassettes/ (embeddings/, judge/) + README.
 - **Runtime-contract:** `ASSAY_VCR_MODE=replay|record|off` (CI default: replay), `ASSAY_VCR_DIR`. CI draait alleen replay; record alleen lokaal met API key. Cassettes scrubben vóór commit.
-- **Nog open:** VCR-middleware in code (reqwest record/replay) zodat bij replay HTTP-responses van disk komen; dan cassettes opnemen en committen. Zie `tests/fixtures/perf/semantic_vcr/README.md` en `cassettes/README.md`.
+- ✅ **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` — `VcrClient` met `post_json()` voor record/replay van HTTP-requests. Matching op method + URL + body (SHA256 fingerprint); Authorization-header uitgesloten. Cassettes opgeslagen als JSON in `ASSAY_VCR_DIR/{embeddings,judge}/`. Zie module docs en tests voor gebruik.
 
 ### Adapter outputs + Criterion flags + VCR hygiene
 

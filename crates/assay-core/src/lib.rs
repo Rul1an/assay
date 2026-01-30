@@ -33,6 +33,7 @@ pub mod runtime;
 pub mod storage;
 pub mod thresholds;
 pub mod trace;
+pub mod vcr;
 
 #[cfg(feature = "discovery")]
 pub mod discovery;

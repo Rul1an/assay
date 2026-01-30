@@ -10,8 +10,8 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 
 | Item | Bron | Actie |
 |------|------|--------|
-| **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | Third-party actions staan nu op @v1/@v2/@v4/@v5 of @main. Aanbevolen: high-risk eerst (Bencher, gh-release, upload-sarif, test-reporter, actions/checkout, dtolnay/rust-toolchain) op commit-SHA zetten; daarna in Settings → Actions “Require SHA pinning” aanzetten. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md). |
-| **Allowed actions beperken** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: “Allow [org] and verified creators” of allowlist i.p.v. “Allow all actions”. |
+| **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | Third-party actions staan nu op @v1/@v2/@v4/@v5 of @main. Aanbevolen: high-risk eerst (Bencher, gh-release, upload-sarif, test-reporter, actions/checkout, dtolnay/rust-toolchain) op commit-SHA zetten; daarna in Settings → Actions "Require SHA pinning" aanzetten. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md). |
+| **Allowed actions beperken** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: "Allow [org] and verified creators" of allowlist i.p.v. "Allow all actions". |
 | **Fork PR policy vastleggen** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: (1) Draaien fork-PR workflows? (2) Read-only of write token? (3) Secrets geblokkeerd? Documenteer keuze (screenshot of één regel). |
 | **GHAS** | REVIEWER-PACK sectie 2 | Beslissen: Code scanning (CodeQL), Secret scanning (push protection), Dependency review aan/uit? |
 
@@ -29,8 +29,8 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 
 | Item | Bron | Actie |
 |------|------|--------|
-| **Signed commits** | REVIEWER-PACK sectie 2 | Optioneel: “Require signed commits” op main aanzetten. |
-| **Linear history** | REVIEWER-PACK sectie 2 | Optioneel: “Require linear history” op main aanzetten. |
+| **Signed commits** | REVIEWER-PACK sectie 2 | Optioneel: "Require signed commits" op main aanzetten. |
+| **Linear history** | REVIEWER-PACK sectie 2 | Optioneel: "Require linear history" op main aanzetten. |
 
 ---
 
@@ -38,9 +38,10 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 
 | Item | Bron | Actie |
 |------|------|--------|
-| **Cache-hit in CI job summary** | PERFORMANCE-ASSESSMENT § “Bewijs van cache-hit”, “Huidige stand” | In de **Criterion-perf-job** (ci.yml): stap toevoegen die **cache-hit** (van rust-cache of assay-perf cache) in de **job summary** logt (`echo "cache-hit=..."`), zodat in de UI zichtbaar is of het een cache-hit was. baseline-gate-demo doet dit al. |
+| ✅ **Cache-hit in CI job summary** | PERFORMANCE-ASSESSMENT § "Bewijs van cache-hit" | **Gedaan:** ci.yml perf-job logt `cache-hit=${{ steps.rust-cache.outputs.cache-hit }}` in job summary (regel 102-106). |
 | **Fase-timings / SQLite-counters** | PERFORMANCE-ASSESSMENT P0.3 | Voor echte P0.3-validatie: fase-timings en SQLite-contention (bv. sqlite_busy_count) first-class in summary.json of bench-output; zie doc voor minimale set. |
 | ✅ **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | **Gedaan:** stdin/pipe-modus, korte IDs (sw/sr), threshold-flags (t_test, upper_boundary 0.99), exacte commands in doc, perf_pr = warn. **Later:** perf_pr_gate.yml met --err + label perf-gate voor hard-fail. |
+| ✅ **VCR-middleware** | PERFORMANCE-ASSESSMENT § VCR-workload | **Gedaan:** `crates/assay-core/src/vcr/mod.rs` — VcrClient met record/replay voor HTTP requests. Matching op method+URL+body (SHA256). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`. |
 
 ---
 
@@ -51,7 +52,22 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 - Caches: hashFiles/vaste prefix; concurrency op ebpf-smoke en kernel-matrix.
 - OIDC voor crates.io en PyPI; Bencher static token met same-repo guard.
 - **Bencher CI baseline + PR compare:** perf_main.yml (main baseline, nightly), perf_pr.yml (PR compare); benchmarks sw/50x400b, sw/12xlarge, sr/wc; stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99); reports in Bencher UI met Δ% en thresholds.
+- **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` voor HTTP record/replay; cassettes in `tests/fixtures/perf/semantic_vcr/cassettes/`.
 
 ---
 
-**Korte prioriteit:** (1) Environment reviewers instellen (release/crates/pypi) → direct human-in-the-loop op publish. (2) SHA-pinning voor high-risk actions + allowed actions beperken. (3) Fork PR policy documenteren. (4) Cache-hit in perf-job summary; daarna optioneel GHAS, signed commits, performance-counters.
+## 6. Open: GitHub Settings (handmatig)
+
+De volgende items vereisen **handmatige actie in GitHub Settings** (niet via code):
+
+1. **Environment reviewers** (Settings → Environments → release/crates/pypi → Required reviewers)
+2. **SHA-pinning aanzetten** (Settings → Actions → General → Require action to be SHA pinned)
+3. **Allowed actions beperken** (Settings → Actions → General → Allow [org] and verified creators)
+4. **Fork PR policy** documenteren (Settings → Actions → General → Fork pull request workflows)
+5. **GHAS** beslissen (Settings → Security → Code scanning / Secret scanning)
+6. **Signed commits** (optioneel, Settings → Branches → main → Require signed commits)
+7. **Linear history** (optioneel, Settings → Branches → main → Require linear history)
+
+---
+
+**Korte prioriteit:** (1) Environment reviewers instellen (release/crates/pypi) → direct human-in-the-loop op publish. (2) SHA-pinning voor high-risk actions + allowed actions beperken. (3) Fork PR policy documenteren. Daarna optioneel GHAS, signed commits, performance-counters.
