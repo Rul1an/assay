@@ -86,10 +86,18 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
-      - name: Install Rust Toolchain (nightly rust-src only)
+      - name: Install Rust Toolchain (nightly)
         uses: dtolnay/rust-toolchain@881ba7bf39a41cda34ac9e123fb41b44ed08232f # nightly
-        with:
-          components: rust-src
+
+      - name: Install rust-src for eBPF (explicit for ARM)
+        run: |
+          rustup component add rust-src --toolchain nightly
+          # Verify rust-src is installed
+          ls -la "$(rustup run nightly rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.lock" || {
+            echo "ERROR: rust-src not found after install"
+            rustup show
+            exit 1
+          }
 
       - name: Swatinem/rust-cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
