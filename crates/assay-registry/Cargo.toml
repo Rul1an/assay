@@ -47,11 +47,11 @@ url = "2.5"
 dirs = "5"
 
 # Random for jitter (used in retry backoff)
-rand = "0.8"
+rand = "0.9"
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
-rand = "0.8"
+rand = "0.9"
 serial_test = "3"
