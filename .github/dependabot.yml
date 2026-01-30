@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # GitHub Actions - weekly SHA bumps
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 5
+
+  # Cargo - weekly dependency updates
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+    open-pull-requests-limit: 10
+    ignore:
+      # Ignore patch versions for stable deps to reduce noise
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
+
+  # Python (assay-python-sdk)
+  - package-ecosystem: "pip"
+    directory: "/assay-python-sdk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "python"
+    open-pull-requests-limit: 5

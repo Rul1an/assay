@@ -19,9 +19,9 @@ jobs:
     env:
       QUICK: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
       - name: Install Linux deps
         shell: bash
         run: |
@@ -30,10 +30,10 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -o Acquire::Retries=10 -o Acquire::http::Timeout=60 -o Acquire::https::Timeout=60
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
         with:
           components: rustfmt
-      - uses: bencherdev/bencher@main
+      - uses: bencherdev/bencher@451ec1124b6d2c5797ac27d9a572233eb308e9d2 # @main
       # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
       - name: Criterion (store_write_heavy)
         env:

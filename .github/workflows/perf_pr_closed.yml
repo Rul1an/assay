@@ -12,8 +12,8 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bencherdev/bencher@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: bencherdev/bencher@451ec1124b6d2c5797ac27d9a572233eb308e9d2 # @main
       - name: Archive closed PR branch with Bencher
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
