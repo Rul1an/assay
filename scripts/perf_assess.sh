@@ -160,6 +160,27 @@ run_forensic() {
   echo "    stddev: ${stddev} ms"
   echo "    tail_ratio (p99/median): $(echo "scale=2; $p99 / $median" | bc 2>/dev/null || echo "N/A")"
 
+  # Calculate tail_ratio and check thresholds
+  local tail_ratio max_p99_ratio
+  tail_ratio=$(echo "scale=2; $p99 / $median" | bc 2>/dev/null || echo "0")
+  max_p99_ratio=$(echo "scale=2; $max / $p99" | bc 2>/dev/null || echo "0")
+
+  # Threshold policy (from PERFORMANCE-ASSESSMENT.md)
+  # tail_ratio: healthy < 1.5, warn 1.5-2.0, fail > 2.0
+  # max/p99: healthy < 1.5, warn 1.5-2.0, fail > 2.0
+  local status="✅"
+  if [ "$(echo "$tail_ratio > 2.0" | bc 2>/dev/null)" = "1" ]; then
+    status="❌ FAIL"
+    echo "    ❌ tail_ratio ${tail_ratio} > 2.0 threshold — investigate structural jitter"
+  elif [ "$(echo "$tail_ratio > 1.5" | bc 2>/dev/null)" = "1" ]; then
+    status="⚠️  WARN"
+    echo "    ⚠️  tail_ratio ${tail_ratio} > 1.5 — elevated tail latency"
+  fi
+
+  if [ "$(echo "$max_p99_ratio > 2.0" | bc 2>/dev/null)" = "1" ]; then
+    echo "    ⚠️  max/p99 ratio ${max_p99_ratio} > 2.0 — outlier detected (cold cache?)"
+  fi
+
   # Identify outliers (> 2× median)
   local outlier_threshold outlier_count
   outlier_threshold=$(echo "scale=2; $median * 2" | bc 2>/dev/null || echo "999999")
@@ -167,6 +188,8 @@ run_forensic() {
   if [ "$outlier_count" -gt 0 ]; then
     echo "    ⚠️  outliers (>2× median): $outlier_count runs"
   fi
+
+  echo "    status: $status"
 
   # Store metrics aggregation
   if command -v jq >/dev/null 2>&1; then
@@ -180,6 +203,15 @@ run_forensic() {
         maxv=$(echo "$vals" | tail -1)
         p99v=$(echo "$vals" | awk -v n="$count" 'BEGIN{p=int(0.99*n+0.999); if(p<1)p=1} {a[NR]=$1} END {print a[p]}')
         echo "    ${key}: median=${med} p99=${p99v} max=${maxv}"
+
+        # sqlite_busy_count threshold check
+        if [ "$key" = "sqlite_busy_count" ] && [ "$maxv" != "0" ]; then
+          if [ "$maxv" -gt 5 ] 2>/dev/null; then
+            echo "      ❌ sqlite_busy_count > 5 — investigate lock contention"
+          elif [ "$maxv" -gt 0 ] 2>/dev/null; then
+            echo "      ⚠️  sqlite_busy_count > 0 — minor lock contention detected"
+          fi
+        fi
       fi
     done
   fi

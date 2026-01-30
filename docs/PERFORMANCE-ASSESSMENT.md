@@ -634,6 +634,29 @@ Gebruik forensic mode wanneer:
 - Je wilt weten of jitter van disk I/O, OS, of applicatie komt
 - Je baseline wilt leggen voor tail-latency SLO
 
+### Tail-latency alarm policy
+
+Gebaseerd op forensic baseline (jan 2026):
+
+| Metric | Gezond | ⚠️ Warn | ❌ Fail |
+|--------|--------|---------|---------|
+| **tail_ratio** (p99/median) | < 1.5 | 1.5–2.0 | > 2.0 |
+| **p95 drift** vs baseline | < +15% | +15–25% | > +25% |
+| **max** vs p99 | < 1.5× | 1.5–2× | > 2× |
+| **sqlite_busy_count** | 0 | 1–5 | > 5 |
+
+**Baseline waarden (worst_file_backed):**
+- median: ~34 ms
+- p95: ~44 ms
+- p99: ~47 ms
+- tail_ratio: 1.37
+
+**Interpretatie:**
+- `tail_ratio > 2.0` duidt op structurele jitter (OS, disk, of code)
+- `p95 drift > 25%` is waarschijnlijk een regressie, niet noise
+- `sqlite_busy_count > 0` betekent lock contention — onderzoek transacties
+- `max >> p99` suggereert incidentele outliers (vaak cold cache of GC)
+
 **Handmatige Hyperfine-commands** (als je geen script wilt):
 
 | Scenario | Command |
