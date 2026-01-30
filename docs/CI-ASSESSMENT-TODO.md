@@ -41,7 +41,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 | ✅ **Cache-hit in CI job summary** | PERFORMANCE-ASSESSMENT § "Bewijs van cache-hit" | **Gedaan:** ci.yml perf-job logt `cache-hit=${{ steps.rust-cache.outputs.cache-hit }}` in job summary (regel 102-106). |
 | **Fase-timings / SQLite-counters** | PERFORMANCE-ASSESSMENT P0.3 | Voor echte P0.3-validatie: fase-timings en SQLite-contention (bv. sqlite_busy_count) first-class in summary.json of bench-output; zie doc voor minimale set. |
 | ✅ **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | **Gedaan:** stdin/pipe-modus, korte IDs (sw/sr), threshold-flags (t_test, upper_boundary 0.99), exacte commands in doc, perf_pr = warn. **Later:** perf_pr_gate.yml met --err + label perf-gate voor hard-fail. |
-| ✅ **VCR-middleware** | PERFORMANCE-ASSESSMENT § VCR-workload | **Gedaan:** `crates/assay-core/src/vcr/mod.rs` — VcrClient met record/replay voor HTTP requests. Matching op method+URL+body (SHA256). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`. |
+| ✅ **VCR-middleware** | PERFORMANCE-ASSESSMENT § VCR-workload | **Gedaan:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (`providers/embedder/openai.rs`, `providers/llm/openai.rs` — `with_vcr()`/`from_env()`). Matching: method+URL+body (SHA256). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`. |
 
 ---
 
@@ -52,7 +52,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 - Caches: hashFiles/vaste prefix; concurrency op ebpf-smoke en kernel-matrix.
 - OIDC voor crates.io en PyPI; Bencher static token met same-repo guard.
 - **Bencher CI baseline + PR compare:** perf_main.yml (main baseline, nightly), perf_pr.yml (PR compare); benchmarks sw/50x400b, sw/12xlarge, sr/wc; stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99); reports in Bencher UI met Δ% en thresholds.
-- **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` voor HTTP record/replay; cassettes in `tests/fixtures/perf/semantic_vcr/cassettes/`.
+- **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (OpenAI embedder/LLM via `with_vcr()`/`from_env()`); cassettes in `tests/fixtures/perf/semantic_vcr/cassettes/`.
 
 ---
 

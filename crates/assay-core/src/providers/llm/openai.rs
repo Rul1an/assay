@@ -1,7 +1,10 @@
 use super::LlmClient;
 use crate::model::LlmResponse;
+use crate::vcr::{VcrClient, VcrMode};
 use async_trait::async_trait;
 use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct OpenAIClient {
     pub model: String,
@@ -9,6 +12,8 @@ pub struct OpenAIClient {
     pub temperature: f32,
     pub max_tokens: u32,
     pub client: reqwest::Client,
+    /// Optional VCR client for record/replay (shared, requires mutex for async)
+    vcr: Option<Arc<Mutex<VcrClient>>>,
 }
 
 impl OpenAIClient {
@@ -19,6 +24,42 @@ impl OpenAIClient {
             temperature,
             max_tokens,
             client: reqwest::Client::new(),
+            vcr: None,
+        }
+    }
+
+    /// Create with VCR support (record/replay HTTP responses)
+    pub fn with_vcr(
+        model: String,
+        api_key: String,
+        temperature: f32,
+        max_tokens: u32,
+        vcr: Arc<Mutex<VcrClient>>,
+    ) -> Self {
+        Self {
+            model,
+            api_key,
+            temperature,
+            max_tokens,
+            client: reqwest::Client::new(),
+            vcr: Some(vcr),
+        }
+    }
+
+    /// Create from environment (auto-enables VCR if ASSAY_VCR_MODE is set)
+    pub fn from_env(model: String, api_key: String, temperature: f32, max_tokens: u32) -> Self {
+        let vcr_mode = VcrMode::from_env();
+        if vcr_mode != VcrMode::Off {
+            let vcr = VcrClient::from_env();
+            Self::with_vcr(
+                model,
+                api_key,
+                temperature,
+                max_tokens,
+                Arc::new(Mutex::new(vcr)),
+            )
+        } else {
+            Self::new(model, api_key, temperature, max_tokens)
         }
     }
 }
@@ -56,21 +97,38 @@ impl LlmClient for OpenAIClient {
             "max_tokens": self.max_tokens,
         });
 
-        let resp = self
-            .client
-            .post(url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+        let json: serde_json::Value = if let Some(vcr) = &self.vcr {
+            // Use VCR for record/replay
+            let mut vcr_guard = vcr.lock().await;
+            let auth = format!("Bearer {}", self.api_key);
+            let resp = vcr_guard.post_json(url, &body, Some(&auth)).await?;
 
-        if !resp.status().is_success() {
-            let error_text = resp.text().await.unwrap_or_else(|_| String::new());
-            anyhow::bail!("OpenAI chat API error: {}", error_text);
-        }
+            if !resp.is_success() {
+                anyhow::bail!(
+                    "OpenAI chat API error (status {}): {}",
+                    resp.status,
+                    resp.body
+                );
+            }
+            resp.body
+        } else {
+            // Direct HTTP request
+            let resp = self
+                .client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
 
-        let json: serde_json::Value = resp.json().await?;
+            if !resp.status().is_success() {
+                let error_text = resp.text().await.unwrap_or_else(|_| String::new());
+                anyhow::bail!("OpenAI chat API error: {}", error_text);
+            }
+
+            resp.json().await?
+        };
 
         // Parse choices[0].message.content
         let text = json

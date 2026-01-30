@@ -574,7 +574,7 @@ Als je alles wat al geïmplementeerd is meerekent (store_metrics, pragmas, wal_c
 | 5 | **Busy handler/timeout in doc** | ✅ In dit doc toegevoegd: sectie “Busy handler en checkpoint” — PRAGMA vs custom handler, één per connection, waarom PRAGMA 0 kan zijn; onze keuze + hoe we loggen. |
 | 6 | **CI cache voor perf jobs** | ✅ Perf-job in ci.yml logt **cache-hit** (rust-cache) in job summary; sectie “CI cache voor perf jobs” in dit doc. Norm: waar cache leeft (.assay vs target/) en wat gecached wordt. |
 
-**Kort:** Fixture-structuur voor semantic VCR en Bencher-workflows zijn toegevoegd en **Bencher is volledig operationeel** (baseline + PR compare + thresholds). Nog open: **(2)** VCR-middleware in code (reqwest record/replay) zodat semantic_vcr replay werkt; daarna cassettes opnemen en committen.
+**Kort:** De **performance assessment is volledig uitvoerbaar**. VCR-middleware is geïmplementeerd (`vcr/mod.rs`) en geïntegreerd met OpenAI providers (`with_vcr()`/`from_env()`). Bencher is operationeel. Optionele stap: lokaal cassettes opnemen met `ASSAY_VCR_MODE=record` + API key.
 
 ---
 
@@ -664,6 +664,7 @@ Zie ook: [Bencher: Create an API Token](https://bencher.dev/docs/how-to/claim/#c
 - **Fixture-structuur:** `tests/fixtures/perf/semantic_vcr/` — eval_semantic_vcr.yaml (1× semantic_similarity_to, 1× faithfulness), trace_semantic_vcr.jsonl, cassettes/ (embeddings/, judge/) + README.
 - **Runtime-contract:** `ASSAY_VCR_MODE=replay|record|off` (CI default: replay), `ASSAY_VCR_DIR`. CI draait alleen replay; record alleen lokaal met API key. Cassettes scrubben vóór commit.
 - ✅ **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` — `VcrClient` met `post_json()` voor record/replay van HTTP-requests. Matching op method + URL + body (SHA256 fingerprint); Authorization-header uitgesloten. Cassettes opgeslagen als JSON in `ASSAY_VCR_DIR/{embeddings,judge}/`. Zie module docs en tests voor gebruik.
+- ✅ **Provider-integratie:** OpenAI embedder (`providers/embedder/openai.rs`) en LLM client (`providers/llm/openai.rs`) ondersteunen VCR via `with_vcr()` of `from_env()` constructors. In CI met `ASSAY_VCR_MODE=replay` worden responses uit cassettes gelezen; geen outbound netwerk.
 
 ### Adapter outputs + Criterion flags + VCR hygiene
 
