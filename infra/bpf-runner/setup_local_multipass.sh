@@ -30,7 +30,7 @@ fi
 VM_NAME="assay-bpf-runner"
 VM_CPUS="4"
 VM_MEM="8G"
-VM_DISK="20G"
+VM_DISK="30G"   # 20G often too small for Kernel Matrix + actions cache; use free_disk.sh if full
 
 # 3. VM Lifecycle Management
 echo "🚀 Managing VM '$VM_NAME'..."
