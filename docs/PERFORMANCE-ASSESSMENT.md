@@ -613,6 +613,27 @@ Plaats: `crates/assay-core/benches/store_write_heavy.rs`, `crates/assay-cli/benc
 
 Override: `PERF_E2E_JSON`, `PERF_E2E_WARMUP`, `PERF_E2E_RUNS`, `ASSAY`. Het script print median en p95 uit de JSON (als jq aanwezig). Voor CI: zet `PERF_E2E_JSON` op een artifact-path en upload de JSON; median/p95 kun je uit de JSON halen of in een gate-tool gebruiken.
 
+### Forensic tail-latency mode
+
+Voor diepere analyse van tail-latency (p95/p99 blow-up):
+
+```bash
+FORENSIC=1 ./scripts/perf_assess.sh
+```
+
+Dit voegt toe aan de normale run:
+- **50× worst_file_backed** met per-iteratie timing
+- **30× worst_large_payload** idem
+- **p99, max, stddev, tail_ratio (p99/median)**
+- **Outlier detectie** (>2× median)
+- **tmpfs vs disk vergelijking** (Linux, /dev/shm)
+- **Raw data** in `$TMPDIR/forensic_*_data/timings.txt` + `run_N.json`
+
+Gebruik forensic mode wanneer:
+- p95/p99 significant hoger is dan median (>2× ratio)
+- Je wilt weten of jitter van disk I/O, OS, of applicatie komt
+- Je baseline wilt leggen voor tail-latency SLO
+
 **Handmatige Hyperfine-commands** (als je geen script wilt):
 
 | Scenario | Command |
