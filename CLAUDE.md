@@ -6,11 +6,11 @@ Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that valid
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `2.7.0`.
+Rust monorepo with workspace version `2.12.0`.
 
 ```
 crates/
-  assay-core/       Core evaluation engine (Runner, Store, MCP, Trace, Report, Providers)
+  assay-core/       Core evaluation engine (Runner, Store, MCP, Trace, Report, Providers, VCR)
   assay-cli/        CLI binary ("assay") - all user-facing commands
   assay-metrics/    Standard metrics (MustContain, RegexMatch, ArgsValid, SequenceValid, etc.)
   assay-mcp-server/ MCP server/proxy for runtime policy enforcement (JSON-RPC over stdio)
@@ -69,6 +69,7 @@ CLI main.rs -> dispatch() -> build_runner() -> Runner::run_suite()
 - **`LlmClient` trait** (`assay-core::providers::llm`): OpenAI, Fake, Trace replay, Strict wrapper
 - **`Embedder` trait** (`assay-core::providers::embedder`): OpenAI, Fake
 - **`Store`** (`assay-core::storage`): SQLite wrapper for runs, results, attempts, embeddings
+- **`VcrClient`** (`assay-core::vcr`): HTTP record/replay for deterministic LLM testing
 
 ### Policy Enforcement (Two-Tier)
 
@@ -151,9 +152,82 @@ Located in `assay-python-sdk/python/assay/`:
 
 - `.github/workflows/ci.yml`: Main CI (clippy, tests, parity)
 - `.github/workflows/release.yml`: Release workflow (binaries + crates.io + PyPI)
+- `.github/workflows/perf_main.yml`: Bencher baseline (main), percentage test 25% threshold
+- `.github/workflows/perf_pr.yml`: Bencher PR compare, clone thresholds, `--err`
+- `.github/workflows/perf_nightly.yml`: Forensic tail-latency analysis, BMF JSON → Bencher
 - `scripts/ci/publish_idempotent.sh`: Publish order: assay-common -> assay-evidence -> assay-core -> assay-metrics -> assay-policy -> assay-mcp-server -> assay-monitor -> assay-sim -> assay-cli
 - Pre-commit hooks: merge conflicts, YAML/TOML check, trailing whitespace, typos, cargo fmt
 - Pre-push hooks: cargo clippy, linux compile gate
+- All third-party actions SHA-pinned (see `docs/PINNED-ACTIONS.md`)
+
+## VCR Middleware (HTTP Record/Replay)
+
+Module: `crates/assay-core/src/vcr/mod.rs`
+
+HTTP record/replay for deterministic testing of LLM/embedding calls without network.
+
+### Usage
+
+```rust
+use assay_core::vcr::{VcrClient, VcrMode};
+
+// Replay mode (CI default)
+let vcr = VcrClient::new(VcrMode::ReplayStrict, cassette_dir);
+let resp = vcr.post_json(url, &body, auth).await?;
+
+// Record mode (local, needs API key)
+let vcr = VcrClient::new(VcrMode::Record, cassette_dir);
+```
+
+### Environment Variables
+
+- `ASSAY_VCR_MODE`: `replay_strict` (default), `replay`, `record`, `auto`, `off`
+- `ASSAY_VCR_DIR`: Cassette directory (default: `tests/fixtures/perf/semantic_vcr/cassettes`)
+
+### Provider Integration
+
+OpenAI embedder and LLM client support VCR via:
+- `OpenAIEmbedder::with_vcr(model, api_key, vcr)` — explicit VCR injection
+- `OpenAIEmbedder::from_env(model, api_key)` — auto-enable based on `ASSAY_VCR_MODE`
+
+Cassettes: `tests/fixtures/perf/semantic_vcr/cassettes/openai/{embeddings,judge}/`
+
+## Performance Assessment
+
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/perf_assess.sh` | Smoke tests + parallel matrix + store metrics |
+| `scripts/perf_e2e.sh` | Hyperfine e2e benchmarks (small/file_backed/ci) |
+
+### Forensic Mode
+
+```bash
+FORENSIC=1 ./scripts/perf_assess.sh           # Tail-latency deep dive
+FORENSIC=1 BMF_JSON=1 ./scripts/perf_assess.sh  # Bencher Metric Format output
+```
+
+Outputs: median, p95, p99, max, stddev, tail_ratio (p99/median), sqlite_busy_count
+
+### Alarm Thresholds
+
+| Metric | Healthy | Warn | Fail |
+|--------|---------|------|------|
+| tail_ratio | < 1.5 | 1.5-2.0 | > 2.0 |
+| p95 drift | < +15% | +15-25% | > +25% |
+| sqlite_busy_count | 0 | 1-5 | > 5 |
+
+### Criterion Benchmarks
+
+```bash
+cargo bench -p assay-core --bench store_write_heavy
+cargo bench -p assay-cli --bench suite_run_worstcase
+```
+
+Benches: `sw/50x400b`, `sw/12xlarge`, `sr/wc`
+
+See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
