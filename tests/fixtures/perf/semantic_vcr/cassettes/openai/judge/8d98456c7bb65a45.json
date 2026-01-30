@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "fingerprint": "8d98456c7bb65a457a091d9eea17a70fbf1984714879a51aec0d1ea5dfa2564e",
+  "method": "POST",
+  "url": "https://api.openai.com/v1/chat/completions",
+  "request_body": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "Evaluate the faithfulness of this response. Score from 0.0 to 1.0.\n\nResponse: The answer is faithful to the source.\n\nReturn only a JSON object with 'score' and 'reason' fields.",
+        "role": "user"
+      }
+    ],
+    "model": "gpt-4o-mini",
+    "temperature": 0.0
+  },
+  "status": 200,
+  "response_body": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "logprobs": null,
+        "message": {
+          "annotations": [],
+          "content": "```json\n{\n  \"score\": 0.0,\n  \"reason\": \"The response does not provide any specific information or context to evaluate its faithfulness to a source. It lacks detail and does not reference any particular content.\"\n}\n```",
+          "refusal": null,
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 1769798876,
+    "id": "chatcmpl-D3np6VbVGAv9TAY4xNWfn0GiJ8ajh",
+    "model": "gpt-4o-mini-2024-07-18",
+    "object": "chat.completion",
+    "service_tier": "default",
+    "system_fingerprint": "fp_1590f93f9d",
+    "usage": {
+      "completion_tokens": 50,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "prompt_tokens": 52,
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      },
+      "total_tokens": 102
+    }
+  },
+  "meta": {
+    "recorded_at": "2026-01-30T18:47:57.528101+00:00",
+    "model": "gpt-4o-mini",
+    "provider": "openai",
+    "kind": "judge"
+  }
+}
