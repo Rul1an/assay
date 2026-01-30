@@ -1,7 +1,11 @@
 # Baseline op main + nightly. Bencher slaat resultaten op; PR-workflow vergelijkt.
 # Vereist: Repository secrets BENCHER_PROJECT (project slug), BENCHER_API_TOKEN.
 # Zie https://bencher.dev/docs/how-to/github-actions/
-# Scheduled run (03:00 UTC): full benches; QUICK niet gezet. CI perf-job gebruikt QUICK=1 voor snelle run.
+#
+# Thresholds (jan 2026):
+# - percentage test: upper_boundary 0.25 (25% = fail)
+# - --err: fail workflow on alert
+# - max_sample_size 64: statistical stability
 name: Perf (main baseline)
 
 on:
@@ -56,10 +60,11 @@ jobs:
                 --adapter rust_criterion \
                 --ci-id store_write_heavy \
                 --threshold-measure latency \
-                --threshold-test t_test \
+                --threshold-test percentage \
                 --threshold-max-sample-size 64 \
-                --threshold-upper-boundary 0.99 \
+                --threshold-upper-boundary 0.25 \
                 --thresholds-reset \
+                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
@@ -81,10 +86,11 @@ jobs:
                 --adapter rust_criterion \
                 --ci-id suite_run_worstcase \
                 --threshold-measure latency \
-                --threshold-test t_test \
+                --threshold-test percentage \
                 --threshold-max-sample-size 64 \
-                --threshold-upper-boundary 0.99 \
+                --threshold-upper-boundary 0.25 \
                 --thresholds-reset \
+                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

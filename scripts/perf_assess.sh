@@ -352,6 +352,10 @@ echo ""
 echo "=== Summary ==="
 echo "$RESULTS"
 
+# --- BMF JSON output (for Bencher custom measures) ---
+# Usage: FORENSIC=1 BMF_JSON=1 ./scripts/perf_assess.sh > forensic.json
+BMF_JSON="${BMF_JSON:-0}"
+
 # --- Forensic mode: deep dive on tail latency ---
 if [ "$FORENSIC" = "1" ]; then
   echo ""
@@ -373,4 +377,65 @@ if [ "$FORENSIC" = "1" ]; then
   echo ""
   echo "=== Forensic raw data saved to: $TMPDIR/forensic_*_data/ ==="
   echo "    (per-iteration timings in timings.txt, run.json per iteration)"
+
+  # --- BMF JSON output for Bencher ---
+  if [ "$BMF_JSON" = "1" ]; then
+    # Extract metrics from forensic runs
+    worst_statsfile="$TMPDIR/forensic_worst_data/timings.txt"
+    large_statsfile="$TMPDIR/forensic_large_data/timings.txt"
+
+    # Initialize variables
+    wn=0; wmedian=0; wp95=0; wp99=0; wmax=0; wtail_ratio=0; wbusy_max=0
+    ln=0; lmedian=0; lp95=0; lp99=0; lmax=0; ltail_ratio=0
+
+    # Calculate stats for worst_file_backed
+    if [ -f "$worst_statsfile" ]; then
+      sort -n "$worst_statsfile" | grep -v "^#" > "${worst_statsfile}.sorted"
+      wn=$(wc -l < "${worst_statsfile}.sorted" | tr -d ' ')
+      wmedian=$(awk -v n="$wn" '{a[NR]=$1} END {print (n%2==1)?a[(n+1)/2]:(a[n/2]+a[n/2+1])/2}' "${worst_statsfile}.sorted")
+      wp95=$(awk -v n="$wn" 'BEGIN{p=int(0.95*n+0.999); if(p<1)p=1} {a[NR]=$1} END {print a[p]}' "${worst_statsfile}.sorted")
+      wp99=$(awk -v n="$wn" 'BEGIN{p=int(0.99*n+0.999); if(p<1)p=1} {a[NR]=$1} END {print a[p]}' "${worst_statsfile}.sorted")
+      wmax=$(tail -1 "${worst_statsfile}.sorted")
+      wtail_ratio=$(echo "scale=3; $wp99 / $wmedian" | bc 2>/dev/null || echo "0")
+
+      # Get sqlite_busy_count from run.json files
+      if command -v jq >/dev/null 2>&1; then
+        wbusy_max=$(for f in "$TMPDIR/forensic_worst_data"/run_*.json; do
+          [ -f "$f" ] && jq -r '.store_metrics.sqlite_busy_count // 0' "$f" 2>/dev/null
+        done | sort -n | tail -1)
+      fi
+    fi
+
+    # Calculate stats for worst_large_payload
+    if [ -f "$large_statsfile" ]; then
+      sort -n "$large_statsfile" | grep -v "^#" > "${large_statsfile}.sorted"
+      ln=$(wc -l < "${large_statsfile}.sorted" | tr -d ' ')
+      lmedian=$(awk -v n="$ln" '{a[NR]=$1} END {print (n%2==1)?a[(n+1)/2]:(a[n/2]+a[n/2+1])/2}' "${large_statsfile}.sorted")
+      lp95=$(awk -v n="$ln" 'BEGIN{p=int(0.95*n+0.999); if(p<1)p=1} {a[NR]=$1} END {print a[p]}' "${large_statsfile}.sorted")
+      lp99=$(awk -v n="$ln" 'BEGIN{p=int(0.99*n+0.999); if(p<1)p=1} {a[NR]=$1} END {print a[p]}' "${large_statsfile}.sorted")
+      lmax=$(tail -1 "${large_statsfile}.sorted")
+      ltail_ratio=$(echo "scale=3; $lp99 / $lmedian" | bc 2>/dev/null || echo "0")
+    fi
+
+    # Output BMF JSON (Bencher Metric Format)
+    cat <<EOF
+{
+  "forensic/worst_file_backed": {
+    "median_ms": { "value": ${wmedian:-0} },
+    "p95_ms": { "value": ${wp95:-0} },
+    "p99_ms": { "value": ${wp99:-0} },
+    "max_ms": { "value": ${wmax:-0} },
+    "tail_ratio": { "value": ${wtail_ratio:-0} },
+    "sqlite_busy_count": { "value": ${wbusy_max:-0} }
+  },
+  "forensic/worst_large_payload": {
+    "median_ms": { "value": ${lmedian:-0} },
+    "p95_ms": { "value": ${lp95:-0} },
+    "p99_ms": { "value": ${lp99:-0} },
+    "max_ms": { "value": ${lmax:-0} },
+    "tail_ratio": { "value": ${ltail_ratio:-0} }
+  }
+}
+EOF
+  fi
 fi

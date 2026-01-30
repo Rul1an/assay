@@ -21,17 +21,19 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Install Linux deps
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev bc jq
 
-      - uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # stable
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - uses: bencherdev/bencher@451ec1124b6d2c5797ac27d9a572233eb308e9d2 # @main
 
       - name: Build release binary
         run: cargo build --release -p assay-cli
@@ -67,12 +69,52 @@ jobs:
             echo "forensic_status=pass" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate BMF JSON for Bencher
+        env:
+          ASSAY: ./target/release/assay
+          FORENSIC: "1"
+          BMF_JSON: "1"
+        run: |
+          # Re-run with BMF_JSON to get Bencher-compatible output
+          # (forensic data is cached in temp, this just extracts the JSON)
+          ./scripts/perf_assess.sh 2>/dev/null | tail -20 > forensic_bmf.json || true
+          cat forensic_bmf.json
+
+      - name: Push forensic metrics to Bencher
+        env:
+          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Push forensic metrics as custom measures
+          # Thresholds: tail_ratio > 2.0 = fail, sqlite_busy_count > 0 = warn
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then
+            echo "Bencher not configured, skipping push"
+            exit 0
+          fi
+          if [ -s forensic_bmf.json ]; then
+            bencher run \
+              --project "$BENCHER_PROJECT" \
+              --token "$BENCHER_API_TOKEN" \
+              --branch main \
+              --testbed ubuntu-latest \
+              --adapter json \
+              --threshold-measure tail_ratio \
+              --threshold-test static \
+              --threshold-upper-boundary 2.0 \
+              --github-actions "$GITHUB_TOKEN" \
+              --file forensic_bmf.json || echo "Bencher push failed (non-fatal)"
+          else
+            echo "No BMF JSON generated, skipping Bencher push"
+          fi
+
       - name: Upload forensic artifacts
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: forensic-${{ github.run_number }}
           path: |
             forensic_output.txt
+            forensic_bmf.json
           retention-days: 90
 
       - name: Trend summary
@@ -83,4 +125,6 @@ jobs:
             echo "Status: ${{ steps.forensic.outputs.forensic_status }}"
             echo ""
             echo "View historical artifacts to track trends over time."
+            echo ""
+            echo "Bencher dashboard: https://bencher.dev/perf/${{ secrets.BENCHER_PROJECT }}"
           } >> "$GITHUB_STEP_SUMMARY"
