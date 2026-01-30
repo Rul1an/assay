@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # GitHub Actions - weekly SHA bumps
+  # GitHub Actions - weekly SHA bumps (patch/minor only)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -12,6 +12,10 @@ updates:
       - "dependencies"
       - "ci"
     open-pull-requests-limit: 5
+    ignore:
+      # Major version bumps need manual review (breaking changes)
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Cargo - weekly dependency updates
   - package-ecosystem: "cargo"

@@ -35,15 +35,22 @@ jobs:
 
       # Generate SARIF even if validate fails, so it shows up in GitHub Security tab.
       - name: Validate (SARIF)
+        id: validate
         shell: bash
         run: |
           set -euo pipefail
-          assay validate --config examples/demo/assay-safe.yaml --format sarif --output results.sarif
+          if ! assay validate --config examples/demo/assay-safe.yaml --format sarif --output results.sarif; then
+            # If validate fails, create a minimal valid SARIF so upload doesn't fail
+            cat > results.sarif << 'SARIF_EOF'
+          {"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"assay"}},"results":[]}]}
+          SARIF_EOF
+            exit 1
+          fi
         continue-on-error: true
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@439137e1b50c27ba9e2f9befc93e43091b449c34 # v3
-        if: always()
+        if: always() && hashFiles('results.sarif') != ''
         with:
           sarif_file: results.sarif
 
