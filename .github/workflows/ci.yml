@@ -83,12 +83,18 @@ jobs:
         env:
           QUICK: "1"
         run: cargo bench -p assay-core -p assay-cli --no-fail-fast
+      - name: List Criterion output (debug)
+        run: |
+          echo "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>}"
+          ls -la target/criterion 2>/dev/null || echo "target/criterion missing or empty"
+          du -sh target/criterion 2>/dev/null || true
       - name: Upload Criterion report
         uses: actions/upload-artifact@v4
         with:
           name: criterion-report
           path: target/criterion/
           retention-days: 5
+          if-no-files-found: ignore
       - name: Prove cache hit (job summary)
         if: always()
         run: |
