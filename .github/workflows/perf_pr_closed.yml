@@ -1,0 +1,26 @@
+# Archive closed PR branch in Bencher so the branch no longer accumulates data.
+# See https://bencher.dev/docs/how-to/github-actions/ (Pull Requests -> clean up).
+name: Perf (PR archive)
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  archive_pr_branch:
+    name: Archive closed PR branch with Bencher
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bencherdev/bencher@main
+      - name: Archive closed PR branch with Bencher
+        env:
+          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+        run: |
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
+          bencher archive \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch "$GITHUB_HEAD_REF"

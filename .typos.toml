@@ -65,4 +65,6 @@ extend-exclude = [
     "**/PERFORMANCE-ASSESSMENT.md",
     "**/CI-ASSESSMENT-TODO.md",
     "**/WORKFLOWS-OVERVIEW.md",
+    "**/DX-REVIEW-MATERIALS.md",
+    "**/DX-IMPLEMENTATION-PLAN.md",
 ]

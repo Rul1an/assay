@@ -1,0 +1,30 @@
+# Semantic/judge VCR workload: precompute_ms + cache gedrag zonder netwerkvariance.
+# Gebruik met ASSAY_VCR_MODE=replay (CI) of record (lokaal met API key).
+# Zie cassettes/README.md en PERFORMANCE-ASSESSMENT.md.
+configVersion: 1
+suite: semantic_vcr
+model: trace
+settings:
+  cache: true
+  parallel: 2
+  timeout_seconds: 30
+
+tests:
+  # 1x embeddings/semantic — precompute_ms + embedding-cache meetbaar
+  - id: semantic_vcr_1
+    input:
+      prompt: "semantic_vcr_prompt_1"
+      context: ["[chunk:1] Reference text for similarity."]
+    expected:
+      type: semantic_similarity_to
+      semantic_similarity_to: "Reference text for similarity."
+      min_score: 0.80
+
+  # 1x judge — judge-pad + caching meetbaar (replay: cassette; record: live call)
+  - id: judge_vcr_1
+    input:
+      prompt: "judge_vcr_prompt_1"
+    expected:
+      type: faithfulness
+      min_score: 0.75
+      rubric_version: v1

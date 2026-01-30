@@ -1,0 +1,7 @@
+{"type":"episode_start","episode_id":"ev1","timestamp":1000,"input":{"prompt":"semantic_vcr_prompt_1","context":["[chunk:1] Reference text for similarity."]}}
+{"type":"step","episode_id":"ev1","step_id":"s1","idx":0,"timestamp":1100,"kind":"llm","content":"Reference text for similarity."}
+{"type":"episode_end","episode_id":"ev1","timestamp":1200,"final_output":"Reference text for similarity."}
+
+{"type":"episode_start","episode_id":"ev2","timestamp":2000,"input":{"prompt":"judge_vcr_prompt_1"}}
+{"type":"step","episode_id":"ev2","step_id":"s1","idx":0,"timestamp":2100,"kind":"llm","content":"The answer is faithful to the source."}
+{"type":"episode_end","episode_id":"ev2","timestamp":2200,"final_output":"The answer is faithful to the source."}

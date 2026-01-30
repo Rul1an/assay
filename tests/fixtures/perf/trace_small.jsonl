@@ -1,0 +1,21 @@
+{"type":"episode_start","episode_id":"ep1","timestamp":1000,"input":{"prompt":"p1"}}
+{"type":"step","episode_id":"ep1","step_id":"s1","idx":0,"timestamp":1100,"kind":"llm","content":"OK"}
+{"type":"episode_end","episode_id":"ep1","timestamp":1200,"final_output":"OK"}
+
+{"type":"episode_start","episode_id":"ep2","timestamp":2000,"input":{"prompt":"p2"}}
+{"type":"step","episode_id":"ep2","step_id":"s1","idx":0,"timestamp":2100,"kind":"llm","content":"result"}
+{"type":"episode_end","episode_id":"ep2","timestamp":2200,"final_output":"result"}
+
+{"type":"episode_start","episode_id":"ep3","timestamp":3000,"input":{"prompt":"p3"}}
+{"type":"step","episode_id":"ep3","step_id":"s1","idx":0,"timestamp":3100,"kind":"llm","content":"Call tool"}
+{"type":"tool_call","episode_id":"ep3","step_id":"s1","timestamp":3150,"tool_name":"tool_a","call_index":0,"args":{},"result":{"ok":true}}
+{"type":"step","episode_id":"ep3","step_id":"s2","idx":1,"timestamp":3200,"kind":"llm","content":"Done"}
+{"type":"episode_end","episode_id":"ep3","timestamp":3300,"final_output":"Done"}
+
+{"type":"episode_start","episode_id":"ep4","timestamp":4000,"input":{"prompt":"p4"}}
+{"type":"step","episode_id":"ep4","step_id":"s1","idx":0,"timestamp":4100,"kind":"llm","content":"done"}
+{"type":"episode_end","episode_id":"ep4","timestamp":4200,"final_output":"done"}
+
+{"type":"episode_start","episode_id":"ep5","timestamp":5000,"input":{"prompt":"p5"}}
+{"type":"step","episode_id":"ep5","step_id":"s1","idx":0,"timestamp":5100,"kind":"llm","content":"ok"}
+{"type":"episode_end","episode_id":"ep5","timestamp":5200,"final_output":"ok"}

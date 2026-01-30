@@ -1,0 +1,24 @@
+configVersion: 1
+suite: perf_small
+model: trace
+settings:
+  cache: false
+  parallel: 4
+  timeout_seconds: 10
+
+tests:
+  - id: t1
+    input: { prompt: "p1" }
+    expected: { type: regex_match, pattern: "OK", flags: ["i"] }
+  - id: t2
+    input: { prompt: "p2" }
+    expected: { type: must_contain, must_contain: ["result"] }
+  - id: t3
+    input: { prompt: "p3" }
+    expected: { type: sequence_valid, rules: [{ type: require, tool: tool_a }] }
+  - id: t4
+    input: { prompt: "p4" }
+    expected: { type: regex_match, pattern: "done", flags: [] }
+  - id: t5
+    input: { prompt: "p5" }
+    expected: { type: must_contain, must_contain: ["ok"] }
