@@ -1,4 +1,4 @@
-# PR: vergelijk met main-baseline. Start met soft thresholds (geen --err); later --err voor hard fail.
+# PR: vergelijk met main-baseline. Zelfde threshold-flags als main; zonder --err = warn (comment), met --err = hard fail (toevoegen zodra ruis onder controle).
 # Alleen same-repo PRs (secrets niet beschikbaar op forks).
 # Vereist: BENCHER_PROJECT, BENCHER_API_TOKEN.
 name: Perf (PR compare)
@@ -80,6 +80,10 @@ jobs:
                 --testbed ubuntu-latest \
                 --adapter rust_criterion \
                 --ci-id suite_run_worstcase \
+                --threshold-measure latency \
+                --threshold-test t_test \
+                --threshold-max-sample-size 64 \
+                --threshold-upper-boundary 0.99 \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

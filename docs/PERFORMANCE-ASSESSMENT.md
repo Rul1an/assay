@@ -667,9 +667,46 @@ Zie ook: [Bencher: Create an API Token](https://bencher.dev/docs/how-to/claim/#c
 
 ### Adapter outputs + Criterion flags + VCR hygiene
 
-- **Criterion:** Bencher-adapter `rust_criterion` verwacht Criterion stdout; meet `latency` (ns). Gebruik altijd `--bench <name> -- …` voor extra args (bijv. `-- --quick`). **Harness:** Criterion-benches moeten `harness = false` hebben in `Cargo.toml` (`[[bench]] name = "…" harness = false`); anders gebruikt Cargo de libtest-harness en krijg je "running 0 tests" in plaats van Criterion-output → Bencher: "Are you sure rust_criterion is the right adapter?". In CI onderdrukt Criterion output als stdout geen TTY is; daarom draaien we `cargo bench` binnen `script -q -c "..." /dev/null` zodat Bencher de timing-lijnen ontvangt (geen "No benchmarks found!").
+- **Criterion:** Bencher-adapter `rust_criterion` verwacht Criterion stdout; meet `latency` (ns). Gebruik altijd `--bench <name> -- …` voor extra args (bijv. `-- --quick`). **Harness:** Criterion-benches moeten `harness = false` hebben in `Cargo.toml` (`[[bench]] name = "…" harness = false`); anders gebruikt Cargo de libtest-harness en krijg je "running 0 tests" in plaats van Criterion-output → Bencher: "Are you sure rust_criterion is the right adapter?". **IDs:** Criterion zet benchmark-naam + `time: [...]` op één regel alleen als de ID kort genoeg is; lange IDs wrappen → adapter parset niet. Gebruik korte group names (bijv. `sw`, `sr`) en korte bench-namen (`50x400b`, `12xlarge`, `wc`) zodat `sw/50x400b   time: [..]` op één regel blijft.
+- **Stdin/pipe-modus:** Bencher leest van stdin als je geen command na `--` geeft. Robuuster dan exec-modus: `cargo bench … 2>&1 | grep -v "Gnuplot not found" | bencher run --adapter rust_criterion …` (geen `-- command`).
 - **Hyperfine:** Bencher kan `--file results.json` (Hyperfine JSON) innemen voor e2e-tracking.
 - **VCR-hygiene:** Cassette-store in repo: scrub secrets/PII; matching op method + url + body (gecanonicaliseerde JSON), niet op Authorization; CI default = replay, record alleen lokaal.
+
+### Bencher ingest: exacte commands en reports
+
+**Waarom het nu werkt:** (1) Korte Criterion-IDs (`sw/50x400b`, `sw/12xlarge`, `sr/wc`) zodat `id + time:` op één regel blijft voor de rust_criterion-adapter. (2) Stdin/pipe: Bencher krijgt exact de gefilterde stdout. (3) Zelfde branch/testbed (`main`, `ubuntu-latest`) en threshold-flags op main en PR.
+
+**Main baseline – twee aparte runs (twee reports in Bencher):**
+
+```bash
+# Step 1: store_write_heavy → report met sw/50x400b, sw/12xlarge
+cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+  | grep -v "Gnuplot not found" \
+  | bencher run \
+      --project "$BENCHER_PROJECT" --token "$BENCHER_API_TOKEN" \
+      --branch main --testbed ubuntu-latest --adapter rust_criterion \
+      --ci-id store_write_heavy \
+      --threshold-measure latency --threshold-test t_test \
+      --threshold-max-sample-size 64 --threshold-upper-boundary 0.99 --thresholds-reset \
+      --github-actions "$GITHUB_TOKEN"
+
+# Step 2: suite_run_worstcase → aparte report met sr/wc
+cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
+  | grep -v "Gnuplot not found" \
+  | bencher run \
+      --project "$BENCHER_PROJECT" --token "$BENCHER_API_TOKEN" \
+      --branch main --testbed ubuntu-latest --adapter rust_criterion \
+      --ci-id suite_run_worstcase \
+      --threshold-measure latency --threshold-test t_test \
+      --threshold-max-sample-size 64 --threshold-upper-boundary 0.99 --thresholds-reset \
+      --github-actions "$GITHUB_TOKEN"
+```
+
+**Waar sr/wc landt:** Elke `bencher run`-aanroep maakt één report. De eerste step vult een report met alleen `sw/50x400b` en `sw/12xlarge`; de tweede step een report met alleen `sr/wc`. In de Bencher-UI zie je dus twee reports per baseline-run (zelfde branch version). Dat is bewust: `--ci-id` onderscheidt de runs; alle drie de benchmarks zijn wel in de branch-baseline aanwezig.
+
+**PR compare:** Zelfde pipe-setup, met `--branch "$GITHUB_HEAD_REF"`, `--start-point "$GITHUB_BASE_REF"`, `--start-point-hash <base_sha>`, `--start-point-clone-thresholds`, `--start-point-reset`, en dezelfde threshold-flags als main. Zonder `--err`: Bencher post de vergelijking als check/comment (warn). Met `--err`: run faalt bij threshold-alert (hard fail); toevoegen zodra ruis onder controle is.
+
+**Robuustheid later:** Overweeg overstap naar json-adapter + BMF file (Criterion JSON of eigen export) zodat wijzigingen in Criterion-output de ingest niet breken.
 
 ### summary.json-velden (phase + store)
 
