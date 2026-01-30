@@ -34,7 +34,11 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-patch"]
       # rand 0.9 requires coordinated updates with ed25519-dalek (crypto RNG trait changes)
+      # See: docs/architecture/ADR-020-Dependency-Governance.md
+      # Tracking: https://github.com/Rul1an/assay/issues/84
       - dependency-name: "rand"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "rand_core"
         update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
