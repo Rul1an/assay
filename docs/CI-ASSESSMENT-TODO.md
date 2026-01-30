@@ -2,7 +2,7 @@
 
 Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTIONS, PERFORMANCE-ASSESSMENT, BRANCH-PROTECTION) die nog actie vragen voor CI/workflows.
 
-**Al gedaan:** Branch protection (main), CODEOWNERS, required status checks (CI, Smoke Install, assay-action-contract-tests, MCP Security), workflow permissions (read default, job-level contents: read), environment: release/crates/pypi in release.yml, fork-guards op self-hosted, OIDC voor crates.io en PyPI.
+**Al gedaan:** Branch protection (main), CODEOWNERS, required status checks (CI, Smoke Install, assay-action-contract-tests, MCP Security), workflow permissions (read default, job-level contents: read), environment: release/crates/pypi in release.yml, fork-guards op self-hosted, OIDC voor crates.io en PyPI, **Bencher production CI gate** (25% threshold, `--err`), **nightly forensic** (BMF JSON → Bencher).
 
 ---
 
@@ -40,8 +40,9 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 |------|------|--------|
 | ✅ **Cache-hit in CI job summary** | PERFORMANCE-ASSESSMENT § "Bewijs van cache-hit" | **Gedaan:** ci.yml perf-job logt `cache-hit=${{ steps.rust-cache.outputs.cache-hit }}` in job summary (regel 102-106). |
 | **Fase-timings / SQLite-counters** | PERFORMANCE-ASSESSMENT P0.3 | Voor echte P0.3-validatie: fase-timings en SQLite-contention (bv. sqlite_busy_count) first-class in summary.json of bench-output; zie doc voor minimale set. |
-| ✅ **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | **Gedaan:** stdin/pipe-modus, korte IDs (sw/sr), threshold-flags (t_test, upper_boundary 0.99), exacte commands in doc, perf_pr = warn. **Later:** perf_pr_gate.yml met --err + label perf-gate voor hard-fail. |
-| ✅ **VCR-middleware** | PERFORMANCE-ASSESSMENT § VCR-workload | **Gedaan:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (`providers/embedder/openai.rs`, `providers/llm/openai.rs` — `with_vcr()`/`from_env()`). Matching: method+URL+body (SHA256). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`. |
+| ✅ **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | **Gedaan:** Production config: percentage test, upper_boundary 0.25 (25%), `--err` voor hard fail op main+PR. Nightly forensic (`perf_nightly.yml`) met BMF JSON push naar Bencher (tail_ratio, sqlite_busy_count thresholds). |
+| ✅ **VCR-middleware** | PERFORMANCE-ASSESSMENT § VCR-workload | **Gedaan:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (`providers/embedder/openai.rs`, `providers/llm/openai.rs` — `with_vcr()`/`from_env()`). Matching: method+URL+body (SHA256). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`. Cassettes opgenomen: `cassettes/openai/{embeddings,judge}/`. |
+| ✅ **Forensic alarm thresholds** | PERFORMANCE-ASSESSMENT § Tail-latency | **Gedaan:** `FORENSIC=1` mode met tail_ratio/p95/p99/max/stddev. Alarm policy: tail_ratio > 1.5 warn, > 2.0 fail; sqlite_busy_count > 0 warn, > 5 fail. |
 
 ---
 
@@ -51,8 +52,9 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 - Geen `pull_request_target`; self-hosted jobs alleen bij non-fork PR (fork-guard).
 - Caches: hashFiles/vaste prefix; concurrency op ebpf-smoke en kernel-matrix.
 - OIDC voor crates.io en PyPI; Bencher static token met same-repo guard.
-- **Bencher CI baseline + PR compare:** perf_main.yml (main baseline, nightly), perf_pr.yml (PR compare); benchmarks sw/50x400b, sw/12xlarge, sr/wc; stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99); reports in Bencher UI met Δ% en thresholds.
-- **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (OpenAI embedder/LLM via `with_vcr()`/`from_env()`); cassettes in `tests/fixtures/perf/semantic_vcr/cassettes/`.
+- **Bencher CI gate (production):** perf_main.yml (baseline, percentage test 25%), perf_pr.yml (clone thresholds, `--err`), perf_nightly.yml (forensic BMF JSON → Bencher custom measures). Thresholds: latency +25% = fail, tail_ratio > 2.0 = alert, sqlite_busy_count > 0 = warn.
+- **VCR-middleware:** `crates/assay-core/src/vcr/mod.rs` + provider-integratie (OpenAI embedder/LLM via `with_vcr()`/`from_env()`); cassettes opgenomen in `tests/fixtures/perf/semantic_vcr/cassettes/openai/{embeddings,judge}/`.
+- **Forensic mode:** `FORENSIC=1` met tail_ratio/p95/p99/stddev, alarm thresholds (warn/fail), `BMF_JSON=1` voor Bencher custom measures.
 
 ---
 
