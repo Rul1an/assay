@@ -12,8 +12,8 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 |----------|---------|----------|------|------|
 | **CI** | `ci.yml` | push (main, debug/**), pull_request (paths-ignore docs), workflow_dispatch | clippy, open-core-boundary, perf, test, ebpf-smoke-ubuntu, ebpf-smoke-self-hosted | Kern-CI: lint, boundary check, Criterion benches, tests (matrix ubuntu/macos/windows), eBPF smoke (Ubuntu + self-hosted). |
 | **Example CI Gate** | `baseline-gate-demo.yml` | pull_request (paths: examples/baseline-gate/**, workflow) | gate | Demo: baseline-gate PR — cache .eval/.assay, build release, replay traces, baseline check; cache-hit in summary. |
-| **Perf (main baseline)** | `perf_main.yml` | push (main), schedule (nightly 03:00 UTC) | benches | Bencher: Criterion-baseline op main + nightly (store_write_heavy, suite_run_worstcase); thresholds-reset. |
-| **Perf (PR compare)** | `perf_pr.yml` | pull_request (opened, reopened, edited, synchronize) | benches | Bencher: PR vergelijken met main (start-point, clone-thresholds); soft (geen --err); alleen same-repo. |
+| **Perf (main baseline)** | `perf_main.yml` | push (main), schedule (nightly 03:00 UTC) | benches | Bencher: Criterion-baseline op main + nightly; benchmarks `sw/50x400b`, `sw/12xlarge` (store_write_heavy) en `sr/wc` (suite_run_worstcase); stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99). |
+| **Perf (PR compare)** | `perf_pr.yml` | pull_request (opened, reopened, edited, synchronize) | benches | Bencher: PR vergelijken met main (start-point, clone-thresholds); zelfde threshold-flags als main; soft (geen --err); alleen same-repo. |
 | **Publish Docs** | `docs.yml` | push (main, paths: docs/**, mkdocs.yml), workflow_dispatch | deploy | MkDocs → GitHub Pages. |
 | **Release** | `release.yml` | push (tags v*), workflow_dispatch (version input) | build, release, verify-lsm-blocking, publish-crates, wheels, publish-pypi | Cross-platform binaries (Linux x86/aarch64; macOS/Windows uitgecommentarieerd), LSM verify, crates.io + Python wheels + PyPI. |
 | **MCP Security** | `assay-security.yml` | push/pull_request (paths: assay.yaml, policy.yaml, examples/**, **/*.mcp.json), workflow_dispatch | security-check | Validate demo config → SARIF → GitHub Security tab; gate op text output. |
@@ -147,8 +147,10 @@ flowchart LR
   BENCHER_MAIN -.->|baseline| BENCHER_PR
 ```
 
-- **perf_main.yml:** bouwt baseline op main (en nightly); Bencher slaat resultaten op met `--thresholds-reset`.
-- **perf_pr.yml:** draait dezelfde Criterion-benches op de PR-branch en vergelijkt met main via `--start-point`, `--start-point-clone-thresholds`, `--start-point-reset`; geen `--err` (soft; later hard fail mogelijk).
+- **perf_main.yml:** bouwt baseline op main (en nightly); Bencher slaat resultaten op met `--thresholds-reset`. Benchmarks: `sw/50x400b`, `sw/12xlarge`, `sr/wc`. Twee reports per run (één per `bencher run`-aanroep met `--ci-id`).
+- **perf_pr.yml:** draait dezelfde Criterion-benches op de PR-branch en vergelijkt met main via `--start-point`, `--start-point-clone-thresholds`, `--start-point-reset`; zelfde threshold-flags als main; geen `--err` (soft; later hard fail mogelijk via aparte gate met `--err` + label).
+- **Stdin/pipe-modus:** `cargo bench … 2>&1 | grep -v "Gnuplot not found" | bencher run --adapter rust_criterion …` — robuuster dan exec-modus.
+- **Korte IDs:** Criterion group names `sw` (store_write_heavy) en `sr` (suite_run_worstcase) zodat `id time: [...]` op één regel blijft voor Bencher's rust_criterion-adapter.
 
 ---
 

@@ -570,11 +570,11 @@ Als je alles wat al geïmplementeerd is meerekent (store_metrics, pragmas, wal_c
 | 1 | **Doc alignen met realiteit** | Inventaris- en status-tabellen up-to-date houden (zoals in dit doc bijgewerkt); anders misleiden reviewers zich op “Nee”/“ontbreekt”-tekst. |
 | 2 | **Semantic/judge VCR-workload** (fixture ✅, middleware open) | Fixture: `tests/fixtures/perf/semantic_vcr/` (eval, trace, cassettes/). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`; CI = replay only. **Open:** VCR-middleware (reqwest record/replay) in code. Zie sectie “Semantic/judge VCR-workload”. |
 | 3 | **Hyperfine e2e als blessed flow** | ✅ **Blessed script:** `scripts/perf_e2e.sh` — small / file_backed / ci; `--warmup`, `--export-json`, median+p95 uit JSON. Zie “Hyperfine e2e: blessed flow” in dit doc. |
-| 4 | **CI baseline-vergelijking + regressie-policy** (Bencher ✅) | Conventie: welke benches op PR vs main/nightly; **baseline-vergelijking** (compare against main of Bencher) zodat niet alleen artifact geüpload wordt maar ook regressie gesignaleerd; policy: eerst “warn if p95 +10%”, later “fail if +X%” als standaard job. |
+| 4 | ✅ **CI baseline-vergelijking + regressie-policy** | **Gedaan:** perf_main.yml (baseline) + perf_pr.yml (PR compare); Bencher reports met `sw/50x400b`, `sw/12xlarge`, `sr/wc`; thresholds (t_test, upper_boundary 0.99); perf_pr = warn. **Later:** perf_pr_gate.yml met --err voor hard fail; thresholds per benchmark in Bencher UI. |
 | 5 | **Busy handler/timeout in doc** | ✅ In dit doc toegevoegd: sectie “Busy handler en checkpoint” — PRAGMA vs custom handler, één per connection, waarom PRAGMA 0 kan zijn; onze keuze + hoe we loggen. |
 | 6 | **CI cache voor perf jobs** | ✅ Perf-job in ci.yml logt **cache-hit** (rust-cache) in job summary; sectie “CI cache voor perf jobs” in dit doc. Norm: waar cache leeft (.assay vs target/) en wat gecached wordt. |
 
-**Kort:** Fixture-structuur voor semantic VCR en Bencher-workflows zijn toegevoegd. Nog open: **(2)** VCR-middleware in code (reqwest record/replay) zodat semantic_vcr replay werkt; daarna cassettes opnemen en committen.
+**Kort:** Fixture-structuur voor semantic VCR en Bencher-workflows zijn toegevoegd en **Bencher is volledig operationeel** (baseline + PR compare + thresholds). Nog open: **(2)** VCR-middleware in code (reqwest record/replay) zodat semantic_vcr replay werkt; daarna cassettes opnemen en committen.
 
 ---
 

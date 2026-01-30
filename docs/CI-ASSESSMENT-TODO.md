@@ -40,7 +40,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 |------|------|--------|
 | **Cache-hit in CI job summary** | PERFORMANCE-ASSESSMENT § “Bewijs van cache-hit”, “Huidige stand” | In de **Criterion-perf-job** (ci.yml): stap toevoegen die **cache-hit** (van rust-cache of assay-perf cache) in de **job summary** logt (`echo "cache-hit=..."`), zodat in de UI zichtbaar is of het een cache-hit was. baseline-gate-demo doet dit al. |
 | **Fase-timings / SQLite-counters** | PERFORMANCE-ASSESSMENT P0.3 | Voor echte P0.3-validatie: fase-timings en SQLite-contention (bv. sqlite_busy_count) first-class in summary.json of bench-output; zie doc voor minimale set. |
-| **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | Beleid vastgelegd: meerdere reports, perf_pr = warn (geen --err), exacte PR-commands in doc. Optioneel later: perf_pr_gate.yml met --err + label perf-gate voor hard-fail; thresholds per benchmark in Bencher UI (bv. +10% warn, +20% fail). |
+| ✅ **Bencher policy** | PERFORMANCE-ASSESSMENT § Bencher policy | **Gedaan:** stdin/pipe-modus, korte IDs (sw/sr), threshold-flags (t_test, upper_boundary 0.99), exacte commands in doc, perf_pr = warn. **Later:** perf_pr_gate.yml met --err + label perf-gate voor hard-fail. |
 
 ---
 
@@ -50,6 +50,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 - Geen `pull_request_target`; self-hosted jobs alleen bij non-fork PR (fork-guard).
 - Caches: hashFiles/vaste prefix; concurrency op ebpf-smoke en kernel-matrix.
 - OIDC voor crates.io en PyPI; Bencher static token met same-repo guard.
+- **Bencher CI baseline + PR compare:** perf_main.yml (main baseline, nightly), perf_pr.yml (PR compare); benchmarks sw/50x400b, sw/12xlarge, sr/wc; stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99); reports in Bencher UI met Δ% en thresholds.
 
 ---
 
