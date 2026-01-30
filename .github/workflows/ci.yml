@@ -80,7 +80,9 @@ jobs:
         with:
           components: rustfmt
       - name: Run Criterion benches
-        run: cargo bench -p assay-core -p assay-cli --no-fail-fast -- --quick
+        env:
+          QUICK: "1"
+        run: cargo bench -p assay-core -p assay-cli --no-fail-fast
       - name: Upload Criterion report
         uses: actions/upload-artifact@v4
         with:

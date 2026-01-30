@@ -1,0 +1,64 @@
+# PR: vergelijk met main-baseline. Start met soft thresholds (geen --err); later --err voor hard fail.
+# Alleen same-repo PRs (secrets niet beschikbaar op forks).
+# Vereist: BENCHER_PROJECT, BENCHER_API_TOKEN.
+name: Perf (PR compare)
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  benches:
+    name: Criterion compare (PR vs main)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      QUICK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -o Acquire::Retries=10 -o Acquire::http::Timeout=60 -o Acquire::https::Timeout=60
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: bencherdev/bencher@main
+      - name: Criterion (store_write_heavy)
+        run: |
+          bencher run \
+            --project '${{ secrets.BENCHER_PROJECT }}' \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch "$GITHUB_HEAD_REF" \
+            --start-point "$GITHUB_BASE_REF" \
+            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            -- cargo bench -p assay-core --bench store_write_heavy -- --quick
+      - name: Criterion (suite_run_worstcase)
+        run: |
+          bencher run \
+            --project '${{ secrets.BENCHER_PROJECT }}' \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch "$GITHUB_HEAD_REF" \
+            --start-point "$GITHUB_BASE_REF" \
+            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            -- cargo bench -p assay-cli --bench suite_run_worstcase
