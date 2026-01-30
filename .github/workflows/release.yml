@@ -185,7 +185,7 @@ jobs:
           "${hash}  ${ARCHIVE_NAME}.zip" | Out-File -Encoding ASCII "dist\${ARCHIVE_NAME}.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: assay-${{ matrix.target }}
           path: dist/assay-*
@@ -307,7 +307,7 @@ jobs:
 
       - name: Upload verification logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: lsm-verification-logs
           path: /tmp/assay-lsm-verify/
@@ -380,7 +380,7 @@ jobs:
           manylinux: auto
 
       - name: Upload wheels
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
           path: assay-python-sdk/dist/*.whl

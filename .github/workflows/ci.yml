@@ -93,7 +93,7 @@ jobs:
           ls -la target/criterion 2>/dev/null || echo "target/criterion missing or empty"
           du -sh target/criterion 2>/dev/null || true
       - name: Upload Criterion report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: criterion-report
           path: target/criterion/
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload verification logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         continue-on-error: true
         with:
           name: ci-smoke-logs-ubuntu
@@ -356,7 +356,7 @@ jobs:
 
       - name: Upload verification logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         continue-on-error: true
         with:
           name: ci-smoke-logs-self-hosted

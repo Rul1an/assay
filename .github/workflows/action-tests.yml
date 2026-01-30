@@ -88,7 +88,7 @@ jobs:
           fi
 
       - name: Upload SARIF artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: pack-lint-sarif
           path: output/lint.sarif
@@ -376,7 +376,7 @@ jobs:
             --trace-file traces/ok.jsonl
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: assay-reports-smoke
           path: |
@@ -425,7 +425,7 @@ jobs:
             --export-baseline baseline.json
 
       - name: Upload Baseline Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v4
         with:
           name: assay-baseline
           path: fixtures/export/baseline.json
