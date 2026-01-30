@@ -1,0 +1,86 @@
+name: Perf Nightly (forensic trend)
+
+on:
+  schedule:
+    # Run at 03:00 UTC daily (off-peak)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Forensic iterations per workload'
+        required: false
+        default: '30'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  forensic:
+    name: Nightly forensic trend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev bc jq
+
+      - uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # stable
+
+      - name: Build release binary
+        run: cargo build --release -p assay-cli
+
+      - name: Run forensic assessment
+        id: forensic
+        env:
+          ASSAY: ./target/release/assay
+          FORENSIC: "1"
+          FORENSIC_ITERATIONS: ${{ github.event.inputs.iterations || '30' }}
+        run: |
+          # Run forensic mode and capture output
+          ./scripts/perf_assess.sh 2>&1 | tee forensic_output.txt
+
+          # Extract key metrics for job summary
+          {
+            echo "## Nightly Forensic Results"
+            echo ""
+            echo "### worst_file_backed"
+            grep -A15 "Forensic: worst_file_backed" forensic_output.txt | grep -E "(median|p95|p99|tail_ratio|status)" || true
+            echo ""
+            echo "### Store metrics"
+            grep -A5 "Store metrics:" forensic_output.txt | head -6 || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Check for failures
+          if grep -q "❌ FAIL" forensic_output.txt; then
+            echo "::warning::Forensic detected threshold violations"
+            echo "forensic_status=fail" >> "$GITHUB_OUTPUT"
+          elif grep -q "⚠️" forensic_output.txt; then
+            echo "forensic_status=warn" >> "$GITHUB_OUTPUT"
+          else
+            echo "forensic_status=pass" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload forensic artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        with:
+          name: forensic-${{ github.run_number }}
+          path: |
+            forensic_output.txt
+          retention-days: 90
+
+      - name: Trend summary
+        run: |
+          {
+            echo "## Trend Analysis"
+            echo ""
+            echo "Status: ${{ steps.forensic.outputs.forensic_status }}"
+            echo ""
+            echo "View historical artifacts to track trends over time."
+          } >> "$GITHUB_STEP_SUMMARY"

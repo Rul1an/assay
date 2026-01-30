@@ -657,6 +657,43 @@ Gebaseerd op forensic baseline (jan 2026):
 - `sqlite_busy_count > 0` betekent lock contention — onderzoek transacties
 - `max >> p99` suggereert incidentele outliers (vaak cold cache of GC)
 
+### Bencher threshold mapping
+
+Bencher thresholds afgestemd op forensic baseline (jan 2026):
+
+| Benchmark | Baseline median | upper_boundary | Rationale |
+|-----------|-----------------|----------------|-----------|
+| **sw/50x400b** | ~95 ms | 0.95 (+20% ruimte) | Store-heavy, CI-noisy |
+| **sw/12xlarge** | ~35 ms | 0.95 | Snelle bench, minder ruis |
+| **sr/wc** | ~52 ms | 0.95 | Suite run, moderate variance |
+
+**Bencher flags (huidige configuratie):**
+```yaml
+--threshold-measure latency
+--threshold-test t_test          # Statistische t-test
+--threshold-max-sample-size 64   # Max 64 historical samples
+--threshold-upper-boundary 0.99  # 99% confidence → warn/fail
+```
+
+**Phased rollout:**
+1. **Week 1-2:** `perf_pr.yml` zonder `--err` (warn only)
+2. **Week 3-4:** Analyseer false positives, tune upper_boundary per benchmark
+3. **Week 5+:** `--err` toevoegen voor hard fail (of aparte `perf_pr_gate.yml`)
+
+**Hysteresis (aanbevolen voor hard fail):**
+- Fail pas na 2 opeenvolgende alerts, óf
+- Gebruik `--threshold-min-sample-size 10` om te garanderen dat er genoeg history is
+
+### Nightly forensic trend
+
+Geautomatiseerd via `.github/workflows/perf_nightly.yml`:
+- **Schedule:** dagelijks 03:00 UTC
+- **Workload:** `FORENSIC=1` (worst_file_backed 30×, worst_large_payload 30×)
+- **Output:** forensic_output.txt artifact (90 dagen retention)
+- **Alerts:** `::warning` in job summary bij threshold violations
+
+Doel: **drift detectie** — niet om PRs te blokkeren, maar om infra/dependency-veranderingen vroeg te signaleren.
+
 **Handmatige Hyperfine-commands** (als je geen script wilt):
 
 | Scenario | Command |
