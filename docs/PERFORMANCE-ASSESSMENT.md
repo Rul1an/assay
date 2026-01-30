@@ -661,38 +661,57 @@ Gebaseerd op forensic baseline (jan 2026):
 
 Bencher thresholds afgestemd op forensic baseline (jan 2026):
 
-| Benchmark | Baseline median | upper_boundary | Rationale |
-|-----------|-----------------|----------------|-----------|
-| **sw/50x400b** | ~95 ms | 0.95 (+20% ruimte) | Store-heavy, CI-noisy |
-| **sw/12xlarge** | ~35 ms | 0.95 | Snelle bench, minder ruis |
-| **sr/wc** | ~52 ms | 0.95 | Suite run, moderate variance |
+| Measure | Test | upper_boundary | Workflow |
+|---------|------|----------------|----------|
+| **latency** | percentage | 0.25 (25%) | perf_main, perf_pr |
+| **tail_ratio** | static | 2.0 | perf_nightly |
+| **sqlite_busy_count** | static | 0 | perf_nightly |
 
-**Bencher flags (huidige configuratie):**
+**Bencher flags (productie configuratie):**
 ```yaml
+# perf_main.yml (baseline)
 --threshold-measure latency
---threshold-test t_test          # Statistische t-test
---threshold-max-sample-size 64   # Max 64 historical samples
---threshold-upper-boundary 0.99  # 99% confidence → warn/fail
+--threshold-test percentage       # Drift vs baseline
+--threshold-max-sample-size 64    # Statistical stability
+--threshold-upper-boundary 0.25   # 25% = fail
+--thresholds-reset                # Only this threshold active
+--err                             # Fail on alert
+
+# perf_pr.yml (PR compare)
+--start-point-clone-thresholds    # Clone from main
+--start-point-reset               # Prevent drift
+--err                             # Fail on alert
+
+# perf_nightly.yml (forensic)
+--adapter json                    # BMF JSON input
+--threshold-measure tail_ratio
+--threshold-test static           # Absolute limit
+--threshold-upper-boundary 2.0    # tail_ratio > 2.0 = alert
 ```
 
-**Phased rollout:**
-1. **Week 1-2:** `perf_pr.yml` zonder `--err` (warn only)
-2. **Week 3-4:** Analyseer false positives, tune upper_boundary per benchmark
-3. **Week 5+:** `--err` toevoegen voor hard fail (of aparte `perf_pr_gate.yml`)
-
-**Hysteresis (aanbevolen voor hard fail):**
-- Fail pas na 2 opeenvolgende alerts, óf
-- Gebruik `--threshold-min-sample-size 10` om te garanderen dat er genoeg history is
+**CI Gate Logic:**
+- **Main baseline:** Elke push naar main update Bencher baseline met 25% threshold
+- **PR compare:** Vergelijk tegen main baseline, fail bij >25% regressie
+- **Nightly:** Forensic metrics (tail_ratio, sqlite_busy_count) met static thresholds
 
 ### Nightly forensic trend
 
 Geautomatiseerd via `.github/workflows/perf_nightly.yml`:
 - **Schedule:** dagelijks 03:00 UTC
 - **Workload:** `FORENSIC=1` (worst_file_backed 30×, worst_large_payload 30×)
-- **Output:** forensic_output.txt artifact (90 dagen retention)
-- **Alerts:** `::warning` in job summary bij threshold violations
+- **Output:**
+  - `forensic_output.txt` artifact (90 dagen retention)
+  - BMF JSON push naar Bencher (grafieken + trend tracking)
+- **Bencher metrics:** tail_ratio, p95_ms, p99_ms, median_ms, sqlite_busy_count
+- **Alerts:** Static threshold `tail_ratio > 2.0` triggert Bencher alert
 
-Doel: **drift detectie** — niet om PRs te blokkeren, maar om infra/dependency-veranderingen vroeg te signaleren.
+**BMF JSON output:**
+```bash
+# Genereer Bencher Metric Format JSON
+FORENSIC=1 BMF_JSON=1 ./scripts/perf_assess.sh 2>/dev/null | tail -20
+```
+
+Doel: **drift detectie** + **trend visualisatie** in Bencher dashboard — niet om PRs te blokkeren, maar om infra/dependency-veranderingen vroeg te signaleren.
 
 **Handmatige Hyperfine-commands** (als je geen script wilt):
 
