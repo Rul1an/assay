@@ -2,14 +2,12 @@
 set -euo pipefail
 
 # Linux-only compile guard for macOS dev: catches cfg(target_os="linux") compile errors.
-# Priority:
-#  1) Multipass VM (if available + configured)
-#  2) Cross-target cargo check (no VM needed)
-#  3) Graceful skip (if neither possible)
+# Default: target (cross-compile only, no VM) so pre-push does not hang on multipass.
+# Set ASSAY_LINUX_CHECK_MODE=multipass for full in-VM clippy; auto tries multipass then target.
 
 VM_NAME="${ASSAY_LINUX_VM:-assay-bpf-runner}"   # override via env
 WORKDIR="${ASSAY_LINUX_WORKDIR:-/home/ubuntu/assay}" # path inside VM (if you mount/sync)
-MODE="${ASSAY_LINUX_CHECK_MODE:-auto}"          # auto | target | multipass
+MODE="${ASSAY_LINUX_CHECK_MODE:-target}"        # target (default) | multipass | auto
 
 run_target_check() {
   echo "==> Linux cross-target: cargo check (no Docker/VM)"
@@ -33,7 +31,7 @@ run_multipass_check() {
   # Execute in VM. Assumes repo available at $WORKDIR in VM.
   # (Mount or git clone inside VM; see notes below.)
   # NOTE: Full clippy in VM can take 2–5 min on cold/heavy build; script times out at 180s.
-  # Use ASSAY_LINUX_CHECK_MODE=target for faster cross-compile-only check (no VM).
+  # Default is ASSAY_LINUX_CHECK_MODE=target (no VM) to avoid pre-push hangs.
   timeout 180 multipass exec "$VM_NAME" -- bash -lc "
     export PATH=\"\$HOME/.cargo/bin:\$PATH\"
     if [ -f \"\$HOME/.cargo/env\" ]; then . \"\$HOME/.cargo/env\"; fi

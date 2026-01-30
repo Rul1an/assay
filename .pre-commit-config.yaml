@@ -68,3 +68,4 @@ repos:
         language: system
         stages: [pre-push]
         pass_filenames: false
+        # Default: cross-compile only (ASSAY_LINUX_CHECK_MODE=target). Set =multipass for full VM clippy.
