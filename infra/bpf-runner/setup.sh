@@ -107,7 +107,7 @@ if [ ! -f "$RUNNER_DIR/.runner" ]; then
 
     echo "   -> Registering Runner (Requires GITHUB_TOKEN interactions)..."
     echo "   ⚠️  Manual Step: Run 'config.sh' as $RUNNER_USER using the token."
-    echo "   su - $RUNNER_USER -c 'cd $RUNNER_DIR && ./config.sh --url $REPO_URL --token $GITHUB_TOKEN --labels self-hosted,linux,x64,bpf-lsm --unattended'"
+    echo "   su - $RUNNER_USER -c 'cd $RUNNER_DIR && ./config.sh --url $REPO_URL --token $GITHUB_TOKEN --labels self-hosted,linux,x64,bpf-lsm,assay-bpf-runner --unattended'"
     echo "   su - $RUNNER_USER -c 'cd $RUNNER_DIR && sudo ./svc.sh install && sudo ./svc.sh start'"
 fi
 

@@ -28,7 +28,7 @@ REPO="${REPO:-Rul1an/assay}"
 RUNNER_NAME="${RUNNER_NAME:-assay-bpf-runner}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
 RUNNER_USER="${RUNNER_USER:-github-runner}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,bpf-lsm}"
+RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,bpf-lsm,assay-bpf-runner}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 
