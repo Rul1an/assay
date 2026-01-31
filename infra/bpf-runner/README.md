@@ -6,6 +6,39 @@ Setup and maintenance for the GitHub Actions self-hosted runner used by Kernel M
 
 - **New VM (Mac):** `./setup_local_multipass.sh` then register the runner (see script output).
 - **Cloud/VM:** `./setup.sh` (requires `GITHUB_TOKEN`, `RUNNER_NAME`, `REPO_URL`).
+- **Auto-recovery:** `./health_check.sh --install-cron` (monitors every 5 minutes).
+
+## Health Check & Auto-Recovery
+
+The `health_check.sh` script monitors the runner and auto-recovers from common failures:
+
+```bash
+# Check status
+./health_check.sh --status
+
+# Manual health check
+./health_check.sh
+
+# Force recovery
+./health_check.sh --recover
+
+# Install cron job (every 5 minutes)
+./health_check.sh --install-cron
+```
+
+**What it monitors:**
+- VM running state (starts if stopped)
+- Runner online status at GitHub
+- Runner service status in VM
+- Queued jobs waiting for the runner
+
+**What it auto-fixes:**
+- VM clock drift (NTP sync) — most common cause of "token expired"
+- Expired registration tokens (generates new token via `gh` CLI)
+- Stopped services (restarts runner service)
+- Stale configuration (full reconfiguration if needed)
+
+**GitHub Actions backup:** A workflow (`runner-health.yml`) runs every 15 minutes and creates a GitHub issue if the runner is offline with queued jobs.
 
 ## "No space left on device" (Kernel Matrix CI)
 
@@ -50,4 +83,5 @@ If the **Kernel Matrix (5.15)** or **(6.6)** job fails with `Error: No space lef
 | `setup_local_multipass.sh` | Create/start Multipass VM (Mac). |
 | `setup.sh` | Full runner setup on Ubuntu (cloud or existing VM). |
 | `register_local.sh` | Register/update runner using a token. |
+| `health_check.sh` | Health monitoring and auto-recovery (install via `--install-cron`). |
 | `free_disk.sh` | Free disk on the runner VM (run when you see "No space left on device"). |

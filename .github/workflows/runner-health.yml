@@ -1,0 +1,126 @@
+# Self-hosted runner health monitor
+# Runs every 15 minutes to check runner status and alert if offline
+name: Runner Health
+
+on:
+  schedule:
+    # Every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  health-check:
+    name: Check Self-Hosted Runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check runner status
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          RUNNER_NAME="assay-bpf-runner"
+
+          echo "Checking runner status for $RUNNER_NAME..."
+
+          # Get runner status
+          STATUS=$(gh api "repos/$REPO/actions/runners" \
+            --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" \
+            2>/dev/null || echo "not_found")
+
+          echo "runner_status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "Runner status: $STATUS"
+
+          # Get queued jobs count
+          QUEUED=$(gh api "repos/$REPO/actions/runs?status=queued" \
+            --jq '.workflow_runs | length' \
+            2>/dev/null || echo "0")
+
+          echo "queued_jobs=$QUEUED" >> "$GITHUB_OUTPUT"
+          echo "Queued jobs: $QUEUED"
+
+          # Determine health
+          if [[ "$STATUS" == "online" ]]; then
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Runner is healthy"
+          elif [[ "$STATUS" == "offline" ]] && [[ "$QUEUED" -gt 0 ]]; then
+            echo "healthy=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Runner is OFFLINE with $QUEUED queued jobs!"
+            exit 1
+          else
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Runner is offline but no queued jobs"
+          fi
+
+      - name: Create issue if unhealthy
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          TITLE="🚨 Self-hosted runner offline with queued jobs"
+
+          # Check if issue already exists
+          EXISTING=$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq 'length')
+
+          if [[ "$EXISTING" -eq 0 ]]; then
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label "runner-health,urgent" \
+              --body "## Runner Health Alert
+
+          The self-hosted runner \`assay-bpf-runner\` is **offline** with queued jobs waiting.
+
+          ### Details
+          - **Runner:** assay-bpf-runner
+          - **Status:** ${{ steps.check.outputs.runner_status }}
+          - **Queued Jobs:** ${{ steps.check.outputs.queued_jobs }}
+          - **Detected:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          ### Recovery Steps
+
+          Run the health check script locally:
+          \`\`\`bash
+          cd /Users/roelschuurkes/assay
+          ./infra/bpf-runner/health_check.sh --recover
+          \`\`\`
+
+          Or manually:
+          1. Check VM: \`multipass list\`
+          2. Start VM if needed: \`multipass start assay-bpf-runner\`
+          3. Sync time: \`multipass exec assay-bpf-runner -- sudo timedatectl set-ntp true\`
+          4. Re-register runner with fresh token
+
+          ### Common Causes
+          - VM clock drift (NTP not synced)
+          - VM suspended or stopped
+          - Runner token expired
+          - Network issues
+
+          This issue will auto-close when the runner comes back online."
+            echo "Created health alert issue"
+          else
+            echo "Health alert issue already exists"
+          fi
+
+      - name: Close issue if healthy
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+
+          # Find and close any open runner-health issues
+          ISSUES=$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq '.[].number')
+
+          for ISSUE in $ISSUES; do
+            gh issue close "$ISSUE" --repo "$REPO" \
+              --comment "✅ Runner is back online. Auto-closing this alert."
+            echo "Closed issue #$ISSUE"
+          done
