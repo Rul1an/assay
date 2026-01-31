@@ -4,7 +4,7 @@
 #
 # Thresholds (jan 2026):
 # - Cloned from main baseline (--start-point-clone-thresholds)
-# - --err: fail workflow on alert (>25% regression)
+# - NO --err: alerts are warnings only (runner variance is too high)
 name: Perf (PR compare)
 
 on:
@@ -60,7 +60,6 @@ jobs:
                 --testbed ubuntu-latest \
                 --adapter rust_criterion \
                 --ci-id store_write_heavy \
-                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
@@ -85,7 +84,6 @@ jobs:
                 --testbed ubuntu-latest \
                 --adapter rust_criterion \
                 --ci-id suite_run_worstcase \
-                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
