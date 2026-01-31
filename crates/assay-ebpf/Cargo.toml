@@ -22,7 +22,7 @@ default = []
 ebpf = []
 
 [dependencies]
-aya-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
+aya-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.1" }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", tag = "aya-v0.13.0" }
 assay-common.workspace = true
 
