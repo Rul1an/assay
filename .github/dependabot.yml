@@ -46,6 +46,9 @@ updates:
         update-types: ["version-update:semver-major"]
       # assay-ebpf pins aya-ebpf and aya-log-ebpf to the same git tag; bump both together manually
       - dependency-name: "aya-log-ebpf"
+      # rusqlite 0.38+ removed FromSql/ToSql impl for u64; requires code migration
+      # Manual upgrade path: change row.get<_, Option<u64>>() to row.get<_, Option<i64>>().map(|v| v as u64)
+      - dependency-name: "rusqlite"
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"

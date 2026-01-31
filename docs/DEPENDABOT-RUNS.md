@@ -21,6 +21,7 @@ Overview of Dependabot configuration and which workflows run on Dependabot PRs.
 | `rand_core` | semver-major  | Same (rand 0.9 ecosystem) |
 | `nix`       | semver-major  | Clippy ICE on 0.31; revisit when Clippy/nix updates |
 | `aya-log-ebpf` | all        | Must stay in sync with aya-ebpf; bump both manually |
+| `rusqlite`     | all        | 0.38+ removed `FromSql`/`ToSql` for `u64`; requires code migration |
 
 ## Which workflows run on Dependabot PRs
 
@@ -36,9 +37,9 @@ There is **no** `if: github.actor != 'dependabot[bot]'` in the workflows: depend
 
 | PR | Update | Status |
 |----|--------|--------|
+| **#87** | rusqlite 0.31.0 → 0.38.0 | **Closed:** 0.38+ removed `FromSql`/`ToSql` for `u64`, requires code changes. Added Dependabot ignore. |
 | **#79** | aya-log-ebpf aya-v0.13.0 → aya-v0.13.1 | **Closed:** two versions of `aya_ebpf` in dependency tree (PR bumped only aya-log-ebpf; aya-ebpf stayed on v0.13.0). Added Dependabot ignore for `aya-log-ebpf`. |
-| **#76** | base64 0.21.7 → 0.22.1 | **Transient failure:** MCP Security workflow got `curl: (22) 403` from getassay.dev (rate-limit/infra), not caused by base64 update. Re-run or merge later. |
-| #86, #83, #81, #78, #75, #73, #71, #70, #67 | jsonschema, crossterm, rust-toolchain SHA, procfs, dirs, thiserror, uuid, ratatui, criterion | Green or still running (e.g. eBPF jobs, Free disk). |
+| #86, #83, #81, #78, #76, #75, #73, #71, #70, #67 | jsonschema, crossterm, rust-toolchain SHA, procfs, base64, dirs, thiserror, uuid, ratatui, criterion | Auto-merge enabled; waiting on self-hosted runner jobs. |
 
 ## Merging
 
