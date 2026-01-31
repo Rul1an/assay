@@ -42,7 +42,32 @@ There is **no** `if: github.actor != 'dependabot[bot]'` in the workflows: depend
 
 ## Merging
 
-- Dependabot PRs can be merged with **auto-merge** or manually once CI is green.
+**Note:** `@dependabot merge` is deprecated as of January 2026. Use GitHub's native controls.
+
+### Enable auto-merge (one-time setup)
+
+1. Go to **Settings → General → Pull Requests**
+2. Check **"Allow auto-merge"**
+3. Optionally check **"Automatically delete head branches"**
+
+### Merge Dependabot PRs
+
+```bash
+# Enable auto-merge (merges when CI passes)
+gh pr merge <number> --auto --squash
+
+# Or merge immediately if CI is already green
+gh pr merge <number> --squash
+
+# Bulk approve and auto-merge all Dependabot PRs
+for pr in $(gh pr list --author "app/dependabot" --state open --json number --jq '.[].number'); do
+  gh pr review $pr --approve
+  gh pr merge $pr --auto --squash
+done
+```
+
+### Notes
+
 - For SHA updates of actions: see [PINNED-ACTIONS.md](PINNED-ACTIONS.md) (verify new SHA is correct).
 - For Cargo: after merge, `cargo update` locally or in a follow-up PR if desired.
 - **aya (assay-ebpf):** both `aya-ebpf` and `aya-log-ebpf` must have the same git tag; Dependabot no longer opens PRs for aya-log-ebpf alone.

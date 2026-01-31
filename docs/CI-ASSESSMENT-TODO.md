@@ -69,6 +69,7 @@ De volgende items vereisen **handmatige actie in GitHub Settings** (niet via cod
 5. **GHAS** beslissen (Settings → Security → Code scanning / Secret scanning)
 6. **Signed commits** (optioneel, Settings → Branches → main → Require signed commits)
 7. **Linear history** (optioneel, Settings → Branches → main → Require linear history)
+8. **Auto-merge voor Dependabot** (Settings → General → Pull Requests → Allow auto-merge) — `@dependabot merge` is deprecated sinds jan 2026; gebruik `gh pr merge --auto --squash`
 
 ---
 
