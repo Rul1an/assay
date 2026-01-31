@@ -54,7 +54,7 @@ ed25519-dalek = { version = "2.1", features = ["pkcs8", "pem", "rand_core"] }
 rand = "0.8"
 pkcs8 = { version = "0.10", features = ["pem"] }
 base64 = "0.22"
-sysinfo = "0.30"
+sysinfo = "0.38"
 humantime = "2"
 tokio-stream = "0.1"
 futures = "0.3"
