@@ -122,6 +122,61 @@ check_queued_jobs() {
     return 1
 }
 
+# ==============================================================================
+# Queue Management (prevents stale job buildup)
+# ==============================================================================
+
+STALE_JOB_HOURS="${STALE_JOB_HOURS:-4}"
+
+# Cancel stale queued jobs (older than STALE_JOB_HOURS)
+cancel_stale_jobs() {
+    local gh="${GH_CMD:-gh}"
+    local cutoff_time
+    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                  date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
+
+    if [[ -z "$cutoff_time" ]]; then
+        log_warn "Could not calculate cutoff time for stale jobs"
+        return 1
+    fi
+
+    log_info "Checking for stale queued jobs (older than ${STALE_JOB_HOURS} hours)..."
+
+    local stale_jobs
+    stale_jobs=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,createdAt 2>/dev/null | \
+        jq -r --arg cutoff "$cutoff_time" '.[] | select(.createdAt < $cutoff) | .databaseId' || echo "")
+
+    if [[ -z "$stale_jobs" ]]; then
+        log_info "No stale jobs found"
+        return 0
+    fi
+
+    local cancel_count=0
+    for run_id in $stale_jobs; do
+        log_info "Cancelling stale run $run_id..."
+        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+        ((cancel_count++))
+        sleep 1  # Rate limiting
+    done
+
+    if [[ "$cancel_count" -gt 0 ]]; then
+        log_ok "Cancelled $cancel_count stale queued jobs"
+    fi
+
+    return 0
+}
+
+# Get queue statistics
+get_queue_stats() {
+    local gh="${GH_CMD:-gh}"
+
+    local queued in_progress
+    queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+    in_progress=$($gh api "repos/$REPO/actions/runs?status=in_progress" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+    echo "queued=$queued in_progress=$in_progress"
+}
+
 # Get runner status from GitHub API
 get_runner_status() {
     local status
@@ -424,10 +479,15 @@ health_check() {
     log_info "Runner '$RUNNER_NAME' status: $status"
 
     if [[ "$status" == "online" ]]; then
-        # Runner is online - still check for action cache issues
+        # Runner is online - perform maintenance tasks
+
+        # 1. Cancel stale queued jobs to prevent backlog
+        cancel_stale_jobs
+
+        # 2. Check for action cache issues
         heal_action_cache
 
-        # Periodic cache cleanup (on every health check when online)
+        # 3. Periodic cache cleanup
         clean_actions_cache
 
         log_ok "Runner is healthy"
@@ -492,13 +552,30 @@ show_status() {
         echo "Service: inactive"
     fi
 
-    local queued
+    echo ""
+    echo "=== Job Queue ==="
+    local queued in_progress
     queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
-    echo "Queued Workflows: $queued"
+    in_progress=$($gh api "repos/$REPO/actions/runs?status=in_progress" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    echo "Queued: $queued"
+    echo "In Progress: $in_progress"
+
+    # Check for stale jobs
+    local cutoff_time stale_count
+    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                  date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
+    if [[ -n "$cutoff_time" ]]; then
+        stale_count=$($gh run list --repo "$REPO" --status queued --limit 50 --json createdAt 2>/dev/null | \
+            jq -r --arg cutoff "$cutoff_time" '[.[] | select(.createdAt < $cutoff)] | length' || echo "?")
+        echo "Stale (>${STALE_JOB_HOURS}h): $stale_count"
+        if [[ "$stale_count" != "?" && "$stale_count" -gt 0 ]]; then
+            echo "⚠️  Run --cancel-stale to clean up"
+        fi
+    fi
 
     local failed
     failed=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=10" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
-    echo "Recent Failed Runs: $failed"
+    echo "Recent Failed: $failed"
 
     echo ""
     echo "=== Actions Cache ==="
@@ -550,11 +627,16 @@ case "${1:-}" in
         check_vm_running || exit 1
         heal_action_cache
         ;;
+    --cancel-stale)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_stale_jobs
+        ;;
     --help|-h)
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  (none)          Run full health check (including cache maintenance)"
+        echo "  (none)          Run full health check (including all maintenance)"
         echo "  --install-cron  Install cron job (every 5 minutes)"
         echo "  --status        Show current status"
         echo "  --recover       Force full runner recovery"
@@ -563,6 +645,13 @@ case "${1:-}" in
         echo "  --clean-cache   Remove stale cache entries (older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)"
         echo "  --clear-cache   Force clear entire actions cache"
         echo "  --heal-cache    Detect cache failures, clear cache, rerun failed jobs"
+        echo ""
+        echo "Queue Management:"
+        echo "  --cancel-stale  Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
+        echo ""
+        echo "Environment Variables:"
+        echo "  STALE_JOB_HOURS           Hours before queued job is considered stale (default: 4)"
+        echo "  ACTIONS_CACHE_MAX_AGE_DAYS Days before cache entry is stale (default: 7)"
         echo ""
         echo "  --help          Show this help"
         ;;
