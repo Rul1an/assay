@@ -570,16 +570,74 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 **Values**: `1` to enable
 **Default**: Disabled
 
-## Exit Codes
+## Exit Codes & Reason Codes
 
-| Code | Meaning | When Used |
-|------|---------|-----------|
-| 0 | Success | All tests pass |
-| 1 | Test failure | One or more tests fail |
-| 2 | Config error | Invalid configuration or policy |
+### Exit Codes (Coarse, CI-Compatible)
+
+| Code | Name | When Used |
+|------|------|-----------|
+| 0 | `EXIT_SUCCESS` | All tests pass |
+| 1 | `EXIT_TEST_FAILURE` | One or more tests fail, policy violation |
+| 2 | `EXIT_CONFIG_ERROR` | Invalid configuration, missing files, parse errors |
+| 3 | `EXIT_INFRA_ERROR` | Judge unavailable, rate limit, timeout, network error |
+
+### Reason Codes (Fine-Grained, Machine-Readable)
+
+Reason codes provide precise error identification for automation and debugging.
+
+#### Config/User Errors (Exit 2)
+| Code | Description | Next Step |
+|------|-------------|-----------|
+| `E_CFG_PARSE` | Config file parse error | `assay doctor --config <file>` |
+| `E_TRACE_NOT_FOUND` | Trace file not found | Check path exists |
+| `E_MISSING_CONFIG` | Required config missing | `assay init` |
+| `E_BASELINE_INVALID` | Baseline file invalid | `assay baseline record` |
+| `E_POLICY_PARSE` | Policy syntax error | `assay policy validate <file>` |
+| `E_INVALID_ARGS` | Invalid CLI arguments | `assay --help` |
+
+#### Infrastructure Errors (Exit 3)
+| Code | Description | Next Step |
+|------|-------------|-----------|
+| `E_JUDGE_UNAVAILABLE` | Judge/LLM service unavailable | Check API key, retry |
+| `E_RATE_LIMIT` | Rate limit hit | Wait, reduce concurrency |
+| `E_PROVIDER_5XX` | Provider returned 5xx | Retry, check status page |
+| `E_TIMEOUT` | Request timeout | Increase timeout, check network |
+| `E_NETWORK_ERROR` | Network connection failed | Check connectivity |
+
+#### Test Failures (Exit 1)
+| Code | Description | Next Step |
+|------|-------------|-----------|
+| `E_TEST_FAILED` | Test assertion failed | `assay explain <test-id>` |
+| `E_POLICY_VIOLATION` | Policy rule violated | Review policy or fix agent |
+| `E_SEQUENCE_VIOLATION` | Wrong tool call order | Check sequence rules |
+| `E_ARG_SCHEMA` | Argument schema invalid | Check tool argument schema |
+| `E_JUDGE_UNCERTAIN` | Judge returned uncertain | Review borderline result |
+
+### Exit Code Compatibility
+
+```bash
+# Use v2 exit codes (default)
+assay run --exit-codes=v2
+
+# Use v1 legacy codes (trace not found = exit 3)
+assay run --exit-codes=v1
+
+# Environment variable
+ASSAY_EXIT_CODES=v1 assay run
+```
+
+### Output Locations
+
+Reason codes appear in:
+- **Console**: Last lines of output
+- **summary.json**: `reason_code` and `reason_code_version` fields
+- **Job Summary**: When running in GitHub Actions
+- **SARIF**: In `ruleId` / `helpUri` where applicable
 
 ## Related Documentation
 
 - [User Flows](user-flows.md) - How these entry points are used in workflows
 - [Codebase Overview](codebase-overview.md) - Implementation details
 - [Interdependencies](interdependencies.md) - How components connect
+- [Quick Reference](quick-reference.md) - Command cheat sheet
+- [Decision Trees](decision-trees.md) - When to use which command
