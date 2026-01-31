@@ -20,6 +20,7 @@ Overview of Dependabot configuration and which workflows run on Dependabot PRs.
 | `rand`      | semver-major  | See [ADR-020](architecture/ADR-020-Dependency-Governance.md); issue [#84](https://github.com/Rul1an/assay/issues/84) |
 | `rand_core` | semver-major  | Same (rand 0.9 ecosystem) |
 | `nix`       | semver-major  | Clippy ICE on 0.31; revisit when Clippy/nix updates |
+| `aya-ebpf`     | all        | Must stay in sync with aya-log-ebpf; bump both manually |
 | `aya-log-ebpf` | all        | Must stay in sync with aya-ebpf; bump both manually |
 | `rusqlite`     | all        | 0.38+ removed `FromSql`/`ToSql` for `u64`; requires code migration |
 
