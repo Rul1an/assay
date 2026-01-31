@@ -443,13 +443,13 @@ jobs:
           fi
 
       - name: Check lint status
-        if: needs.lint.result != 'success'
+        if: needs.lint.result == 'failure'
         run: |
           echo "Lint failed"
           exit 1
 
       - name: Check build status
-        if: needs.build-artifacts.result != 'success'
+        if: needs.build-artifacts.result == 'failure'
         run: |
           echo "Build failed"
           exit 1
