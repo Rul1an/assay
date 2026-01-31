@@ -258,6 +258,124 @@ start_runner_service() {
     fi
 }
 
+# ==============================================================================
+# Actions Cache Management (prevents "Can't find action.yml" errors)
+# ==============================================================================
+
+ACTIONS_CACHE_DIR="${ACTIONS_CACHE_DIR:-/opt/actions-runner/_work/_actions}"
+ACTIONS_CACHE_MAX_AGE_DAYS="${ACTIONS_CACHE_MAX_AGE_DAYS:-7}"
+
+# Clean old/stale actions cache entries
+clean_actions_cache() {
+    log_info "Cleaning actions cache (entries older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)..."
+
+    local cleaned_count
+    cleaned_count=$(multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 2>/dev/null | wc -l || echo "0")
+
+    if [[ "$cleaned_count" -gt 0 ]]; then
+        multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 -exec rm -rf {} \; 2>/dev/null || true
+        log_ok "Cleaned $cleaned_count stale cache entries"
+    else
+        log_info "No stale cache entries found"
+    fi
+}
+
+# Force clear entire actions cache (use when corruption detected)
+force_clear_actions_cache() {
+    log_warn "Force clearing entire actions cache..."
+
+    multipass exec "$VM_NAME" -- sudo rm -rf "$ACTIONS_CACHE_DIR"/* 2>/dev/null || true
+    multipass exec "$VM_NAME" -- sudo mkdir -p "$ACTIONS_CACHE_DIR" 2>/dev/null || true
+    multipass exec "$VM_NAME" -- sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$ACTIONS_CACHE_DIR" 2>/dev/null || true
+
+    log_ok "Actions cache cleared"
+}
+
+# Check for failed jobs with "Can't find action.yml" error
+check_action_cache_failures() {
+    local gh="${GH_CMD:-gh}"
+
+    # Get recent failed runs (last 2 hours)
+    local failed_runs
+    failed_runs=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=10" \
+        --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' 2>/dev/null || echo "")
+
+    if [[ -z "$failed_runs" ]]; then
+        return 1  # No failed runs
+    fi
+
+    # Check if any failed due to action cache issue
+    for run_id in $failed_runs; do
+        local jobs_url
+        jobs_url=$($gh api "repos/$REPO/actions/runs/$run_id" --jq '.jobs_url' 2>/dev/null || echo "")
+
+        if [[ -n "$jobs_url" ]]; then
+            # Check job conclusions and look for the specific error pattern
+            local job_logs
+            job_logs=$($gh run view "$run_id" --repo "$REPO" --log-failed 2>/dev/null | head -50 || echo "")
+
+            if echo "$job_logs" | grep -q "Can't find 'action.yml'"; then
+                log_warn "Found action cache failure in run $run_id"
+                return 0  # Found cache failure
+            fi
+        fi
+    done
+
+    return 1  # No cache failures found
+}
+
+# Rerun failed jobs that were caused by cache issues
+rerun_cache_failed_jobs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking for jobs to rerun after cache clear..."
+
+    local failed_runs
+    failed_runs=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=20" \
+        --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' 2>/dev/null || echo "")
+
+    local rerun_count=0
+    for run_id in $failed_runs; do
+        local job_logs
+        job_logs=$($gh run view "$run_id" --repo "$REPO" --log-failed 2>/dev/null | head -50 || echo "")
+
+        if echo "$job_logs" | grep -q "Can't find 'action.yml'"; then
+            log_info "Rerunning failed run $run_id..."
+            $gh run rerun "$run_id" --repo "$REPO" --failed 2>/dev/null || true
+            ((rerun_count++))
+            sleep 2  # Avoid rate limiting
+        fi
+    done
+
+    if [[ "$rerun_count" -gt 0 ]]; then
+        log_ok "Triggered rerun for $rerun_count failed jobs"
+    fi
+}
+
+# Auto-heal action cache issues
+heal_action_cache() {
+    log_info "Checking for action cache issues..."
+
+    if check_action_cache_failures; then
+        log_warn "Action cache corruption detected - initiating auto-heal"
+
+        # Step 1: Clear the cache
+        force_clear_actions_cache
+
+        # Step 2: Rerun failed jobs
+        rerun_cache_failed_jobs
+
+        return 0
+    fi
+
+    log_info "No action cache issues detected"
+    return 0
+}
+
+# ==============================================================================
+# Runner Recovery
+# ==============================================================================
+
 # Full recovery procedure
 recover_runner() {
     log_warn "Starting runner recovery..."
@@ -306,6 +424,12 @@ health_check() {
     log_info "Runner '$RUNNER_NAME' status: $status"
 
     if [[ "$status" == "online" ]]; then
+        # Runner is online - still check for action cache issues
+        heal_action_cache
+
+        # Periodic cache cleanup (on every health check when online)
+        clean_actions_cache
+
         log_ok "Runner is healthy"
         return 0
     fi
@@ -372,6 +496,25 @@ show_status() {
     queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
     echo "Queued Workflows: $queued"
 
+    local failed
+    failed=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=10" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    echo "Recent Failed Runs: $failed"
+
+    echo ""
+    echo "=== Actions Cache ==="
+    local cache_size cache_entries
+    cache_size=$(multipass exec "$VM_NAME" -- du -sh "$ACTIONS_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
+    cache_entries=$(multipass exec "$VM_NAME" -- find "$ACTIONS_CACHE_DIR" -maxdepth 2 -type d 2>/dev/null | wc -l || echo "?")
+    echo "Cache Size: $cache_size"
+    echo "Cache Entries: $cache_entries"
+
+    # Check for potential cache issues
+    if check_action_cache_failures 2>/dev/null; then
+        echo "Cache Health: ⚠️  FAILURES DETECTED (run --heal-cache)"
+    else
+        echo "Cache Health: ✅ OK"
+    fi
+
     echo ""
     echo "Recent log entries:"
     tail -10 "$LOG_FILE" 2>/dev/null || echo "(no log file)"
@@ -391,14 +534,36 @@ case "${1:-}" in
         check_vm_running || exit 1
         recover_runner
         ;;
+    --clean-cache)
+        rotate_log
+        check_vm_running || exit 1
+        clean_actions_cache
+        ;;
+    --clear-cache)
+        rotate_log
+        check_vm_running || exit 1
+        force_clear_actions_cache
+        ;;
+    --heal-cache)
+        rotate_log
+        check_gh_auth || exit 1
+        check_vm_running || exit 1
+        heal_action_cache
+        ;;
     --help|-h)
-        echo "Usage: $0 [--install-cron|--status|--recover|--help]"
+        echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  (none)          Run health check"
+        echo "  (none)          Run full health check (including cache maintenance)"
         echo "  --install-cron  Install cron job (every 5 minutes)"
         echo "  --status        Show current status"
-        echo "  --recover       Force recovery"
+        echo "  --recover       Force full runner recovery"
+        echo ""
+        echo "Cache Management:"
+        echo "  --clean-cache   Remove stale cache entries (older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)"
+        echo "  --clear-cache   Force clear entire actions cache"
+        echo "  --heal-cache    Detect cache failures, clear cache, rerun failed jobs"
+        echo ""
         echo "  --help          Show this help"
         ;;
     *)
