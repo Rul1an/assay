@@ -166,6 +166,67 @@ cancel_stale_jobs() {
     return 0
 }
 
+# Cancel superseded runs (older runs for same branch)
+cancel_superseded_runs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking for superseded queued runs..."
+
+    # Get all queued runs, group by branch, cancel all but newest
+    local superseded
+    superseded=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,headBranch,createdAt 2>/dev/null | \
+        jq -r 'group_by(.headBranch) | .[] | select(length > 1) | sort_by(.createdAt) | .[:-1] | .[].databaseId' || echo "")
+
+    if [[ -z "$superseded" ]]; then
+        log_info "No superseded runs found"
+        return 0
+    fi
+
+    local cancel_count=0
+    for run_id in $superseded; do
+        log_info "Cancelling superseded run $run_id..."
+        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+        ((cancel_count++))
+        sleep 1
+    done
+
+    if [[ "$cancel_count" -gt 0 ]]; then
+        log_ok "Cancelled $cancel_count superseded runs"
+    fi
+
+    return 0
+}
+
+# Cancel queued push runs when PR runs are waiting (PRs get priority)
+prioritize_pr_runs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking if PR runs should be prioritized..."
+
+    # Count queued PR runs vs push runs
+    local pr_runs push_runs
+    pr_runs=$($gh run list --repo "$REPO" --status queued --event pull_request --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
+    push_runs=$($gh run list --repo "$REPO" --status queued --event push --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
+
+    if [[ "$pr_runs" -gt 5 && "$push_runs" -gt 0 ]]; then
+        log_info "Many PR runs waiting ($pr_runs), cancelling $push_runs queued push runs..."
+
+        # Cancel push runs (they'll be superseded by next push anyway)
+        $gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null | \
+            jq -r '.[].databaseId' | while read run_id; do
+            log_info "Cancelling push run $run_id (PR priority)..."
+            $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+            sleep 1
+        done
+
+        log_ok "PR runs prioritized"
+    else
+        log_info "Queue balanced (PR: $pr_runs, push: $push_runs)"
+    fi
+
+    return 0
+}
+
 # Get queue statistics
 get_queue_stats() {
     local gh="${GH_CMD:-gh}"
@@ -484,10 +545,16 @@ health_check() {
         # 1. Cancel stale queued jobs to prevent backlog
         cancel_stale_jobs
 
-        # 2. Check for action cache issues
+        # 2. Cancel superseded runs (duplicates for same branch)
+        cancel_superseded_runs
+
+        # 3. Prioritize PR runs over push runs
+        prioritize_pr_runs
+
+        # 4. Check for action cache issues
         heal_action_cache
 
-        # 3. Periodic cache cleanup
+        # 5. Periodic cache cleanup
         clean_actions_cache
 
         log_ok "Runner is healthy"
@@ -632,6 +699,23 @@ case "${1:-}" in
         check_gh_auth || exit 1
         cancel_stale_jobs
         ;;
+    --cancel-superseded)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_superseded_runs
+        ;;
+    --prioritize-prs)
+        rotate_log
+        check_gh_auth || exit 1
+        prioritize_pr_runs
+        ;;
+    --optimize-queue)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_stale_jobs
+        cancel_superseded_runs
+        prioritize_pr_runs
+        ;;
     --help|-h)
         echo "Usage: $0 [OPTIONS]"
         echo ""
@@ -647,7 +731,10 @@ case "${1:-}" in
         echo "  --heal-cache    Detect cache failures, clear cache, rerun failed jobs"
         echo ""
         echo "Queue Management:"
-        echo "  --cancel-stale  Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
+        echo "  --cancel-stale      Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
+        echo "  --cancel-superseded Cancel older duplicate runs for same branch"
+        echo "  --prioritize-prs    Cancel push runs when many PR runs waiting"
+        echo "  --optimize-queue    Run all queue optimizations (stale + superseded + PR priority)"
         echo ""
         echo "Environment Variables:"
         echo "  STALE_JOB_HOURS           Hours before queued job is considered stale (default: 4)"

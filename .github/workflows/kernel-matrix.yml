@@ -152,10 +152,55 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # Check if eBPF-related files were changed (skip heavy tests for pure dep bumps)
+  check-ebpf-changes:
+    name: Check eBPF Changes
+    runs-on: ubuntu-latest
+    outputs:
+      ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for eBPF-related changes
+        id: check
+        run: |
+          # For push events, compare with previous commit
+          # For PRs, compare with base branch
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+
+          echo "Comparing $BASE..$HEAD"
+
+          # Check if eBPF-related files changed (not just Cargo.toml/Cargo.lock)
+          EBPF_PATTERNS="crates/assay-ebpf|crates/assay-monitor|crates/assay-evidence|scripts/ci|\.github/workflows/kernel-matrix"
+
+          CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Check if any eBPF-related file changed
+          if echo "$CHANGED_FILES" | grep -qE "$EBPF_PATTERNS"; then
+            echo "ebpf_changed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ eBPF-related files changed - full matrix test required"
+          else
+            echo "ebpf_changed=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️ Only dependency changes - skipping heavy matrix tests"
+          fi
+
   cleanup-runner:
     name: Free disk (before matrix)
-    needs: [lint, build-artifacts]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    needs: [lint, build-artifacts, check-ebpf-changes]
+    # Skip for fork PRs OR when only dependencies changed (no eBPF code)
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
+      needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
     steps:
@@ -178,8 +223,11 @@ jobs:
       contents: read
       actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
-    needs: [lint, build-artifacts, cleanup-runner]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    needs: [lint, build-artifacts, cleanup-runner, check-ebpf-changes]
+    # Skip for fork PRs OR when only dependencies changed (no eBPF code)
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
+      needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
@@ -357,3 +405,51 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* 2>/dev/null || true
           sudo rm -rf /opt/actions-runner/_work/_temp /opt/actions-runner/_work/_tool /opt/actions-runner/_work/_actions 2>/dev/null || true
           df -h / || true
+
+  # Summary job for PR status - always runs to report outcome
+  summary:
+    name: Kernel Matrix Summary
+    runs-on: ubuntu-latest
+    needs: [lint, build-artifacts, check-ebpf-changes, matrix-test]
+    if: always()
+    steps:
+      - name: Report Status
+        env:
+          EBPF_CHANGED: ${{ needs.check-ebpf-changes.outputs.ebpf_changed }}
+          MATRIX_RESULT: ${{ needs.matrix-test.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Kernel Matrix CI Summary"
+            echo ""
+
+            if [ "${EBPF_CHANGED}" = "false" ]; then
+              echo "⏭️ **Matrix tests skipped** - No eBPF-related changes detected"
+              echo ""
+              echo "Only Cargo.toml/Cargo.lock changed. Heavy kernel matrix tests not required."
+            elif [ "${MATRIX_RESULT}" = "success" ]; then
+              echo "✅ **All kernel matrix tests passed**"
+            elif [ "${MATRIX_RESULT}" = "skipped" ]; then
+              echo "⏭️ **Matrix tests skipped** (fork PR or no eBPF changes)"
+            else
+              echo "❌ **Matrix tests failed**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail if matrix tests actually failed
+          if [ "${EBPF_CHANGED}" = "true" ] && [ "${MATRIX_RESULT}" = "failure" ]; then
+            exit 1
+          fi
+
+      - name: Check lint status
+        if: needs.lint.result != 'success'
+        run: |
+          echo "Lint failed"
+          exit 1
+
+      - name: Check build status
+        if: needs.build-artifacts.result != 'success'
+        run: |
+          echo "Build failed"
+          exit 1
