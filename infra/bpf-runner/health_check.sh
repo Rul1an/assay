@@ -28,7 +28,7 @@ REPO="${REPO:-Rul1an/assay}"
 RUNNER_NAME="${RUNNER_NAME:-assay-bpf-runner}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
 RUNNER_USER="${RUNNER_USER:-github-runner}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,ARM64,bpf-lsm,assay-bpf-runner}"
+RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,bpf-lsm}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 
@@ -62,11 +62,24 @@ rotate_log() {
 
 # Check if gh CLI is available and authenticated
 check_gh_auth() {
-    if ! command -v gh &>/dev/null; then
+    # Try common gh locations for cron compatibility
+    local gh_cmd=""
+    for path in gh /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
+        if command -v "$path" &>/dev/null; then
+            gh_cmd="$path"
+            break
+        fi
+    done
+
+    if [[ -z "$gh_cmd" ]]; then
         log_error "gh CLI not found. Install with: brew install gh"
         return 1
     fi
-    if ! gh auth status &>/dev/null; then
+
+    # Export GH path for use in other functions
+    export GH_CMD="$gh_cmd"
+
+    if ! $gh_cmd auth status &>/dev/null; then
         log_error "gh CLI not authenticated. Run: gh auth login"
         return 1
     fi
@@ -99,7 +112,8 @@ check_vm_running() {
 # Check if there are queued jobs waiting for our runner labels
 check_queued_jobs() {
     local queued_count
-    queued_count=$(gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+    local gh="${GH_CMD:-gh}"
+    queued_count=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
 
     if [[ "$queued_count" -gt 0 ]]; then
         log_info "Found $queued_count queued workflow runs"
@@ -111,14 +125,17 @@ check_queued_jobs() {
 # Get runner status from GitHub API
 get_runner_status() {
     local status
-    status=$(gh api "repos/$REPO/actions/runners" --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" 2>/dev/null || echo "unknown")
+    local gh="${GH_CMD:-gh}"
+    status=$($gh api "repos/$REPO/actions/runners" --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" 2>/dev/null || echo "unknown")
     echo "$status"
 }
 
 # Check if runner service is running in VM
 check_runner_service() {
     local service_status
-    service_status=$(multipass exec "$VM_NAME" -- sudo systemctl is-active "actions.runner.${REPO/\//-}.$RUNNER_NAME.service" 2>/dev/null || echo "inactive")
+    # Use timeout to prevent hanging
+    service_status=$(timeout 10 multipass exec "$VM_NAME" -- \
+        sudo systemctl is-active "actions.runner.${REPO/\//-}.$RUNNER_NAME.service" 2>/dev/null || echo "inactive")
 
     if [[ "$service_status" == "active" ]]; then
         return 0
@@ -149,7 +166,8 @@ sync_vm_time() {
 # Generate new runner registration token
 generate_runner_token() {
     local token
-    token=$(gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq '.token' 2>/dev/null)
+    local gh="${GH_CMD:-gh}"
+    token=$($gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq '.token' 2>/dev/null)
 
     if [[ -z "$token" ]]; then
         log_error "Failed to generate runner token"
@@ -162,11 +180,11 @@ generate_runner_token() {
 cleanup_runner_config() {
     log_info "Cleaning up old runner configuration..."
 
-    # Stop and uninstall service
-    multipass exec "$VM_NAME" -- sudo bash -c "
-        cd $RUNNER_DIR 2>/dev/null || exit 0
-        ./svc.sh stop 2>/dev/null || true
-        ./svc.sh uninstall 2>/dev/null || true
+    # Stop and uninstall service (MUST run from runner directory)
+    multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR || exit 0
+        sudo ./svc.sh stop 2>/dev/null || true
+        sudo ./svc.sh uninstall 2>/dev/null || true
     " 2>/dev/null || true
 
     # Remove old service files
@@ -175,7 +193,7 @@ cleanup_runner_config() {
         systemctl daemon-reload 2>/dev/null || true
     " 2>/dev/null || true
 
-    # Remove credentials
+    # Remove credentials to force fresh registration
     multipass exec "$VM_NAME" -- sudo rm -f \
         "$RUNNER_DIR/.runner" \
         "$RUNNER_DIR/.credentials" \
@@ -202,7 +220,8 @@ configure_runner() {
         --unattended \
         --replace 2>&1)
 
-    if echo "$result" | grep -q "Successfully"; then
+    # Check for success indicators (handles both fresh install and replacement)
+    if echo "$result" | grep -qE "(Successfully|Settings Saved)"; then
         log_ok "Runner configured successfully"
         return 0
     else
@@ -215,11 +234,18 @@ configure_runner() {
 start_runner_service() {
     log_info "Installing and starting runner service..."
 
-    multipass exec "$VM_NAME" -- bash -c "
-        cd $RUNNER_DIR
-        sudo ./svc.sh install $RUNNER_USER
-        sudo ./svc.sh start
-    " 2>/dev/null
+    # MUST run svc.sh from the runner directory
+    local install_result
+    install_result=$(multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR && sudo ./svc.sh install $RUNNER_USER 2>&1
+    ")
+    log_info "Install output: $install_result"
+
+    local start_result
+    start_result=$(multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR && sudo ./svc.sh start 2>&1
+    ")
+    log_info "Start output: $start_result"
 
     sleep 5
 
@@ -319,6 +345,10 @@ install_cron() {
 
 # Show status
 show_status() {
+    # Initialize gh path for status display
+    check_gh_auth 2>/dev/null || true
+    local gh="${GH_CMD:-gh}"
+
     echo "=== Runner Status ==="
     echo "VM: $VM_NAME"
 
@@ -339,7 +369,7 @@ show_status() {
     fi
 
     local queued
-    queued=$(gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
     echo "Queued Workflows: $queued"
 
     echo ""
