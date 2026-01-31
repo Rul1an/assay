@@ -50,6 +50,9 @@ updates:
       # rusqlite 0.38+ removed FromSql/ToSql impl for u64; requires code migration
       # Manual upgrade path: change row.get<_, Option<u64>>() to row.get<_, Option<i64>>().map(|v| v as u64)
       - dependency-name: "rusqlite"
+      # sysinfo 0.38+ has breaking API changes (method signatures changed)
+      - dependency-name: "sysinfo"
+        update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"

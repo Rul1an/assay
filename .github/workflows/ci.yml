@@ -28,7 +28,9 @@ jobs:
       - name: cargo deny (advisories, licenses, bans, sources)
         run: cargo deny check advisories bans licenses sources
       - name: cargo audit (RustSec)
-        run: cargo audit
+        run: |
+          rm -rf ~/.cargo/advisory-db
+          cargo audit
 
   clippy:
     name: Clippy (deny warnings)
