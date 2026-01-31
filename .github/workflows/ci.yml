@@ -13,6 +13,25 @@ on:
 permissions: {}
 
 jobs:
+  # --- Dependency security (advisories, licenses, sources) ---
+  deps-security:
+    name: Dependency Security (cargo-deny + audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: cargo deny (advisories, licenses, bans, sources)
+        run: cargo deny check advisories bans licenses sources
+      - name: cargo audit (RustSec)
+        run: |
+          rm -rf ~/.cargo/advisory-db
+          cargo audit
+
   clippy:
     name: Clippy (deny warnings)
     runs-on: ubuntu-latest

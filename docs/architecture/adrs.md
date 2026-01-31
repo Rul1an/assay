@@ -21,6 +21,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | EU AI Act Compliance Pack | Proposed | **P2** |
 | [ADR-014](./ADR-014-GitHub-Action-v2.md) | GitHub Action v2 Design | **Implemented** | ✅ |
 | [ADR-015](./ADR-015-BYOS-Storage-Strategy.md) | BYOS Storage Strategy | **Accepted** | **P1** |
+| [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
 
 ## Q2 2026 Priorities
 

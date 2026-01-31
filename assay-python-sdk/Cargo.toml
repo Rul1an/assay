@@ -11,9 +11,9 @@ name = "assay"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.23.3", features = ["extension-module"] }
+pyo3 = { version = "0.24", features = ["extension-module"] }
 assay-core.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 serde_yaml.workspace = true
-pythonize = "0.23.0"
+pythonize = "0.24"

@@ -10,7 +10,7 @@ Overzicht van **open punten** uit de assessment-docs (REVIEWER-PACK, PINNED-ACTI
 
 | Item | Bron | Actie |
 |------|------|--------|
-| ✅ **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | **Gedaan:** Alle 16 third-party actions zijn SHA-pinned. Dependabot.yml toegevoegd voor wekelijkse SHA-bump PRs. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md) voor de volledige mapping. |
+| ✅ **Actions pinnen op SHA** | REVIEWER-PACK checklist; PINNED-ACTIONS.md | **Gedaan:** Alle 16 third-party actions zijn SHA-pinned. Dependabot.yml toegevoegd voor wekelijkse SHA-bump PRs. Zie [PINNED-ACTIONS.md](PINNED-ACTIONS.md) voor de volledige mapping. Welke workflows op Dependabot-PR's draaien: [DEPENDABOT-RUNS.md](DEPENDABOT-RUNS.md). |
 | **Allowed actions beperken** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: "Allow [org] and verified creators" of allowlist i.p.v. "Allow all actions". |
 | **Fork PR policy vastleggen** | REVIEWER-PACK sectie 2 | In **Settings → Actions → General**: (1) Draaien fork-PR workflows? (2) Read-only of write token? (3) Secrets geblokkeerd? Documenteer keuze (screenshot of één regel). |
 | **GHAS** | REVIEWER-PACK sectie 2 | Beslissen: Code scanning (CodeQL), Secret scanning (push protection), Dependency review aan/uit? |
@@ -69,6 +69,7 @@ De volgende items vereisen **handmatige actie in GitHub Settings** (niet via cod
 5. **GHAS** beslissen (Settings → Security → Code scanning / Secret scanning)
 6. **Signed commits** (optioneel, Settings → Branches → main → Require signed commits)
 7. **Linear history** (optioneel, Settings → Branches → main → Require linear history)
+8. **Auto-merge voor Dependabot** (Settings → General → Pull Requests → Allow auto-merge) — `@dependabot merge` is deprecated sinds jan 2026; gebruik `gh pr merge --auto --squash`
 
 ---
 

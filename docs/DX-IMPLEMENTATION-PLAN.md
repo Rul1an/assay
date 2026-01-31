@@ -267,7 +267,294 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 
 ---
 
-## 8. References
+## 8. P1 SOTA Implementation (Judge, Security, Observability, Replay)
+
+**Status:** Planned
+**Priority Order:** P1.3 → P1.1 → P1.2 → Replay Bundle
+**Rationale:** Security baseline first (hard invariant), then judge reliability (CI signal), then observability (debugging), then DX (replay).
+
+---
+
+### 8.1 P1.3 MCP Auth Hardening (Security Baseline)
+
+**Goal:** OAuth 2.0 Security BCP compliance + sender-constrained tokens where applicable.
+
+#### 8.1.1 Resource Indicators (RFC 8707)
+
+| File | Change |
+|------|--------|
+| `crates/assay-mcp-server/src/auth/` | Enforce `resource` parameter matches protected API; validate `iss`, `aud`, `exp`, `nbf` with configurable clock-skew window |
+| `crates/assay-mcp-server/src/auth/jwks.rs` | JWKS caching with rotation support; old key revoked → reject; new key → accept |
+| Config | Add `auth.clock_skew_seconds` (default 30), `auth.jwks_cache_ttl_seconds` (default 300) |
+
+#### 8.1.2 DPoP (Sender-Constrained Tokens) — Optional Hardening
+
+| File | Change |
+|------|--------|
+| `crates/assay-mcp-server/src/auth/dpop.rs` | **New.** DPoP proof validation per RFC 9449; `cnf.jkt` thumbprint binding |
+| Config | `auth.require_dpop: bool` (default false for MVP, true for high-security deployments) |
+
+#### 8.1.3 Negative Test Suite
+
+| Test Category | Cases |
+|---------------|-------|
+| **Token validation** | expired, wrong issuer, wrong audience, invalid signature |
+| **alg/crit confusion** | `alg=none`, unexpected algorithms, crit header edge cases |
+| **JWKS rotation** | old key revoked (reject), new key added (accept), cache invalidation |
+| **Resource mismatch** | token `resource` ≠ requested API |
+| **No pass-through** | downstream tokens are NOT original tokens (proven in tests) |
+
+#### 8.1.4 Definition of Done
+
+- [ ] `resource` enforced + `iss`/`aud` validated conform OAuth BCP
+- [ ] Negative test suite includes JWKS rotation + alg confusion
+- [ ] "No pass-through" proven in tests (downstream tokens are different)
+- [ ] Config documented in `docs/reference/config/mcp-server.md`
+
+**Effort:** 2–3 days
+
+---
+
+### 8.2 P1.1 Judge Reliability MVP (CI Signal/Noise)
+
+**Goal:** Reduce flakiness, add bias mitigation, structured uncertainty handling.
+
+#### 8.2.1 Borderline Band + Adaptive Calibration
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/judge/borderline.rs` | **New.** `BorderlineBand { lower: f64, upper: f64 }` with default 0.4–0.6; per-suite/model calibration from historical variance |
+| `crates/assay-core/src/judge/mod.rs` | Integrate borderline detection before final verdict |
+| Config | `judge.borderline_band: [0.4, 0.6]` (overridable per suite) |
+
+#### 8.2.2 Order-Invariance (Bias Mitigation)
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/judge/reliability.rs` | **New.** `OrderInvariantEval`: run both A/B and B/A for pairwise judgments; aggregate with majority/score-averaging |
+| Output metrics | `order_invariance_rate`, `flip_rate` (label changed over A/B vs B/A) |
+
+#### 8.2.3 Rerun Strategy (2-of-3 Majority)
+
+```
+if first_run NOT borderline:
+    return verdict (done, 1 call)
+elif first_run borderline:
+    run second
+    if first == second:
+        return verdict (done, 2 calls)
+    else:
+        run third
+        return majority(first, second, third) (done, 3 calls)
+```
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/judge/rerun.rs` | **New.** `RerunStrategy::TwoOfThree` implementing above logic |
+| Config | `judge.rerun_strategy: "two_of_three"` (default) or `"always_three"` |
+
+#### 8.2.4 Output Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `consensus_rate` | % runs where all iterations agreed |
+| `flip_rate` | % runs where label changed over iterations |
+| `abstain_rate` | % runs returning "uncertain" |
+| `margin` | Average distance to decision boundary |
+| `effective_sample_size` | For weighted voting (future) |
+
+#### 8.2.5 Fail Modes: Split "Uncertain" from "Unavailable"
+
+| Condition | Exit Code | Reason Code | Default Policy |
+|-----------|-----------|-------------|----------------|
+| Judge returns "uncertain" (within band) | 1 | `E_JUDGE_UNCERTAIN` | Configurable: fail-closed (security) or warn (quality) |
+| Judge unavailable (timeout/5xx/rate limit) | 3 | `E_JUDGE_UNAVAILABLE` | Fail-closed with clear reason; optional quarantine/retry in nightly |
+
+| File | Change |
+|------|--------|
+| `crates/assay-cli/src/exit_codes.rs` | Add `E_JUDGE_UNCERTAIN` reason code |
+| `crates/assay-core/src/judge/policy.rs` | `JudgeFailPolicy::FailClosed`, `JudgeFailPolicy::Quarantine` per suite type (security vs quality) |
+
+#### 8.2.6 Definition of Done
+
+- [ ] CI-run produces `consensus_rate`, `flip_rate`, `abstain_rate`
+- [ ] Order-invariance check ingebouwd (A/B en B/A) for judge-mode
+- [ ] Policies: security vs quality splits + clear reason codes
+- [ ] 2-of-3 rerun strategy default; configurable
+
+**Effort:** 2–3 days (MVP), +1 day for tuning PRs
+
+---
+
+### 8.3 P1.2 OTel GenAI (Observability)
+
+**Goal:** OpenTelemetry GenAI semantic conventions compliance; privacy-safe defaults.
+
+#### 8.3.1 Span Layers
+
+| Span Type | Attributes (GenAI semconv) |
+|-----------|---------------------------|
+| **Provider span** (HTTP) | `http.method`, `http.url`, `http.status_code`, `http.request.duration` |
+| **GenAI logical span** | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `assay.cache_hit` |
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/providers/trace.rs` | Extend with GenAI semconv attributes |
+| `crates/assay-core/src/otel/genai.rs` | **New.** GenAI span builder conforming to OTel semantic conventions |
+
+#### 8.3.2 Metrics (Low-Cardinality)
+
+| Metric | Labels |
+|--------|--------|
+| `assay.llm.request.duration` | `provider`, `model`, `operation` (chat/embeddings/judge), `outcome` (ok/error/uncertain/cache_hit) |
+| `assay.llm.tokens.total` | `provider`, `model`, `direction` (input/output) |
+| `assay.judge.decisions` | `verdict` (pass/fail/uncertain), `suite_type` (security/quality) |
+
+**Avoid:** prompt hashes, user IDs, trace IDs as metric labels (cardinality explosion).
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/otel/metrics.rs` | **New.** Metrics registry with above definitions |
+
+#### 8.3.3 Prompt/Response Capture (Opt-in + Redaction)
+
+| File | Change |
+|------|--------|
+| Config | `otel.capture_prompts: false` (default), `otel.redaction_policy: "default"` |
+| `crates/assay-core/src/otel/redaction.rs` | **New.** Redaction policies: `default` (no capture), `hash_only`, `full` (opt-in) |
+| Tests | Golden tests: default config → no prompt/response in export; `full` → content present |
+
+#### 8.3.4 Definition of Done
+
+- [ ] Spans voldoen aan GenAI semconv (where available)
+- [ ] Prompt capture opt-in + redaction tests
+- [ ] Metrics low-cardinality en bruikbaar
+- [ ] Config documented in `docs/reference/config/observability.md`
+
+**Effort:** 1–2 days
+
+---
+
+### 8.4 Replay Bundle (DX + Forensic)
+
+**Goal:** Reproducible test runs from a single artifact; supply-chain aware.
+
+#### 8.4.1 Bundle Format
+
+```
+.assay/replay.bundle/
+├── manifest.json          # Provenance + file digests
+├── config/
+│   ├── eval.yaml
+│   └── policy.yaml
+├── traces/
+│   └── input.jsonl
+├── cassettes/             # VCR recordings (if enabled)
+│   └── openai/
+│       └── *.json
+└── baseline/
+    └── baseline.json
+```
+
+#### 8.4.2 Manifest (Cryptographically Sluitend)
+
+```json
+{
+  "schema_version": 1,
+  "created_at": "2026-01-30T12:00:00Z",
+  "assay_version": "2.12.0",
+  "git_sha": "abc123...",
+  "workflow_run_id": "12345678",
+  "files": {
+    "config/eval.yaml": {
+      "sha256": "...",
+      "size_bytes": 1234
+    },
+    "traces/input.jsonl": {
+      "sha256": "...",
+      "size_bytes": 5678
+    }
+  },
+  "bundle_digest": "sha256:...",
+  "tool_versions": {
+    "openai_sdk": "1.x.x",
+    "reqwest": "0.12.x"
+  }
+}
+```
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/replay/bundle.rs` | **New.** Bundle creation + manifest generation |
+| `crates/assay-core/src/replay/manifest.rs` | **New.** Manifest schema + digest computation |
+| `crates/assay-cli/src/cli/commands/replay.rs` | **New.** `assay replay --bundle <path>` command |
+
+#### 8.4.3 Privacy: Minimal Secrets Risk
+
+| Default | Behavior |
+|---------|----------|
+| `replay.include_prompts: false` | No prompt/response content in bundle unless explicit |
+| `replay.include_cassettes: true` | VCR cassettes included (already scrubbed) |
+
+#### 8.4.4 CLI Interface
+
+```bash
+# Create bundle from last run
+assay bundle create --output replay.bundle
+
+# Replay bundle (offline, VCR mode)
+assay replay --bundle replay.bundle
+
+# Replay with network (re-run against live providers)
+assay replay --bundle replay.bundle --live
+```
+
+#### 8.4.5 Definition of Done
+
+- [ ] Manifest with file digests + git sha + (optional) CI run id
+- [ ] `assay replay --bundle` reproduces on VCR replay without network
+- [ ] Privacy: no prompts in bundle unless `--include-prompts`
+- [ ] Signature placeholder ready (not P1, but structure in place)
+
+**Effort:** 2–3 days
+
+---
+
+### 8.5 P1 File-Level Checklist
+
+| File / Area | P1.3 MCP | P1.1 Judge | P1.2 OTel | Replay |
+|-------------|----------|------------|-----------|--------|
+| `crates/assay-mcp-server/src/auth/` | Resource + BCP validation | — | — | — |
+| `crates/assay-mcp-server/src/auth/jwks.rs` | JWKS rotation + cache | — | — | — |
+| `crates/assay-mcp-server/src/auth/dpop.rs` | DPoP (optional) | — | — | — |
+| `crates/assay-core/src/judge/borderline.rs` | — | Borderline band | — | — |
+| `crates/assay-core/src/judge/reliability.rs` | — | Order-invariance | — | — |
+| `crates/assay-core/src/judge/rerun.rs` | — | 2-of-3 strategy | — | — |
+| `crates/assay-core/src/judge/policy.rs` | — | Fail policies | — | — |
+| `crates/assay-core/src/otel/genai.rs` | — | — | GenAI spans | — |
+| `crates/assay-core/src/otel/metrics.rs` | — | — | LLM metrics | — |
+| `crates/assay-core/src/otel/redaction.rs` | — | — | Redaction | — |
+| `crates/assay-core/src/replay/bundle.rs` | — | — | — | Bundle create |
+| `crates/assay-core/src/replay/manifest.rs` | — | — | — | Manifest |
+| `crates/assay-cli/src/cli/commands/replay.rs` | — | — | — | CLI |
+| `crates/assay-cli/src/exit_codes.rs` | — | E_JUDGE_UNCERTAIN | — | — |
+| Tests (negative) | alg/crit/JWKS/passthrough | order-invariance, consensus | redaction goldens | bundle roundtrip |
+
+---
+
+### 8.6 P1 Effort Summary
+
+| Epic | Effort | Dependencies |
+|------|--------|--------------|
+| P1.3 MCP Auth Hardening | 2–3 days | None (security baseline) |
+| P1.1 Judge Reliability MVP | 2–3 days (+1 tuning) | P1.3 done |
+| P1.2 OTel GenAI | 1–2 days | P1.1 helps with tuning |
+| Replay Bundle | 2–3 days | All above (uses their outputs) |
+| **Total** | **8–12 days** | Sequential with parallelization possible |
+
+---
+
+## 9. References
 
 - [DX-REVIEW-MATERIALS.md](DX-REVIEW-MATERIALS.md) — current DX review materials
 - [ADR-019 PR Gate 2026 SOTA](architecture/ADR-019-PR-Gate-2026-SOTA.md) — performance, DX, security, judge, observability

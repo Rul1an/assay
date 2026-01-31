@@ -3,8 +3,9 @@
 # Zie https://bencher.dev/docs/how-to/github-actions/
 #
 # Thresholds (jan 2026):
-# - percentage test: upper_boundary 0.25 (25% = fail)
-# - --err: fail workflow on alert
+# - percentage test: upper_boundary 0.50 (50%)
+#   Note: GitHub Actions runners have high variance (20-40%+); alerts are warnings only.
+# - NO --err: alerts don't fail the workflow (visibility without blocking CI)
 # - max_sample_size 64: statistical stability
 name: Perf (main baseline)
 
@@ -62,9 +63,8 @@ jobs:
                 --threshold-measure latency \
                 --threshold-test percentage \
                 --threshold-max-sample-size 64 \
-                --threshold-upper-boundary 0.25 \
+                --threshold-upper-boundary 0.50 \
                 --thresholds-reset \
-                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
@@ -88,9 +88,8 @@ jobs:
                 --threshold-measure latency \
                 --threshold-test percentage \
                 --threshold-max-sample-size 64 \
-                --threshold-upper-boundary 0.25 \
+                --threshold-upper-boundary 0.50 \
                 --thresholds-reset \
-                --err \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .

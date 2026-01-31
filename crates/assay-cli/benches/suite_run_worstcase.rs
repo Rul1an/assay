@@ -6,8 +6,9 @@
 //! **Duration:** Each iteration runs a full `assay run` subprocess (12 episodes, file-backed DB).
 //! With QUICK=1 (10 samples, 300ms warm-up, 1s measurement): expect ~20–40s total. Not a hang.
 
-use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
+use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use std::fs;
+use std::hint::black_box;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;

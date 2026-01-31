@@ -55,6 +55,32 @@ repos:
         always_run: true
         pass_filenames: false
 
+      # --- Dependency security (shift-left) ---
+      - id: cargo-deny
+        name: cargo deny (advisories, licenses, bans, sources)
+        entry: bash -lc 'cargo deny check advisories bans licenses sources'
+        language: system
+        pass_filenames: false
+        # Only run when deps/policy change (avoids noise on unrelated commits)
+        files: ^(Cargo\.lock|Cargo\.toml|crates/.*/Cargo\.toml|deny\.toml)$
+        stages: [pre-commit]
+
+      - id: cargo-audit
+        name: cargo audit (RustSec)
+        entry: bash -lc 'cargo audit'
+        language: system
+        pass_filenames: false
+        files: ^Cargo\.lock$
+        stages: [pre-push]
+
+      # Optioneel/streng: supply-chain auditing (CI/manual only)
+      # - id: cargo-vet
+      #   name: cargo vet check (manual)
+      #   entry: bash -lc 'cargo vet check'
+      #   language: system
+      #   pass_filenames: false
+      #   stages: [manual]
+
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh

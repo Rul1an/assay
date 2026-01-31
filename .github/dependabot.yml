@@ -33,6 +33,26 @@ updates:
       # Ignore patch versions for stable deps to reduce noise
       - dependency-name: "*"
         update-types: ["version-update:semver-patch"]
+      # rand 0.9 requires coordinated updates with ed25519-dalek (crypto RNG trait changes)
+      # See: docs/architecture/ADR-020-Dependency-Governance.md
+      # Tracking: https://github.com/Rul1an/assay/issues/84
+      - dependency-name: "rand"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "rand_core"
+        update-types: ["version-update:semver-major"]
+      # nix 0.31 triggers Clippy ICE (Internal Compiler Error)
+      # Revisit when Clippy is updated or nix stabilizes
+      - dependency-name: "nix"
+        update-types: ["version-update:semver-major"]
+      # assay-ebpf pins aya-ebpf and aya-log-ebpf to the same git tag; bump both together manually
+      - dependency-name: "aya-ebpf"
+      - dependency-name: "aya-log-ebpf"
+      # rusqlite 0.38+ removed FromSql/ToSql impl for u64; requires code migration
+      # Manual upgrade path: change row.get<_, Option<u64>>() to row.get<_, Option<i64>>().map(|v| v as u64)
+      - dependency-name: "rusqlite"
+      # sysinfo 0.38+ has breaking API changes (method signatures changed)
+      - dependency-name: "sysinfo"
+        update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
   - package-ecosystem: "pip"
