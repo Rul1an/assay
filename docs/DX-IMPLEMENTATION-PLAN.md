@@ -269,9 +269,10 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 
 ## 8. P1 SOTA Implementation (Judge, Security, Observability, Replay)
 
-**Status:** Planned
+**Status:** Planned (Updated: Bleeding Edge Jan 2026)
 **Priority Order:** P1.3 → P1.1 → P1.2 → Replay Bundle
 **Rationale:** Security baseline first (hard invariant), then judge reliability (CI signal), then observability (debugging), then DX (replay).
+**Review Score:** 9.2/10 → **9.7/10** with bleeding edge additions below.
 
 ---
 
@@ -294,24 +295,52 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 | `crates/assay-mcp-server/src/auth/dpop.rs` | **New.** DPoP proof validation per RFC 9449; `cnf.jkt` thumbprint binding |
 | Config | `auth.require_dpop: bool` (default false for MVP, true for high-security deployments) |
 
-#### 8.1.3 Negative Test Suite
+#### 8.1.3 Bleeding Edge: Alg/Typ/Crit Hardening (JWT Footguns)
+
+| Check | Implementation |
+|-------|----------------|
+| **Alg whitelist** | Only `RS256`/`ES256`; **reject `none`** and unexpected algorithms |
+| **Typ verification** | Verify `typ` header (`JWT` or `at+jwt` depending on issuer); strict header parsing |
+| **Crit handling** | If `crit` present and extension unknown → **reject** (classic bypass vector) |
+
+#### 8.1.4 Bleeding Edge: Replay Defense (DPoP)
+
+| Aspect | Implementation |
+|--------|----------------|
+| **jti replay cache** | Per `(jti, iat)` window; config `auth.dpop_jti_cache_ttl_seconds` |
+| **htu/htm strict** | Validate HTTP method + URL exact match |
+
+#### 8.1.5 Bleeding Edge: JWKS Caching "Done Right"
+
+| Feature | Implementation |
+|---------|----------------|
+| **Stale-while-revalidate** | Soft TTL to avoid request spikes |
+| **Kid miss → force refresh** | Unknown `kid` triggers immediate refresh (rotation path) |
+| **Max key set size** | Limit on number of keys (DoS prevention); config `auth.jwks_max_keys` |
+
+#### 8.1.6 Negative Test Suite
 
 | Test Category | Cases |
 |---------------|-------|
 | **Token validation** | expired, wrong issuer, wrong audience, invalid signature |
-| **alg/crit confusion** | `alg=none`, unexpected algorithms, crit header edge cases |
-| **JWKS rotation** | old key revoked (reject), new key added (accept), cache invalidation |
+| **alg/typ/crit confusion** | `alg=none`, unexpected algorithms, wrong `typ`, unknown `crit` extensions |
+| **JWKS rotation** | old key revoked (reject), new key added (accept), cache invalidation, kid miss refresh |
 | **Resource mismatch** | token `resource` ≠ requested API |
-| **No pass-through** | downstream tokens are NOT original tokens (proven in tests) |
+| **No pass-through (hard proof)** | incoming token never in logs/telemetry; downstream call always with different token + different `aud` |
+| **DPoP replay** | jti reuse rejected; htu/htm mismatch rejected |
 
-#### 8.1.4 Definition of Done
+#### 8.1.7 Definition of Done
 
 - [ ] `resource` enforced + `iss`/`aud` validated conform OAuth BCP
-- [ ] Negative test suite includes JWKS rotation + alg confusion
-- [ ] "No pass-through" proven in tests (downstream tokens are different)
+- [ ] **Alg/typ/crit confusion tests** (bleeding edge)
+- [ ] JWKS with stale-while-revalidate + kid-miss refresh + max-keys
+- [ ] DPoP jti replay cache + htu/htm strict (when enabled)
+- [ ] "No pass-through" proven in tests (logs + downstream aud)
 - [ ] Config documented in `docs/reference/config/mcp-server.md`
 
 **Effort:** 2–3 days
+
+**DX Impact:** Fewer "mysterious 401/403" errors — developers understand what to fix via reason codes.
 
 ---
 
@@ -327,19 +356,53 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 | `crates/assay-core/src/judge/mod.rs` | Integrate borderline detection before final verdict |
 | Config | `judge.borderline_band: [0.4, 0.6]` (overridable per suite) |
 
-#### 8.2.2 Order-Invariance (Bias Mitigation)
+#### 8.2.2 Bleeding Edge: Randomized Order as DEFAULT
+
+Instead of always A/B → B/A test: **randomized order (with seed) is DEFAULT** in CI for pairwise comparisons.
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/judge/order.rs` | **New.** `OrderStrategy::Randomized` (default) or `Fixed` for backward compat |
+| Config | `judge.order_strategy: "randomized"` (default) |
+| Output | **Seed logged in summary.json** for replay |
+
+This makes position bias visible without extra calls.
+
+#### 8.2.3 Order-Invariance (Bias Mitigation)
 
 | File | Change |
 |------|--------|
 | `crates/assay-core/src/judge/reliability.rs` | **New.** `OrderInvariantEval`: run both A/B and B/A for pairwise judgments; aggregate with majority/score-averaging |
 | Output metrics | `order_invariance_rate`, `flip_rate` (label changed over A/B vs B/A) |
 
-#### 8.2.3 Rerun Strategy (2-of-3 Majority)
+#### 8.2.4 Bleeding Edge: Rerun on Instability (Not Just Borderline)
+
+Rerun triggers expanded beyond borderline:
+
+| Condition | Trigger | Config |
+|-----------|---------|--------|
+| **Borderline** | score in [0.4, 0.6] | `judge.borderline_band` |
+| **Low margin** | `|score − 0.5| < ε` | `judge.margin_threshold: 0.1` |
+| **Order flip** | A/B ≠ B/A verdict | automatic |
+| **High variance** | std_dev > threshold | `judge.variance_threshold` |
+| **Judge unavailable** | timeout/5xx | fallback policy |
+
+```yaml
+# Config example
+judge:
+  rerun_triggers:
+    - borderline      # score in [0.4, 0.6]
+    - low_margin      # |score - 0.5| < margin_threshold
+    - order_flip      # A/B vs B/A disagreement
+    - high_variance   # std_dev > variance_threshold
+```
+
+#### 8.2.5 Rerun Strategy (2-of-3 Majority)
 
 ```
-if first_run NOT borderline:
+if first_run NOT in rerun_triggers:
     return verdict (done, 1 call)
-elif first_run borderline:
+elif first_run triggers rerun:
     run second
     if first == second:
         return verdict (done, 2 calls)
@@ -350,10 +413,10 @@ elif first_run borderline:
 
 | File | Change |
 |------|--------|
-| `crates/assay-core/src/judge/rerun.rs` | **New.** `RerunStrategy::TwoOfThree` implementing above logic |
+| `crates/assay-core/src/judge/rerun.rs` | **New.** `RerunStrategy::TwoOfThree` with instability triggers |
 | Config | `judge.rerun_strategy: "two_of_three"` (default) or `"always_three"` |
 
-#### 8.2.4 Output Metrics
+#### 8.2.6 Output Metrics
 
 | Metric | Description |
 |--------|-------------|
@@ -361,28 +424,66 @@ elif first_run borderline:
 | `flip_rate` | % runs where label changed over iterations |
 | `abstain_rate` | % runs returning "uncertain" |
 | `margin` | Average distance to decision boundary |
+| `order_seed` | Seed used for randomized order (for replay) |
 | `effective_sample_size` | For weighted voting (future) |
 
-#### 8.2.5 Fail Modes: Split "Uncertain" from "Unavailable"
+#### 8.2.7 Bleeding Edge: Config-First Policies per Suite Type
+
+| Suite Type | Uncertain Policy | Rationale |
+|------------|------------------|-----------|
+| **security** | `fail_closed` | uncertain = fail (security posture) |
+| **quality** | `quarantine` | warn, optional human review |
+| **regression** | `fail_on_confident` | fail only on confident regression, quarantine uncertain |
+
+```yaml
+# Config example
+suites:
+  - name: security_checks
+    type: security
+    uncertain_policy: fail_closed
+  - name: quality_metrics
+    type: quality
+    uncertain_policy: quarantine
+```
+
+#### 8.2.8 Fail Modes: Split "Uncertain" from "Unavailable"
 
 | Condition | Exit Code | Reason Code | Default Policy |
 |-----------|-----------|-------------|----------------|
-| Judge returns "uncertain" (within band) | 1 | `E_JUDGE_UNCERTAIN` | Configurable: fail-closed (security) or warn (quality) |
-| Judge unavailable (timeout/5xx/rate limit) | 3 | `E_JUDGE_UNAVAILABLE` | Fail-closed with clear reason; optional quarantine/retry in nightly |
+| Judge returns "uncertain" (instability detected) | 1 | `E_JUDGE_UNCERTAIN` | Configurable per suite type |
+| Judge unavailable (timeout/5xx/rate limit) | 3 | `E_JUDGE_UNAVAILABLE` | Fail-closed with clear reason |
 
 | File | Change |
 |------|--------|
 | `crates/assay-cli/src/exit_codes.rs` | Add `E_JUDGE_UNCERTAIN` reason code |
-| `crates/assay-core/src/judge/policy.rs` | `JudgeFailPolicy::FailClosed`, `JudgeFailPolicy::Quarantine` per suite type (security vs quality) |
+| `crates/assay-core/src/judge/policy.rs` | `JudgeFailPolicy::FailClosed`, `JudgeFailPolicy::Quarantine` per suite type |
 
-#### 8.2.6 Definition of Done
+#### 8.2.9 Future: Multi-Judge Support (Placeholder)
 
-- [ ] CI-run produces `consensus_rate`, `flip_rate`, `abstain_rate`
-- [ ] Order-invariance check ingebouwd (A/B en B/A) for judge-mode
-- [ ] Policies: security vs quality splits + clear reason codes
-- [ ] 2-of-3 rerun strategy default; configurable
+```yaml
+# Structure for later: 2 different judge models (cheap + strong)
+judge:
+  models:
+    - name: fast
+      model: gpt-4o-mini
+      role: first_pass
+    - name: strong
+      model: gpt-4o
+      role: tiebreaker  # only on disagreement
+```
+
+#### 8.2.10 Definition of Done
+
+- [ ] **Randomized order default** with seed in summary.json
+- [ ] **Rerun-on-instability** (borderline + low_margin + order_flip + high_variance)
+- [ ] Config-first policies per suite type (security/quality/regression)
+- [ ] CI-run produces `consensus_rate`, `flip_rate`, `abstain_rate`, `margin`
+- [ ] Reason codes `E_JUDGE_UNCERTAIN`, `E_JUDGE_UNAVAILABLE`
+- [ ] Multi-judge config placeholder (structure, not full implementation)
 
 **Effort:** 2–3 days (MVP), +1 day for tuning PRs
+
+**DX Impact:** Fewer flaky failures → devs trust CI again. "Uncertain" with reason_code + next_step → faster debugging.
 
 ---
 
@@ -390,7 +491,23 @@ elif first_run borderline:
 
 **Goal:** OpenTelemetry GenAI semantic conventions compliance; privacy-safe defaults.
 
-#### 8.3.1 Span Layers
+#### 8.3.1 Bleeding Edge: Semconv Version Gating
+
+**Critical:** GenAI semconv evolves rapidly. Without version gating, backward compat breaks.
+
+```yaml
+# Config
+otel:
+  genai_semconv_version: "1.28.0"  # or "latest"
+```
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/otel/genai.rs` | Version-gated span attributes |
+| `summary.json` / bundle manifest | Include which semconv mapping was used |
+| Feature flag | `--features otel-genai-semconv-1.28` |
+
+#### 8.3.2 Span Layers
 
 | Span Type | Attributes (GenAI semconv) |
 |-----------|---------------------------|
@@ -400,9 +517,14 @@ elif first_run borderline:
 | File | Change |
 |------|--------|
 | `crates/assay-core/src/providers/trace.rs` | Extend with GenAI semconv attributes |
-| `crates/assay-core/src/otel/genai.rs` | **New.** GenAI span builder conforming to OTel semantic conventions |
+| `crates/assay-core/src/otel/genai.rs` | **New.** GenAI span builder conforming to OTel semantic conventions (versioned) |
 
-#### 8.3.2 Metrics (Low-Cardinality)
+#### 8.3.3 Bleeding Edge: Low-Cardinality Enforcement (Hard)
+
+| Allowed Labels | Forbidden Labels |
+|----------------|------------------|
+| `provider`, `model`, `operation`, `outcome` | prompt hash, user id, request id, trace id |
+| `verdict`, `suite_type` | file paths, dynamic strings |
 
 | Metric | Labels |
 |--------|--------|
@@ -410,28 +532,41 @@ elif first_run borderline:
 | `assay.llm.tokens.total` | `provider`, `model`, `direction` (input/output) |
 | `assay.judge.decisions` | `verdict` (pass/fail/uncertain), `suite_type` (security/quality) |
 
-**Avoid:** prompt hashes, user IDs, trace IDs as metric labels (cardinality explosion).
-
 | File | Change |
 |------|--------|
 | `crates/assay-core/src/otel/metrics.rs` | **New.** Metrics registry with above definitions |
+| Tests | **New.** `test_metric_labels_bounded()` — assert label cardinality < MAX_ALLOWED, no dynamic strings |
 
-#### 8.3.3 Prompt/Response Capture (Opt-in + Redaction)
+#### 8.3.4 Bleeding Edge: Composable Redaction Policies
+
+```yaml
+otel:
+  capture_prompts: false  # default
+  redaction_policies:
+    - strip_secrets      # API keys, tokens
+    - strip_file_paths   # Local paths
+    - strip_pii          # Email, phone (regex)
+    - custom: "s/password=.*/password=REDACTED/"
+```
 
 | File | Change |
 |------|--------|
-| Config | `otel.capture_prompts: false` (default), `otel.redaction_policy: "default"` |
-| `crates/assay-core/src/otel/redaction.rs` | **New.** Redaction policies: `default` (no capture), `hash_only`, `full` (opt-in) |
-| Tests | Golden tests: default config → no prompt/response in export; `full` → content present |
+| Config | `otel.capture_prompts: false` (default), `otel.redaction_policies: [...]` |
+| `crates/assay-core/src/otel/redaction.rs` | **New.** Composable redaction policies |
+| Tests | Golden tests: default = no prompt in export; `capture_prompts: true` = redacted content |
 
-#### 8.3.4 Definition of Done
+#### 8.3.5 Definition of Done
 
-- [ ] Spans voldoen aan GenAI semconv (where available)
-- [ ] Prompt capture opt-in + redaction tests
-- [ ] Metrics low-cardinality en bruikbaar
+- [ ] **Semconv version gating** in config + manifest
+- [ ] **Low-cardinality enforcement tests** (labels bounded)
+- [ ] Spans conform GenAI semconv (versioned)
+- [ ] Composable redaction policies
+- [ ] Golden tests: default = no prompt; full = redacted content
 - [ ] Config documented in `docs/reference/config/observability.md`
 
 **Effort:** 1–2 days
+
+**DX Impact:** "Why is this slow/flaky" → spans/metrics immediately available.
 
 ---
 
@@ -443,37 +578,49 @@ elif first_run borderline:
 
 ```
 .assay/replay.bundle/
-├── manifest.json          # Provenance + file digests
+├── manifest.json          # Provenance + file digests + toolchain
 ├── config/
 │   ├── eval.yaml
 │   └── policy.yaml
 ├── traces/
 │   └── input.jsonl
-├── cassettes/             # VCR recordings (if enabled)
+├── cassettes/             # VCR recordings (scrubbed)
 │   └── openai/
 │       └── *.json
-└── baseline/
-    └── baseline.json
+├── baseline/
+│   └── baseline.json
+└── toolchain/             # NEW: for true reproducibility
+    ├── Cargo.lock
+    └── cargo-metadata.json
 ```
 
-#### 8.4.2 Manifest (Cryptographically Sluitend)
+#### 8.4.2 Bleeding Edge: Toolchain Capture (Critical for Reproducibility)
+
+Without toolchain capture, "replay works on my machine" is common. Include:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "created_at": "2026-01-30T12:00:00Z",
   "assay_version": "2.12.0",
   "git_sha": "abc123...",
   "workflow_run_id": "12345678",
+  "toolchain": {
+    "rustc": "rustc 1.84.0 (9fc6b4312 2025-01-07)",
+    "cargo": "cargo 1.84.0 (66221abde 2024-11-19)",
+    "target_triple": "aarch64-apple-darwin",
+    "cargo_lock_digest": "sha256:abc123...",
+    "cargo_metadata_snapshot": "sha256:def456..."
+  },
+  "runner": {
+    "os": "Linux",
+    "os_version": "Ubuntu 22.04.3 LTS",
+    "runner_image": "ubuntu-latest",
+    "uname": "Linux 6.5.0-1025-azure x86_64"
+  },
   "files": {
-    "config/eval.yaml": {
-      "sha256": "...",
-      "size_bytes": 1234
-    },
-    "traces/input.jsonl": {
-      "sha256": "...",
-      "size_bytes": 5678
-    }
+    "config/eval.yaml": { "sha256": "...", "size_bytes": 1234 },
+    "traces/input.jsonl": { "sha256": "...", "size_bytes": 5678 }
   },
   "bundle_digest": "sha256:...",
   "tool_versions": {
@@ -483,20 +630,55 @@ elif first_run borderline:
 }
 ```
 
+**Captured files:**
+- `Cargo.lock` (exact dependency versions)
+- `cargo metadata --format-version 1` snapshot
+- `rustc -Vv` output
+- Runner environment metadata
+
+#### 8.4.3 Bleeding Edge: Deterministic Seed Logging
+
+For judge reliability: seed is logged → replay with same seed = same order.
+
+```json
+{
+  "determinism": {
+    "judge_order_seed": 42,
+    "random_seed": 12345,
+    "timestamp_frozen": false
+  }
+}
+```
+
 | File | Change |
 |------|--------|
 | `crates/assay-core/src/replay/bundle.rs` | **New.** Bundle creation + manifest generation |
-| `crates/assay-core/src/replay/manifest.rs` | **New.** Manifest schema + digest computation |
+| `crates/assay-core/src/replay/manifest.rs` | **New.** Manifest schema + digest computation + toolchain capture |
 | `crates/assay-cli/src/cli/commands/replay.rs` | **New.** `assay replay --bundle <path>` command |
 
-#### 8.4.3 Privacy: Minimal Secrets Risk
+#### 8.4.4 Bleeding Edge: Scrubbed Cassettes Policy
+
+```yaml
+replay:
+  include_prompts: false        # default
+  scrub_cassettes: true         # remove secrets from VCR cassettes
+  scrub_policy: "default"       # or custom regex list
+```
+
+| File | Change |
+|------|--------|
+| `crates/assay-core/src/replay/scrub.rs` | **New.** Cassette scrubbing policies |
+| Tests | Bundle is safe to share (no secrets, no PII) |
+
+#### 8.4.5 Privacy: Minimal Secrets Risk
 
 | Default | Behavior |
 |---------|----------|
 | `replay.include_prompts: false` | No prompt/response content in bundle unless explicit |
-| `replay.include_cassettes: true` | VCR cassettes included (already scrubbed) |
+| `replay.include_cassettes: true` | VCR cassettes included (scrubbed) |
+| `replay.scrub_cassettes: true` | Remove API keys, tokens, PII from cassettes |
 
-#### 8.4.4 CLI Interface
+#### 8.4.6 CLI Interface
 
 ```bash
 # Create bundle from last run
@@ -507,38 +689,48 @@ assay replay --bundle replay.bundle
 
 # Replay with network (re-run against live providers)
 assay replay --bundle replay.bundle --live
+
+# Replay with specific seed (for judge order reproducibility)
+assay replay --bundle replay.bundle --seed 42
 ```
 
-#### 8.4.5 Definition of Done
+#### 8.4.7 Definition of Done
 
-- [ ] Manifest with file digests + git sha + (optional) CI run id
-- [ ] `assay replay --bundle` reproduces on VCR replay without network
-- [ ] Privacy: no prompts in bundle unless `--include-prompts`
-- [ ] Signature placeholder ready (not P1, but structure in place)
+- [ ] **Toolchain capture** (rustc, cargo, lock, metadata, runner)
+- [ ] **Deterministic seed logging** for reproducibility
+- [ ] Manifest with file digests + provenance
+- [ ] `assay replay --bundle` reproduces (VCR, deterministic seeds)
+- [ ] Scrubbed cassettes policy + tests
+- [ ] Privacy: no prompts/secrets unless opt-in
+- [ ] Signature placeholder (structure for later Sigstore/cosign)
 
 **Effort:** 2–3 days
 
+**DX Impact:** Reviewers can reproduce "exactly this" locally. Bundle is often the "next step" on failures.
+
 ---
 
-### 8.5 P1 File-Level Checklist
+### 8.5 P1 File-Level Checklist (Updated)
 
 | File / Area | P1.3 MCP | P1.1 Judge | P1.2 OTel | Replay |
 |-------------|----------|------------|-----------|--------|
-| `crates/assay-mcp-server/src/auth/` | Resource + BCP validation | — | — | — |
-| `crates/assay-mcp-server/src/auth/jwks.rs` | JWKS rotation + cache | — | — | — |
-| `crates/assay-mcp-server/src/auth/dpop.rs` | DPoP (optional) | — | — | — |
+| `crates/assay-mcp-server/src/auth/` | Resource + BCP + **alg/typ/crit** | — | — | — |
+| `crates/assay-mcp-server/src/auth/jwks.rs` | JWKS rotation + cache + **stale-while-revalidate** | — | — | — |
+| `crates/assay-mcp-server/src/auth/dpop.rs` | DPoP + **jti cache** | — | — | — |
 | `crates/assay-core/src/judge/borderline.rs` | — | Borderline band | — | — |
+| `crates/assay-core/src/judge/order.rs` | — | **Randomized order** (NEW) | — | — |
 | `crates/assay-core/src/judge/reliability.rs` | — | Order-invariance | — | — |
-| `crates/assay-core/src/judge/rerun.rs` | — | 2-of-3 strategy | — | — |
-| `crates/assay-core/src/judge/policy.rs` | — | Fail policies | — | — |
-| `crates/assay-core/src/otel/genai.rs` | — | — | GenAI spans | — |
-| `crates/assay-core/src/otel/metrics.rs` | — | — | LLM metrics | — |
-| `crates/assay-core/src/otel/redaction.rs` | — | — | Redaction | — |
+| `crates/assay-core/src/judge/rerun.rs` | — | 2-of-3 + **instability triggers** | — | — |
+| `crates/assay-core/src/judge/policy.rs` | — | Fail policies **per suite type** | — | — |
+| `crates/assay-core/src/otel/genai.rs` | — | — | GenAI spans + **semconv version** | — |
+| `crates/assay-core/src/otel/metrics.rs` | — | — | LLM metrics + **cardinality tests** | — |
+| `crates/assay-core/src/otel/redaction.rs` | — | — | **Composable** redaction | — |
 | `crates/assay-core/src/replay/bundle.rs` | — | — | — | Bundle create |
-| `crates/assay-core/src/replay/manifest.rs` | — | — | — | Manifest |
+| `crates/assay-core/src/replay/manifest.rs` | — | — | — | Manifest + **toolchain** |
+| `crates/assay-core/src/replay/scrub.rs` | — | — | — | **Cassette scrubbing** (NEW) |
 | `crates/assay-cli/src/cli/commands/replay.rs` | — | — | — | CLI |
 | `crates/assay-cli/src/exit_codes.rs` | — | E_JUDGE_UNCERTAIN | — | — |
-| Tests (negative) | alg/crit/JWKS/passthrough | order-invariance, consensus | redaction goldens | bundle roundtrip |
+| Tests (negative) | alg/typ/crit, JWKS, passthrough, **jti cache** | order-invariance, consensus, **instability** | redaction goldens, **cardinality** | bundle roundtrip, **scrubbed** |
 
 ---
 
@@ -551,6 +743,47 @@ assay replay --bundle replay.bundle --live
 | P1.2 OTel GenAI | 1–2 days | P1.1 helps with tuning |
 | Replay Bundle | 2–3 days | All above (uses their outputs) |
 | **Total** | **8–12 days** | Sequential with parallelization possible |
+
+**DX-items priority:** #10 (next steps) → #11 (perf DX) → #13 (privacy) — highest impact first.
+
+---
+
+### 8.7 PR Sequence Blueprint
+
+Recommended PR structure for implementation:
+
+```
+PR 1: P1.3 MCP Auth Hardening
+  ├── auth/resource.rs (RFC 8707)
+  ├── auth/jwt_validation.rs (alg/typ/crit)
+  ├── auth/jwks.rs (cache improvements)
+  ├── auth/dpop.rs (optional, behind feature flag)
+  └── tests/auth_negative.rs
+
+PR 2: P1.1 Judge Reliability
+  ├── judge/borderline.rs
+  ├── judge/order.rs (randomized default)
+  ├── judge/rerun.rs (instability triggers)
+  ├── judge/policy.rs (suite-type policies)
+  └── tests/judge_reliability.rs
+
+PR 3: P1.2 OTel GenAI
+  ├── otel/genai.rs (semconv versioned)
+  ├── otel/metrics.rs (low-cardinality)
+  ├── otel/redaction.rs (composable)
+  └── tests/otel_cardinality.rs
+
+PR 4: Replay Bundle
+  ├── replay/bundle.rs
+  ├── replay/manifest.rs (toolchain, seeds)
+  ├── replay/scrub.rs
+  └── tests/bundle_roundtrip.rs
+
+DX Mini-PRs (parallel):
+  ├── #10: suggest_next_steps()
+  ├── #11: slowest 5 + phase timings
+  └── #13: privacy defaults + redaction tests
+```
 
 ---
 
