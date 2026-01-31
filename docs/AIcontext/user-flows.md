@@ -384,6 +384,56 @@ flowchart TD
 - `events.jsonl`: CloudEvents v1.0 format events
 - Deterministic: Same profile → same bundle ID (JCS canonicalization)
 
+## Flow 12: CI Optimization & Self-Hosted Runner (Platform Engineer)
+
+```mermaid
+flowchart TD
+    start[CI Pipeline] --> type{Change type?}
+    type -->|eBPF code| full[Full Matrix Test]
+    type -->|Pure deps| skip[Skip Matrix]
+
+    full --> runner{Self-hosted<br/>runner online?}
+    runner -->|Yes| run[Run Kernel Tests]
+    runner -->|No| health[Health Check]
+    health --> recover[Auto-Recovery]
+    recover --> run
+
+    run --> queue{Queue<br/>backlog?}
+    queue -->|Yes| optimize[Optimize Queue]
+    optimize --> cancel[Cancel Stale/Superseded]
+    cancel --> run
+    queue -->|No| complete[Complete]
+
+    skip --> summary[Summary: Skipped]
+    summary --> complete
+```
+
+**CI Optimization Features:**
+
+1. **Kernel Matrix Skip**: Pure dependency bumps skip heavy self-hosted tests
+2. **Auto-Recovery**: Health check script recovers offline runners
+3. **Queue Management**: Auto-cancel stale jobs, superseded runs, PR prioritization
+4. **Cache Healing**: Auto-clear corrupted actions cache
+
+**Health Check Commands:**
+```bash
+# View status
+./infra/bpf-runner/health_check.sh --status
+
+# Manual recovery
+./infra/bpf-runner/health_check.sh --recover
+
+# Queue optimization
+./infra/bpf-runner/health_check.sh --optimize-queue
+
+# Cache healing
+./infra/bpf-runner/health_check.sh --heal-cache
+```
+
+See [CI Infrastructure](ci-infrastructure.md) for detailed documentation.
+
+---
+
 ## Decision Points
 
 ### When to Use Which Flow
@@ -401,6 +451,7 @@ flowchart TD
 | Debugging | Flow 9 | `assay doctor`, `assay explain` |
 | Upgrading | Flow 10 | `assay migrate` |
 | Evidence & Compliance | Flow 11 | `assay evidence export/verify/lint` |
+| CI Optimization | Flow 12 | `health_check.sh --status/--recover/--optimize-queue` |
 
 ## Error Handling Flows
 

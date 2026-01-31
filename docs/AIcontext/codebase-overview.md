@@ -1,5 +1,8 @@
 # Assay Codebase Overview
 
+> **Version**: 2.12.0 (January 2026)
+> **SOTA Status**: Bleeding Edge (Judge Reliability, MCP Auth, OTel GenAI, Replay Bundle)
+
 ## What is Assay?
 
 **Assay** is a **Policy-as-Code** engine for Model Context Protocol (MCP) that validates AI agent behavior. It provides:
@@ -204,6 +207,44 @@ Report (console/JSON/JUnit/SARIF)
 3. **Policy-as-Code**: Uses logic, not LLMs, for evaluation
 4. **Separation of Concerns**: CLI handles UX/config, core handles evaluation logic
 5. **Extensibility**: Metrics, providers, and policies are pluggable via traits
+
+## SOTA Features (January 2026)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Judge Reliability** | ✅ Implemented | Randomized order default, borderline band [0.4-0.6], 2-of-3 rerun on instability, per-suite policies |
+| **MCP Auth Hardening** | 🔄 P1 | RFC 8707 resource indicators, alg/typ/crit JWT hardening, JWKS rotation, DPoP (optional) |
+| **OTel GenAI** | 🔄 P1 | Semconv version gating, low-cardinality metrics, composable redaction policies |
+| **Replay Bundle** | 🔄 P1 | Toolchain capture (rustc, Cargo.lock), deterministic seeds, scrubbed cassettes (deny-by-default) |
+| **CI Optimization** | ✅ Implemented | Skip kernel matrix for pure dep bumps, auto-cancel superseded runs |
+| **Self-Healing Runner** | ✅ Implemented | Health check with cache auto-heal, stale job cleanup, PR prioritization |
+
+## Exit Codes & Reason Codes
+
+### Exit Codes (Coarse, Stable)
+
+| Code | Name | When |
+|------|------|------|
+| 0 | `EXIT_SUCCESS` | All tests passed |
+| 1 | `EXIT_TEST_FAILURE` | One or more tests failed |
+| 2 | `EXIT_CONFIG_ERROR` | Configuration or user error |
+| 3 | `EXIT_INFRA_ERROR` | Infrastructure or judge unavailable |
+
+### Reason Codes (Fine-Grained)
+
+| Category | Codes | Exit |
+|----------|-------|------|
+| **Config** | `E_CFG_PARSE`, `E_TRACE_NOT_FOUND`, `E_MISSING_CONFIG`, `E_BASELINE_INVALID`, `E_POLICY_PARSE`, `E_INVALID_ARGS` | 2 |
+| **Infra** | `E_JUDGE_UNAVAILABLE`, `E_RATE_LIMIT`, `E_PROVIDER_5XX`, `E_TIMEOUT`, `E_NETWORK_ERROR` | 3 |
+| **Test** | `E_TEST_FAILED`, `E_POLICY_VIOLATION`, `E_SEQUENCE_VIOLATION`, `E_ARG_SCHEMA` | 1 |
+
+### Compatibility
+
+- `--exit-codes=v2` (default): New exit code mapping
+- `--exit-codes=v1`: Legacy mapping (exit 3 = trace not found)
+- Environment: `ASSAY_EXIT_CODES=v1|v2`
+
+**Note**: Always use `reason_code` in `summary.json` for programmatic handling, not exit codes.
 
 ## Extension Points
 

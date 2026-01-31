@@ -28,7 +28,7 @@ REPO="${REPO:-Rul1an/assay}"
 RUNNER_NAME="${RUNNER_NAME:-assay-bpf-runner}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
 RUNNER_USER="${RUNNER_USER:-github-runner}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,ARM64,bpf-lsm,assay-bpf-runner}"
+RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,bpf-lsm,assay-bpf-runner}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 
@@ -62,11 +62,24 @@ rotate_log() {
 
 # Check if gh CLI is available and authenticated
 check_gh_auth() {
-    if ! command -v gh &>/dev/null; then
+    # Try common gh locations for cron compatibility
+    local gh_cmd=""
+    for path in gh /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
+        if command -v "$path" &>/dev/null; then
+            gh_cmd="$path"
+            break
+        fi
+    done
+
+    if [[ -z "$gh_cmd" ]]; then
         log_error "gh CLI not found. Install with: brew install gh"
         return 1
     fi
-    if ! gh auth status &>/dev/null; then
+
+    # Export GH path for use in other functions
+    export GH_CMD="$gh_cmd"
+
+    if ! $gh_cmd auth status &>/dev/null; then
         log_error "gh CLI not authenticated. Run: gh auth login"
         return 1
     fi
@@ -99,7 +112,8 @@ check_vm_running() {
 # Check if there are queued jobs waiting for our runner labels
 check_queued_jobs() {
     local queued_count
-    queued_count=$(gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+    local gh="${GH_CMD:-gh}"
+    queued_count=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
 
     if [[ "$queued_count" -gt 0 ]]; then
         log_info "Found $queued_count queued workflow runs"
@@ -108,17 +122,136 @@ check_queued_jobs() {
     return 1
 }
 
+# ==============================================================================
+# Queue Management (prevents stale job buildup)
+# ==============================================================================
+
+STALE_JOB_HOURS="${STALE_JOB_HOURS:-4}"
+
+# Cancel stale queued jobs (older than STALE_JOB_HOURS)
+cancel_stale_jobs() {
+    local gh="${GH_CMD:-gh}"
+    local cutoff_time
+    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                  date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
+
+    if [[ -z "$cutoff_time" ]]; then
+        log_warn "Could not calculate cutoff time for stale jobs"
+        return 1
+    fi
+
+    log_info "Checking for stale queued jobs (older than ${STALE_JOB_HOURS} hours)..."
+
+    local stale_jobs
+    stale_jobs=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,createdAt 2>/dev/null | \
+        jq -r --arg cutoff "$cutoff_time" '.[] | select(.createdAt < $cutoff) | .databaseId' || echo "")
+
+    if [[ -z "$stale_jobs" ]]; then
+        log_info "No stale jobs found"
+        return 0
+    fi
+
+    local cancel_count=0
+    for run_id in $stale_jobs; do
+        log_info "Cancelling stale run $run_id..."
+        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+        ((cancel_count++))
+        sleep 1  # Rate limiting
+    done
+
+    if [[ "$cancel_count" -gt 0 ]]; then
+        log_ok "Cancelled $cancel_count stale queued jobs"
+    fi
+
+    return 0
+}
+
+# Cancel superseded runs (older runs for same branch)
+cancel_superseded_runs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking for superseded queued runs..."
+
+    # Get all queued runs, group by branch, cancel all but newest
+    local superseded
+    superseded=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,headBranch,createdAt 2>/dev/null | \
+        jq -r 'group_by(.headBranch) | .[] | select(length > 1) | sort_by(.createdAt) | .[:-1] | .[].databaseId' || echo "")
+
+    if [[ -z "$superseded" ]]; then
+        log_info "No superseded runs found"
+        return 0
+    fi
+
+    local cancel_count=0
+    for run_id in $superseded; do
+        log_info "Cancelling superseded run $run_id..."
+        $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+        ((cancel_count++))
+        sleep 1
+    done
+
+    if [[ "$cancel_count" -gt 0 ]]; then
+        log_ok "Cancelled $cancel_count superseded runs"
+    fi
+
+    return 0
+}
+
+# Cancel queued push runs when PR runs are waiting (PRs get priority)
+prioritize_pr_runs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking if PR runs should be prioritized..."
+
+    # Count queued PR runs vs push runs
+    local pr_runs push_runs
+    pr_runs=$($gh run list --repo "$REPO" --status queued --event pull_request --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
+    push_runs=$($gh run list --repo "$REPO" --status queued --event push --limit 50 --json databaseId 2>/dev/null | jq 'length' || echo "0")
+
+    if [[ "$pr_runs" -gt 5 && "$push_runs" -gt 0 ]]; then
+        log_info "Many PR runs waiting ($pr_runs), cancelling $push_runs queued push runs..."
+
+        # Cancel push runs (they'll be superseded by next push anyway)
+        $gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null | \
+            jq -r '.[].databaseId' | while read run_id; do
+            log_info "Cancelling push run $run_id (PR priority)..."
+            $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
+            sleep 1
+        done
+
+        log_ok "PR runs prioritized"
+    else
+        log_info "Queue balanced (PR: $pr_runs, push: $push_runs)"
+    fi
+
+    return 0
+}
+
+# Get queue statistics
+get_queue_stats() {
+    local gh="${GH_CMD:-gh}"
+
+    local queued in_progress
+    queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+    in_progress=$($gh api "repos/$REPO/actions/runs?status=in_progress" --jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+    echo "queued=$queued in_progress=$in_progress"
+}
+
 # Get runner status from GitHub API
 get_runner_status() {
     local status
-    status=$(gh api "repos/$REPO/actions/runners" --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" 2>/dev/null || echo "unknown")
+    local gh="${GH_CMD:-gh}"
+    status=$($gh api "repos/$REPO/actions/runners" --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" 2>/dev/null || echo "unknown")
     echo "$status"
 }
 
 # Check if runner service is running in VM
 check_runner_service() {
     local service_status
-    service_status=$(multipass exec "$VM_NAME" -- sudo systemctl is-active "actions.runner.${REPO/\//-}.$RUNNER_NAME.service" 2>/dev/null || echo "inactive")
+    # Use timeout to prevent hanging
+    service_status=$(timeout 10 multipass exec "$VM_NAME" -- \
+        sudo systemctl is-active "actions.runner.${REPO/\//-}.$RUNNER_NAME.service" 2>/dev/null || echo "inactive")
 
     if [[ "$service_status" == "active" ]]; then
         return 0
@@ -149,7 +282,8 @@ sync_vm_time() {
 # Generate new runner registration token
 generate_runner_token() {
     local token
-    token=$(gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq '.token' 2>/dev/null)
+    local gh="${GH_CMD:-gh}"
+    token=$($gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq '.token' 2>/dev/null)
 
     if [[ -z "$token" ]]; then
         log_error "Failed to generate runner token"
@@ -162,11 +296,11 @@ generate_runner_token() {
 cleanup_runner_config() {
     log_info "Cleaning up old runner configuration..."
 
-    # Stop and uninstall service
-    multipass exec "$VM_NAME" -- sudo bash -c "
-        cd $RUNNER_DIR 2>/dev/null || exit 0
-        ./svc.sh stop 2>/dev/null || true
-        ./svc.sh uninstall 2>/dev/null || true
+    # Stop and uninstall service (MUST run from runner directory)
+    multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR || exit 0
+        sudo ./svc.sh stop 2>/dev/null || true
+        sudo ./svc.sh uninstall 2>/dev/null || true
     " 2>/dev/null || true
 
     # Remove old service files
@@ -175,7 +309,7 @@ cleanup_runner_config() {
         systemctl daemon-reload 2>/dev/null || true
     " 2>/dev/null || true
 
-    # Remove credentials
+    # Remove credentials to force fresh registration
     multipass exec "$VM_NAME" -- sudo rm -f \
         "$RUNNER_DIR/.runner" \
         "$RUNNER_DIR/.credentials" \
@@ -202,7 +336,8 @@ configure_runner() {
         --unattended \
         --replace 2>&1)
 
-    if echo "$result" | grep -q "Successfully"; then
+    # Check for success indicators (handles both fresh install and replacement)
+    if echo "$result" | grep -qE "(Successfully|Settings Saved)"; then
         log_ok "Runner configured successfully"
         return 0
     else
@@ -215,11 +350,18 @@ configure_runner() {
 start_runner_service() {
     log_info "Installing and starting runner service..."
 
-    multipass exec "$VM_NAME" -- bash -c "
-        cd $RUNNER_DIR
-        sudo ./svc.sh install $RUNNER_USER
-        sudo ./svc.sh start
-    " 2>/dev/null
+    # MUST run svc.sh from the runner directory
+    local install_result
+    install_result=$(multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR && sudo ./svc.sh install $RUNNER_USER 2>&1
+    ")
+    log_info "Install output: $install_result"
+
+    local start_result
+    start_result=$(multipass exec "$VM_NAME" -- bash -c "
+        cd $RUNNER_DIR && sudo ./svc.sh start 2>&1
+    ")
+    log_info "Start output: $start_result"
 
     sleep 5
 
@@ -231,6 +373,124 @@ start_runner_service() {
         return 1
     fi
 }
+
+# ==============================================================================
+# Actions Cache Management (prevents "Can't find action.yml" errors)
+# ==============================================================================
+
+ACTIONS_CACHE_DIR="${ACTIONS_CACHE_DIR:-/opt/actions-runner/_work/_actions}"
+ACTIONS_CACHE_MAX_AGE_DAYS="${ACTIONS_CACHE_MAX_AGE_DAYS:-7}"
+
+# Clean old/stale actions cache entries
+clean_actions_cache() {
+    log_info "Cleaning actions cache (entries older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)..."
+
+    local cleaned_count
+    cleaned_count=$(multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 2>/dev/null | wc -l || echo "0")
+
+    if [[ "$cleaned_count" -gt 0 ]]; then
+        multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 -exec rm -rf {} \; 2>/dev/null || true
+        log_ok "Cleaned $cleaned_count stale cache entries"
+    else
+        log_info "No stale cache entries found"
+    fi
+}
+
+# Force clear entire actions cache (use when corruption detected)
+force_clear_actions_cache() {
+    log_warn "Force clearing entire actions cache..."
+
+    multipass exec "$VM_NAME" -- sudo rm -rf "$ACTIONS_CACHE_DIR"/* 2>/dev/null || true
+    multipass exec "$VM_NAME" -- sudo mkdir -p "$ACTIONS_CACHE_DIR" 2>/dev/null || true
+    multipass exec "$VM_NAME" -- sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$ACTIONS_CACHE_DIR" 2>/dev/null || true
+
+    log_ok "Actions cache cleared"
+}
+
+# Check for failed jobs with "Can't find action.yml" error
+check_action_cache_failures() {
+    local gh="${GH_CMD:-gh}"
+
+    # Get recent failed runs (last 2 hours)
+    local failed_runs
+    failed_runs=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=10" \
+        --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' 2>/dev/null || echo "")
+
+    if [[ -z "$failed_runs" ]]; then
+        return 1  # No failed runs
+    fi
+
+    # Check if any failed due to action cache issue
+    for run_id in $failed_runs; do
+        local jobs_url
+        jobs_url=$($gh api "repos/$REPO/actions/runs/$run_id" --jq '.jobs_url' 2>/dev/null || echo "")
+
+        if [[ -n "$jobs_url" ]]; then
+            # Check job conclusions and look for the specific error pattern
+            local job_logs
+            job_logs=$($gh run view "$run_id" --repo "$REPO" --log-failed 2>/dev/null | head -50 || echo "")
+
+            if echo "$job_logs" | grep -q "Can't find 'action.yml'"; then
+                log_warn "Found action cache failure in run $run_id"
+                return 0  # Found cache failure
+            fi
+        fi
+    done
+
+    return 1  # No cache failures found
+}
+
+# Rerun failed jobs that were caused by cache issues
+rerun_cache_failed_jobs() {
+    local gh="${GH_CMD:-gh}"
+
+    log_info "Checking for jobs to rerun after cache clear..."
+
+    local failed_runs
+    failed_runs=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=20" \
+        --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' 2>/dev/null || echo "")
+
+    local rerun_count=0
+    for run_id in $failed_runs; do
+        local job_logs
+        job_logs=$($gh run view "$run_id" --repo "$REPO" --log-failed 2>/dev/null | head -50 || echo "")
+
+        if echo "$job_logs" | grep -q "Can't find 'action.yml'"; then
+            log_info "Rerunning failed run $run_id..."
+            $gh run rerun "$run_id" --repo "$REPO" --failed 2>/dev/null || true
+            ((rerun_count++))
+            sleep 2  # Avoid rate limiting
+        fi
+    done
+
+    if [[ "$rerun_count" -gt 0 ]]; then
+        log_ok "Triggered rerun for $rerun_count failed jobs"
+    fi
+}
+
+# Auto-heal action cache issues
+heal_action_cache() {
+    log_info "Checking for action cache issues..."
+
+    if check_action_cache_failures; then
+        log_warn "Action cache corruption detected - initiating auto-heal"
+
+        # Step 1: Clear the cache
+        force_clear_actions_cache
+
+        # Step 2: Rerun failed jobs
+        rerun_cache_failed_jobs
+
+        return 0
+    fi
+
+    log_info "No action cache issues detected"
+    return 0
+}
+
+# ==============================================================================
+# Runner Recovery
+# ==============================================================================
 
 # Full recovery procedure
 recover_runner() {
@@ -280,6 +540,23 @@ health_check() {
     log_info "Runner '$RUNNER_NAME' status: $status"
 
     if [[ "$status" == "online" ]]; then
+        # Runner is online - perform maintenance tasks
+
+        # 1. Cancel stale queued jobs to prevent backlog
+        cancel_stale_jobs
+
+        # 2. Cancel superseded runs (duplicates for same branch)
+        cancel_superseded_runs
+
+        # 3. Prioritize PR runs over push runs
+        prioritize_pr_runs
+
+        # 4. Check for action cache issues
+        heal_action_cache
+
+        # 5. Periodic cache cleanup
+        clean_actions_cache
+
         log_ok "Runner is healthy"
         return 0
     fi
@@ -319,6 +596,10 @@ install_cron() {
 
 # Show status
 show_status() {
+    # Initialize gh path for status display
+    check_gh_auth 2>/dev/null || true
+    local gh="${GH_CMD:-gh}"
+
     echo "=== Runner Status ==="
     echo "VM: $VM_NAME"
 
@@ -338,9 +619,45 @@ show_status() {
         echo "Service: inactive"
     fi
 
-    local queued
-    queued=$(gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
-    echo "Queued Workflows: $queued"
+    echo ""
+    echo "=== Job Queue ==="
+    local queued in_progress
+    queued=$($gh api "repos/$REPO/actions/runs?status=queued" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    in_progress=$($gh api "repos/$REPO/actions/runs?status=in_progress" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    echo "Queued: $queued"
+    echo "In Progress: $in_progress"
+
+    # Check for stale jobs
+    local cutoff_time stale_count
+    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                  date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
+    if [[ -n "$cutoff_time" ]]; then
+        stale_count=$($gh run list --repo "$REPO" --status queued --limit 50 --json createdAt 2>/dev/null | \
+            jq -r --arg cutoff "$cutoff_time" '[.[] | select(.createdAt < $cutoff)] | length' || echo "?")
+        echo "Stale (>${STALE_JOB_HOURS}h): $stale_count"
+        if [[ "$stale_count" != "?" && "$stale_count" -gt 0 ]]; then
+            echo "⚠️  Run --cancel-stale to clean up"
+        fi
+    fi
+
+    local failed
+    failed=$($gh api "repos/$REPO/actions/runs?status=failure&per_page=10" --jq '.workflow_runs | length' 2>/dev/null || echo "?")
+    echo "Recent Failed: $failed"
+
+    echo ""
+    echo "=== Actions Cache ==="
+    local cache_size cache_entries
+    cache_size=$(multipass exec "$VM_NAME" -- du -sh "$ACTIONS_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
+    cache_entries=$(multipass exec "$VM_NAME" -- find "$ACTIONS_CACHE_DIR" -maxdepth 2 -type d 2>/dev/null | wc -l || echo "?")
+    echo "Cache Size: $cache_size"
+    echo "Cache Entries: $cache_entries"
+
+    # Check for potential cache issues
+    if check_action_cache_failures 2>/dev/null; then
+        echo "Cache Health: ⚠️  FAILURES DETECTED (run --heal-cache)"
+    else
+        echo "Cache Health: ✅ OK"
+    fi
 
     echo ""
     echo "Recent log entries:"
@@ -361,14 +678,68 @@ case "${1:-}" in
         check_vm_running || exit 1
         recover_runner
         ;;
+    --clean-cache)
+        rotate_log
+        check_vm_running || exit 1
+        clean_actions_cache
+        ;;
+    --clear-cache)
+        rotate_log
+        check_vm_running || exit 1
+        force_clear_actions_cache
+        ;;
+    --heal-cache)
+        rotate_log
+        check_gh_auth || exit 1
+        check_vm_running || exit 1
+        heal_action_cache
+        ;;
+    --cancel-stale)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_stale_jobs
+        ;;
+    --cancel-superseded)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_superseded_runs
+        ;;
+    --prioritize-prs)
+        rotate_log
+        check_gh_auth || exit 1
+        prioritize_pr_runs
+        ;;
+    --optimize-queue)
+        rotate_log
+        check_gh_auth || exit 1
+        cancel_stale_jobs
+        cancel_superseded_runs
+        prioritize_pr_runs
+        ;;
     --help|-h)
-        echo "Usage: $0 [--install-cron|--status|--recover|--help]"
+        echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  (none)          Run health check"
+        echo "  (none)          Run full health check (including all maintenance)"
         echo "  --install-cron  Install cron job (every 5 minutes)"
         echo "  --status        Show current status"
-        echo "  --recover       Force recovery"
+        echo "  --recover       Force full runner recovery"
+        echo ""
+        echo "Cache Management:"
+        echo "  --clean-cache   Remove stale cache entries (older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)"
+        echo "  --clear-cache   Force clear entire actions cache"
+        echo "  --heal-cache    Detect cache failures, clear cache, rerun failed jobs"
+        echo ""
+        echo "Queue Management:"
+        echo "  --cancel-stale      Cancel queued jobs older than ${STALE_JOB_HOURS} hours"
+        echo "  --cancel-superseded Cancel older duplicate runs for same branch"
+        echo "  --prioritize-prs    Cancel push runs when many PR runs waiting"
+        echo "  --optimize-queue    Run all queue optimizations (stale + superseded + PR priority)"
+        echo ""
+        echo "Environment Variables:"
+        echo "  STALE_JOB_HOURS           Hours before queued job is considered stale (default: 4)"
+        echo "  ACTIONS_CACHE_MAX_AGE_DAYS Days before cache entry is stale (default: 7)"
+        echo ""
         echo "  --help          Show this help"
         ;;
     *)

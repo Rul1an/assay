@@ -82,9 +82,9 @@ multipass exec "$VM" -- sudo bash -c '
 '
 
 # 1. Configure (Unattended)
-# Note: --labels bpf-lsm is CRITICAL for our workflow!
+# Note: --labels bpf-lsm,assay-bpf-runner are CRITICAL for our workflow!
 multipass exec "$VM" -- sudo su - github-runner -c \
-    "cd /opt/actions-runner && ./config.sh --url $REPO_URL --token $TOKEN --labels self-hosted,linux,x64,bpf-lsm --unattended --replace || echo '⚠️  Config skipped (already configured?)'"
+    "cd /opt/actions-runner && ./config.sh --url $REPO_URL --token $TOKEN --labels self-hosted,linux,x64,bpf-lsm,assay-bpf-runner --unattended --replace || echo '⚠️  Config skipped (already configured?)'"
 
 # 2. Install & Start Service (SOTA: As Dedicated User)
 echo "🔌 Installing & Starting Service (User: github-runner)..."
