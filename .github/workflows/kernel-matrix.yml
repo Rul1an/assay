@@ -12,8 +12,7 @@ on:
       - "crates/assay-monitor/**"
       - "scripts/**"
       - ".github/workflows/kernel-matrix.yml"
-      - "Cargo.toml"
-      - "Cargo.lock"
+      # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
 
