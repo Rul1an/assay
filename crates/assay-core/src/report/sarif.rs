@@ -9,6 +9,12 @@ use std::path::Path;
 pub const SARIF_SCHEMA: &str =
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json";
 
+/// Synthetic location for results without file context.
+///
+/// GitHub Code Scanning requires at least one location per result, so we use
+/// a synthetic fallback pointing to the config file when no real file is available.
+const SYNTHETIC_LOCATION_URI: &str = ".assay/eval.yaml";
+
 /// Write test results as SARIF 2.1.0 to a file.
 ///
 /// # SARIF consistency contract
@@ -39,10 +45,16 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
                 TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => "warning",
                 TestStatus::Fail | TestStatus::Error => "error",
             };
+            // Always include at least one location (synthetic fallback for GitHub)
             Some(serde_json::json!({
                 "ruleId": "assay",
                 "level": level,
                 "message": { "text": format!("{}: {}", r.test_id, r.message) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": SYNTHETIC_LOCATION_URI }
+                    }
+                }]
             }))
         })
         .collect();
@@ -81,16 +93,19 @@ pub fn build_sarif_diagnostics(
             // Map code to ruleId (use simple code string for now)
             let rule_id = &d.code;
 
-            // Optional: location (if context provides file/line)
-            let locations = if let Some(file) = d.context.get("file").and_then(|v| v.as_str()) {
-                vec![serde_json::json!({
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": file }
-                    }
-                })]
-            } else {
-                vec![]
-            };
+            // Always include at least one location; use context file or synthetic fallback
+            let file_uri = d
+                .context
+                .get("file")
+                .and_then(|v| v.as_str())
+                .unwrap_or(SYNTHETIC_LOCATION_URI);
+            let line = d.context.get("line").and_then(|v| v.as_u64()).unwrap_or(1);
+            let locations = vec![serde_json::json!({
+                "physicalLocation": {
+                    "artifactLocation": { "uri": file_uri },
+                    "region": { "startLine": line }
+                }
+            })];
 
             serde_json::json!({
                 "ruleId": rule_id,
@@ -163,5 +178,54 @@ mod tests {
         let invocations = runs[0]["invocations"].as_array().unwrap();
         assert!(!invocations[0]["executionSuccessful"].as_bool().unwrap());
         assert_eq!(invocations[0]["exitCode"], 1);
+    }
+
+    /// Contract test: every SARIF result MUST have at least one location
+    /// (required for GitHub Code Scanning to accept the file)
+    #[test]
+    fn test_sarif_location_invariant_with_context() {
+        let diag = Diagnostic::new("TEST002", "Error with file context".to_string())
+            .with_severity("error")
+            .with_context(json!({"file": "src/main.rs", "line": 42}));
+
+        let sarif = build_sarif_diagnostics("assay", &[diag], 1);
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+
+        // Must have at least one location
+        let locations = results[0]["locations"].as_array().unwrap();
+        assert!(
+            !locations.is_empty(),
+            "SARIF result must have at least one location"
+        );
+
+        // Should use the provided file
+        let uri = &locations[0]["physicalLocation"]["artifactLocation"]["uri"];
+        assert_eq!(uri, "src/main.rs");
+
+        // Should include line number
+        let line = &locations[0]["physicalLocation"]["region"]["startLine"];
+        assert_eq!(line, 42);
+    }
+
+    /// Contract test: SARIF results without file context get synthetic location
+    #[test]
+    fn test_sarif_location_invariant_synthetic_fallback() {
+        let diag = Diagnostic::new("TEST003", "Error without file context".to_string())
+            .with_severity("error");
+        // No context set - should use synthetic location
+
+        let sarif = build_sarif_diagnostics("assay", &[diag], 1);
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+
+        // Must have at least one location (synthetic)
+        let locations = results[0]["locations"].as_array().unwrap();
+        assert!(
+            !locations.is_empty(),
+            "SARIF result must have synthetic location fallback"
+        );
+
+        // Should use the synthetic location URI
+        let uri = &locations[0]["physicalLocation"]["artifactLocation"]["uri"];
+        assert_eq!(uri, SYNTHETIC_LOCATION_URI);
     }
 }

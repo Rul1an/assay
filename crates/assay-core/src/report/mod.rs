@@ -2,6 +2,7 @@ pub mod console;
 pub mod json;
 pub mod junit;
 pub mod sarif;
+pub mod summary;
 
 use crate::model::TestResultRow;
 
