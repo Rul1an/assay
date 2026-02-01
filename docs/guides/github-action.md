@@ -426,7 +426,7 @@ jobs:
 
       # Assay writes reports (JUnit/SARIF) as "Best Effort".
       # Failures to write reports (e.g. bad path) print a WARNING but do not fail the step.
-      # The primary artifact 'run.json' is guaranteed.
+      # The primary artifact 'run.json' is also written on a "Best Effort" basis.
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4

@@ -61,14 +61,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (Pinned for supply-chain security)
 
       - name: Setup Assay
-        uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use an exact tag (e.g., v2.1.0) or a full commit SHA.
+        uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use a full commit SHA. Exact tags (e.g. v2.1.0) are less strict.
 
       - name: Run Assay Tests
         run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Upload SARIF
-        # Skip on fork PRs to prevent permission errors
-        if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+        # Skip on fork PRs to prevent permission errors, and ensure file exists
+        if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('.assay/reports/sarif.json') != ''
         # Pin to SHA for supply-chain security (v3.28.10)
         uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30
         with:

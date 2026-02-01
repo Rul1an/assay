@@ -411,8 +411,6 @@ runs:
           # Generate SARIF for this bundle
           assay evidence lint --format sarif "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).sarif" 2>/dev/null || true
 
-          # Generate JUnit for this bundle
-          assay evidence lint --format junit "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).xml" 2>/dev/null || true
         done
 
         # Merge SARIF files if multiple

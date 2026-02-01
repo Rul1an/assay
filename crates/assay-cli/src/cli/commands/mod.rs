@@ -288,9 +288,16 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     }
 
-    let cfg = match assay_core::config::load_config(&args.config, legacy_mode, false) {
-        Ok(c) => c,
-        Err(e) => return write_error(ReasonCode::ECfgParse, e.to_string()),
+    let cfg = if args.config.exists() {
+        match assay_core::config::load_config(&args.config, legacy_mode, false) {
+            Ok(c) => c,
+            Err(e) => return write_error(ReasonCode::ECfgParse, e.to_string()),
+        }
+    } else {
+        return write_error(
+            ReasonCode::EMissingConfig,
+            format!("Config file not found: {}", args.config.display()),
+        );
     };
 
     // Observability: Log config version
@@ -332,10 +339,12 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             if msg.contains("config error") {
                 return write_error(ReasonCode::ECfgParse, msg.clone());
             }
-            if msg.to_lowercase().contains("trace")
-                && (msg.contains("not found")
-                    || msg.contains("No such file")
-                    || msg.contains("failed to load trace"))
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("trace")
+                && (msg_lower.contains("not found")
+                    || msg_lower.contains("no such file")
+                    || msg_lower.contains("failed to load trace")
+                    || msg_lower.contains("failed to ingest trace"))
             {
                 return write_error(ReasonCode::ETraceNotFound, msg);
             }
