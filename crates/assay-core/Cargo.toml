@@ -67,7 +67,7 @@ libc = "0.2"
 
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", optional = true }
+procfs = { version = "0.18", optional = true }
 
 [[bench]]
 name = "store_write_heavy"
