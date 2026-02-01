@@ -1,3 +1,4 @@
+use crate::auth::{AuthMode, JwksProvider, TokenValidator};
 use crate::config::ServerConfig;
 use crate::tools::{self};
 use anyhow::Result;
@@ -86,6 +87,34 @@ impl Server {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
 
+        // Initialize Auth Validator (E6 Hardening)
+        if cfg.auth.mode == AuthMode::Permissive {
+            eprintln!("WARN: RUNNING IN PERMISSIVE AUTH MODE - NOT FOR PRODUCTION. Set ASSAY_AUTH_MODE=strict to enforce security.");
+        }
+        let validator = {
+            let jwks = if let Some(uri) = &cfg.auth.jwks_uri {
+                match JwksProvider::new(uri.clone()) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        let msg = format!(
+                            "Failed to initialize JWKS provider (SSRF/Config Check): {}",
+                            e
+                        );
+                        tracing::error!("{}", msg);
+                        eprintln!("ERROR: {}", msg);
+                        // In Strict mode, an invalid JWKS URI (e.g. unsafe IP) is a hard blocker
+                        if cfg.auth.mode == AuthMode::Strict {
+                            return Err(anyhow::anyhow!(msg));
+                        }
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            TokenValidator::new(jwks)
+        };
+
         for line in stdin.lock().lines() {
             let line = line?;
             let rid = next_rid();
@@ -135,21 +164,82 @@ impl Server {
             // Dispatch
             let resp = match req.method.as_str() {
                 "initialize" => {
-                    let caps = serde_json::json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "assay-mcp-server",
-                            "version": "0.4.0"
-                        },
-                        "meta": {
-                            "certified": true,
-                            "partner": "agent_framework"
+                    // Auth Hardening (E6)
+                    let check_result = if let Some(params) = &req.params {
+                        // Strategy: Check `authorization` (standard-ish) or `initializationOptions.authorization`
+                        let token_cand = params
+                            .get("authorization")
+                            .or_else(|| {
+                                params
+                                    .get("initializationOptions")
+                                    .and_then(|o| o.get("authorization"))
+                            })
+                            .and_then(|v| v.as_str());
+
+                        if let Some(raw_token) = token_cand {
+                            let token = raw_token.strip_prefix("Bearer ").unwrap_or(raw_token);
+                            match validator.validate(token, &cfg.auth).await {
+                                Ok(claims) => {
+                                    tracing::info!(
+                                        event = "auth_success",
+                                        rid = %rid,
+                                        iss = ?claims.iss,
+                                        ok = true
+                                    );
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        event = "auth_failure",
+                                        rid = %rid,
+                                        error = %e,
+                                        mode = ?cfg.auth.mode
+                                    );
+                                    if cfg.auth.mode == AuthMode::Strict {
+                                        Err(e)
+                                    } else {
+                                        Ok(()) // Permissive: Allow but warn
+                                    }
+                                }
+                            }
+                        } else {
+                            // Missing token
+                            if cfg.auth.mode == AuthMode::Strict && cfg.auth.jwks_uri.is_some() {
+                                let e =
+                                    anyhow::anyhow!("Missing authorization token (Strict mode)");
+                                tracing::warn!(event = "auth_missing", rid = %rid);
+                                Err(e)
+                            } else {
+                                Ok(())
+                            }
                         }
-                    });
-                    JsonRpcResponse::ok(req.id.clone(), caps)
+                    } else {
+                        Ok(())
+                    };
+
+                    if let Err(e) = check_result {
+                        JsonRpcResponse::error(
+                            req.id.clone(),
+                            -32000,
+                            format!("Authentication Failed: {}", e),
+                        )
+                    } else {
+                        let caps = serde_json::json!({
+                            "protocolVersion": "2024-11-05", // Matches recent spec
+                            "capabilities": {
+                                "tools": {}
+                            },
+                            "serverInfo": {
+                                "name": "assay-mcp-server",
+                                "version": "0.4.0"
+                            },
+                            "meta": {
+                                "certified": true,
+                                "partner": "agent_framework"
+                            }
+                        });
+                        JsonRpcResponse::ok(req.id.clone(), caps)
+                    }
                 }
                 "notifications/initialized" => {
                     // Notification, no response needed usually, but good to ack log
