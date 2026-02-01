@@ -194,6 +194,8 @@ pub async fn cmd_trace(args: TraceArgs, legacy_mode: bool) -> anyhow::Result<i32
                 temperature: 0.0,
                 max_tokens: 1000,
                 refresh: true,
+                reliability: Default::default(),
+                system_prompt_version: String::new(),
             };
 
             let service = assay_core::judge::JudgeService::new(config, judge_store, client);

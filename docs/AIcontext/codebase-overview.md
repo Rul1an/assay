@@ -212,7 +212,7 @@ Report (console/JSON/JUnit/SARIF)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Judge Reliability** | ✅ Implemented | Randomized order default, borderline band [0.4-0.6], 2-of-3 rerun on instability, per-suite policies |
+| **Judge Reliability** | ✅ Audit Grade | Randomized order default, borderline band [0.4-0.6], Adaptive Majority (2-of-3), per-suite policies, E7 Audit Evidence |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707 resource indicators, alg/typ/crit JWT hardening, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv version gating, low-cardinality metrics, composable redaction policies |
 | **Replay Bundle** | 🔄 P1 | Toolchain capture (rustc, Cargo.lock), deterministic seeds, scrubbed cassettes (deny-by-default) |

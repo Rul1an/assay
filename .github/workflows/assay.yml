@@ -1,0 +1,14 @@
+name: Assay Gate
+on: [push, pull_request]
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Assay Smoke Test
+        uses: Rul1an/assay-action@v1.0.0
+        with:
+          assay_version: "v0.1.0" # Update to latest
+          config: ci-eval.yaml
+          trace_file: traces/ci.jsonl
+          strict: "true"

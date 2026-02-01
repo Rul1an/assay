@@ -500,6 +500,8 @@ pub struct ThresholdingConfig {
 pub struct JudgeConfig {
     pub rubric_version: Option<String>,
     pub samples: Option<u32>,
+    #[serde(default)]
+    pub reliability: crate::judge::reliability::ReliabilityConfig,
 }
 
 fn default_min_score() -> f64 {

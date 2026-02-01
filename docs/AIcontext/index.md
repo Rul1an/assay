@@ -42,7 +42,7 @@ These documents provide:
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Judge Reliability** | ✅ Implemented | Randomized order, borderline band, 2-of-3 rerun, per-suite policies |
+| **Judge Reliability** | ✅ Audit Grade | Randomized order, borderline band, Adaptive Majority (2-of-3), per-suite policies, E7 Audit Evidence |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707, alg/typ/crit, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv versioning, low-cardinality metrics, composable redaction |
 | **Replay Bundle** | 🔄 P1 | Toolchain capture, deterministic seeds, scrubbed cassettes |

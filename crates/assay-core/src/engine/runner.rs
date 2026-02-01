@@ -52,7 +52,17 @@ impl Runner {
         let sem = Arc::new(Semaphore::new(parallel));
         let mut handles = Vec::new();
 
-        for tc in cfg.tests.iter() {
+        // E7.2: Randomized Order for position bias mitigation
+        let mut tests = cfg.tests.clone();
+        if let Some(seed) = cfg.settings.seed {
+            use rand::seq::SliceRandom;
+            use rand::SeedableRng;
+            // Use StdRng for reproducibility
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            tests.shuffle(&mut rng);
+        }
+
+        for tc in tests.iter() {
             let permit = sem.clone().acquire_owned().await?;
             let this = self.clone_for_task();
             let cfg = cfg.clone();
@@ -411,8 +421,8 @@ impl Runner {
         resp.cached = resp.cached || cached;
 
         // Semantic Enrichment
-        self.enrich_semantic(tc, &mut resp).await?;
-        self.enrich_judge(tc, &mut resp).await?;
+        self.enrich_semantic(cfg, tc, &mut resp).await?;
+        self.enrich_judge(cfg, tc, &mut resp).await?;
 
         let mut final_status = TestStatus::Pass;
         let mut final_score: Option<f64> = None;
@@ -571,7 +581,12 @@ impl Runner {
     }
 
     // Embeddings logic
-    async fn enrich_semantic(&self, tc: &TestCase, resp: &mut LlmResponse) -> anyhow::Result<()> {
+    async fn enrich_semantic(
+        &self,
+        _cfg: &EvalConfig,
+        tc: &TestCase,
+        resp: &mut LlmResponse,
+    ) -> anyhow::Result<()> {
         use crate::model::Expected;
 
         let Expected::SemanticSimilarityTo {
@@ -643,7 +658,12 @@ impl Runner {
         Ok((vec, "live"))
     }
 
-    async fn enrich_judge(&self, tc: &TestCase, resp: &mut LlmResponse) -> anyhow::Result<()> {
+    async fn enrich_judge(
+        &self,
+        cfg: &EvalConfig,
+        tc: &TestCase,
+        resp: &mut LlmResponse,
+    ) -> anyhow::Result<()> {
         use crate::model::Expected;
 
         let (rubric_id, rubric_version) = match &tc.expected {
@@ -670,6 +690,15 @@ impl Runner {
             anyhow::anyhow!("config error: judge required but service not initialized")
         })?;
 
+        // E7.2: Derive stable per-test seed from suite seed + test ID
+        let test_seed = cfg.settings.seed.map(|s: u64| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            s.hash(&mut hasher);
+            tc.id.hash(&mut hasher);
+            hasher.finish()
+        });
+
         judge
             .evaluate(
                 &tc.id,
@@ -678,6 +707,7 @@ impl Runner {
                 &resp.text,
                 rubric_version,
                 &mut resp.meta,
+                test_seed,
             )
             .await?;
 

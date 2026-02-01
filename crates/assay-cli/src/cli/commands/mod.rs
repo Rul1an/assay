@@ -718,6 +718,13 @@ async fn build_runner(
         temperature: judge_args.judge_temperature,
         max_tokens: judge_args.judge_max_tokens,
         refresh: judge_args.judge_refresh,
+        reliability: cfg
+            .settings
+            .judge
+            .as_ref()
+            .map(|j| j.reliability.clone())
+            .unwrap_or_default(),
+        system_prompt_version: String::new(),
     };
 
     let mut judge_client: Option<Arc<dyn assay_core::providers::llm::LlmClient>> = if !judge_config
