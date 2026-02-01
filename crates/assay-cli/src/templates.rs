@@ -61,15 +61,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Assay Tests
-        run: assay run --config ci-eval.yaml --trace traces/ci.jsonl
-
-      - name: Verify Assay Results
-        if: always() # Run verification even if tests fail (to capture artifacts)
+      - name: Setup Assay
         uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use an exact tag (e.g., v2.1.0) or a full commit SHA.
+
+      - name: Run Assay Tests
+        run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          bundles: .assay/evidence/*.tar.gz
-          sarif: true
+          sarif_file: sarif.json
+          category: assay-gate
 
 "#;
 
