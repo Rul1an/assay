@@ -1,5 +1,5 @@
-use super::exit_codes;
 use crate::cli::args::CoverageArgs;
+use crate::exit_codes;
 use anyhow::{Context, Result};
 
 pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {

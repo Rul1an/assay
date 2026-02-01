@@ -4,8 +4,8 @@ use assay_core::validate::{validate, ValidateOptions, ValidateReport};
 use serde_json::json;
 
 use crate::cli::args::{ValidateArgs, ValidateOutputFormat};
-use crate::cli::commands::exit_codes;
 use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
+use crate::exit_codes;
 
 pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.deny_deprecations {

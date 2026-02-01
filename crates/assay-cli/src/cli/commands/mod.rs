@@ -38,11 +38,8 @@ pub mod sim;
 pub mod tool;
 pub mod validate;
 
-pub mod exit_codes {
-    pub const OK: i32 = 0;
-    pub const TEST_FAILED: i32 = 1;
-    pub const CONFIG_ERROR: i32 = 2;
-}
+// Use crate-level exit codes module (direct items to avoid E0603)
+use crate::exit_codes::{ReasonCode, RunOutcome, EXIT_SUCCESS};
 
 pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     match cli.cmd {
@@ -58,13 +55,13 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Calibrate(args) => calibrate::cmd_calibrate(args).await,
         Command::Baseline(args) => match args.cmd {
             BaselineSub::Report(report_args) => {
-                baseline::cmd_baseline_report(report_args).map(|_| exit_codes::OK)
+                baseline::cmd_baseline_report(report_args).map(|_| EXIT_SUCCESS)
             }
             BaselineSub::Record(record_args) => {
-                baseline::cmd_baseline_record(record_args).map(|_| exit_codes::OK)
+                baseline::cmd_baseline_record(record_args).map(|_| EXIT_SUCCESS)
             }
             BaselineSub::Check(check_args) => {
-                baseline::cmd_baseline_check(check_args).map(|_| exit_codes::OK)
+                baseline::cmd_baseline_check(check_args).map(|_| EXIT_SUCCESS)
             }
         },
         Command::Migrate(args) => migrate::cmd_migrate(args),
@@ -88,32 +85,67 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Tool(args) => Ok(tool::cmd_tool(args.cmd)),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
-            Ok(exit_codes::OK)
+            Ok(EXIT_SUCCESS)
         }
     }
 }
 
 async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    // determine strictly what version to use? args.exit_codes is available.
+    let version = args.exit_codes;
+    let run_json_path = PathBuf::from("run.json");
+
     if args.deny_deprecations {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
-    ensure_parent_dir(&args.db)?;
+
+    // Helper to write error run.json and return specific exit code
+    let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
+        let mut o = RunOutcome::from_reason(reason, Some(msg), None);
+        o.exit_code = reason.exit_code_for(version);
+        write_run_json_minimal(&o, &run_json_path).ok(); // Best effort write
+        Ok(o.exit_code)
+    };
+
+    if let Err(e) = ensure_parent_dir(&args.db) {
+        return write_error(
+            ReasonCode::ECfgParse,
+            format!("Failed to create DB dir: {}", e),
+        );
+    }
 
     // Argument validation
     if args.baseline.is_some() && args.export_baseline.is_some() {
         eprintln!("config error: cannot use --baseline and --export-baseline together");
-        return Ok(exit_codes::CONFIG_ERROR);
+        return write_error(
+            ReasonCode::EInvalidArgs,
+            "Cannot use --baseline and --export-baseline together".into(),
+        );
     }
 
-    let cfg = assay_core::config::load_config(&args.config, legacy_mode, false)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = match assay_core::config::load_config(&args.config, legacy_mode, false) {
+        Ok(c) => c,
+        Err(e) => {
+            // Heuristic: is it missing?
+            let msg = e.to_string();
+            let reason = if msg.contains("not found") {
+                ReasonCode::EMissingConfig
+            } else {
+                ReasonCode::ECfgParse
+            };
+            return write_error(reason, msg);
+        }
+    };
 
     // Check for deprecated legacy usage
     if !cfg.is_legacy() && cfg.has_legacy_usage() {
         eprintln!("WARN: Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.", cfg.version);
     }
 
-    let store = assay_core::storage::Store::open(&args.db)?;
+    let store = match assay_core::storage::Store::open(&args.db) {
+        Ok(s) => s,
+        Err(e) => return write_error(ReasonCode::ECfgParse, format!("Failed to open DB: {}", e)),
+    };
 
     let runner = build_runner(
         store,
@@ -138,12 +170,21 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         Err(e) => {
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
                 eprintln!("{}", diag);
-                return Ok(exit_codes::CONFIG_ERROR);
+                return write_error(ReasonCode::ECfgParse, diag.to_string());
             }
-            if e.to_string().contains("config error") {
-                return Ok(exit_codes::CONFIG_ERROR);
+            let msg = e.to_string();
+            if msg.contains("config error") {
+                return write_error(ReasonCode::ECfgParse, msg.clone());
             }
-            return Err(e);
+            if msg.to_lowercase().contains("trace")
+                && (msg.contains("not found")
+                    || msg.contains("No such file")
+                    || msg.contains("failed to load trace"))
+            {
+                return write_error(ReasonCode::ETraceNotFound, msg);
+            }
+            // General initialization failure
+            return write_error(ReasonCode::ECfgParse, msg);
         }
     };
 
@@ -156,55 +197,102 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     }
 
-    assay_core::report::json::write_json(&artifacts, &PathBuf::from("run.json"))?;
+    let outcome = decide_run_outcome(&artifacts.results, args.strict, args.exit_codes);
+    // Use extended writer for authoritative reason coding in run.json
+    write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
+
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     // PR11: Export baseline logic
     if let Some(path) = &args.export_baseline {
-        export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)?;
+        if let Err(e) =
+            export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)
+        {
+            eprintln!("Failed to export baseline: {}", e);
+            // Non-fatal? Or change outcome?
+            // Usually artifacts are written. This is auxiliary.
+            // We return existing outcome exit code, but maybe warn.
+        }
     }
 
-    Ok(decide_exit_code(
-        &artifacts.results,
-        args.strict,
-        args.exit_codes,
-    ))
+    Ok(outcome.exit_code)
 }
 
 async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+    let version = args.exit_codes;
+    let run_json_path = PathBuf::from("run.json");
+
     if args.deny_deprecations {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
-    ensure_parent_dir(&args.db)?;
+
+    // Helper to write error run.json and return specific exit code
+    let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
+        let mut o = RunOutcome::from_reason(reason, Some(msg), None);
+        o.exit_code = reason.exit_code_for(version);
+        write_run_json_minimal(&o, &run_json_path).ok();
+        Ok(o.exit_code)
+    };
+
+    if let Err(e) = ensure_parent_dir(&args.db) {
+        return write_error(
+            ReasonCode::ECfgParse,
+            format!("Failed to create DB dir: {}", e),
+        );
+    }
 
     // Argument Validation
     if args.baseline.is_some() && args.export_baseline.is_some() {
         eprintln!("config error: cannot use --baseline and --export-baseline together");
-        return Ok(exit_codes::CONFIG_ERROR);
+        return write_error(
+            ReasonCode::EInvalidArgs,
+            "Cannot use --baseline and --export-baseline together".into(),
+        );
     }
 
     // Shared Store for Auto-Ingest
-    let store = assay_core::storage::Store::open(&args.db)?;
-    store.init_schema()?; // Ensure tables exist for ingest
+    let store = match assay_core::storage::Store::open(&args.db) {
+        Ok(s) => s,
+        Err(e) => return write_error(ReasonCode::ECfgParse, format!("Failed to open DB: {}", e)),
+    };
+    if let Err(e) = store.init_schema() {
+        return write_error(
+            ReasonCode::ECfgParse,
+            format!("Failed to init DB schema: {}", e),
+        );
+    }
 
     // In Strict Replay mode, we MUST ingest the trace into the DB
-    // so that Agent Assertions (which query the DB) can find the episodes/steps.
     if args.replay_strict {
         if let Some(trace_path) = &args.trace_file {
-            let stats = assay_core::trace::ingest::ingest_into_store(&store, trace_path)
-                .map_err(|e| anyhow::anyhow!("failed to ingest trace: {}", e))?;
-
-            eprintln!(
-                "auto-ingest: loaded {} events into {} (from {})",
-                stats.event_count,
-                args.db.display(),
-                trace_path.display()
-            );
+            match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
+                Ok(stats) => {
+                    eprintln!(
+                        "auto-ingest: loaded {} events into {} (from {})",
+                        stats.event_count,
+                        args.db.display(),
+                        trace_path.display()
+                    );
+                }
+                Err(e) => {
+                    let msg = format!("Failed to ingest trace: {}", e);
+                    if msg.contains("No such file")
+                        || msg.contains("not found")
+                        || msg.contains("failed to ingest trace")
+                    {
+                        return write_error(ReasonCode::ETraceNotFound, msg);
+                    }
+                    return write_error(ReasonCode::ECfgParse, msg);
+                }
+            }
         }
     }
 
-    let cfg = assay_core::config::load_config(&args.config, legacy_mode, false)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let cfg = match assay_core::config::load_config(&args.config, legacy_mode, false) {
+        Ok(c) => c,
+        Err(e) => return write_error(ReasonCode::ECfgParse, e.to_string()),
+    };
+
     // Observability: Log config version
     if cfg.version > 0 {
         eprintln!("Loaded config version: {}", cfg.version);
@@ -214,6 +302,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     }
     // Strict mode implies no reruns by default policy (fail fast/accurate)
     let reruns = if args.strict { 0 } else { args.rerun_failures };
+
     let runner = build_runner(
         store,
         &args.trace_file,
@@ -237,12 +326,20 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         Err(e) => {
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
                 eprintln!("{}", diag);
-                return Ok(exit_codes::CONFIG_ERROR);
+                return write_error(ReasonCode::ECfgParse, diag.to_string());
             }
-            if e.to_string().contains("config error") {
-                return Ok(exit_codes::CONFIG_ERROR);
+            let msg = e.to_string();
+            if msg.contains("config error") {
+                return write_error(ReasonCode::ECfgParse, msg.clone());
             }
-            return Err(e);
+            if msg.to_lowercase().contains("trace")
+                && (msg.contains("not found")
+                    || msg.contains("No such file")
+                    || msg.contains("failed to load trace"))
+            {
+                return write_error(ReasonCode::ETraceNotFound, msg);
+            }
+            return write_error(ReasonCode::ECfgParse, msg);
         }
     };
 
@@ -255,9 +352,40 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     }
 
-    assay_core::report::junit::write_junit(&cfg.suite, &artifacts.results, &args.junit)?;
-    assay_core::report::sarif::write_sarif("assay", &artifacts.results, &args.sarif)?;
-    assay_core::report::json::write_json(&artifacts, &PathBuf::from("run.json"))?;
+    // Determine and Write Outcome FIRST (Safety against report write failures)
+    let mut outcome = decide_run_outcome(&artifacts.results, args.strict, args.exit_codes);
+    write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
+
+    // Then Write Output Formats (Best Effort - Option B: Don't fail workflow on report IO)
+    if let Err(e) = (|| -> anyhow::Result<()> {
+        if let Some(parent) = args.junit.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        assay_core::report::junit::write_junit(&cfg.suite, &artifacts.results, &args.junit)?;
+        Ok(())
+    })() {
+        let msg = format!("Failed to write JUnit report: {}", e);
+        eprintln!("WARNING: {}", msg);
+        outcome.warnings.push(msg);
+    }
+
+    if let Err(e) = (|| -> anyhow::Result<()> {
+        if let Some(parent) = args.sarif.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        assay_core::report::sarif::write_sarif("assay", &artifacts.results, &args.sarif)?;
+        Ok(())
+    })() {
+        let msg = format!("Failed to write SARIF report: {}", e);
+        eprintln!("WARNING: {}", msg);
+        outcome.warnings.push(msg);
+    }
+
+    // Re-write run.json if warnings occurred (to maintain Single Source of Truth fidelity)
+    if !outcome.warnings.is_empty() {
+        write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
+    }
+
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     let otel_cfg = assay_core::otel::OTelConfig {
@@ -268,14 +396,14 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     // PR11: Export baseline logic
     if let Some(path) = &args.export_baseline {
-        export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)?;
+        if let Err(e) =
+            export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)
+        {
+            eprintln!("Failed to export baseline: {}", e);
+        }
     }
 
-    Ok(decide_exit_code(
-        &artifacts.results,
-        args.strict,
-        args.exit_codes,
-    ))
+    Ok(outcome.exit_code)
 }
 
 async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
@@ -300,60 +428,170 @@ async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
             eprintln!("quarantine list: not implemented");
         }
     }
-    Ok(exit_codes::OK)
+    Ok(EXIT_SUCCESS)
 }
 
-fn decide_exit_code(
+fn decide_run_outcome(
     results: &[assay_core::model::TestResultRow],
     strict: bool,
     version: crate::exit_codes::ExitCodeVersion,
-) -> i32 {
-    use crate::exit_codes::ReasonCode;
+) -> crate::exit_codes::RunOutcome {
     use assay_core::model::TestStatus;
 
-    // Priority 1: Config Errors (Exit 2 in V2)
-    if results.iter().any(|r| r.message.contains("config error:")) {
-        // We lack precise reason codes from the runner artifacts yet (future todo),
-        // but "config error" message implies ECfgParse usually.
-        return ReasonCode::ECfgParse.exit_code_for(version);
+    // Helper to ensure exit code matches requested version
+    let make_outcome = |reason: ReasonCode, msg: Option<String>, context: Option<&str>| {
+        let mut o = RunOutcome::from_reason(reason, msg, context);
+        o.exit_code = reason.exit_code_for(version);
+        o
+    };
+
+    // Priority 1: Config Errors (Exit 2)
+    // Granular detection per user request
+    for r in results {
+        let msg = r.message.to_lowercase();
+        // Trace Not Found
+        if msg.contains("trace not found") || msg.contains("tracenotfound") {
+            return make_outcome(ReasonCode::ETraceNotFound, Some(r.message.clone()), None);
+        }
+        // Missing Config (generic heuristic)
+        if msg.contains("no config found") || msg.contains("config missing") {
+            return make_outcome(ReasonCode::EMissingConfig, Some(r.message.clone()), None);
+        }
+        // Config Parse / General Config Error
+        if msg.contains("config error") || msg.contains("configerror") {
+            return make_outcome(ReasonCode::ECfgParse, Some(r.message.clone()), None);
+        }
     }
 
-    // Priority 2: Fatal Errors (Fail/Error) -> Test Failure or Infra Failure
-    // Note: If an error was Infra-related, runner should have returned Error above?
-    // Actually runner returns Result. But individual tests can have Error status (e.g. 5xx).
-
-    // Map Error status to Generic Infra Failure (Exit 3)
-    let has_infra_err = results
+    // Priority 2: Infrastructure Failures (Refined Heuristics)
+    let infra_errors: Vec<&assay_core::model::TestResultRow> = results
         .iter()
-        .any(|r| matches!(r.status, TestStatus::Error));
+        .filter(|r| matches!(r.status, TestStatus::Error))
+        .collect();
 
-    if has_infra_err {
-        // Use EJudgeUnavailable as generic infra error placeholder (Exit 3)
-        // Future TODO: Dedicated EInfraError code
-        return ReasonCode::EJudgeUnavailable.exit_code_for(version);
+    if !infra_errors.is_empty() {
+        let reason = pick_infra_reason(&infra_errors);
+        return make_outcome(
+            reason,
+            Some("Infrastructure failures detected".into()),
+            None,
+        );
     }
 
-    // Map Fail status to Test Failure (Exit 1)
-    let has_fail = results.iter().any(|r| matches!(r.status, TestStatus::Fail));
-
-    if has_fail {
-        return ReasonCode::ETestFailed.exit_code_for(version);
+    // Priority 3: Test Failures
+    let fails = results
+        .iter()
+        .filter(|r| matches!(r.status, TestStatus::Fail))
+        .count();
+    if fails > 0 {
+        let mut o = RunOutcome::test_failure(fails);
+        o.exit_code = ReasonCode::ETestFailed.exit_code_for(version);
+        return o;
     }
 
-    // Priority 3: Strict Mode Violations (Warn/Flaky) -> Test Failure
-    if strict
-        && results.iter().any(|r| {
-            matches!(
-                r.status,
-                TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable
-            )
-        })
-    {
-        return ReasonCode::EPolicyViolation.exit_code_for(version);
+    // Priority 4: Strict Mode Violations
+    if strict {
+        let violations = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.status,
+                    TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable
+                )
+            })
+            .count();
+        if violations > 0 {
+            return make_outcome(
+                ReasonCode::EPolicyViolation,
+                Some(format!("Strict mode: {} policy violations", violations)),
+                None,
+            );
+        }
     }
 
-    // Success
-    ReasonCode::Success.exit_code_for(version)
+    // Success (ensure version compliance though Success is usually 0 in all versions)
+    let mut o = RunOutcome::success();
+    o.exit_code = ReasonCode::Success.exit_code_for(version);
+    o
+}
+
+fn pick_infra_reason(
+    errors: &[&assay_core::model::TestResultRow],
+) -> crate::exit_codes::ReasonCode {
+    // Heuristic: check messages for known infra patterns
+    for r in errors {
+        let msg = r.message.to_lowercase();
+        if msg.contains("rate limit") || msg.contains("429") {
+            return ReasonCode::ERateLimit;
+        }
+        if msg.contains("timeout") {
+            return ReasonCode::ETimeout;
+        }
+        if msg.contains("500")
+            || msg.contains("502")
+            || msg.contains("503")
+            || msg.contains("504")
+            || msg.contains("provider error")
+        {
+            return ReasonCode::EProvider5xx;
+        }
+        if msg.contains("network") || msg.contains("connection") || msg.contains("dns") {
+            return ReasonCode::ENetworkError;
+        }
+    }
+    // Default fallback
+    ReasonCode::EJudgeUnavailable
+}
+
+fn write_extended_run_json(
+    artifacts: &assay_core::report::RunArtifacts,
+    outcome: &crate::exit_codes::RunOutcome,
+    path: &PathBuf,
+) -> anyhow::Result<()> {
+    // Manually construct the JSON to inject outcome fields
+    let mut v = serde_json::to_value(artifacts)?;
+    if let Some(obj) = v.as_object_mut() {
+        // Inject top-level outcome fields for machine-readability (Canonical Contract)
+        obj.insert(
+            "exit_code".to_string(),
+            serde_json::json!(outcome.exit_code),
+        );
+        obj.insert(
+            "reason_code".to_string(),
+            serde_json::json!(outcome.reason_code),
+        );
+
+        // Conflict avoidance: Move full details to 'resolution' object
+        // Do NOT inject 'message' or 'next_step' top-level to avoid collisions with artifact fields.
+        obj.insert("resolution".to_string(), serde_json::to_value(outcome)?);
+
+        if !outcome.warnings.is_empty() {
+            obj.insert("warnings".into(), serde_json::json!(outcome.warnings));
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&v)?)?;
+    Ok(())
+}
+
+fn write_run_json_minimal(
+    outcome: &crate::exit_codes::RunOutcome,
+    path: &PathBuf,
+) -> anyhow::Result<()> {
+    // Minimal JSON for early exits (no artifacts available)
+    let v = serde_json::json!({
+        "exit_code": outcome.exit_code,
+        "reason_code": outcome.reason_code,
+        "resolution": outcome
+    });
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&v)?)?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

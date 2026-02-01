@@ -1,5 +1,5 @@
 use super::super::args::{TraceArgs, TraceSub};
-use super::exit_codes;
+use crate::exit_codes;
 
 use assay_core::trace;
 mod import_mcp;

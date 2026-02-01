@@ -251,6 +251,8 @@ pub struct RunOutcome {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl RunOutcome {
@@ -261,6 +263,7 @@ impl RunOutcome {
             reason_code: String::new(),
             message: None,
             next_step: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -276,6 +279,7 @@ impl RunOutcome {
             reason_code: reason.as_str().to_string(),
             message,
             next_step,
+            warnings: Vec::new(),
         }
     }
 
@@ -286,6 +290,7 @@ impl RunOutcome {
             reason_code: ReasonCode::ETestFailed.as_str().to_string(),
             message: Some(format!("{} test(s) failed", failed_count)),
             next_step: Some("Run: assay explain <test-id> for details".to_string()),
+            warnings: Vec::new(),
         }
     }
 }

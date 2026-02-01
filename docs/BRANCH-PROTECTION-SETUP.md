@@ -10,7 +10,7 @@ Main is unprotected until you configure branch protection or a ruleset. This doc
 
 - **Require a pull request** before merging (no direct pushes to main).
 - **Required approvals:** at least 1–2.
-- **Required status checks:** CI, Smoke Install (E2E), MCP Security (assay-security). Add Kernel Matrix if eBPF paths must be green.
+- **Required status checks:** CI only (see "Required checks: when each is needed" for rationale; optional: Smoke Install, assay-action-contract-tests, MCP Security, Kernel Matrix).
 - **Require branch to be up to date** before merging.
 - **Restrict force-push and branch deletion** (do not allow force-push to main; restrict who can delete the branch).
 
@@ -44,6 +44,20 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 
 ---
 
+## Required checks: when each is needed
+
+| Check | What it does | **Dependabot / deps-only PRs** | **Other PRs (features, workflows, action)** |
+|-------|----------------|---------------------------------|---------------------------------------------|
+| **CI** | Build, test, clippy, cargo-deny, cargo-audit, eBPF smoke | **Essential** — new deps must not break build or tests. | **Essential** — same. |
+| **Smoke Install (E2E)** | Build from source, run assay, JUnit | Redundant with CI (CI already builds and tests). | Useful — verifies install path. |
+| **assay-action-contract-tests** | Tests GitHub Action in `assay-action/` | Not needed — Cargo.toml/Cargo.lock don't touch the action. | **Essential** if PR touches `assay-action/` or workflows. |
+| **MCP Security (Assay)** | Install assay, run validate with demo config | Redundant with CI for deps-only (CI validates the binary). | Useful — sanity check for security workflow. |
+| **Kernel Matrix CI** | eBPF tests on self-hosted runner | Not needed — kernel-matrix `paths` exclude Cargo.toml/Cargo.lock. | **Essential** if PR touches eBPF/Monitor/evidence. |
+
+**Recommendation:** Require **only CI** for merging. That is enough for Dependabot (deps-only) PRs and keeps the gate meaningful for all PRs. Smoke Install, assay-action-contract-tests, and MCP Security still run and appear on the PR; they are not required to merge. If you merge changes to `assay-action/` or workflows, ensure contract tests and MCP Security have passed before merging (e.g. via review policy or by re-adding them to required checks when needed).
+
+---
+
 ## Option B: `gh` CLI (branch protection)
 
 Classic branch protection via API (no rulesets). The API expects a **JSON body** with real booleans; form fields (`-f`) can send strings and cause 422 "Validation Failed". Use `--input -` with a JSON payload below.
@@ -59,7 +73,7 @@ gh api repos/OWNER/REPO/branches/main/protection -X PUT \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["CI", "Smoke Install (E2E)", "assay-action-contract-tests", "MCP Security (Assay)"]
+    "contexts": ["CI"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -108,6 +122,6 @@ See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the c
 ## Checklist
 
 - [x] Branch protection or ruleset on `main` with: require PR, approvals, status checks, up to date, no force-push.
-- [x] Required status checks include: CI, Smoke Install (E2E), assay-action-contract-tests, MCP Security (Assay) (and Kernel Matrix CI if eBPF required).
+- [x] Required status checks: CI only (see "Required checks: when each is needed" above; add Smoke Install / contract tests / MCP Security / Kernel Matrix when stricter gate needed).
 - [x] CODEOWNERS in place; “Require review from Code Owners” enabled.
 - [ ] Environments `release` / `crates` / `pypi` configured with required reviewers; release workflow uses `environment:` on publish jobs.

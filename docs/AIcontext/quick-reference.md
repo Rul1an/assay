@@ -40,6 +40,8 @@ assay explain --trace-file traces.jsonl  # Explain violations
 
 **Migration note**: Use `--exit-codes=v2` (default) or `--exit-codes=v1` for legacy behavior.
 
+**DX Note**: `assay ci` treats Report IO failures (JUnit/SARIF writing) as **Warnings** (checks strictly pass), ensuring robust pipelines. Diagnostics are injected into `run.json` warnings.
+
 ## Reason Code Registry
 
 ### Config Errors (exit 2)

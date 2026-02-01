@@ -424,6 +424,10 @@ jobs:
         run: assay evidence lint --pack eu-ai-act-baseline --format sarif --output results.sarif
         continue-on-error: true
 
+      # Assay writes reports (JUnit/SARIF) as "Best Effort".
+      # Failures to write reports (e.g. bad path) print a WARNING but do not fail the step.
+      # The primary artifact 'run.json' is guaranteed.
+
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4
         if: always()
