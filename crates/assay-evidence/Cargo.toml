@@ -47,7 +47,7 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-jsonschema = "0.17"
+jsonschema = "0.19"
 tempfile = "3"
 assert_fs = "1.0"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
