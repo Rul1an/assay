@@ -52,7 +52,7 @@ globset = "0.4"
 
 # Discovery dependencies
 sysinfo = { version = "0.30", optional = true }
-dirs = { version = "5", optional = true }
+dirs = { version = "6", optional = true }
 nix = { version = "0.27", features = ["signal", "process"], optional = true }
 schemars = "1.2.0"
 
@@ -67,7 +67,7 @@ libc = "0.2"
 
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", optional = true }
+procfs = { version = "0.18", optional = true }
 
 [[bench]]
 name = "store_write_heavy"
@@ -77,4 +77,4 @@ harness = false
 [dev-dependencies]
 tempfile = "3.23.0"
 serial_test = "3"
-criterion = "0.5"
+criterion = "0.8"

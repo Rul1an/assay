@@ -52,18 +52,19 @@ impl AuthConfig {
             if let Ok(u) = Url::parse(&v) {
                 if u.scheme() != "https" {
                     if cfg.mode == AuthMode::Strict {
-                        eprintln!("ERROR: JWKS URI must be HTTPS in strict mode.");
-                        // We can't easily return error from here as signature is strict.
-                        // But we can clear it or fail later.
-                        // But Env load is usually permissive.
-                        // We'll panic or log error.
-                        // Better: log unsafe.
-                        eprintln!("WARN: JWKS URI '{}' is not HTTPS. This is UNSAFE.", v);
+                        eprintln!(
+                            "ERROR: JWKS URI must be HTTPS in strict mode. Ignoring unsafe URI."
+                        );
+                        // In Strict mode, we treat unsafe URI as invalid configuration (None).
+                        // This will cause JwksProvider init to fail or skip, preventing startup or auth.
+                        cfg.jwks_uri = None;
                     } else {
                         eprintln!("WARN: JWKS URI '{}' is not HTTPS. This is UNSAFE.", v);
+                        cfg.jwks_uri = Some(u);
                     }
+                } else {
+                    cfg.jwks_uri = Some(u);
                 }
-                cfg.jwks_uri = Some(u);
             }
         }
 

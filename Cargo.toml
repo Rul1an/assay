@@ -77,14 +77,14 @@ assay-registry = { path = "crates/assay-registry", version = "2.9.0" }
 
 # Common dependencies
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
 serde_yaml = "0.9"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.20", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"], default-features = false }
 tempfile = "3"
 regex = "1"
@@ -93,5 +93,5 @@ sha2 = "0.10"
 hex = "0.4"
 aya = "0.13.0"
 aya-log = "0.2"
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"

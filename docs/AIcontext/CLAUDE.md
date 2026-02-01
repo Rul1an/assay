@@ -231,7 +231,7 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
-- Workspace version in root `Cargo.toml` (`version = "2.7.0"`)
+- Workspace version in root `Cargo.toml` (`version = "2.12.0"`)
 - Internal crate deps use `workspace = true` with path + version
 - `#[deny(unsafe_code)]` on all crates except assay-ebpf
 - Error handling: `anyhow` for applications, `thiserror` for libraries

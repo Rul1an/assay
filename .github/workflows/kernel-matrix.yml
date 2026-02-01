@@ -89,7 +89,7 @@ jobs:
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Install Rust Toolchain (nightly)
-        uses: dtolnay/rust-toolchain@881ba7bf39a41cda34ac9e123fb41b44ed08232f # nightly
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # nightly
 
       - name: Install rust-src for eBPF (explicit for ARM)
         run: |
