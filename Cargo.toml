@@ -77,7 +77,7 @@ assay-registry = { path = "crates/assay-registry", version = "2.9.0" }
 
 # Common dependencies
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
 serde_yaml = "0.9"
