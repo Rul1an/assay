@@ -77,4 +77,4 @@ harness = false
 [dev-dependencies]
 tempfile = "3.23.0"
 serial_test = "3"
-criterion = "0.5"
+criterion = "0.8"
