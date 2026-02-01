@@ -147,6 +147,10 @@ assay run --config mcp-eval.yaml --output junit
 # Creates: .assay/reports/junit.xml
 ```
 
+This format is compatible with most CI providers (GitHub Actions, GitLab CI, Jenkins) for test reporting/summary.
+Assay ensures `junit.xml` follows the schema expected by `dorny/test-reporter` and standard parsers.
+Contract path: `.assay/reports/junit.xml` is the canonical location for automated pickup.
+
 ### JSON (Programmatic)
 
 ```bash

@@ -52,7 +52,8 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
                 "message": { "text": format!("{}: {}", r.test_id, r.message) },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": SYNTHETIC_LOCATION_URI }
+                        "artifactLocation": { "uri": SYNTHETIC_LOCATION_URI },
+                        "region": { "startLine": 1, "startColumn": 1 }
                     }
                 }]
             }))
@@ -103,7 +104,7 @@ pub fn build_sarif_diagnostics(
             let locations = vec![serde_json::json!({
                 "physicalLocation": {
                     "artifactLocation": { "uri": file_uri },
-                    "region": { "startLine": line }
+                    "region": { "startLine": line, "startColumn": 1 }
                 }
             })];
 

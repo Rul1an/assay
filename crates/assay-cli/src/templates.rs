@@ -61,45 +61,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Assay CLI
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/Rul1an/assay/main/scripts/install.sh | bash
-          echo "$HOME/.assay/bin" >> $GITHUB_PATH
+      - name: Setup Assay
+        uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use an exact tag (e.g., v2.1.0) or a full commit SHA.
 
-      - name: Run Assay Gate
-        id: assay
-        run: |
-          assay ci \
-            --config ci-eval.yaml \
-            --trace traces/ci.jsonl \
-            --output-dir .assay-reports \
-            --junit .assay-reports/junit.xml \
-            --sarif .assay-reports/sarif.json \
-            --summary .assay-reports/summary.json
-        continue-on-error: true
+      - name: Run Assay Tests
+        run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl
 
-      # JUnit test annotations (failures shown in PR)
-      - name: Publish Test Results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: Assay Tests
-          path: .assay-reports/junit.xml
-          reporter: java-junit
-          fail-on-error: false
-
-      # SARIF upload to GitHub Security tab
       - name: Upload SARIF
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('.assay-reports/sarif.json') != ''
         with:
-          sarif_file: .assay-reports/sarif.json
-          category: assay
+          sarif_file: sarif.json
+          category: assay-gate
 
-      # Fail the job if assay ci failed
-      - name: Check Assay result
-        if: steps.assay.outcome == 'failure'
-        run: exit 1
 "#;
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/assay\n";
