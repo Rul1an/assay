@@ -1,5 +1,5 @@
 use crate::cli::args::InitArgs;
-use crate::cli::commands::exit_codes;
+use crate::exit_codes;
 use std::path::Path;
 
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {

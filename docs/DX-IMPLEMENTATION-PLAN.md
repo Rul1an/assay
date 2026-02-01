@@ -14,14 +14,14 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 
 | # | Criterium | Test/Verificatie | Status |
 |---|-----------|------------------|--------|
-| 1 | **init template uses v2 action** | `assay init --ci` → `.github/workflows/assay.yml` bevat exact `Rul1an/assay/assay-action@v2` (golden/contract test) | ⬜ |
-| 2 | **SARIF always has locations** | Unit test: elk SARIF result heeft `locations.length ≥ 1` | ⬜ |
-| 3 | **SARIF schema contract test** | SARIF output passes schema 2.1.0 validation | ⬜ |
-| 4 | **Exit codes aligned** | Missing trace → exit 2 + `E_TRACE_NOT_FOUND`; judge unavail → exit 3 + `E_JUDGE_UNAVAILABLE` | ⬜ |
-| 5 | **reason_code everywhere** | reason_code in: console, job summary, summary.json; `reason_code_version: 1` in summary.json | ⬜ |
-| 6 | **summary.json stable** | `schema_version` + `reason_code_version` in output; golden test | ⬜ |
-| 7 | **JUnit path contractual** | `.assay/reports/junit.xml` (of gekozen pad) in docs + tests + action | ⬜ |
-| 8 | **Compat switch documented** | `--exit-codes=v2` (default) / `v1` (legacy) + `ASSAY_EXIT_CODES` env in run.md | ⬜ |
+| 1 | **init template uses v2 action** | `assay init --ci` → `.github/workflows/assay.yml` bevat exact `Rul1an/assay/assay-action@v2` (golden/contract test) | ✅ |
+| 2 | **SARIF always has locations** | Unit test: elk SARIF result heeft `locations.length ≥ 1` | ✅ |
+| 3 | **SARIF schema contract test** | SARIF output passes schema 2.1.0 validation | ✅ |
+| 4 | **Exit codes aligned** | Missing trace → exit 2 + `E_TRACE_NOT_FOUND`; judge unavail → exit 3 + `E_JUDGE_UNAVAILABLE` | ✅ |
+| 5 | **reason_code everywhere** | reason_code in: console, job summary, summary.json; `reason_code_version: 1` in summary.json | ✅ |
+| 6 | **summary.json stable** | `schema_version` + `reason_code_version` in output; golden test | ✅ |
+| 7 | **JUnit path contractual** | `.assay/reports/junit.xml` (of gekozen pad) in docs + tests + action | ✅ |
+| 8 | **Compat switch documented** | `--exit-codes=v2` (default) / `v1` (legacy) + `ASSAY_EXIT_CODES` env in run.md | ✅ |
 
 **Definition of "default gate ready":** All ⬜ → ✅
 

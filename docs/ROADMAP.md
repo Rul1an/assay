@@ -124,6 +124,8 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | Priority | Item | Effort | Value | Status |
 |----------|------|--------|-------|--------|
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
+| **P0** | Exit Codes (V2) | Low | High | ✅ Complete (v2.12.0) |
+| **P0** | Report IO Robustness (Warnings) | Low | High | ✅ Complete (v2.12.0) |
 | **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
 | **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete (v2.9.0) |
 | **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |

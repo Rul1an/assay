@@ -1,4 +1,4 @@
-use crate::cli::commands::exit_codes;
+use crate::exit_codes;
 use assay_core::errors::diagnostic::Diagnostic;
 use std::path::{Path, PathBuf};
 

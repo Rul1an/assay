@@ -261,6 +261,11 @@ pub struct RunArgs {
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
     pub deny_deprecations: bool,
+
+    /// Exit code compatibility mode: v1 (legacy) or v2 (standard)
+    /// defaults to v2 (trace not found = 2)
+    #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
+    pub exit_codes: crate::exit_codes::ExitCodeVersion,
 }
 
 #[derive(Parser, Clone)]
@@ -334,6 +339,10 @@ pub struct CiArgs {
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
     pub deny_deprecations: bool,
+
+    /// Exit code compatibility mode: v1 (legacy) or v2 (standard)
+    #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
+    pub exit_codes: crate::exit_codes::ExitCodeVersion,
 }
 
 #[derive(clap::Args, Clone)]

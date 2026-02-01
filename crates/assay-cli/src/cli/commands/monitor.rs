@@ -1,5 +1,5 @@
 #[cfg(target_os = "linux")]
-use crate::cli::commands::exit_codes;
+use crate::exit_codes;
 use clap::Args;
 use std::path::PathBuf;
 

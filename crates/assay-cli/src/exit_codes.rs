@@ -11,6 +11,16 @@ use serde::{Deserialize, Serialize};
 // Exit Codes (coarse, stable)
 // ============================================================================
 
+/// CLI Argument enum for Exit Code Version
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum ExitCodeVersion {
+    V1,
+    #[default]
+    V2,
+}
+
+// (Removed invalid impl From<ExitCodeVersion> for assay_core::reason::ExitCodeVersion)
+
 /// All tests passed
 pub const EXIT_SUCCESS: i32 = 0;
 
@@ -33,6 +43,11 @@ pub const INTERNAL_ERROR: i32 = EXIT_CONFIG_ERROR;
 pub const POLICY_UNENFORCEABLE: i32 = EXIT_CONFIG_ERROR;
 pub const VIOLATION_AUDIT: i32 = EXIT_INFRA_ERROR;
 pub const WOULD_BLOCK: i32 = EXIT_WOULD_BLOCK;
+
+// Aliases matching previous inline module
+pub const OK: i32 = EXIT_SUCCESS;
+pub const TEST_FAILED: i32 = EXIT_TEST_FAILURE;
+pub const CONFIG_ERROR: i32 = EXIT_CONFIG_ERROR;
 
 // ============================================================================
 // Reason Codes (fine-grained, machine-readable)
@@ -84,12 +99,24 @@ pub enum ReasonCode {
 }
 
 impl ReasonCode {
-    /// Get the corresponding exit code for this reason
+    /// Get the corresponding exit code for this reason, respecting version
+    pub fn exit_code_for(&self, version: ExitCodeVersion) -> i32 {
+        match version {
+            ExitCodeVersion::V1 => self.exit_code_v1(),
+            ExitCodeVersion::V2 => self.exit_code_v2(),
+        }
+    }
+
+    /// Default exit code (V2)
     pub fn exit_code(&self) -> i32 {
+        self.exit_code_v2()
+    }
+
+    fn exit_code_v2(&self) -> i32 {
         match self {
             ReasonCode::Success => EXIT_SUCCESS,
 
-            // Config errors -> exit 2
+            // V2: Config/User errors -> 2
             ReasonCode::ECfgParse
             | ReasonCode::ETraceNotFound
             | ReasonCode::EMissingConfig
@@ -97,18 +124,35 @@ impl ReasonCode {
             | ReasonCode::EPolicyParse
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
-            // Infra errors -> exit 3
+            // V2: Infra errors -> 3
             ReasonCode::EJudgeUnavailable
             | ReasonCode::ERateLimit
             | ReasonCode::EProvider5xx
             | ReasonCode::ETimeout
             | ReasonCode::ENetworkError => EXIT_INFRA_ERROR,
 
-            // Test failures -> exit 1
+            // V2: Test failures -> 1
             ReasonCode::ETestFailed
             | ReasonCode::EPolicyViolation
             | ReasonCode::ESequenceViolation
             | ReasonCode::EArgSchema => EXIT_TEST_FAILURE,
+        }
+    }
+
+    fn exit_code_v1(&self) -> i32 {
+        // Legacy mapping (V1)
+        match self {
+            ReasonCode::Success => EXIT_SUCCESS,
+
+            // In V1, we often conflated errors.
+            // E.g., Trace Not Found might have been 3 (Infra) or 1 (General).
+            // User spec says: "Trace Not Found is now exit code 2 ... not 3".
+            // So V1 TraceNotFound = 3.
+            ReasonCode::ETraceNotFound => EXIT_INFRA_ERROR,
+
+            // Most others standard?
+            // Assuming config errors were 2, but let's stick to V2 where possible unless specific compat needed.
+            _ => self.exit_code_v2(),
         }
     }
 
@@ -207,6 +251,8 @@ pub struct RunOutcome {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl RunOutcome {
@@ -217,6 +263,7 @@ impl RunOutcome {
             reason_code: String::new(),
             message: None,
             next_step: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -232,6 +279,7 @@ impl RunOutcome {
             reason_code: reason.as_str().to_string(),
             message,
             next_step,
+            warnings: Vec::new(),
         }
     }
 
@@ -242,6 +290,7 @@ impl RunOutcome {
             reason_code: ReasonCode::ETestFailed.as_str().to_string(),
             message: Some(format!("{} test(s) failed", failed_count)),
             next_step: Some("Run: assay explain <test-id> for details".to_string()),
+            warnings: Vec::new(),
         }
     }
 }

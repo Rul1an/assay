@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::cli::args::{FixArgs, MaxRisk};
-use crate::cli::commands::exit_codes;
 use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
+use crate::exit_codes;
 
 pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let cfg = load_config(&args.config, legacy_mode, true)

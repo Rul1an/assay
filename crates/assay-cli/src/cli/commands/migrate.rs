@@ -1,5 +1,5 @@
-use super::exit_codes;
 use crate::cli::args::MigrateArgs;
+use crate::exit_codes;
 use anyhow::{Context, Result};
 use std::fs;
 

@@ -1,5 +1,5 @@
 use crate::cli::args::PolicyMigrateArgs;
-use crate::cli::commands::exit_codes;
+use crate::exit_codes;
 use anyhow::{Context, Result};
 
 pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {

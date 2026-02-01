@@ -1,5 +1,5 @@
 use crate::cli::args::PolicyValidateArgs;
-use crate::cli::commands::exit_codes;
+use crate::exit_codes;
 use anyhow::{Context, Result};
 
 pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
