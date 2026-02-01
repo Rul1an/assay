@@ -164,7 +164,11 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)?;
     }
 
-    Ok(decide_exit_code(&artifacts.results, args.strict))
+    Ok(decide_exit_code(
+        &artifacts.results,
+        args.strict,
+        args.exit_codes,
+    ))
 }
 
 async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
@@ -267,7 +271,11 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)?;
     }
 
-    Ok(decide_exit_code(&artifacts.results, args.strict))
+    Ok(decide_exit_code(
+        &artifacts.results,
+        args.strict,
+        args.exit_codes,
+    ))
 }
 
 async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
@@ -295,21 +303,33 @@ async fn cmd_quarantine(args: QuarantineArgs) -> anyhow::Result<i32> {
     Ok(exit_codes::OK)
 }
 
-fn decide_exit_code(results: &[assay_core::model::TestResultRow], strict: bool) -> i32 {
+fn decide_exit_code(
+    results: &[assay_core::model::TestResultRow],
+    strict: bool,
+    version: crate::exit_codes::ExitCodeVersion,
+) -> i32 {
+    use crate::exit_codes::ReasonCode;
     use assay_core::model::TestStatus;
 
+    // Priority 1: Config Errors (Exit 2 in V2)
     if results.iter().any(|r| r.message.contains("config error:")) {
-        return exit_codes::CONFIG_ERROR;
+        // We lack precise reason codes from the runner artifacts yet (future todo),
+        // but "config error" message implies ECfgParse usually.
+        return ReasonCode::ECfgParse.exit_code_for(version);
     }
 
+    // Priority 2: Fatal Errors (Fail/Error) -> Test Failure (Exit 1)
+    // Note: If an error was Infra-related, runner should have returned Error above?
+    // Actually runner returns Result. But individual tests can have Error status.
     let has_fatal = results
         .iter()
         .any(|r| matches!(r.status, TestStatus::Fail | TestStatus::Error));
 
     if has_fatal {
-        return exit_codes::TEST_FAILED;
+        return ReasonCode::ETestFailed.exit_code_for(version);
     }
 
+    // Priority 3: Strict Mode Violations (Warn/Flaky) -> Test Failure
     if strict
         && results.iter().any(|r| {
             matches!(
@@ -318,10 +338,11 @@ fn decide_exit_code(results: &[assay_core::model::TestResultRow], strict: bool) 
             )
         })
     {
-        return exit_codes::TEST_FAILED;
+        return ReasonCode::EPolicyViolation.exit_code_for(version);
     }
 
-    exit_codes::OK
+    // Success
+    ReasonCode::Success.exit_code_for(version)
 }
 
 #[allow(clippy::too_many_arguments)]

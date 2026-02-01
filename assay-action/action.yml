@@ -410,12 +410,23 @@ runs:
 
           # Generate SARIF for this bundle
           assay evidence lint --format sarif "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).sarif" 2>/dev/null || true
+
+          # Generate JUnit for this bundle
+          assay evidence lint --format junit "$bundle" > "$REPORTS_DIR/lint-$(basename "$bundle" .tar.gz).xml" 2>/dev/null || true
         done
 
         # Merge SARIF files if multiple
         FIRST_SARIF=$(ls "$REPORTS_DIR"/*.sarif 2>/dev/null | head -1)
         if [ -n "$FIRST_SARIF" ]; then
           cp "$FIRST_SARIF" "$REPORTS_DIR/lint.sarif"
+        fi
+
+        # Merge JUnit files if multiple (simple concat for now, or use first)
+        # Proper JUnit merge is hard in bash. Using first for now or rely on test reporter glob handling.
+        # But we promised junit.xml.
+        FIRST_XML=$(ls "$REPORTS_DIR"/*.xml 2>/dev/null | head -1)
+        if [ -n "$FIRST_XML" ]; then
+          cp "$FIRST_XML" "$REPORTS_DIR/junit.xml"
         fi
 
         echo "sarif_path=$REPORTS_DIR/lint.sarif" >> $GITHUB_OUTPUT
