@@ -21,8 +21,8 @@ This PR lands the P0 “must-have” DX fixes from the DX Implementation Plan. I
 
 ### 🚥 E3 — Exit Codes & Reason Code Registry
 *   **Architecture:**
-    *   `assay-core`: Defines the canonical `ReasonCode` validation domain.
-    *   `assay-cli`: Maps these codes to exit codes based on the selected compatibility version.
+    *   `assay-cli`: Defines the canonical `ReasonCode` validation domain and maps to exit codes.
+    *   `assay-core`: Provides test result models (future home of ReasonCode).
 *   **Strict V2 mapping (default):**
     *   `0` = Success
     *   `1` = Test failure (e.g., `TestFailed` / `PolicyViolation`)

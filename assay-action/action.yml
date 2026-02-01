@@ -421,12 +421,12 @@ runs:
           cp "$FIRST_SARIF" "$REPORTS_DIR/lint.sarif"
         fi
 
-        # Merge JUnit files if multiple (simple concat for now, or use first)
-        # Proper JUnit merge is hard in bash. Using first for now or rely on test reporter glob handling.
-        # But we promised junit.xml.
-        FIRST_XML=$(ls "$REPORTS_DIR"/*.xml 2>/dev/null | head -1)
-        if [ -n "$FIRST_XML" ]; then
-          cp "$FIRST_XML" "$REPORTS_DIR/junit.xml"
+        # JUnit files:
+        # If exactly one XML exists, copy to junit.xml for easy discovery.
+        # If multiple exist, leave them as-is (e.g. lint-bundle1.xml) for globbing.
+        XML_FILES=( "$REPORTS_DIR"/*.xml )
+        if [ ${#XML_FILES[@]} -eq 1 ] && [ -e "${XML_FILES[0]}" ]; then
+          cp "${XML_FILES[0]}" "$REPORTS_DIR/junit.xml"
         fi
 
         echo "sarif_path=$REPORTS_DIR/lint.sarif" >> $GITHUB_OUTPUT

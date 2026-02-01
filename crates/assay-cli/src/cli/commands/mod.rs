@@ -318,14 +318,25 @@ fn decide_exit_code(
         return ReasonCode::ECfgParse.exit_code_for(version);
     }
 
-    // Priority 2: Fatal Errors (Fail/Error) -> Test Failure (Exit 1)
+    // Priority 2: Fatal Errors (Fail/Error) -> Test Failure or Infra Failure
     // Note: If an error was Infra-related, runner should have returned Error above?
-    // Actually runner returns Result. But individual tests can have Error status.
-    let has_fatal = results
-        .iter()
-        .any(|r| matches!(r.status, TestStatus::Fail | TestStatus::Error));
+    // Actually runner returns Result. But individual tests can have Error status (e.g. 5xx).
 
-    if has_fatal {
+    // Map Error status to Generic Infra Failure (Exit 3)
+    let has_infra_err = results
+        .iter()
+        .any(|r| matches!(r.status, TestStatus::Error));
+
+    if has_infra_err {
+        // Use EJudgeUnavailable as generic infra error placeholder (Exit 3)
+        // Future TODO: Dedicated EInfraError code
+        return ReasonCode::EJudgeUnavailable.exit_code_for(version);
+    }
+
+    // Map Fail status to Test Failure (Exit 1)
+    let has_fail = results.iter().any(|r| matches!(r.status, TestStatus::Fail));
+
+    if has_fail {
         return ReasonCode::ETestFailed.exit_code_for(version);
     }
 

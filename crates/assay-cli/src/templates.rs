@@ -61,13 +61,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Assay Gate
+      - name: Run Assay Tests
+        run: assay run --config ci-eval.yaml --trace traces/ci.jsonl
+
+      - name: Verify Assay Results
+        if: always() # Run verification even if tests fail (to capture artifacts)
         uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use an exact tag (e.g., v2.1.0) or a full commit SHA.
         with:
-          config: ci-eval.yaml
-          trace_file: traces/ci.jsonl
+          bundles: .assay/evidence/*.tar.gz
+          sarif: true
 
-      # Integration with Rul1an/assay/assay-action handling SARIF upload automatically
 "#;
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/assay\n";
