@@ -1,0 +1,25 @@
+version: 1
+suite: "ci_smoke"
+model: "trace"
+tests:
+  - id: "ci_smoke_regex"
+    input:
+      prompt: "ci_regex"
+    expected:
+      type: regex_match
+      pattern: "Hello\\s+CI"
+      flags: ["i"]
+  - id: "ci_smoke_schema"
+    input:
+      prompt: "ci_schema"
+    expected:
+      type: json_schema
+      json_schema: "{}"
+      schema_file: "schemas/ci_answer.schema.json"
+  - id: "ci_smoke_semantic"
+    input:
+      prompt: "ci_semantic"
+    expected:
+      type: semantic_similarity_to
+      text: "Hello Semantic"
+      threshold: 0.99

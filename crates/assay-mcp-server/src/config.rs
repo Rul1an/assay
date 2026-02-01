@@ -1,3 +1,4 @@
+use crate::auth::config::AuthConfig;
 use std::env;
 
 #[derive(Clone, Debug)]
@@ -8,6 +9,7 @@ pub struct ServerConfig {
     pub max_field_bytes: usize,
     pub cache_entries: u64,
     pub log_level: String,
+    pub auth: AuthConfig,
 }
 
 impl Default for ServerConfig {
@@ -19,6 +21,7 @@ impl Default for ServerConfig {
             max_field_bytes: 64_000,
             cache_entries: 128,
             log_level: "info".to_string(),
+            auth: AuthConfig::default(),
         }
     }
 }
@@ -54,6 +57,7 @@ impl ServerConfig {
         if let Ok(v) = env::var("ASSAY_LOG") {
             cfg.log_level = v;
         }
+        cfg.auth = AuthConfig::from_env();
         cfg
     }
 }
