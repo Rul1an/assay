@@ -275,6 +275,12 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
+    # Self-hosted runner has Rust in /opt/rust; jobs run with --noprofile so PATH is not set.
+    # Point to system Rust so dtolnay/rust-toolchain finds rustup and does not try to download (which can timeout/fail).
+    env:
+      PATH: /opt/rust/bin:$PATH
+      RUSTUP_HOME: /opt/rust
+      CARGO_HOME: /opt/rust
     steps:
       - name: Pre-clean workspace ownership
         shell: bash
