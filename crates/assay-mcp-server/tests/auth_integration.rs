@@ -4,6 +4,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
+#[allow(clippy::field_reassign_with_default)]
 async fn test_auth_rejection_e2e_simulation() {
     // We simulate the auth logic flow here to prove E6 behavior
     // 1. Setup JWKS mock

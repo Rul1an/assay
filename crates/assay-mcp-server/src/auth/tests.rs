@@ -37,8 +37,10 @@ async fn test_alg_none_rejection() {
     let token = create_token(header, claims);
 
     let validator = TokenValidator::new(None); // No JWKS needed for this check failure
-    let mut config = AuthConfig::default();
-    config.mode = AuthMode::Strict;
+    let config = AuthConfig {
+        mode: AuthMode::Strict,
+        ..Default::default()
+    };
 
     // HS256 (symmetric) is NOT in our whitelist (RS256/ES256 only for SOTA)
     let res = validator.validate(&token, &config).await;
@@ -60,8 +62,10 @@ async fn test_typ_enforcement() {
     let token = "eyJ0eXAiOiJiYWQtdHlwIiwiYWxnIjoiUlMyNTYifQ.e30.signature"; // forged header
 
     let validator = TokenValidator::new(None);
-    let mut config = AuthConfig::default();
-    config.mode = AuthMode::Strict;
+    let config = AuthConfig {
+        mode: AuthMode::Strict,
+        ..Default::default()
+    };
 
     let _res = validator.validate(token, &config).await;
     // It might fail on base64 first, but if it parses header, it should check typ
@@ -102,8 +106,10 @@ async fn test_typ_enforcement() {
 #[tokio::test]
 async fn test_header_hardening() {
     let validator = TokenValidator::new(None);
-    let mut config = AuthConfig::default();
-    config.mode = AuthMode::Strict;
+    let config = AuthConfig {
+        mode: AuthMode::Strict,
+        ..Default::default()
+    };
 
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     // Test JKU
