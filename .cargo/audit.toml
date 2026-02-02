@@ -1,0 +1,3 @@
+# Align with ci.yml and deny.toml: allow RUSTSEC-2023-0071 (rsa, no fix)
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]

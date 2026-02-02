@@ -34,7 +34,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "2.13.0"
+version = "2.14.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
@@ -65,15 +65,15 @@ codegen-units = 1
 
 [workspace.dependencies]
 # Internal crates
-assay-core = { path = "crates/assay-core", version = "2.9.0" }
-assay-common = { path = "crates/assay-common", version = "2.9.0", default-features = false }
-assay-monitor = { path = "crates/assay-monitor", version = "2.9.0" }
-assay-metrics = { path = "crates/assay-metrics", version = "2.9.0" }
-assay-policy = { path = "crates/assay-policy", version = "2.9.0" }
-assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.9.0" }
-assay-evidence = { path = "crates/assay-evidence", version = "2.9.0" }
-assay-sim = { path = "crates/assay-sim", version = "2.9.0" }
-assay-registry = { path = "crates/assay-registry", version = "2.9.0" }
+assay-core = { path = "crates/assay-core", version = "2.14.0" }
+assay-common = { path = "crates/assay-common", version = "2.14.0", default-features = false }
+assay-monitor = { path = "crates/assay-monitor", version = "2.14.0" }
+assay-metrics = { path = "crates/assay-metrics", version = "2.14.0" }
+assay-policy = { path = "crates/assay-policy", version = "2.14.0" }
+assay-mcp-server = { path = "crates/assay-mcp-server", version = "2.14.0" }
+assay-evidence = { path = "crates/assay-evidence", version = "2.14.0" }
+assay-sim = { path = "crates/assay-sim", version = "2.14.0" }
+assay-registry = { path = "crates/assay-registry", version = "2.14.0" }
 
 # Common dependencies
 anyhow = "1"
