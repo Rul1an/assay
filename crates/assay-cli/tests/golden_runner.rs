@@ -42,14 +42,18 @@ fn test_golden_harness() {
 
     // Normalize: Remove variable timing info "(0.0s)" or similar if it changes
     // The golden file has "(0.0s)". If it changes to "(0.1s)", test fails.
+    // Strip E7 seed line ("Info: No seed provided. Using generated seed: NNNN") so golden is stable.
     // Verify result (strip ANSI codes for comparison)
     let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
     let duration_re = regex::Regex::new(r"\(\d+\.\d+s\)").unwrap();
+    let seed_re =
+        regex::Regex::new(r"Info: No seed provided\. Using generated seed: \d+\n\n").unwrap();
 
     let stripped_actual = ansi_re.replace_all(&stderr, "").to_string();
+    let without_seed = seed_re.replace_all(&stripped_actual, "").to_string();
 
     let normalized_actual = duration_re
-        .replace_all(&stripped_actual, "(0.0s)")
+        .replace_all(&without_seed, "(0.0s)")
         .replace("\r\n", "\n")
         .trim()
         .to_string();
