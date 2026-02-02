@@ -276,11 +276,10 @@ jobs:
     permissions:
       contents: read
     # Self-hosted runner has Rust in /opt/rust; jobs run with --noprofile so PATH can be minimal.
-    # Ensure Rust + standard paths so rustup and system tools (tar, git, etc.) are found.
+    # PATH only (no RUSTUP_HOME/CARGO_HOME): action finds existing rustup and does not try to install
+    # into /opt/rust (runner user may not have write permission there).
     env:
       PATH: /opt/rust/bin:/usr/bin:/bin:$PATH
-      RUSTUP_HOME: /opt/rust
-      CARGO_HOME: /opt/rust
     steps:
       - name: Pre-clean workspace ownership
         shell: bash
