@@ -30,7 +30,8 @@ jobs:
       - name: cargo audit (RustSec)
         run: |
           rm -rf ~/.cargo/advisory-db
-          cargo audit
+          # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
+          cargo audit --ignore RUSTSEC-2023-0071
 
   clippy:
     name: Clippy (deny warnings)
