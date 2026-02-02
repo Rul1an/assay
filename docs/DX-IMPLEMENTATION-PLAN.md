@@ -745,13 +745,15 @@ judge:
 
 #### 8.2.10 Definition of Done
 
-- [ ] **Randomized order default** with seed in summary.json + job summary
-- [ ] **Cost guardrails:** `judge.max_extra_calls_per_run` (default 2); warning logged when cap reached
-- [ ] **Rerun-on-instability** (borderline + low_margin + order_flip + high_variance)
-- [ ] Config-first policies per suite type (security/quality/regression)
-- [ ] CI-run produces `consensus_rate`, `flip_rate`, `abstain_rate`, `margin`
-- [ ] Reason codes `E_JUDGE_UNCERTAIN`, `E_JUDGE_UNAVAILABLE`
-- [ ] Multi-judge config placeholder (structure, not full implementation)
+- [x] **Randomized order default** with seed in summary.json + job summary
+- [x] **Cost guardrails:** `judge.max_extra_calls_per_run` (default 2); warning logged when cap reached
+- [x] **Rerun-on-instability** (borderline + low_margin + order_flip + high_variance)
+- [x] Config-first policies per suite type (security/quality/regression)
+- [x] CI-run produces `consensus_rate`, `flip_rate`, `abstain_rate`, `margin`
+- [x] Reason codes `E_JUDGE_UNCERTAIN`, `E_JUDGE_UNAVAILABLE`
+- [x] Multi-judge config placeholder (structure, not full implementation)
+- [x] **Audit E:** Robust JSON Parsing (Greedy stream seeker)
+- [x] **Audit F:** Audit Evidence Pack (E7-AUDIT.md)
 
 **Effort:** 2–3 days (MVP), +1 day for tuning PRs
 

@@ -18,11 +18,25 @@ pub struct Claims {
 
 pub struct TokenValidator {
     jwks: Option<JwksProvider>,
+    static_key: Option<std::sync::Arc<jsonwebtoken::DecodingKey>>,
 }
 
 impl TokenValidator {
     pub fn new(jwks: Option<JwksProvider>) -> Self {
-        Self { jwks }
+        Self {
+            jwks,
+            static_key: None,
+        }
+    }
+
+    pub fn new_with_static_key(key_pem: &[u8]) -> anyhow::Result<Self> {
+        let key = jsonwebtoken::DecodingKey::from_rsa_pem(key_pem)
+            .map_err(|e| anyhow::anyhow!("Failed to create DecodingKey from RSA PEM: {}", e))?;
+
+        Ok(Self {
+            jwks: None,
+            static_key: Some(std::sync::Arc::new(key)),
+        })
     }
 
     pub async fn validate(&self, token: &str, config: &AuthConfig) -> Result<Claims> {
@@ -90,22 +104,21 @@ impl TokenValidator {
                 }
                 tracing::warn!(reason = "W_AUTH_TYP", "{}", msg);
             }
+        } else if config.mode == AuthMode::Strict {
+            // Mandatory in Strict mode per SOTA 2026
+            return Err(anyhow::anyhow!("Missing 'typ' header in strict mode"));
         }
 
         // 2. Key Resolution
-        // For now, assume RS256/ES256 requires JWKS.
-        // If we don't have JWKS configured but strict mode is on, fail.
-        let key = if let Some(provider) = &self.jwks {
+        let key = if let Some(sk) = &self.static_key {
+            Some(sk.clone())
+        } else if let Some(provider) = &self.jwks {
             if let Some(kid) = &header.kid {
-                provider.get_key(kid).await.ok() // Pass failure handling down
+                provider.get_key(kid).await.ok()
             } else {
                 None
             }
         } else {
-            // No JWKS provider. Check if we accept purely on non-validated tokens (only in permissive)?
-            // Actually, without key we can't validate signature.
-            // For E6 demo, we might skip signature if NO config provided? No, that's dangerous.
-            // We assume if AuthConfig has JWKS, we use it. If not, maybe we skip auth?
             None
         };
 

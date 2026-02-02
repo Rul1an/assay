@@ -151,6 +151,7 @@ pub async fn precompute_judge(
                             &entry.response,
                             rubric_version,
                             &mut entry.meta,
+                            None,
                         )
                         .await?;
                 }

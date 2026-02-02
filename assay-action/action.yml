@@ -276,10 +276,26 @@ runs:
         DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
         echo "Downloading Assay ${VERSION} for ${TARGET}..."
 
-        if ! curl -fsSL "$DOWNLOAD_URL" | tar xz -C ~/.assay/bin; then
-          echo "::error::Failed to download Assay from $DOWNLOAD_URL"
+        # Download to temp dir first to handle variable archive structure
+        TEMP_DIR=$(mktemp -d)
+        if ! curl -fsSL "$DOWNLOAD_URL" | tar xz -C "$TEMP_DIR"; then
+          echo "::error::Failed to download/extract Assay from $DOWNLOAD_URL"
+          rm -rf "$TEMP_DIR"
           exit 1
         fi
+
+        # Find binary (robust to nested dirs)
+        BINARY=$(find "$TEMP_DIR" -type f -name "assay" | head -n 1)
+
+        if [ -z "$BINARY" ]; then
+          echo "::error::Binary 'assay' not found in downloaded archive"
+          ls -R "$TEMP_DIR"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        fi
+
+        mv "$BINARY" ~/.assay/bin/assay
+        rm -rf "$TEMP_DIR"
 
         chmod +x ~/.assay/bin/assay
         echo "✓ Installed Assay ${VERSION}"

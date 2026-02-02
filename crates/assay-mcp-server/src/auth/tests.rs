@@ -8,7 +8,7 @@ fn create_token(header: Header, claims: serde_json::Value) -> String {
     encode(
         &header,
         &claims,
-        &EncodingKey::from_secret("secret".as_ref()),
+        &EncodingKey::from_secret(b"test_secret_for_unit_testing_only"),
     )
     .unwrap()
 }
@@ -25,7 +25,7 @@ fn valid_claims() -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn test_alg_none_rejection() {
+async fn test_alg_whitelist_enforcement() {
     let mut header = Header::new(Algorithm::HS256);
     header.alg = Algorithm::HS256; // We use HS256 to sign, but Validator expects RS/ES.
                                    // Actually, `jsonwebtoken` crate doesn't easily let us forge "none" signed tokens that verify() checks
@@ -59,7 +59,9 @@ async fn test_typ_enforcement() {
     // OR we use a validator that fails early.
     // Our validator checks header *before* key resolution.
 
-    let token = "eyJ0eXAiOiJiYWQtdHlwIiwiYWxnIjoiUlMyNTYifQ.e30.signature"; // forged header
+    // Token with forged header: {"typ":"bad-typ","alg":"RS256"}
+    let part1 = URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"bad-typ"}"#);
+    let token = format!("{}.e30.signature", part1);
 
     let validator = TokenValidator::new(None);
     let config = AuthConfig {
@@ -67,7 +69,7 @@ async fn test_typ_enforcement() {
         ..Default::default()
     };
 
-    let _res = validator.validate(token, &config).await;
+    let _res = validator.validate(&token, &config).await;
     // It might fail on base64 first, but if it parses header, it should check typ
     // Let's ensure it fails on typ if header valid.
 
@@ -170,11 +172,90 @@ fn test_ssrf_ip_blocking() {
 }
 
 #[tokio::test]
-async fn test_resource_intent_mismatch() {
-    // This requires full validation success to reach claims check.
-    // For unit test without real keys, we can mock `validate` or just test the logic component.
-    // But `TokenValidator::validate` does it all.
-    // To test this deeply, we need `TokenValidator` to accept a token.
-    // We can't easily do that without a real RSA keypair in this `tests.rs`.
-    // Let's generate a keypair.
+async fn test_security_jwt_rs256_full_path() {
+    // Generate transient test keys at runtime
+    use rsa::{pkcs8::EncodePrivateKey, pkcs8::EncodePublicKey, RsaPrivateKey};
+    let mut rng = rand::thread_rng();
+    let bits = 2048;
+    let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate key");
+    let pub_key = priv_key.to_public_key();
+
+    let priv_pem_str = priv_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
+    let pub_pem_str = pub_key
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
+
+    let priv_pem = priv_pem_str.as_bytes();
+    let pub_pem = pub_pem_str.as_bytes();
+
+    let header = Header::new(Algorithm::RS256);
+    let claims = valid_claims();
+
+    let token = encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(priv_pem).unwrap(),
+    )
+    .unwrap();
+
+    // Setup Validator with Mock JWKS containing our public key
+    let validator = TokenValidator::new_with_static_key(pub_pem).unwrap();
+    let config = AuthConfig {
+        mode: AuthMode::Strict,
+        audience: vec!["assay-mcp".to_string()],
+        resource_id: Some("assay-system".to_string()),
+        ..Default::default()
+    };
+
+    let res = validator.validate(&token, &config).await;
+    assert!(
+        res.is_ok(),
+        "Should validate valid RS256 token: {:?}",
+        res.err()
+    );
+    let claims_out = res.unwrap();
+    assert_eq!(claims_out.sub, "user123");
+    assert_eq!(
+        claims_out.resource.as_ref().and_then(|v| v.as_str()),
+        Some("assay-system")
+    );
+}
+
+#[tokio::test]
+async fn test_typ_enforcement_strict() {
+    let validator = TokenValidator::new(None);
+    let config = AuthConfig {
+        mode: AuthMode::Strict,
+        ..Default::default()
+    };
+
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    // Case 1: Missing typ
+    let part1 = URL_SAFE_NO_PAD
+        .encode(r#"{"alg":"RS256"}"#)
+        .replace("=", "");
+    let token = format!("{}.e30.sig", part1);
+    let res = validator.validate(&token, &config).await;
+    assert!(res.is_err());
+    assert!(res
+        .unwrap_err()
+        .to_string()
+        .contains("Missing 'typ' header"));
+
+    // Case 2: Wrong typ
+    let part1 = URL_SAFE_NO_PAD
+        .encode(r#"{"alg":"RS256","typ":"text"}"#)
+        .replace("=", "");
+    let token = format!("{}.e30.sig", part1);
+    let res = validator.validate(&token, &config).await;
+    assert!(res.is_err());
+    assert!(res
+        .unwrap_err()
+        .to_string()
+        .contains("Token type 'text' not accepted"));
 }

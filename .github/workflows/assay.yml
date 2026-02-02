@@ -1,0 +1,16 @@
+name: Assay Gate
+on: [push, pull_request]
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.1.1
+      - name: Setup Assay
+        uses: ./assay-action
+        with:
+          version: latest
+
+      - name: Run Assay CI
+        run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --strict
