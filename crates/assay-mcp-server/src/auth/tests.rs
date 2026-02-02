@@ -173,10 +173,24 @@ fn test_ssrf_ip_blocking() {
 
 #[tokio::test]
 async fn test_security_jwt_rs256_full_path() {
-    // Generate transient test keys
-    // In a real SOTA test we'd use a real key, but here we use a test-only RSA PEM.
-    let priv_pem = include_bytes!("../../tests/fixtures/test_rsa_priv.pem");
-    let pub_pem = include_bytes!("../../tests/fixtures/test_rsa_pub.pem");
+    // Generate transient test keys at runtime
+    use rsa::{pkcs8::EncodePrivateKey, pkcs8::EncodePublicKey, RsaPrivateKey};
+    let mut rng = rand::thread_rng();
+    let bits = 2048;
+    let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate key");
+    let pub_key = priv_key.to_public_key();
+
+    let priv_pem_str = priv_key
+        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
+    let pub_pem_str = pub_key
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap()
+        .to_string();
+
+    let priv_pem = priv_pem_str.as_bytes();
+    let pub_pem = pub_pem_str.as_bytes();
 
     let header = Header::new(Algorithm::RS256);
     let claims = valid_claims();
@@ -189,7 +203,7 @@ async fn test_security_jwt_rs256_full_path() {
     .unwrap();
 
     // Setup Validator with Mock JWKS containing our public key
-    let validator = TokenValidator::new_with_static_key(pub_pem);
+    let validator = TokenValidator::new_with_static_key(pub_pem).unwrap();
     let config = AuthConfig {
         mode: AuthMode::Strict,
         audience: vec!["assay-mcp".to_string()],

@@ -29,13 +29,14 @@ impl TokenValidator {
         }
     }
 
-    pub fn new_with_static_key(key_pem: &[u8]) -> Self {
-        Self {
+    pub fn new_with_static_key(key_pem: &[u8]) -> anyhow::Result<Self> {
+        let key = jsonwebtoken::DecodingKey::from_rsa_pem(key_pem)
+            .map_err(|e| anyhow::anyhow!("Failed to create DecodingKey from RSA PEM: {}", e))?;
+
+        Ok(Self {
             jwks: None,
-            static_key: Some(std::sync::Arc::new(
-                jsonwebtoken::DecodingKey::from_rsa_pem(key_pem).unwrap(),
-            )),
-        }
+            static_key: Some(std::sync::Arc::new(key)),
+        })
     }
 
     pub async fn validate(&self, token: &str, config: &AuthConfig) -> Result<Claims> {

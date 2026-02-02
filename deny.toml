@@ -26,6 +26,9 @@ ignore = [
     # paste is widely used and the "unmaintained" status is disputed
     # See: https://rustsec.org/advisories/RUSTSEC-2024-0436.html
     "RUSTSEC-2024-0436",
+    # rsa 0.9.10 Marvin Attack (Timing Sidechannel).
+    # Used only in dev-dependencies for ephemeral test key generation.
+    "RUSTSEC-2023-0071",
 ]
 
 # =============================================================================

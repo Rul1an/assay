@@ -4,5 +4,6 @@
 # Ignore test fixtures containing intentionally fake cryptographic material
 paths-ignore:
   - "crates/assay-evidence/tests/fixtures/**"
+  - "crates/assay-mcp-server/tests/fixtures/**"
   - "**/test_vectors*.json"
   - "**/golden_vectors*.json"

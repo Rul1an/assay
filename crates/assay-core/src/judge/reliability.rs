@@ -93,7 +93,12 @@ impl ReliabilityConfig {
             RerunStrategy::Single => false,
             RerunStrategy::AlwaysThree => iteration < 3,
             RerunStrategy::SequentialSprt => {
-                score >= self.borderline_min && score <= self.borderline_max
+                // Adaptive Majority: Force at least 2 votes to detect instability,
+                // unless we already have a borderline score (split vote).
+                // If iteration < 2, we rerun.
+                // If iteration == 2 and score is 0.5 (borderline), we rerun (for 3rd).
+                // If iteration == 2 and score is 0.0 or 1.0, we stop.
+                iteration < 2 || (score >= self.borderline_min && score <= self.borderline_max)
             }
         }
     }

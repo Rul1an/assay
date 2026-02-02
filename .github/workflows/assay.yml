@@ -3,12 +3,14 @@ on: [push, pull_request]
 jobs:
   assay:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Run Assay Smoke Test
-        uses: Rul1an/assay-action@v1.0.0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.1.1
+      - name: Setup Assay
+        uses: ./assay-action
         with:
-          assay_version: "v0.1.0" # Update to latest
-          config: ci-eval.yaml
-          trace_file: traces/ci.jsonl
-          strict: "true"
+          version: latest
+
+      - name: Run Assay CI
+        run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --strict

@@ -52,7 +52,17 @@ impl Runner {
         let sem = Arc::new(Semaphore::new(parallel));
         let mut handles = Vec::new();
 
-        // E7.2: Randomized Order for position bias mitigation
+        // E7.2: Randomized Order default (derived seed)
+        // If seed is missing, generate one to ensure deterministic replay capability if logged
+        // and to enforce default randomization.
+        let mut cfg = cfg.clone();
+        if cfg.settings.seed.is_none() {
+            let s = rand::random();
+            cfg.settings.seed = Some(s);
+            // This ensures we always have a seed for 'run' artifacts and judge logic.
+            eprintln!("Info: No seed provided. Using generated seed: {}", s);
+        }
+
         let mut tests = cfg.tests.clone();
         if let Some(seed) = cfg.settings.seed {
             use rand::seq::SliceRandom;
