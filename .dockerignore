@@ -1,0 +1,23 @@
+# Exclude build artifacts so Docker build context does not try to stat them
+# (avoids "can't stat .../target/debug/.fingerprint/..." when target is root-owned on self-hosted)
+/target
+.git
+.gitignore
+*.log
+.DS_Store
+.assay-test
+.repro_artifacts
+site/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.eval
+*.rs.bk
