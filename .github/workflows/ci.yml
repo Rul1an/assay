@@ -369,6 +369,10 @@ jobs:
           STRICT_LSM_CHECK: "1"
         run: |
           set -euo pipefail
+          # Pre-create test file as runner user so sudo'd script does not need to write
+          # (some self-hosted runners block root writes to /tmp via Landlock/etc.)
+          mkdir -p /tmp/assay-test
+          echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
           chmod +x scripts/verify_lsm_docker.sh
           sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
 

@@ -164,7 +164,8 @@ RUN_TEST_CMD='
 set -e
 # Cleanup any stale monitors
 pkill -x assay || true
-rm -f /tmp/assay-test/secret.txt || true
+# Do not remove secret.txt: on some runners (e.g. Landlock under sudo) root cannot
+# create it; allow pre-creation by the workflow as the runner user.
 
 echo ">> [Diag] Kernel: $(uname -r)"
 echo ">> [Diag] Active LSMs: $(cat /sys/kernel/security/lsm 2>/dev/null || echo "N/A")"
@@ -183,7 +184,10 @@ fi
 
 echo ">> [Test] Setting up test files..."
 mkdir -p /tmp/assay-test
-echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
+# Create secret only if missing (CI may pre-create as runner user to avoid Landlock EPERM)
+if [ ! -f /tmp/assay-test/secret.txt ]; then
+  echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
+fi
 echo ">> [Info] Initial file creation complete."
 
 # Start Monitor
