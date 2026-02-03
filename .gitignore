@@ -6,6 +6,7 @@ archive/
 **/*.rs.bk
 benchmark_results/
 .eval
+.assay-test
 .DS_Store
 *.log
 junit.xml
