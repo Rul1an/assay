@@ -57,6 +57,7 @@ confidence-threshold = 0.93
 # Allow these licenses
 allow = [
     "MIT",
+    "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

@@ -51,7 +51,7 @@ pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) ->
     // To support caching, we'd need a `PolicyState` struct.
     // For now, I'll compile on the fly (parity correctness first).
 
-    let compiled = match jsonschema::JSONSchema::compile(schema_val) {
+    let compiled = match jsonschema::validator_for(schema_val) {
         Ok(c) => c,
         Err(e) => {
             return Verdict {
@@ -69,32 +69,30 @@ pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) ->
 }
 
 /// Evaluates tool arguments against a compiled schema.
-pub fn evaluate_schema(compiled: &jsonschema::JSONSchema, tool_args: &Value) -> Verdict {
-    let result = compiled.validate(tool_args);
-    match result {
-        Ok(_) => Verdict {
+pub fn evaluate_schema(compiled: &jsonschema::Validator, tool_args: &Value) -> Verdict {
+    if compiled.is_valid(tool_args) {
+        return Verdict {
             status: VerdictStatus::Allowed,
             reason_code: "OK".to_string(),
             details: serde_json::json!({}),
-        },
-        Err(errors) => {
-            let violations: Vec<Value> = errors
-                .map(|e| {
-                    serde_json::json!({
-                        "path": e.instance_path.to_string(),
-                        "constraint": e.to_string(),
-                        "message": e.to_string()
-                    })
-                })
-                .collect();
-            Verdict {
-                status: VerdictStatus::Blocked,
-                reason_code: "E_ARG_SCHEMA".to_string(),
-                details: serde_json::json!({
-                    "violations": violations
-                }),
-            }
-        }
+        };
+    }
+    let violations: Vec<Value> = compiled
+        .iter_errors(tool_args)
+        .map(|e| {
+            serde_json::json!({
+                "path": e.instance_path().to_string(),
+                "constraint": e.to_string(),
+                "message": e.to_string()
+            })
+        })
+        .collect();
+    Verdict {
+        status: VerdictStatus::Blocked,
+        reason_code: "E_ARG_SCHEMA".to_string(),
+        details: serde_json::json!({
+            "violations": violations
+        }),
     }
 }
 

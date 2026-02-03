@@ -1,7 +1,6 @@
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
 use async_trait::async_trait;
-use jsonschema::JSONSchema;
 use std::sync::Arc;
 
 pub struct JsonSchemaMetric;
@@ -58,8 +57,8 @@ impl Metric for JsonSchemaMetric {
         let schema_json: serde_json::Value = serde_json::from_str(&schema_str)
             .map_err(|e| anyhow::anyhow!("config error: invalid JSON schema: {}", e))?;
 
-        let compiled = JSONSchema::options()
-            .compile(&schema_json)
+        let compiled = jsonschema::options()
+            .build(&schema_json)
             .map_err(|e| anyhow::anyhow!("config error: schema compile failed: {}", e))?;
 
         let instance: serde_json::Value = match serde_json::from_str(&resp.text) {
@@ -72,9 +71,13 @@ impl Metric for JsonSchemaMetric {
             }
         };
 
-        let result = compiled.validate(&instance);
-        if let Err(errors) = result {
-            let error_list: Vec<String> = errors.map(|e| e.to_string()).collect();
+        if compiled.is_valid(&instance) {
+            Ok(MetricResult::pass(1.0))
+        } else {
+            let error_list: Vec<String> = compiled
+                .iter_errors(&instance)
+                .map(|e| e.to_string())
+                .collect();
             Ok(MetricResult {
                 score: 0.0,
                 passed: false,
@@ -84,8 +87,6 @@ impl Metric for JsonSchemaMetric {
                     "errors": error_list
                 }),
             })
-        } else {
-            Ok(MetricResult::pass(1.0))
         }
     }
 }
