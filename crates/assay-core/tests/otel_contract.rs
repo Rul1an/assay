@@ -2,7 +2,7 @@
 //! Sign-off: E2E proof that Off/BlobRef do not emit gen_ai.prompt; BlobRef emits assay.blob.ref (hmac256:);
 //! RedactedInline emits gen_ai.prompt with policy applied.
 
-use assay_core::config::otel::{OtelConfig, PromptCaptureMode};
+use assay_core::config::otel::{OtelConfig, PromptCaptureMode, RedactionConfig};
 use assay_core::providers::llm::fake::FakeClient;
 use assay_core::providers::llm::tracing::TracingLlmClient;
 use assay_core::providers::llm::LlmClient;
@@ -90,9 +90,11 @@ fn setup_capture() -> (MockWriter, tracing::subscriber::DefaultGuard) {
 async fn test_invariant_capture_off() {
     let (writer, _guard) = setup_capture();
 
-    let mut cfg = OtelConfig::default();
-    cfg.capture_mode = PromptCaptureMode::Off;
-    cfg.capture_requires_sampled_span = false;
+    let cfg = OtelConfig {
+        capture_mode: PromptCaptureMode::Off,
+        capture_requires_sampled_span: false,
+        ..Default::default()
+    };
 
     let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
     let client = TracingLlmClient::new(inner, cfg);
@@ -124,10 +126,12 @@ async fn test_invariant_capture_off() {
 async fn test_invariant_blob_ref() {
     let (writer, _guard) = setup_capture();
 
-    let mut cfg = OtelConfig::default();
-    cfg.capture_mode = PromptCaptureMode::BlobRef;
-    cfg.capture_acknowledged = true;
-    cfg.capture_requires_sampled_span = false;
+    let cfg = OtelConfig {
+        capture_mode: PromptCaptureMode::BlobRef,
+        capture_acknowledged: true,
+        capture_requires_sampled_span: false,
+        ..Default::default()
+    };
 
     let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
     let client = TracingLlmClient::new(inner, cfg);
@@ -171,11 +175,15 @@ async fn test_invariant_blob_ref() {
 async fn test_invariant_redacted_inline() {
     let (writer, _guard) = setup_capture();
 
-    let mut cfg = OtelConfig::default();
-    cfg.capture_mode = PromptCaptureMode::RedactedInline;
-    cfg.capture_acknowledged = true;
-    cfg.capture_requires_sampled_span = false;
-    cfg.redaction.policies = vec!["sk-".to_string()];
+    let cfg = OtelConfig {
+        capture_mode: PromptCaptureMode::RedactedInline,
+        capture_acknowledged: true,
+        capture_requires_sampled_span: false,
+        redaction: RedactionConfig {
+            policies: vec!["sk-".to_string()],
+        },
+        ..Default::default()
+    };
 
     let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
     let client = TracingLlmClient::new(inner, cfg);
@@ -222,10 +230,12 @@ async fn test_capture_requires_sampled_span_no_work_when_disabled() {
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let mut cfg = OtelConfig::default();
-    cfg.capture_mode = PromptCaptureMode::BlobRef;
-    cfg.capture_acknowledged = true;
-    cfg.capture_requires_sampled_span = true;
+    let cfg = OtelConfig {
+        capture_mode: PromptCaptureMode::BlobRef,
+        capture_acknowledged: true,
+        capture_requires_sampled_span: true,
+        ..Default::default()
+    };
 
     let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
     let client = TracingLlmClient::new(inner, cfg);

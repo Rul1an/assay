@@ -100,16 +100,16 @@ impl LlmClient for TracingLlmClient {
             // capture_requires_sampled_span: gate payload work on "span is recorded".
             // We use !is_disabled() as proxy for is_recording() (tracing 0.1 has no is_recording()).
             // When the subscriber filters out the span (sampling drop), no blob hash / redaction is done.
-            if !self.config.capture_requires_sampled_span || !span.is_disabled() {
-                if self.redaction.should_capture() {
-                    if self.redaction.is_blob_ref() {
-                        let blob_ref = self.redaction.blob_ref(prompt);
-                        span.record("assay.blob.ref", blob_ref.as_str());
-                        span.record("assay.blob.kind", "prompt");
-                    } else {
-                        let redacted = self.redaction.redact_inline(prompt);
-                        span.record("gen_ai.prompt", redacted.as_str());
-                    }
+            if (!self.config.capture_requires_sampled_span || !span.is_disabled())
+                && self.redaction.should_capture()
+            {
+                if self.redaction.is_blob_ref() {
+                    let blob_ref = self.redaction.blob_ref(prompt);
+                    span.record("assay.blob.ref", blob_ref.as_str());
+                    span.record("assay.blob.kind", "prompt");
+                } else {
+                    let redacted = self.redaction.redact_inline(prompt);
+                    span.record("gen_ai.prompt", redacted.as_str());
                 }
             }
 
@@ -152,17 +152,21 @@ impl LlmClient for TracingLlmClient {
 #[allow(unsafe_code)]
 mod tests {
     use super::*;
-    use crate::config::otel::{OtelConfig, PromptCaptureMode};
+    use crate::config::otel::{ExporterConfig, OtelConfig, PromptCaptureMode, RedactionConfig};
     use crate::providers::llm::fake::FakeClient;
     use serial_test::serial;
 
     #[tokio::test]
     async fn test_tracing_redaction_inline() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::RedactedInline;
-        cfg.capture_acknowledged = true;
-        cfg.capture_requires_sampled_span = false;
-        cfg.redaction.policies = vec!["sk-".to_string()];
+        let cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::RedactedInline,
+            capture_acknowledged: true,
+            capture_requires_sampled_span: false,
+            redaction: RedactionConfig {
+                policies: vec!["sk-".to_string()],
+            },
+            ..Default::default()
+        };
 
         let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
         let client = TracingLlmClient::new(inner, cfg);
@@ -173,10 +177,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_tracing_blob_ref() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::BlobRef;
-        cfg.capture_acknowledged = true;
-        cfg.capture_requires_sampled_span = false;
+        let cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::BlobRef,
+            capture_acknowledged: true,
+            capture_requires_sampled_span: false,
+            ..Default::default()
+        };
 
         let inner = Arc::new(FakeClient::new("gpt-4".to_string()));
         let client = TracingLlmClient::new(inner, cfg);
@@ -188,10 +194,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_guardrails_validation() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::RedactedInline;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = None;
+        let mut cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::RedactedInline,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: None,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         unsafe {
             std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");

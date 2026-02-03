@@ -195,10 +195,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_guardrails_validation() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::RedactedInline;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = None; // Ensure reset
+        let mut cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::RedactedInline,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: None,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         // 1. Unset env var -> Error (No allowlist provided)
         unsafe {
@@ -260,10 +265,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_allowlist_wildcard_mycorp_allowed_evil_denied() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::BlobRef;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = Some(vec!["*.mycorp.com".to_string()]);
+        let cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::BlobRef,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: Some(vec!["*.mycorp.com".to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         unsafe {
             std::env::set_var("ASSAY_ORG_SECRET", "test-secret");
@@ -296,10 +306,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_allowlist_port_and_trailing_dot() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::RedactedInline;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = Some(vec!["otel.mycorp.com".to_string()]);
+        let cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::RedactedInline,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: Some(vec!["otel.mycorp.com".to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         unsafe {
             std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otel.mycorp.com:443");
@@ -318,11 +333,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_allow_localhost_default_deny_explicit_true_allowed() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::BlobRef;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = Some(vec!["127.0.0.1".to_string()]);
-        cfg.exporter.allow_localhost = false;
+        let mut cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::BlobRef,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: Some(vec!["127.0.0.1".to_string()]),
+                allow_localhost: false,
+            },
+            ..Default::default()
+        };
 
         unsafe {
             std::env::set_var("ASSAY_ORG_SECRET", "test-secret");
@@ -353,10 +372,15 @@ mod tests {
     #[test]
     #[serial]
     fn test_blob_ref_requires_assay_org_secret() {
-        let mut cfg = OtelConfig::default();
-        cfg.capture_mode = PromptCaptureMode::BlobRef;
-        cfg.capture_acknowledged = true;
-        cfg.exporter.allowlist = Some(vec!["example.com".to_string()]);
+        let cfg = OtelConfig {
+            capture_mode: PromptCaptureMode::BlobRef,
+            capture_acknowledged: true,
+            exporter: ExporterConfig {
+                allowlist: Some(vec!["example.com".to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         unsafe {
             std::env::remove_var("ASSAY_ORG_SECRET");

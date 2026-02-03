@@ -21,6 +21,12 @@ pub struct MetricRegistry {
     registered_instruments: Mutex<HashSet<String>>,
 }
 
+impl Default for MetricRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricRegistry {
     pub fn new() -> Self {
         Self {
