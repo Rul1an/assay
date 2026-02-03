@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::TryStreamExt;
-use object_store::{ObjectStore, PutMode, PutOptions, PutPayload};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 use super::{BundleMeta, BundleStore, KeyBuilder, StoreError, StoreResult, StoreSpec};
 
@@ -305,7 +305,7 @@ impl BundleStore for ObjectStoreBundleStore {
                     .parse_bundle_key(&entry.location)
                     .map(|id| BundleMeta {
                         bundle_id: id,
-                        size: Some(entry.size as u64),
+                        size: Some(entry.size),
                         modified: Some(entry.last_modified),
                     })
             })
