@@ -22,14 +22,8 @@ exclude = [
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # Ignore specific advisories (add RUSTSEC-YYYY-NNNN here if needed)
-ignore = [
-    # paste is widely used and the "unmaintained" status is disputed
-    # See: https://rustsec.org/advisories/RUSTSEC-2024-0436.html
-    "RUSTSEC-2024-0436",
-    # rsa 0.9.x: Marvin Attack timing sidechannel; no fixed upgrade (assay-mcp-server JWT)
-    # See: https://rustsec.org/advisories/RUSTSEC-2023-0071.html
-    "RUSTSEC-2023-0071",
-]
+# Only list advisories that currently match a crate in the tree; remove when dep is upgraded or removed.
+ignore = []
 
 # =============================================================================
 # [bans] - Crate bans and duplicate detection
