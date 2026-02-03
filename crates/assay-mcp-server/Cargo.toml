@@ -29,7 +29,7 @@ moka = { version = "0.12", features = ["sync"] }
 
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
-jsonwebtoken = "9.2"
+jsonwebtoken = "10.3"
 base64 = "0.21"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2.5", features = ["serde"] }
@@ -40,7 +40,7 @@ serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["full"] }
 tempfile.workspace = true
 wiremock = "0.6"
-jsonwebtoken = "9.2"
+jsonwebtoken = "10.3"
 base64 = "0.21"
 # uuid = { version = "1.0", features = ["v4"] } # Removed in favor of SystemTime
 rsa = "0.9"
