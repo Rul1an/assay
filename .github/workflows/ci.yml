@@ -285,8 +285,10 @@ jobs:
       - name: Pre-clean workspace ownership
         shell: bash
         run: |
-          sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
-          sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" || true
+          # Remove target/ with sudo so checkout can delete workspace (avoids EPERM on root-owned fingerprints)
+          sudo rm -rf "$GITHUB_WORKSPACE/target" 2>/dev/null || true
+          sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+          sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" 2>/dev/null || true
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -363,14 +365,25 @@ jobs:
             cargo install bpf-linker --locked
           fi
 
+      - name: Ensure Docker context excludes target
+        shell: bash
+        run: |
+          # Avoid "can't stat .../target/..." when Docker builds (branches without .dockerignore, e.g. Dependabot pre-rebase)
+          touch .dockerignore
+          grep -q '^/target$' .dockerignore || echo '/target' >> .dockerignore
+
       - name: Verify LSM blocking (CI Mode - strict on self-hosted)
         shell: bash
         env:
           STRICT_LSM_CHECK: "1"
+          # Use workspace path: self-hosted runner may deny writes to /tmp (Landlock etc.)
+          ASSAY_TEST_DIR: ${{ github.workspace }}/.assay-test
         run: |
           set -euo pipefail
+          mkdir -p "$ASSAY_TEST_DIR"
+          echo "TOP SECRET DATA" > "$ASSAY_TEST_DIR/secret.txt"
           chmod +x scripts/verify_lsm_docker.sh
-          sudo -E env "PATH=$PATH" ./scripts/verify_lsm_docker.sh --ci-mode
+          sudo -E env "PATH=$PATH" "ASSAY_TEST_DIR=$ASSAY_TEST_DIR" ./scripts/verify_lsm_docker.sh --ci-mode
 
       - name: Fix log permissions
         if: always()
