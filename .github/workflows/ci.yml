@@ -365,6 +365,13 @@ jobs:
             cargo install bpf-linker --locked
           fi
 
+      - name: Ensure Docker context excludes target
+        shell: bash
+        run: |
+          # Avoid "can't stat .../target/..." when Docker builds (branches without .dockerignore, e.g. Dependabot pre-rebase)
+          touch .dockerignore
+          grep -q '^/target$' .dockerignore || echo '/target' >> .dockerignore
+
       - name: Verify LSM blocking (CI Mode - strict on self-hosted)
         shell: bash
         env:
