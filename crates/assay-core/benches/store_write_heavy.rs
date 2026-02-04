@@ -23,6 +23,7 @@ fn minimal_config(suite: &str) -> EvalConfig {
         model: "trace".to_string(),
         settings: Default::default(),
         thresholds: Default::default(),
+        otel: Default::default(),
         tests: vec![],
     }
 }

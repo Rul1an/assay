@@ -55,7 +55,7 @@ pub struct McpPolicy {
 
     /// Compiled schemas (lazy, thread-safe, shared across clones)
     #[serde(skip)]
-    pub(crate) compiled: Arc<OnceLock<HashMap<String, Arc<jsonschema::JSONSchema>>>>,
+    pub(crate) compiled: Arc<OnceLock<HashMap<String, Arc<jsonschema::Validator>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,11 +311,11 @@ impl McpPolicy {
         }
     }
 
-    fn compiled_schemas(&self) -> &HashMap<String, Arc<jsonschema::JSONSchema>> {
+    fn compiled_schemas(&self) -> &HashMap<String, Arc<jsonschema::Validator>> {
         self.compiled.get_or_init(|| self.compile_all_schemas())
     }
 
-    pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::JSONSchema>> {
+    pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::Validator>> {
         // Option 1: Inline $defs into every schema to support relative #/$defs/... refs
         let root_defs = self.schemas.get("$defs").cloned();
 
@@ -335,7 +335,7 @@ impl McpPolicy {
                 }
             }
 
-            match jsonschema::JSONSchema::compile(&schema_to_compile) {
+            match jsonschema::validator_for(&schema_to_compile) {
                 Ok(validator) => {
                     compiled.insert(tool_name.clone(), Arc::new(validator));
                 }
@@ -418,30 +418,29 @@ impl McpPolicy {
         // 4. Schema Validation
         let compiled = self.compiled_schemas();
         if let Some(validator) = compiled.get(tool_name) {
-            match validator.validate(args) {
-                Ok(_) => return PolicyDecision::Allow,
-                Err(errors) => {
-                    let violations: Vec<_> = errors
-                        .map(|e| {
-                            json!({
-                                "path": e.instance_path.to_string(),
-                                "message": e.to_string(),
-                            })
+            if !validator.is_valid(args) {
+                let violations: Vec<Value> = validator
+                    .iter_errors(args)
+                    .map(|e| {
+                        json!({
+                            "path": e.instance_path().to_string(),
+                            "message": e.to_string(),
                         })
-                        .collect();
-                    return PolicyDecision::Deny {
-                        tool: tool_name.to_string(),
-                        code: "E_ARG_SCHEMA".to_string(),
-                        reason: "JSON Schema validation failed".to_string(),
-                        contract: json!({
-                            "status": "deny",
-                            "error_code": "E_ARG_SCHEMA",
-                            "tool": tool_name,
-                            "violations": violations,
-                        }),
-                    };
-                }
+                    })
+                    .collect();
+                return PolicyDecision::Deny {
+                    tool: tool_name.to_string(),
+                    code: "E_ARG_SCHEMA".to_string(),
+                    reason: "JSON Schema validation failed".to_string(),
+                    contract: json!({
+                        "status": "deny",
+                        "error_code": "E_ARG_SCHEMA",
+                        "tool": tool_name,
+                        "violations": violations,
+                    }),
+                };
             }
+            return PolicyDecision::Allow;
         }
 
         // 5. Unconstrained Mode

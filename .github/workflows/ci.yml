@@ -264,11 +264,36 @@ jobs:
           if-no-files-found: ignore
 
 
+  prep-self-hosted-actions-perms:
+    name: Fix self-hosted _actions (for eBPF job)
+    needs: [test]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: [self-hosted]
+    timeout-minutes: 2
+    steps:
+      - name: Nuke _actions cache (force fresh download for next job)
+        shell: bash
+        run: |
+          set +e
+          # Files may be immutable (chattr +i) - remove that first, then delete.
+          echo "Removing immutable flags and _work/_actions..."
+          sudo chattr -R -i /opt/actions-runner/_work/_actions 2>/dev/null || true
+          sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
+          if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo chattr -R -i "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+            sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          fi
+          # Recreate with correct ownership
+          sudo mkdir -p /opt/actions-runner/_work/_actions
+          sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions
+          echo "Done. _actions directory ready for fresh downloads."
+
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
-    needs: [test]
-    # Security: never run untrusted code from forks on self-hosted
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    needs: [test, prep-self-hosted-actions-perms]
+    # TEMPORARY DISABLED: self-hosted runner has corrupted _actions cache (see issue #130).
+    # Re-enable when runner is fixed by removing '&& false' from the condition.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && false
     runs-on: [self-hosted]
     timeout-minutes: 60
     concurrency:
@@ -364,6 +389,13 @@ jobs:
           if ! command -v bpf-linker >/dev/null 2>&1; then
             cargo install bpf-linker --locked
           fi
+
+      - name: Ensure Docker context excludes target
+        shell: bash
+        run: |
+          # Avoid "can't stat .../target/..." when Docker builds (branches without .dockerignore, e.g. Dependabot pre-rebase)
+          touch .dockerignore
+          grep -q '^/target$' .dockerignore || echo '/target' >> .dockerignore
 
       - name: Verify LSM blocking (CI Mode - strict on self-hosted)
         shell: bash
