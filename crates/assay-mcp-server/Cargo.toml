@@ -30,7 +30,7 @@ moka = { version = "0.12", features = ["sync"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
 jsonwebtoken = { version = "10.3", default-features = false, features = ["rust_crypto", "use_pem"] }
-base64 = "0.21"
+base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2.5", features = ["serde"] }
 
@@ -41,7 +41,7 @@ tokio = { workspace = true, features = ["full"] }
 tempfile.workspace = true
 wiremock = "0.6"
 jsonwebtoken = { version = "10.3", default-features = false, features = ["rust_crypto", "use_pem"] }
-base64 = "0.21"
+base64 = "0.22"
 # uuid = { version = "1.0", features = ["v4"] } # Removed in favor of SystemTime
 rsa = "0.9"
 rand = "0.8"
