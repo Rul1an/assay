@@ -181,12 +181,36 @@ assay run --config mcp-eval.yaml --output text
 
 ## Exit Codes
 
+Exit codes are **coarse** and intended for transport (e.g. CI pass/fail). For precise machine semantics, use `reason_code` and `reason_code_version` in `run.json` or `summary.json`.
+
 | Code | Meaning | CI Behavior |
 |------|---------|-------------|
 | 0 | All tests passed | Build succeeds |
 | 1 | One or more tests failed | Build fails |
-| 2 | Configuration error | Build fails |
-| 3 | Trace file not found | Build fails |
+| 2 | Configuration / user error (e.g. missing trace, invalid config) | Build fails |
+| 3 | Infrastructure / judge unavailable (e.g. API down, rate limit) | Build fails |
+
+**Exit codes are transport; reason_code is semantics.** Downstream automation MUST branch on `(reason_code_version, reason_code)`; exit code is only coarse bucketing.
+
+### Reason codes
+
+When exit code ≠ 0, `run.json` and `summary.json` include a stable `reason_code` (e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`, `E_CFG_PARSE`) and `reason_code_version` (currently `1`). The full registry is in [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md) §5 and [Troubleshooting](../guides/troubleshooting.md). Use these for programmatic branching instead of exit code alone.
+
+### Compatibility (v1 vs v2)
+
+Default behaviour uses **v2** exit mapping. Legacy scripts that relied on the old mapping can use compatibility mode:
+
+- **CLI:** `--exit-codes=v1` or `--exit-codes=v2` (default)
+- **Environment:** `ASSAY_EXIT_CODES=v1` or `ASSAY_EXIT_CODES=v2`
+
+| Scenario | v1 (legacy) | v2 (default) |
+|----------|-------------|--------------|
+| Trace file not found | exit 3 | exit 2, reason_code `E_TRACE_NOT_FOUND` |
+| Judge/API unavailable | exit 3 | exit 3, reason_code `E_JUDGE_UNAVAILABLE` (etc.) |
+| Config/parse error | exit 2 | exit 2, reason_code `E_CFG_PARSE` (etc.) |
+| Test failure | exit 1 | exit 1, reason_code `E_TEST_FAILED` (etc.) |
+
+Exit code semantics and the reason code registry are defined in [ADR-019 PR Gate 2026 SOTA](../../architecture/ADR-019-PR-Gate-2026-SOTA.md) and [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md).
 
 ---
 
@@ -196,6 +220,7 @@ assay run --config mcp-eval.yaml --output text
 |----------|-------------|
 | `ASSAY_CONFIG` | Default config file if `--config` not specified |
 | `ASSAY_DB` | Default database path |
+| `ASSAY_EXIT_CODES` | Exit code mapping: `v1` (legacy) or `v2` (default). See [Compatibility](#compatibility-v1-vs-v2) above. |
 | `NO_COLOR` | Disable colored output |
 
 ---
@@ -239,3 +264,5 @@ jobs:
 - [assay import](import.md)
 - [Configuration](../config/index.md)
 - [CI Integration](../getting-started/ci-integration.md)
+- [Troubleshooting](../guides/troubleshooting.md) — Exit 2 vs 3, reason codes, common errors
+- [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md) — Reason code registry and output contracts
