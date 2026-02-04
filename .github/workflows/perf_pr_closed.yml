@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: bencherdev/bencher@485cfb6f9737becbb642bb37d76fa0649d5dae69 # @main
+      - uses: bencherdev/bencher@886fbed6aad69e12a7852b0fc9ce49c50516c578 # @main
       - name: Archive closed PR branch with Bencher
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
