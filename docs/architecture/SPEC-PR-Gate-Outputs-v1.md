@@ -50,7 +50,7 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 
 ### 3.2 Provenance (Artifact Auditability)
 
-Every summary.json MUST include the following provenance fields so that gates remain auditable (ADR-019 P0.4).
+Every summary.json MUST include a top-level **`provenance`** object with the following fields so that gates remain auditable (ADR-019 P0.4).
 
 | Field                 | Type   | Required | Description |
 |-----------------------|--------|----------|-------------|
@@ -64,15 +64,17 @@ Every summary.json MUST include the following provenance fields so that gates re
 
 ### 3.3 Results Summary (Optional but Recommended)
 
-| Field           | Type   | Required | Description |
-|-----------------|--------|----------|-------------|
-| `passed`        | integer| No       | Count of tests passed. |
-| `failed`        | integer| No       | Count of tests failed. |
-| `warned`        | integer| No       | Count of tests with Warn/Flaky (depends on strict mode). |
-| `skipped`       | integer| No       | Count of tests skipped (e.g. cache hit). |
-| `total_duration_ms` | integer | No | Total run duration in milliseconds. |
+A top-level **`results`** object MAY contain:
 
-Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
+| Field     | Type    | Required | Description |
+|-----------|---------|----------|-------------|
+| `passed`  | integer | No       | Count of tests passed. |
+| `failed`  | integer | No       | Count of tests failed. |
+| `warned`  | integer | No       | Count of tests with Warn/Flaky (depends on strict mode). |
+| `skipped` | integer | No       | Count of tests skipped (e.g. cache hit). |
+| `total`   | integer | No       | Total test count. |
+
+A top-level **`performance`** object MAY contain `total_duration_ms` (integer, milliseconds). Future versions MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
 
 ### 3.4 Example (Minimal)
 
@@ -82,11 +84,18 @@ Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase
   "reason_code_version": 1,
   "exit_code": 0,
   "reason_code": "",
-  "assay_version": "2.12.0",
-  "verify_mode": "enabled",
-  "passed": 10,
-  "failed": 0,
-  "total_duration_ms": 1234
+  "provenance": {
+    "assay_version": "2.12.0",
+    "verify_mode": "enabled"
+  },
+  "results": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10
+  },
+  "performance": {
+    "total_duration_ms": 1234
+  }
 }
 ```
 
@@ -100,8 +109,10 @@ Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase
   "reason_code": "E_TRACE_NOT_FOUND",
   "message": "Trace file not found: traces/ci.jsonl",
   "next_step": "Run: assay doctor --config ci-eval.yaml --trace-file traces/ci.jsonl",
-  "assay_version": "2.12.0",
-  "verify_mode": "enabled"
+  "provenance": {
+    "assay_version": "2.12.0",
+    "verify_mode": "enabled"
+  }
 }
 ```
 
