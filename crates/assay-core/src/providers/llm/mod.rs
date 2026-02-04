@@ -16,3 +16,4 @@ pub trait LlmClient: Send + Sync {
 
 pub mod fake;
 pub mod openai;
+pub mod tracing;
