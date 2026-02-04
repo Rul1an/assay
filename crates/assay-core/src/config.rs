@@ -2,6 +2,7 @@ use crate::errors::ConfigError;
 use crate::model::EvalConfig;
 use std::path::Path;
 
+pub mod otel;
 pub mod path_resolver;
 pub mod resolve;
 

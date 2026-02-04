@@ -35,8 +35,15 @@ emac = "emac"
 sigfault = "sigfault"
 invald = "invald"
 
-# Dutch common words (false positives in traces/examples)
+# Dutch common words (false positives in traces/examples, audit docs)
 controle = "controle"
+matcht = "matcht"
+definitieve = "definitieve"
+Definitieve = "Definitieve"
+expliciet = "expliciet"
+Conclusie = "Conclusie"
+doen = "doen"
+implicatie = "implicatie"
 controles = "controles"
 productie = "productie"
 wil = "wil"
@@ -67,4 +74,7 @@ extend-exclude = [
     "**/WORKFLOWS-OVERVIEW.md",
     "**/DX-REVIEW-MATERIALS.md",
     "**/DX-IMPLEMENTATION-PLAN.md",
+    # Dutch project docs (internal)
+    "**/docs/project/**",
+    "**/docs/maintainers/**",
 ]

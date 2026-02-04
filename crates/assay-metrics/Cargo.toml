@@ -17,7 +17,7 @@ serde_json = { workspace = true, features = ["std"] }
 assay-core.workspace = true
 assay-common = { workspace = true, features = ["std"] }
 regex.workspace = true
-jsonschema = "0.19"
+jsonschema = "0.40"
 serde_yaml.workspace = true
 tracing.workspace = true
 

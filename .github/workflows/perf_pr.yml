@@ -39,7 +39,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
         with:
           components: rustfmt
-      - uses: bencherdev/bencher@485cfb6f9737becbb642bb37d76fa0649d5dae69 # @main
+      - uses: bencherdev/bencher@886fbed6aad69e12a7852b0fc9ce49c50516c578 # @main
       # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
       - name: Criterion (store_write_heavy)
         env:

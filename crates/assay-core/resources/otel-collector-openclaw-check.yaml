@@ -1,0 +1,41 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        # OpenClaw Guard: Default to localhost binding (Defense against accidental exposure)
+        endpoint: "127.0.0.1:4317"
+      http:
+        endpoint: "127.0.0.1:4318"
+
+processors:
+  # OpenClaw Defense: Downstream Redaction as "Last Line of Defense"
+  redaction:
+    allow_all_keys: false
+    allowed_keys:
+      - "gen_ai.usage.*"
+      - "http.status_code"
+      - "assay.blob.ref"
+    blocked_values:
+      - "sk-*"
+      - "Bearer *"
+
+  # OpenClaw Defense: Resource Normalization
+  resource:
+    attributes:
+    - action: delete
+      key: process.command_line
+    - action: delete
+      key: process.executable.path
+
+exporters:
+  otlp/secure:
+    endpoint: "${env:OTEL_COLLECTOR_UPSTREAM_ENDPOINT}"
+    tls:
+      insecure: false
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [redaction, resource]
+      exporters: [otlp/secure]
