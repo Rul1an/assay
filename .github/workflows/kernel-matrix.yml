@@ -246,6 +246,9 @@ jobs:
       needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
+    # TEMPORARY: self-hosted runner has corrupted _actions cache that requires manual intervention.
+    # This allows PRs to merge while the runner is being fixed.
+    continue-on-error: true
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ matrix.kernel }}
       cancel-in-progress: true

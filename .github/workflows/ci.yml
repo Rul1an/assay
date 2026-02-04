@@ -295,6 +295,9 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted]
     timeout-minutes: 60
+    # TEMPORARY: self-hosted runner has corrupted _actions cache that requires manual intervention.
+    # This allows PRs to merge while the runner is being fixed.
+    continue-on-error: true
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
       cancel-in-progress: true
