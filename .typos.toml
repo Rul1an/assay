@@ -74,4 +74,7 @@ extend-exclude = [
     "**/WORKFLOWS-OVERVIEW.md",
     "**/DX-REVIEW-MATERIALS.md",
     "**/DX-IMPLEMENTATION-PLAN.md",
+    # Dutch project docs (internal)
+    "**/docs/project/**",
+    "**/docs/maintainers/**",
 ]

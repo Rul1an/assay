@@ -708,6 +708,176 @@ flowchart TB
 | **Cache Untrusted** | Digest (and signature if required) verified on every cache read |
 | **Lockfile Hard Fail** | Digest mismatches with lockfile are always hard errors |
 
+## Generated Diagrams
+
+The following diagrams are automatically generated from the codebase by the
+[docs-auto-update workflow](../../.github/workflows/docs-auto-update.yml).
+
+### Crate Dependencies (Auto-Generated)
+
+<!-- BEGIN:CRATE_DEPS -->
+```mermaid
+flowchart TB
+    subgraph workspace["Assay Workspace"]
+        direction TB
+        assay_cli["assay-cli"]
+        assay_common["assay-common"]
+        assay_core["assay-core"]
+        assay_ebpf["assay-ebpf"]
+        assay_evidence["assay-evidence"]
+        assay_it["assay-it"]
+        assay_mcp_server["assay-mcp-server"]
+        assay_metrics["assay-metrics"]
+        assay_monitor["assay-monitor"]
+        assay_policy["assay-policy"]
+        assay_registry["assay-registry"]
+        assay_sim["assay-sim"]
+        assay_xtask["assay-xtask"]
+    end
+
+    assay_cli --> assay_common
+    assay_cli --> assay_core
+    assay_cli --> assay_evidence
+    assay_cli --> assay_mcp_server
+    assay_cli --> assay_metrics
+    assay_cli --> assay_monitor
+    assay_cli --> assay_policy
+    assay_cli --> assay_sim
+    assay_core --> assay_common
+    assay_ebpf --> assay_common
+    assay_it --> assay_core
+    assay_mcp_server --> assay_common
+    assay_mcp_server --> assay_core
+    assay_mcp_server --> assay_metrics
+    assay_metrics --> assay_common
+    assay_metrics --> assay_core
+    assay_monitor --> assay_common
+    assay_monitor --> assay_policy
+    assay_sim --> assay_core
+    assay_sim --> assay_evidence
+
+    %% Logical groupings for readability
+    subgraph core["Core"]
+        assay_core
+        assay_metrics
+        assay_policy
+        assay_evidence
+        assay_common
+    end
+
+    subgraph interface["Interface"]
+        assay_cli
+        assay_mcp_server
+    end
+
+    subgraph runtime["Runtime"]
+        assay_monitor
+        assay_ebpf
+    end
+
+    subgraph support["Support"]
+        assay_sim
+        assay_xtask
+        assay_registry
+    end
+
+```
+<!-- END:CRATE_DEPS -->
+
+### Module Structure (Auto-Generated)
+
+<!-- BEGIN:MODULE_MAP -->
+```mermaid
+flowchart TB
+    subgraph assay_cli["assay-cli"]
+        direction TB
+        cli_main["main.rs"]
+        cli_dispatch["dispatch"]
+        cli_commands["commands/"]
+        cli_args["args.rs"]
+        cli_main --> cli_dispatch
+        cli_dispatch --> cli_commands
+        cli_dispatch --> cli_args
+    end
+
+    subgraph assay_core["assay-core"]
+        direction TB
+        core_lib["lib.rs"]
+        core_engine["engine/"]
+        core_storage["storage/"]
+        core_trace["trace/"]
+        core_mcp["mcp/"]
+        core_report["report/"]
+        core_providers["providers/"]
+        core_lib --> core_engine
+        core_lib --> core_storage
+        core_lib --> core_trace
+        core_lib --> core_mcp
+        core_lib --> core_report
+        core_lib --> core_providers
+    end
+
+    subgraph assay_metrics["assay-metrics"]
+        direction TB
+        metrics_lib["lib.rs"]
+        metrics_must_contain["must_contain"]
+        metrics_semantic["semantic"]
+        metrics_regex["regex_match"]
+        metrics_schema["json_schema"]
+        metrics_args["args_valid"]
+        metrics_sequence["sequence_valid"]
+        metrics_lib --> metrics_must_contain
+        metrics_lib --> metrics_semantic
+        metrics_lib --> metrics_regex
+        metrics_lib --> metrics_schema
+        metrics_lib --> metrics_args
+        metrics_lib --> metrics_sequence
+    end
+
+    subgraph assay_mcp_server["assay-mcp-server"]
+        direction TB
+        mcp_main["main.rs"]
+        mcp_server["server"]
+        mcp_proxy["proxy"]
+        mcp_policy["policy"]
+        mcp_main --> mcp_server
+        mcp_server --> mcp_proxy
+        mcp_proxy --> mcp_policy
+    end
+
+    subgraph assay_monitor["assay-monitor"]
+        direction TB
+        mon_lib["lib.rs"]
+        mon_events["events"]
+        mon_ebpf["ebpf_loader"]
+        mon_lib --> mon_events
+        mon_lib --> mon_ebpf
+    end
+
+    subgraph assay_evidence["assay-evidence"]
+        direction TB
+        ev_lib["lib.rs"]
+        ev_bundle["bundle"]
+        ev_events["cloud_events"]
+        ev_jcs["jcs"]
+        ev_lib --> ev_bundle
+        ev_lib --> ev_events
+        ev_lib --> ev_jcs
+    end
+
+    %% Cross-crate dependencies
+    assay_cli --> assay_core
+    assay_cli --> assay_metrics
+    assay_cli --> assay_evidence
+    assay_mcp_server --> assay_core
+    assay_mcp_server --> assay_policy
+    assay_monitor --> assay_ebpf
+    core_engine --> metrics_lib
+    core_mcp --> assay_policy
+
+```
+<!-- END:MODULE_MAP -->
+
 ## Related Documentation
 
 - [Codebase Overview](codebase-overview.md) - Detailed component descriptions
