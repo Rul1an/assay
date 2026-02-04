@@ -1,0 +1,113 @@
+{
+  "description": "Open-core roadmap items for GitHub Project #4. Enterprise items are not in this repo.",
+  "epics": [
+    {
+      "id": "E1",
+      "title": "E1: Blessed init & CI on-ramp",
+      "priority": "P0",
+      "labels": [
+        "epic",
+        "dx",
+        "in progress"
+      ],
+      "items": [
+        {
+          "title": "E1.1 Template v2: assay init --ci → assay-action@v2",
+          "priority": "P0"
+        },
+        {
+          "title": "E1.2 Blessed entrypoint: documenteer init --ci, init-ci alias",
+          "priority": "P0"
+        },
+        {
+          "title": "E1.3 One-click DX demo repos (dx-demo-node, dx-demo-python)",
+          "priority": "P1"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "title": "E2: PR feedback UX (JUnit, SARIF, fork)",
+      "priority": "P0",
+      "labels": [
+        "epic",
+        "dx",
+        "in progress"
+      ],
+      "items": [
+        {
+          "title": "E2.1 JUnit default + blessed snippet",
+          "priority": "P0"
+        },
+        {
+          "title": "E2.2 SARIF location invariant + contract test",
+          "priority": "P0"
+        },
+        {
+          "title": "E2.3 SARIF limits: truncate + N omitted",
+          "priority": "P1"
+        },
+        {
+          "title": "E2.4 Fork PR: job summary only, documenteer",
+          "priority": "P1"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "title": "E3: Exit codes & reason code registry",
+      "priority": "P0",
+      "labels": [
+        "epic",
+        "dx",
+        "in progress"
+      ],
+      "items": [
+        {
+          "title": "E3.1 Error/reason code registry (E_TRACE_NOT_FOUND, etc.)",
+          "priority": "P0"
+        },
+        {
+          "title": "E3.2 summary.json: schema_version, reason_code_version",
+          "priority": "P0"
+        },
+        {
+          "title": "E3.3 Compat switch --exit-codes=v2|v1",
+          "priority": "P0"
+        },
+        {
+          "title": "E3.4 reason_code in alle outputs",
+          "priority": "P0"
+        },
+        {
+          "title": "E3.5 Docs + deprecation run.md, troubleshooting, ADR-019",
+          "priority": "P0"
+        }
+      ]
+    },
+    {
+      "id": "E4",
+      "title": "E4: Ergonomie & debuggability",
+      "priority": "P1",
+      "labels": [
+        "epic",
+        "dx",
+        "in design"
+      ],
+      "items": [
+        {
+          "title": "E4.1 Next step in errors, suggest_next_steps",
+          "priority": "P1"
+        },
+        {
+          "title": "E4.2 Performance DX: slowest 5, cache, phase timings",
+          "priority": "P1"
+        },
+        {
+          "title": "E4.3 Progress UX: N/M tests, ETA",
+          "priority": "P1"
+        }
+      ]
+    }
+  ]
+}
