@@ -39,13 +39,14 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 
 ### 3.1 Required Top-Level Fields
 
-| Field            | Type    | Required | Description |
-|------------------|---------|----------|-------------|
-| `schema_version` | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
-| `exit_code`      | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
-| `reason_code`    | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. MAY be empty string when exit_code is 0. |
-| `message`        | string  | No       | Human-readable one-line description of outcome. |
-| `next_step`      | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
+| Field                 | Type    | Required | Description |
+|-----------------------|---------|----------|-------------|
+| `schema_version`     | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
+| `reason_code_version`| integer | **Yes**  | Version of the reason code registry. MUST be present. MUST equal `1` in Outputs-v1. Future changes to the reason code set use this version. Consumers MUST branch on `(reason_code_version, reason_code)` for semantics; exit code is coarse transport only. Consumers MUST treat unknown versions as "compat required" (fail closed or fallback parsing). |
+| `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
+| `reason_code`         | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. MAY be empty string when exit_code is 0. |
+| `message`             | string  | No       | Human-readable one-line description of outcome. |
+| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
 
 ### 3.2 Provenance (Artifact Auditability)
 
@@ -78,6 +79,7 @@ Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase
 ```json
 {
   "schema_version": 1,
+  "reason_code_version": 1,
   "exit_code": 0,
   "reason_code": "",
   "assay_version": "2.12.0",
@@ -93,6 +95,7 @@ Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase
 ```json
 {
   "schema_version": 1,
+  "reason_code_version": 1,
   "exit_code": 2,
   "reason_code": "E_TRACE_NOT_FOUND",
   "message": "Trace file not found: traces/ci.jsonl",

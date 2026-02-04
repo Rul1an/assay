@@ -12,6 +12,7 @@ benchmark_results/
 junit.xml
 sarif.json
 run.json
+summary.json
 otel.jsonl
 perf_e2e_results.json
 out/
