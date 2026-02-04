@@ -256,6 +256,14 @@ jobs:
           sudo mkdir -p "$GITHUB_WORKSPACE"
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
 
+          # Fix actions cache so checkout can load (self-hosted may have root-owned _actions)
+          if [ -d "/opt/actions-runner/_work/_actions" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "/opt/actions-runner/_work/_actions" 2>/dev/null || true
+          fi
+          if [ -n "${RUNNER_WORKDIR:-}" ] && [ -d "${RUNNER_WORKDIR}/_actions" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          fi
+
           # runner internals (best effort)
           if [ -n "${RUNNER_WORKDIR:-}" ]; then
             # sudo rm -rf "${RUNNER_WORKDIR}/_temp" "${RUNNER_WORKDIR}/_tool" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
