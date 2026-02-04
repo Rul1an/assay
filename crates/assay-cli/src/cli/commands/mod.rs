@@ -543,7 +543,18 @@ fn decide_run_outcome(
         );
     }
 
-    // Priority 3: Test Failures
+    // Priority 3: Judge uncertain (abstain) — exit 1, E_JUDGE_UNCERTAIN
+    let abstain_count = results
+        .iter()
+        .filter(|r| has_judge_verdict_abstain(&r.details))
+        .count();
+    if abstain_count > 0 {
+        let mut o = RunOutcome::judge_uncertain(abstain_count);
+        o.exit_code = ReasonCode::EJudgeUncertain.exit_code_for(version);
+        return o;
+    }
+
+    // Priority 4: Test Failures
     let fails = results
         .iter()
         .filter(|r| matches!(r.status, TestStatus::Fail))
@@ -554,7 +565,7 @@ fn decide_run_outcome(
         return o;
     }
 
-    // Priority 4: Strict Mode Violations
+    // Priority 5: Strict Mode Violations
     if strict {
         let violations = results
             .iter()
@@ -574,10 +585,25 @@ fn decide_run_outcome(
         }
     }
 
-    // Success (ensure version compliance though Success is usually 0 in all versions)
+    // Priority 6: Success (ensure version compliance though Success is usually 0 in all versions)
     let mut o = RunOutcome::success();
     o.exit_code = ReasonCode::Success.exit_code_for(version);
     o
+}
+
+/// True if this result row has any judge metric with verdict "Abstain" (E7.5).
+fn has_judge_verdict_abstain(details: &serde_json::Value) -> bool {
+    let Some(metrics) = details.get("metrics").and_then(|m| m.as_object()) else {
+        return false;
+    };
+    for (_name, metric_val) in metrics {
+        if let Some(inner) = metric_val.get("details").and_then(|d| d.get("verdict")) {
+            if inner.as_str() == Some("Abstain") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn pick_infra_reason(
@@ -984,5 +1010,46 @@ impl assay_core::providers::llm::LlmClient for DummyClient {
 
     fn provider_name(&self) -> &'static str {
         "dummy"
+    }
+}
+
+#[cfg(test)]
+mod run_outcome_tests {
+    use super::has_judge_verdict_abstain;
+
+    #[test]
+    fn test_has_judge_verdict_abstain_detects_abstain() {
+        let details = serde_json::json!({
+            "metrics": {
+                "faithfulness": {
+                    "score": 0.5,
+                    "passed": false,
+                    "unstable": true,
+                    "details": { "verdict": "Abstain", "score": 0.5 }
+                }
+            }
+        });
+        assert!(has_judge_verdict_abstain(&details));
+    }
+
+    #[test]
+    fn test_has_judge_verdict_abstain_ignores_pass() {
+        let details = serde_json::json!({
+            "metrics": {
+                "faithfulness": {
+                    "score": 1.0,
+                    "passed": true,
+                    "unstable": false,
+                    "details": { "verdict": "Pass", "score": 1.0 }
+                }
+            }
+        });
+        assert!(!has_judge_verdict_abstain(&details));
+    }
+
+    #[test]
+    fn test_has_judge_verdict_abstain_no_metrics() {
+        let details = serde_json::json!({});
+        assert!(!has_judge_verdict_abstain(&details));
     }
 }
