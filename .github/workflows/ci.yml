@@ -291,13 +291,11 @@ jobs:
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
     needs: [test, prep-self-hosted-actions-perms]
-    # Security: never run untrusted code from forks on self-hosted
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # TEMPORARY DISABLED: self-hosted runner has corrupted _actions cache (see issue #130).
+    # Re-enable when runner is fixed by removing '&& false' from the condition.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && false
     runs-on: [self-hosted]
     timeout-minutes: 60
-    # TEMPORARY: self-hosted runner has corrupted _actions cache that requires manual intervention.
-    # This allows PRs to merge while the runner is being fixed.
-    continue-on-error: true
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
       cancel-in-progress: true
