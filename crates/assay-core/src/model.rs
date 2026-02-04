@@ -12,7 +12,13 @@ pub struct EvalConfig {
     pub settings: Settings,
     #[serde(default, skip_serializing_if = "is_default_thresholds")]
     pub thresholds: crate::thresholds::ThresholdConfig,
+    #[serde(default, skip_serializing_if = "is_default_otel")]
+    pub otel: crate::config::otel::OtelConfig,
     pub tests: Vec<TestCase>,
+}
+
+fn is_default_otel(o: &crate::config::otel::OtelConfig) -> bool {
+    o == &crate::config::otel::OtelConfig::default()
 }
 
 impl EvalConfig {
@@ -664,6 +670,7 @@ mod tests {
                 metadata: None,
                 on_error: None,
             }],
+            otel: Default::default(),
         };
         assert!(config.validate().is_err());
     }

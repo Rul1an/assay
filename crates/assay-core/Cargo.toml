@@ -32,6 +32,8 @@ tracing.workspace = true
 uuid.workspace = true
 chrono = { workspace = true, features = ["std", "clock"] }
 sha2.workspace = true
+hmac = "0.12"
+lazy_static = "1.4"
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt-multi-thread"] }
 
 # Tool signing
@@ -45,7 +47,7 @@ hex.workspace = true
 md5 = "0.8.0"
 strsim = "0.11.1"
 serde_ignored = "0.1.14"
-jsonschema = "0.19"
+jsonschema = "0.40"
 regex.workspace = true
 tempfile.workspace = true
 globset = "0.4"
@@ -58,6 +60,8 @@ schemars = "1.2.0"
 
 # SQLite: always use bundled to avoid cross-platform/cross-compilation issues
 rusqlite = { version = "0.31", features = ["bundled"] }
+sha256 = "1.6.0"
+url = "2.5.8"
 
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature
@@ -78,3 +82,4 @@ harness = false
 tempfile = "3.23.0"
 serial_test = "3"
 criterion = "0.8"
+tracing-subscriber = { version = "0.3.22", features = ["json", "fmt", "env-filter"] }

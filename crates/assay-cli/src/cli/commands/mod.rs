@@ -641,6 +641,18 @@ async fn build_runner(
         client = Arc::new(StrictLlmClient::new(client));
     }
 
+    // Observability (OTel GenAI) - E8
+    if let Err(e) = cfg.otel.validate() {
+        return Err(anyhow::anyhow!("telemetry config error: {}", e));
+    }
+    // Only wrap if "enabled" (implicit via capture_mode != Off check or always wrap if we want metrics regardless?)
+    // TracingLlmClient always emits spans, but redaction controls payload.
+    // If we want spans even without payloads (metrics etc), we always wrap.
+    // However, for now we can wrap unconditionally as it's low overhead.
+    // Or check if config is not default?
+    use assay_core::providers::llm::tracing::TracingLlmClient;
+    client = Arc::new(TracingLlmClient::new(client, cfg.otel.clone()));
+
     let metrics = assay_metrics::default_metrics();
 
     let replay_mode = trace_file.is_some();

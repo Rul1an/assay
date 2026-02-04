@@ -3,9 +3,9 @@ use sha2::{Digest, Sha256};
 
 // We need types for what we cache.
 // For args_schema, we cache the compiled JSON Validator?
-// jsonschema::JSONSchema is not Clone, but is Send+Sync.
+// jsonschema::Validator is Clone (0.40), Send+Sync.
 // moka::sync::Cache requires Value to optionally be Clone if we use get().
-// But we can use get_with or manual wrapper. Arc<JSONSchema> is Clone.
+// Arc<Validator> is Clone.
 
 // For now, let's define placeholder types or use what we have.
 #[derive(Debug, Clone)]

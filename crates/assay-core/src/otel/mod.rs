@@ -1,5 +1,10 @@
 use crate::model::TestResultRow;
 
+pub mod genai;
+pub mod metrics;
+pub mod redaction;
+pub mod semconv;
+
 #[derive(Debug, Clone, Default)]
 pub struct OTelConfig {
     pub jsonl_path: Option<std::path::PathBuf>,

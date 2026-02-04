@@ -22,12 +22,10 @@ exclude = [
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # Ignore specific advisories (add RUSTSEC-YYYY-NNNN here if needed)
+# Only list advisories that currently match a crate in the tree; remove when dep is upgraded or removed.
 ignore = [
-    # paste is widely used and the "unmaintained" status is disputed
-    # See: https://rustsec.org/advisories/RUSTSEC-2024-0436.html
-    "RUSTSEC-2024-0436",
-    # rsa 0.9.x: Marvin Attack timing sidechannel; no fixed upgrade (assay-mcp-server JWT)
-    # See: https://rustsec.org/advisories/RUSTSEC-2023-0071.html
+    # rsa: transitive via jsonwebtoken (assay-mcp-server). No safe upgrade; timing sidechannel.
+    # JWT verification is server-side; accept risk for MCP auth until jsonwebtoken/rsa offer a fix.
     "RUSTSEC-2023-0071",
 ]
 
@@ -63,6 +61,7 @@ confidence-threshold = 0.93
 # Allow these licenses
 allow = [
     "MIT",
+    "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

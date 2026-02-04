@@ -31,6 +31,10 @@ echo "🚀 Starting Assay Verification..."
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR"
 
+# Test path for LSM block: use ASSAY_TEST_DIR if set (e.g. workspace on restricted /tmp runners)
+export ASSAY_TEST_DIR="${ASSAY_TEST_DIR:-/tmp/assay-test}"
+ASSAY_TEST_PATH="${ASSAY_TEST_DIR}/secret.txt"
+
 # Cleanup stale artifacts immediately to free disk space
 echo "🧹 [Init] Cleaning up stale verification artifacts..."
 sudo rm -rf /tmp/assay-lsm-verify || true
@@ -147,7 +151,7 @@ runtime_monitor:
     - id: "block-secret"
       type: "file_open"
       match:
-        path_globs: ["/tmp/assay-test/secret.txt"]
+        path_globs: ["$ASSAY_TEST_PATH"]
       severity: "critical"
       action: "deny"
 kill_switch:
@@ -164,7 +168,7 @@ RUN_TEST_CMD='
 set -e
 # Cleanup any stale monitors
 pkill -x assay || true
-rm -f /tmp/assay-test/secret.txt || true
+rm -f "${ASSAY_TEST_DIR:-/tmp/assay-test}/secret.txt" || true
 
 echo ">> [Diag] Kernel: $(uname -r)"
 echo ">> [Diag] Active LSMs: $(cat /sys/kernel/security/lsm 2>/dev/null || echo "N/A")"
@@ -182,8 +186,11 @@ if ! grep -q "bpf" /sys/kernel/security/lsm 2>/dev/null; then
 fi
 
 echo ">> [Test] Setting up test files..."
-mkdir -p /tmp/assay-test
-echo "TOP SECRET DATA" > /tmp/assay-test/secret.txt
+mkdir -p "${ASSAY_TEST_DIR:-/tmp/assay-test}"
+# Create secret only if missing (CI may pre-create as runner user when /tmp is restricted)
+if [ ! -f "${ASSAY_TEST_DIR:-/tmp/assay-test}/secret.txt" ]; then
+  echo "TOP SECRET DATA" > "${ASSAY_TEST_DIR:-/tmp/assay-test}/secret.txt"
+fi
 echo ">> [Info] Initial file creation complete."
 
 # Start Monitor
@@ -266,26 +273,27 @@ if [ "$READY" -ne 1 ]; then
 fi
 echo "✅ Monitor Attached and Policy Armed"
 
-echo ">> [Test] Attempting Access (cat /tmp/assay-test/secret.txt)..."
+SECRET_PATH="${ASSAY_TEST_DIR:-/tmp/assay-test}/secret.txt"
+echo ">> [Test] Attempting Access (cat $SECRET_PATH)..."
 echo ">> [Debug] File Stat:"
-stat /tmp/assay-test/secret.txt || echo "stat failed"
-stat -c "Dev: %d (0x%x) Ino: %i" /tmp/assay-test/secret.txt || true
-ls -ln /tmp/assay-test/secret.txt
+stat "$SECRET_PATH" || echo "stat failed"
+stat -c "Dev: %d (0x%x) Ino: %i" "$SECRET_PATH" || true
+ls -ln "$SECRET_PATH"
 
-chmod 644 /tmp/assay-test/secret.txt
+chmod 644 "$SECRET_PATH"
 
 set +e
 if id nobody >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
   echo ">> [Test] Access Command: sudo -u nobody -- cat ..."
-  OUTPUT="$(sudo -u nobody -- cat /tmp/assay-test/secret.txt 2>&1)"
+  OUTPUT="$(sudo -u nobody -- cat "$SECRET_PATH" 2>&1)"
   EXIT_CODE=$?
 elif id nobody >/dev/null 2>&1 && command -v su >/dev/null 2>&1; then
   echo ">> [Test] Access Command: su -s /bin/bash nobody -c ..."
-  OUTPUT="$(su -s /bin/bash nobody -c \"cat /tmp/assay-test/secret.txt\" 2>&1)"
+  OUTPUT="$(su -s /bin/bash nobody -c \"cat $SECRET_PATH\" 2>&1)"
   EXIT_CODE=$?
 else
   echo ">> [Test] Access Command: cat (fallback to current user)..."
-  OUTPUT="$(cat /tmp/assay-test/secret.txt 2>&1)"
+  OUTPUT="$(cat "$SECRET_PATH" 2>&1)"
   EXIT_CODE=$?
 fi
 set -e

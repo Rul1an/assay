@@ -86,7 +86,7 @@ pub struct ScrubConfig {
 }
 
 impl ScrubConfig {
-    /// Default scrubber: remove auth headers and common secrets
+    /// Default scrubber: remove auth headers and common secrets (VCR/cassette sign-off: no prompt/response bodies by default).
     pub fn default_secure() -> Self {
         Self {
             request_headers: vec![
@@ -485,6 +485,44 @@ impl VcrResponse {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Sign-off: default_secure() must scrub auth and common secret headers so cassettes don't leak.
+    #[test]
+    fn test_default_secure_scrub_paths() {
+        let cfg = ScrubConfig::default_secure();
+        assert!(
+            cfg.request_headers
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case("authorization")),
+            "Must scrub Authorization"
+        );
+        assert!(
+            cfg.request_headers
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case("x-api-key")),
+            "Must scrub x-api-key"
+        );
+        assert!(
+            cfg.request_headers
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case("api-key")),
+            "Must scrub api-key"
+        );
+        assert!(
+            cfg.response_headers
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case("set-cookie")),
+            "Must scrub set-cookie"
+        );
+        assert!(
+            cfg.request_body_paths.is_empty(),
+            "Default: no body paths (audit: explicit if needed)"
+        );
+        assert!(
+            cfg.response_body_paths.is_empty(),
+            "Default: no response body paths"
+        );
+    }
 
     #[test]
     fn test_fingerprint_stability() {
