@@ -44,6 +44,21 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 
 ---
 
+**Canonical context names** (use these exactly; they match `name:` in the workflow files):
+
+| Context | Workflow file |
+|---------|----------------|
+| `CI` | `.github/workflows/ci.yml` |
+| `Smoke Install (E2E)` | `.github/workflows/smoke-install.yml` |
+| `assay-action-contract-tests` | `.github/workflows/action-tests.yml` |
+| `MCP Security (Assay)` | `.github/workflows/assay-security.yml` |
+| `Kernel Matrix CI` | `.github/workflows/kernel-matrix.yml` |
+| `Assay Gate` | `.github/workflows/assay.yml` |
+
+Use **`CI`** (not `CIExpected` or any other variant). No workflow in this repo reports a check named `CIExpected`.
+
+---
+
 ## Required checks: when each is needed
 
 | Check | What it does | **Dependabot / deps-only PRs** | **Other PRs (features, workflows, action)** |
@@ -125,3 +140,13 @@ See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the c
 - [x] Required status checks: CI only (see "Required checks: when each is needed" above; add Smoke Install / contract tests / MCP Security / Kernel Matrix when stricter gate needed).
 - [x] CODEOWNERS in place; “Require review from Code Owners” enabled.
 - [ ] Environments `release` / `crates` / `pypi` configured with required reviewers; release workflow uses `environment:` on publish jobs.
+
+---
+
+## Troubleshooting: "CIExpected — Waiting for status to be reported"
+
+If a PR shows a required check **CIExpected** that never completes, branch protection is requiring a context that no workflow reports.
+
+**Fix:** In **Settings → Branches → Branch protection rule for `main`**, under "Require status checks", remove **CIExpected** and add **CI** (from `.github/workflows/ci.yml`). Save.
+
+**Via API:** Inspect with `gh api repos/OWNER/REPO/branches/main/protection`. Ensure `required_status_checks.contexts` contains `"CI"` and not `"CIExpected"`. Re-apply using the JSON in Option B above with `"contexts": ["CI"]`.
