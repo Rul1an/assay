@@ -227,9 +227,21 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .filter(|r| r.status.is_blocking())
         .count();
     summary = summary.with_results(passed, failed, artifacts.results.len());
+    // E7.2: seeds in summary
+    summary = summary.with_seeds(artifacts.order_seed, artifacts.order_seed);
+    // E7.3: judge metrics
+    if let Some(metrics) =
+        assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
+    {
+        summary = summary.with_judge_metrics(metrics);
+    }
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
+    assay_core::report::console::print_run_footer(
+        summary.seeds.as_ref(),
+        summary.judge_metrics.as_ref(),
+    );
 
     // PR11: Export baseline logic
     if let Some(path) = &args.export_baseline {
@@ -449,9 +461,19 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .filter(|r| r.status.is_blocking())
         .count();
     summary = summary.with_results(passed, failed, artifacts.results.len());
+    summary = summary.with_seeds(artifacts.order_seed, artifacts.order_seed);
+    if let Some(metrics) =
+        assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
+    {
+        summary = summary.with_judge_metrics(metrics);
+    }
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
+    assay_core::report::console::print_run_footer(
+        summary.seeds.as_ref(),
+        summary.judge_metrics.as_ref(),
+    );
 
     let otel_cfg = assay_core::otel::OTelConfig {
         jsonl_path: args.otel_jsonl.clone(),
@@ -676,6 +698,23 @@ fn write_extended_run_json(
             "reason_code_version".to_string(),
             serde_json::json!(assay_core::report::summary::REASON_CODE_VERSION),
         );
+
+        // E7.2: seeds for replay determinism
+        if let Some(seed) = artifacts.order_seed {
+            obj.insert(
+                "seed_version".to_string(),
+                serde_json::json!(assay_core::report::summary::SEED_VERSION),
+            );
+            obj.insert("order_seed".to_string(), serde_json::json!(seed));
+            obj.insert("judge_seed".to_string(), serde_json::json!(seed));
+        }
+
+        // E7.3: judge metrics when present
+        if let Some(metrics) =
+            assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
+        {
+            obj.insert("judge_metrics".to_string(), serde_json::to_value(metrics)?);
+        }
 
         // Conflict avoidance: Move full details to 'resolution' object
         // Do NOT inject 'message' or 'next_step' top-level to avoid collisions with artifact fields.

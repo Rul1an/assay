@@ -13,6 +13,9 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// Downstream MUST branch on (reason_code_version, reason_code) rather than exit code.
 pub const REASON_CODE_VERSION: u32 = 1;
 
+/// Seed version for deterministic replay (E7.2). Same philosophy as reason_code_version.
+pub const SEED_VERSION: u32 = 1;
+
 /// Machine-readable summary for the PR gate
 ///
 /// See: SPEC-PR-Gate-Outputs-v1.md for the full contract.
@@ -49,6 +52,44 @@ pub struct Summary {
     /// Performance metrics (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub performance: Option<PerformanceMetrics>,
+
+    /// Seeds for deterministic replay (E7.2). Present when run used a seed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seeds: Option<Seeds>,
+
+    /// Judge reliability metrics (E7.3). Present when run had judge evaluations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub judge_metrics: Option<JudgeMetrics>,
+}
+
+/// Seeds used in the run (replay determinism)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Seeds {
+    /// Version of the seed schema; consumers MUST branch on this.
+    pub seed_version: u32,
+    /// Seed used for test execution order (shuffle).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_seed: Option<u64>,
+    /// Seed used for judge randomization (per-test seed derived from suite seed when present).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub judge_seed: Option<u64>,
+}
+
+/// Judge reliability metrics (low cardinality, E8-consistent)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JudgeMetrics {
+    /// Fraction of judge evaluations that returned Abstain (uncertain).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abstain_rate: Option<f64>,
+    /// Fraction of evaluations where order was swapped and outcome differed (flip).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip_rate: Option<f64>,
+    /// Fraction of evaluations where all samples agreed (consensus).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consensus_rate: Option<f64>,
+    /// Count of runs where judge was unavailable (infra/transport); do not count toward abstain_rate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_count: Option<u32>,
 }
 
 /// Provenance fields for artifact auditability (ADR-019 P0.4)
@@ -163,6 +204,8 @@ impl Summary {
             provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
+            seeds: None,
+            judge_metrics: None,
         }
     }
 
@@ -185,6 +228,8 @@ impl Summary {
             provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
+            seeds: None,
+            judge_metrics: None,
         }
     }
 
@@ -223,6 +268,96 @@ impl Summary {
         self.provenance.trace_digest = trace_digest;
         self
     }
+
+    /// Set seeds for replay determinism (E7.2)
+    pub fn with_seeds(mut self, order_seed: Option<u64>, judge_seed: Option<u64>) -> Self {
+        if order_seed.is_some() || judge_seed.is_some() {
+            self.seeds = Some(Seeds {
+                seed_version: SEED_VERSION,
+                order_seed,
+                judge_seed,
+            });
+        }
+        self
+    }
+
+    /// Set judge reliability metrics (E7.3)
+    pub fn with_judge_metrics(mut self, metrics: JudgeMetrics) -> Self {
+        self.judge_metrics = Some(metrics);
+        self
+    }
+}
+
+/// Compute judge reliability metrics from run results (E7.3).
+/// Returns None if no results have judge details.
+pub fn judge_metrics_from_results(results: &[crate::model::TestResultRow]) -> Option<JudgeMetrics> {
+    use crate::model::TestStatus;
+
+    let mut total_judge = 0u32;
+    let mut abstain_count = 0u32;
+    let mut consensus_count = 0u32;
+    let mut flip_count = 0u32;
+
+    for r in results {
+        let Some(metrics) = r.details.get("metrics").and_then(|m| m.as_object()) else {
+            continue;
+        };
+        for (_name, metric_val) in metrics {
+            let Some(details) = metric_val.get("details") else {
+                continue;
+            };
+            let verdict = details.get("verdict").and_then(|v| v.as_str());
+            let agreement = details.get("agreement").and_then(|v| v.as_f64());
+            let swapped = details
+                .get("swapped")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if verdict.is_none() && agreement.is_none() {
+                continue;
+            }
+            total_judge += 1;
+
+            if verdict == Some("Abstain") {
+                abstain_count += 1;
+            }
+            if let Some(a) = agreement {
+                if a == 0.0 || a == 1.0 {
+                    consensus_count += 1;
+                }
+                if swapped && a > 0.0 && a < 1.0 {
+                    flip_count += 1;
+                }
+            }
+        }
+    }
+
+    if total_judge == 0 {
+        return None;
+    }
+
+    let total = total_judge as f64;
+    Some(JudgeMetrics {
+        abstain_rate: Some(abstain_count as f64 / total),
+        flip_rate: Some(flip_count as f64 / total),
+        consensus_rate: Some(consensus_count as f64 / total),
+        unavailable_count: Some(
+            results
+                .iter()
+                .filter(|r| matches!(r.status, TestStatus::Error))
+                .filter(|r| {
+                    let m = r.message.to_lowercase();
+                    m.contains("timeout")
+                        || m.contains("500")
+                        || m.contains("502")
+                        || m.contains("503")
+                        || m.contains("504")
+                        || m.contains("rate limit")
+                        || m.contains("network")
+                })
+                .count() as u32,
+        ),
+    })
 }
 
 /// Write summary.json to file

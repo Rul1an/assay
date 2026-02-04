@@ -76,6 +76,31 @@ A top-level **`results`** object MAY contain:
 
 A top-level **`performance`** object MAY contain `total_duration_ms` (integer, milliseconds). Future versions MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
 
+### 3.3.1 Seeds (E7.2 – Replay Determinism)
+
+When the run used a seed for order or judge randomization, a top-level **`seeds`** object MAY be present:
+
+| Field         | Type    | Required | Description |
+|---------------|---------|----------|-------------|
+| `seed_version`| integer | **Yes**  | Version of the seed schema. MUST be `1` for Outputs-v1. Consumers MUST branch on `seed_version` when interpreting seeds. |
+| `order_seed`  | integer | No       | Seed used for test execution order (shuffle). |
+| `judge_seed`  | integer | No       | Seed used for judge randomization (suite-level; per-test seeds may be derived from this). |
+
+**Normative:** When present, `run.json` and the CLI console SHALL also expose seeds (e.g. `seed_version`, `order_seed`, `judge_seed` in run.json; a "Seeds (replay): …" line in console output) so CI logs and job summaries can show them for replay.
+
+### 3.3.2 Judge Metrics (E7.3)
+
+When the run had judge evaluations, a top-level **`judge_metrics`** object MAY be present with low-cardinality reliability metrics:
+
+| Field               | Type    | Required | Description |
+|---------------------|---------|----------|-------------|
+| `abstain_rate`      | number  | No       | Fraction of judge evaluations that returned Abstain (uncertain). |
+| `flip_rate`         | number  | No       | Fraction of evaluations where order was swapped and outcome differed. |
+| `consensus_rate`    | number  | No       | Fraction of evaluations where all samples agreed. |
+| `unavailable_count` | integer | No       | Count of runs where judge was unavailable (infra/transport); not counted toward abstain_rate. |
+
+**Normative:** Judge unavailable (transport/infra) MUST NOT be counted as Abstain; use `unavailable_count` for that. When present, run.json and the CLI console SHALL expose judge metrics so CI can display them.
+
 ### 3.4 Example (Minimal)
 
 ```json
@@ -216,7 +241,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 
 | schema_version | Date     | Changes |
 |----------------|----------|---------|
-| 1              | 2026-01  | Initial: schema_version, exit_code, reason_code, provenance, next_step, SARIF location and truncation rules. |
+| 1              | 2026-01  | Initial: schema_version, exit_code, reason_code, provenance, next_step, SARIF location and truncation rules. E7.2: seeds (seed_version, order_seed, judge_seed) in summary.json, run.json, and console. E7.3: judge_metrics (abstain_rate, flip_rate, consensus_rate, unavailable_count) in summary.json, run.json, and console. |
 
 ---
 

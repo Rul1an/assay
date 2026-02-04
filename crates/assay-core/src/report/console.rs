@@ -1,4 +1,45 @@
 use crate::model::{TestResultRow, TestStatus};
+use crate::report::summary::{JudgeMetrics, Seeds};
+
+/// Print seeds and judge metrics to stderr (E7.2/E7.3 job summary visibility in CI logs).
+pub fn print_run_footer(seeds: Option<&Seeds>, judge_metrics: Option<&JudgeMetrics>) {
+    if let Some(s) = seeds {
+        let order = s
+            .order_seed
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "—".into());
+        let judge = s
+            .judge_seed
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "—".into());
+        eprintln!(
+            "Seeds (replay): seed_version={} order_seed={} judge_seed={}",
+            s.seed_version, order, judge
+        );
+    }
+    if let Some(m) = judge_metrics {
+        let abstain = m
+            .abstain_rate
+            .map(|r| format!("{:.2}", r))
+            .unwrap_or_else(|| "—".into());
+        let flip = m
+            .flip_rate
+            .map(|r| format!("{:.2}", r))
+            .unwrap_or_else(|| "—".into());
+        let consensus = m
+            .consensus_rate
+            .map(|r| format!("{:.2}", r))
+            .unwrap_or_else(|| "—".into());
+        let unavail = m
+            .unavailable_count
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "—".into());
+        eprintln!(
+            "Judge metrics: abstain_rate={} flip_rate={} consensus_rate={} unavailable_count={}",
+            abstain, flip, consensus, unavail
+        );
+    }
+}
 
 pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
     let mut pass = 0;
