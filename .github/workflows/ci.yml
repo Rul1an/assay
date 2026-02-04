@@ -264,9 +264,27 @@ jobs:
           if-no-files-found: ignore
 
 
+  prep-self-hosted-actions-perms:
+    name: Fix self-hosted _actions (for eBPF job)
+    needs: [test]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: [self-hosted]
+    timeout-minutes: 2
+    steps:
+      - name: Chown _work/_actions
+        shell: bash
+        run: |
+          set +e
+          if [ -d "/opt/actions-runner/_work/_actions" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "/opt/actions-runner/_work/_actions" 2>/dev/null || true
+          fi
+          if [ -n "${RUNNER_WORKDIR:-}" ] && [ -d "${RUNNER_WORKDIR}/_actions" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          fi
+
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
-    needs: [test]
+    needs: [test, prep-self-hosted-actions-perms]
     # Security: never run untrusted code from forks on self-hosted
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted]
