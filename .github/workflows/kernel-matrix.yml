@@ -208,15 +208,18 @@ jobs:
         run: |
           set +e
           # Runner loads actions *before* first step of next job.
-          # chown is not enough if files are immutable; delete the whole cache so runner re-downloads.
-          echo "Removing _work/_actions to force fresh action downloads..."
+          # Files may be immutable (chattr +i) - remove that first, then delete.
+          echo "Removing immutable flags and _work/_actions..."
+          sudo chattr -R -i /opt/actions-runner/_work/_actions 2>/dev/null || true
           sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
           if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo chattr -R -i "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
             sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
           fi
           # Recreate with correct ownership
           sudo mkdir -p /opt/actions-runner/_work/_actions
           sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions
+          echo "Done. _actions directory ready for fresh downloads."
       - name: Free disk (always before matrix-test)
         shell: bash
         run: |
