@@ -103,13 +103,17 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = RunOutcome::from_reason(reason, Some(msg), None);
         o.exit_code = reason.exit_code_for(version);
-        write_run_json_minimal(&o, &run_json_path).ok();
+        if let Err(e) = write_run_json_minimal(&o, &run_json_path) {
+            eprintln!("WARNING: failed to write run.json: {}", e);
+        }
         let summary_path = run_json_path
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
         let summary = summary_from_outcome(&o);
-        assay_core::report::summary::write_summary(&summary, &summary_path).ok();
+        if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
+            eprintln!("WARNING: failed to write summary.json: {}", e);
+        }
         Ok(o.exit_code)
     };
 
@@ -254,13 +258,17 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = RunOutcome::from_reason(reason, Some(msg), None);
         o.exit_code = reason.exit_code_for(version);
-        write_run_json_minimal(&o, &run_json_path).ok();
+        if let Err(e) = write_run_json_minimal(&o, &run_json_path) {
+            eprintln!("WARNING: failed to write run.json: {}", e);
+        }
         let summary_path = run_json_path
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
         let summary = summary_from_outcome(&o);
-        assay_core::report::summary::write_summary(&summary, &summary_path).ok();
+        if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
+            eprintln!("WARNING: failed to write summary.json: {}", e);
+        }
         Ok(o.exit_code)
     };
 
@@ -601,11 +609,12 @@ fn pick_infra_reason(
 }
 
 /// Build a Summary from RunOutcome for writing summary.json (same dir as run.json).
+/// Note: verify_mode in provenance is currently defaulted to "enabled"; run/ci do not yet expose a --no-verify flag for this path (follow-up).
 fn summary_from_outcome(
     outcome: &crate::exit_codes::RunOutcome,
 ) -> assay_core::report::summary::Summary {
     let assay_version = env!("CARGO_PKG_VERSION");
-    let verify_enabled = true;
+    let verify_enabled = true; // TODO: plumb from run/ci args when available
     if outcome.exit_code == 0 {
         assay_core::report::summary::Summary::success(assay_version, verify_enabled)
     } else {
