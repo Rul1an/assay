@@ -203,17 +203,20 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
     steps:
-      - name: Fix _actions permissions (for next job)
+      - name: Nuke _actions cache (force fresh download for next job)
         shell: bash
         run: |
           set +e
-          # Runner loads actions *before* first step of next job; chown here so matrix-test can extract checkout
-          if [ -d "/opt/actions-runner/_work/_actions" ]; then
-            sudo chown -R "$(id -u):$(id -g)" "/opt/actions-runner/_work/_actions" 2>/dev/null || true
+          # Runner loads actions *before* first step of next job.
+          # chown is not enough if files are immutable; delete the whole cache so runner re-downloads.
+          echo "Removing _work/_actions to force fresh action downloads..."
+          sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
+          if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
           fi
-          if [ -n "${RUNNER_WORKDIR:-}" ] && [ -d "${RUNNER_WORKDIR}/_actions" ]; then
-            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
-          fi
+          # Recreate with correct ownership
+          sudo mkdir -p /opt/actions-runner/_work/_actions
+          sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions
       - name: Free disk (always before matrix-test)
         shell: bash
         run: |

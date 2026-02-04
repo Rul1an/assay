@@ -271,16 +271,19 @@ jobs:
     runs-on: [self-hosted]
     timeout-minutes: 2
     steps:
-      - name: Chown _work/_actions
+      - name: Nuke _actions cache (force fresh download for next job)
         shell: bash
         run: |
           set +e
-          if [ -d "/opt/actions-runner/_work/_actions" ]; then
-            sudo chown -R "$(id -u):$(id -g)" "/opt/actions-runner/_work/_actions" 2>/dev/null || true
+          # chown is not enough if files are immutable; delete the whole cache so runner re-downloads.
+          echo "Removing _work/_actions to force fresh action downloads..."
+          sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
+          if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
           fi
-          if [ -n "${RUNNER_WORKDIR:-}" ] && [ -d "${RUNNER_WORKDIR}/_actions" ]; then
-            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
-          fi
+          # Recreate with correct ownership
+          sudo mkdir -p /opt/actions-runner/_work/_actions
+          sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions
 
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
