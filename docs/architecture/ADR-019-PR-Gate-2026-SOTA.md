@@ -5,7 +5,7 @@
 **Last Updated:** 2026-01-30
 **Extends:** ADR-004 (exit code 3, judge strategy); complements ADR-017 (main store only; ADR-017 covers MandateStore WAL).
 
-**Related:** [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [ADR-003 Gate Semantics](./ADR-003-Gate-Semantics.md), [ADR-014 GitHub Action v2](./ADR-014-GitHub-Action-v2.md), [ADR-018 GitHub Action v2.1](./ADR-018-GitHub-Action-v2.1.md)
+**Related:** [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [SPEC-PR-Gate-Outputs-v1](./SPEC-PR-Gate-Outputs-v1.md) (output contract and reason code registry), [ADR-003 Gate Semantics](./ADR-003-Gate-Semantics.md), [ADR-014 GitHub Action v2](./ADR-014-GitHub-Action-v2.md), [ADR-018 GitHub Action v2.1](./ADR-018-GitHub-Action-v2.1.md)
 
 ---
 

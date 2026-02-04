@@ -39,17 +39,18 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 
 ### 3.1 Required Top-Level Fields
 
-| Field            | Type    | Required | Description |
-|------------------|---------|----------|-------------|
-| `schema_version` | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
-| `exit_code`      | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
-| `reason_code`    | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. MAY be empty string when exit_code is 0. |
-| `message`        | string  | No       | Human-readable one-line description of outcome. |
-| `next_step`      | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
+| Field                 | Type    | Required | Description |
+|-----------------------|---------|----------|-------------|
+| `schema_version`     | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
+| `reason_code_version`| integer | **Yes**  | Version of the reason code registry. MUST be present. MUST equal `1` in Outputs-v1. Future changes to the reason code set use this version. Consumers MUST branch on `(reason_code_version, reason_code)` for semantics; exit code is coarse transport only. Consumers MUST treat unknown versions as "compat required" (fail closed or fallback parsing). |
+| `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
+| `reason_code`         | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. When exit_code is 0, MAY be empty string or a designated success code (e.g. OK); empty is allowed and common. |
+| `message`             | string  | No       | Human-readable one-line description of outcome. |
+| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
 
 ### 3.2 Provenance (Artifact Auditability)
 
-Every summary.json MUST include the following provenance fields so that gates remain auditable (ADR-019 P0.4).
+Every summary.json MUST include a top-level **`provenance`** object with the following fields so that gates remain auditable (ADR-019 P0.4).
 
 | Field                 | Type   | Required | Description |
 |-----------------------|--------|----------|-------------|
@@ -63,28 +64,38 @@ Every summary.json MUST include the following provenance fields so that gates re
 
 ### 3.3 Results Summary (Optional but Recommended)
 
-| Field           | Type   | Required | Description |
-|-----------------|--------|----------|-------------|
-| `passed`        | integer| No       | Count of tests passed. |
-| `failed`        | integer| No       | Count of tests failed. |
-| `warned`        | integer| No       | Count of tests with Warn/Flaky (depends on strict mode). |
-| `skipped`       | integer| No       | Count of tests skipped (e.g. cache hit). |
-| `total_duration_ms` | integer | No | Total run duration in milliseconds. |
+A top-level **`results`** object MAY contain:
 
-Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
+| Field     | Type    | Required | Description |
+|-----------|---------|----------|-------------|
+| `passed`  | integer | No       | Count of tests passed. |
+| `failed`  | integer | No       | Count of tests failed. |
+| `warned`  | integer | No       | Count of tests with Warn/Flaky (depends on strict mode). |
+| `skipped` | integer | No       | Count of tests skipped (e.g. cache hit). |
+| `total`   | integer | No       | Total test count. |
+
+A top-level **`performance`** object MAY contain `total_duration_ms` (integer, milliseconds). Future versions MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
 
 ### 3.4 Example (Minimal)
 
 ```json
 {
   "schema_version": 1,
+  "reason_code_version": 1,
   "exit_code": 0,
   "reason_code": "",
-  "assay_version": "2.12.0",
-  "verify_mode": "enabled",
-  "passed": 10,
-  "failed": 0,
-  "total_duration_ms": 1234
+  "provenance": {
+    "assay_version": "2.12.0",
+    "verify_mode": "enabled"
+  },
+  "results": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10
+  },
+  "performance": {
+    "total_duration_ms": 1234
+  }
 }
 ```
 
@@ -93,12 +104,15 @@ Future versions of this schema MAY add `slowest_tests`, `cache_hit_rate`, `phase
 ```json
 {
   "schema_version": 1,
+  "reason_code_version": 1,
   "exit_code": 2,
   "reason_code": "E_TRACE_NOT_FOUND",
   "message": "Trace file not found: traces/ci.jsonl",
   "next_step": "Run: assay doctor --config ci-eval.yaml --trace-file traces/ci.jsonl",
-  "assay_version": "2.12.0",
-  "verify_mode": "enabled"
+  "provenance": {
+    "assay_version": "2.12.0",
+    "verify_mode": "enabled"
+  }
 }
 ```
 

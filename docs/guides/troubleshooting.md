@@ -2,6 +2,8 @@
 
 Common errors and how to fix them.
 
+**Exit codes:** Configuration and input errors (e.g. trace not found, invalid YAML) produce **exit code 2**. Infrastructure and judge errors (e.g. API unavailable, rate limit) produce **exit code 3**. For precise handling, use `reason_code` in `run.json` or `summary.json`; see [run reference](../reference/cli/run.md#exit-codes) for the full table and compatibility (v1 vs v2).
+
 ---
 
 ## Configuration Errors (Exit Code 2)
@@ -156,13 +158,17 @@ fatal: ConfigError: duplicate test id 'my_test'
 
 ---
 
-## Trace Issues
+## Trace Issues (Exit Code 2)
+
+Trace and input errors use **exit code 2** with reason code `E_TRACE_NOT_FOUND` (or similar) in `run.json` / `summary.json`.
 
 ### Trace File Not Found
 
 ```
 fatal: IOError: trace file not found: traces/golden.jsonl
 ```
+
+**Exit code:** 2. **Reason code:** `E_TRACE_NOT_FOUND` (in run.json / summary.json).
 
 **Fix:** Check the path and ensure the file exists:
 
@@ -190,6 +196,24 @@ fatal: TraceError: trace file is empty: traces/empty.jsonl
 ```
 
 **Fix:** Ensure your recording captured events. Re-record if necessary.
+
+---
+
+## Judge / API Unavailable (Exit Code 3)
+
+When the judge service or provider is unreachable or returns an error, Assay exits with **exit code 3** and a reason code such as `E_JUDGE_UNAVAILABLE`, `E_RATE_LIMIT`, `E_PROVIDER_5XX`, or `E_TIMEOUT` in `run.json` / `summary.json`.
+
+**Typical causes:**
+
+- Judge/API endpoint down or returning 5xx
+- Rate limit hit (provider or judge)
+- Network timeout or connectivity issues
+
+**What to do:**
+
+1. Check the error message and `reason_code` in `run.json` or `summary.json`.
+2. Retry after a short delay (rate limits) or verify the service is up.
+3. For compatibility and the full reason code list, see [run.md — Exit codes and compatibility](../reference/cli/run.md#exit-codes).
 
 ---
 

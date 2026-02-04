@@ -9,13 +9,21 @@ use std::path::Path;
 /// Current schema version for summary.json
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Reason code registry version (stable for downstream branching).
+/// Downstream MUST branch on (reason_code_version, reason_code) rather than exit code.
+pub const REASON_CODE_VERSION: u32 = 1;
+
 /// Machine-readable summary for the PR gate
 ///
-/// See: SPEC-PR-Gate-Outputs-v1.md for the full contract
+/// See: SPEC-PR-Gate-Outputs-v1.md for the full contract.
+/// Downstream MUST branch on (reason_code_version, reason_code) rather than exit code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Summary {
     /// Schema version for compatibility detection
     pub schema_version: u32,
+
+    /// Version of the reason code registry. MUST be 1 for Outputs-v1. Downstream MUST branch on (reason_code_version, reason_code) rather than exit code.
+    pub reason_code_version: u32,
 
     /// Exit code: 0=pass, 1=test failure, 2=config error, 3=infra error
     pub exit_code: i32,
@@ -147,6 +155,7 @@ impl Summary {
     pub fn success(assay_version: &str, verify_enabled: bool) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            reason_code_version: REASON_CODE_VERSION,
             exit_code: 0,
             reason_code: String::new(),
             message: Some("All tests passed".to_string()),
@@ -168,6 +177,7 @@ impl Summary {
     ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            reason_code_version: REASON_CODE_VERSION,
             exit_code,
             reason_code: reason_code.to_string(),
             message: Some(message.to_string()),
@@ -233,6 +243,7 @@ mod tests {
             .with_duration(1234);
 
         assert_eq!(summary.schema_version, 1);
+        assert_eq!(summary.reason_code_version, 1);
         assert_eq!(summary.exit_code, 0);
         assert_eq!(summary.reason_code, "");
         assert_eq!(summary.provenance.verify_mode, "enabled");
@@ -249,6 +260,7 @@ mod tests {
             true,
         );
 
+        assert_eq!(summary.reason_code_version, 1);
         assert_eq!(summary.exit_code, 2);
         assert_eq!(summary.reason_code, "E_TRACE_NOT_FOUND");
         assert!(summary.next_step.is_some());
@@ -260,6 +272,13 @@ mod tests {
 
         let json = serde_json::to_string_pretty(&summary).unwrap();
         assert!(json.contains("\"schema_version\": 1"));
+        assert!(json.contains("\"reason_code_version\": 1"));
         assert!(json.contains("\"assay_version\": \"2.12.0\""));
+
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["reason_code_version"], 1,
+            "reason_code_version must be present and integer"
+        );
     }
 }

@@ -99,11 +99,21 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
 
-    // Helper to write error run.json and return specific exit code
+    // Helper to write error run.json + summary.json and return specific exit code
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = RunOutcome::from_reason(reason, Some(msg), None);
         o.exit_code = reason.exit_code_for(version);
-        write_run_json_minimal(&o, &run_json_path).ok(); // Best effort write
+        if let Err(e) = write_run_json_minimal(&o, &run_json_path) {
+            eprintln!("WARNING: failed to write run.json: {}", e);
+        }
+        let summary_path = run_json_path
+            .parent()
+            .map(|p| p.join("summary.json"))
+            .unwrap_or_else(|| PathBuf::from("summary.json"));
+        let summary = summary_from_outcome(&o);
+        if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
+            eprintln!("WARNING: failed to write summary.json: {}", e);
+        }
         Ok(o.exit_code)
     };
 
@@ -201,6 +211,24 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     // Use extended writer for authoritative reason coding in run.json
     write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
 
+    let summary_path = run_json_path
+        .parent()
+        .map(|p| p.join("summary.json"))
+        .unwrap_or_else(|| PathBuf::from("summary.json"));
+    let mut summary = summary_from_outcome(&outcome);
+    let passed = artifacts
+        .results
+        .iter()
+        .filter(|r| r.status.is_passing())
+        .count();
+    let failed = artifacts
+        .results
+        .iter()
+        .filter(|r| r.status.is_blocking())
+        .count();
+    summary = summary.with_results(passed, failed, artifacts.results.len());
+    assay_core::report::summary::write_summary(&summary, &summary_path)?;
+
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     // PR11: Export baseline logic
@@ -226,11 +254,21 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
 
-    // Helper to write error run.json and return specific exit code
+    // Helper to write error run.json + summary.json and return specific exit code
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = RunOutcome::from_reason(reason, Some(msg), None);
         o.exit_code = reason.exit_code_for(version);
-        write_run_json_minimal(&o, &run_json_path).ok();
+        if let Err(e) = write_run_json_minimal(&o, &run_json_path) {
+            eprintln!("WARNING: failed to write run.json: {}", e);
+        }
+        let summary_path = run_json_path
+            .parent()
+            .map(|p| p.join("summary.json"))
+            .unwrap_or_else(|| PathBuf::from("summary.json"));
+        let summary = summary_from_outcome(&o);
+        if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
+            eprintln!("WARNING: failed to write summary.json: {}", e);
+        }
         Ok(o.exit_code)
     };
 
@@ -395,6 +433,24 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
     }
 
+    let summary_path = run_json_path
+        .parent()
+        .map(|p| p.join("summary.json"))
+        .unwrap_or_else(|| PathBuf::from("summary.json"));
+    let mut summary = summary_from_outcome(&outcome);
+    let passed = artifacts
+        .results
+        .iter()
+        .filter(|r| r.status.is_passing())
+        .count();
+    let failed = artifacts
+        .results
+        .iter()
+        .filter(|r| r.status.is_blocking())
+        .count();
+    summary = summary.with_results(passed, failed, artifacts.results.len());
+    assay_core::report::summary::write_summary(&summary, &summary_path)?;
+
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
 
     let otel_cfg = assay_core::otel::OTelConfig {
@@ -552,6 +608,27 @@ fn pick_infra_reason(
     ReasonCode::EJudgeUnavailable
 }
 
+/// Build a Summary from RunOutcome for writing summary.json (same dir as run.json).
+/// Note: verify_mode in provenance is currently defaulted to "enabled"; run/ci do not yet expose a --no-verify flag for this path (follow-up).
+fn summary_from_outcome(
+    outcome: &crate::exit_codes::RunOutcome,
+) -> assay_core::report::summary::Summary {
+    let assay_version = env!("CARGO_PKG_VERSION");
+    let verify_enabled = true; // TODO: plumb from run/ci args when available
+    if outcome.exit_code == 0 {
+        assay_core::report::summary::Summary::success(assay_version, verify_enabled)
+    } else {
+        assay_core::report::summary::Summary::failure(
+            outcome.exit_code,
+            &outcome.reason_code,
+            outcome.message.as_deref().unwrap_or(""),
+            outcome.next_step.as_deref().unwrap_or(""),
+            assay_version,
+            verify_enabled,
+        )
+    }
+}
+
 fn write_extended_run_json(
     artifacts: &assay_core::report::RunArtifacts,
     outcome: &crate::exit_codes::RunOutcome,
@@ -568,6 +645,10 @@ fn write_extended_run_json(
         obj.insert(
             "reason_code".to_string(),
             serde_json::json!(outcome.reason_code),
+        );
+        obj.insert(
+            "reason_code_version".to_string(),
+            serde_json::json!(assay_core::report::summary::REASON_CODE_VERSION),
         );
 
         // Conflict avoidance: Move full details to 'resolution' object
@@ -594,6 +675,7 @@ fn write_run_json_minimal(
     let v = serde_json::json!({
         "exit_code": outcome.exit_code,
         "reason_code": outcome.reason_code,
+        "reason_code_version": assay_core::report::summary::REASON_CODE_VERSION,
         "resolution": outcome
     });
     if let Some(parent) = path.parent() {

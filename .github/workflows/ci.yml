@@ -425,3 +425,12 @@ jobs:
           name: ci-smoke-logs-self-hosted
           path: /tmp/assay-lsm-verify/
           if-no-files-found: ignore
+
+  # Single job named "CI" so branch protection (required status check "CI") is satisfied.
+  # Branch protection matches check run name; other jobs use descriptive names, this one reports "CI".
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [deps-security, clippy, open-core-boundary, perf, test, ebpf-smoke-ubuntu]
+    steps:
+      - run: echo "All required CI jobs passed."
