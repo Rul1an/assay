@@ -608,11 +608,38 @@ Als deze vier blokken (diffs, output, tests, SPEC) kloppen → **✅ definitive 
 
 ## Checklist vóór PR open
 
-- [ ] `Summary.seeds` is non-optional en altijd geserialiseerd.
-- [ ] `Seeds.order_seed` en `Seeds.judge_seed` keys staan altijd in JSON (string of null).
-- [ ] `write_extended_run_json` insert seeds altijd (geen `if let Some`); order_seed als string of null.
-- [ ] Contract test faalt als `order_seed` een number is (precision-safe).
-- [ ] SPEC §3.3.1: order_seed/judge_seed type string or null + normatieve zin over decimal strings.
+- [ ] run.json (extended) bevat altijd: seed_version, order_seed, judge_seed (string|null), ongeacht of artifacts.order_seed None is.
+- [ ] run.json (minimal/early-exit) bevat altijd dezelfde seed keys (nulls toegestaan).
+- [ ] summary.json bevat altijd seeds.seed_version + keys order_seed/judge_seed (string|null).
+- [ ] order_seed wordt nooit als JSON number geschreven (contract test bewaakt dit).
+- [ ] judge_seed is null totdat RunArtifacts/judge-seeding bestaat (comment + SPEC note).
+- [ ] Precedence: infra exit 3 wint van abstain exit 1 (test: test_infra_beats_abstain_precedence).
+- [ ] SPEC §3.3.1 seeds types = string|null, en rationale (precision) staat expliciet.
+
+---
+
+## Backwards compatibility / Consumers (voor PR description)
+
+Copy-paste onderstaande in de PR body onder **Backwards compatibility / Consumers**:
+
+- **Consumers MUST treat unknown seed_version as compat required** (branch on seed_version when interpreting seeds).
+- **Seeds are strings;** numeric seeds are accepted only for legacy parsing; **writers MUST emit strings** (decimal u64 or null). Replay tooling outside Rust can rely on string encoding without precision loss.
+
+---
+
+## write_extended_run_json — seed block (onvoorwaardelijk)
+
+Het seed-blok wordt **altijd** geïnserteerd (geen `if` rond dit blok). Excerpt zoals in branch:
+
+```rust
+obj.insert("seed_version", ...);
+let order_seed_json = match artifacts.order_seed {
+    Some(n) => serde_json::Value::String(n.to_string()),
+    None => serde_json::Value::Null,
+};
+obj.insert("order_seed", order_seed_json);
+obj.insert("judge_seed", serde_json::Value::Null);
+```
 
 ---
 

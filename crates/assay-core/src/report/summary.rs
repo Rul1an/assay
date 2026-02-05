@@ -32,6 +32,7 @@ mod serde_seed {
                 Ok(Some(n))
             }
             Some(serde_json::Value::Number(num)) => {
+                // Legacy only; write path always emits string.
                 let n = num
                     .as_u64()
                     .ok_or_else(|| serde::de::Error::custom("seed number must be u64"))?;

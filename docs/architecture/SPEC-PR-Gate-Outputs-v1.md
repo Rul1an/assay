@@ -246,7 +246,8 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 
 | schema_version | Date     | Changes |
 |----------------|----------|---------|
-| 1              | 2026-01  | Initial: schema_version, exit_code, reason_code, provenance, next_step, SARIF location and truncation rules. E7.2: seeds (seed_version, order_seed, judge_seed) in summary.json, run.json, and console; order_seed/judge_seed encoded as decimal string or null (consumer-safe, no JSON number precision loss). judge_seed reserved; null until E9/judge sampling. E7.3: judge_metrics (abstain_rate, flip_rate, consensus_rate, unavailable_count) in summary.json, run.json, and console. |
+| 1              | 2026-01  | Initial Outputs-v1. |
+| 1              | 2026-02  | Clarified/added: Seeds (§3.3.1) + Judge metrics (§3.3.2). Seeds MUST be decimal strings (or null) to avoid JSON precision loss. judge_seed reserved (null) until implemented. |
 
 ---
 

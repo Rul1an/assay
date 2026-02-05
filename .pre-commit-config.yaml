@@ -88,4 +88,5 @@ repos:
         language: system
         stages: [pre-push]
         pass_filenames: false
-        # Default: cross-compile only (ASSAY_LINUX_CHECK_MODE=target). Set =multipass for full VM clippy.
+        # Default: cross-compile only (ASSAY_LINUX_CHECK_MODE=target), with timeout so pre-push does not hang.
+        # ASSAY_LINUX_TARGET_TIMEOUT=300 (default). Set =multipass for full VM clippy.
