@@ -48,10 +48,11 @@ fn test_golden_harness() {
     let duration_re = regex::Regex::new(r"\(\d+\.\d+s\)").unwrap();
     let seed_re =
         regex::Regex::new(r"Info: No seed provided\. Using generated seed: \d+\n\n").unwrap();
-    // Match "Seeds:" or "Seeds (replay):" (spec uses "Seeds:", older branches may use "Seeds (replay):")
-    let seeds_footer_re =
-        regex::Regex::new(r"Seeds( \(replay\))?: seed_version=\d+ order_seed=\d+ judge_seed=\d+")
-            .unwrap();
+    // Match "Seeds:" or "Seeds (replay):"; order_seed is number, judge_seed number or "—" (null until E9)
+    let seeds_footer_re = regex::Regex::new(
+        r"Seeds( \(replay\))?: seed_version=\d+ order_seed=\d+ judge_seed=(\d+|—)",
+    )
+    .unwrap();
 
     let stripped_actual = ansi_re.replace_all(&stderr, "").to_string();
     let without_seed = seed_re.replace_all(&stripped_actual, "").to_string();
