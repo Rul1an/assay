@@ -13,31 +13,24 @@ graph TD
     cli --> evidence[assay-evidence]
     cli --> mcpServer[assay-mcp-server]
     cli --> common[assay-common]
-    cli --> sim[assay-sim]
-    cli --> registry[assay-registry]
+    cli -.-> sim[assay-sim]
 
     mcpServer --> core
-    mcpServer --> policy
     mcpServer --> common
+    mcpServer --> metrics
 
-    monitor --> policy
     monitor --> common
-    monitor --> ebpf[assay-ebpf]
+    monitor --> policy
 
-    ebpf --> common
+    ebpf[assay-ebpf] --> common
 
     core --> common
-    core --> metrics
 
     metrics --> core
+    metrics --> common
 
-    policy --> common
-
-    evidence --> core
-    evidence --> common
-    evidence --> registry
-
-    registry --> common
+    sim --> core
+    sim --> evidence
 
     pySdk[assay-python-sdk] --> core
 
@@ -46,8 +39,10 @@ graph TD
     style metrics fill:#e8f5e9
     style mcpServer fill:#f3e5f5
     style monitor fill:#ffebee
-    style registry fill:#e3f2fd
 ```
+
+> **Leaf crates** (no internal dependencies): `assay-common`, `assay-policy`, `assay-evidence`, `assay-registry`, `assay-xtask`.
+> **Note**: `assay-sim` is an optional dependency of `assay-cli` (dashed arrow).
 
 ## Detailed Crate Dependencies
 
@@ -76,7 +71,6 @@ graph TD
 
 **Internal Crates:**
 - `assay-common` (workspace, features: ["std"]) - Shared types
-- `assay-metrics` (workspace) - Metrics trait implementations
 
 **External Dependencies:**
 - `tokio` - Async runtime
@@ -95,6 +89,7 @@ graph TD
 
 **Internal Crates:**
 - `assay-core` (workspace) - Metrics API traits
+- `assay-common` (workspace, features: ["std"]) - Shared types
 
 **External Dependencies:**
 - `serde`, `serde_json` - Serialization
@@ -105,8 +100,8 @@ graph TD
 
 **Internal Crates:**
 - `assay-core` (workspace) - MCP integration, policy engine
-- `assay-policy` (workspace) - Policy compilation
-- `assay-common` (workspace) - Shared types
+- `assay-common` (workspace, features: ["std"]) - Shared types
+- `assay-metrics` (workspace) - Standard metrics
 
 **External Dependencies:**
 - `tokio` - Async runtime
@@ -116,9 +111,8 @@ graph TD
 ### `assay-monitor` Dependencies
 
 **Internal Crates:**
-- `assay-policy` (workspace) - Policy compilation
 - `assay-common` (workspace) - Shared types
-- `assay-ebpf` (workspace) - eBPF programs
+- `assay-policy` (workspace) - Policy compilation
 
 **External Dependencies:**
 - `aya` - eBPF framework
@@ -128,7 +122,7 @@ graph TD
 ### `assay-policy` Dependencies
 
 **Internal Crates:**
-- `assay-common` (workspace) - Shared types
+- (none)
 
 **External Dependencies:**
 - `serde`, `serde_json`, `serde_yaml` - Serialization
@@ -136,9 +130,7 @@ graph TD
 ### `assay-evidence` Dependencies
 
 **Internal Crates:**
-- `assay-core` (workspace) - Profile types, event mapping
-- `assay-common` (workspace) - Shared types
-- `assay-registry` (workspace) - Pack fetching for lint rules
+- (none)
 
 **External Dependencies:**
 - `serde`, `serde_json` - Serialization
@@ -155,7 +147,7 @@ graph TD
 ### `assay-registry` Dependencies
 
 **Internal Crates:**
-- `assay-common` (workspace) - Shared types
+- (none)
 
 **External Dependencies:**
 - `reqwest` - HTTP client with retry logic
@@ -352,11 +344,11 @@ sequenceDiagram
 ## Circular Dependencies
 
 **None**: The dependency graph is acyclic. All dependencies flow in one direction:
-- CLI → Core → Metrics
-- CLI → Registry → Common
-- MCP Server → Core → Policy
-- Monitor → Policy → Common
-- Evidence → Registry → Common
+- CLI → Core → Common
+- CLI → Metrics → Core → Common
+- MCP Server → Core → Common
+- Monitor → Policy (leaf), Common (leaf)
+- Sim → Core, Evidence (leaf)
 
 ## Feature Flags
 
@@ -447,7 +439,7 @@ Rul1an/assay/assay-action@v2
 **Workspace Version**: All crates share version from `Cargo.toml` workspace:
 ```toml
 [workspace.package]
-version = "2.12.0"
+version = "2.15.0"
 ```
 
 **Patch Section**: Internal crates are patched to use local paths:
@@ -455,7 +447,6 @@ version = "2.12.0"
 [patch.crates-io]
 assay-core = { path = "crates/assay-core" }
 assay-metrics = { path = "crates/assay-metrics" }
-assay-registry = { path = "crates/assay-registry" }
 ```
 
 ## Related Documentation

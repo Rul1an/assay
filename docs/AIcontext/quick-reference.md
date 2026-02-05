@@ -1,7 +1,7 @@
 # Quick Reference
 
 > **Purpose**: Fast lookup for AI agents - commands, patterns, exit codes, and common operations.
-> **Version**: 2.12.0 (January 2026)
+> **Version**: 2.15.0 (February 2026)
 
 ## TL;DR - What is Assay?
 
@@ -37,6 +37,7 @@ assay explain --trace-file traces.jsonl  # Explain violations
 | 1 | TEST_FAILURE | `E_TEST_FAILED`, `E_POLICY_VIOLATION`, `E_JUDGE_UNCERTAIN` | Test or policy failure; judge abstain → E_JUDGE_UNCERTAIN |
 | 2 | CONFIG_ERROR | `E_CFG_PARSE`, `E_TRACE_NOT_FOUND`, `E_MISSING_CONFIG` | Config or input error |
 | 3 | INFRA_ERROR | `E_JUDGE_UNAVAILABLE`, `E_RATE_LIMIT`, `E_TIMEOUT` | Infrastructure issue |
+| 4 | WOULD_BLOCK | (sandbox/policy) | Execution would be blocked |
 
 **Migration note**: Use `--exit-codes=v2` (default) or `--exit-codes=v1` for legacy behavior.
 

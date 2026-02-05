@@ -1,7 +1,7 @@
 # Run Output Contract (PR Gate)
 
 > **Purpose**: Machine-readable outputs from `assay run` and `assay ci` for CI gates and downstream tooling.
-> **Version**: 2.12.0 (January 2026)
+> **Version**: 2.15.0 (February 2026)
 > **Spec**: [SPEC-PR-Gate-Outputs-v1](../architecture/SPEC-PR-Gate-Outputs-v1.md) — §3.3.1 Seeds, §3.3.2 Judge metrics, §6.3 SARIF truncation.
 > **Implementation**: PR #159 (E7.5, E7.2, E7.3); PR #160 (E2.3 SARIF limits, sarif.omitted).
 

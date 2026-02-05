@@ -5,7 +5,7 @@ This document provides a detailed mapping of important files, modules, and their
 ## File Structure Overview
 
 ```
-assay/                         # Version 2.14.0
+assay/                         # Version 2.15.0
 ├── crates/                    # Rust crates
 │   ├── assay-core/            # Core evaluation engine
 │   ├── assay-cli/             # CLI interface
@@ -18,6 +18,7 @@ assay/                         # Version 2.14.0
 │   ├── assay-monitor/         # Runtime monitoring
 │   ├── assay-policy/          # Policy compilation
 │   ├── assay-evidence/        # Evidence management (CloudEvents, JCS, bundles)
+│   ├── assay-registry/         # Pack Registry client
 │   ├── assay-common/          # Shared types
 │   ├── assay-ebpf/            # eBPF programs
 │   └── assay-sim/             # Attack simulation
@@ -113,6 +114,12 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 ### Metrics API (`src/metrics_api.rs`)
 - `Metric` trait definition
 - Used by `assay-metrics` for implementations
+
+### Replay Bundle Module (`src/replay/`)
+- **`mod.rs`**: Module exports, public API
+- **`manifest.rs`**: `ReplayManifest` (schema v1), `ReplaySeeds`, `ReplayCoverage`, `ScrubPolicy`, `ToolchainMeta`, `RunnerMeta`, `FileManifestEntry`
+- **`bundle.rs`**: `write_bundle_tar_gz()` (deterministic .tar.gz), `bundle_digest()` (SHA256), `validate_entry_path()` (fail-closed path validation), `build_file_manifest()`
+- **`toolchain.rs`**: `capture_toolchain()` for rustc/cargo metadata
 
 ### Other Key Modules
 - **`config.rs`**: Configuration loading and resolution
@@ -343,10 +350,11 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 ## Important Constants
 
 ### Exit Codes (`assay-cli/src/exit_codes.rs`, `commands/mod.rs`)
-- `OK = 0`: Success
-- `TEST_FAILED = 1`: Test failure; **E_JUDGE_UNCERTAIN** when judge abstains (PR #159)
-- `CONFIG_ERROR = 2`: Configuration error
-- `INFRA_ERROR = 3`: Judge unavailable, rate limit, timeout (E_JUDGE_UNAVAILABLE)
+- `EXIT_SUCCESS = 0`: Success
+- `EXIT_TEST_FAILURE = 1`: Test failure; **E_JUDGE_UNCERTAIN** when judge abstains (PR #159)
+- `EXIT_CONFIG_ERROR = 2`: Configuration error
+- `EXIT_INFRA_ERROR = 3`: Judge unavailable, rate limit, timeout (E_JUDGE_UNAVAILABLE)
+- `EXIT_WOULD_BLOCK = 4`: Sandbox/policy would block execution
 
 ### Error Codes (`assay-core/src/errors/diagnostic.rs`)
 - Diagnostic error codes for user-friendly messages

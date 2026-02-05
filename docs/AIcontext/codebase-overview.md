@@ -1,6 +1,6 @@
 # Assay Codebase Overview
 
-> **Version**: 2.12.0 (January 2026)
+> **Version**: 2.15.0 (February 2026)
 > **SOTA Status**: Bleeding Edge (Judge Reliability, MCP Auth, OTel GenAI, Replay Bundle)
 
 ## What is Assay?
@@ -219,7 +219,7 @@ Report (console/JSON/JUnit/SARIF; SARIF truncation at 25k results by default, wi
 | **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k), runs[0].properties.assay, sarif.omitted in run/summary; consumers use summary/run for counts |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707 resource indicators, alg/typ/crit JWT hardening, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv version gating, low-cardinality metrics, composable redaction policies |
-| **Replay Bundle** | 🔄 P1 | Toolchain capture (rustc, Cargo.lock), deterministic seeds, scrubbed cassettes (deny-by-default) |
+| **Replay Bundle** | ✅ In Progress (E9.1–E9.3) | Manifest, container writer, toolchain capture, path validation, provenance. Module: `assay-core/src/replay/` |
 | **CI Optimization** | ✅ Implemented | Skip kernel matrix for pure dep bumps, auto-cancel superseded runs |
 | **Self-Healing Runner** | ✅ Implemented | Health check with cache auto-heal, stale job cleanup, PR prioritization |
 
@@ -233,6 +233,7 @@ Report (console/JSON/JUnit/SARIF; SARIF truncation at 25k results by default, wi
 | 1 | `EXIT_TEST_FAILURE` | One or more tests failed |
 | 2 | `EXIT_CONFIG_ERROR` | Configuration or user error |
 | 3 | `EXIT_INFRA_ERROR` | Infrastructure or judge unavailable |
+| 4 | `EXIT_WOULD_BLOCK` | Sandbox/policy would block execution |
 
 ### Reason Codes (Fine-Grained)
 
