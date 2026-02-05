@@ -180,8 +180,7 @@ mod landlock_impl {
             max_abi = 4;
         }
 
-        // TODO (SOTA 2026): ABI v5 (IOCTL), v6 (Scoping), and v7 (Audit)
-        // will be added when the `landlock` crate support or raw syscalls are ready.
+        // TODO(landlock-abi-v5): ABI v5/v6/v7 when landlock crate or raw syscalls ready
 
         (true, max_abi)
     }
@@ -219,8 +218,7 @@ mod landlock_impl {
         // FS rules (ABI V1-V3)
         ruleset = ruleset.handle_access(AccessFs::from_all(abi))?;
 
-        // TODO: NET rules (ABI V4) if abi_level >= 4
-        // if abi_level >= 4 { ruleset = ruleset.handle_access(AccessNet::from_all(abi))?; }
+        // TODO(landlock-net): NET rules (ABI V4) when abi_level >= 4
 
         let mut ruleset = ruleset.create()?;
 

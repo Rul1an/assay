@@ -266,6 +266,10 @@ pub struct RunArgs {
     /// defaults to v2 (trace not found = 2)
     #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
     pub exit_codes: crate::exit_codes::ExitCodeVersion,
+
+    /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
+    #[arg(long)]
+    pub no_verify: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -343,6 +347,10 @@ pub struct CiArgs {
     /// Exit code compatibility mode: v1 (legacy) or v2 (standard)
     #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
     pub exit_codes: crate::exit_codes::ExitCodeVersion,
+
+    /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
+    #[arg(long)]
+    pub no_verify: bool,
 }
 
 #[derive(clap::Args, Clone)]

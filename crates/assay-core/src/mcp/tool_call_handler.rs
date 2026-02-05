@@ -207,7 +207,7 @@ impl ToolCallHandler {
             let operation_class = if is_commit_tool {
                 OperationClass::Commit
             } else {
-                OperationClass::Read // TODO: Determine from tool classification
+                OperationClass::Read // TODO(mcp-op-class): derive from tool classification
             };
 
             let tool_call_data = ToolCallData {

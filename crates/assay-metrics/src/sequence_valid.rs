@@ -128,8 +128,7 @@ impl Metric for SequenceValidMetric {
                         }
                     }
                     _ => {
-                        // TODO: Implement v1.1 operators (Eventually, MaxCalls, etc)
-                        // Note: Consider delegating to assay-core::explain::TraceExplainer once stabilized.
+                        // TODO(sequence-v11): v1.1 operators; see docs/contributing/TODOS.md
                     }
                 }
             }

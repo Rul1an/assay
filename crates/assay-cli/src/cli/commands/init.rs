@@ -82,7 +82,7 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
             crate::templates::CI_TRACES_JSONL,
         )?;
 
-        // TODO: Use the provider value to select template
+        // TODO(init-provider-template): select workflow by provider
         write_file_if_missing(
             Path::new(".github/workflows/assay.yml"),
             crate::templates::CI_WORKFLOW_YML,

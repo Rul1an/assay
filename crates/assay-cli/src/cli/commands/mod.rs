@@ -110,7 +110,7 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
-        let summary = summary_from_outcome(&o).with_seeds(None, None);
+        let summary = summary_from_outcome(&o, !args.no_verify).with_seeds(None, None);
         if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
             eprintln!("WARNING: failed to write summary.json: {}", e);
         }
@@ -215,7 +215,7 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let mut summary = summary_from_outcome(&outcome);
+    let mut summary = summary_from_outcome(&outcome, !args.no_verify);
     let passed = artifacts
         .results
         .iter()
@@ -277,7 +277,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
-        let summary = summary_from_outcome(&o).with_seeds(None, None);
+        let summary = summary_from_outcome(&o, !args.no_verify).with_seeds(None, None);
         if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
             eprintln!("WARNING: failed to write summary.json: {}", e);
         }
@@ -449,7 +449,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let mut summary = summary_from_outcome(&outcome);
+    let mut summary = summary_from_outcome(&outcome, !args.no_verify);
     let passed = artifacts
         .results
         .iter()
@@ -658,12 +658,11 @@ fn pick_infra_reason(
 }
 
 /// Build a Summary from RunOutcome for writing summary.json (same dir as run.json).
-/// Note: verify_mode in provenance is currently defaulted to "enabled"; run/ci do not yet expose a --no-verify flag for this path (follow-up).
 fn summary_from_outcome(
     outcome: &crate::exit_codes::RunOutcome,
+    verify_enabled: bool,
 ) -> assay_core::report::summary::Summary {
     let assay_version = env!("CARGO_PKG_VERSION");
-    let verify_enabled = true; // TODO: plumb from run/ci args when available
     if outcome.exit_code == 0 {
         assay_core::report::summary::Summary::success(assay_version, verify_enabled)
     } else {

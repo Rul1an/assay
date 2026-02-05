@@ -275,7 +275,7 @@ impl McpProxy {
                                         &tool_call_id,
                                         &tool_name,
                                         Decision::Allow,
-                                        reason_codes::P_POLICY_DENY, // TODO: Better code
+                                        reason_codes::P_POLICY_DENY, // TODO(mcp-deny-code): use specific reason code
                                         None,
                                         req.id.clone(),
                                     );

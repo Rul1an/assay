@@ -189,7 +189,7 @@ pub async fn validate(
                                     // policy.tools.allow/deny are lists.
 
                                     // Simplified validation for v1.2.1: Just check args against schema if present.
-                                    // Detailed enforcement requires full policy engine context (TODO for v1.3)
+                                    // TODO(validate-v13): full policy context for arg enforcement
 
                                     for call in calls {
                                         let tool_name = call
