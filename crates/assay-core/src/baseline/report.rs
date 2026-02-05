@@ -76,7 +76,7 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
         let mut scores: HashMap<String, Vec<f64>> = HashMap::new();
 
         for r in &rows {
-            *counts.entry(r.status.clone()).or_insert(0) += 1;
+            *counts.entry(r.status).or_insert(0) += 1;
 
             // Collect reasons
             if let Some(reason) = &r.skip_reason {

@@ -208,8 +208,8 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     }
 
     let outcome = decide_run_outcome(&artifacts.results, args.strict, args.exit_codes);
-    // Use extended writer for authoritative reason coding in run.json
-    write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
+    // Use extended writer for authoritative reason coding in run.json (no SARIF in run command)
+    write_extended_run_json(&artifacts, &outcome, &run_json_path, None)?;
 
     let summary_path = run_json_path
         .parent()
@@ -411,11 +411,10 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     }
 
-    // Determine and Write Outcome FIRST (Safety against report write failures)
+    // Determine outcome first (safety against report write failures)
     let mut outcome = decide_run_outcome(&artifacts.results, args.strict, args.exit_codes);
-    write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
 
-    // Then Write Output Formats (Best Effort - Option B: Don't fail workflow on report IO)
+    // Write output formats (best effort); SARIF outcome needed for run.json/summary sarif.omitted
     if let Err(e) = (|| -> anyhow::Result<()> {
         if let Some(parent) = args.junit.parent() {
             std::fs::create_dir_all(parent)?;
@@ -428,22 +427,23 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         outcome.warnings.push(msg);
     }
 
-    if let Err(e) = (|| -> anyhow::Result<()> {
+    let sarif_outcome = (|| -> anyhow::Result<assay_core::report::sarif::SarifWriteOutcome> {
         if let Some(parent) = args.sarif.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        assay_core::report::sarif::write_sarif("assay", &artifacts.results, &args.sarif)?;
-        Ok(())
-    })() {
-        let msg = format!("Failed to write SARIF report: {}", e);
-        eprintln!("WARNING: {}", msg);
-        outcome.warnings.push(msg);
-    }
+        assay_core::report::sarif::write_sarif("assay", &artifacts.results, &args.sarif)
+    })();
+    let sarif_omitted = match &sarif_outcome {
+        Ok(o) => o.omitted_count,
+        Err(e) => {
+            outcome
+                .warnings
+                .push(format!("Failed to write SARIF report: {}", e));
+            0
+        }
+    };
 
-    // Re-write run.json if warnings occurred (to maintain Single Source of Truth fidelity)
-    if !outcome.warnings.is_empty() {
-        write_extended_run_json(&artifacts, &outcome, &run_json_path)?;
-    }
+    write_extended_run_json(&artifacts, &outcome, &run_json_path, Some(sarif_omitted))?;
 
     let summary_path = run_json_path
         .parent()
@@ -467,6 +467,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     {
         summary = summary.with_judge_metrics(metrics);
     }
+    summary = summary.with_sarif_omitted(sarif_omitted);
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
@@ -681,6 +682,7 @@ fn write_extended_run_json(
     artifacts: &assay_core::report::RunArtifacts,
     outcome: &crate::exit_codes::RunOutcome,
     path: &PathBuf,
+    sarif_omitted: Option<u64>,
 ) -> anyhow::Result<()> {
     // Manually construct the JSON to inject outcome fields
     let mut v = serde_json::to_value(artifacts)?;
@@ -716,6 +718,13 @@ fn write_extended_run_json(
             assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
         {
             obj.insert("judge_metrics".to_string(), serde_json::to_value(metrics)?);
+        }
+
+        // E2.3: SARIF truncation metadata when SARIF was truncated
+        if let Some(n) = sarif_omitted {
+            if n > 0 {
+                obj.insert("sarif".to_string(), serde_json::json!({ "omitted": n }));
+            }
         }
 
         // Conflict avoidance: Move full details to 'resolution' object

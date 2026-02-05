@@ -211,11 +211,18 @@ SARIF produced for GitHub Code Scanning MUST satisfy the following so that `uplo
 
 **Normative:** Contract tests MUST validate that every result in the generated SARIF has `locations` length ≥ 1.
 
-### 6.3 Truncation (Size and Result Limits)
+### 6.3 Truncation (Size and Result Limits) (E2.3)
 
 - GitHub enforces limits on SARIF upload (e.g. max size gzipped, max number of results). Producers MUST **truncate** results when limits would be exceeded, and MUST add a clear indication that results were omitted (e.g. in the run description or a dedicated message: "N results omitted due to GitHub upload limits").
-- Truncation strategy: keep top N results by severity (e.g. error first, then warning). N and the exact message are implementation-defined but MUST be documented.
-- **Normative:** SARIF upload MUST NOT fail due to size or result count; truncation is required when necessary.
+- Truncation strategy: keep top N results by severity (e.g. error first, then warning). N and the exact message are implementation-defined but MUST be documented. Truncation MUST be **deterministic** (same run → same selection); selection order: blocking (Fail/Error) first, then warning-level, then stable sort (e.g. by test_id). **Eligibility:** only SARIF-eligible results (e.g. Fail, Error, Warn, Flaky, Unstable) count toward the limit. Define **eligible_total** as the count of SARIF-eligible results before truncation; **included** as the number of results actually written in the SARIF run; then `omitted_count` = eligible_total − included.
+- **SARIF run-level metadata when truncated:** `runs[].properties.assay` MUST be present when truncation was applied:
+  - `truncated` (boolean): `true`
+  - `omitted_count` (integer): number of eligible results omitted
+- **summary.json and run.json — nested `sarif` object:** When SARIF was truncated, summary.json and run.json MAY include a top-level **`sarif`** object. Schema when present:
+  - `sarif` (object, optional): present only when truncation occurred (recommended to reduce noise).
+  - `sarif.omitted` (integer, required when `sarif` is present): ≥ 1.
+- **Consistency:** When both are present, `sarif.omitted` (in run.json or summary.json) MUST equal `runs[0].properties.assay.omitted_count`.
+- **Normative:** SARIF upload MUST NOT fail due to size or result count; truncation is required when necessary. **Consumers MUST treat SARIF as potentially truncated and MUST use summary/run for authoritative counts.**
 
 ### 6.4 Severity Mapping
 
@@ -248,6 +255,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 |----------------|----------|---------|
 | 1              | 2026-01  | Initial Outputs-v1. |
 | 1              | 2026-02  | Clarified/added: Seeds (§3.3.1) + Judge metrics (§3.3.2). Seeds MUST be decimal strings (or null) to avoid JSON precision loss. judge_seed reserved (null) until implemented. |
+| 1              | 2026-02  | E2.3: SARIF truncation metadata (§6.3): properties.assay (truncated, omitted_count) in SARIF run; sarif.omitted in summary.json and run.json when truncated. Deterministic truncation order. |
 
 ---
 
