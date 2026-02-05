@@ -442,9 +442,6 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             0
         }
     };
-    if sarif_outcome.is_err() {
-        eprintln!("WARNING: Failed to write SARIF report");
-    }
 
     write_extended_run_json(&artifacts, &outcome, &run_json_path, Some(sarif_omitted))?;
 
