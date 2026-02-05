@@ -52,8 +52,12 @@ pub mod check_sequence;
 pub mod explain_trace;
 pub mod policy_decide;
 
+#[cfg(feature = "test-outbound")]
+pub mod test_outbound;
+
 pub fn list_tools() -> Vec<Value> {
-    vec![
+    #[allow(unused_mut)] // mut needed when feature "test-outbound" is enabled
+    let mut list: Vec<Value> = vec![
         serde_json::json!({
             "name": "assay_check_args",
             "description": "Validate tool arguments against a policy schema.",
@@ -130,7 +134,14 @@ pub fn list_tools() -> Vec<Value> {
                 "required": ["policy", "trace"]
             }
         }),
-    ]
+    ];
+    #[cfg(feature = "test-outbound")]
+    list.push(serde_json::json!({
+        "name": "assay_test_outbound",
+        "description": "Test-only: E6a.3 no-pass-through E2E. GET ASSAY_TEST_OUTBOUND_URL with allowlist headers only.",
+        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    }));
+    list
 }
 
 pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow::Result<Value> {
@@ -140,6 +151,8 @@ pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow:
         "assay_policy_decide" => policy_decide::policy_decide(ctx, args).await,
         "assay_check_coverage" => check_coverage::check_coverage(ctx, args).await,
         "assay_explain_trace" => explain_trace::explain_trace(ctx, args).await,
+        #[cfg(feature = "test-outbound")]
+        "assay_test_outbound" => test_outbound::test_outbound(args).await,
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }

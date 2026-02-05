@@ -41,6 +41,7 @@ impl JwksProvider {
                 .max_capacity(100)
                 .time_to_live(Duration::from_secs(3600)) // 1 hour TTL
                 .build(),
+            // E6a.3 no-pass-through: outbound requests use no request-derived headers (allowlist-only).
             client: Client::builder()
                 .timeout(Duration::from_secs(5))
                 .user_agent("assay-mcp-server/0.1")

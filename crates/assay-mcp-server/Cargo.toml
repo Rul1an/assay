@@ -12,6 +12,9 @@ workspace = true
 
 [features]
 experimental = ["assay-core/experimental"]
+# Test-only: adds assay_test_outbound tool for E6a.3 no-pass-through E2E test.
+# Use: cargo test -p assay-mcp-server --features test-outbound
+test-outbound = []
 
 [dependencies]
 anyhow.workspace = true
