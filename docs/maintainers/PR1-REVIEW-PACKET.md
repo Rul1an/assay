@@ -134,27 +134,21 @@ diff --git a/crates/assay-cli/src/exit_codes.rs b/crates/assay-cli/src/exit_code
 
 **crates/assay-core/src/report/summary.rs** — SEED_VERSION, Seeds, JudgeMetrics, with_seeds, judge_metrics_from_results
 
+- **Summary**: `pub seeds: Seeds` (verplicht). Geen Option, geen skip_serializing_if op seeds.
+- **Seeds**: order_seed en judge_seed met `serialize_with`/`deserialize_with` (serde_seed) → in JSON altijd key aanwezig, waarde **string** of **null**. Zie §1.3 voor de definitieve struct.
+
 ```diff
 +pub const SEED_VERSION: u32 = 1;
  ...
-     pub performance: Option<PerformanceMetrics>,
++    pub seeds: Seeds,
 +
-+    /// Seeds for deterministic replay (E7.2). Present when run used a seed.
-+    #[serde(skip_serializing_if = "Option::is_none")]
-+    pub seeds: Option<Seeds>,
-+
-+    /// Judge reliability metrics (E7.3). Present when run had judge evaluations.
-+    #[serde(skip_serializing_if = "Option::is_none")]
-+    pub judge_metrics: Option<JudgeMetrics>,
-+}
-+
-+/// Seeds used in the run (replay determinism)
++/// Seeds used in the run (replay determinism). order_seed/judge_seed serialized as string or null.
 +#[derive(Debug, Clone, Serialize, Deserialize)]
 +pub struct Seeds {
 +    pub seed_version: u32,
-+    #[serde(skip_serializing_if = "Option::is_none")]
++    #[serde(serialize_with = "serde_seed::serialize_opt_u64_as_str", ...)]
 +    pub order_seed: Option<u64>,
-+    #[serde(skip_serializing_if = "Option::is_none")]
++    #[serde(serialize_with = "serde_seed::serialize_opt_u64_as_str", ...)]
 +    pub judge_seed: Option<u64>,
 +    #[serde(skip_serializing_if = "Option::is_none")]
 +    pub sampling_seed: Option<u64>,
@@ -173,19 +167,15 @@ diff --git a/crates/assay-cli/src/exit_codes.rs b/crates/assay-cli/src/exit_code
 +    pub unavailable_count: Option<u32>,
  }
  ...
-+            seeds: None,
++            seeds: Seeds::default(),
 +            judge_metrics: None,
-         }
-     }
+        }
+    }
  ...
-+    /// Set seeds for replay determinism (E7.2). Always set for schema stability (early-exit uses null).
++    /// Set seeds for replay determinism (E7.2). Keys always present in JSON (string or null).
 +    pub fn with_seeds(mut self, order_seed: Option<u64>, judge_seed: Option<u64>) -> Self {
-+        self.seeds = Some(Seeds {
-+            seed_version: SEED_VERSION,
-+            order_seed,
-+            judge_seed,
-+            sampling_seed: None,
-+        });
++        self.seeds.order_seed = order_seed;
++        self.seeds.judge_seed = judge_seed;
 +        self
 +    }
 +
@@ -389,24 +379,22 @@ Zie **summary.rs** hierboven: `JudgeMetrics`-struct, `judge_metrics_from_results
 ## 5) Schema-/compatibiliteitskeuzes
 
 - **summary.json**
-  - **seeds**: `Option<Seeds>`; veld `seeds` kan ontbreken (skip_serializing_if). Bij run/ci wordt altijd `with_seeds(…)` aangeroepen (ook early-exit met None,None) → object altijd aanwezig met ten minste `seed_version`; order_seed/judge_seed kunnen ontbreken of null (serialisatie Option).
+  - **seeds**: `pub seeds: Seeds` (verplicht, geen Option). Keys order_seed/judge_seed altijd aanwezig in JSON (decimal string of null via serde_seed).
   - **judge_metrics**: `Option<JudgeMetrics>`; alleen aanwezig als er judge-evaluaties zijn. Velden binnen JudgeMetrics zijn Option (abstain_rate etc. kunnen ontbreken).
 
 - **run.json extended**
-  - Seeds: seed_version/order_seed/judge_seed alleen geïnjecteerd als `artifacts.order_seed.is_some()`.
+  - Seeds: seed_version, order_seed, judge_seed **altijd** geïnjecteerd (onvoorwaardelijk). order_seed = string of null; judge_seed = null tot E9.
   - Judge_metrics: alleen als `judge_metrics_from_results` Some geeft.
 
 - **run.json minimal (early exit)**
-  - SPEC §3.3.1: seed_version SHALL present; order_seed/judge_seed present (integer or null). Implementatie zou hier `seed_version`, `order_seed: null`, `judge_seed: null` moeten schrijven voor schema-stabiliteit; controleren op PR-branch.
+  - seed_version, order_seed: null, judge_seed: null altijd aanwezig (SPEC §3.3.1).
 
 - **SPEC §3.3.1 / §3.3.2**
-  - seed_version: Required (Yes). order_seed/judge_seed: “present (integer or null)”, niet “Required” in de tabel; normative tekst: “SHALL be present”.
+  - seed_version: Required (Yes). order_seed/judge_seed: type string or null; “SHALL be present”; normative: decimal strings to avoid precision loss.
   - Judge metrics: alle velden “No” (optional).
 
 - **Onbekende seed_version**
-  - Geen expliciete “fail closed” bij unknown seed_version in consumer; SPEC zegt: consumers MUST branch on seed_version. Aanbeveling: downstream bij unknown version conservatief doen (bijv. replay weigeren of waarschuwen).
-
-**Best practice**: Schema-stabiliteit → liever “veld altijd aanwezig, waarde null indien onbekend” dan “veld soms afwezig”; SPEC ondersteunt dat voor seeds bij early-exit.
+  - Consumers MUST treat unknown seed_version as compat required (branch on seed_version). Downstream bij unknown version conservatief (replay weigeren of waarschuwen).
 
 ---
 
@@ -656,6 +644,14 @@ git diff origin/main...HEAD -- docs/architecture/SPEC-PR-Gate-Outputs-v1.md
 ```
 
 *(Lokale wijzigingen zoals `write_run_json_minimal` + `with_seeds(None, None)` bij early-exit staan mogelijk nog niet gecommit; die zijn wel in §1 als diff-snippets opgenomen.)*
+
+---
+
+## PR title + body (voorstel)
+
+**Title:** `feat(pr1): E7.5 E_JUDGE_UNCERTAIN + E7.2 seeds (string|null) + E7.3 judge metrics in output`
+
+**Body (copy-paste):** Summary: E7.5 Judge Uncertain (exit 1 on Abstain), E7.2 seeds in run.json + summary.json (schema-stable, decimal string or null), E7.3 judge_metrics (low-cardinality). Precedence: infra exit 3 > abstain exit 1. SPEC §3.3.1/§3.3.2 aligned. Review: Audit-grade packet in `docs/maintainers/PR1-REVIEW-PACKET.md`. **Backwards compatibility / Consumers:** Consumers MUST treat unknown seed_version as compat required. Seeds are strings; numeric seeds accepted only for legacy parsing; writers MUST emit strings (decimal u64 or null). *Definitive sign-off: ✅ PR1. Merge when CI green.*
 
 ---
 
