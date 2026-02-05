@@ -111,8 +111,15 @@ async fn test_no_passthrough_e2e() {
     stdin.flush().unwrap();
 
     let mut line = String::new();
-    if reader.read_line(&mut line).unwrap() == 0 {
-        reader.read_line(&mut line).unwrap();
+    for _ in 0..10 {
+        line.clear();
+        let n = reader.read_line(&mut line).expect("read init response");
+        if n == 0 {
+            break;
+        }
+        if !line.trim().is_empty() {
+            break;
+        }
     }
     let resp: serde_json::Value = serde_json::from_str(line.trim()).expect("Parse init response");
     assert!(resp.get("result").is_some(), "Init failed: {:?}", resp);
@@ -133,7 +140,11 @@ async fn test_no_passthrough_e2e() {
     assert!(resp.get("result").is_some(), "Tool call failed: {:?}", resp);
 
     drop(stdin);
-    let _ = child.wait();
+    let status = child.wait().expect("failed to wait on child process");
+    assert!(
+        status.success(),
+        "server process did not exit successfully: {status:?}"
+    );
 
     let received = mock_server.received_requests().await.unwrap();
     assert_eq!(

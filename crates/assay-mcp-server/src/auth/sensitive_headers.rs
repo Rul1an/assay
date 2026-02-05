@@ -12,6 +12,7 @@
 //!    assert mock received no sensitive header names (audit-grade failure message on leak).
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 /// Header names that must never be forwarded from inbound to downstream (case-insensitive).
 /// Covers common credential/cookie leak paths (RFC and de-facto).
@@ -28,8 +29,10 @@ pub const SENSITIVE_HEADER_NAMES: &[&str] = &[
     "set-cookie",
 ];
 
-fn sensitive_set() -> HashSet<&'static str> {
-    SENSITIVE_HEADER_NAMES.iter().copied().collect()
+static SENSITIVE_SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+fn sensitive_set() -> &'static HashSet<&'static str> {
+    SENSITIVE_SET.get_or_init(|| SENSITIVE_HEADER_NAMES.iter().copied().collect())
 }
 
 /// Returns true if the header name is sensitive (case-insensitive).
