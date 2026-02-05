@@ -6,6 +6,44 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// Serde helpers: serialize Option<u64> as JSON string or null to avoid precision loss (u64 > 2^53 in JS).
+mod serde_seed {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize_opt_u64_as_str<S>(v: &Option<u64>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match v {
+            Some(n) => s.serialize_str(&n.to_string()),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize_opt_u64_from_str<'de, D>(d: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt: Option<serde_json::Value> = Option::deserialize(d)?;
+        match opt {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::String(s)) => {
+                let n = s.parse::<u64>().map_err(serde::de::Error::custom)?;
+                Ok(Some(n))
+            }
+            Some(serde_json::Value::Number(num)) => {
+                let n = num
+                    .as_u64()
+                    .ok_or_else(|| serde::de::Error::custom("seed number must be u64"))?;
+                Ok(Some(n))
+            }
+            Some(other) => Err(serde::de::Error::custom(format!(
+                "seed must be string or null, got: {other}"
+            ))),
+        }
+    }
+}
+
 /// Current schema version for summary.json
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -53,29 +91,45 @@ pub struct Summary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub performance: Option<PerformanceMetrics>,
 
-    /// Seeds for deterministic replay (E7.2). Present when run used a seed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seeds: Option<Seeds>,
+    /// Seeds for deterministic replay (E7.2). Always present for schema stability (order_seed/judge_seed null when unknown).
+    pub seeds: Seeds,
 
     /// Judge reliability metrics (E7.3). Present when run had judge evaluations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub judge_metrics: Option<JudgeMetrics>,
 }
 
-/// Seeds used in the run (replay determinism)
+/// Seeds used in the run (replay determinism). Always present in Summary; order_seed/judge_seed encoded as string or null to avoid JSON number precision loss (u64 > 2^53).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Seeds {
     /// Version of the seed schema; consumers MUST branch on this.
     pub seed_version: u32,
-    /// Seed used for test execution order (shuffle).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Seed used for test execution order (shuffle). Serialized as decimal string or null (schema stability + consumer-safe).
+    #[serde(
+        serialize_with = "serde_seed::serialize_opt_u64_as_str",
+        deserialize_with = "serde_seed::deserialize_opt_u64_from_str"
+    )]
     pub order_seed: Option<u64>,
-    /// Seed used for judge randomization (per-test seed derived from suite seed when present).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Seed used for judge randomization (per-test seed derived from suite seed when present). MAY be null until implemented; consumers MUST handle null.
+    #[serde(
+        serialize_with = "serde_seed::serialize_opt_u64_as_str",
+        deserialize_with = "serde_seed::deserialize_opt_u64_from_str"
+    )]
     pub judge_seed: Option<u64>,
     /// Optional: determinism for telemetry sampling (future use).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling_seed: Option<u64>,
+}
+
+impl Default for Seeds {
+    fn default() -> Self {
+        Self {
+            seed_version: SEED_VERSION,
+            order_seed: None,
+            judge_seed: None,
+            sampling_seed: None,
+        }
+    }
 }
 
 /// Judge reliability metrics (low cardinality, E8-consistent)
@@ -207,7 +261,7 @@ impl Summary {
             provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
-            seeds: None,
+            seeds: Seeds::default(),
             judge_metrics: None,
         }
     }
@@ -231,7 +285,7 @@ impl Summary {
             provenance: Provenance::new(assay_version, verify_enabled),
             results: None,
             performance: None,
-            seeds: None,
+            seeds: Seeds::default(),
             judge_metrics: None,
         }
     }
@@ -272,14 +326,10 @@ impl Summary {
         self
     }
 
-    /// Set seeds for replay determinism (E7.2). Always set for schema stability (early-exit uses null).
+    /// Set seeds for replay determinism (E7.2). Keys always present in JSON (string or null).
     pub fn with_seeds(mut self, order_seed: Option<u64>, judge_seed: Option<u64>) -> Self {
-        self.seeds = Some(Seeds {
-            seed_version: SEED_VERSION,
-            order_seed,
-            judge_seed,
-            sampling_seed: None,
-        });
+        self.seeds.order_seed = order_seed;
+        self.seeds.judge_seed = judge_seed;
         self
     }
 
@@ -327,11 +377,11 @@ pub fn judge_metrics_from_results(results: &[crate::model::TestResultRow]) -> Op
                 if a == 0.0 || a == 1.0 {
                     consensus_count += 1;
                 }
-                // flip_rate (spec: "order was swapped and outcome differed"). We do not store
-                // the counterfactual verdict for the other order, so we use a proxy: swapped
-                // and non-unanimous (0 < agreement < 1) indicates order may have affected
-                // outcome. A strict implementation would require the judge to record
-                // whether the pass/fail verdict differed under the other ordering.
+                // flip_rate: heuristic proxy for "order was swapped and outcome differed".
+                // We do not store the counterfactual verdict, so we use: swapped + non-unanimous
+                // (0 < agreement < 1). This does NOT guarantee the verdict actually flipped;
+                // it indicates order may have affected outcome. Strict definition would require
+                // the judge to record whether pass/fail differed under the other ordering.
                 if swapped && a > 0.0 && a < 1.0 {
                     flip_count += 1;
                 }
@@ -422,5 +472,65 @@ mod tests {
             v["reason_code_version"], 1,
             "reason_code_version must be present and integer"
         );
+
+        // E7.2: seeds always present; order_seed/judge_seed keys exist (string or null)
+        assert_eq!(v["seeds"]["seed_version"], 1);
+        assert!(
+            v["seeds"].get("order_seed").is_some(),
+            "order_seed key must exist"
+        );
+        assert!(
+            v["seeds"].get("judge_seed").is_some(),
+            "judge_seed key must exist"
+        );
+        assert!(v["seeds"]["order_seed"].is_null());
+        assert!(v["seeds"]["judge_seed"].is_null());
+    }
+
+    #[test]
+    fn test_seeds_serialize_as_string() {
+        let summary = Summary::success("2.12.0", true)
+            .with_results(1, 0, 1)
+            .with_seeds(Some(17390767342376325021), None);
+
+        let json = serde_json::to_string(&summary).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            v["seeds"]["order_seed"].is_string(),
+            "order_seed must be string to avoid precision loss"
+        );
+        assert_eq!(
+            v["seeds"]["order_seed"].as_str(),
+            Some("17390767342376325021")
+        );
+        assert!(v["seeds"]["judge_seed"].is_null());
+    }
+
+    #[test]
+    fn test_judge_metrics_abstain_not_counted_as_unavailable() {
+        use crate::model::{TestResultRow, TestStatus};
+
+        // Rows with verdict Abstain (uncertain) must NOT increment unavailable_count.
+        // unavailable_count is only for Error status + infra message (timeout/5xx/rate limit/network).
+        let results = vec![TestResultRow {
+            test_id: "t1".into(),
+            status: TestStatus::Pass,
+            score: Some(0.5),
+            cached: false,
+            message: String::new(),
+            details: serde_json::json!({
+                "metrics": {
+                    "m1": { "details": { "verdict": "Abstain", "agreement": 0.5 } }
+                }
+            }),
+            duration_ms: None,
+            fingerprint: None,
+            skip_reason: None,
+            attempts: None,
+            error_policy_applied: None,
+        }];
+        let metrics = judge_metrics_from_results(&results).unwrap();
+        assert_eq!(metrics.abstain_rate, Some(1.0));
+        assert_eq!(metrics.unavailable_count, Some(0));
     }
 }

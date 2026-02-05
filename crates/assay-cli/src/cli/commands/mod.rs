@@ -228,7 +228,7 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .count();
     summary = summary.with_results(passed, failed, artifacts.results.len());
     // E7.2: seeds in summary
-    summary = summary.with_seeds(artifacts.order_seed, artifacts.order_seed);
+    summary = summary.with_seeds(artifacts.order_seed, None);
     // E7.3: judge metrics
     if let Some(metrics) =
         assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
@@ -239,7 +239,7 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
     assay_core::report::console::print_run_footer(
-        summary.seeds.as_ref(),
+        Some(&summary.seeds),
         summary.judge_metrics.as_ref(),
     );
 
@@ -461,7 +461,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         .filter(|r| r.status.is_blocking())
         .count();
     summary = summary.with_results(passed, failed, artifacts.results.len());
-    summary = summary.with_seeds(artifacts.order_seed, artifacts.order_seed);
+    summary = summary.with_seeds(artifacts.order_seed, None);
     if let Some(metrics) =
         assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
     {
@@ -471,7 +471,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
     assay_core::report::console::print_run_footer(
-        summary.seeds.as_ref(),
+        Some(&summary.seeds),
         summary.judge_metrics.as_ref(),
     );
 
@@ -699,15 +699,17 @@ fn write_extended_run_json(
             serde_json::json!(assay_core::report::summary::REASON_CODE_VERSION),
         );
 
-        // E7.2: seeds for replay determinism
-        if let Some(seed) = artifacts.order_seed {
-            obj.insert(
-                "seed_version".to_string(),
-                serde_json::json!(assay_core::report::summary::SEED_VERSION),
-            );
-            obj.insert("order_seed".to_string(), serde_json::json!(seed));
-            obj.insert("judge_seed".to_string(), serde_json::json!(seed));
-        }
+        // E7.2: seeds always present; order_seed/judge_seed as string or null (SPEC: avoid JSON number precision loss)
+        obj.insert(
+            "seed_version".to_string(),
+            serde_json::json!(assay_core::report::summary::SEED_VERSION),
+        );
+        let order_seed_json = match artifacts.order_seed {
+            Some(n) => serde_json::Value::String(n.to_string()),
+            None => serde_json::Value::Null,
+        };
+        obj.insert("order_seed".to_string(), order_seed_json);
+        obj.insert("judge_seed".to_string(), serde_json::Value::Null);
 
         // E7.3: judge metrics when present
         if let Some(metrics) =
@@ -1057,7 +1059,59 @@ impl assay_core::providers::llm::LlmClient for DummyClient {
 
 #[cfg(test)]
 mod run_outcome_tests {
-    use super::has_judge_verdict_abstain;
+    use super::{decide_run_outcome, has_judge_verdict_abstain};
+    use crate::exit_codes::{ExitCodeVersion, ReasonCode, EXIT_INFRA_ERROR};
+    use assay_core::model::{TestResultRow, TestStatus};
+
+    #[test]
+    fn test_infra_beats_abstain_precedence() {
+        // Precedence: infra (exit 3) must win over abstain (exit 1). One Error + one Abstain → exit 3.
+        let results = vec![
+            TestResultRow {
+                test_id: "infra".into(),
+                status: TestStatus::Error,
+                score: None,
+                cached: false,
+                message: "Request timeout".into(),
+                details: serde_json::json!({}),
+                duration_ms: None,
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
+                error_policy_applied: None,
+            },
+            TestResultRow {
+                test_id: "abstain".into(),
+                status: TestStatus::Pass,
+                score: Some(0.5),
+                cached: false,
+                message: String::new(),
+                details: serde_json::json!({
+                    "metrics": {
+                        "faithfulness": {
+                            "details": { "verdict": "Abstain", "score": 0.5 }
+                        }
+                    }
+                }),
+                duration_ms: None,
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
+                error_policy_applied: None,
+            },
+        ];
+        let outcome = decide_run_outcome(&results, false, ExitCodeVersion::V2);
+        assert_eq!(
+            outcome.exit_code, EXIT_INFRA_ERROR,
+            "infra must beat abstain: expected exit 3"
+        );
+        assert!(
+            outcome.reason_code == ReasonCode::ETimeout.as_str()
+                || outcome.reason_code == ReasonCode::EJudgeUnavailable.as_str(),
+            "reason should be infra (E_TIMEOUT or E_JUDGE_UNAVAILABLE), got {}",
+            outcome.reason_code
+        );
+    }
 
     #[test]
     fn test_has_judge_verdict_abstain_detects_abstain() {

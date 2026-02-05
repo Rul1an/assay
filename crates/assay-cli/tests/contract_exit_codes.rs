@@ -41,24 +41,26 @@ fn assert_schema(v: &Value) {
     }
 }
 
-/// E7.2: Early-exit run.json must have seed_version present and order_seed/judge_seed null.
+/// E7.2: Early-exit run.json must have seed_version present; order_seed/judge_seed keys present and null.
 fn assert_run_json_seeds_early_exit(v: &Value) {
     assert_eq!(
         v.get("seed_version").and_then(Value::as_u64),
         Some(1),
         "run.json must have seed_version == 1"
     );
+    assert!(v.get("order_seed").is_some(), "order_seed key must exist");
+    assert!(v.get("judge_seed").is_some(), "judge_seed key must exist");
     assert!(
-        v.get("order_seed").is_none_or(|v| v.is_null()),
+        v["order_seed"].is_null(),
         "order_seed must be null on early exit"
     );
     assert!(
-        v.get("judge_seed").is_none_or(|v| v.is_null()),
+        v["judge_seed"].is_null(),
         "judge_seed must be null on early exit"
     );
 }
 
-/// E7.2: Successful run run.json must have seed_version 1 and integer order_seed/judge_seed.
+/// E7.2: Successful run run.json: seed_version 1; order_seed string (no number precision loss); judge_seed key present (null until implemented).
 fn assert_run_json_seeds_happy(v: &Value) {
     assert_eq!(
         v.get("seed_version").and_then(Value::as_u64),
@@ -66,16 +68,17 @@ fn assert_run_json_seeds_happy(v: &Value) {
         "run.json must have seed_version == 1"
     );
     assert!(
-        v.get("order_seed").and_then(Value::as_u64).is_some(),
-        "order_seed must be present and integer on success"
+        v["order_seed"].is_string(),
+        "order_seed must be string to avoid JSON precision loss"
     );
+    assert!(v.get("judge_seed").is_some(), "judge_seed key must exist");
     assert!(
-        v.get("judge_seed").and_then(Value::as_u64).is_some(),
-        "judge_seed must be present and integer on success"
+        v["judge_seed"].is_null(),
+        "judge_seed reserved, must be null until implemented"
     );
 }
 
-/// E7.2: Early-exit summary.json must have seeds with seed_version (order/judge may be omitted or null).
+/// E7.2: Early-exit summary.json must have seeds with seed_version; order_seed/judge_seed keys present (null or string).
 fn assert_summary_seeds_early_exit(v: &Value) {
     let seeds = v
         .get("seeds")
@@ -85,9 +88,25 @@ fn assert_summary_seeds_early_exit(v: &Value) {
         Some(1),
         "summary seeds must have seed_version == 1"
     );
+    assert!(
+        seeds.get("order_seed").is_some(),
+        "order_seed key must exist"
+    );
+    assert!(
+        seeds.get("judge_seed").is_some(),
+        "judge_seed key must exist"
+    );
+    assert!(
+        seeds["order_seed"].is_null() || seeds["order_seed"].is_string(),
+        "order_seed must be string or null"
+    );
+    assert!(
+        seeds["judge_seed"].is_null() || seeds["judge_seed"].is_string(),
+        "judge_seed must be string or null"
+    );
 }
 
-/// E7.2: Successful run summary.json must have seeds with seed_version and integer order_seed/judge_seed.
+/// E7.2: Successful run summary.json: seeds with seed_version; order_seed string, judge_seed null (reserved).
 fn assert_summary_seeds_happy(v: &Value) {
     let seeds = v
         .get("seeds")
@@ -98,12 +117,16 @@ fn assert_summary_seeds_happy(v: &Value) {
         "summary seeds must have seed_version == 1"
     );
     assert!(
-        seeds.get("order_seed").and_then(Value::as_u64).is_some(),
-        "summary seeds.order_seed must be integer"
+        seeds["order_seed"].is_string(),
+        "summary seeds.order_seed must be string (no precision loss)"
     );
     assert!(
-        seeds.get("judge_seed").and_then(Value::as_u64).is_some(),
-        "summary seeds.judge_seed must be integer"
+        seeds.get("judge_seed").is_some(),
+        "judge_seed key must exist"
+    );
+    assert!(
+        seeds["judge_seed"].is_null(),
+        "judge_seed reserved, null until implemented"
     );
 }
 
