@@ -484,6 +484,18 @@ impl Expected {
             _ => None,
         }
     }
+
+    /// Per-test thresholding for baseline regression (mode/max_drop) when this Expected variant matches the metric.
+    pub fn thresholding_for_metric(&self, metric_name: &str) -> Option<&ThresholdingConfig> {
+        match (metric_name, self) {
+            ("semantic_similarity_to", Expected::SemanticSimilarityTo { thresholding, .. }) => {
+                thresholding.as_ref()
+            }
+            ("faithfulness", Expected::Faithfulness { thresholding, .. }) => thresholding.as_ref(),
+            ("relevance", Expected::Relevance { thresholding, .. }) => thresholding.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -673,5 +685,42 @@ mod tests {
             otel: Default::default(),
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_thresholding_for_metric() {
+        // No thresholding
+        let exp = Expected::SemanticSimilarityTo {
+            semantic_similarity_to: "ref".into(),
+            min_score: 0.8,
+            thresholding: None,
+        };
+        assert!(exp
+            .thresholding_for_metric("semantic_similarity_to")
+            .is_none());
+        // With thresholding
+        let exp = Expected::SemanticSimilarityTo {
+            semantic_similarity_to: "ref".into(),
+            min_score: 0.8,
+            thresholding: Some(ThresholdingConfig {
+                max_drop: Some(0.05),
+            }),
+        };
+        let t = exp
+            .thresholding_for_metric("semantic_similarity_to")
+            .unwrap();
+        assert_eq!(t.max_drop, Some(0.05));
+        // Wrong metric name
+        assert!(exp.thresholding_for_metric("faithfulness").is_none());
+        // Faithfulness variant
+        let exp = Expected::Faithfulness {
+            min_score: 0.7,
+            rubric_version: None,
+            thresholding: Some(ThresholdingConfig {
+                max_drop: Some(0.1),
+            }),
+        };
+        let t = exp.thresholding_for_metric("faithfulness").unwrap();
+        assert_eq!(t.max_drop, Some(0.1));
     }
 }

@@ -6,10 +6,6 @@ Tracked work items that are marked in code with `// TODO(tag):` and documented h
 
 | Tag | Crate | Location | Summary |
 |-----|-------|----------|---------|
-| **runner-metric-override** | assay-core | `engine/runner.rs` | Map `metric_name` to strict `Expected` variant fields for per-test overrides; currently only suite-level defaults apply. |
-| **mcp-deny-code** | assay-core | `mcp/proxy.rs` | Use a more specific reason code when policy denies but we emit Allow for symmetry (dual-emit path). |
-| **mcp-op-class** | assay-core | `mcp/tool_call_handler.rs` | Derive `OperationClass` from tool classification instead of defaulting to `Read` for non-commit tools. |
-| **init-provider-template** | assay-cli | `cli/commands/init.rs` | Choose CI workflow template by provider value instead of always writing the same `.github/workflows/assay.yml`. |
 | **sandbox-scrub** | assay-cli | `cli/commands/sandbox.rs` | If partial env scrubbing is implemented, set `scrubbed: true` in profiler for keys that were redacted. |
 | **sim-verify-limits** | assay-cli | `cli/commands/sim.rs` | Parse `verify_limits` from `args.limits` when present and pass into `SuiteConfig`. |
 | **landlock-abi-v5** | assay-cli | `backend.rs` | ABI v5 (IOCTL), v6 (Scoping), v7 (Audit) when landlock crate or raw syscalls support them (SOTA 2026). |
@@ -23,10 +19,6 @@ Where each TODO should be fixed, with priority, value, urgency, and dependencies
 
 | Tag | Where to fix | Priority | Value | Urgency | Dependencies |
 |-----|--------------|----------|-------|---------|--------------|
-| **runner-metric-override** | **P1 / E4.2** (Performance DX) or follow-up to suite config. | P1 | Medium | SOTA / Later | None. Per-test Expected overrides improve DX and baseline workflows. |
-| **mcp-deny-code** | **P1.3 / E6** (MCP Auth Hardening). Reason codes in MCP decision path. | P1 | Medium | SOTA | None. Improves audit clarity when policy denies but we dual-emit. |
-| **mcp-op-class** | **P1.3 / E6** (MCP Auth). Mandate/tool classification. | P1 | High | SOTA | Tool classification (policy or spec); affects mandate authorization correctness. |
-| **init-provider-template** | **E1** (Blessed init & CI). Extend E1.1 to provider-specific workflow (e.g. GitLab). | P1 | Medium | SOTA | None. Unblocks GitLab/non-GitHub CI story in ROADMAP. |
 | **sandbox-scrub** | **E5 / E9.4** (Privacy, Replay scrubbing). Only when partial scrubbing exists. | P2 | Low until feature exists | Later | Depends on partial env scrubbing implementation. |
 | **sim-verify-limits** | **Backlog.** `assay sim` attack simulation; not in DX epics. | Backlog | Low | Later | None. |
 | **landlock-abi-v5** | **ROADMAP Backlog:** “Runtime Extensions (Epic G): ABI 6/7”. | Backlog | Medium | Later | Landlock crate or kernel support for ABI v5/v6/v7. |
@@ -36,11 +28,9 @@ Where each TODO should be fixed, with priority, value, urgency, and dependencies
 
 ### Suggested fix order (by plan phase)
 
-1. **P1 SOTA (E6 → E7 → …):** `mcp-op-class`, `mcp-deny-code` — with P1.3 MCP Auth.
-2. **P1 DX:** `init-provider-template` (E1), `runner-metric-override` (E4.2 or config follow-up).
-3. **Later / Backlog:** `sandbox-scrub` (after scrubbing), `sim-verify-limits`, `landlock-net`, `landlock-abi-v5`, `validate-v13`, `sequence-v11`.
+1. **Later / Backlog:** `sandbox-scrub` (after scrubbing), `sim-verify-limits`, `landlock-net`, `landlock-abi-v5`, `validate-v13`, `sequence-v11`.
 
-**Done:** `cli-verify` (P0 — run/ci `--no-verify` plumbed to Summary); `monitor-strict-warn` (P1 — warning when openat2 unavailable).
+**Done:** `cli-verify` (P0); `monitor-strict-warn` (P1); `mcp-deny-code` (P1); `mcp-op-class` (P1); `init-provider-template` (P1); `runner-metric-override` (P1 — `Expected::thresholding_for_metric` + per-test max_drop in baseline regression).
 
 ## Conventions
 

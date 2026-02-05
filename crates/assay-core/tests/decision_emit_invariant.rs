@@ -120,6 +120,7 @@ fn test_commit_tool_no_mandate_emits_deny() {
         event_source: "assay://test".to_string(),
         require_mandate_for_commit: true,
         commit_tools: vec!["purchase_*".to_string()],
+        write_tools: vec![],
     };
     let handler = ToolCallHandler::new(policy, None, emitter.clone(), config);
 
@@ -229,6 +230,7 @@ fn test_event_source_from_config() {
         event_source: "assay://myorg/myapp".to_string(),
         require_mandate_for_commit: false,
         commit_tools: vec![],
+        write_tools: vec![],
     };
     let handler = ToolCallHandler::new(policy, None, emitter.clone(), config);
 

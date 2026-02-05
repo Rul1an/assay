@@ -571,11 +571,10 @@ impl Runner {
 
     fn resolve_threshold_config(
         &self,
-        _tc: &TestCase,
-        _metric_name: &str,
+        tc: &TestCase,
+        metric_name: &str,
         suite_defaults: Option<&crate::model::ThresholdingSettings>,
     ) -> (String, Option<f64>) {
-        // Defaults
         let mut mode = "absolute".to_string();
         let mut max_drop = None;
 
@@ -586,7 +585,12 @@ impl Runner {
             max_drop = s.max_drop;
         }
 
-        // TODO(runner-metric-override): per-test overrides; see docs/contributing/TODOS.md
+        if let Some(t) = tc.expected.thresholding_for_metric(metric_name) {
+            if t.max_drop.is_some() {
+                max_drop = t.max_drop;
+            }
+        }
+
         (mode, max_drop)
     }
 

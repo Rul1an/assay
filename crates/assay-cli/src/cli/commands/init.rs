@@ -82,11 +82,21 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
             crate::templates::CI_TRACES_JSONL,
         )?;
 
-        // TODO(init-provider-template): select workflow by provider
-        write_file_if_missing(
-            Path::new(".github/workflows/assay.yml"),
-            crate::templates::CI_WORKFLOW_YML,
-        )?;
+        let provider = args.ci.as_deref().unwrap_or("github");
+        match provider {
+            "gitlab" => {
+                write_file_if_missing(
+                    Path::new(".gitlab-ci.yml"),
+                    crate::templates::GITLAB_CI_YML,
+                )?;
+            }
+            _ => {
+                write_file_if_missing(
+                    Path::new(".github/workflows/assay.yml"),
+                    crate::templates::CI_WORKFLOW_YML,
+                )?;
+            }
+        }
     }
 
     println!("✅  Initialization complete. Run 'assay audit' to test.");
