@@ -78,15 +78,16 @@ A top-level **`performance`** object MAY contain `total_duration_ms` (integer, m
 
 ### 3.3.1 Seeds (E7.2 – Replay Determinism)
 
-When the run used a seed for order or judge randomization, a top-level **`seeds`** object MAY be present:
+A top-level **`seeds`** object (summary.json) and top-level **`seed_version`**, **`order_seed`**, **`judge_seed`** (run.json) SHALL be present for schema stability. On early-exit (e.g. trace not found, config fail), seeds may be `null` when unknown; `seed_version` SHALL still be present.
 
-| Field         | Type    | Required | Description |
-|---------------|---------|----------|-------------|
-| `seed_version`| integer | **Yes**  | Version of the seed schema. MUST be `1` for Outputs-v1. Consumers MUST branch on `seed_version` when interpreting seeds. |
-| `order_seed`  | integer | No       | Seed used for test execution order (shuffle). |
-| `judge_seed`  | integer | No       | Seed used for judge randomization (suite-level; per-test seeds may be derived from this). |
+| Field          | Type    | Required | Description |
+|----------------|---------|----------|-------------|
+| `seed_version` | integer | **Yes**  | Version of the seed schema. MUST be `1` for Outputs-v1. Consumers MUST branch on `seed_version` when interpreting seeds. |
+| `order_seed`   | integer | No       | Seed used for test execution order (shuffle). Null on early-exit when unknown. |
+| `judge_seed`   | integer | No       | Seed used for judge randomization (suite-level; per-test seeds may be derived from this). Null on early-exit when unknown. |
+| `sampling_seed`| integer | No       | Optional: determinism for telemetry sampling (reserved for future use). |
 
-**Normative:** When present, `run.json` and the CLI console SHALL also expose seeds (e.g. `seed_version`, `order_seed`, `judge_seed` in run.json; a "Seeds (replay): …" line in console output) so CI logs and job summaries can show them for replay.
+**Normative:** run.json (extended and minimal) and summary.json SHALL include `seed_version`; order_seed and judge_seed SHALL be present (integer or null). CLI console SHALL print one line: `Seeds: seed_version=1 order_seed=… judge_seed=…` so CI job summaries can show them for replay.
 
 ### 3.3.2 Judge Metrics (E7.3)
 
@@ -95,7 +96,7 @@ When the run had judge evaluations, a top-level **`judge_metrics`** object MAY b
 | Field               | Type    | Required | Description |
 |---------------------|---------|----------|-------------|
 | `abstain_rate`      | number  | No       | Fraction of judge evaluations that returned Abstain (uncertain). |
-| `flip_rate`         | number  | No       | Fraction of evaluations where order was swapped and outcome differed. |
+| `flip_rate`         | number  | No       | Fraction of evaluations where order was swapped and outcome differed. (Implementation may use a proxy: swapped and non-unanimous agreement, when the judge does not record whether the pass/fail verdict would have differed under the other ordering.) |
 | `consensus_rate`    | number  | No       | Fraction of evaluations where all samples agreed. |
 | `unavailable_count` | integer | No       | Count of runs where judge was unavailable (infra/transport); not counted toward abstain_rate. |
 

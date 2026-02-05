@@ -13,6 +13,15 @@ fn read_run_json(dir: &std::path::Path) -> Value {
     serde_json::from_str(&content).expect("Invalid JSON in run.json")
 }
 
+fn read_summary_json(dir: &std::path::Path) -> Value {
+    let path = dir.join("summary.json");
+    if !path.exists() {
+        panic!("summary.json missing in {}", dir.display());
+    }
+    let content = fs::read_to_string(&path).unwrap();
+    serde_json::from_str(&content).expect("Invalid JSON in summary.json")
+}
+
 fn assert_schema(v: &Value) {
     assert!(
         v.get("exit_code").expect("missing exit_code").is_i64(),
@@ -31,7 +40,73 @@ fn assert_schema(v: &Value) {
         }
     }
 }
-// ...
+
+/// E7.2: Early-exit run.json must have seed_version present and order_seed/judge_seed null.
+fn assert_run_json_seeds_early_exit(v: &Value) {
+    assert_eq!(
+        v.get("seed_version").and_then(Value::as_u64),
+        Some(1),
+        "run.json must have seed_version == 1"
+    );
+    assert!(
+        v.get("order_seed").is_none_or(|v| v.is_null()),
+        "order_seed must be null on early exit"
+    );
+    assert!(
+        v.get("judge_seed").is_none_or(|v| v.is_null()),
+        "judge_seed must be null on early exit"
+    );
+}
+
+/// E7.2: Successful run run.json must have seed_version 1 and integer order_seed/judge_seed.
+fn assert_run_json_seeds_happy(v: &Value) {
+    assert_eq!(
+        v.get("seed_version").and_then(Value::as_u64),
+        Some(1),
+        "run.json must have seed_version == 1"
+    );
+    assert!(
+        v.get("order_seed").and_then(Value::as_u64).is_some(),
+        "order_seed must be present and integer on success"
+    );
+    assert!(
+        v.get("judge_seed").and_then(Value::as_u64).is_some(),
+        "judge_seed must be present and integer on success"
+    );
+}
+
+/// E7.2: Early-exit summary.json must have seeds with seed_version (order/judge may be omitted or null).
+fn assert_summary_seeds_early_exit(v: &Value) {
+    let seeds = v
+        .get("seeds")
+        .expect("summary.json must have seeds on early exit");
+    assert_eq!(
+        seeds.get("seed_version").and_then(Value::as_u64),
+        Some(1),
+        "summary seeds must have seed_version == 1"
+    );
+}
+
+/// E7.2: Successful run summary.json must have seeds with seed_version and integer order_seed/judge_seed.
+fn assert_summary_seeds_happy(v: &Value) {
+    let seeds = v
+        .get("seeds")
+        .expect("summary.json must have seeds on success");
+    assert_eq!(
+        seeds.get("seed_version").and_then(Value::as_u64),
+        Some(1),
+        "summary seeds must have seed_version == 1"
+    );
+    assert!(
+        seeds.get("order_seed").and_then(Value::as_u64).is_some(),
+        "summary seeds.order_seed must be integer"
+    );
+    assert!(
+        seeds.get("judge_seed").and_then(Value::as_u64).is_some(),
+        "summary seeds.judge_seed must be integer"
+    );
+}
+
 #[test]
 fn contract_ci_report_io_failure() {
     let dir = tempdir().unwrap();
@@ -141,6 +216,9 @@ fn contract_reason_code_trace_not_found_v2() {
     assert_schema(&v);
     assert_eq!(v["exit_code"], 2);
     assert_eq!(v["reason_code"], "E_TRACE_NOT_FOUND");
+    assert_run_json_seeds_early_exit(&v);
+    let summary = read_summary_json(dir.path());
+    assert_summary_seeds_early_exit(&summary);
 }
 
 #[test]
@@ -167,6 +245,51 @@ fn contract_legacy_v1_trace_not_found() {
     assert_schema(&v);
     assert_eq!(v["exit_code"], 3);
     assert_eq!(v["reason_code"], "E_TRACE_NOT_FOUND");
+}
+
+/// E7.2: Happy path — run completes; run.json and summary.json contain seed_version 1 and integer order_seed/judge_seed.
+#[test]
+fn contract_e72_seeds_happy_path() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"version: 1
+suite: e72-seeds
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected: { type: must_contain, must_contain: ["passed"] }
+"#,
+    )
+    .unwrap();
+    // Minimal v2 trace: episode_start + episode_end for t1 with final_output containing "passed"
+    fs::write(
+        dir.path().join("trace.jsonl"),
+        r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hi"}}
+{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"passed"}
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .arg("--trace-file")
+        .arg("trace.jsonl")
+        .arg("--strict")
+        .assert()
+        .success();
+
+    let run = read_run_json(dir.path());
+    assert_schema(&run);
+    assert_eq!(run["exit_code"], 0);
+    assert_run_json_seeds_happy(&run);
+    let summary = read_summary_json(dir.path());
+    assert_summary_seeds_happy(&summary);
 }
 
 #[test]

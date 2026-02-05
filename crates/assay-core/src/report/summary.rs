@@ -73,6 +73,9 @@ pub struct Seeds {
     /// Seed used for judge randomization (per-test seed derived from suite seed when present).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub judge_seed: Option<u64>,
+    /// Optional: determinism for telemetry sampling (future use).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampling_seed: Option<u64>,
 }
 
 /// Judge reliability metrics (low cardinality, E8-consistent)
@@ -269,15 +272,14 @@ impl Summary {
         self
     }
 
-    /// Set seeds for replay determinism (E7.2)
+    /// Set seeds for replay determinism (E7.2). Always set for schema stability (early-exit uses null).
     pub fn with_seeds(mut self, order_seed: Option<u64>, judge_seed: Option<u64>) -> Self {
-        if order_seed.is_some() || judge_seed.is_some() {
-            self.seeds = Some(Seeds {
-                seed_version: SEED_VERSION,
-                order_seed,
-                judge_seed,
-            });
-        }
+        self.seeds = Some(Seeds {
+            seed_version: SEED_VERSION,
+            order_seed,
+            judge_seed,
+            sampling_seed: None,
+        });
         self
     }
 
@@ -325,6 +327,11 @@ pub fn judge_metrics_from_results(results: &[crate::model::TestResultRow]) -> Op
                 if a == 0.0 || a == 1.0 {
                     consensus_count += 1;
                 }
+                // flip_rate (spec: "order was swapped and outcome differed"). We do not store
+                // the counterfactual verdict for the other order, so we use a proxy: swapped
+                // and non-unanimous (0 < agreement < 1) indicates order may have affected
+                // outcome. A strict implementation would require the judge to record
+                // whether the pass/fail verdict differed under the other ordering.
                 if swapped && a > 0.0 && a < 1.0 {
                     flip_count += 1;
                 }
