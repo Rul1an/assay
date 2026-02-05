@@ -1,6 +1,6 @@
 # AI Context Documentation
 
-> **Version**: 2.12.0 (January 2026)
+> **Version**: 2.15.0 (February 2026)
 > **Last Updated**: 2026-02
 > **SOTA Status**: Judge output (PR #159); SARIF limits (PR #160); Bleeding Edge (MCP Auth, OTel GenAI, Replay Bundle)
 
@@ -47,7 +47,7 @@ These documents provide:
 | **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k results); runs[0].properties.assay when truncated; sarif.omitted in run.json/summary.json. Consumers use summary/run for authoritative counts. |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707, alg/typ/crit, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv versioning, low-cardinality metrics, composable redaction |
-| **Replay Bundle** | 🔄 P1 | Toolchain capture, deterministic seeds, scrubbed cassettes |
+| **Replay Bundle** | ✅ In Progress (E9.1–E9.3) | Manifest, container writer, toolchain capture, path validation, provenance |
 | **CI Optimization** | ✅ Implemented | Skip matrix tests for pure dep bumps, auto-cancel superseded runs |
 | **Self-Healing Runner** | ✅ Implemented | Health check, cache auto-heal, stale job cleanup |
 

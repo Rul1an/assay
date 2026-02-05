@@ -6,17 +6,18 @@ Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that valid
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `2.12.0`.
+Rust monorepo with workspace version `2.15.0`.
 
 ```
 crates/
-  assay-core/       Core evaluation engine (Runner, Store, MCP, Trace, Report, Providers, VCR)
+  assay-core/       Core evaluation engine (Runner, Store, MCP, Trace, Report, Providers, VCR, Replay Bundle)
   assay-cli/        CLI binary ("assay") - all user-facing commands
   assay-metrics/    Standard metrics (MustContain, RegexMatch, ArgsValid, SequenceValid, etc.)
   assay-mcp-server/ MCP server/proxy for runtime policy enforcement (JSON-RPC over stdio)
   assay-monitor/    Runtime eBPF/LSM monitoring (Linux only)
   assay-policy/     Policy compilation (Tier 1: kernel, Tier 2: userspace)
   assay-evidence/   Evidence bundles (tar.gz with manifest.json + events.ndjson), lint, diff, sanitize
+  assay-registry/   Pack Registry client (HTTP, DSSE verification, OIDC auth, local caching, lockfile v2)
   assay-common/     Shared types (no_std compatible for eBPF)
   assay-ebpf/       Kernel eBPF programs (LSM hooks + tracepoints)
   assay-sim/        Attack simulation harness (chaos, differential, integrity testing)
@@ -89,14 +90,16 @@ Error classification: `ErrorClass` (Integrity/Contract/Security/Limits) + `Error
 ## Crate Dependency Graph
 
 ```
-assay-cli -> assay-core, assay-metrics, assay-monitor, assay-policy, assay-evidence, assay-mcp-server, assay-sim, assay-common
-assay-mcp-server -> assay-core, assay-policy, assay-common
-assay-monitor -> assay-policy, assay-common, assay-ebpf
-assay-core -> assay-common, assay-metrics
-assay-evidence -> assay-core, assay-common
+assay-cli -> assay-core, assay-metrics, assay-monitor, assay-common, assay-policy, assay-evidence, assay-mcp-server, assay-sim (optional)
+assay-mcp-server -> assay-core, assay-common, assay-metrics
+assay-monitor -> assay-common, assay-policy
+assay-metrics -> assay-core, assay-common
+assay-core -> assay-common
 assay-sim -> assay-core, assay-evidence
 assay-ebpf -> assay-common
 ```
+
+Leaf crates (no internal dependencies): `assay-common`, `assay-policy`, `assay-evidence`, `assay-registry`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
 
@@ -231,7 +234,7 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
-- Workspace version in root `Cargo.toml` (`version = "2.7.0"`)
+- Workspace version in root `Cargo.toml` (`version = "2.15.0"`)
 - Internal crate deps use `workspace = true` with path + version
 - `#[deny(unsafe_code)]` on all crates except assay-ebpf
 - Error handling: `anyhow` for applications, `thiserror` for libraries
@@ -246,6 +249,8 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 | 0 | All tests pass | All attacks blocked | No findings above threshold |
 | 1 | Test failure | Bypass found (regression) | Findings found |
 | 2 | Config error | Infra error (panic/timeout) | Verification failure |
+| 3 | Infra/judge unavailable | — | — |
+| 4 | Would block (sandbox/policy) | — | — |
 
 ## Security Considerations
 

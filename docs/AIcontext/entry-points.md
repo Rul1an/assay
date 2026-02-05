@@ -65,8 +65,9 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 
 #### `assay replay`
 **Purpose**: Interactive trace replay
-**Entry**: `crates/assay-cli/src/cli/commands/replay.rs` (if exists)
+**Entry**: `crates/assay-cli/src/cli/commands/replay.rs`
 **Flow**: Load trace → step through → inspect results
+**Note**: Replay bundle core (manifest, container writer, toolchain) is in `crates/assay-core/src/replay/`.
 
 ### Policy Management
 
@@ -580,6 +581,7 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 | 1 | `EXIT_TEST_FAILURE` | One or more tests fail, policy violation |
 | 2 | `EXIT_CONFIG_ERROR` | Invalid configuration, missing files, parse errors |
 | 3 | `EXIT_INFRA_ERROR` | Judge unavailable, rate limit, timeout, network error |
+| 4 | `EXIT_WOULD_BLOCK` | Sandbox/policy would block execution |
 
 ### Reason Codes (Fine-Grained, Machine-Readable)
 

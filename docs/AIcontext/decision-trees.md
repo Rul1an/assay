@@ -1,7 +1,7 @@
 # Decision Trees
 
 > **Purpose**: Help AI agents decide which command, approach, or pattern to use.
-> **Version**: 2.12.0 (January 2026)
+> **Version**: 2.15.0 (February 2026)
 
 ## Decision Tree 1: Which Command Should I Use?
 
@@ -57,6 +57,10 @@ flowchart TD
     E3 -->|Yes| INFRA[Infrastructure error]
     INFRA --> RETRY[Retry with backoff]
     RETRY --> CHECK_API[Check API keys and limits]
+
+    E3 -->|No| E4{Code 4?}
+    E4 -->|Yes| BLOCKED[Would block - sandbox/policy]
+    BLOCKED --> REVIEW_POLICY[Review sandbox policy constraints]
 ```
 
 ## Decision Tree 3: Trace Recording Method
