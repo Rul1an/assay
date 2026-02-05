@@ -343,6 +343,7 @@ impl Summary {
 
 /// Compute judge reliability metrics from run results (E7.3).
 /// Returns None if no results have judge details.
+/// One test can contribute multiple evaluations (one per metric name, e.g. faithfulness + relevance); rates are per-evaluation.
 pub fn judge_metrics_from_results(results: &[crate::model::TestResultRow]) -> Option<JudgeMetrics> {
     use crate::model::TestStatus;
 

@@ -13,7 +13,7 @@ pub fn print_run_footer(seeds: Option<&Seeds>, judge_metrics: Option<&JudgeMetri
             .map(|n| n.to_string())
             .unwrap_or_else(|| "—".into());
         eprintln!(
-            "Seeds (replay): seed_version={} order_seed={} judge_seed={}",
+            "Seeds: seed_version={} order_seed={} judge_seed={}",
             s.seed_version, order, judge
         );
     }
