@@ -4,3 +4,4 @@ Running 1 tests...
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Summary: 1 passed, 0 failed, 0 skipped, 0 flaky, 0 unstable, 0 warn, 0 error
+Seeds: seed_version=1 order_seed=<SEED> judge_seed=<SEED>

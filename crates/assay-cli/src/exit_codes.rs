@@ -90,6 +90,8 @@ pub enum ReasonCode {
     // Test Failure (exit 1)
     /// One or more tests failed
     ETestFailed,
+    /// Judge returned uncertain (abstain) — model could not decide; policy-dependent
+    EJudgeUncertain,
     /// Policy violation detected
     EPolicyViolation,
     /// Sequence assertion failed
@@ -133,6 +135,7 @@ impl ReasonCode {
 
             // V2: Test failures -> 1
             ReasonCode::ETestFailed
+            | ReasonCode::EJudgeUncertain
             | ReasonCode::EPolicyViolation
             | ReasonCode::ESequenceViolation
             | ReasonCode::EArgSchema => EXIT_TEST_FAILURE,
@@ -172,6 +175,7 @@ impl ReasonCode {
             ReasonCode::ETimeout => "E_TIMEOUT",
             ReasonCode::ENetworkError => "E_NETWORK_ERROR",
             ReasonCode::ETestFailed => "E_TEST_FAILED",
+            ReasonCode::EJudgeUncertain => "E_JUDGE_UNCERTAIN",
             ReasonCode::EPolicyViolation => "E_POLICY_VIOLATION",
             ReasonCode::ESequenceViolation => "E_SEQUENCE_VIOLATION",
             ReasonCode::EArgSchema => "E_ARG_SCHEMA",
@@ -219,6 +223,10 @@ impl ReasonCode {
                 "Check network connectivity and firewall rules".to_string()
             }
             ReasonCode::ETestFailed => "Run: assay explain <test-id> for details".to_string(),
+            ReasonCode::EJudgeUncertain => {
+                "Review borderline result or adjust judge threshold; run: assay explain <test-id>"
+                    .to_string()
+            }
             ReasonCode::EPolicyViolation => {
                 "Run: assay explain <test-id> or review policy rules".to_string()
             }
@@ -293,6 +301,23 @@ impl RunOutcome {
             warnings: Vec::new(),
         }
     }
+
+    /// Create an outcome when judge returned uncertain (abstain) — exit 1, E_JUDGE_UNCERTAIN
+    pub fn judge_uncertain(abstain_count: usize) -> Self {
+        Self {
+            exit_code: EXIT_TEST_FAILURE,
+            reason_code: ReasonCode::EJudgeUncertain.as_str().to_string(),
+            message: Some(format!(
+                "Judge uncertain (abstain) for {} test(s); cannot decide pass/fail",
+                abstain_count
+            )),
+            next_step: Some(
+                "Review borderline result or adjust judge threshold; run: assay explain <test-id>"
+                    .to_string(),
+            ),
+            warnings: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +355,7 @@ mod tests {
 
         // Test failures map to 1
         assert_eq!(ReasonCode::ETestFailed.exit_code(), EXIT_TEST_FAILURE);
+        assert_eq!(ReasonCode::EJudgeUncertain.exit_code(), EXIT_TEST_FAILURE);
         assert_eq!(ReasonCode::EPolicyViolation.exit_code(), EXIT_TEST_FAILURE);
         assert_eq!(
             ReasonCode::ESequenceViolation.exit_code(),
@@ -356,6 +382,7 @@ mod tests {
         assert_eq!(ReasonCode::ETimeout.as_str(), "E_TIMEOUT");
         assert_eq!(ReasonCode::ENetworkError.as_str(), "E_NETWORK_ERROR");
         assert_eq!(ReasonCode::ETestFailed.as_str(), "E_TEST_FAILED");
+        assert_eq!(ReasonCode::EJudgeUncertain.as_str(), "E_JUDGE_UNCERTAIN");
         assert_eq!(ReasonCode::EPolicyViolation.as_str(), "E_POLICY_VIOLATION");
         assert_eq!(
             ReasonCode::ESequenceViolation.as_str(),
@@ -404,6 +431,9 @@ mod tests {
         assert!(ReasonCode::ETestFailed
             .next_step(None)
             .contains("assay explain"));
+        assert!(ReasonCode::EJudgeUncertain
+            .next_step(None)
+            .contains("borderline"));
         assert!(ReasonCode::EPolicyViolation
             .next_step(None)
             .contains("explain"));
@@ -460,5 +490,14 @@ mod tests {
         assert!(json.contains("\"exit_code\":1"));
         assert!(json.contains("\"reason_code\":\"E_TEST_FAILED\""));
         assert!(json.contains("2 test(s) failed"));
+    }
+
+    #[test]
+    fn test_run_outcome_judge_uncertain() {
+        let outcome = RunOutcome::judge_uncertain(1);
+        assert_eq!(outcome.exit_code, EXIT_TEST_FAILURE);
+        assert_eq!(outcome.reason_code, "E_JUDGE_UNCERTAIN");
+        assert!(outcome.message.as_ref().unwrap().contains("uncertain"));
+        assert!(outcome.next_step.as_ref().unwrap().contains("borderline"));
     }
 }

@@ -126,6 +126,7 @@ impl Runner {
             run_id,
             suite: cfg.suite.clone(),
             results: rows,
+            order_seed: cfg.settings.seed,
         })
     }
 

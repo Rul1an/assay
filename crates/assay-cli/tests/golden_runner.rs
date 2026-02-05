@@ -43,17 +43,26 @@ fn test_golden_harness() {
     // Normalize: Remove variable timing info "(0.0s)" or similar if it changes
     // The golden file has "(0.0s)". If it changes to "(0.1s)", test fails.
     // Strip E7 seed line ("Info: No seed provided. Using generated seed: NNNN") so golden is stable.
-    // Verify result (strip ANSI codes for comparison)
+    // E7.2: Normalize Seeds footer (order_seed/judge_seed vary per run) to fixed placeholder.
     let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
     let duration_re = regex::Regex::new(r"\(\d+\.\d+s\)").unwrap();
     let seed_re =
         regex::Regex::new(r"Info: No seed provided\. Using generated seed: \d+\n\n").unwrap();
+    // Match "Seeds:" or "Seeds (replay):"; order_seed is number, judge_seed number or "—" (null until E9)
+    let seeds_footer_re = regex::Regex::new(
+        r"Seeds( \(replay\))?: seed_version=\d+ order_seed=\d+ judge_seed=(\d+|—)",
+    )
+    .unwrap();
 
     let stripped_actual = ansi_re.replace_all(&stderr, "").to_string();
     let without_seed = seed_re.replace_all(&stripped_actual, "").to_string();
+    let without_seeds_footer = seeds_footer_re.replace_all(
+        &without_seed,
+        "Seeds: seed_version=1 order_seed=<SEED> judge_seed=<SEED>",
+    );
 
     let normalized_actual = duration_re
-        .replace_all(&without_seed, "(0.0s)")
+        .replace_all(&without_seeds_footer, "(0.0s)")
         .replace("\r\n", "\n")
         .trim()
         .to_string();

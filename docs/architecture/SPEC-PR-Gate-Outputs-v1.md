@@ -76,6 +76,36 @@ A top-level **`results`** object MAY contain:
 
 A top-level **`performance`** object MAY contain `total_duration_ms` (integer, milliseconds). Future versions MAY add `slowest_tests`, `cache_hit_rate`, `phase_timings` (see ADR-019 / DX-IMPLEMENTATION-PLAN). Consumers MUST ignore unknown top-level keys.
 
+### 3.3.1 Seeds (E7.2 – Replay Determinism)
+
+A top-level **`seeds`** object (summary.json) and top-level **`seed_version`**, **`order_seed`**, **`judge_seed`** (run.json) SHALL be present for schema stability. On early-exit (e.g. trace not found, config fail), seeds may be `null` when unknown; `seed_version` SHALL still be present.
+
+| Field          | Type            | Required | Description |
+|----------------|-----------------|----------|-------------|
+| `seed_version` | integer         | **Yes**  | Version of the seed schema. MUST be `1` for Outputs-v1. Consumers MUST branch on `seed_version` when interpreting seeds. |
+| `order_seed`   | string or null  | **Yes**  | Decimal u64 encoded as string to avoid JSON number precision loss; null on early-exit when unknown. |
+| `judge_seed`   | string or null  | **Yes**  | Decimal u64 encoded as string; MAY be null until judge-level seeding is implemented (E9); consumers MUST handle null. |
+| `sampling_seed`| integer         | No       | Optional: determinism for telemetry sampling (reserved for future use). |
+
+**Normative:** run.json (extended and minimal) and summary.json SHALL include `seed_version`; order_seed and judge_seed SHALL be present (string or null). Seeds MUST be encoded as decimal strings (or null) to avoid precision loss in JSON consumers (e.g. JS/TS safe for u64 > 2^53). CLI console SHALL print one line: `Seeds: seed_version=1 order_seed=… judge_seed=…` so CI job summaries can show them for replay.
+
+### 3.3.2 Judge Metrics (E7.3)
+
+When the run had judge evaluations, a top-level **`judge_metrics`** object MAY be present with low-cardinality reliability metrics:
+
+| Field               | Type    | Required | Description |
+|---------------------|---------|----------|-------------|
+| `abstain_rate`      | number  | No       | Fraction of judge evaluations that returned Abstain (uncertain). |
+| `flip_rate`         | number  | No       | Fraction of evaluations where order was swapped and outcome differed. (Implementation may use a proxy: swapped and non-unanimous agreement, when the judge does not record whether the pass/fail verdict would have differed under the other ordering.) |
+| `consensus_rate`    | number  | No       | Fraction of evaluations where all samples agreed. |
+| `unavailable_count` | integer | No       | Count of runs where judge was unavailable (infra/transport); not counted toward abstain_rate. |
+
+**Normative:** Judge unavailable (transport/infra) MUST NOT be counted as Abstain; use `unavailable_count` for that.
+
+**Implementation note (unavailable_count):** Implementations may use message heuristics (e.g. timeout, 5xx, rate limit, network) on Error-status rows to classify infra failures. Abstain (uncertain verdict) is never counted as unavailable. Prefer standardised reason codes or an explicit infra_class field when available.
+
+**Implementation note (flip_rate):** The spec defines flip_rate as “order was swapped and outcome differed”. When the judge does not record whether the pass/fail verdict would have differed under the other ordering, implementations may use a heuristic proxy (e.g. swapped and non-unanimous agreement). This proxy does not guarantee that the verdict actually flipped; it indicates order may have affected the outcome. When present, run.json and the CLI console SHALL expose judge metrics so CI can display them.
+
 ### 3.4 Example (Minimal)
 
 ```json
@@ -216,7 +246,8 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 
 | schema_version | Date     | Changes |
 |----------------|----------|---------|
-| 1              | 2026-01  | Initial: schema_version, exit_code, reason_code, provenance, next_step, SARIF location and truncation rules. |
+| 1              | 2026-01  | Initial Outputs-v1. |
+| 1              | 2026-02  | Clarified/added: Seeds (§3.3.1) + Judge metrics (§3.3.2). Seeds MUST be decimal strings (or null) to avoid JSON precision loss. judge_seed reserved (null) until implemented. |
 
 ---
 
