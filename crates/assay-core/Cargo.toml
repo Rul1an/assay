@@ -52,6 +52,10 @@ regex.workspace = true
 tempfile.workspace = true
 globset = "0.4"
 
+# Replay bundle (E9): hermetic archive
+tar = "0.4"
+flate2 = "1.0"
+
 # Discovery dependencies
 sysinfo = { version = "0.30", optional = true }
 dirs = { version = "6", optional = true }
