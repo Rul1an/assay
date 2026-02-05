@@ -132,6 +132,7 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
 | **P2** | Mandate/Intent Evidence | Medium | High | ✅ Complete (v2.11.0) |
 | **P1** | Judge Reliability (SOTA E7) | High | High | ✅ Complete (Audit Grade) |
+| **P1** | Progress N/M (E4.3) | Low | High | ✅ Complete (PR #164) |
 | **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |

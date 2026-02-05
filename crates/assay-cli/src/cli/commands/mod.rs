@@ -198,7 +198,12 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     };
 
-    let mut artifacts = runner.run_suite(&cfg).await?;
+    let total = cfg.tests.len();
+    if total > 0 {
+        eprintln!("Running {} tests...", total);
+    }
+    let progress = assay_core::report::console::default_progress_sink(total);
+    let mut artifacts = runner.run_suite(&cfg, progress).await?;
 
     if args.redact_prompts {
         let policy = assay_core::redaction::RedactionPolicy::new(true);
@@ -402,7 +407,12 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     };
 
-    let mut artifacts = runner.run_suite(&cfg).await?;
+    let total = cfg.tests.len();
+    if total > 0 {
+        eprintln!("Running {} tests...", total);
+    }
+    let progress = assay_core::report::console::default_progress_sink(total);
+    let mut artifacts = runner.run_suite(&cfg, progress).await?;
 
     if args.redact_prompts {
         let policy = assay_core::redaction::RedactionPolicy::new(true);

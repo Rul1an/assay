@@ -1,6 +1,7 @@
 pub mod console;
 pub mod json;
 pub mod junit;
+pub mod progress;
 pub mod sarif;
 pub mod summary;
 

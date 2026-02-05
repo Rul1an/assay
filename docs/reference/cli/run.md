@@ -14,7 +14,7 @@ assay run [OPTIONS]
 
 ## Description
 
-Runs all tests defined in your configuration file against the specified trace(s). This is the main command for:
+Runs all tests defined in your configuration file against the specified trace(s). Console output: a start line "Running N tests...", then during the run throttled progress lines "Running test X/N..." (final N/N always; no N/M when 0 or 1 tests), then per-test results and summary. This is the main command for:
 
 - CI/CD regression gates
 - Local development testing

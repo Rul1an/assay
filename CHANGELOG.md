@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### DX
+
+- **E4.3 Progress N/M (PR #164):** Realtime progress during `assay run` / `assay ci`: "Running test X/N..." in completion order (JoinSet), throttled (200 ms min, step ≈ total/10), final N/N always; results sorted by test_id for deterministic artifacts.
+
+---
+
 ## [v2.12.0] - 2026-01-29
 
 ### 🔐 Pack Registry: Enterprise-Grade Supply Chain Security
