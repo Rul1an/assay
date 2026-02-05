@@ -60,8 +60,8 @@ if command -v gh &>/dev/null && [[ -n "${GH_TOKEN:-}" ]]; then
 
     # Insert new section after the first heading
     if [[ -s "$TEMP_FILE" ]]; then
-        # Find the line number of the first ## heading (after the title)
-        INSERT_LINE=$(grep -n '^## \[' "$CHANGELOG" | head -1 | cut -d: -f1)
+        # Find the line number of the first ## heading (after the title); do not fail when none
+        INSERT_LINE=$(grep -n '^## \[' "$CHANGELOG" 2>/dev/null | head -1 | cut -d: -f1 || true)
 
         if [[ -n "$INSERT_LINE" ]]; then
             # Insert before the first version section
@@ -73,7 +73,14 @@ if command -v gh &>/dev/null && [[ -n "${GH_TOKEN:-}" ]]; then
             mv "${CHANGELOG}.new" "$CHANGELOG"
             echo "Changelog updated with new entries"
         else
-            echo "Could not find insertion point in changelog"
+            # No ## [date] section yet: append new section after the first line (title)
+            {
+                head -n 1 "$CHANGELOG"
+                cat "$TEMP_FILE"
+                tail -n +2 "$CHANGELOG"
+            } > "${CHANGELOG}.new"
+            mv "${CHANGELOG}.new" "$CHANGELOG"
+            echo "Changelog updated with new entries (no existing date section)"
         fi
     fi
 else
