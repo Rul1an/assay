@@ -199,6 +199,11 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
+      # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature)
+      - name: Test MCP no-pass-through E2E (E6a.3)
+        if: runner.os == 'Linux'
+        run: cargo test -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough
+
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
       - name: Test Workspace (Cross-Platform)
