@@ -98,4 +98,4 @@ pip install pre-commit
 pre-commit install
 ```
 
-Runs `cargo fmt`, `cargo clippy`, and `typos` on commit.
+Runs hooks on commit and push (see `.pre-commit-config.yaml`). Shellcheck uses the system binary; install with `brew install shellcheck` on macOS.
