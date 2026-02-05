@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
-    // Policy denials (P_*)
+    // Policy decisions (P_*)
+    pub const P_POLICY_ALLOW: &str = "P_POLICY_ALLOW";
     pub const P_POLICY_DENY: &str = "P_POLICY_DENY";
     pub const P_TOOL_DENIED: &str = "P_TOOL_DENIED";
     pub const P_TOOL_NOT_ALLOWED: &str = "P_TOOL_NOT_ALLOWED";
@@ -498,6 +499,7 @@ mod tests {
     #[test]
     fn test_reason_codes_are_string_constants() {
         // Ensure reason codes are stable strings
+        assert_eq!(reason_codes::P_POLICY_ALLOW, "P_POLICY_ALLOW");
         assert_eq!(reason_codes::P_POLICY_DENY, "P_POLICY_DENY");
         assert_eq!(reason_codes::M_EXPIRED, "M_EXPIRED");
         assert_eq!(reason_codes::S_DB_ERROR, "S_DB_ERROR");

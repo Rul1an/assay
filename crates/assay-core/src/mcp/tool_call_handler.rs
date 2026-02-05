@@ -43,8 +43,10 @@ pub struct ToolCallHandlerConfig {
     pub event_source: String,
     /// Whether commit tools require mandates
     pub require_mandate_for_commit: bool,
-    /// Tools classified as commit operations
+    /// Tools classified as commit operations (glob: "prefix*" or exact)
     pub commit_tools: Vec<String>,
+    /// Tools classified as write operations (non-commit; glob or exact). Used for mandate operation_class.
+    pub write_tools: Vec<String>,
 }
 
 impl Default for ToolCallHandlerConfig {
@@ -53,6 +55,7 @@ impl Default for ToolCallHandlerConfig {
             event_source: "assay://unknown".to_string(),
             require_mandate_for_commit: true,
             commit_tools: vec![],
+            write_tools: vec![],
         }
     }
 }
@@ -204,11 +207,7 @@ impl ToolCallHandler {
 
         // Step 3: Mandate authorization (if mandate present)
         if let (Some(authorizer), Some(mandate_data)) = (&self.authorizer, mandate) {
-            let operation_class = if is_commit_tool {
-                OperationClass::Commit
-            } else {
-                OperationClass::Read // TODO(mcp-op-class): derive from tool classification
-            };
+            let operation_class = self.operation_class_for_tool(&tool_name);
 
             let tool_call_data = ToolCallData {
                 tool_name: tool_name.clone(),
@@ -275,7 +274,7 @@ impl ToolCallHandler {
         // Step 4: No mandate required, policy allows
         let elapsed_ms = start.elapsed().as_millis() as u64;
         guard.set_latencies(Some(elapsed_ms), None);
-        guard.emit_allow(reason_codes::P_POLICY_DENY); // Actually P_POLICY_ALLOW but we use P_POLICY_DENY as catch-all
+        guard.emit_allow(reason_codes::P_POLICY_ALLOW);
 
         HandleResult::Allow {
             receipt: None,
@@ -284,7 +283,7 @@ impl ToolCallHandler {
                 tool_call_id,
                 tool_name,
             )
-            .allow(reason_codes::P_POLICY_DENY),
+            .allow(reason_codes::P_POLICY_ALLOW),
         }
     }
 
@@ -326,6 +325,32 @@ impl ToolCallHandler {
                 tool_name == pattern
             }
         })
+    }
+
+    /// Check if a tool is classified as a write operation (non-commit).
+    fn is_write_tool(&self, tool_name: &str) -> bool {
+        self.config.write_tools.iter().any(|pattern| {
+            if pattern == "*" {
+                return true;
+            }
+            if pattern.ends_with('*') {
+                let prefix = pattern.trim_end_matches('*');
+                tool_name.starts_with(prefix)
+            } else {
+                tool_name == pattern
+            }
+        })
+    }
+
+    /// Derive operation class from tool classification (commit_tools, write_tools, else Read).
+    fn operation_class_for_tool(&self, tool_name: &str) -> OperationClass {
+        if self.is_commit_tool(tool_name) {
+            OperationClass::Commit
+        } else if self.is_write_tool(tool_name) {
+            OperationClass::Write
+        } else {
+            OperationClass::Read
+        }
     }
 
     /// Map policy error code to reason code.
@@ -514,6 +539,7 @@ mod tests {
             event_source: "assay://test".to_string(),
             require_mandate_for_commit: true,
             commit_tools: vec!["purchase_*".to_string()],
+            write_tools: vec![],
         };
 
         let handler = ToolCallHandler::new(policy, None, emitter.clone(), config);
@@ -548,6 +574,38 @@ mod tests {
         assert!(handler.is_commit_tool("delete_account"));
         assert!(!handler.is_commit_tool("search_products"));
         assert!(!handler.is_commit_tool("purchase")); // Doesn't match purchase_*
+    }
+
+    #[test]
+    fn test_operation_class_for_tool() {
+        use crate::runtime::OperationClass;
+        let config = ToolCallHandlerConfig {
+            commit_tools: vec!["purchase_*".to_string()],
+            write_tools: vec!["update_*".to_string(), "create_item".to_string()],
+            ..Default::default()
+        };
+        let handler = ToolCallHandler::new(
+            McpPolicy::default(),
+            None,
+            Arc::new(NullDecisionEmitter),
+            config,
+        );
+        assert_eq!(
+            handler.operation_class_for_tool("purchase_item"),
+            OperationClass::Commit
+        );
+        assert_eq!(
+            handler.operation_class_for_tool("update_profile"),
+            OperationClass::Write
+        );
+        assert_eq!(
+            handler.operation_class_for_tool("create_item"),
+            OperationClass::Write
+        );
+        assert_eq!(
+            handler.operation_class_for_tool("read_file"),
+            OperationClass::Read
+        );
     }
 
     // === P0-B: Lifecycle event emission tests ===
