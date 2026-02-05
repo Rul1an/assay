@@ -85,30 +85,35 @@ fn write_tar_entry<T: Write>(tar: &mut Builder<T>, path: &str, data: &[u8]) -> R
     Ok(())
 }
 
-/// Validates and normalizes a bundle entry path. Fail-closed: returns Ok(normalized) or Err.
-/// - POSIX: backslash → slash, no leading slash.
-/// - No empty path or empty segments (no "//").
-/// - No segment "." or ".." (segment check, so "files/a..b.txt" is allowed).
-/// - No Windows drive letter: first segment must not contain ':'.
-/// - Canonical prefix: must be files/, outputs/, or cassettes/.
+/// Validates and normalizes a bundle **entry** path. Fail-closed: returns Ok(normalized) or Err.
+/// Applies only to entry paths (files under files/, outputs/, cassettes/). The manifest file
+/// (`manifest.json`) is written via [write_tar_entry] with [paths::MANIFEST] and never goes
+/// through this validator.
+///
+/// Rules: POSIX (backslash → slash, no leading slash); no empty path or empty segments (e.g.
+/// `files//x` rejected); no segment "." or ".." (segment check, so `files/a..b.txt` is allowed);
+/// no drive letter (':' in first segment); canonical prefix required: files/, outputs/, or cassettes/.
 fn validate_entry_path(path: &str) -> Result<String> {
     let normalized = path.replace('\\', "/").trim_start_matches('/').to_string();
     if normalized.is_empty() {
-        anyhow::bail!("invalid bundle path: empty");
+        anyhow::bail!("invalid bundle path: empty path");
     }
     let segments: Vec<&str> = normalized.split('/').collect();
     if segments[0].contains(':') {
         anyhow::bail!(
-            "invalid bundle path: path must not contain drive letter (e.g. C:): {}",
+            "invalid bundle path: drive-letter or ':' in first segment (path: {})",
             path
         );
     }
     for seg in &segments {
         if seg.is_empty() {
-            anyhow::bail!("invalid bundle path: empty segment in {}", path);
+            anyhow::bail!("invalid bundle path: empty segment (path: {})", path);
         }
         if *seg == "." || *seg == ".." {
-            anyhow::bail!("invalid bundle path: traversal segment in {}", path);
+            anyhow::bail!(
+                "invalid bundle path: traversal segment '.' or '..' (path: {})",
+                path
+            );
         }
     }
     let has_canonical_prefix = normalized.starts_with(paths::FILES_PREFIX)
@@ -116,7 +121,7 @@ fn validate_entry_path(path: &str) -> Result<String> {
         || normalized.starts_with(paths::CASSETTES_PREFIX);
     if !has_canonical_prefix {
         anyhow::bail!(
-            "invalid bundle path prefix: must be files/, outputs/, or cassettes/: {}",
+            "invalid bundle path prefix: must be files/, outputs/, or cassettes/ (path: {})",
             path
         );
     }
@@ -233,6 +238,18 @@ mod tests {
         }
     }
 
+    /// Empty segment (duplicate slash) rejected.
+    #[test]
+    fn path_rejects_empty_segment() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let entries = vec![BundleEntry {
+            path: "files//x.json".into(),
+            data: vec![],
+        }];
+        let err = write_bundle_tar_gz(&mut Vec::new(), &manifest, &entries).unwrap_err();
+        assert!(err.to_string().contains("empty segment"), "files//x");
+    }
+
     /// Windows drive-letter-like path rejected.
     #[test]
     fn path_rejects_drive_letter() {
@@ -243,7 +260,12 @@ mod tests {
                 data: vec![],
             }];
             let err = write_bundle_tar_gz(&mut Vec::new(), &manifest, &entries).unwrap_err();
-            assert!(err.to_string().contains("drive letter"), "{}", bad);
+            assert!(
+                err.to_string().contains("drive-letter")
+                    || err.to_string().contains("first segment"),
+                "{}",
+                bad
+            );
         }
     }
 
