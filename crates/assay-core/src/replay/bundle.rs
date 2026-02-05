@@ -64,7 +64,7 @@ pub fn write_bundle_tar_gz<W: Write>(
 }
 
 /// Compute SHA256 of the entire archive (for provenance.bundle_digest).
-/// Caller must pass the same manifest + entries in the same order as write_bundle_tar_gz.
+/// Caller must pass the same manifest + set of entries as write_bundle_tar_gz; entry order is irrelevant.
 pub fn bundle_digest(manifest: &ReplayManifest, entries: &[BundleEntry]) -> Result<String> {
     let mut buf = Vec::new();
     write_bundle_tar_gz(&mut buf, manifest, entries)?;
