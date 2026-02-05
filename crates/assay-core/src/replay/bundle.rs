@@ -435,6 +435,28 @@ mod tests {
         assert!(names.iter().any(|p| p.starts_with("cassettes/")));
     }
 
+    // --- Gap 1: Golden-value snapshot test ---
+
+    /// Pinned digest: catches silent reproducibility regressions (serde field order,
+    /// flate2 compression defaults, tar header changes).
+    #[test]
+    fn golden_digest_snapshot() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let entries = vec![BundleEntry {
+            path: "files/trace.jsonl".into(),
+            data: b"[]".to_vec(),
+        }];
+        let digest = bundle_digest(&manifest, &entries).unwrap();
+        assert_eq!(
+            digest, "e982d2dd1d7cf56df6b417c7af1bc3f7f334ecfc47298bf5d240f4485f3b7a7c",
+            "Golden digest changed — if intentional, update this value after verifying \
+             that the new output is still deterministic across platforms"
+        );
+    }
+
+    // --- Gap 2: Fix helper + sort-order test ---
+
+    /// Returns tar entry paths in **archive order** (no sorting).
     fn list_tar_gz_paths(gz: &[u8]) -> Vec<String> {
         let dec = flate2::read::GzDecoder::new(gz);
         let mut ar = tar::Archive::new(dec);
@@ -444,7 +466,120 @@ mod tests {
             let path = e.path().unwrap();
             names.push(path.to_string_lossy().replace('\\', "/"));
         }
-        names.sort();
         names
+    }
+
+    /// Writer must emit entries in sorted order (after manifest). Entries given
+    /// out-of-order must appear sorted in the archive.
+    #[test]
+    fn entries_written_in_sorted_order() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        // Provide entries deliberately out of sorted order.
+        let entries = vec![
+            BundleEntry {
+                path: "outputs/z.json".into(),
+                data: b"{}".to_vec(),
+            },
+            BundleEntry {
+                path: "files/a.jsonl".into(),
+                data: b"[]".to_vec(),
+            },
+            BundleEntry {
+                path: "cassettes/m.json".into(),
+                data: b"{}".to_vec(),
+            },
+        ];
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(&mut buf, &manifest, &entries).unwrap();
+        let names = list_tar_gz_paths(&buf);
+        assert_eq!(names[0], "manifest.json", "manifest must be first");
+        let data_entries: Vec<_> = names[1..].to_vec();
+        let mut expected = data_entries.clone();
+        expected.sort();
+        assert_eq!(
+            data_entries, expected,
+            "entries after manifest must be in sorted order"
+        );
+    }
+
+    // --- Gap 3: Direct unit tests for validate_entry_path ---
+
+    #[test]
+    fn validate_entry_path_accepts_valid_paths() {
+        for good in [
+            "files/trace.jsonl",
+            "outputs/run.json",
+            "cassettes/openai/embed.json",
+            "files/a..b.txt",
+            "files/deep/nested/dir/file.json",
+        ] {
+            let result = validate_entry_path(good);
+            assert!(result.is_ok(), "should accept: {}", good);
+            assert_eq!(result.unwrap(), good, "valid path returned unchanged");
+        }
+    }
+
+    #[test]
+    fn validate_entry_path_normalizes_backslash_and_leading_slash() {
+        assert_eq!(
+            validate_entry_path("files\\trace.jsonl").unwrap(),
+            "files/trace.jsonl"
+        );
+        assert_eq!(
+            validate_entry_path("/files/trace.jsonl").unwrap(),
+            "files/trace.jsonl"
+        );
+        assert_eq!(
+            validate_entry_path("\\files\\trace.jsonl").unwrap(),
+            "files/trace.jsonl"
+        );
+    }
+
+    #[test]
+    fn validate_entry_path_rejects_empty() {
+        let err = validate_entry_path("").unwrap_err();
+        assert!(err.to_string().contains("empty path"));
+    }
+
+    #[test]
+    fn validate_entry_path_rejects_empty_segment() {
+        let err = validate_entry_path("files//x.json").unwrap_err();
+        assert!(err.to_string().contains("empty segment"));
+    }
+
+    #[test]
+    fn validate_entry_path_rejects_dot_segments() {
+        for bad in ["files/./x.json", "files/../x.json", "outputs/.."] {
+            let err = validate_entry_path(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("traversal segment"),
+                "should reject: {}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn validate_entry_path_rejects_drive_letter() {
+        for bad in ["C:/foo", "D:bar"] {
+            let err = validate_entry_path(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("drive-letter"),
+                "should reject: {}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn validate_entry_path_rejects_non_canonical_prefix() {
+        for bad in ["evil.txt", "x/y/z", "output/run.json", "file/x.json"] {
+            let err = validate_entry_path(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid bundle path prefix"),
+                "should reject: {}",
+                bad
+            );
+        }
     }
 }
