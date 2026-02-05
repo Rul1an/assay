@@ -29,7 +29,7 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
         tier,
         target_bundle: args.target.clone(),
         seed,
-        verify_limits: None, // TODO: parse from args.limits if needed
+        verify_limits: None, // TODO(sim-verify-limits): parse from args.limits
     };
 
     println!("Assay Attack Simulation");

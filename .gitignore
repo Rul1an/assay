@@ -1,5 +1,11 @@
 # Private/internal docs (not for public repo)
 .private/
+docs/maintainers/
+docs/project/
+
+# Local / one-off
+_v.txt
+ai-agent-eval-plugin/
 
 /target
 archive/

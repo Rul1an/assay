@@ -11,7 +11,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 #### `assay run`
 **Purpose**: Execute test suite against traces
 **Entry**: `crates/assay-cli/src/cli/commands/mod.rs::cmd_run()`
-**Flow**: `load_config()` → `build_runner()` → `Runner::run_suite()` → report
+**Flow**: `load_config()` → `build_runner()` → `Runner::run_suite()` → report; writes **run.json**, **summary.json** (seeds, judge_metrics, reason_code per SPEC-PR-Gate-Outputs-v1), and console footer (Seeds line + judge metrics). See [Run Output](run-output.md).
 
 **Key Options**:
 - `--config <PATH>`: Config file (default: `assay.yaml`)

@@ -383,8 +383,10 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                     if e.kind() == std::io::ErrorKind::Unsupported
                         || e.raw_os_error() == Some(libc::ENOSYS)
                     {
-                        // Fallback to O_PATH | O_NOFOLLOW
-                        // TODO: Log warning "Strict open unavailable"
+                        eprintln!(
+                            "Warning: Strict open (openat2) unavailable on this system, using O_PATH fallback for {}",
+                            rule.path
+                        );
                         match unsafe {
                             libc::open(
                                 c_path.as_ptr(),

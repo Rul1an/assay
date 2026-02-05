@@ -244,8 +244,11 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 | Code | CLI (assay run) | Sim (assay sim) | Lint (assay evidence lint) |
 |------|----------------|-----------------|---------------------------|
 | 0 | All tests pass | All attacks blocked | No findings above threshold |
-| 1 | Test failure | Bypass found (regression) | Findings found |
+| 1 | Test failure or judge uncertain (E_JUDGE_UNCERTAIN) | Bypass found (regression) | Findings found |
 | 2 | Config error | Infra error (panic/timeout) | Verification failure |
+| 3 | Infra/judge unavailable (E_JUDGE_UNAVAILABLE) | — | — |
+
+**Run output (PR #159, #160):** run.json and summary.json include reason_code, reason_code_version, seed_version, order_seed, judge_seed (string or null), judge_metrics, and when SARIF was truncated **sarif.omitted**. Console: `Seeds: seed_version=1 order_seed=… judge_seed=…`. Use summary/run for authoritative counts when sarif.omitted is present. See docs/AIcontext/run-output.md and SPEC-PR-Gate-Outputs-v1.
 
 ## Security Considerations
 

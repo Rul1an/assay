@@ -250,7 +250,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         if let Some(p) = &profiler {
             p.record(ProfileEvent::EnvProvidedKeys {
                 key: key.clone(),
-                scrubbed: false, // TODO: if we implement partial scrubbing, track here
+                scrubbed: false, // TODO(sandbox-scrub): set true when partial scrubbing exists
             });
         }
     }

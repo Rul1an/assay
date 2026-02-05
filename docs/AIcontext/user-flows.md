@@ -56,10 +56,10 @@ flowchart TD
 **Steps:**
 1. **PR created**: Developer opens pull request
 2. **CI triggered**: GitHub Actions runs
-3. **Tests run**: Tests generate evidence bundles (`.assay/evidence/*.tar.gz`)
+3. **Tests run**: Tests generate evidence bundles (`.assay/evidence/*.tar.gz`); `assay run`/`assay ci` also write **run.json** and **summary.json** (exit_code, reason_code, seeds, judge_metrics, and when SARIF was truncated **sarif.omitted** per SPEC-PR-Gate-Outputs-v1, PR #160).
 4. **Action verifies**: `Rul1an/assay/assay-action@v2` verifies and lints bundles
-5. **Reporting**: SARIF uploaded to GitHub Security tab, PR comment if issues
-6. **Gate decision**: Exit code 0 = pass, 1 = fail
+5. **Reporting**: SARIF (truncated at 25k results by default when needed) uploaded to GitHub Security tab; run.json/summary.json carry **sarif.omitted** when truncated so CI has authoritative counts. PR comment if issues; job summary shows **Seeds** and judge metrics from console footer
+6. **Gate decision**: Exit code 0 = pass; 1 = fail (test failure or **E_JUDGE_UNCERTAIN** when judge abstains); 2 = config error; 3 = infra/judge unavailable
 
 **Configuration (Recommended):**
 ```yaml

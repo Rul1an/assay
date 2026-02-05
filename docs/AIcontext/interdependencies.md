@@ -54,7 +54,7 @@ graph TD
 ### `assay-cli` Dependencies
 
 **Internal Crates:**
-- `assay-core` (workspace) - Core evaluation engine
+- `assay-core` (workspace) - Core evaluation engine; uses `report::Summary`, `report::Seeds`, `report::JudgeMetrics`, `write_summary`, `print_run_footer` for run.json/summary.json and console footer (PR #159)
 - `assay-monitor` (workspace) - Runtime monitoring
 - `assay-common` (workspace, features: ["std"]) - Shared types
 - `assay-policy` (workspace) - Policy compilation

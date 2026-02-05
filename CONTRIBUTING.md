@@ -58,6 +58,7 @@ pytest python/tests/
 - **Clippy clean**: `cargo clippy -- -D warnings`
 - **Formatted**: `cargo fmt`
 - **Tested**: New features require tests
+- **TODOs**: In-code `TODO(tag):` items are listed in [docs/contributing/TODOS.md](docs/contributing/TODOS.md); use the same tag when adding or resolving.
 
 ## Testing
 

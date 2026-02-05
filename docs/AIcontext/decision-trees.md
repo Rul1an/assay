@@ -41,8 +41,11 @@ flowchart TD
     E0 -->|Yes| SUCCESS[✅ Success - continue]
 
     E0 -->|No| E1{Code 1?}
-    E1 -->|Yes| TEST_FAIL[Test/Policy failure]
-    TEST_FAIL --> EXPLAIN[Run: assay explain]
+    E1 -->|Yes| TEST_FAIL[Test/Policy or Judge uncertain]
+    TEST_FAIL --> REASON{reason_code?}
+    REASON -->|E_JUDGE_UNCERTAIN| JUDGE_ABSTAIN[Judge abstain — review borderline / adjust threshold]
+    REASON -->|Other| EXPLAIN[Run: assay explain]
+    JUDGE_ABSTAIN --> EXPLAIN
     EXPLAIN --> FIX_AGENT[Fix agent or relax policy]
 
     E1 -->|No| E2{Code 2?}
@@ -187,7 +190,7 @@ flowchart TD
 | Human reading | Console | (default) |
 | CI parsing | JSON | `--format json` |
 | Test reporting | JUnit | `--format junit` or `--junit <path>` |
-| GitHub Security | SARIF | `--format sarif` or `--sarif <path>` |
+| GitHub Security | SARIF | `--format sarif` or `--sarif <path>` (truncated at 25k results by default; use run.json/summary.json `sarif.omitted` for authoritative count when present) |
 
 ## Decision Table: Error Recovery
 

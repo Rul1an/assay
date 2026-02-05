@@ -586,8 +586,7 @@ impl Runner {
             max_drop = s.max_drop;
         }
 
-        // TODO: Map metric_name to strict Expected variant fields for per-test overrides.
-        // Currently relies on global suite defaults.
+        // TODO(runner-metric-override): per-test overrides; see docs/contributing/TODOS.md
         (mode, max_drop)
     }
 
