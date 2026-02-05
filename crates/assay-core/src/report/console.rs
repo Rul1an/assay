@@ -30,16 +30,15 @@ pub(crate) fn progress_step(total: usize) -> usize {
 }
 
 /// Returns a progress sink that throttles updates and prints to stderr via format_progress_line.
-/// Skips intermediate updates when total == 1 (no "1/1"). Always emits on done == total.
+/// Skips intermediate updates when total <= 1 (no "1/1"). Always emits on done == total.
+/// Time-based throttling (200ms min interval) and step logic are verified via manual/E2E runs
+/// (OPEN-ITEMS §12); not unit-tested to avoid flaky time-dependent tests.
 pub fn default_progress_sink(total: usize) -> Option<ProgressSink> {
     if total <= 1 {
         return None;
     }
     let step = progress_step(total);
-    let state = Mutex::new(ThrottleState {
-        last_emit: None,
-        last_done: 0,
-    });
+    let state = Mutex::new(ThrottleState { last_emit: None });
     let state = std::sync::Arc::new(state);
     Some(Arc::new(move |ev: ProgressEvent| {
         if ev.total == 0 {
@@ -60,7 +59,6 @@ pub fn default_progress_sink(total: usize) -> Option<ProgressSink> {
             let ok = emit_final || (emit_step && interval_ok);
             if ok {
                 g.last_emit = Some(now);
-                g.last_done = ev.done;
             }
             ok
         };
@@ -73,7 +71,6 @@ pub fn default_progress_sink(total: usize) -> Option<ProgressSink> {
 
 struct ThrottleState {
     last_emit: Option<Instant>,
-    last_done: usize,
 }
 
 /// Print seeds and judge metrics to stderr (E7.2/E7.3 job summary visibility in CI logs).
