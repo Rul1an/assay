@@ -1,5 +1,80 @@
 use crate::model::{TestResultRow, TestStatus};
+use crate::report::progress::{ProgressEvent, ProgressSink};
 use crate::report::summary::{JudgeMetrics, Seeds};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+// --- E4.3 Progress N/M (throttled, completion-order) ---
+
+/// Format a single progress line for display. Deterministic, unit-testable.
+/// ETA optional (not used in initial PR4; add when ETA is implemented).
+#[must_use]
+pub fn format_progress_line(done: usize, total: usize, _eta_secs: Option<u64>) -> String {
+    format!("Running test {}/{}...", done, total)
+}
+
+/// Write a progress line to stderr. Used by the default progress sink after throttling.
+pub fn emit_progress_line(line: &str) {
+    eprintln!("{}", line);
+}
+
+/// Minimum interval between progress updates to avoid log spam.
+const PROGRESS_MIN_INTERVAL_MS: u64 = 200;
+/// For large suites, emit at most every this many tests (e.g. 10% step).
+pub(crate) fn progress_step(total: usize) -> usize {
+    if total <= 10 {
+        1
+    } else {
+        std::cmp::max(1, total / 10)
+    }
+}
+
+/// Returns a progress sink that throttles updates and prints to stderr via format_progress_line.
+/// Skips intermediate updates when total == 1 (no "1/1"). Always emits on done == total.
+pub fn default_progress_sink(total: usize) -> Option<ProgressSink> {
+    if total <= 1 {
+        return None;
+    }
+    let step = progress_step(total);
+    let state = Mutex::new(ThrottleState {
+        last_emit: None,
+        last_done: 0,
+    });
+    let state = std::sync::Arc::new(state);
+    Some(Arc::new(move |ev: ProgressEvent| {
+        if ev.total == 0 {
+            return;
+        }
+        let now = Instant::now();
+        let should_emit = {
+            let mut g = state.lock().expect("progress throttle lock");
+            let emit_final = ev.done == ev.total;
+            let emit_step = ev.done % step == 0 || ev.done == 1;
+            let interval_ok = g
+                .last_emit
+                .map(|t| {
+                    now.saturating_duration_since(t)
+                        >= Duration::from_millis(PROGRESS_MIN_INTERVAL_MS)
+                })
+                .unwrap_or(true);
+            let ok = emit_final || (emit_step && interval_ok);
+            if ok {
+                g.last_emit = Some(now);
+                g.last_done = ev.done;
+            }
+            ok
+        };
+        if should_emit {
+            let line = format_progress_line(ev.done, ev.total, None);
+            emit_progress_line(&line);
+        }
+    }))
+}
+
+struct ThrottleState {
+    last_emit: Option<Instant>,
+    last_done: usize,
+}
 
 /// Print seeds and judge metrics to stderr (E7.2/E7.3 job summary visibility in CI logs).
 pub fn print_run_footer(seeds: Option<&Seeds>, judge_metrics: Option<&JudgeMetrics>) {
@@ -50,8 +125,7 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
     let mut error = 0;
     let mut skipped = 0;
 
-    eprintln!("\nRunning {} tests...", results.len());
-
+    eprintln!();
     for r in results {
         let duration = r
             .duration_ms
@@ -179,4 +253,40 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
         "Summary: {} passed, {} failed, {} skipped{}, {} flaky, {} unstable, {} warn, {} error",
         pass, fail, skipped, skip_hint, flaky, unstable, warn, error
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_progress_sink, format_progress_line, progress_step};
+
+    #[test]
+    fn format_progress_line_contains_done_and_total() {
+        let s = format_progress_line(3, 10, None);
+        assert!(s.contains("3/10"), "expected '3/10' in {:?}", s);
+        assert!(
+            s.contains("Running test"),
+            "expected 'Running test' in {:?}",
+            s
+        );
+    }
+
+    #[test]
+    fn format_progress_line_final() {
+        let s = format_progress_line(5, 5, None);
+        assert!(s.contains("5/5"));
+    }
+
+    #[test]
+    fn default_progress_sink_none_for_total_0_or_1() {
+        assert!(default_progress_sink(0).is_none());
+        assert!(default_progress_sink(1).is_none());
+    }
+
+    #[test]
+    fn progress_step_logic() {
+        assert_eq!(progress_step(5), 1);
+        assert_eq!(progress_step(10), 1);
+        assert_eq!(progress_step(25), 2); // 25/10 = 2
+        assert_eq!(progress_step(100), 10);
+    }
 }

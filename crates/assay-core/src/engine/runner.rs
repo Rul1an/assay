@@ -7,10 +7,12 @@ use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestCase, TestResultRow,
 use crate::on_error::{ErrorPolicy, ErrorPolicyResult};
 use crate::providers::llm::LlmClient;
 use crate::quarantine::{QuarantineMode, QuarantineService};
+use crate::report::progress::{ProgressEvent, ProgressSink};
 use crate::report::RunArtifacts;
 use crate::storage::store::Store;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
 
 #[derive(Debug, Clone)]
@@ -45,12 +47,19 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub async fn run_suite(&self, cfg: &EvalConfig) -> anyhow::Result<RunArtifacts> {
+    /// Run the suite; results are collected in completion order internally but returned
+    /// sorted by test_id for deterministic output. If `progress` is set, it is called
+    /// after each test completes (E4.3 realtime progress).
+    pub async fn run_suite(
+        &self,
+        cfg: &EvalConfig,
+        progress: Option<ProgressSink>,
+    ) -> anyhow::Result<RunArtifacts> {
         let run_id = self.store.create_run(cfg)?;
 
         let parallel = cfg.settings.parallel.unwrap_or(4).max(1);
         let sem = Arc::new(Semaphore::new(parallel));
-        let mut handles = Vec::new();
+        let mut join_set = JoinSet::new();
 
         // E7.2: Randomized Order default (derived seed)
         // If seed is missing, generate one to ensure deterministic replay capability if logged
@@ -72,22 +81,22 @@ impl Runner {
             tests.shuffle(&mut rng);
         }
 
+        let total = tests.len();
         for tc in tests.iter() {
             let permit = sem.clone().acquire_owned().await?;
             let this = self.clone_for_task();
             let cfg = cfg.clone();
             let tc = tc.clone();
-            let h = tokio::spawn(async move {
+            join_set.spawn(async move {
                 let _permit = permit;
                 this.run_test_with_policy(&cfg, &tc, run_id).await
             });
-            handles.push(h);
         }
 
         let mut rows = Vec::new();
         let mut any_fail = false;
-        for h in handles {
-            let row = match h.await {
+        while let Some(res) = join_set.join_next().await {
+            let row = match res {
                 Ok(Ok(row)) => row,
                 Ok(Err(e)) => TestResultRow {
                     test_id: "unknown".into(),
@@ -118,7 +127,18 @@ impl Runner {
             };
             any_fail = any_fail || matches!(row.status, TestStatus::Fail | TestStatus::Error);
             rows.push(row);
+            if total > 0 {
+                if let Some(ref sink) = progress {
+                    sink(ProgressEvent {
+                        done: rows.len(),
+                        total,
+                    });
+                }
+            }
         }
+
+        // Deterministic order for artifacts (replay, golden tests).
+        rows.sort_by(|a, b| a.test_id.cmp(&b.test_id));
 
         self.store
             .finalize_run(run_id, if any_fail { "failed" } else { "passed" })?;

@@ -139,7 +139,7 @@ assay run --config ci-eval.yaml --trace-file traces/ci.jsonl --output junit --ou
 ### C.4 Performance-DX — progress, timings, slowest tests, cache hit rate
 
 - **Console summary:** [crates/assay-core/src/report/console.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-core/src/report/console.rs) — per test duration (`(X.Xs)`), status (Pass/Fail/Warn/Flaky/Skipped), bij skip: reason, fingerprint, "To rerun: assay run --refresh-cache".
-- **Progress:** "Running N tests..." gevolgd door regels per test; geen aparte progress bar.
+- **Progress:** "Running N tests..." aan het begin; tijdens de run "Running test X/N..." (throttled: max ~10 updates + altijd final N/N). Bij total ≤ 1 geen N/M-regels. Geen progress bar.
 - **Timings:** duration_ms per TestResultRow, afgedrukt in console summary.
 - **Slowest tests:** Niet expliciet gesorteerd of geaggregeerd in één regel ("slowest 5"); wel per-test duration zichtbaar.
 - **Cache hit rate:** Niet als aparte KPI in console; wel skip-reason en fingerprint bij cached/skipped tests. Cache/logic in runner en store.
