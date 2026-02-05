@@ -6,6 +6,16 @@ set -euo pipefail
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
+# pyo3 (assay-python-sdk) needs a valid Python at build time; avoid stale miniconda path
+if [ -z "${PYO3_PYTHON:-}" ]; then
+  for p in python3.12 python3.11 python3 python; do
+    if pypath=$(command -v "$p" 2>/dev/null); then
+      export PYO3_PYTHON=$pypath
+      break
+    fi
+  done
+fi
+
 # Timeout in seconds (default 300 = 5 min). Set CLIPPY_TIMEOUT=0 to disable.
 CLIPPY_TIMEOUT="${CLIPPY_TIMEOUT:-300}"
 

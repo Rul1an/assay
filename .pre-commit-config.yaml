@@ -37,12 +37,15 @@ repos:
         args: ["-config-file", ".github/actionlint.yaml"]
         files: ^\.github/workflows/.*\.ya?ml$
 
-  # shellcheck (bash)
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
+  # shellcheck (bash) — use system binary to avoid SSL/download issues
+  - repo: local
     hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
         args: ["-x", "-S", "warning"]
+        language: system
+        types: [shell]
 
   # --- Rust: fmt on commit (fast), clippy on push (heavier) ---
   - repo: local
@@ -72,15 +75,6 @@ repos:
         pass_filenames: false
         files: ^Cargo\.lock$
         stages: [pre-push]
-
-      # Optioneel/streng: supply-chain auditing (CI/manual only)
-      # - id: cargo-vet
-      #   name: cargo vet check (manual)
-      #   entry: bash -lc 'cargo vet check'
-      #   language: system
-      #   pass_filenames: false
-      #   stages: [manual]
-
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh
