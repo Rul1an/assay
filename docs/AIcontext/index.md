@@ -1,8 +1,8 @@
 # AI Context Documentation
 
 > **Version**: 2.12.0 (January 2026)
-> **Last Updated**: 2026-01-31
-> **SOTA Status**: Bleeding Edge (Judge Reliability, MCP Auth, OTel GenAI, Replay Bundle)
+> **Last Updated**: 2026-02
+> **SOTA Status**: Judge output (PR #159); SARIF limits (PR #160); Bleeding Edge (MCP Auth, OTel GenAI, Replay Bundle)
 
 This directory contains comprehensive documentation designed specifically for AI agents (LLMs) to understand and work with the Assay codebase. These documents follow best practices for AI context management as of January 2026.
 
@@ -37,12 +37,14 @@ These documents provide:
 | [Entry Points](entry-points.md) | All ways to interact with Assay (CLI commands, Python SDK, MCP server) | Medium |
 | [Code Map](code-map.md) | Detailed mapping of important files, modules, and their responsibilities | Low |
 | [CI Infrastructure](ci-infrastructure.md) | **NEW** Self-hosted runner, health checks, CI optimization | Low |
+| [Run Output](run-output.md) | **NEW** run.json / summary.json contract: seeds, judge_metrics, reason_code (PR gate) | Medium |
 
 ## SOTA Features (January 2026)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| **Judge Reliability** | ✅ Audit Grade | Randomized order, borderline band, Adaptive Majority (2-of-3), per-suite policies, E7 Audit Evidence |
+| **Judge Reliability** | ✅ Audit Grade (PR #159) | E_JUDGE_UNCERTAIN (exit 1), seeds (string\|null) in run/summary/console, judge_metrics (flip_rate, abstain_rate). Randomized order, 2-of-3, per-suite policies. |
+| **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k results); runs[0].properties.assay when truncated; sarif.omitted in run.json/summary.json. Consumers use summary/run for authoritative counts. |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707, alg/typ/crit, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv versioning, low-cardinality metrics, composable redaction |
 | **Replay Bundle** | 🔄 P1 | Toolchain capture, deterministic seeds, scrubbed cassettes |
@@ -92,9 +94,11 @@ This documentation follows 2026 best practices for AI codebase understanding:
 | Code | Meaning | Common Causes |
 |------|---------|---------------|
 | 0 | Success | All tests pass |
-| 1 | Test failure | Policy violation, metric failure |
+| 1 | Test failure | Policy violation, metric failure; **judge uncertain** → `E_JUDGE_UNCERTAIN` |
 | 2 | Config error | Invalid YAML, missing file, parse error |
 | 3 | Infra error | Judge unavailable, rate limit, timeout |
+
+**Run output (PR #159, #160):** `run.json` and `summary.json` include `seeds` (order_seed, judge_seed as string or null), `judge_metrics`, `reason_code`, and when SARIF was truncated `sarif.omitted`. Console: `Seeds: seed_version=1 order_seed=… judge_seed=…`. See [Run Output](run-output.md).
 
 ## Maintenance
 
@@ -108,8 +112,10 @@ These documents should be updated when:
 
 ## Related Documentation
 
+- [Run Output](run-output.md) - run.json / summary.json contract (seeds, judge_metrics, reason_code)
 - [Architecture ADRs](../architecture/) - Architecture Decision Records
 - [Core Concepts](../concepts/) - User-facing concept documentation
 - [CLI Reference](../reference/cli/) - Detailed CLI command documentation
 - [Python SDK](../python-sdk/) - Python SDK documentation
+- [SPEC-PR-Gate-Outputs-v1](../architecture/SPEC-PR-Gate-Outputs-v1.md) - PR gate output spec
 - [DX Implementation Plan](../DX-IMPLEMENTATION-PLAN.md) - Current DX roadmap

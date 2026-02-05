@@ -89,10 +89,11 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 - **`trust_policy.rs`**: Trust policy loading and key_id matching
 
 ### Report Module (`src/report/`)
-- **`console.rs`**: Console output formatter
+- **`console.rs`**: Console output formatter; **`print_run_footer(seeds, judge_metrics)`** — prints `Seeds: seed_version=1 order_seed=… judge_seed=…` and judge metrics line (PR #159)
+- **`summary.rs`**: **`Summary`** with `seeds: Seeds`, `judge_metrics: Option<JudgeMetrics>`; **`Seeds`** (order_seed, judge_seed as string|null via serde_seed); **`with_seeds()`**; **`write_summary()`**
 - **`json.rs`**: JSON output formatter
 - **`junit.rs`**: JUnit XML output formatter
-- **`sarif.rs`**: SARIF output formatter
+- **`sarif.rs`**: SARIF output (write_sarif, write_sarif_with_limit); deterministic truncation, runs[0].properties.assay when truncated (PR #160)
 
 ### Providers Module (`src/providers/`)
 - **`llm/mod.rs`**: LLM client trait and implementations
@@ -139,7 +140,10 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 ### Command Dispatch (`src/cli/commands/mod.rs`)
 - **`dispatch()`**: Routes commands to handlers
 - **`build_runner()`**: Constructs `Runner` with all dependencies
-- Command handlers for each subcommand
+- **`write_extended_run_json()`**: Writes run.json with exit_code, reason_code, reason_code_version, seed_version, order_seed, judge_seed (string|null), judge_metrics (PR #159), sarif.omitted when truncated (PR #160)
+- **`write_run_json_minimal()`**: Early-exit run.json (seeds null when unknown)
+- **`print_run_footer(seeds, judge_metrics)`**: Calls assay_core report::console; prints Seeds line and judge metrics to stderr
+- Command handlers for each subcommand (cmd_run, cmd_ci set summary.with_seeds and call print_run_footer)
 
 ### Command Handlers (`src/cli/commands/`)
 - **`run.rs`**: `assay run` command
@@ -338,10 +342,11 @@ The GitHub Action is maintained in a separate repository for GitHub Marketplace 
 
 ## Important Constants
 
-### Exit Codes (`assay-cli/src/cli/commands/mod.rs`)
+### Exit Codes (`assay-cli/src/exit_codes.rs`, `commands/mod.rs`)
 - `OK = 0`: Success
-- `TEST_FAILED = 1`: Test failure
+- `TEST_FAILED = 1`: Test failure; **E_JUDGE_UNCERTAIN** when judge abstains (PR #159)
 - `CONFIG_ERROR = 2`: Configuration error
+- `INFRA_ERROR = 3`: Judge unavailable, rate limit, timeout (E_JUDGE_UNAVAILABLE)
 
 ### Error Codes (`assay-core/src/errors/diagnostic.rs`)
 - Diagnostic error codes for user-friendly messages

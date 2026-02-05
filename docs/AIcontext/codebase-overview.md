@@ -115,6 +115,9 @@ The core crate is organized into these main modules:
 #### Report (`report/`)
 - Output formatters: `console` (summary), `json`, `junit`, `sarif`
 - **`RunArtifacts`**: Container for run_id, suite, results
+- **`Summary`** (summary.rs): Machine-readable run summary with `schema_version`, `reason_code_version`, `exit_code`, `reason_code`, **`seeds`** (required; `Seeds` with `order_seed`/`judge_seed` as string or null via serde_seed), **`judge_metrics`** (optional; abstain_rate, flip_rate, etc.). `Summary::with_seeds()` injects seeds; written to summary.json and reflected in run.json.
+- **`print_run_footer`** (console.rs): Prints one line `Seeds: seed_version=1 order_seed=… judge_seed=…` and judge metrics line to stderr (CI job summary visibility). Called from assay-cli after run/ci.
+- **run.json / summary.json**: Contract per SPEC-PR-Gate-Outputs-v1 (§3.3.1 Seeds, §3.3.2 Judge metrics). Seeds are decimal strings or null for JS/TS precision safety.
 
 #### Providers & Metrics API
 - **`providers/`**: LLM clients (OpenAI, fake, trace replay), embedders, strict mode wrappers
@@ -197,7 +200,7 @@ run_test_once()
     ↓
 Store results
     ↓
-Report (console/JSON/JUnit/SARIF)
+Report (console/JSON/JUnit/SARIF; SARIF truncation at 25k results by default, with sarif.omitted in run/summary when truncated — PR #160)
 ```
 
 ## Key Design Principles
@@ -213,6 +216,7 @@ Report (console/JSON/JUnit/SARIF)
 | Feature | Status | Description |
 |---------|--------|-------------|
 | **Judge Reliability** | ✅ Audit Grade | Randomized order default, borderline band [0.4-0.6], Adaptive Majority (2-of-3), per-suite policies, E7 Audit Evidence |
+| **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k), runs[0].properties.assay, sarif.omitted in run/summary; consumers use summary/run for counts |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707 resource indicators, alg/typ/crit JWT hardening, JWKS rotation, DPoP (optional) |
 | **OTel GenAI** | 🔄 P1 | Semconv version gating, low-cardinality metrics, composable redaction policies |
 | **Replay Bundle** | 🔄 P1 | Toolchain capture (rustc, Cargo.lock), deterministic seeds, scrubbed cassettes (deny-by-default) |

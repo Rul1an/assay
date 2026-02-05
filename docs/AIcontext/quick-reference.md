@@ -34,7 +34,7 @@ assay explain --trace-file traces.jsonl  # Explain violations
 | Code | Name | Reason Code Pattern | When |
 |------|------|---------------------|------|
 | 0 | SUCCESS | (none) | All tests pass |
-| 1 | TEST_FAILURE | `E_TEST_FAILED`, `E_POLICY_VIOLATION` | Test or policy failure |
+| 1 | TEST_FAILURE | `E_TEST_FAILED`, `E_POLICY_VIOLATION`, `E_JUDGE_UNCERTAIN` | Test or policy failure; judge abstain → E_JUDGE_UNCERTAIN |
 | 2 | CONFIG_ERROR | `E_CFG_PARSE`, `E_TRACE_NOT_FOUND`, `E_MISSING_CONFIG` | Config or input error |
 | 3 | INFRA_ERROR | `E_JUDGE_UNAVAILABLE`, `E_RATE_LIMIT`, `E_TIMEOUT` | Infrastructure issue |
 
@@ -65,8 +65,21 @@ assay explain --trace-file traces.jsonl  # Explain violations
 | Code | Meaning | Next Step |
 |------|---------|-----------|
 | `E_TEST_FAILED` | Test assertion failed | `assay explain <test-id>` |
+| `E_JUDGE_UNCERTAIN` | Judge returned abstain (could not decide) | Review borderline result; `assay explain <test-id>`; adjust threshold |
 | `E_POLICY_VIOLATION` | Policy rule violated | Review policy or fix agent |
 | `E_SEQUENCE_VIOLATION` | Wrong tool call order | Check sequence rules |
+
+## Run / CI Output (PR gate, PR #159)
+
+After `assay run` or `assay ci`:
+
+| Output | Contents |
+|--------|----------|
+| **run.json** | `exit_code`, `reason_code`, `reason_code_version`, `seed_version`, `order_seed`, `judge_seed` (string or null), `judge_metrics` (abstain_rate, flip_rate, etc.) |
+| **summary.json** | Same plus `seeds` object, `schema_version`, full `Summary` |
+| **Console footer** | One line: `Seeds: seed_version=1 order_seed=… judge_seed=…`; then judge metrics line if present |
+
+Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safety. See [Run Output](run-output.md) and SPEC-PR-Gate-Outputs-v1.
 
 ## File Locations
 
@@ -76,9 +89,11 @@ assay explain --trace-file traces.jsonl  # Explain violations
 | `policy.yaml` | Policy rules | `assay init` |
 | `traces/*.jsonl` | Agent traces | SDK or import |
 | `baseline.json` | Regression baseline | `assay run --export-baseline` |
+| `run.json` | Run outcome (exit, reason_code, seeds, judge_metrics, sarif.omitted when truncated) | `assay run` / `assay ci` |
+| `summary.json` | Machine-readable summary (seeds, judge_metrics, sarif.omitted when truncated) | `assay run` / `assay ci` |
 | `.github/workflows/assay.yml` | CI workflow | `assay init --ci` |
 | `.assay/reports/junit.xml` | JUnit output | `assay run --junit` |
-| `.assay/reports/sarif.json` | SARIF output | `assay run --sarif` |
+| `.assay/reports/sarif.json` | SARIF output (truncated at 25k results by default; run.json/summary have sarif.omitted when truncated) | `assay run --sarif` |
 | `.assay/evidence/*.tar.gz` | Evidence bundles | Test runs |
 
 ## GitHub Action Usage
@@ -263,6 +278,7 @@ infra/bpf-runner/health_check.sh          # Runner health
 
 ## Related Documentation
 
+- [Run Output](run-output.md) - run.json / summary.json contract (seeds, judge_metrics)
 - [Decision Trees](decision-trees.md) - When to use which approach
 - [Entry Points](entry-points.md) - Full command reference
 - [Codebase Overview](codebase-overview.md) - Architecture details

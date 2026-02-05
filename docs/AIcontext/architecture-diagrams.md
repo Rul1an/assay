@@ -435,6 +435,113 @@ flowchart LR
     Fail --> Comment[PR Comment]
 ```
 
+## Run Output (PR Gate) — seeds, judge_metrics, reason_code, sarif.omitted (PR #159, #160)
+
+After `assay run` or `assay ci`, the CLI writes run.json, summary.json, and a console footer. This diagram shows the contract (SPEC-PR-Gate-Outputs-v1).
+
+```mermaid
+flowchart LR
+    subgraph Runner[Runner]
+        Artifacts[RunArtifacts]
+        Outcome[RunOutcome]
+    end
+
+    subgraph Outputs[Outputs]
+        RunJSON[run.json]
+        SummaryJSON[summary.json]
+        Console[Console stderr]
+    end
+
+    subgraph RunJSONFields[run.json fields]
+        R_exit[exit_code]
+        R_reason[reason_code]
+        R_rcv[reason_code_version]
+        R_sv[seed_version]
+        R_oseed[order_seed string|null]
+        R_jseed[judge_seed string|null]
+        R_jm[judge_metrics]
+        R_sarif[sarif.omitted when truncated]
+    end
+
+    subgraph SummaryFields[summary.json fields]
+        S_seeds[seeds object]
+        S_jm[judge_metrics]
+        S_schema[schema_version]
+        S_rcv[reason_code_version]
+        S_sarif[sarif.omitted when truncated]
+    end
+
+    subgraph ConsoleFooter[Console footer]
+        Line1["Seeds: seed_version=1 order_seed=… judge_seed=…"]
+        Line2[Judge metrics line]
+    end
+
+    Artifacts --> Outcome
+    Outcome --> RunJSON
+    Outcome --> SummaryJSON
+    Outcome --> Console
+    RunJSON --> R_exit
+    RunJSON --> R_reason
+    RunJSON --> R_sv
+    RunJSON --> R_oseed
+    RunJSON --> R_jseed
+    RunJSON --> R_jm
+    RunJSON --> R_sarif
+    SummaryJSON --> S_seeds
+    SummaryJSON --> S_jm
+    SummaryJSON --> S_sarif
+    Console --> Line1
+    Console --> Line2
+```
+
+**Invariants:** Seeds are decimal **strings or null** (no JSON number) for JS/TS u64 safety. On early-exit (e.g. trace not found), seeds may be null; `seed_version` is always present. Judge uncertain (abstain) → exit 1, `reason_code` `E_JUDGE_UNCERTAIN`. **SARIF (PR #160):** When SARIF was truncated (e.g. >25k eligible results), `sarif.omitted` appears in run.json and summary.json; use these for authoritative counts (SARIF file may be truncated).
+
+## SARIF Truncation Flow (PR #160)
+
+When `assay ci` (or `assay run --sarif`) writes SARIF, results are filtered to eligible statuses (Fail, Error, Warn, Flaky, Unstable), sorted deterministically (blocking first, then severity, then test_id), and limited to `max_results` (default 25_000). If truncation occurs, run-level metadata and run/summary fields are set.
+
+```mermaid
+flowchart TD
+    subgraph Input[Input]
+        Results[Test results]
+    end
+
+    subgraph Truncation[assay-core report/sarif]
+        Filter[Filter: is_sarif_eligible]
+        Sort[Sort: BlockingRank, SeverityRank, test_id]
+        Take[Take first max_results]
+        Build[Build SARIF results]
+        Props{omitted_count > 0?}
+        RunWithProps[runs[0].properties.assay: truncated, omitted_count]
+        RunNoProps[runs[0].results only]
+    end
+
+    subgraph Output[Output]
+        SARIFFile[sarif.json]
+        Outcome[SarifWriteOutcome]
+    end
+
+    subgraph Downstream[CLI: run.json / summary.json]
+        RunJSON[sarif.omitted in run.json]
+        SummaryJSON[sarif.omitted in summary.json]
+    end
+
+    Results --> Filter
+    Filter --> Sort
+    Sort --> Take
+    Take --> Build
+    Build --> Props
+    Props -->|Yes| RunWithProps
+    Props -->|No| RunNoProps
+    RunWithProps --> SARIFFile
+    RunNoProps --> SARIFFile
+    Take --> Outcome
+    Outcome -->|omitted_count > 0| RunJSON
+    Outcome -->|omitted_count > 0| SummaryJSON
+```
+
+**Contract:** Consumers MUST use summary/run for authoritative result counts when `sarif.omitted` is present; the SARIF file is truncated.
+
 ## Policy Compilation Flow
 
 ```mermaid
@@ -499,11 +606,13 @@ flowchart TD
     Error[Error Occurs] --> Classify[Classify Error]
     Classify --> ConfigError[Config Error]
     Classify --> TestError[Test Error]
+    Classify --> JudgeUncertain[Judge Uncertain / Abstain]
     Classify --> PolicyError[Policy Error]
     Classify --> SystemError[System Error]
 
     ConfigError --> Diagnostic[Generate Diagnostic]
     TestError --> ErrorPolicy{Error Policy?}
+    JudgeUncertain --> Exit1Judge[Exit 1, E_JUDGE_UNCERTAIN]
     PolicyError --> Violation[Policy Violation]
     SystemError --> Log[Log Error]
 
