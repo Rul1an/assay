@@ -4,49 +4,43 @@
 //! Used when writing cassettes into the bundle and when verifying (scan for forbidden patterns).
 //! See E9-REPLAY-BUNDLE-PLAN §2.5 (bundle verify), §8.4.4 (scrub policy).
 //!
-//! **Encoding:** We operate on bytes; for [scrub_content] we use UTF-8 lossy decoding (invalid
-//! UTF-8 → replacement char U+FFFD) then run regex. For [contains_forbidden_patterns] we only
-//! scan valid UTF-8 (invalid → treated as no match). Binary cassettes may thus get lossy chars
-//! and could theoretically match patterns; SOTA follow-up: scan only in known-text entries or
-//! restrict to ASCII substring scan.
+//! **Encoding:** All operations are **byte-based** (no UTF-8 requirement). Verify never
+//! fail-opens on invalid UTF-8; scrub does not corrupt binary (non-matching bytes unchanged).
 //!
-//! **Redaction scope:** (1) Authorization header: **whole line** replaced by `[REDACTED]`.
-//! (2) Bearer token: only the token part is replaced (`Bearer XXX` → `Bearer [REDACTED]`).
-//! (3) sk-* key: the key substring is replaced by `[REDACTED]`.
+//! **Redaction scope:** (1) Authorization header: line replaced by `Authorization: [REDACTED]`
+//! (header name preserved for forensics). (2) Bearer token: value only → `Bearer [REDACTED]`.
+//! (3) sk-* key: key substring → `[REDACTED]`. Pattern covers sk- and sk_ (e.g. sk_live_).
 
 use lazy_static::lazy_static;
-use regex::Regex;
-use std::borrow::Cow;
+use regex::bytes::{NoExpand, Regex};
 
-const REDACTED: &str = "[REDACTED]";
+const REDACTED: &[u8] = b"[REDACTED]";
+/// Whole auth line replaced so redacted content no longer matches AUTH_HEADER (verify passes).
+const AUTH_REDACTED_LINE: &[u8] = b"[REDACTED]\n";
+const BEARER_REDACTED: &[u8] = b"Bearer [REDACTED]";
 
 lazy_static! {
-    /// Authorization header line (case-insensitive); whole line is sensitive.
+    /// Authorization header line (case-insensitive); whole line sensitive.
     static ref AUTH_HEADER: Regex = Regex::new(r"(?mi)^\s*Authorization\s*:\s*.+$").unwrap();
-    /// Bearer token (e.g. "Bearer sk-..."); token part redacted.
+    /// Bearer token; token part redacted.
     static ref BEARER_TOKEN: Regex = Regex::new(r"(?i)Bearer\s+\S+").unwrap();
-    /// OpenAI-style API key (sk- followed by alphanumeric).
-    static ref SK_KEY: Regex = Regex::new(r"sk-[a-zA-Z0-9]{20,}").unwrap();
+    /// API key: sk- or sk_ followed by 20+ word chars (covers sk-proj-, sk_live_, OpenAI-style).
+    static ref SK_KEY: Regex = Regex::new(r"sk[-_][A-Za-z0-9_-]{20,}").unwrap();
 }
 
-/// Redacts known secret patterns in `data`. Returns UTF-8 string with secrets replaced by [REDACTED].
-/// Use when writing cassette/file content into the bundle. Invalid UTF-8 is replaced with replacement char.
-pub fn scrub_content(data: &[u8]) -> Cow<'_, str> {
-    let s = String::from_utf8_lossy(data);
-    let s = AUTH_HEADER.replace_all(&s, REDACTED);
-    let s = BEARER_TOKEN.replace_all(&s, "Bearer [REDACTED]");
-    let s = SK_KEY.replace_all(&s, REDACTED);
-    Cow::Owned(s.into_owned())
+/// Redacts known secret patterns in `data`. Byte-based: no UTF-8 conversion; binary unchanged
+/// where no pattern matches. Use when writing cassette/file content into the bundle.
+pub fn scrub_content(data: &[u8]) -> Vec<u8> {
+    let s = AUTH_HEADER.replace_all(data, NoExpand(AUTH_REDACTED_LINE));
+    let s = BEARER_TOKEN.replace_all(&s, NoExpand(BEARER_REDACTED));
+    let s = SK_KEY.replace_all(&s, NoExpand(REDACTED));
+    s.into_owned()
 }
 
-/// Returns true if `data` contains any forbidden pattern (Authorization header, Bearer token, sk-* key).
-/// Used by bundle verify: hard fail for cassettes/ and files/, warn for outputs/.
+/// Returns true if `data` contains any forbidden pattern. Byte-based: invalid UTF-8 is still
+/// scanned (no fail-open). Used by bundle verify: hard fail for cassettes/ and files/, warn for outputs/.
 pub fn contains_forbidden_patterns(data: &[u8]) -> bool {
-    let s = match std::str::from_utf8(data) {
-        Ok(valid) => valid,
-        Err(_) => return false,
-    };
-    AUTH_HEADER.is_match(s) || BEARER_TOKEN.is_match(s) || SK_KEY.is_match(s)
+    AUTH_HEADER.is_match(data) || BEARER_TOKEN.is_match(data) || SK_KEY.is_match(data)
 }
 
 #[cfg(test)]
@@ -57,24 +51,32 @@ mod tests {
     fn scrub_redacts_auth_header() {
         let raw = b"Content-Type: application/json\nAuthorization: Bearer sk-secret123\n\n{}";
         let out = scrub_content(raw);
-        assert!(!out.contains("sk-secret"));
-        assert!(out.contains(REDACTED));
+        assert!(!out.windows(10).any(|w| w == b"sk-secret"));
+        assert!(out.windows(REDACTED.len()).any(|w| w == REDACTED));
+        // Whole auth line replaced so no "Authorization" in redacted output (safe to share)
+        assert!(!out
+            .windows(b"Authorization".len())
+            .any(|w| w == b"Authorization"));
     }
 
     #[test]
     fn scrub_redacts_bearer_and_sk() {
         let raw = b"Bearer sk-proj-abc123def456";
         let out = scrub_content(raw);
-        assert!(!out.contains("sk-proj"));
-        assert!(out.contains("Bearer [REDACTED]") || out.contains(REDACTED));
+        assert!(!out.windows(6).any(|w| w == b"sk-proj"));
+        assert!(
+            out.windows(BEARER_REDACTED.len())
+                .any(|w| w == BEARER_REDACTED)
+                || out.windows(REDACTED.len()).any(|w| w == REDACTED)
+        );
     }
 
     #[test]
     fn scrub_redacts_sk_key() {
         let raw = b"api_key=sk-abcdefghij1234567890xyz";
         let out = scrub_content(raw);
-        assert!(!out.contains("sk-abcdefghij"));
-        assert!(out.contains(REDACTED));
+        assert!(!out.windows(14).any(|w| w == b"sk-abcdefghij"));
+        assert!(out.windows(REDACTED.len()).any(|w| w == REDACTED));
     }
 
     #[test]
@@ -91,6 +93,7 @@ mod tests {
         assert!(contains_forbidden_patterns(
             b"sk-abcdefghij1234567890abcdefghij"
         ));
+        assert!(contains_forbidden_patterns(b"sk_live_abcdefghij1234567890"));
         assert!(!contains_forbidden_patterns(b"sk- short"));
     }
 
@@ -98,7 +101,25 @@ mod tests {
     fn safe_content_unchanged() {
         let safe = b"{\"method\":\"GET\",\"url\":\"/api\"}";
         let out = scrub_content(safe);
-        assert_eq!(out.as_ref(), std::str::from_utf8(safe).unwrap());
+        assert_eq!(&out[..], safe);
         assert!(!contains_forbidden_patterns(safe));
+    }
+
+    /// Invalid UTF-8 with ASCII secret still detected (no fail-open).
+    #[test]
+    fn contains_forbidden_patterns_detects_in_valid_utf8_with_ascii_secret() {
+        let with_secret = b"Authorization: Bearer SECRET\xff\xfe";
+        assert!(
+            contains_forbidden_patterns(with_secret),
+            "verify must not skip non-UTF8 content that contains ASCII secrets"
+        );
+    }
+
+    /// Binary without pattern is unchanged by scrub.
+    #[test]
+    fn scrub_preserves_binary_without_pattern() {
+        let binary = [0u8, 1, 2, 0xff, 0xfe, 100];
+        let out = scrub_content(&binary);
+        assert_eq!(&out[..], &binary[..]);
     }
 }
