@@ -49,7 +49,7 @@ pub fn default_progress_sink(total: usize) -> Option<ProgressSink> {
         let should_emit = {
             let mut g = state.lock().expect("progress throttle lock");
             let emit_final = ev.done == ev.total;
-            let emit_step = ev.done % step == 0 || ev.done == 1;
+            let emit_step = ev.done.is_multiple_of(step) || ev.done == 1;
             let interval_ok = g
                 .last_emit
                 .map(|t| {

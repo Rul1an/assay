@@ -120,17 +120,17 @@ De onderstaande epics groeperen het DX-plan in uitvoerbare eenheden. Per epic: *
 
 **Stories:**
 
-| ID | Story | Priority | Detail ref |
-|----|-------|----------|------------|
-| E4.1 | Next step in errors: `suggest_next_steps(exit_code, reason_code, context)` in run/ci/doctor; troubleshooting per-error next steps | P1 | §4.1 |
-| E4.2 | Performance DX: slowest 5 tests, cache hit rate, phase timings in console + summary.json | P1 | §4.2 |
-| E4.3 | Progress UX: N/M tests, optioneel ETA in console | P1 | §4.3 |
+| ID | Story | Priority | Detail ref | Status |
+|----|-------|----------|------------|--------|
+| E4.1 | Next step in errors: `suggest_next_steps(exit_code, reason_code, context)` in run/ci/doctor; troubleshooting per-error next steps | P1 | §4.1 | |
+| E4.2 | Performance DX: slowest 5 tests, cache hit rate, phase timings in console + summary.json | P1 | §4.2 | |
+| E4.3 | Progress UX: N/M tests, optioneel ETA in console | P1 | §4.3 | ✅ PR #164 |
 
 **Acceptance criteria:**
 
 - [ ] Config/trace/test failure → stdout bevat minstens één suggestie (assay doctor / explain / baseline).
 - [ ] summary.json bevat slowest_tests (max 5), cache_hit_rate, phase_timings; console toont ze.
-- [ ] Suite met 10+ tests → console toont progress (bijv. 3/10).
+- [x] Suite met 10+ tests → console toont progress (bijv. 3/10). ✅ PR #164 (JoinSet, throttle, formatter tests).
 
 ---
 
