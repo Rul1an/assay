@@ -122,4 +122,98 @@ mod tests {
         let out = scrub_content(&binary);
         assert_eq!(&out[..], &binary[..]);
     }
+
+    // === Regex bypass surface tests (eval-esser F3) ===
+
+    /// sk-key at exact boundary: 20 chars after prefix → matched.
+    #[test]
+    fn contains_forbidden_detects_sk_key_at_min_length() {
+        // sk- + exactly 20 word chars = minimum match
+        let at_boundary = b"sk-abcdefghij1234567890";
+        assert_eq!(at_boundary.len(), 23); // 3 prefix + 20
+        assert!(
+            contains_forbidden_patterns(at_boundary),
+            "sk-key with exactly 20 chars after prefix must be detected"
+        );
+    }
+
+    /// sk-key below boundary: 19 chars after prefix → NOT matched (too short for a real key).
+    #[test]
+    fn contains_forbidden_ignores_sk_key_below_min_length() {
+        let below_boundary = b"sk-abcdefghij123456789";
+        assert_eq!(below_boundary.len(), 22); // 3 prefix + 19
+        assert!(
+            !contains_forbidden_patterns(below_boundary),
+            "sk-key with only 19 chars after prefix must NOT be detected"
+        );
+    }
+
+    /// sk_live_ variant at boundary: sk_ + 20 chars → matched.
+    #[test]
+    fn contains_forbidden_detects_sk_underscore_at_min_length() {
+        let key = b"sk_live_abcdefghij12";
+        assert_eq!(key.len(), 20); // 3 prefix + 17 < 20 chars after sk_
+        assert!(
+            !contains_forbidden_patterns(key),
+            "sk_ + 17 chars should not match (need 20 after prefix)"
+        );
+        // Now with enough chars
+        let key = b"sk_live_abcdefghij1234567890";
+        // 3 (sk_) + 24 chars after sk_ → matches
+        assert!(contains_forbidden_patterns(key));
+    }
+
+    /// Null byte in the middle of an Authorization header: regex still scans.
+    #[test]
+    fn contains_forbidden_detects_auth_with_null_byte_before() {
+        // Null byte before "Authorization" should not prevent detection
+        let data = b"\x00Authorization: Bearer secret";
+        assert!(
+            contains_forbidden_patterns(data),
+            "null byte before auth header must not prevent detection"
+        );
+    }
+
+    /// Multiline header continuation (obs-fold): Authorization:\r\n<SP>Bearer sk-secret.
+    /// Current regex is line-based, so continuation value is on a separate line.
+    /// Document the boundary: the header line itself is detected, but continuation-only is not.
+    #[test]
+    fn contains_forbidden_detects_auth_line_even_with_continuation() {
+        // Standard case: header line itself contains the value
+        let standard = b"Authorization: Bearer sk-proj-abcdef0123456789abcd\r\n";
+        assert!(contains_forbidden_patterns(standard));
+
+        // obs-fold case: value only on continuation line (no value on header line)
+        // This is an acknowledged limitation of line-based regex.
+        let obs_fold = b"Authorization:\r\n Bearer sk-proj-abcdef0123456789abcd\r\n";
+        // The Authorization line itself matches (it has ":" followed by ".+"),
+        // but only because "\r\n Bearer..." is on a separate line.
+        // The Bearer token on the continuation line IS detected by the BEARER_TOKEN regex.
+        assert!(
+            contains_forbidden_patterns(obs_fold),
+            "Bearer token on continuation line must still be caught by BEARER_TOKEN regex"
+        );
+    }
+
+    /// Bearer token alone on continuation line (no Authorization header context).
+    #[test]
+    fn contains_forbidden_detects_bearer_on_standalone_line() {
+        let data = b"  Bearer sk-proj-abcdef0123456789abcd\r\n";
+        assert!(
+            contains_forbidden_patterns(data),
+            "BEARER_TOKEN regex must catch standalone bearer tokens"
+        );
+    }
+
+    /// Base64-encoded key is NOT detected (acknowledged limitation; documents boundary).
+    #[test]
+    fn contains_forbidden_does_not_detect_base64_encoded_key() {
+        // base64("sk-proj-abc123def456ghij") ≈ "c2stcHJvai1hYmMxMjNkZWY0NTZnaGlq"
+        // This is an acknowledged limitation: scrub operates on literal patterns only.
+        let b64_key = b"api_key=c2stcHJvai1hYmMxMjNkZWY0NTZnaGlq";
+        assert!(
+            !contains_forbidden_patterns(b64_key),
+            "base64-encoded keys are outside scrub scope (acknowledged limitation)"
+        );
+    }
 }

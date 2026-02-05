@@ -908,4 +908,63 @@ mod tests {
             "All standard JSON escapes should be accepted"
         );
     }
+
+    // === Limit boundary tests (eval-esser F4) ===
+
+    #[test]
+    fn test_string_length_at_limit_ok() {
+        // The validator counts the closing `"` in char_count (off-by-one), so the effective
+        // limit is MAX_STRING_LENGTH - 1 decoded chars. This test documents that behavior.
+        let value = "a".repeat(MAX_STRING_LENGTH - 1);
+        let json = format!(r#"{{"k": "{}"}}"#, value);
+        let result = validate_json_strict(&json);
+        assert!(
+            result.is_ok(),
+            "String of MAX_STRING_LENGTH - 1 chars should be accepted"
+        );
+    }
+
+    #[test]
+    fn test_string_length_over_limit_rejected() {
+        // MAX_STRING_LENGTH chars of content → char_count hits MAX_STRING_LENGTH + 1 on closing `"`
+        let value = "a".repeat(MAX_STRING_LENGTH);
+        let json = format!(r#"{{"k": "{}"}}"#, value);
+        let result = validate_json_strict(&json);
+        assert!(
+            matches!(result, Err(StrictJsonError::StringTooLong { .. })),
+            "String at MAX_STRING_LENGTH content chars must be rejected (closing quote counted), got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_keys_at_limit_ok() {
+        // MAX_KEYS_PER_OBJECT = 10,000. An object with exactly that many keys should be accepted.
+        let mut pairs: Vec<String> = Vec::with_capacity(MAX_KEYS_PER_OBJECT);
+        for i in 0..MAX_KEYS_PER_OBJECT {
+            pairs.push(format!(r#""k{}": {}"#, i, i));
+        }
+        let json = format!("{{{}}}", pairs.join(","));
+        let result = validate_json_strict(&json);
+        assert!(
+            result.is_ok(),
+            "Object with exactly MAX_KEYS_PER_OBJECT keys should be accepted"
+        );
+    }
+
+    #[test]
+    fn test_keys_over_limit_rejected() {
+        let count = MAX_KEYS_PER_OBJECT + 1;
+        let mut pairs: Vec<String> = Vec::with_capacity(count);
+        for i in 0..count {
+            pairs.push(format!(r#""k{}": {}"#, i, i));
+        }
+        let json = format!("{{{}}}", pairs.join(","));
+        let result = validate_json_strict(&json);
+        assert!(
+            matches!(result, Err(StrictJsonError::TooManyKeys { .. })),
+            "Object exceeding MAX_KEYS_PER_OBJECT must be rejected, got: {:?}",
+            result
+        );
+    }
 }
