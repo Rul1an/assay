@@ -110,7 +110,7 @@ async fn cmd_run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
-        let summary = summary_from_outcome(&o);
+        let summary = summary_from_outcome(&o).with_seeds(None, None);
         if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
             eprintln!("WARNING: failed to write summary.json: {}", e);
         }
@@ -277,7 +277,7 @@ async fn cmd_ci(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             .parent()
             .map(|p| p.join("summary.json"))
             .unwrap_or_else(|| PathBuf::from("summary.json"));
-        let summary = summary_from_outcome(&o);
+        let summary = summary_from_outcome(&o).with_seeds(None, None);
         if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
             eprintln!("WARNING: failed to write summary.json: {}", e);
         }
@@ -736,11 +736,14 @@ fn write_run_json_minimal(
     outcome: &crate::exit_codes::RunOutcome,
     path: &PathBuf,
 ) -> anyhow::Result<()> {
-    // Minimal JSON for early exits (no artifacts available)
+    // Minimal JSON for early exits (no artifacts available). E7.2: seed fields present for schema stability (null when unknown).
     let v = serde_json::json!({
         "exit_code": outcome.exit_code,
         "reason_code": outcome.reason_code,
         "reason_code_version": assay_core::report::summary::REASON_CODE_VERSION,
+        "seed_version": assay_core::report::summary::SEED_VERSION,
+        "order_seed": null,
+        "judge_seed": null,
         "resolution": outcome
     });
     if let Some(parent) = path.parent() {
