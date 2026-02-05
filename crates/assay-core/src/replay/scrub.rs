@@ -7,9 +7,9 @@
 //! **Encoding:** All operations are **byte-based** (no UTF-8 requirement). Verify never
 //! fail-opens on invalid UTF-8; scrub does not corrupt binary (non-matching bytes unchanged).
 //!
-//! **Redaction scope:** (1) Authorization header: line replaced by `Authorization: [REDACTED]`
-//! (header name preserved for forensics). (2) Bearer token: value only → `Bearer [REDACTED]`.
-//! (3) sk-* key: key substring → `[REDACTED]`. Pattern covers sk- and sk_ (e.g. sk_live_).
+//! **Redaction scope:** (1) Authorization header: entire line replaced by `[REDACTED]`.
+//! (2) Bearer token: value only → `Bearer [REDACTED]`. (3) sk-* key: key substring → `[REDACTED]`.
+//! Pattern covers sk- and sk_ (e.g. sk_live_).
 
 use lazy_static::lazy_static;
 use regex::bytes::{NoExpand, Regex};
