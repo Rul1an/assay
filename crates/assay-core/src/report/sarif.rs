@@ -1,6 +1,17 @@
 use crate::model::{TestResultRow, TestStatus};
 use std::path::Path;
 
+/// Default maximum number of results to include in SARIF output.
+/// GitHub Code Scanning accepts up to 25_000 results per run (soft limit); exceeding causes upload issues.
+pub const DEFAULT_SARIF_MAX_RESULTS: usize = 25_000;
+
+/// Outcome of writing SARIF: when truncation was applied, how many results were omitted.
+#[derive(Debug, Clone, Default)]
+pub struct SarifWriteOutcome {
+    /// Number of results omitted due to max_results limit (0 when no truncation).
+    pub omitted_count: u64,
+}
+
 /// SARIF schema version used by all Assay SARIF producers.
 ///
 /// Shared contract with `assay-evidence::lint::sarif` — both modules MUST use
@@ -15,38 +26,80 @@ pub const SARIF_SCHEMA: &str =
 /// a synthetic fallback pointing to the config file when no real file is available.
 const SYNTHETIC_LOCATION_URI: &str = ".assay/eval.yaml";
 
-/// Write test results as SARIF 2.1.0 to a file.
+/// Whether this status is included in SARIF output (deterministic truncation contract).
+/// Eligible: Fail, Error, Warn, Flaky, Unstable. Excluded: Pass, Skipped, AllowedOnError.
+#[inline]
+pub fn is_sarif_eligible(status: TestStatus) -> bool {
+    !matches!(
+        status,
+        TestStatus::Pass | TestStatus::Skipped | TestStatus::AllowedOnError
+    )
+}
+
+/// Blocking rank for truncation order: 0 = blocking (Fail/Error), 1 = non-blocking (Warn/Flaky/Unstable).
+/// Policy-proof: E7.4 suite policy can change what "blocks" CI without changing this rank.
+#[inline]
+pub fn blocking_rank(status: TestStatus) -> u8 {
+    if status.is_blocking() {
+        0
+    } else {
+        1
+    }
+}
+
+/// Severity rank for SARIF truncation: 0 = error, 1 = warning, 2 = note.
+/// The `_ => 2` branch is reserved for future eligible severities (e.g. note-level); currently all eligible statuses map to 0 or 1.
+#[inline]
+pub fn severity_rank(status: TestStatus) -> u8 {
+    match status {
+        TestStatus::Fail | TestStatus::Error => 0,
+        TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => 1,
+        _ => 2,
+    }
+}
+
+/// Sort key for deterministic truncation: (BlockingRank, SeverityRank, test_id). Stable and input-order independent.
+fn sarif_sort_key(r: &TestResultRow) -> (u8, u8, &str) {
+    (
+        blocking_rank(r.status),
+        severity_rank(r.status),
+        r.test_id.as_str(),
+    )
+}
+
+/// Writes test results as SARIF 2.1.0 with an explicit result limit. Use this when you need a custom
+/// limit (e.g. contract tests with a small limit). For production, prefer [`write_sarif`] which uses
+/// [`DEFAULT_SARIF_MAX_RESULTS`].
 ///
-/// # SARIF consistency contract
-///
-/// There are two SARIF producers in the Assay workspace:
-///
-/// | Producer | Crate | Purpose |
-/// |----------|-------|---------|
-/// | `write_sarif` / `build_sarif_diagnostics` (this module) | `assay-core` | Test results & diagnostic reports |
-/// | `to_sarif` | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning |
-///
-/// **Shared invariants** (must stay in sync):
-/// - SARIF version: `"2.1.0"`
-/// - Schema URI: [`SARIF_SCHEMA`]
-/// - Severity mapping: `Error`→`"error"`, `Warn`→`"warning"`, `Info`/other→`"note"`
-///
-/// **Intentional differences** (by design, not drift):
-/// - This module includes `invocations[]` with exit codes (diagnostics path);
-///   `assay-evidence` does not.
-/// - `assay-evidence` includes `partialFingerprints`, `automationDetails`, and
-///   `tool.driver.rules[]` for GitHub Code Scanning; this module does not.
-pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> anyhow::Result<()> {
-    let sarif_results: Vec<serde_json::Value> = results
+/// Truncation is deterministic: filter to eligible results → sort by (BlockingRank, SeverityRank, test_id) → take first `max_results`.
+/// `omitted_count` = eligible_total - included (only eligible results are counted).
+pub fn write_sarif_with_limit(
+    tool_name: &str,
+    results: &[TestResultRow],
+    out: &Path,
+    max_results: usize,
+) -> anyhow::Result<SarifWriteOutcome> {
+    let eligible: Vec<&TestResultRow> = results
         .iter()
-        .filter_map(|r| {
+        .filter(|r| is_sarif_eligible(r.status))
+        .collect();
+    let eligible_total = eligible.len();
+
+    let mut sorted: Vec<&TestResultRow> = eligible;
+    sorted.sort_by_cached_key(|r| sarif_sort_key(r));
+    let kept: Vec<&TestResultRow> = sorted.into_iter().take(max_results).collect();
+    let kept_count = kept.len();
+    let omitted_count = eligible_total.saturating_sub(kept_count) as u64;
+
+    let sarif_results: Vec<serde_json::Value> = kept
+        .iter()
+        .map(|r| {
             let level = match r.status {
-                TestStatus::Pass | TestStatus::Skipped | TestStatus::AllowedOnError => return None,
                 TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => "warning",
                 TestStatus::Fail | TestStatus::Error => "error",
+                _ => "note",
             };
-            // Always include at least one location (synthetic fallback for GitHub)
-            Some(serde_json::json!({
+            serde_json::json!({
                 "ruleId": "assay",
                 "level": level,
                 "message": { "text": format!("{}: {}", r.test_id, r.message) },
@@ -56,21 +109,63 @@ pub fn write_sarif(tool_name: &str, results: &[TestResultRow], out: &Path) -> an
                         "region": { "startLine": 1, "startColumn": 1 }
                     }
                 }]
-            }))
+            })
         })
         .collect();
 
+    let run_obj: serde_json::Value = if omitted_count > 0 {
+        serde_json::json!({
+            "tool": { "driver": { "name": tool_name } },
+            "results": sarif_results,
+            "properties": {
+                "assay": {
+                    "truncated": true,
+                    "omitted_count": omitted_count
+                }
+            }
+        })
+    } else {
+        serde_json::json!({
+            "tool": { "driver": { "name": tool_name } },
+            "results": sarif_results
+        })
+    };
+
     let doc = serde_json::json!({
-      "version": "2.1.0",
-      "$schema": SARIF_SCHEMA,
-      "runs": [{
-        "tool": { "driver": { "name": tool_name } },
-        "results": sarif_results
-      }]
+        "version": "2.1.0",
+        "$schema": SARIF_SCHEMA,
+        "runs": [run_obj]
     });
 
     std::fs::write(out, serde_json::to_string_pretty(&doc)?)?;
-    Ok(())
+    Ok(SarifWriteOutcome { omitted_count })
+}
+
+/// Write test results as SARIF 2.1.0 to a file using the default result limit ([`DEFAULT_SARIF_MAX_RESULTS`]).
+///
+/// For custom limits (e.g. tests), use [`write_sarif_with_limit`]. Truncation is deterministic:
+/// eligible results (Fail/Error/Warn/Flaky/Unstable) are sorted by (BlockingRank, SeverityRank, test_id)
+/// then truncated; run-level `runs[0].properties.assay` holds truncated/omitted_count when applicable.
+///
+/// # SARIF consistency contract
+///
+/// There are two SARIF producers in the Assay workspace:
+///
+/// | Producer | Crate | Purpose |
+/// |----------|-------|---------|
+/// | `write_sarif` / `write_sarif_with_limit` / `build_sarif_diagnostics` (this module) | `assay-core` | Test results & diagnostic reports |
+/// | `to_sarif` | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning |
+///
+/// **Shared invariants** (must stay in sync):
+/// - SARIF version: `"2.1.0"`
+/// - Schema URI: [`SARIF_SCHEMA`]
+/// - Severity mapping: `Error`→`"error"`, `Warn`→`"warning"`, `Info`/other→`"note"`
+pub fn write_sarif(
+    tool_name: &str,
+    results: &[TestResultRow],
+    out: &Path,
+) -> anyhow::Result<SarifWriteOutcome> {
+    write_sarif_with_limit(tool_name, results, out, DEFAULT_SARIF_MAX_RESULTS)
 }
 
 pub fn build_sarif_diagnostics(

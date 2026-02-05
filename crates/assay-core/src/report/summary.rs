@@ -98,6 +98,17 @@ pub struct Summary {
     /// Judge reliability metrics (E7.3). Present when run had judge evaluations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub judge_metrics: Option<JudgeMetrics>,
+
+    /// SARIF truncation (E2.3). Present when SARIF was truncated (N results omitted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sarif: Option<SarifOutputInfo>,
+}
+
+/// SARIF output metadata (E2.3). Written when SARIF was truncated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifOutputInfo {
+    /// Number of results omitted from SARIF due to max_results limit.
+    pub omitted: u64,
 }
 
 /// Seeds used in the run (replay determinism). Always present in Summary; order_seed/judge_seed encoded as string or null to avoid JSON number precision loss (u64 > 2^53).
@@ -264,6 +275,7 @@ impl Summary {
             performance: None,
             seeds: Seeds::default(),
             judge_metrics: None,
+            sarif: None,
         }
     }
 
@@ -288,6 +300,7 @@ impl Summary {
             performance: None,
             seeds: Seeds::default(),
             judge_metrics: None,
+            sarif: None,
         }
     }
 
@@ -337,6 +350,14 @@ impl Summary {
     /// Set judge reliability metrics (E7.3)
     pub fn with_judge_metrics(mut self, metrics: JudgeMetrics) -> Self {
         self.judge_metrics = Some(metrics);
+        self
+    }
+
+    /// Set SARIF truncation info (E2.3). Call when omitted_count > 0.
+    pub fn with_sarif_omitted(mut self, omitted: u64) -> Self {
+        if omitted > 0 {
+            self.sarif = Some(SarifOutputInfo { omitted });
+        }
         self
     }
 }

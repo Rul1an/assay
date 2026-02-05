@@ -196,7 +196,7 @@ impl Runner {
             };
             attempts.push(AttemptRow {
                 attempt_no: i + 1,
-                status: row.status.clone(),
+                status: row.status,
                 message: row.message.clone(),
                 duration_ms: row.duration_ms,
                 details: row.details.clone(),

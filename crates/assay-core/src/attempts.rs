@@ -28,7 +28,7 @@ pub fn classify_attempts(attempts: &[AttemptRow]) -> FailureClass {
         return FailureClass::Error;
     }
 
-    let statuses: Vec<TestStatus> = attempts.iter().map(|a| a.status.clone()).collect();
+    let statuses: Vec<TestStatus> = attempts.iter().map(|a| a.status).collect();
 
     let any_fail = statuses.iter().any(|s| matches!(s, Fail));
     let any_pass = statuses.iter().any(|s| matches!(s, Pass | Warn | Flaky));
