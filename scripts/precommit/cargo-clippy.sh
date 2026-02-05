@@ -3,36 +3,34 @@ set -euo pipefail
 
 # This script runs cargo clippy on the workspace.
 # Pre-push: runs with timeout so it doesn't hang indefinitely (CI runs clippy too).
+# Excludes assay-python-sdk (pyo3 needs Python at build time; can hang or fail locally)
+# and assay-ebpf (Linux-only, heavy). CI runs full workspace on Ubuntu.
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-
-# pyo3 (assay-python-sdk) needs a valid Python at build time; avoid stale miniconda path
-if [ -z "${PYO3_PYTHON:-}" ]; then
-  for p in python3.12 python3.11 python3 python; do
-    if pypath=$(command -v "$p" 2>/dev/null); then
-      export PYO3_PYTHON=$pypath
-      break
-    fi
-  done
-fi
 
 # Timeout in seconds (default 300 = 5 min). Set CLIPPY_TIMEOUT=0 to disable.
 CLIPPY_TIMEOUT="${CLIPPY_TIMEOUT:-300}"
 
-echo "cargo-clippy: checking workspace (timeout=${CLIPPY_TIMEOUT}s)..."
+# Exclude crates that often hang or fail on dev machines (CI runs full workspace)
+# assay-it = assay-python-sdk (pyo3 needs Python at build time); assay-ebpf = Linux-only
+CLIPPY_EXCLUDE="--exclude assay-it --exclude assay-ebpf"
+CLIPPY_CMD="cargo clippy --workspace --all-targets $CLIPPY_EXCLUDE -- -D warnings"
+
+echo "cargo-clippy: checking workspace (timeout=${CLIPPY_TIMEOUT}s, exclude assay-it, assay-ebpf)..."
 
 run_clippy() {
-    cargo clippy --workspace --all-targets -- -D warnings
+    $CLIPPY_CMD
 }
 
 # timeout(1) expects a command name, not a shell function; use bash -c with the actual command.
 run_with_timeout() {
     local t=$1
-    local cmd='cargo clippy --workspace --all-targets -- -D warnings'
     if command -v timeout &>/dev/null; then
-        timeout "$t" bash -c "$cmd"
+        timeout "$t" bash -c "$CLIPPY_CMD"
+    elif command -v gtimeout &>/dev/null; then
+        gtimeout "$t" bash -c "$CLIPPY_CMD"
     else
-        command -v gtimeout &>/dev/null && gtimeout "$t" bash -c "$cmd" || run_clippy
+        run_clippy
     fi
 }
 
