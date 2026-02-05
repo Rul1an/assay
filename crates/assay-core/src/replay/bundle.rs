@@ -6,14 +6,15 @@
 
 use crate::replay::manifest::ReplayManifest;
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use flate2::Compression;
 use flate2::GzBuilder;
 use serde_json;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
-use tar::{Builder, Header};
+use tar::{Archive, Builder, Header};
 
 /// Canonical paths inside the bundle (POSIX, relative to root).
 pub mod paths {
@@ -160,6 +161,47 @@ pub fn build_file_manifest(
     Ok(out)
 }
 
+/// Result of reading a bundle: manifest and all file entries (path -> contents).
+/// Paths are POSIX, relative to bundle root; manifest.json is not in entries.
+#[derive(Debug)]
+pub struct ReadBundle {
+    pub manifest: ReplayManifest,
+    pub entries: Vec<(String, Vec<u8>)>,
+}
+
+/// Read a replay bundle from .tar.gz: parse manifest and collect all entry (path, data).
+/// Paths normalized to POSIX. Enforces same path policy as writer: only manifest.json or
+/// files/, outputs/, cassettes/ (no empty segment, no . or .., no drive letter). Duplicate
+/// paths in tar → Error. Missing manifest.json → Error.
+pub fn read_bundle_tar_gz<R: Read>(r: R) -> Result<ReadBundle> {
+    let dec = GzDecoder::new(r);
+    let mut ar = Archive::new(dec);
+    let mut manifest_data: Option<Vec<u8>> = None;
+    let mut seen = BTreeMap::new();
+    for entry in ar.entries().context("list tar entries")? {
+        let mut e = entry.context("read tar entry")?;
+        let path = e.path().context("entry path")?;
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        if path_str == paths::MANIFEST {
+            let mut data = Vec::new();
+            e.read_to_end(&mut data).context("read manifest body")?;
+            manifest_data = Some(data);
+            continue;
+        }
+        validate_entry_path(&path_str)?;
+        let mut data = Vec::new();
+        e.read_to_end(&mut data).context("read entry body")?;
+        if seen.insert(path_str.clone(), data).is_some() {
+            anyhow::bail!("duplicate path in bundle: {}", path_str);
+        }
+    }
+    let manifest_json = manifest_data.context("manifest.json missing in bundle")?;
+    let manifest: ReplayManifest =
+        serde_json::from_slice(&manifest_json).context("parse manifest.json")?;
+    let entries = seen.into_iter().collect();
+    Ok(ReadBundle { manifest, entries })
+}
+
 fn content_type_hint(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     Some(match ext {
@@ -191,6 +233,83 @@ mod tests {
         assert!(!buf.is_empty());
         let digest = bundle_digest(&manifest, &entries).unwrap();
         assert_eq!(digest.len(), 64);
+    }
+
+    #[test]
+    fn read_bundle_roundtrip() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let entries = vec![
+            BundleEntry {
+                path: "files/trace.jsonl".into(),
+                data: b"[]".to_vec(),
+            },
+            BundleEntry {
+                path: "outputs/summary.json".into(),
+                data: br#"{"schema_version":1}"#.to_vec(),
+            },
+        ];
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(&mut buf, &manifest, &entries).unwrap();
+        let read = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap();
+        assert_eq!(read.manifest.schema_version, manifest.schema_version);
+        assert_eq!(read.manifest.assay_version, manifest.assay_version);
+        let paths: std::collections::BTreeSet<_> =
+            read.entries.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains("files/trace.jsonl"));
+        assert!(paths.contains("outputs/summary.json"));
+        let data: std::collections::BTreeMap<_, _> = read.entries.into_iter().collect();
+        assert_eq!(data.get("files/trace.jsonl").unwrap(), &b"[]"[..]);
+    }
+
+    /// Reader fails when manifest.json is absent (same policy: bundle must be valid).
+    #[test]
+    fn read_bundle_fails_manifest_missing() {
+        let mut buf = Vec::new();
+        let gz = GzBuilder::new()
+            .mtime(0)
+            .write(&mut buf, flate2::Compression::default());
+        let mut tar = Builder::new(gz);
+        let mut header = Header::new_gnu();
+        header.set_path("files/x").unwrap();
+        header.set_size(0);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append(&header, &[] as &[u8]).unwrap();
+        let gz = tar.into_inner().unwrap();
+        gz.finish().unwrap();
+        let err = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap_err();
+        assert!(err.to_string().contains("manifest.json missing"), "{}", err);
+    }
+
+    /// Duplicate path in tar → Error (avoids zip-slip style confusion; last-wins undefined).
+    #[test]
+    fn read_bundle_fails_duplicate_path() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut buf = Vec::new();
+        let gz = GzBuilder::new()
+            .mtime(0)
+            .write(&mut buf, flate2::Compression::default());
+        let mut tar = Builder::new(gz);
+        tar.mode(tar::HeaderMode::Deterministic);
+        let mut h = Header::new_gnu();
+        h.set_path(paths::MANIFEST).unwrap();
+        h.set_size(manifest_json.len() as u64);
+        h.set_mode(0o644);
+        h.set_cksum();
+        tar.append(&h, &manifest_json[..]).unwrap();
+        for _ in 0..2 {
+            let mut h2 = Header::new_gnu();
+            h2.set_path("files/x").unwrap();
+            h2.set_size(1);
+            h2.set_mode(0o644);
+            h2.set_cksum();
+            tar.append(&h2, &b"x"[..]).unwrap();
+        }
+        let gz = tar.into_inner().unwrap();
+        gz.finish().unwrap();
+        let err = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap_err();
+        assert!(err.to_string().contains("duplicate path"), "{}", err);
     }
 
     #[test]
