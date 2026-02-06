@@ -269,7 +269,8 @@ mod tests {
         assert!(truncated);
         assert_eq!(truncated_count, 25_000);
 
-        // All 10k errors should survive (highest severity), sorted first
+        // Truncation to 5k should keep only highest-severity findings:
+        // all retained findings are errors.
         let errors = result
             .iter()
             .filter(|f| f.severity == Severity::Error)
@@ -279,7 +280,7 @@ mod tests {
 
     #[test]
     fn truncate_preserves_errors_over_infos() {
-        // 3 errors + 10 infos, limit 5 -> keep all 3 errors + 2 warnings/infos
+        // 3 errors + 10 infos, limit 5 -> keep all 3 errors + 2 infos
         let mut findings = Vec::new();
         for i in 0..3 {
             findings.push(make_finding(Severity::Error, i));
@@ -304,6 +305,17 @@ mod tests {
     #[test]
     fn default_max_results_is_5000() {
         let options = LintOptions::default();
-        assert_eq!(options.max_results.unwrap_or(5000), 5000);
+        assert!(options.max_results.is_none());
+
+        // Verify default fallback path in lint_bundle_with_options().
+        let mut findings = Vec::new();
+        for i in 0..5001 {
+            findings.push(make_finding(Severity::Info, i));
+        }
+        let (result, truncated, truncated_count) =
+            truncate_findings(findings, options.max_results.unwrap_or(5000));
+        assert_eq!(result.len(), 5000);
+        assert!(truncated);
+        assert_eq!(truncated_count, 1);
     }
 }

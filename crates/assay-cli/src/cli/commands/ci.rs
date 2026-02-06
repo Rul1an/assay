@@ -265,6 +265,7 @@ fn format_pr_comment(
     suite: &str,
 ) -> String {
     let mut md = String::new();
+    let suite_display = escape_markdown_table_cell(suite);
 
     // Marker for find/update pattern
     md.push_str("<!-- assay-governance-report -->\n");
@@ -283,10 +284,10 @@ fn format_pr_comment(
     // Results table
     md.push_str("| Metric | Value |\n");
     md.push_str("|--------|-------|\n");
-    md.push_str(&format!("| Suite | `{}` |\n", suite));
+    md.push_str(&format!("| Suite | {} |\n", suite_display));
 
     if let Some(results) = &summary.results {
-        let total = results.passed + results.failed;
+        let total = results.total;
         md.push_str(&format!(
             "| Tests | {}/{} passed |\n",
             results.passed, total
@@ -307,7 +308,7 @@ fn format_pr_comment(
         md.push('\n');
         md.push_str("<details>\n<summary>Warnings</summary>\n\n");
         for w in &outcome.warnings {
-            md.push_str(&format!("- {}\n", w));
+            md.push_str(&format!("- {}\n", escape_markdown_text(w)));
         }
         md.push_str("\n</details>\n");
     }
@@ -327,4 +328,23 @@ fn format_pr_comment(
     ));
 
     md
+}
+
+fn escape_markdown_table_cell(input: &str) -> String {
+    escape_markdown_text(input).replace('|', "\\|")
+}
+
+fn escape_markdown_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\r' | '\n' => out.push(' '),
+            '\\' | '`' | '*' | '_' | '[' | ']' | '#' | '<' | '>' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }

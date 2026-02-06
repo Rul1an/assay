@@ -177,7 +177,7 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
     }
 
     // 4. Write eval.yaml config
-    let trace_rel = trace_path.display().to_string();
+    let trace_rel = escape_yaml_double_quoted(&trace_path.display().to_string());
     let config_content = format!(
         "version: 2\nsuite: \"generated\"\npolicy: \"policy.yaml\"\ntrace_file: \"{}\"\n",
         trace_rel
@@ -223,4 +223,13 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
     println!("\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline");
 
     Ok(exit_codes::OK)
+}
+
+fn escape_yaml_double_quoted(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
