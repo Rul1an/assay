@@ -127,6 +127,7 @@ pub async fn run(args: RecordArgs) -> Result<i32> {
         name: args.name,
         format: "yaml".to_string(),
         dry_run: false,
+        diff: false,
         heuristics: true, // Enable heuristics for record mode
         entropy_threshold: 3.8,
         min_stability: 0.8,
