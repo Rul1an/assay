@@ -42,6 +42,19 @@ Contains all run.json outcome fields plus:
 | `judge_metrics` | object \| null | Optional; present when judge was used |
 | `sarif` | object \| null | Optional; present when SARIF was truncated (PR #160): `{ "omitted": N }` |
 
+## Replay provenance (E9c alignment draft)
+
+For replay-generated outputs (`assay replay --bundle ...`), `summary.json` / `run.json` provenance is aligned to carry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provenance.replay` | boolean | `true` when output came from replay bundle execution |
+| `provenance.bundle_digest` | string | SHA256 digest of the bundle archive |
+| `provenance.replay_mode` | string | `"offline"` or `"live"` |
+| `provenance.source_run_id` | string \| absent | Optional original run identifier |
+
+Replay offline contract uses reason code **`E_REPLAY_MISSING_DEPENDENCY`** (exit code 2) when required inputs are missing.
+
 ## judge_metrics (when present)
 
 | Field | Type | Description |

@@ -31,6 +31,10 @@ pub struct ReplayManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_run_path: Option<String>,
 
+    /// How source run was selected (e.g. "run-id", "mtime-latest", "explicit-from").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_method: Option<String>,
+
     /// Git SHA of the repo at bundle creation; dirty flag if uncommitted changes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
@@ -213,6 +217,7 @@ impl ReplayManifest {
             assay_version,
             created_at: None,
             source_run_path: None,
+            selection_method: None,
             git_sha: None,
             git_dirty: None,
             workflow_run_id: None,

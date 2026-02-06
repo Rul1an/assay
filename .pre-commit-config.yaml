@@ -20,6 +20,14 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
+  # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
+  - repo: https://github.com/gitguardian/ggshield
+    rev: v1.47.0
+    hooks:
+      - id: ggshield
+        language_version: python3
+        stages: [manual]
+
   # --- Tooling hooks (remote) ---
   # typos (spellcheck)
   - repo: https://github.com/crate-ci/typos

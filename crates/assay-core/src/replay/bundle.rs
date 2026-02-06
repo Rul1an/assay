@@ -491,6 +491,7 @@ mod tests {
             assay_version: "2.15.0".to_string(),
             created_at: Some("2025-01-27T12:00:00Z".to_string()),
             source_run_path: Some(".assay/run_abc123".to_string()),
+            selection_method: Some("run-id".to_string()),
             git_sha: Some("a1b2c3d4e5f6".to_string()),
             git_dirty: Some(false),
             workflow_run_id: None,

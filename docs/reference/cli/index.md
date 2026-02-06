@@ -26,9 +26,10 @@ assay --version
 | Command | Description |
 |---------|-------------|
 | [`assay run`](run.md) | Run tests against traces |
+| [`assay bundle`](bundle.md) | Create/verify replay bundles |
+| [`assay replay`](replay.md) | Replay from a replay bundle |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
-| [`assay replay`](replay.md) | Interactive trace replay |
 | [`assay monitor`](../../guides/runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
 | [`assay mcp-server`](mcp-server.md) | Start Assay as MCP tool server |
 
@@ -67,17 +68,20 @@ assay run --config mcp-eval.yaml --output sarif
 assay run --config mcp-eval.yaml --output junit
 ```
 
-### Import Traces
+### Replay Bundles
 
 ```bash
-# From MCP Inspector
-assay import --format mcp-inspector session.json
+# Create bundle from latest run artifacts
+assay bundle create
 
-# Auto-generate config
-assay import --format mcp-inspector session.json --init
+# Verify bundle safety/integrity
+assay bundle verify --bundle .assay/bundles/12345.tar.gz
 
-# Custom output path
-assay import --format mcp-inspector session.json --out-trace traces/custom.jsonl
+# Replay from bundle (offline default)
+assay replay --bundle .assay/bundles/12345.tar.gz
+
+# Replay live with seed override
+assay replay --bundle .assay/bundles/12345.tar.gz --live --seed 42
 ```
 
 ### Migrate Config
@@ -179,9 +183,17 @@ See [Configuration](../config/index.md) for full reference.
 
     ---
 
-    Interactive step-by-step trace replay for debugging.
+    Replay runs from a replay bundle (`--bundle`), offline by default.
 
     [:octicons-arrow-right-24: Full reference](replay.md)
+
+-   :material-package-variant:{ .lg .middle } __assay bundle__
+
+    ---
+
+    Create and verify replay bundles.
+
+    [:octicons-arrow-right-24: Full reference](bundle.md)
 
 -   :material-server:{ .lg .middle } __assay mcp-server__
 

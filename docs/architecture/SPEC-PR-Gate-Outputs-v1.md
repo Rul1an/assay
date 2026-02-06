@@ -1,8 +1,8 @@
 # PR Gate Output Contracts Specification v1
 
 **Status:** Draft
-**Version:** 1.0.0
-**Date:** 2026-01
+**Version:** 1.0.1-draft
+**Date:** 2026-02
 **ADR:** [ADR-019: PR Gate 2026 SOTA](./ADR-019-PR-Gate-2026-SOTA.md)
 **Related:** [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [SPEC-GitHub-Action-v2.1](./SPEC-GitHub-Action-v2.1.md)
 
@@ -59,8 +59,13 @@ Every summary.json MUST include a top-level **`provenance`** object with the fol
 | `policy_pack_digest`  | string | No       | Digest of policy/pack used (e.g. `sha256:...`). |
 | `baseline_digest`     | string | No       | Digest of baseline used for comparison, if applicable. |
 | `trace_digest`        | string | No       | Digest of trace input, if applicable (optional for privacy/size). |
+| `replay`              | boolean| No       | `true` when this output was produced by replay from a bundle. |
+| `bundle_digest`       | string | No       | SHA256 digest of the replay bundle archive used for this run. |
+| `replay_mode`         | string | No       | Replay mode when `replay=true`: `"offline"` or `"live"`. |
+| `source_run_id`       | string | No       | Optional original run id carried into replay provenance. |
 
 **Normative:** If the run was executed with `--no-verify`, `verify_mode` MUST be `"disabled"`.
+When replay is used, producers SHOULD set `replay=true` and include `bundle_digest` and `replay_mode`.
 
 ### 3.3 Results Summary (Optional but Recommended)
 
@@ -178,6 +183,7 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_MISSING_CONFIG    | Required config file missing. |
 | E_BASELINE_INVALID  | Baseline file invalid or missing. |
 | E_POLICY_PARSE      | Policy file parse error. |
+| E_REPLAY_MISSING_DEPENDENCY | Replay missing required offline dependency (e.g. uncached judge/cassette input). |
 
 ### 5.2 Infra / Judge Unavailable (exit_code 3)
 
@@ -256,6 +262,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 | 1              | 2026-01  | Initial Outputs-v1. |
 | 1              | 2026-02  | Clarified/added: Seeds (§3.3.1) + Judge metrics (§3.3.2). Seeds MUST be decimal strings (or null) to avoid JSON precision loss. judge_seed reserved (null) until implemented. |
 | 1              | 2026-02  | E2.3: SARIF truncation metadata (§6.3): properties.assay (truncated, omitted_count) in SARIF run; sarif.omitted in summary.json and run.json when truncated. Deterministic truncation order. |
+| 1              | 2026-02  | E9c alignment draft: replay provenance keys in `provenance` (`replay`, `bundle_digest`, `replay_mode`, `source_run_id`) and `E_REPLAY_MISSING_DEPENDENCY` reason code. |
 
 ---
 
