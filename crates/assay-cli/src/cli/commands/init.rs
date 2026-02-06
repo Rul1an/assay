@@ -99,7 +99,7 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         }
     }
 
-    println!("✅  Initialization complete. Run 'assay audit' to test.");
+    println!("✅  Initialization complete. Run 'assay validate' to test.");
     Ok(exit_codes::OK)
 }
 
