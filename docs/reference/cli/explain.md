@@ -31,8 +31,8 @@ Use it for:
 | `--policy`, `-p <FILE>` | Policy file used for evaluation |
 | `--format`, `-f <FORMAT>` | Output format: `terminal` (default), `markdown`, `html`, `json` |
 | `--output`, `-o <FILE>` | Write output to file instead of stdout |
-| `--blocked-only` | Show only blocked steps |
-| `--verbose` | Show all rule evaluations per step |
+| `--blocked-only` | Show only blocked steps (terminal output only) |
+| `--verbose` | Show all rule evaluations per step (terminal output only) |
 | `--compliance-pack <REF>` | Add article hints + coverage summary from a compliance pack (for `terminal`/`markdown`) |
 
 ---
@@ -59,13 +59,22 @@ Definition:
 assay explain --trace traces/session.jsonl --policy policy.yaml
 ```
 
-### Blocked-only markdown report
+### Blocked-only terminal report
 
 ```bash
 assay explain \
   --trace traces/session.jsonl \
   --policy policy.yaml \
   --blocked-only \
+  --format terminal
+```
+
+### Markdown report (full explanation)
+
+```bash
+assay explain \
+  --trace traces/session.jsonl \
+  --policy policy.yaml \
   --format markdown \
   --output reports/explain.md
 ```
@@ -106,4 +115,3 @@ Expected markdown tail:
 
 - `0` if all steps are allowed
 - `1` if one or more steps are blocked
-
