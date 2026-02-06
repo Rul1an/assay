@@ -120,7 +120,6 @@ cat > "$SUMMARY_FILE" << 'EOF'
 | assay-ebpf | eBPF programs | lsm hooks |
 | assay-sim | Attack simulation | scenarios |
 | assay-common | Shared types | exports |
-
 EOF
 
 echo "Generated: $SUMMARY_FILE"
