@@ -7,7 +7,7 @@ use assay_core::replay::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub async fn run(args: BundleArgs, _legacy_mode: bool) -> anyhow::Result<i32> {
@@ -60,6 +60,8 @@ fn cmd_create(args: BundleCreateArgs) -> anyhow::Result<i32> {
     let mut baseline_digest: Option<String> = None;
     let mut trace_digest: Option<String> = None;
     let mut trace_path: Option<String> = None;
+    let mut config_snapshot_present = false;
+    let mut trace_snapshot_present = false;
 
     if let Some(run_json_path) = find_run_json(&source_root, args.from.as_ref()) {
         let run_bytes = std::fs::read(&run_json_path)?;
@@ -139,6 +141,7 @@ fn cmd_create(args: BundleCreateArgs) -> anyhow::Result<i32> {
             .and_then(|s| s.to_str())
             .unwrap_or("eval.yaml");
         entries_map.insert(format!("files/{}", name), bytes.clone());
+        config_snapshot_present = true;
         let hash = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
         if config_digest.is_none() {
             config_digest = Some(hash.clone());
@@ -157,6 +160,7 @@ fn cmd_create(args: BundleCreateArgs) -> anyhow::Result<i32> {
             .unwrap_or("trace.jsonl");
         let bundle_trace_path = format!("files/{}", name);
         entries_map.insert(bundle_trace_path.clone(), bytes.clone());
+        trace_snapshot_present = true;
         if trace_digest.is_none() {
             trace_digest = Some(format!("sha256:{}", hex::encode(Sha256::digest(&bytes))));
         }
@@ -185,6 +189,9 @@ fn cmd_create(args: BundleCreateArgs) -> anyhow::Result<i32> {
     for (path, data) in entries_map {
         entries.push(BundleEntry { path, data });
     }
+    replay_coverage = replay_coverage.map(|coverage| {
+        enforce_bundle_input_coverage(coverage, config_snapshot_present, trace_snapshot_present)
+    });
     let file_manifest = build_file_manifest(&entries)?;
 
     let run_id = args
@@ -554,6 +561,45 @@ fn extract_replay_coverage(v: &Value) -> Option<ReplayCoverage> {
             Some(reason)
         },
     })
+}
+
+fn enforce_bundle_input_coverage(
+    mut coverage: ReplayCoverage,
+    config_snapshot_present: bool,
+    trace_snapshot_present: bool,
+) -> ReplayCoverage {
+    // "complete_tests" are only complete when mandatory replay inputs are present in bundle.
+    if !config_snapshot_present {
+        mark_all_incomplete(&mut coverage, "config snapshot missing from bundle");
+    }
+    if !trace_snapshot_present {
+        mark_all_incomplete(&mut coverage, "trace snapshot missing from bundle");
+    }
+    coverage
+}
+
+fn mark_all_incomplete(coverage: &mut ReplayCoverage, reason_message: &str) {
+    let mut all = BTreeSet::new();
+    for test_id in &coverage.complete_tests {
+        all.insert(test_id.clone());
+    }
+    for test_id in &coverage.incomplete_tests {
+        all.insert(test_id.clone());
+    }
+
+    if all.is_empty() {
+        return;
+    }
+
+    let reason = coverage.reason.get_or_insert_with(BTreeMap::new);
+    for test_id in &all {
+        reason
+            .entry(test_id.clone())
+            .or_insert_with(|| reason_message.to_string());
+    }
+
+    coverage.complete_tests.clear();
+    coverage.incomplete_tests = all.into_iter().collect();
 }
 
 fn truncate_reason(message: &str, max_chars: usize) -> String {
