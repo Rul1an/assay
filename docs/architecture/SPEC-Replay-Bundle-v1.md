@@ -1,8 +1,8 @@
 # Replay Bundle Specification v1
 
-**Status:** Draft
-**Version:** 1.0.0
-**Date:** 2026-01
+**Status:** Draft (Aligned for E9c planning)
+**Version:** 1.0.1-draft
+**Date:** 2026-02
 **ADR:** [ADR-019: PR Gate 2026 SOTA §5 Replay Bundle](./ADR-019-PR-Gate-2026-SOTA.md#5-replay-bundle-lightweight-differentiator)
 
 ---
@@ -17,6 +17,13 @@ This specification defines the **Replay Bundle**: a lightweight artifact that ca
 - **Best-effort deterministic** — Replay may not be byte-identical (e.g. judge variance); the goal is "same inputs → same conclusions" where deterministic; for judge, record/replay of outputs is optional.
 - **Support/DX first** — Primary use: support ("stuur bundle") and PR summary ("Reproduce locally"). No attestation or signing required for v1.
 
+### Alignment Note (2026-02)
+
+This spec is aligned to current E9 implementation direction:
+- Producer emits a **single canonical archive**.
+- Default output path is under `.assay/bundles/` using run_id-based naming.
+- Offline replay is hermetic by default; missing dependencies are explicit errors.
+
 ### Out of Scope (v1)
 
 - Full supply-chain attestations (SLSA/in-toto) for every run.
@@ -27,19 +34,24 @@ This specification defines the **Replay Bundle**: a lightweight artifact that ca
 
 ## 2. Bundle Location and Name
 
-- **Default path:** `.assay/replay.bundle` (directory or archive; see §3).
-- **Alternative:** Implementations MAY support a custom path via `assay replay --bundle <path>`.
+- **Default producer path:** `.assay/bundles/<run_id>.tar.gz`.
+- **Replay input:** `assay replay --bundle <path>` accepts explicit path.
+- **Compatibility:** Implementations MAY support legacy paths (e.g. `.assay/replay.bundle`) for reading, but SHOULD NOT use them as default write target.
 
 ---
 
 ## 3. Bundle Format
 
-The bundle MAY be either:
+**Normative producer format (v1):**
+- Single archive: **`.tar.gz`**
+- Canonical layout:
+  - `manifest.json`
+  - `files/`
+  - `outputs/`
+  - `cassettes/`
 
-- **Option A — Directory:** A directory named `replay.bundle` (or the path given to `--bundle`) containing a manifest file and referenced files.
-- **Option B — Archive:** A single file (e.g. `.tar.gz` or `.zip`) that expands to the same structure as Option A.
-
-**Normative:** The bundle MUST contain a **manifest** file that describes contents and digests. The manifest MUST be named `manifest.json` and MUST be at the root of the bundle (directory root or archive root after extraction).
+**Normative:** The bundle MUST contain `manifest.json` at archive root.
+Consumers MAY support additional legacy/dev formats, but producer output is canonicalized to `.tar.gz`.
 
 ### 3.1 Manifest Schema (manifest.json)
 
@@ -54,7 +66,15 @@ The bundle MAY be either:
 | `trace_digest`      | string | No       | Digest of trace input (or primary trace), if included or referenced. |
 | `trace_path`        | string | No       | Relative path inside bundle to trace file(s), or pointer (e.g. `traces/run.jsonl`). |
 | `outputs`           | object | No       | Paths or digests of outputs; see §3.2. |
-| `env`               | object | No       | Environment metadata (e.g. `runner`, `os`); free-form. |
+| `source_run_path`   | string | No       | Path used to select source run when creating bundle (audit). |
+| `selection_method`  | string | No       | How source was selected (e.g. `"run-id"` or `"mtime-latest"`). |
+| `outputs`           | object | No       | Paths or digests of outputs; see §3.2. |
+| `toolchain`         | object | No       | Captured toolchain/runner metadata. |
+| `seeds`             | object | No       | order/judge seed values from original run. |
+| `replay_coverage`   | object | No       | complete/incomplete tests + reason map. |
+| `scrub_policy`      | object | No       | Bundle scrub policy used at creation time. |
+| `files`             | object | No       | File manifest map: path -> sha256/size/(mode/content_type). |
+| `env`               | object | No       | Environment metadata (legacy/free-form). |
 
 ### 3.2 outputs Object
 
@@ -70,6 +90,7 @@ Paths are relative to the bundle root. If outputs are inlined by reference only 
 
 - **manifest.json** (with schema_version, assay_version).
 - At least one of: config snapshot or config_digest; trace file (at trace_path) or trace_digest; summary.json (at outputs.summary).
+- Canonical layout prefixes for data files: `files/`, `outputs/`, `cassettes/`.
 
 **Normative:** A valid v1 bundle MUST have manifest.json with schema_version 1 and assay_version set. It SHOULD include summary.json so that "reproduce locally" can show the original outcome.
 
@@ -102,8 +123,8 @@ Paths are relative to the bundle root. If outputs are inlined by reference only 
 ## 4. Bundle Creation
 
 - **When:** The implementation MAY create a replay bundle after each `assay ci` or `assay run` (e.g. when a non-zero exit occurs, or always, or when requested via a flag such as `--write-replay-bundle`).
-- **Where:** Default path `.assay/replay.bundle` (directory or archive); MAY be overridden.
-- **What:** Copy or link config (or store digest), policy digest, baseline digest, trace file (or digest + path), and outputs (junit.xml, sarif.json, summary.json) into the bundle; write manifest.json with assay_version and digests.
+- **Where:** Default path `.assay/bundles/<run_id>.tar.gz`; MAY be overridden.
+- **What:** Copy or include config (or digest), policy digest, baseline digest, trace file (or digest + path), outputs, and scrubbed cassettes; write manifest.json with assay_version and required metadata.
 
 **Normative:** If bundle creation is implemented, it MUST produce a valid manifest (§3) and MUST include assay_version and at least one of config_digest, trace_path/trace_digest, or outputs.summary.
 
@@ -123,19 +144,15 @@ assay replay --bundle <path>
 
 - **Parse manifest:** Read manifest.json; validate schema_version (MUST support 1); load assay_version, config_digest, policy_digest, baseline_digest, trace_path, outputs.
 - **Resolve inputs:** Resolve config (from bundle or from digest check); resolve trace from trace_path inside bundle (or fail with clear message if missing).
-- **Re-run:** Execute the same logical run (e.g. assay run with same config and trace) in a best-effort deterministic way. For deterministic metrics, results SHOULD match; for judge-based metrics, record/replay of judge outputs is OPTIONAL (implementations MAY replay cached judge results if stored in the bundle).
+- **Re-run:** Execute the same logical run (e.g. assay run with same config and trace) in deterministic replay mode by default.
 - **Compare (optional):** Implementation MAY compare new run outputs (e.g. summary) to bundled outputs and report differences.
-- **Exit:** Exit code SHOULD reflect success of replay (0 = replay completed; non-zero = replay failed or diff detected, per implementation).
+- **Exit:** Exit code SHOULD reflect success of replay (0 = replay completed; non-zero = replay failed or diff detected).
 
-### 5.3 Best-Effort Deterministic
+### 5.3 Offline Hermetic Contract
 
-- **Deterministic metrics:** Same config + same trace → same metric results (e.g. regex, json_schema, sequence_valid). Replay SHOULD produce the same outcome for these.
-- **Judge metrics:** Judge calls may not be replayed identically (provider variance). Implementations MAY:
-  - Skip judge and use cached results from the bundle (if stored), or
-  - Re-run judge and accept possible variance, or
-  - Mark replay as "partial" when judge was re-run and results differ.
-
-**Normative:** Replay MUST NOT require network or judge calls for deterministic-only replay when cached/bundled results are available. When judge is re-run, implementations SHOULD document that results may differ.
+- **Default mode:** Offline hermetic. Replay MUST NOT perform outbound network.
+- **Missing dependencies:** If replay requires missing inputs (e.g. uncached judge response), result MUST be explicit error (`E_REPLAY_MISSING_DEPENDENCY`, exit code 2 in CLI mapping).
+- **Live mode:** `--live` MAY allow outbound provider calls; replay provenance SHOULD record live/offline mode and seed overrides.
 
 ### 5.4 "Reproduce Locally" in PR Summary
 
@@ -145,9 +162,17 @@ The GitHub Action or CI step MAY write a Replay Bundle (e.g. as an artifact) and
 
 ## 6. Conformance
 
-- **Producers:** Any code that writes a replay bundle MUST follow §3 (manifest schema and required contents). Bundle MUST be readable by the consumer (directory or archive format documented).
+- **Producers:** Any code that writes a replay bundle MUST follow §3 (canonical `.tar.gz`, manifest schema, required contents).
 - **Consumers:** `assay replay --bundle` MUST accept bundles with schema_version 1 and MUST use manifest.json to resolve config, trace, and outputs. Unknown manifest fields MUST be ignored.
 - **Contract tests:** Implementations SHOULD include a test that creates a bundle (after a run) and runs `assay replay --bundle` and verifies that replay completes (and optionally that deterministic results match).
+
+### 6.1 Security/Trust Profile (Recommended)
+
+- Verify manifest-vs-file hashes for all manifest entries.
+- Secret scan policy:
+  - hard fail on `files/` and `cassettes/`
+  - warn on `outputs/`
+- Optional (recommended) attestation/signature verification profile for higher-assurance environments.
 
 ---
 
@@ -156,6 +181,7 @@ The GitHub Action or CI step MAY write a Replay Bundle (e.g. as an artifact) and
 | schema_version | Date    | Changes |
 |----------------|---------|---------|
 | 1              | 2026-01 | Initial: manifest schema, bundle format, assay replay --bundle semantics. |
+| 1              | 2026-02 | Alignment update: canonical `.tar.gz` producer format, `.assay/bundles/<run_id>.tar.gz` default, offline hermetic contract. |
 
 ---
 

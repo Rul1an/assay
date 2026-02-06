@@ -181,6 +181,22 @@ pub struct Provenance {
     /// Digest of trace input (optional for privacy)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_digest: Option<String>,
+
+    /// True when output is from replaying a bundle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay: Option<bool>,
+
+    /// SHA256 digest of replay bundle archive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_digest: Option<String>,
+
+    /// Replay mode: offline|live.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_mode: Option<String>,
+
+    /// Optional original run id from source run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_run_id: Option<String>,
 }
 
 /// Test results summary
@@ -256,6 +272,10 @@ impl Provenance {
             policy_pack_digest: None,
             baseline_digest: None,
             trace_digest: None,
+            replay: None,
+            bundle_digest: None,
+            replay_mode: None,
+            source_run_id: None,
         }
     }
 }
@@ -337,6 +357,20 @@ impl Summary {
         self.provenance.policy_pack_digest = policy_digest;
         self.provenance.baseline_digest = baseline_digest;
         self.provenance.trace_digest = trace_digest;
+        self
+    }
+
+    /// Set replay provenance fields (E9c).
+    pub fn with_replay_provenance(
+        mut self,
+        bundle_digest: String,
+        replay_mode: &str,
+        source_run_id: Option<String>,
+    ) -> Self {
+        self.provenance.replay = Some(true);
+        self.provenance.bundle_digest = Some(bundle_digest);
+        self.provenance.replay_mode = Some(replay_mode.to_string());
+        self.provenance.source_run_id = source_run_id;
         self
     }
 

@@ -72,6 +72,8 @@ pub enum ReasonCode {
     EBaselineInvalid,
     /// Policy file parse error
     EPolicyParse,
+    /// Replay bundle missing required dependency for offline replay
+    EReplayMissingDependency,
     /// Invalid command-line arguments
     EInvalidArgs,
 
@@ -124,6 +126,7 @@ impl ReasonCode {
             | ReasonCode::EMissingConfig
             | ReasonCode::EBaselineInvalid
             | ReasonCode::EPolicyParse
+            | ReasonCode::EReplayMissingDependency
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
             // V2: Infra errors -> 3
@@ -168,6 +171,7 @@ impl ReasonCode {
             ReasonCode::EMissingConfig => "E_MISSING_CONFIG",
             ReasonCode::EBaselineInvalid => "E_BASELINE_INVALID",
             ReasonCode::EPolicyParse => "E_POLICY_PARSE",
+            ReasonCode::EReplayMissingDependency => "E_REPLAY_MISSING_DEPENDENCY",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
             ReasonCode::ERateLimit => "E_RATE_LIMIT",
@@ -207,6 +211,9 @@ impl ReasonCode {
                     "Run: assay policy validate {}",
                     context.unwrap_or("<policy.yaml>")
                 )
+            }
+            ReasonCode::EReplayMissingDependency => {
+                "Replay bundle missing required offline dependency; rerun with --live or create a complete bundle".to_string()
             }
             ReasonCode::EInvalidArgs => "Run: assay --help for usage".to_string(),
             ReasonCode::EJudgeUnavailable => {
@@ -344,6 +351,10 @@ mod tests {
         assert_eq!(ReasonCode::EMissingConfig.exit_code(), EXIT_CONFIG_ERROR);
         assert_eq!(ReasonCode::EBaselineInvalid.exit_code(), EXIT_CONFIG_ERROR);
         assert_eq!(ReasonCode::EPolicyParse.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(
+            ReasonCode::EReplayMissingDependency.exit_code(),
+            EXIT_CONFIG_ERROR
+        );
         assert_eq!(ReasonCode::EInvalidArgs.exit_code(), EXIT_CONFIG_ERROR);
 
         // Infra errors map to 3
@@ -372,6 +383,10 @@ mod tests {
         assert_eq!(ReasonCode::EMissingConfig.as_str(), "E_MISSING_CONFIG");
         assert_eq!(ReasonCode::EBaselineInvalid.as_str(), "E_BASELINE_INVALID");
         assert_eq!(ReasonCode::EPolicyParse.as_str(), "E_POLICY_PARSE");
+        assert_eq!(
+            ReasonCode::EReplayMissingDependency.as_str(),
+            "E_REPLAY_MISSING_DEPENDENCY"
+        );
         assert_eq!(ReasonCode::EInvalidArgs.as_str(), "E_INVALID_ARGS");
         assert_eq!(
             ReasonCode::EJudgeUnavailable.as_str(),
@@ -412,6 +427,9 @@ mod tests {
         assert!(ReasonCode::EPolicyParse
             .next_step(None)
             .contains("policy validate"));
+        assert!(ReasonCode::EReplayMissingDependency
+            .next_step(None)
+            .contains("--live"));
         assert!(ReasonCode::EInvalidArgs.next_step(None).contains("--help"));
 
         // Infra errors provide recovery guidance
