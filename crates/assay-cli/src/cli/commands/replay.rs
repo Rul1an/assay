@@ -8,7 +8,17 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    let bundle_digest = sha256_file(&args.bundle).unwrap_or_else(|_| "sha256:unknown".to_string());
+    let bundle_digest = match sha256_file(&args.bundle) {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!(
+                "warning: failed to compute bundle digest for {}: {}; using sha256:unknown",
+                args.bundle.display(),
+                err
+            );
+            "sha256:unknown".to_string()
+        }
+    };
     let replay_mode = if args.live { "live" } else { "offline" };
 
     let file = match std::fs::File::open(&args.bundle) {
@@ -20,7 +30,7 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                 replay_mode,
                 None,
                 ReasonCode::ECfgParse,
-                format!("failed to open bundle: {}", err),
+                format!("failed to open bundle {}: {}", args.bundle.display(), err),
                 None,
             );
         }
@@ -75,7 +85,11 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                 replay_mode,
                 None,
                 ReasonCode::ECfgParse,
-                format!("failed to open verified bundle: {}", err),
+                format!(
+                    "failed to open verified bundle {}: {}",
+                    args.bundle.display(),
+                    err
+                ),
                 None,
             );
         }
@@ -268,9 +282,12 @@ fn write_replay_failure(
     source_run_id: Option<String>,
     reason: ReasonCode,
     message: String,
-    next_step: Option<&str>,
+    next_step_override: Option<&str>,
 ) -> anyhow::Result<i32> {
-    let mut outcome = RunOutcome::from_reason(reason, Some(message), next_step);
+    let mut outcome = RunOutcome::from_reason(reason, Some(message), None);
+    if let Some(next_step) = next_step_override {
+        outcome.next_step = Some(next_step.to_string());
+    }
     outcome.exit_code = reason.exit_code_for(args.exit_codes);
 
     let run_json_path = PathBuf::from("run.json");

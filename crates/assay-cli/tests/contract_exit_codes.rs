@@ -409,7 +409,7 @@ fn contract_replay_verify_failure_writes_outputs_with_provenance() {
 suite: replay-verify-fail
 model: dummy
 settings:
-  injected: "OPENAI_API_KEY=sk-123456789012345678901234567890"
+  injected: "OPENAI_API_KEY=sk-abcdefghij1234567890abcdefghij"
 "#;
 
     let entries = vec![BundleEntry {
