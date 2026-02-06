@@ -150,6 +150,10 @@ impl ReasonCode {
         match self {
             ReasonCode::Success => EXIT_SUCCESS,
 
+            // Keep replay missing-dependency deterministic across profiles.
+            // This avoids compat-profile drift for the offline replay contract.
+            ReasonCode::EReplayMissingDependency => EXIT_CONFIG_ERROR,
+
             // In V1, we often conflated errors.
             // E.g., Trace Not Found might have been 3 (Infra) or 1 (General).
             // User spec says: "Trace Not Found is now exit code 2 ... not 3".
@@ -373,6 +377,18 @@ mod tests {
             EXIT_TEST_FAILURE
         );
         assert_eq!(ReasonCode::EArgSchema.exit_code(), EXIT_TEST_FAILURE);
+    }
+
+    #[test]
+    fn test_replay_missing_dependency_profile_stability() {
+        assert_eq!(
+            ReasonCode::EReplayMissingDependency.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EReplayMissingDependency.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
     }
 
     #[test]
