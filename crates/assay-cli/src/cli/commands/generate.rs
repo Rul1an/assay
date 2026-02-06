@@ -15,7 +15,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::events::Event;
 use super::heuristics::{self, HeuristicsConfig};
@@ -838,7 +838,7 @@ fn print_section_diff(label: &str, diff: &SectionDiff) {
     }
 }
 
-fn print_policy_diff(diff: &PolicyDiff, output_path: &PathBuf) {
+fn print_policy_diff(diff: &PolicyDiff, output_path: &Path) {
     eprintln!();
     eprintln!("Policy diff ({} -> generated):", output_path.display());
     if diff.is_empty() {
