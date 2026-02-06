@@ -91,6 +91,8 @@ On config error, missing trace, or similar early-exit:
 - **run.json** (minimal): exit_code, reason_code, reason_code_version, seed_version present; **order_seed** and **judge_seed** may be **null**.
 - **summary.json**: Same; seeds object present with seed_version; order_seed/judge_seed null when unknown.
 
+Replay-specific note (E9d hardening): for replay early-exit paths (missing dependency, verify fail, parse/open fail), seeds are intentionally written as `null` to indicate that no new deterministic replay execution occurred.
+
 ## Related
 
 - [Quick Reference](quick-reference.md) — Exit codes and Run/CI output table
