@@ -6,7 +6,7 @@
 [![Open Core](https://img.shields.io/badge/Open%20Core-ADR--016-blue)](docs/architecture/ADR-016-Pack-Taxonomy.md)
 
 **Policy-as-Code for AI Agents.**
-Deterministic testing, runtime enforcement, and verifiable evidence for the Model Context Protocol.
+End-to-end governance pipeline for the Model Context Protocol: trace capture, policy generation, deterministic CI replay gating, verifiable evidence bundles, and signed compliance packs.
 
 > **Open Core:** Engine + baseline packs are open source (MIT/Apache-2.0).
 > Enterprise packs and managed workflows are commercial.
@@ -55,6 +55,7 @@ assay generate --profile profile.yaml --min-stability 0.8
 ### 3. Evidence Bundles
 
 Tamper-evident bundles with content-addressed IDs. CloudEvents v1.0 format.
+For audit-grade deployments, combine with append-only BYOS storage for collection completeness.
 
 ```bash
 # Export evidence
@@ -75,7 +76,7 @@ assay evidence diff baseline.tar.gz current.tar.gz
 
 ### 4. Compliance Packs
 
-Built-in rule packs for regulatory compliance. Article-referenced, auditor-friendly.
+Built-in rule packs that structure engineering evidence for regulatory compliance. Article-referenced, auditor-friendly. Packs help organize audit-ready evidence — they do not constitute legal compliance on their own.
 
 ```bash
 # EU AI Act Article 12 (logging requirements)
@@ -153,7 +154,9 @@ Supports: AWS S3, Backblaze B2, Cloudflare R2, MinIO, Azure Blob, GCS.
 assay mcp-server --policy policy.yaml
 ```
 
-### Kernel-Level Sandbox (Linux)
+### Defense in Depth: Kernel Sandbox (Linux, Optional)
+
+Optional kernel-level hardening for Linux deployments. Not required for core governance workflow.
 
 ```bash
 # Landlock isolation (rootless)

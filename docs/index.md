@@ -8,7 +8,7 @@
 
 <p class="subtitle">Policy-as-Code for AI Agents</p>
 
-Assay is a **Policy-as-Code** engine for the Model Context Protocol (MCP). Deterministic testing, verifiable evidence bundles, and runtime enforcement.
+Assay is a **Policy-as-Code** engine for the Model Context Protocol (MCP). End-to-end governance pipeline: trace capture → policy generation → deterministic CI replay gating → verifiable evidence bundles → signed compliance packs.
 
 ---
 
@@ -34,7 +34,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
     ---
 
-    Tamper-evident audit trails with content-addressed IDs. CloudEvents v1.0 format. SARIF output for GitHub Security.
+    Tamper-evident audit trails with content-addressed IDs. CloudEvents v1.0 format. SARIF output for GitHub Security. Combine with BYOS append-only storage for audit-grade completeness.
 
     [:octicons-arrow-right-24: Evidence Guide](concepts/traces.md)
 
@@ -42,7 +42,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
     ---
 
-    Built-in rule packs for EU AI Act, SOC 2, and custom policies. Article-referenced findings for auditors.
+    Built-in rule packs that structure engineering evidence for EU AI Act, SOC 2, and custom policies. Article-referenced findings for auditors. Packs do not constitute legal compliance on their own.
 
     [:octicons-arrow-right-24: Pack Engine](architecture/SPEC-Pack-Engine-v1.md)
 
@@ -99,7 +99,9 @@ Zero-config. Discovers evidence bundles, verifies integrity, uploads SARIF to Gi
 
 [:octicons-arrow-right-24: GitHub Action Guide](guides/github-action.md)
 
-## Runtime Enforcement (Linux)
+## Defense in Depth: Runtime Enforcement (Linux, Optional)
+
+Optional kernel-level hardening for Linux deployments.
 
 ```bash
 # Landlock sandbox (rootless)

@@ -66,6 +66,13 @@ pub(crate) async fn build_runner(
         quarantine_mode: assay_core::quarantine::QuarantineMode::parse(quarantine_mode_str),
         replay_strict,
     };
+    let network_guard = if replay_strict {
+        Some(assay_core::providers::network::NetworkPolicyGuard::deny(
+            "replay_strict forbids outbound network",
+        ))
+    } else {
+        None
+    };
 
     // Embedder construction
     use assay_core::providers::embedder::{fake::FakeEmbedder, openai::OpenAIEmbedder, Embedder};
@@ -202,6 +209,7 @@ pub(crate) async fn build_runner(
         client,
         metrics,
         policy,
+        _network_guard: network_guard,
         embedder,
         refresh_embeddings,
         incremental,

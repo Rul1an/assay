@@ -113,6 +113,7 @@ impl LlmClient for OpenAIClient {
             resp.body
         } else {
             // Direct HTTP request
+            crate::providers::network::check_outbound(url)?;
             let resp = self
                 .client
                 .post(url)
@@ -148,5 +149,24 @@ impl LlmClient for OpenAIClient {
 
     fn provider_name(&self) -> &'static str {
         "openai"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn openai_client_respects_network_deny_policy() {
+        let _serial = crate::providers::network::lock_test_serial_async().await;
+        let _guard = crate::providers::network::NetworkPolicyGuard::deny("unit test");
+        let client = OpenAIClient::new("gpt-4o-mini".to_string(), "test-key".to_string(), 0.0, 8);
+        let err = client
+            .complete("hello", None)
+            .await
+            .expect_err("network deny policy should block outbound call");
+        let msg = err.to_string();
+        assert!(msg.contains("outbound network blocked by policy"));
+        assert!(msg.contains("api.openai.com"));
     }
 }

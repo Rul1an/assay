@@ -45,6 +45,7 @@ Governance workflows and premium compliance content for organizations.
 **For users:**
 - Audit the code that handles your evidence (trust layer)
 - No vendor lock-in on basic compliance checks
+- Baseline packs are community-extensible; enterprise packs add vertical depth
 - Clear boundary: free for evaluation, paid for scale
 
 **For enterprises:**
@@ -59,6 +60,7 @@ Governance workflows and premium compliance content for organizations.
 | Engine | OSS | Closed |
 | Baseline rules | OSS | Closed/Trial |
 | Evidence format | Open standard | Proprietary |
+| Release provenance | SLSA (planned) | Varies |
 | Self-hosted | Yes | Usually no |
 | Audit trail | Yours | Vendor-held |
 

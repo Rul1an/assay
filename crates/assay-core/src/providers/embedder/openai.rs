@@ -71,6 +71,7 @@ impl Embedder for OpenAIEmbedder {
             resp.body
         } else {
             // Direct HTTP request
+            crate::providers::network::check_outbound(url)?;
             let resp = self
                 .client
                 .post(url)
@@ -108,5 +109,24 @@ impl Embedder for OpenAIEmbedder {
 
     fn model_id(&self) -> String {
         self.model.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn openai_embedder_respects_network_deny_policy() {
+        let _serial = crate::providers::network::lock_test_serial_async().await;
+        let _guard = crate::providers::network::NetworkPolicyGuard::deny("unit test");
+        let embedder = OpenAIEmbedder::new("text-embedding-3-small".to_string(), "test-key".into());
+        let err = embedder
+            .embed("hello")
+            .await
+            .expect_err("network deny policy should block outbound call");
+        let msg = err.to_string();
+        assert!(msg.contains("outbound network blocked by policy"));
+        assert!(msg.contains("api.openai.com"));
     }
 }

@@ -24,15 +24,16 @@
 
 ## What is Assay?
 
-Assay is a **Policy-as-Code engine for AI agents** that provides:
+Assay is an **end-to-end governance pipeline for AI agents** via the Model Context Protocol. The core paradigm is a closed-loop workflow: observe → generate → profile → lock → gate → evidence → audit.
 
 | Capability | Description |
 |------------|-------------|
 | **Deterministic Testing** | Record/replay agent traces without LLM calls (ms, $0, 0% flakiness) |
-| **Policy Generation** | Auto-generate policies from observed agent behavior |
+| **Policy Generation** | Auto-generate policies from observed behavior with multi-run profiling |
 | **Evidence Bundles** | Tamper-evident, content-addressed audit trails (CloudEvents + JCS) |
-| **Runtime Security** | eBPF/LSM kernel enforcement for production workloads |
-| **MCP Proxy** | Policy enforcement for Model Context Protocol tool calls |
+| **Compliance Packs** | Signed rule packs with deterministic lockfiles and supply-chain verification |
+| **MCP Proxy** | Runtime policy enforcement for Model Context Protocol tool calls |
+| **Kernel Sandbox** | Optional eBPF/LSM defense-in-depth for Linux deployments |
 
 **Target Users:** AI/ML Engineers, DevOps/Platform Engineers, Security/Compliance Officers
 
