@@ -969,6 +969,16 @@ pub fn run(args: GenerateArgs) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path(ext: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("assay-generate-{}-{}.{}", std::process::id(), ts, ext))
+    }
 
     #[test]
     fn classify_stable_low_risk() {
@@ -1162,5 +1172,72 @@ mod tests {
 
         let diff = diff_policies(&old, &new);
         assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn parse_existing_policy_yaml() {
+        let path = temp_file_path("yaml");
+        fs::write(
+            &path,
+            r#"
+files: {}
+network: {}
+processes: {}
+"#,
+        )
+        .unwrap();
+
+        let parsed = parse_existing_policy(&path).unwrap();
+        assert!(parsed.files.allow.is_empty());
+        assert!(parsed.network.allow_destinations.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parse_existing_policy_json_by_extension() {
+        let path = temp_file_path("json");
+        fs::write(
+            &path,
+            r#"{"files":{},"network":{},"processes":{}}"#,
+        )
+        .unwrap();
+
+        let parsed = parse_existing_policy(&path).unwrap();
+        assert!(parsed.files.allow.is_empty());
+        assert!(parsed.processes.allow.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parse_existing_policy_unknown_ext_uses_yaml_fallback() {
+        let path = temp_file_path("txt");
+        fs::write(
+            &path,
+            r#"
+files: {}
+network: {}
+processes: {}
+"#,
+        )
+        .unwrap();
+
+        let parsed = parse_existing_policy(&path).unwrap();
+        assert!(parsed.files.allow.is_empty());
+        assert!(parsed.network.needs_review.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parse_existing_policy_unknown_ext_malformed_errors() {
+        let path = temp_file_path("txt");
+        fs::write(&path, "not-valid-yaml-{").unwrap();
+
+        let err = parse_existing_policy(&path).err();
+        assert!(err.is_some(), "malformed file should fail parsing");
+
+        let _ = fs::remove_file(path);
     }
 }
