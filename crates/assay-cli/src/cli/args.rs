@@ -418,6 +418,10 @@ pub struct CiArgs {
     /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
     #[arg(long)]
     pub no_verify: bool,
+
+    /// Write PR comment body (markdown) to file for GitHub Actions
+    #[arg(long)]
+    pub pr_comment: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Clone)]
@@ -484,6 +488,14 @@ pub struct InitArgs {
     /// List available packs and exit
     #[arg(long)]
     pub list_packs: bool,
+
+    /// Generate policy from an existing trace file (JSONL events)
+    #[arg(long)]
+    pub from_trace: Option<PathBuf>,
+
+    /// Enable heuristics (entropy/risk analysis) when generating from trace
+    #[arg(long, requires = "from_trace")]
+    pub heuristics: bool,
 }
 
 #[derive(Parser, Clone)]

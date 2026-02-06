@@ -10,6 +10,11 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         return Ok(exit_codes::OK);
     }
 
+    // --from-trace: generate policy + config from existing trace
+    if let Some(trace_path) = &args.from_trace {
+        return run_from_trace(&args, trace_path);
+    }
+
     println!("🔍 Scanning project for MCP configurations...");
 
     let mut found_config = false;
@@ -114,4 +119,108 @@ fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
         println!("   Skipped {} (exists)", path.display());
     }
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// init --from-trace: Generate policy + config from existing trace
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Result<i32> {
+    use super::generate;
+    use super::heuristics::HeuristicsConfig;
+
+    if !trace_path.exists() {
+        anyhow::bail!("trace file not found: {}", trace_path.display());
+    }
+
+    let trace_pathbuf = trace_path.to_path_buf();
+    println!("🔍 Generating policy from trace: {}", trace_path.display());
+
+    // 1. Read and aggregate events
+    let events = generate::read_events(&trace_pathbuf)?;
+    if events.is_empty() {
+        anyhow::bail!("no events found in trace file: {}", trace_path.display());
+    }
+    let agg = generate::aggregate(&events);
+    println!(
+        "   Aggregated {} unique entries from {} events",
+        agg.total(),
+        events.len()
+    );
+
+    // 2. Generate policy
+    let heur_cfg = HeuristicsConfig::default();
+    let policy = generate::generate_from_trace("generated", &agg, args.heuristics, &heur_cfg);
+    let policy_yaml = generate::serialize(&policy, "yaml")?;
+
+    // Count entries for summary
+    let allow_count = policy.files.allow.len()
+        + policy.network.allow_destinations.len()
+        + policy.processes.allow.len();
+    let review_count = policy.files.needs_review.len()
+        + policy.network.needs_review.len()
+        + policy.processes.needs_review.len();
+    let deny_count = policy.files.deny.len()
+        + policy.network.deny_destinations.len()
+        + policy.processes.deny.len();
+
+    // 3. Write policy.yaml
+    let policy_path = Path::new("policy.yaml");
+    if policy_path.exists() {
+        println!("   Skipped policy.yaml (exists)");
+    } else {
+        std::fs::write(policy_path, &policy_yaml)?;
+        println!(
+            "   Created policy.yaml ({} allow, {} needs_review, {} deny)",
+            allow_count, review_count, deny_count
+        );
+    }
+
+    // 4. Write eval.yaml config
+    let trace_rel = trace_path.display().to_string();
+    let config_content = format!(
+        "version: 2\nsuite: \"generated\"\npolicy: \"policy.yaml\"\ntrace_file: \"{}\"\n",
+        trace_rel
+    );
+    write_file_if_missing(&args.config, &config_content)?;
+
+    // 5. Gitignore
+    if args.gitignore {
+        write_file_if_missing(Path::new(".gitignore"), crate::templates::GITIGNORE)?;
+    }
+
+    // 6. CI scaffolding (reuse existing logic)
+    if args.ci.is_some() {
+        println!("🏗️  Generating CI scaffolding...");
+        let provider = args.ci.as_deref().unwrap_or("github");
+        match provider {
+            "gitlab" => {
+                write_file_if_missing(
+                    Path::new(".gitlab-ci.yml"),
+                    crate::templates::GITLAB_CI_YML,
+                )?;
+            }
+            _ => {
+                write_file_if_missing(
+                    Path::new(".github/workflows/assay.yml"),
+                    crate::templates::CI_WORKFLOW_YML,
+                )?;
+            }
+        }
+    }
+
+    println!("\n✅  Initialization complete.");
+    println!(
+        "\n   Next: assay validate --config {} --trace-file {}",
+        args.config.display(),
+        trace_path.display()
+    );
+    println!(
+        "   CI:   assay ci --config {} --trace-file {}",
+        args.config.display(),
+        trace_path.display()
+    );
+    println!("\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline");
+
+    Ok(exit_codes::OK)
 }
