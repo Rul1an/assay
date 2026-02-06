@@ -1,17 +1,6 @@
 # Assay
 
-**Zero-flake regression testing for AI agents.**
-
-Assay replaces flaky, network-dependent evals with deterministic replay testing. Record your agent's behavior once, then validate every PR in milliseconds — no API calls, no cost, no surprises.
-
-## Why Assay?
-
-| Problem | Traditional Evals | Assay |
-|---------|-------------------|-------|
-| CI flakiness | LLM calls fail randomly | Deterministic replay |
-| Cost | $$ per test run | $0 after recording |
-| Speed | Seconds per test | Milliseconds |
-| Privacy | Data sent to cloud | 100% local |
+**Deterministic testing for AI agents.** Record traces, replay in CI, validate against policies. No API calls, no flakiness.
 
 ## 5-Minute Quickstart
 
@@ -21,130 +10,147 @@ Assay replaces flaky, network-dependent evals with deterministic replay testing.
 cargo install assay-cli
 ```
 
-### 2. Create a config
+### 2. Initialize from a trace
+
+If you have an existing trace file (JSONL of agent behavior):
+
+```bash
+assay init --from-trace trace.jsonl
+```
+
+This generates `policy.yaml` and `eval.yaml` from your trace data.
+
+If you're starting from scratch:
+
+```bash
+assay init --ci
+```
+
+### 3. Import from MCP Inspector
+
+```bash
+assay import --format inspector session.json --init
+```
+
+### 4. Run your first test
+
+```bash
+assay run --config eval.yaml --trace-file trace.jsonl
+
+# Output:
+# Running 3 tests...
+# PASS  deploy_args          (0ms)
+# PASS  read_file_path       (0ms)
+# PASS  no_shell_calls       (0ms)
+# Summary: 3 passed, 0 failed, 0 skipped
+```
+
+### 5. Add to CI
+
+```bash
+assay init --ci github
+```
+
+Or use the GitHub Action directly:
 
 ```yaml
-# mcp-eval.yaml
-configVersion: 1
-suite: my_agent
+- uses: Rul1an/assay/assay-action@v2
+```
 
+This uploads SARIF to the Security tab and posts a PR comment with results.
+
+## Core Concepts
+
+### Traces
+
+A trace is a recording of agent behavior: tool calls, arguments, responses. Assay replays these deterministically.
+
+```jsonl
+{"schema_version": 1, "type": "assay.trace", "request_id": "1", "prompt": "deploy", "response": "{\"status\":\"ok\"}", "model": "trace", "provider": "trace"}
+```
+
+### Policies
+
+Policies define allowed behavior:
+
+```yaml
+version: "1.0"
+name: "my-policy"
+allow: ["*"]
+deny: ["exec", "shell", "bash"]
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"
+```
+
+### Test Configs
+
+Test configs define what to validate:
+
+```yaml
+version: 1
+suite: "my_agent"
+model: "trace"
 tests:
-  - id: basic_flow
+  - id: "basic_flow"
     input:
-      prompt: "Deploy to staging"
+      prompt: "deploy_staging"
     expected:
       type: args_valid
       schema:
         deploy_service:
           type: object
           required: [env]
-          properties:
-            env:
-              type: string
-              enum: [staging, prod]
 ```
 
-### 3. Import a trace
+### Metrics
+
+Built-in validation types:
+
+| Metric | What it checks |
+|--------|---------------|
+| `args_valid` | Tool arguments match JSON Schema |
+| `sequence_valid` | Tools called in expected order |
+| `tool_blocklist` | Forbidden tools never called |
+| `regex_match` | Response matches pattern |
+| `json_schema` | Response validates against schema |
+| `semantic_similarity_to` | Response semantically matches reference |
+
+### Policy Generation
+
+Generate policies from observed behavior instead of writing them by hand:
 
 ```bash
-# From MCP Inspector logs
-assay import --format mcp-inspector session.json --out-trace trace.jsonl
+# From a single trace
+assay generate -i trace.jsonl --heuristics
+
+# From multiple runs (stability analysis)
+assay profile init --output profile.yaml --name my-app
+assay profile update --profile profile.yaml -i run1.jsonl --run-id run-1
+assay profile update --profile profile.yaml -i run2.jsonl --run-id run-2
+assay generate --profile profile.yaml --min-stability 0.8
 ```
 
-### 4. Run your first eval
+### Diagnostics
+
+When things break:
 
 ```bash
-assay run --config mcp-eval.yaml --trace-file trace.jsonl
-
-# Output:
-# Running 1 tests...
-# ✅ basic_flow        passed (0.2s)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Summary: 1 passed, 0 failed, 0 skipped
+assay doctor --config eval.yaml --trace-file trace.jsonl
+assay explain --trace trace.jsonl --policy policy.yaml
+assay fix --config eval.yaml
 ```
-
-### 5. Add to CI
-
-```yaml
-# .github/workflows/eval.yaml
-name: Agent Evaluation
-
-on: [pull_request]
-
-jobs:
-  eval:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Assay
-        run: cargo install assay-cli
-
-      - name: Run evals
-        run: assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl --strict
-```
-
-## Core Concepts
-
-### Traces
-
-A trace is a recording of your agent's behavior — every tool call, every argument, every response. Assay replays these traces deterministically.
-
-```jsonl
-{"type":"tool_call","tool":"deploy_service","args":{"env":"staging"}}
-{"type":"tool_result","result":{"status":"success"}}
-```
-
-### Policies
-
-Policies define what "correct" behavior looks like:
-
-- **`args_valid`** — Tool arguments match a JSON Schema
-- **`sequence_valid`** — Tools are called in the right order
-- **`tool_blocklist`** — Certain tools are never called
-- **`regex_match`** — Output matches a pattern
-
-### Golden Traces
-
-A "golden trace" is a known-good recording that becomes your regression baseline. When behavior changes, Assay catches it.
 
 ## Documentation
 
-- [CLI Reference](./CLI_REFERENCE.md) — All commands and flags
-- [Config Reference](./CONFIG_REFERENCE.md) — Full `mcp-eval.yaml` schema
-- [Troubleshooting](./TROUBLESHOOTING.md) — Common errors and fixes
-- [Migration Guide](./MIGRATION.md) — Upgrading from v0 configs
-
-## Use Cases
-
-### CI Regression Gate
-
-Prevent prompt changes from breaking existing capabilities:
-
-```bash
-assay run --config mcp-eval.yaml --trace-file goldens.jsonl --strict
-```
-
-### Trace-Driven Debugging
-
-Reproduce and fix user-reported failures:
-
-```bash
-assay import --format mcp-inspector user_bug.json --out-trace bug.jsonl
-assay run --config mcp-eval.yaml --trace-file bug.jsonl
-```
-
-### Agent Self-Correction (Runtime)
-
-Let your agent validate its own actions before executing:
-
-```python
-# Agent calls Assay before executing
-result = assay_check_args(tool="deploy_service", args={"env": "prod"})
-if not result.valid:
-    # Self-correct based on error message
-    ...
-```
+- [CLI Reference: init](reference/cli/init.md)
+- [CLI Reference: validate](reference/cli/validate.md)
+- [Config Reference](reference/config/index.md)
+- [Evidence Bundles](concepts/traces.md)
+- [Replay & Caching](concepts/replay.md)
+- [GitHub Action Guide](guides/github-action.md)
 
 ## License
 

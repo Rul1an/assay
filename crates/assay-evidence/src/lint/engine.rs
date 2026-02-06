@@ -89,7 +89,7 @@ pub fn lint_bundle_with_options<R: Read>(
     };
 
     // 5. Apply max_results to combined findings (builtin + pack)
-    let max_results = options.max_results.unwrap_or(500);
+    let max_results = options.max_results.unwrap_or(5000);
     let (findings, truncated, truncated_count) = truncate_findings(findings, max_results);
 
     // Update pack_meta with truncation info
@@ -197,23 +197,16 @@ fn truncate_findings(
         return (findings, false, 0);
     }
 
-    // Sort by severity priority (lowest first for truncation)
-    findings.sort_by(|a, b| {
-        let a_priority = severity_priority(&a.severity);
-        let b_priority = severity_priority(&b.severity);
-        a_priority.cmp(&b_priority)
-    });
-
-    // Truncate lowest severity first
-    let truncated_count = findings.len() - max_results;
-    findings.truncate(max_results);
-
-    // Re-sort for display (highest severity first)
+    // Sort by severity priority (highest first to keep)
     findings.sort_by(|a, b| {
         let a_priority = severity_priority(&a.severity);
         let b_priority = severity_priority(&b.severity);
         b_priority.cmp(&a_priority)
     });
+
+    // Keep the top max_results (highest severity); drop the rest
+    let truncated_count = findings.len() - max_results;
+    findings.truncate(max_results);
 
     (findings, true, truncated_count)
 }
@@ -224,5 +217,105 @@ fn severity_priority(severity: &Severity) -> u8 {
         Severity::Info => 0,
         Severity::Warn => 1,
         Severity::Error => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lint::EventLocation;
+
+    fn make_finding(severity: Severity, idx: usize) -> LintFinding {
+        LintFinding::new(
+            format!("TEST-{:05}", idx),
+            severity,
+            format!("test finding {}", idx),
+            Some(EventLocation {
+                seq: idx,
+                line: idx + 1,
+                event_type: None,
+            }),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn truncate_no_op_under_limit() {
+        let findings: Vec<LintFinding> =
+            (0..100).map(|i| make_finding(Severity::Warn, i)).collect();
+        let (result, truncated, count) = truncate_findings(findings, 5000);
+        assert_eq!(result.len(), 100);
+        assert!(!truncated);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn truncate_30k_to_5k_keeps_highest_severity() {
+        // Simulate 30k results: 10k errors, 10k warnings, 10k infos
+        let mut findings = Vec::with_capacity(30_000);
+        for i in 0..10_000 {
+            findings.push(make_finding(Severity::Error, i));
+        }
+        for i in 10_000..20_000 {
+            findings.push(make_finding(Severity::Warn, i));
+        }
+        for i in 20_000..30_000 {
+            findings.push(make_finding(Severity::Info, i));
+        }
+
+        let (result, truncated, truncated_count) = truncate_findings(findings, 5000);
+
+        assert_eq!(result.len(), 5000);
+        assert!(truncated);
+        assert_eq!(truncated_count, 25_000);
+
+        // Truncation to 5k should keep only highest-severity findings:
+        // all retained findings are errors.
+        let errors = result
+            .iter()
+            .filter(|f| f.severity == Severity::Error)
+            .count();
+        assert_eq!(errors, 5000);
+    }
+
+    #[test]
+    fn truncate_preserves_errors_over_infos() {
+        // 3 errors + 10 infos, limit 5 -> keep all 3 errors + 2 infos
+        let mut findings = Vec::new();
+        for i in 0..3 {
+            findings.push(make_finding(Severity::Error, i));
+        }
+        for i in 3..13 {
+            findings.push(make_finding(Severity::Info, i));
+        }
+
+        let (result, truncated, truncated_count) = truncate_findings(findings, 5);
+
+        assert_eq!(result.len(), 5);
+        assert!(truncated);
+        assert_eq!(truncated_count, 8);
+
+        let errors = result
+            .iter()
+            .filter(|f| f.severity == Severity::Error)
+            .count();
+        assert_eq!(errors, 3);
+    }
+
+    #[test]
+    fn default_max_results_is_5000() {
+        let options = LintOptions::default();
+        assert!(options.max_results.is_none());
+
+        // Verify default fallback path in lint_bundle_with_options().
+        let mut findings = Vec::new();
+        for i in 0..5001 {
+            findings.push(make_finding(Severity::Info, i));
+        }
+        let (result, truncated, truncated_count) =
+            truncate_findings(findings, options.max_results.unwrap_or(5000));
+        assert_eq!(result.len(), 5000);
+        assert!(truncated);
+        assert_eq!(truncated_count, 1);
     }
 }

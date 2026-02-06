@@ -3,213 +3,202 @@
 [![Crates.io](https://img.shields.io/crates/v/assay-cli.svg)](https://crates.io/crates/assay-cli)
 [![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
-[![Open Core](https://img.shields.io/badge/Open%20Core-ADR--016-blue)](docs/architecture/ADR-016-Pack-Taxonomy.md)
 
 **Policy-as-Code for AI Agents.**
-End-to-end governance pipeline for the Model Context Protocol: trace capture, policy generation, deterministic CI replay gating, verifiable evidence bundles, and signed compliance packs.
 
-> **Open Core:** Engine + baseline packs are open source (MIT/Apache-2.0).
-> Enterprise packs and managed workflows are commercial.
-> See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md) for details.
+Assay validates AI agent behavior against policies. Record traces, generate policies, run deterministic CI gates, produce evidence bundles for audit. Works with any MCP-compatible agent.
+
+> **Open Core:** Engine + baseline packs are MIT/Apache-2.0.
+> Compliance packs (EU AI Act, SOC2) are commercial.
+> See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).
 
 ## Install
 
 ```bash
-curl -fsSL https://getassay.dev/install.sh | sh
-```
-
-Or via Cargo:
-```bash
 cargo install assay-cli
 ```
 
-## Core Workflow
+## Quickstart
 
-### 1. Record → Replay → Validate
-
-Record agent behavior once, replay deterministically in CI. No LLM calls, no flakiness.
+### From scratch
 
 ```bash
-# Capture traces from your agent
-assay import --format mcp-inspector session.json --out trace.jsonl
+# Generate policy + config from project defaults
+assay init --ci
 
-# Validate against policy (milliseconds, $0 cost)
-assay validate --config assay.yaml --trace-file trace.jsonl
-
-# CI gate with SARIF output
-assay run --config assay.yaml --format sarif
+# Run smoke tests (uses bundled traces, no API calls)
+assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl
 ```
 
-### 2. Generate Policies from Behavior
+### From an existing trace
 
 ```bash
-# Single trace → policy
-assay generate -i trace.jsonl --heuristics
+# Generate policy from recorded agent behavior
+assay init --from-trace trace.jsonl
 
-# Multi-run profiling for stable policies
-assay profile init --output profile.yaml --name my-app
-assay profile update --profile profile.yaml -i trace.jsonl --run-id ci-123
-assay generate --profile profile.yaml --min-stability 0.8
+# Validate
+assay validate --config eval.yaml --trace-file trace.jsonl
 ```
 
-### 3. Evidence Bundles
-
-Tamper-evident bundles with content-addressed IDs. CloudEvents v1.0 format.
-For audit-grade deployments, combine with append-only BYOS storage for collection completeness.
+### From an MCP Inspector session
 
 ```bash
-# Export evidence
-assay evidence export --profile profile.yaml --out bundle.tar.gz
+# Import trace
+assay import --format inspector session.json --init
 
-# Verify integrity
-assay evidence verify bundle.tar.gz
-
-# Lint for security issues (SARIF output)
-assay evidence lint bundle.tar.gz --format sarif
-
-# Lint with compliance pack
-assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
-
-# Compare runs
-assay evidence diff baseline.tar.gz current.tar.gz
+# Run tests
+assay run --config eval.yaml --trace-file traces/session.jsonl
 ```
 
-### 4. Compliance Packs
+## Commands
 
-Built-in rule packs that structure engineering evidence for regulatory compliance. Article-referenced, auditor-friendly. Packs help organize audit-ready evidence — they do not constitute legal compliance on their own.
+### Testing & Validation
 
-```bash
-# EU AI Act Article 12 (logging requirements)
-assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
+| Command | What it does |
+|---------|-------------|
+| `assay run` | Execute test suite against trace file. SARIF, JUnit, JSON output. |
+| `assay ci` | CI-mode run. Adds `--sarif`, `--junit`, `--pr-comment` outputs. |
+| `assay validate` | Stateless policy check. Text, JSON, or SARIF output. |
+| `assay replay` | Replay from a self-contained bundle (offline, hermetic). |
 
-# Multiple packs
-assay evidence lint --pack eu-ai-act-baseline,soc2-baseline bundle.tar.gz
+### Policy & Config
 
-# Custom pack
-assay evidence lint --pack ./my-org-rules.yaml bundle.tar.gz
-```
+| Command | What it does |
+|---------|-------------|
+| `assay init` | Scaffold project: policy, config, CI workflow. `--from-trace` for existing traces. |
+| `assay generate` | Generate policy from trace or multi-run profile. `--heuristics` for entropy analysis. |
+| `assay profile` | Multi-run stability profiling. Wilson interval gating. |
+| `assay doctor` | Diagnose config, trace, and baseline issues. |
+| `assay explain` | Step-by-step trace explanation against policy. Terminal, markdown, JSON output. |
 
-SARIF output includes article references for audit trails.
+### Evidence & Compliance
 
-### 5. Pack Registry (Secure, Reproducible Pack Fetching)
+| Command | What it does |
+|---------|-------------|
+| `assay evidence export` | Create evidence bundle (tar.gz, content-addressed, Merkle root). |
+| `assay evidence verify` | Verify bundle integrity. |
+| `assay evidence lint` | Lint bundle with SARIF output. Supports `--pack` for compliance rules. |
+| `assay evidence diff` | Diff two verified bundles (network, filesystem, process changes). |
+| `assay evidence explore` | Interactive TUI explorer. |
+| `assay evidence push/pull/list` | BYOS: S3, GCS, Azure Blob, R2, B2, MinIO. |
+| `assay bundle create/verify` | Replay bundles (portable, offline test artifacts). |
 
-Assay resolves `--pack` references in a deterministic order:
-1. **Local** (`./custom.yaml`)
-2. **Bundled** (`packs/open/<name>`)
-3. **Registry** (`name@version` or pinned `name@version#sha256:...`)
-4. **BYOS** (`s3://`, `gs://`, `az://`)
+### Runtime
 
-All remote packs are verified before use:
-- **Canonical digest**: strict YAML subset → JSON → JCS (RFC 8785) → SHA-256
-- **Authenticity**: Ed25519 + DSSE signature verification for commercial packs
-- **Sidecar signatures**: `GET /packs/{name}/{version}.sig` (avoids header size limits)
+| Command | What it does |
+|---------|-------------|
+| `assay mcp-server` | MCP proxy with policy enforcement (JSON-RPC over stdio). |
+| `assay sandbox` | Landlock sandbox execution (Linux, rootless). |
+| `assay monitor` | eBPF/LSM runtime enforcement (Linux, requires capabilities). |
 
-Trust model is **no-TOFU**:
-- CLI ships with pinned root key IDs
-- Registry publishes a DSSE-signed keys manifest (`GET /keys`)
-- Pack signatures must chain to manifest keys (revocation/expiry enforced)
+### Misc
 
-For reproducible CI, `assay.packs.lock` (v2) pins name/version/digest/signature metadata. Lockfile mismatches are hard errors.
+| Command | What it does |
+|---------|-------------|
+| `assay sim run` | Attack simulation suite (integrity, chaos, differential). |
+| `assay import` | Import traces from MCP Inspector or JSON-RPC logs. |
+| `assay tool sign/verify/keygen` | Ed25519 + DSSE tool signing. |
+| `assay fix` | Interactive auto-fix suggestions for policy issues. |
 
-See [SPEC-Pack-Registry-v1](docs/architecture/SPEC-Pack-Registry-v1.md) for the full protocol specification.
+## CI Integration
 
-### 6. Tool Signing
-
-Cryptographic signatures for tool definitions. Ed25519 + DSSE.
-
-```bash
-# Generate keypair
-assay tool keygen --out ~/.assay/keys/
-
-# Sign tool definition
-assay tool sign tool.json --key priv.pem --out signed.json
-
-# Verify signature
-assay tool verify signed.json --pubkey pub.pem
-```
-
-### 7. BYOS (Bring Your Own Storage)
-
-Push evidence to your own S3-compatible storage. No vendor lock-in.
-
-```bash
-# Push bundle
-assay evidence push bundle.tar.gz --store s3://my-bucket/evidence
-
-# Pull by ID
-assay evidence pull --bundle-id sha256:abc... --store s3://my-bucket/evidence
-
-# List bundles
-assay evidence list --store s3://my-bucket/evidence
-```
-
-Supports: AWS S3, Backblaze B2, Cloudflare R2, MinIO, Azure Blob, GCS.
-
-## Runtime Enforcement
-
-### MCP Server Proxy
-
-```bash
-# Start policy enforcement proxy
-assay mcp-server --policy policy.yaml
-```
-
-### Defense in Depth: Kernel Sandbox (Linux, Optional)
-
-Optional kernel-level hardening for Linux deployments. Not required for core governance workflow.
-
-```bash
-# Landlock isolation (rootless)
-assay sandbox --policy policy.yaml -- python agent.py
-
-# eBPF/LSM enforcement (requires capabilities)
-sudo assay monitor --policy policy.yaml --pid <agent-pid>
-```
-
-## GitHub Action
+### GitHub Actions
 
 ```yaml
 - uses: Rul1an/assay/assay-action@v2
 ```
 
-Zero-config evidence verification. Native GitHub Security tab integration.
-
-**v2.1 features:**
-- Compliance packs (`pack: eu-ai-act-baseline`)
-- BYOS push with OIDC (`store: s3://bucket/evidence`)
-- Artifact attestation (`attest: true`)
-- Coverage badges
+The action installs assay, runs your gate, uploads SARIF to the Security tab, and posts a PR comment with results.
 
 ```yaml
-# Full example
-- uses: Rul1an/assay/assay-action@v2
-  with:
-    pack: eu-ai-act-baseline
-    store: s3://my-bucket/evidence
-    store_role: arn:aws:iam::123456789:role/AssayRole
-    attest: true
+# .github/workflows/assay.yml
+name: Assay Gate
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Rul1an/assay/assay-action@v2
 ```
 
-See [GitHub Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security) | [Guide](docs/guides/github-action.md).
+Or generate a workflow:
+
+```bash
+assay init --ci github   # writes .github/workflows/assay.yml
+assay init --ci gitlab   # writes .gitlab-ci.yml
+```
+
+### Manual CI
+
+```bash
+assay ci \
+  --config eval.yaml \
+  --trace-file traces/golden.jsonl \
+  --sarif reports/sarif.json \
+  --junit reports/junit.xml \
+  --pr-comment reports/pr-comment.md \
+  --replay-strict
+```
+
+Exit codes: `0` pass, `1` test failure, `2` config error, `3` infra error.
 
 ## Configuration
 
-`assay.yaml`:
+Two files: a test config (`eval.yaml`) and a policy (`policy.yaml`).
+
+**eval.yaml** — defines what to test:
 ```yaml
-version: "2.0"
-name: "mcp-default-gate"
+version: 1
+suite: "my_agent"
+model: "trace"
+tests:
+  - id: "deploy_args"
+    input:
+      prompt: "deploy_staging"
+    expected:
+      type: args_valid
+      schema:
+        deploy_service:
+          type: object
+          required: [env]
+          properties:
+            env: { type: string, enum: [staging, prod] }
+```
 
+**policy.yaml** — defines what's allowed:
+```yaml
+version: "1.0"
+name: "my-policy"
 allow: ["*"]
-
 deny:
-  - "exec*"
-  - "shell*"
-
+  - "exec"
+  - "shell"
+  - "bash"
 constraints:
   - tool: "read_file"
     params:
       path:
         matches: "^/app/.*|^/data/.*"
+```
+
+Policy packs: `assay init --pack default|hardened|dev`
+
+## Evidence Bundles
+
+Tamper-evident `.tar.gz` bundles containing `manifest.json` (SHA-256 hashes, Merkle root) and `events.ndjson` (CloudEvents format, content-addressed IDs).
+
+```bash
+assay evidence export --profile profile.yaml --out bundle.tar.gz
+assay evidence verify bundle.tar.gz
+assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
+assay evidence diff baseline.tar.gz current.tar.gz
 ```
 
 ## Python SDK
@@ -219,36 +208,42 @@ pip install assay
 ```
 
 ```python
-from assay import AssayClient, validate
+from assay import AssayClient
 
-# Record traces
 client = AssayClient("traces.jsonl")
 client.record_trace(tool_call)
-
-# Validate
-result = validate("policy.yaml", traces)
-assert result["passed"]
 ```
 
-Pytest plugin for automatic trace capture:
+Pytest plugin:
 ```python
 @pytest.mark.assay(trace_file="test_traces.jsonl")
 def test_agent():
     pass
 ```
 
-## Documentation
+## Project Structure
 
-- [Getting Started](https://getassay.dev/getting-started/)
-- [Policy Reference](https://getassay.dev/reference/policies/)
-- [Evidence Bundles](https://getassay.dev/concepts/traces/)
-- [GitHub Action](https://getassay.dev/guides/github-action/)
-- [Python SDK](https://getassay.dev/python-sdk/)
+```
+crates/
+  assay-cli/        CLI binary
+  assay-core/       Eval engine, store, trace replay, report formatters
+  assay-metrics/    Built-in metrics (args_valid, sequence_valid, regex_match, etc.)
+  assay-evidence/   Evidence bundles, lint engine, diff, sanitize
+  assay-mcp-server/ MCP proxy for runtime enforcement
+  assay-sim/        Attack simulation harness
+  assay-monitor/    eBPF/LSM runtime (Linux)
+  assay-policy/     Policy compilation (kernel + userspace tiers)
+  assay-registry/   Pack registry client (DSSE, OIDC, lockfile)
+  assay-common/     Shared types
+  assay-ebpf/       Kernel eBPF programs
+assay-python-sdk/   Python SDK (PyO3 + pytest plugin)
+```
 
 ## Contributing
 
 ```bash
 cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

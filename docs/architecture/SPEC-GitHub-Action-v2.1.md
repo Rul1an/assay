@@ -750,7 +750,7 @@ google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5f       # v2.1
 azure/login@a65d910e8af852a8061c627c456678983e180302                      # v2.2.0
 schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483 # v1.7.0
 peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e         # v3.1.0
-peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1ebb043 # v4.0.0
+peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
 ```
 
 **Verification command:**

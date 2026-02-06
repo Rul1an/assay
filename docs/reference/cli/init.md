@@ -1,6 +1,6 @@
 # assay init
 
-Initialize an Assay project with secure defaults.
+Initialize an Assay project.
 
 ---
 
@@ -12,31 +12,45 @@ assay init [OPTIONS]
 
 ## Description
 
-The `init` command is the fastest way to secure your agent. It scans your directory for known project types (MCP, Python, Node.js) and generates an opinionated security policy and CI configuration.
+Scans your directory for known project types (MCP, Python, Node.js) and generates a security policy and config. Optionally generates CI scaffolding and `.gitignore`.
 
-It generates:
-- `assay.yaml`: The Policy-as-Code definition.
-- `policy.yaml`: Baseline security rules (blocking Exec/Shell/Python by default).
-- `.github/workflows/assay.yml`: (Optional) A complete CI/CD pipeline.
+With `--from-trace`, generates a policy directly from recorded agent behavior instead of using a preset pack.
 
 ## Options
 
 | Option | Description |
 |--------|-------------|
-| `--ci [PROVIDER]` | Generate CI scaffolding. Default: `github`. |
-| `--config <FILE>` | Config filename. Default: `assay.yaml`. |
-| `--gitignore` | Add `.assay` and trace files to `.gitignore`. |
+| `--config <FILE>` | Config filename. Default: `eval.yaml`. |
+| `--ci [PROVIDER]` | Generate CI scaffolding. `github` (default) or `gitlab`. |
+| `--gitignore` | Generate `.gitignore` for artifacts/db. |
+| `--pack <PACK>` | Policy pack: `default`, `hardened`, `dev`. Default: `default`. |
+| `--list-packs` | List available packs and exit. |
+| `--from-trace <FILE>` | Generate policy from an existing trace file (JSONL). |
+| `--heuristics` | Enable entropy/risk analysis when generating from trace. Requires `--from-trace`. |
 
 ## Examples
 
-### Basic Setup
-Detect project type and generate config.
+### Basic setup
 ```bash
 assay init
 ```
 
-### GitHub Actions
-Generate a complete CI workflow for Pull Request gating.
+### From existing trace
+```bash
+assay init --from-trace traces/agent.jsonl --heuristics
+```
+
+### With GitHub Actions CI
 ```bash
 assay init --ci
+```
+
+### With GitLab CI
+```bash
+assay init --ci gitlab
+```
+
+### Hardened policy
+```bash
+assay init --pack hardened --ci --gitignore
 ```
