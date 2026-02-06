@@ -136,7 +136,7 @@ sequenceDiagram
     participant Metrics as Metrics
     participant Report as Report
 
-    User->>CLI: assay run --config assay.yaml
+    User->>CLI: assay run --config eval.yaml
     CLI->>CLI: load_config()
     CLI->>Store: Store::open()
     CLI->>CLI: build_runner()

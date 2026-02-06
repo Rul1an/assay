@@ -91,7 +91,7 @@ docker pull ghcr.io/rul1an/assay:latest
 
 # Run with volume mount
 docker run -v $(pwd):/workspace ghcr.io/rul1an/assay:latest \
-    run --config /workspace/mcp-eval.yaml
+    run --config /workspace/eval.yaml
 ```
 
 ---

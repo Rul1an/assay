@@ -61,7 +61,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 ### 1. Capture Traces
 
 ```bash
-assay import --format mcp-inspector session.json --out trace.jsonl
+assay import --format inspector session.json --out-trace trace.jsonl
 ```
 
 ### 2. Validate
@@ -73,7 +73,8 @@ assay validate --trace-file trace.jsonl --format sarif
 ### 3. Export Evidence
 
 ```bash
-assay evidence export --out bundle.tar.gz
+assay profile init --output assay-profile.yaml --name quickstart
+assay evidence export --profile assay-profile.yaml --out bundle.tar.gz
 assay evidence verify bundle.tar.gz
 ```
 

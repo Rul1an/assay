@@ -22,7 +22,7 @@ Traditional solutions:
 
 ## The Solution
 
-Assay's MCP server lets agents **check before acting**:
+Assay's MCP wrapper lets agents **check before acting**:
 
 ```
 Agent: "I want to call apply_discount(percent=50)"
@@ -75,10 +75,10 @@ The agent self-corrects without human intervention.
 
 ## Setup
 
-### 1. Start Assay Server
+### 1. Start Assay MCP Wrapper
 
 ```bash
-assay mcp-server --policy policies/ --port 3001
+assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 ```
 
 ### 2. Connect Your Agent
@@ -90,7 +90,7 @@ assay mcp-server --policy policies/ --port 3001
   "mcpServers": {
     "assay": {
       "command": "assay",
-      "args": ["mcp-server", "--policy", "./policies"]
+      "args": ["mcp", "wrap", "--policy", "assay.yaml", "--", "/path/to/real-mcp-server"]
     }
   }
 }
@@ -330,6 +330,6 @@ async def safe_tool_call(tool_name, args):
 
 ## See Also
 
-- [assay mcp-server](../cli/mcp-server.md)
+- [MCP Runtime Commands](../reference/cli/mcp-server.md)
 - [MCP Integration](../mcp/index.md)
 - [Policies](../concepts/policies.md)

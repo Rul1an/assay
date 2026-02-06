@@ -23,6 +23,8 @@ pub enum Command {
     Baseline(BaselineArgs),
     Validate(ValidateArgs),
     Doctor(DoctorArgs),
+    /// Watch config/policy/trace files and rerun on changes
+    Watch(WatchArgs),
     Import(ImportArgs),
     Migrate(MigrateArgs),
     Coverage(CoverageArgs),
@@ -659,6 +661,47 @@ pub struct DoctorArgs {
 
     #[arg(long)]
     pub out: Option<std::path::PathBuf>,
+
+    /// Diagnose and offer/apply automated fixes for known issues
+    #[arg(long)]
+    pub fix: bool,
+
+    /// Apply all available fixes without interactive confirmation
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Preview fixes without writing files
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct WatchArgs {
+    #[arg(long, default_value = "eval.yaml")]
+    pub config: std::path::PathBuf,
+
+    #[arg(long)]
+    pub trace_file: Option<std::path::PathBuf>,
+
+    #[arg(long)]
+    pub baseline: Option<std::path::PathBuf>,
+
+    #[arg(long, default_value = ".eval/eval.db")]
+    pub db: std::path::PathBuf,
+
+    #[arg(long)]
+    pub strict: bool,
+
+    #[arg(long, default_value = "false")]
+    pub replay_strict: bool,
+
+    /// Clear terminal before each rerun
+    #[arg(long)]
+    pub clear: bool,
+
+    /// Debounce file events before rerunning (milliseconds)
+    #[arg(long, default_value_t = 350)]
+    pub debounce_ms: u64,
 }
 
 #[derive(clap::Args, Debug, Clone)]

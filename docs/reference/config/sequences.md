@@ -19,7 +19,7 @@ These rules are **deterministic** — they produce pass/fail results with no amb
 ## Quick Example
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 tests:
   - id: verify_before_delete
     metric: sequence_valid
@@ -351,7 +351,7 @@ rules:
 If you have old-style sequence configs:
 
 ```bash
-assay migrate --config mcp-eval.yaml
+assay migrate --config eval.yaml
 ```
 
 This converts:

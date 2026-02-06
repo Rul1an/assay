@@ -18,7 +18,7 @@ The primary change is the handling of **policies** and **strictness**.
 Run the `migrate` command on your configuration file:
 
 ```bash
-assay migrate --config mcp-eval.yaml
+assay migrate --config eval.yaml
 ```
 
 This will:
@@ -27,7 +27,7 @@ This will:
 3.  Inline them into the respective tests.
 4.  Remove the top-level `policies` field.
 5.  Set `configVersion: 1`.
-6.  Back up the original file to `mcp-eval.yaml.bak`.
+6.  Back up the original file to `eval.yaml.bak`.
 
 ### Common Errors
 
@@ -48,7 +48,7 @@ If validation fails or migration causes issues:
 
 ```bash
 # Option 1: Restore from backup (created by migrate command)
-cp mcp-eval.yaml.bak mcp-eval.yaml
+cp eval.yaml.bak eval.yaml
 
 # Option 2: Revert Python SDK to previous stable version
 pip install assay-it==0.8.0
@@ -61,7 +61,7 @@ pip install assay-it==0.8.0
 In your Continuous Integration (CI) pipeline, you should ensure that all configuration files are fully migrated and up-to-date. Use the `--check` flag:
 
 ```bash
-assay migrate --check --config mcp-eval.yaml
+assay migrate --check --config eval.yaml
 ```
 
 **Exit Codes:**
@@ -72,5 +72,5 @@ assay migrate --check --config mcp-eval.yaml
 
 ```yaml
 - name: Verify Config Migration
-  run: assay migrate --check --config mcp-eval.yaml
+  run: assay migrate --check --config eval.yaml
 ```

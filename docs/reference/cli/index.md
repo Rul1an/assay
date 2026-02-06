@@ -30,22 +30,21 @@ assay --version
 | [`assay replay`](replay.md) | Replay from a replay bundle |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
+| [`assay doctor`](doctor.md) | Diagnose setup and optionally auto-fix known issues |
+| [`assay watch`](watch.md) | Re-run on config/policy/trace changes |
 | [`assay monitor`](../../guides/runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
-| [`assay mcp-server`](mcp-server.md) | Start Assay as MCP tool server |
+| [`assay mcp wrap`](mcp-server.md) | Wrap an MCP process with policy enforcement |
 
 ---
 
 ## Global Options
 
-These options work with all commands:
+Common top-level options:
 
 | Option | Description |
 |--------|-------------|
 | `--help`, `-h` | Show help message |
 | `--version`, `-V` | Show version |
-| `--verbose`, `-v` | Enable verbose output |
-| `--quiet`, `-q` | Suppress non-error output |
-| `--config`, `-c` | Path to mcp-eval.yaml |
 
 ---
 
@@ -55,17 +54,16 @@ These options work with all commands:
 
 ```bash
 # Basic run
-assay run --config mcp-eval.yaml
+assay run --config eval.yaml
 
 # Strict mode (fail on any violation)
-assay run --config mcp-eval.yaml --strict
+assay run --config eval.yaml --strict
 
 # Specific trace file
-assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl
+assay run --config eval.yaml --trace-file traces/golden.jsonl
 
-# Output formats
-assay run --config mcp-eval.yaml --output sarif
-assay run --config mcp-eval.yaml --output junit
+# CI reports
+assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif sarif.json --junit junit.xml
 ```
 
 ### Replay Bundles
@@ -94,14 +92,24 @@ assay migrate --config old-eval.yaml
 assay migrate --config old-eval.yaml --dry-run
 ```
 
-### Start MCP Server
+### Start MCP Wrapper
 
 ```bash
-# Default port
-assay mcp-server --policy policies/
+# Enforcing mode
+assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 
-# Custom port
-assay mcp-server --port 3001 --policy policies/
+# Dry-run mode
+assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
+```
+
+### Diagnose and Watch
+
+```bash
+# Diagnose and auto-fix known issues
+assay doctor --config eval.yaml --trace-file traces/dev.jsonl --fix --yes
+
+# Live re-run loop on local edits
+assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict
 ```
 
 ---
@@ -113,8 +121,8 @@ assay mcp-server --port 3001 --policy policies/
 | 0 | Success (all tests passed) |
 | 1 | Test failure (one or more tests failed) |
 | 2 | Configuration error |
-| 3 | File not found |
-| 4 | Invalid input format |
+| 3 | Infrastructure/judge error |
+| 4 | Would block (sandbox/policy) |
 
 ---
 
@@ -122,29 +130,22 @@ assay mcp-server --port 3001 --policy policies/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ASSAY_CONFIG` | Default config file path | `mcp-eval.yaml` |
-| `ASSAY_DB` | Database path | `.assay/store.db` |
-| `ASSAY_LOG_LEVEL` | Log verbosity | `info` |
+| `ASSAY_EXIT_CODES` | Exit code compatibility mode (`v1` or `v2`) | `v2` |
+| `MCP_CONFIG_LEGACY` | Enable legacy config mode when set to `1` | disabled |
+| `ASSAY_STRICT_DEPRECATIONS` | Fail on deprecated policy/config usage when set to `1` | disabled |
+| `OPENAI_API_KEY` | API key for OpenAI-backed judge/embedder paths | unset |
 | `NO_COLOR` | Disable colored output | unset |
 
 ---
 
 ## Configuration File
 
-Most commands read from `mcp-eval.yaml`:
+Most run/ci commands read from `eval.yaml` by default:
 
 ```yaml
-version: "1"
-suite: my-agent
-
-tests:
-  - id: args_valid
-    metric: args_valid
-    policy: policies/default.yaml
-
-output:
-  format: [sarif, junit]
-  directory: .assay/reports
+version: 2
+policy: "policy.yaml"
+baseline: ".assay/baseline.json"
 ```
 
 See [Configuration](../config/index.md) for full reference.
@@ -179,6 +180,22 @@ See [Configuration](../config/index.md) for full reference.
 
     [:octicons-arrow-right-24: Full reference](migrate.md)
 
+-   :material-stethoscope:{ .lg .middle } __assay doctor__
+
+    ---
+
+    Diagnose environment/config issues and apply known fixes.
+
+    [:octicons-arrow-right-24: Full reference](doctor.md)
+
+-   :material-eye-refresh:{ .lg .middle } __assay watch__
+
+    ---
+
+    Watch files and rerun Assay on changes.
+
+    [:octicons-arrow-right-24: Full reference](watch.md)
+
 -   :material-step-forward:{ .lg .middle } __assay replay__
 
     ---
@@ -195,11 +212,11 @@ See [Configuration](../config/index.md) for full reference.
 
     [:octicons-arrow-right-24: Full reference](bundle.md)
 
--   :material-server:{ .lg .middle } __assay mcp-server__
+-   :material-server:{ .lg .middle } __assay mcp wrap__
 
     ---
 
-    Start Assay as an MCP tool server for agent self-correction.
+    Wrap a real MCP process with policy enforcement for agent self-correction.
 
     [:octicons-arrow-right-24: Full reference](mcp-server.md)
 

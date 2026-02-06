@@ -14,11 +14,10 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 **Flow**: `load_config()` → `build_runner()` → `Runner::run_suite()` → report; writes **run.json**, **summary.json** (seeds, judge_metrics, reason_code per SPEC-PR-Gate-Outputs-v1), and console footer (Seeds line + judge metrics). See [Run Output](run-output.md).
 
 **Key Options**:
-- `--config <PATH>`: Config file (default: `assay.yaml`)
+- `--config <PATH>`: Config file (default: `eval.yaml`)
 - `--trace-file <PATH>`: Trace file to use
 - `--baseline <PATH>`: Baseline file for regression testing
 - `--export-baseline <PATH>`: Export baseline after run
-- `--format <FORMAT>`: Output format (console, json, junit, sarif)
 - `--strict`: Fail on any violation
 - `--rerun-failures <N>`: Retry failed tests N times
 
@@ -35,11 +34,15 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 #### `assay init`
 **Purpose**: Initialize new Assay project
 **Entry**: `crates/assay-cli/src/cli/commands/init.rs::run()`
-**Flow**: Detect project type → generate `assay.yaml` + `policy.yaml`
+**Flow**: Detect project type → generate `eval.yaml` + `policy.yaml`
 
 **Key Options**:
-- `--force`: Overwrite existing config
-- `--template <TEMPLATE>`: Use specific template
+- `--ci [github|gitlab]`: Generate CI scaffolding
+- `--gitignore`: Generate `.gitignore` for Assay artifacts
+- `--pack <default|hardened|dev>`: Select starter policy pack
+- `--list-packs`: List available packs
+- `--from-trace <PATH>`: Generate config/policy from an existing trace
+- `--heuristics`: Enable heuristics for `--from-trace`
 
 ### Trace Management
 
@@ -49,7 +52,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 **Flow**: Parse input format → convert to JSONL → optionally generate config
 
 **Supported Formats**:
-- `mcp-inspector`: MCP Inspector session logs
+- `inspector`: MCP Inspector session logs
 - `jsonl`: Direct JSONL import
 - `otel`: OpenTelemetry traces
 
@@ -59,9 +62,9 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `--out-trace <PATH>`: Output trace file
 
 #### `assay trace`
-**Purpose**: Generate traces from running agent
+**Purpose**: Trace utilities (ingest, verify, precompute, MCP import)
 **Entry**: `crates/assay-cli/src/cli/commands/trace.rs::cmd_trace()`
-**Flow**: Wrap agent execution → capture tool calls → write JSONL
+**Flow**: Execute selected subcommand (`ingest`, `ingest-otel`, `verify`, `precompute-*`, `import-mcp`)
 
 #### `assay replay`
 **Purpose**: Interactive trace replay
@@ -141,15 +144,13 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 
 ### Runtime Security
 
-#### `assay mcp-server`
-**Purpose**: Start Assay as MCP server/proxy
+#### `assay-mcp-server` (separate binary)
+**Purpose**: Start Assay MCP server/proxy
 **Entry**: `crates/assay-mcp-server/src/main.rs` (separate binary)
 **Flow**: Load policies → start JSON-RPC server → proxy tool calls
 
 **Key Options**:
-- `--policy <PATH>`: Policy directory
-- `--port <PORT>`: Server port (default: 3000)
-- `--host <HOST>`: Server host (default: 127.0.0.1)
+- `--policy-root <PATH>`: Policy root directory (default: `policies`)
 
 #### `assay monitor`
 **Purpose**: Runtime eBPF monitoring (Linux only)
@@ -171,7 +172,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 #### `assay mcp wrap`
 **Purpose**: Wrap MCP server with policy enforcement and audit logging
 **Entry**: `crates/assay-cli/src/cli/commands/mcp.rs::cmd_wrap()`
-**Flow**: Load policy → spawn MCP server → proxy tool calls → emit CloudEvents
+**Flow**: Load policy → spawn wrapped command → proxy tool calls → emit CloudEvents
 
 **Key Options**:
 - `--policy <PATH>`: Policy file (default: `assay.yaml`)
@@ -181,6 +182,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `--audit-log <PATH>`: NDJSON log for mandate lifecycle events (mandate.used, mandate.revoked)
 - `--decision-log <PATH>`: NDJSON log for tool.decision events
 - `--event-source <URI>`: CloudEvents source URI (e.g. `assay://org/app`), required when logging enabled
+- `-- <command> [args...]`: Wrapped MCP server/process command (required)
 
 **New in v2.10**: `--decision-log`, `--event-source`, `--audit-log` flags for mandate runtime enforcement.
 
@@ -518,7 +520,7 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 
 ## Configuration Files
 
-### `assay.yaml`
+### `eval.yaml`
 
 **Purpose**: Main evaluation configuration
 **Location**: Project root (default)
@@ -534,7 +536,7 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 ### `policy.yaml`
 
 **Purpose**: Policy constraints
-**Location**: Specified in `assay.yaml` or default `policy.yaml`
+**Location**: Specified in `eval.yaml` or default `policy.yaml`
 **Schema**: Defined in `assay-core::policy_engine`
 
 **Key Sections**:

@@ -163,7 +163,7 @@ graph TD
 **1. Record a session** → Creates a trace
 
 ```bash
-assay import --format mcp-inspector session.json
+assay import --format inspector session.json
 # Creates: traces/session.jsonl
 ```
 
@@ -180,7 +180,7 @@ tools:
 **3. Configure metrics** → What to check?
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 tests:
   - id: args_valid
     metric: args_valid
@@ -193,7 +193,7 @@ tests:
 **4. Run replay** → Execute tests
 
 ```bash
-assay run --config mcp-eval.yaml --strict
+assay run --config eval.yaml --strict
 # Result: Pass/Fail in 3ms
 ```
 

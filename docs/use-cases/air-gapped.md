@@ -92,7 +92,7 @@ Record sessions on a connected dev machine, then transfer:
 
 ```bash
 # On dev machine
-assay import --format mcp-inspector session.json
+assay import --format inspector session.json
 
 # Transfer
 scp traces/session.jsonl air-gapped-server:/data/traces/
@@ -103,7 +103,7 @@ scp traces/session.jsonl air-gapped-server:/data/traces/
 ```bash
 # On air-gapped machine — no network needed
 assay run \
-  --config mcp-eval.yaml \
+  --config eval.yaml \
   --trace-file /data/traces/session.jsonl \
   --db :memory:
 ```
@@ -120,7 +120,7 @@ agent-tests:
   stage: test
   image: internal-registry.corp/assay:v0.8.0
   script:
-    - assay run --config mcp-eval.yaml --strict
+    - assay run --config eval.yaml --strict
   artifacts:
     reports:
       junit: .assay/reports/junit.xml
@@ -136,7 +136,7 @@ pipeline {
     stages {
         stage('Test') {
             steps {
-                sh 'assay run --config mcp-eval.yaml --output junit'
+                sh 'assay ci --config eval.yaml --trace-file traces/golden.jsonl --junit .assay/reports/junit.xml'
             }
         }
     }
@@ -155,7 +155,7 @@ pool:
   name: 'SecurePool'  # Self-hosted agent pool
 
 steps:
-  - script: assay run --config mcp-eval.yaml --strict
+  - script: assay run --config eval.yaml --strict
     displayName: 'Run Agent Tests'
 ```
 
@@ -197,7 +197,7 @@ steps:
 |------|----------|
 | Traces | `./traces/*.jsonl` |
 | Policies | `./policies/*.yaml` |
-| Config | `./mcp-eval.yaml` |
+| Config | `./eval.yaml` |
 | Cache | `./.assay/store.db` |
 | Reports | `./.assay/reports/` |
 
@@ -214,7 +214,7 @@ Verify with network monitoring:
 
 ```bash
 # Run with network tracing
-strace -e trace=network assay run --config mcp-eval.yaml 2>&1 | grep -E "connect|sendto"
+strace -e trace=network assay run --config eval.yaml 2>&1 | grep -E "connect|sendto"
 
 # Output: (empty — no network calls)
 ```
@@ -273,7 +273,7 @@ If you see network errors, something is misconfigured. Assay should never make n
 
 ```bash
 # Verify no network in trace
-assay run --config mcp-eval.yaml 2>&1 | grep -i network
+assay run --config eval.yaml 2>&1 | grep -i network
 
 # Should be empty
 ```

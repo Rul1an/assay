@@ -51,7 +51,7 @@ The replay engine reads a trace file and simulates the agent's execution, valida
 Fail on any violation. Use for CI gates.
 
 ```bash
-assay run --config mcp-eval.yaml --strict
+assay run --config eval.yaml --strict
 ```
 
 In strict mode:
@@ -59,18 +59,18 @@ In strict mode:
 - Exit code is 1 if any test fails
 - Ideal for blocking PRs with regressions
 
-### Lenient Mode
+### Non-Strict Mode
 
 Report violations but don't fail. Use for auditing.
 
 ```bash
-assay run --config mcp-eval.yaml --lenient
+assay run --config eval.yaml
 ```
 
-In lenient mode:
-- Violations are logged but don't fail
-- Exit code is 0 even with violations
-- Ideal for migration, baseline analysis
+Without `--strict`:
+- Warn/flaky outcomes do not fail the process
+- Exit code remains 0 unless blocking failures occur
+- Useful for migration and exploratory audits
 
 ---
 
@@ -124,21 +124,23 @@ This means:
 
 ```bash
 # Run all tests against the default trace
-assay run --config mcp-eval.yaml
+assay run --config eval.yaml
 ```
 
 ### Specify Trace File
 
 ```bash
 # Run against a specific trace
-assay run --config mcp-eval.yaml --trace-file traces/production-incident.jsonl
+assay run --config eval.yaml --trace-file traces/production-incident.jsonl
 ```
 
 ### Multiple Traces
 
 ```bash
-# Run against all traces in a directory
-assay run --config mcp-eval.yaml --trace-dir traces/
+# Run multiple traces by iterating files
+for trace in traces/*.jsonl; do
+  assay run --config eval.yaml --trace-file "$trace" --strict || exit $?
+done
 ```
 
 ### In-Memory Database
@@ -146,42 +148,36 @@ assay run --config mcp-eval.yaml --trace-dir traces/
 For CI, skip disk writes:
 
 ```bash
-assay run --config mcp-eval.yaml --db :memory:
+assay run --config eval.yaml --db :memory:
 ```
 
 ---
 
 ## Replay with Debugging
 
-### Verbose Output
+### Detailed Explanation
 
 ```bash
-assay run --config mcp-eval.yaml --verbose
+assay explain --trace traces/golden.jsonl --policy policy.yaml --verbose
 
 # Output:
-# [TRACE] Loading trace: traces/golden.jsonl
-# [TRACE] Found 47 tool calls
-# [REPLAY] Call 1: get_customer(id="123")
-# [VALIDATE] args_valid: ✅ PASS
-# [REPLAY] Call 2: update_customer(id="123", email="new@example.com")
-# [VALIDATE] args_valid: ✅ PASS
+# Step 1: get_customer(...)
+# Verdict: Allowed
+# Rules: args_valid, sequence_valid
 # ...
 ```
 
-### Step-by-Step
+### Bundle Replay
 
 ```bash
-assay replay --trace traces/golden.jsonl --step
-
-# Interactive mode:
-# > [1/47] get_customer(id="123") — Press Enter to continue
-# > [2/47] update_customer(...) — Press Enter to continue
+# Replay from an immutable replay bundle (offline by default)
+assay replay --bundle .assay/bundles/run-123.tar.gz
 ```
 
-### Export Replay Log
+### Export Explain Report
 
 ```bash
-assay run --config mcp-eval.yaml --output-log replay.log
+assay explain --trace traces/golden.jsonl --policy policy.yaml --format markdown --output replay.md
 ```
 
 ---
@@ -220,7 +216,7 @@ Error: Invalid trace format at line 15
                                            ^
   Missing required field: 'arguments'
 
-Suggestion: Validate trace with 'assay validate --trace <file>'
+Suggestion: Validate trace with 'assay trace verify --trace <file> --config eval.yaml'
 ```
 
 ### Policy Mismatch
@@ -232,8 +228,8 @@ The trace contains calls to 'new_feature', but no policy defines it.
 
 Options:
   1. Add 'new_feature' to your policy file
-  2. Use --ignore-unknown-tools to skip validation
-  3. Use --strict to fail on unknown tools
+  2. Re-run with an updated policy file
+  3. Validate config and trace coverage with `assay trace verify`
 ```
 
 ---
@@ -264,11 +260,12 @@ Typical performance:
 ```yaml
 - name: Run Assay Tests
   run: |
-    assay run \
-      --config mcp-eval.yaml \
+    assay ci \
+      --config eval.yaml \
       --trace-file traces/golden.jsonl \
       --strict \
-      --output sarif \
+      --sarif .assay/reports/sarif.json \
+      --junit .assay/reports/junit.xml \
       --db :memory:
 ```
 
@@ -278,8 +275,8 @@ Typical performance:
 |------|---------|
 | 0 | All tests passed |
 | 1 | One or more tests failed |
-| 2 | Configuration error |
-| 3 | Trace file error |
+| 2 | Configuration/input error |
+| 3 | Infrastructure/judge/provider error |
 
 ---
 
@@ -288,4 +285,4 @@ Typical performance:
 - [Traces](traces.md)
 - [Cache & Fingerprints](cache.md)
 - [CI Integration](../getting-started/ci-integration.md)
-- [CLI: assay run](../cli/run.md)
+- [CLI: assay run](../reference/cli/run.md)

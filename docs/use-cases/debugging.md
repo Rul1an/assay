@@ -34,7 +34,7 @@ When a user reports an issue, ask for their session log:
 
 ```bash
 # From MCP Inspector export
-assay import --format mcp-inspector user_session.json
+assay import --format inspector user_session.json
 
 # Output:
 # Imported 23 tool calls from user_session.json
@@ -44,7 +44,7 @@ assay import --format mcp-inspector user_session.json
 ### 2. Reproduce the Failure
 
 ```bash
-assay run --config mcp-eval.yaml --trace-file traces/incident-2025-12-27.jsonl
+assay run --config eval.yaml --trace-file traces/incident-2025-12-27.jsonl
 
 # Output:
 # ❌ FAIL: args_valid
@@ -60,19 +60,16 @@ Now you know:
 ### 3. Inspect in Detail
 
 ```bash
-assay replay --trace traces/incident-2025-12-27.jsonl --start 13 --step
+assay explain \
+  --trace traces/incident-2025-12-27.jsonl \
+  --policy policy.yaml \
+  --verbose
 
 # Output:
-# [13/23] get_order(id="ord_456")
-#         → {"total": 150.00, "items": [...]}
-#
-# Press Enter to continue...
-#
-# [14/23] calculate_discount(total=150)
-#         → {"suggested_percent": 75}
-#
-# [15/23] apply_discount(percent=75, order_id="ord_456")
-#         → ERROR: Validation failed
+# Step 15: apply_discount
+# Verdict: Blocked
+# Rule: args_valid
+# Reason: percent=75 exceeds max(30)
 ```
 
 **Root cause found:** The `calculate_discount` tool suggested 75%, but the business rule caps at 30%.
@@ -101,7 +98,7 @@ tools:
 **Verify:**
 
 ```bash
-assay run --config mcp-eval.yaml --trace-file traces/incident-2025-12-27.jsonl
+assay run --config eval.yaml --trace-file traces/incident-2025-12-27.jsonl
 
 # Output:
 # ✅ All tests passed
@@ -109,35 +106,25 @@ assay run --config mcp-eval.yaml --trace-file traces/incident-2025-12-27.jsonl
 
 ---
 
-## Interactive Debugging
+## Debugging Commands
 
-### Step-by-Step Replay
-
-```bash
-assay replay --trace traces/incident.jsonl --step
-```
-
-Commands:
-- `Enter` — Next call
-- `i` — Inspect current call
-- `j 15` — Jump to call #15
-- `q` — Quit
-
-### Verbose Mode
+### Focus on blocked steps
 
 ```bash
-assay replay --trace traces/incident.jsonl --verbose
+assay explain --trace traces/incident.jsonl --policy policy.yaml --blocked-only
 ```
 
-Shows full arguments and results for each call.
-
-### Policy Overlay
+### Full rule evaluation
 
 ```bash
-assay replay --trace traces/incident.jsonl --policy policies/new-rules.yaml
+assay explain --trace traces/incident.jsonl --policy policy.yaml --verbose
 ```
 
-Test if updated policies would have caught the issue.
+### Test updated policy behavior
+
+```bash
+assay explain --trace traces/incident.jsonl --policy policies/new-rules.yaml
+```
 
 ---
 
@@ -151,10 +138,13 @@ Test if updated policies would have caught the issue.
 
 ```bash
 # Import the session
-assay import --format mcp-inspector support-case-4521.json
+assay import --format inspector support-case-4521.json
 
 # Find the problem
-assay run --config mcp-eval.yaml --trace-file traces/support-case-4521.jsonl --verbose
+assay run --config eval.yaml --trace-file traces/support-case-4521.jsonl
+
+# Explain the exact failing step and rule
+assay explain --trace traces/support-case-4521.jsonl --policy policy.yaml --blocked-only
 ```
 
 Output:
@@ -186,7 +176,7 @@ def calculate_discount(customer_tier, order_total):
 
 ```bash
 # Re-run with fix
-assay run --config mcp-eval.yaml --trace-file traces/support-case-4521.jsonl
+assay run --config eval.yaml --trace-file traces/support-case-4521.jsonl
 
 # ✅ All tests passed
 ```
@@ -214,7 +204,9 @@ traces/
 Run all as regression tests:
 
 ```bash
-assay run --config mcp-eval.yaml --trace-dir traces/
+for trace in traces/failures/*.jsonl traces/edge-cases/*.jsonl; do
+  assay run --config eval.yaml --trace-file "$trace" --strict || exit $?
+done
 ```
 
 ---
@@ -230,12 +222,13 @@ Set up logging to capture all sessions, not just failures:
 session.export_to_file(f"logs/{session_id}.json")
 ```
 
-### 2. Anonymize Sensitive Data
+### 2. Redact Sensitive Data
 
-Before sharing traces:
+Assay currently has no dedicated `anonymize` subcommand. Redact before sharing (example with `jq`):
 
 ```bash
-assay anonymize --trace incident.jsonl --output safe-incident.jsonl
+jq 'walk(if type == "object" then with_entries(if (.key|test("token|password|secret";"i")) then .value="***" else . end) else . end)' \
+  incident.jsonl > safe-incident.jsonl
 ```
 
 ### 3. Add to Test Suite

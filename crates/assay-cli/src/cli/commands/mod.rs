@@ -41,6 +41,7 @@ pub mod setup;
 pub mod sim;
 pub mod tool;
 pub mod validate;
+pub mod watch;
 
 // Re-exports for replay.rs backward compatibility (uses super::cmd_run etc.)
 pub(crate) use run::run as cmd_run;
@@ -56,6 +57,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Validate(args) => validate::run(args, legacy_mode).await,
         Command::Fix(args) => fix::run(args, legacy_mode).await,
         Command::Doctor(args) => doctor::run(args, legacy_mode).await,
+        Command::Watch(args) => watch::run(args, legacy_mode).await,
         Command::Import(args) => import::cmd_import(args),
         Command::Quarantine(args) => quarantine::run(args).await,
         Command::Trace(args) => trace::cmd_trace(args, legacy_mode).await,

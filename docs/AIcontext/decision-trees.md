@@ -75,11 +75,11 @@ flowchart TD
     PYTEST -->|No| MANUAL[Manual client.record_trace]
 
     LANG -->|Other| IMPORT_METHOD{Have logs?}
-    IMPORT_METHOD -->|MCP Inspector| MCP_IMPORT[assay import --format mcp-inspector]
+    IMPORT_METHOD -->|MCP Inspector| MCP_IMPORT[assay import --format inspector]
     IMPORT_METHOD -->|JSONL| DIRECT[Direct JSONL file]
-    IMPORT_METHOD -->|OTel| OTEL_IMPORT[assay import --format otel]
+    IMPORT_METHOD -->|OTel| OTEL_IMPORT[assay trace ingest-otel --input otel.jsonl --db .eval/eval.db --out-trace traces/otel.jsonl]
 
-    LANG -->|CLI wrapper| CLI_TRACE[assay trace -- command]
+    LANG -->|CLI wrapper| CLI_TRACE[Capture logs then assay import/trace ingest]
 ```
 
 ## Decision Tree 4: Policy Development
@@ -89,8 +89,8 @@ flowchart TD
     START[Developing policy?] --> EXISTING{Have existing<br/>behavior to model?}
 
     EXISTING -->|Yes| LEARNING[Learning mode]
-    LEARNING --> RECORD[assay record --capture]
-    RECORD --> GENERATE[assay generate --from-profile]
+    LEARNING --> RECORD[assay record -- your-command]
+    RECORD --> GENERATE[assay generate -i trace.jsonl]
     GENERATE --> REVIEW[Review and refine]
 
     EXISTING -->|No| MANUAL[Manual policy writing]
@@ -177,9 +177,9 @@ flowchart TD
 | Run test suite | `assay run` | `--config`, `--baseline` |
 | CI gate (strict) | `assay ci` | `--trace-file`, `--sarif` |
 | Debug setup | `assay doctor` | (no options needed) |
-| Explain failures | `assay explain` | `--trace-file` |
+| Explain failures | `assay explain` | `--trace`, `--policy` |
 | Generate policy | `assay generate` | `--from-profile` |
-| Record behavior | `assay record` | `--capture` |
+| Record behavior | `assay record` | `--output <policy.yaml> -- <command>` |
 | Check coverage | `assay coverage` | `--min-coverage 80` |
 | MCP enforcement | `assay mcp wrap` | `--policy`, `--dry-run` |
 | Export evidence | `assay evidence export` | `--profile`, `--out` |
@@ -210,9 +210,9 @@ flowchart TD
 ## When to Use What: Quick Reference
 
 ### For Validation
-- **Quick check**: `assay validate --trace-file traces.jsonl`
-- **Full suite**: `assay run --config assay.yaml`
-- **CI gate**: `assay ci --config assay.yaml --strict`
+- **Quick check**: `assay validate --config eval.yaml --trace-file traces.jsonl`
+- **Full suite**: `assay run --config eval.yaml`
+- **CI gate**: `assay ci --config eval.yaml --strict`
 
 ### For Policy Development
 - **From scratch**: Write `policy.yaml` manually
@@ -221,7 +221,7 @@ flowchart TD
 
 ### For Debugging
 - **Setup issues**: `assay doctor`
-- **Test failures**: `assay explain --trace-file traces.jsonl`
+- **Test failures**: `assay explain --trace traces.jsonl --policy policy.yaml`
 - **Coverage gaps**: `assay coverage`
 
 ### For CI Integration

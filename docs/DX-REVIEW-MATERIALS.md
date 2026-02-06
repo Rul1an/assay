@@ -65,7 +65,7 @@ cd /tmp && mkdir assay-dx-demo && cd assay-dx-demo
 git init
 assay init --ci github
 # Aanpassen: .github/workflows/assay.yml → uses: Rul1an/assay/assay-action@v2, en config/trace_file pad controleren
-assay run --config ci-eval.yaml --trace-file traces/ci.jsonl --output junit --output sarif
+assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --junit junit.xml --sarif sarif.json
 # Lokaal: junit.xml + SARIF in output-dir; in CI: zelfde command + upload SARIF/JUnit.
 ```
 
@@ -77,16 +77,16 @@ assay run --config ci-eval.yaml --trace-file traces/ci.jsonl --output junit --ou
 
 ### B.1 JUnit — test failures "native" in CI
 
-- **CLI:** `assay run --config <config> --trace-file <trace> --output junit` schrijft JUnit XML (default `junit.xml`; `--junit <path>` overschrijft).
+- **CLI:** `assay ci --config <config> --trace-file <trace> --junit <path>` schrijft JUnit XML.
 - **Formaat:** [crates/assay-core/src/report/junit.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-core/src/report/junit.rs) — suite name, testcase per test, `<failure>` bij Fail/Error, `<system-out>` voor Warn/Flaky details (ADR-003).
-- **CI:** In eigen workflows kan JUnit geüpload worden (bijv. `actions/junit-report` of `reporter: java-junit` in summary). De **assay-action** zelf schrijft JUnit niet automatisch; de stap die `assay` aanroept moet `--output junit` (en eventueel `--junit`) gebruiken en daarna de JUnit-artifact uploaden/rapporteren.
+- **CI:** In eigen workflows kan JUnit geüpload worden (bijv. `actions/junit-report` of `reporter: java-junit` in summary). De stap die `assay ci` aanroept schrijft JUnit naar het pad uit `--junit`; upload dat artifact daarna in je workflow.
 - **Voorbeeld (bestaand):** [.github/workflows/smoke-install.yml](https://github.com/Rul1an/assay/blob/main/.github/workflows/smoke-install.yml) — "Run Assay suite (strict + JUnit)", "Upload JUnit report artifact", "Report (JUnit)" met `reporter: java-junit`.
 
-**Review:** Run lokaal met `--output junit`, open `junit.xml` en controleer of failed tests als `<failure>` en Warn/Flaky in `<system-out>` staan; in een branch met deze workflow zie je test-annotations in de GitHub UI.
+**Review:** Run lokaal met `assay ci --junit junit.xml`, open `junit.xml` en controleer of failed tests als `<failure>` en Warn/Flaky in `<system-out>` staan; in een branch met deze workflow zie je test-annotations in de GitHub UI.
 
 ### B.2 SARIF — findings in GitHub Security tab
 
-- **CLI:** `assay run --output sarif` (of evidence lint) produceert SARIF; Action uploadt SARIF via `github/codeql-action/upload-sarif`.
+- **CLI:** `assay ci --sarif <path>` (of `assay evidence lint --format sarif`) produceert SARIF; Action uploadt SARIF via `github/codeql-action/upload-sarif`.
 - **Action:** [assay-action/action.yml](https://github.com/Rul1an/assay/blob/main/assay-action/action.yml) — step `upload-sarif`, alleen bij same-repo PR/push (geen upload op fork PR).
 - **Review:** PR met findings → Security tab toont code scanning alerts; geen findings → geen alerts. Vergelijk met [REVIEW-MATERIALS](REVIEW-MATERIALS.md) Set A/B: run met failing trace en controleer of de bijbehorende finding in SARIF en in de Security tab verschijnt.
 
@@ -153,7 +153,7 @@ assay run --config ci-eval.yaml --trace-file traces/ci.jsonl --output junit --ou
 |-----------|-------------|----------------|
 | A.1 init output | `assay init` en `assay init --ci` in lege dir | Gegenereerde bestanden, template-versie (v1 vs v2 action) |
 | A.2 0→CI | Volg "0 → CI gate" stappen hierboven of gebruik examples/baseline-gate | Of er een minimale Node/Python-voorbeeldrepo ontbreekt |
-| B.1 JUnit | Run met `--output junit`, open junit.xml; in CI: smoke-install workflow | Failure vs system-out, annotations in GitHub |
+| B.1 JUnit | Run met `assay ci --junit junit.xml`, open junit.xml; in CI: smoke-install workflow | Failure vs system-out, annotations in GitHub |
 | B.2 SARIF | Run met failing trace, upload SARIF, open Security tab | Findings komen overeen met failures |
 | B.3 PR comment | PR met findings vs zonder findings | Comment alleen bij findings |
 | B.4 Exit codes | Misconfig, missing trace, fail, warn | Exit 2/1/0 en duidelijke boodschap |
@@ -170,5 +170,5 @@ assay run --config ci-eval.yaml --trace-file traces/ci.jsonl --output junit --ou
 - [ADR-003 Gate Semantics](architecture/ADR-003-Gate-Semantics.md) — Pass/Fail/Warn/Flaky, strict mode.
 - [ADR-019 PR Gate 2026 SOTA](architecture/ADR-019-PR-Gate-2026-SOTA.md) — blessed flow, exit codes, DX-doelen.
 - [getting-started/ci-integration.md](getting-started/ci-integration.md) — CI-integratie en Action-gebruik.
-- [reference/cli/run.md](reference/cli/run.md) — run, output formats, exit codes.
+- [reference/cli/run.md](reference/cli/run.md) — run, strict/baseline/exit codes.
 - [guides/troubleshooting.md](guides/troubleshooting.md) — veelvoorkomende fouten en fixes.

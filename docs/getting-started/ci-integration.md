@@ -47,7 +47,7 @@ jobs:
       - name: Run tests with Assay
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
-          assay run --policy policy.yaml -- pytest tests/
+          assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
         uses: Rul1an/assay/assay-action@v2
@@ -95,22 +95,23 @@ assay:
   before_script:
     - cargo install assay
   script:
-    - assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl --output junit
+    - assay ci --config eval.yaml --trace-file traces/golden.jsonl --junit .assay/reports/junit.xml
+    - assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif .assay/reports/sarif.json
   artifacts:
     reports:
       junit: .assay/reports/junit.xml
     when: always
 ```
 
-### GitLab Code Quality
+### GitLab Security Report (SARIF)
 
 ```yaml
 assay:
   script:
-    - assay run --config mcp-eval.yaml --output codeclimate
+    - assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif .assay/reports/sarif.json
   artifacts:
-    reports:
-      codequality: .assay/reports/codeclimate.json
+    paths:
+      - .assay/reports/sarif.json
 ```
 
 ---
@@ -129,7 +130,7 @@ steps:
   - script: cargo install assay
     displayName: 'Install Assay'
 
-  - script: assay run --config mcp-eval.yaml --strict --output junit
+  - script: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
     displayName: 'Run Assay Tests'
 
   - task: PublishTestResults@2
@@ -158,7 +159,7 @@ jobs:
           command: cargo install assay
       - run:
           name: Run Tests
-          command: assay run --config mcp-eval.yaml --strict
+          command: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
       - store_test_results:
           path: .assay/reports
 
@@ -187,7 +188,7 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh 'assay run --config mcp-eval.yaml --output junit'
+                sh 'assay ci --config eval.yaml --trace-file traces/golden.jsonl --junit .assay/reports/junit.xml'
             }
         }
     }
@@ -213,7 +214,7 @@ steps:
       docker run --rm \
         -v $(pwd):/workspace \
         ghcr.io/rul1an/assay:latest \
-        run --config /workspace/mcp-eval.yaml --strict
+        run --config /workspace/eval.yaml --strict
 ```
 
 ---
@@ -224,7 +225,7 @@ steps:
 
 ```
 your-repo/
-├── mcp-eval.yaml
+├── eval.yaml
 ├── policies/
 │   └── discount.yaml
 └── traces/
@@ -256,7 +257,7 @@ on:
     paths:
       - 'agents/**'
       - 'prompts/**'
-      - 'mcp-eval.yaml'
+      - 'eval.yaml'
 ```
 
 ### 5. Separate Fast and Slow Tests
@@ -283,7 +284,7 @@ jobs:
 ### View Detailed Output
 
 ```yaml
-- run: assay run --config mcp-eval.yaml --verbose
+- run: assay doctor --config eval.yaml --trace-file traces/golden.jsonl
 ```
 
 ### Download Artifacts
@@ -299,7 +300,7 @@ jobs:
 
 ```bash
 # Same command as CI
-assay run --config mcp-eval.yaml --strict --db :memory:
+assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --db :memory: --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 ```
 
 ---

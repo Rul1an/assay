@@ -55,8 +55,8 @@ Assay integrates with MCP in three ways:
 Import MCP sessions and run deterministic tests in CI.
 
 ```bash
-assay import --format mcp-inspector session.json
-assay run --config mcp-eval.yaml --strict
+assay import --format inspector session.json
+assay run --config eval.yaml --strict
 ```
 
 **Use case:** CI regression gates, debugging, baseline comparison.
@@ -65,12 +65,12 @@ assay run --config mcp-eval.yaml --strict
 
 ---
 
-### 2. MCP Server (Runtime Validation)
+### 2. MCP Wrapper (Runtime Validation)
 
 Expose Assay as MCP tools that agents call before executing actions.
 
 ```bash
-assay mcp-server --port 3001 --policy policies/
+assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 ```
 
 The agent can query:
@@ -119,18 +119,18 @@ MCP standardizes **how** agents communicate. Assay validates **what** they commu
 
 | Format | Source | Command |
 |--------|--------|---------|
-| MCP Inspector | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | `--format mcp-inspector` |
+| MCP Inspector | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | `--format inspector` |
 | JSON-RPC 2.0 | Raw MCP messages | `--format jsonrpc` |
-| LangChain | LangChain traces | `--format langchain` *(coming soon)* |
-| LlamaIndex | LlamaIndex traces | `--format llamaindex` *(coming soon)* |
+| LangChain | LangChain traces | Not yet supported in `assay import` |
+| LlamaIndex | LlamaIndex traces | Not yet supported in `assay import` |
 
 ### Export Formats
 
 | Format | Use Case | Flag |
 |--------|----------|------|
-| SARIF | GitHub Code Scanning | `--output sarif` |
-| JUnit | CI test results | `--output junit` |
-| JSON | Programmatic access | `--output json` |
+| SARIF | GitHub Code Scanning | `assay ci --sarif <path>` |
+| JUnit | CI test results | `assay ci --junit <path>` |
+| JSON | Programmatic access | `assay validate --format json --output <path>` |
 
 ---
 
@@ -161,7 +161,7 @@ MCP standardizes **how** agents communicate. Assay validates **what** they commu
 
     [:octicons-arrow-right-24: Quick Start](quickstart.md)
 
--   :material-server:{ .lg .middle } __Assay MCP Server__
+-   :material-server:{ .lg .middle } __Assay MCP Wrapper__
 
     ---
 

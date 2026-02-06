@@ -8,7 +8,7 @@ Learn how to configure Assay for your project.
 
 | File | Purpose |
 |------|---------|
-| `mcp-eval.yaml` | Main test suite configuration |
+| `eval.yaml` | Main test suite configuration |
 | `policies/*.yaml` | Argument validation rules |
 
 ---
@@ -18,7 +18,7 @@ Learn how to configure Assay for your project.
 ### Minimal Config
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 version: "1"
 suite: my-agent-tests
 
@@ -36,7 +36,7 @@ output:
 
 ## Sections
 
-- [mcp-eval.yaml Reference](eval-yaml.md) — Full config options
+- [eval.yaml Reference](eval-yaml.md) — Full config options
 - [Policy Files](policies.md) — Argument validation schemas
 - [Sequence Rules DSL](sequences.md) — Order constraints
 - [Migration Guide](migration.md) — Upgrading from v0

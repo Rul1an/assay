@@ -69,7 +69,7 @@ De onderstaande epics groeperen het DX-plan in uitvoerbare eenheden. Per epic: *
 
 | ID | Story | Priority | Detail ref |
 |----|-------|----------|------------|
-| E2.1 | JUnit default + blessed snippet: action default `--output junit`; run.md snippet "failures as annotations" + "where is junit.xml" | P0 | §2.1 |
+| E2.1 | JUnit default + blessed snippet: use `assay ci --junit ...`; run.md snippet "failures as annotations" + "where is junit.xml" | P0 | §2.1 |
 | E2.2 | SARIF location invariant: elk result ≥1 location (synthetic fallback); contract test (schema + upload-smoke) | P0 | §2.2 |
 | E2.3 | SARIF limits: truncate + "N results omitted" bij overschrijding GitHub-limits; configureerbaar | P1 | §2.2 |
 | E2.4 | Fork PR: documenteer "geen SARIF/comment, wel job summary"; action al conditioneel | P1 | §2.3 |

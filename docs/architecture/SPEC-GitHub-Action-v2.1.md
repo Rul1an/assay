@@ -58,7 +58,7 @@ jobs:
       - name: Run tests (generates evidence)
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
-          assay run --policy policy.yaml -- pytest tests/
+          assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Verify & Report
         uses: Rul1an/assay/assay-action@v2

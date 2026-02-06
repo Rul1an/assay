@@ -21,7 +21,7 @@ Import from MCP Inspector or create a trace file:
 
 ```bash
 # From MCP Inspector
-assay import --format mcp-inspector session.json --out trace.jsonl
+assay import --format inspector session.json --out-trace trace.jsonl
 
 # Or create manually
 echo '{"tool": "read_file", "args": {"path": "/etc/passwd"}}' > trace.jsonl
@@ -46,7 +46,8 @@ Output:
 Create a verifiable evidence bundle:
 
 ```bash
-assay evidence export --out bundle.tar.gz
+assay profile init --output assay-profile.yaml --name quickstart
+assay evidence export --profile assay-profile.yaml --out bundle.tar.gz
 assay evidence verify bundle.tar.gz
 ```
 
@@ -150,13 +151,13 @@ Requires Linux 5.8+ with BPF LSM support.
 ### "No trace file found"
 
 ```bash
-assay import --format mcp-inspector session.json --out trace.jsonl
+assay import --format inspector session.json --out-trace trace.jsonl
 ```
 
 ### "Config version mismatch"
 
 ```bash
-assay migrate --config assay.yaml
+assay migrate --config eval.yaml
 ```
 
 ### "Unknown tool in policy"
@@ -164,5 +165,8 @@ assay migrate --config assay.yaml
 Tool names must match exactly. List tools in a trace:
 
 ```bash
-assay inspect --trace trace.jsonl --tools
+awk -F'"' '/"tool"/ {print $4}' trace.jsonl | sort -u
+
+# Then verify coverage against config
+assay trace verify --trace trace.jsonl --config eval.yaml
 ```

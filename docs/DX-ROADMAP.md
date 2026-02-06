@@ -17,8 +17,8 @@
 | `next_step()` mapping (E4.1) | P0 | Already existed | — |
 | `generate --diff` | P1-A | Planned | — |
 | `explain` + compliance hints | P1-B | Planned | — |
-| `doctor --fix` | P2-A | Planned | — |
-| `watch` | P2-B | Planned | — |
+| `doctor --fix` | P2-A | Done | local |
+| `watch` | P2-B | Done | local |
 
 ---
 
@@ -195,7 +195,7 @@ Tests:
 
 ---
 
-## P2 — Planned
+## P2 — Completed
 
 ### P2-A: `doctor --fix` — Self-Healing Setup
 
@@ -219,11 +219,13 @@ Config: eval.yaml
 Applied 2 fix(es). Remaining: 0 error(s).
 ```
 
-Implementation:
-- Add `--fix`, `--yes`, `--dry-run` to `DoctorArgs`
+Implementation (shipped):
+- Added `--fix`, `--yes`, `--dry-run` to `DoctorArgs`
 - `run_doctor_fix()` converts diagnostics to fix suggestions via `assay_core::agentic::build_suggestions()`
-- Prompt with `dialoguer` (already a dependency)
-- After applying: re-run validate to show remaining issues
+- Interactive confirmations via `dialoguer` (with `--yes` override)
+- Supports dry-run patch previews (unified diff)
+- Adds automatic trace-file creation fix path for `E_TRACE_MISS`
+- After applying: re-runs doctor diagnostics and reports remaining errors
 
 Fixable diagnostics:
 - `E_CFG_PARSE` with typo -> field rename
@@ -261,17 +263,15 @@ Result: 11/12 passed
 [14:32:15] Waiting for changes...
 ```
 
-Implementation:
-- New dependency: `notify = { version = "7", optional = true }` behind `watch` feature flag
-- New `WatchArgs` struct with `--config`, `--trace-file`, `--baseline`, `--clear`, `--debounce-ms`
-- Watch loop: `notify` watcher -> debounce -> re-run suite
-- `collect_watch_paths()` parses config to find policy path
-- Reuses `cmd_run` internally
+Implementation (shipped):
+- Added `WatchArgs` with `--config`, `--trace-file`, `--baseline`, `--db`, `--strict`, `--replay-strict`, `--clear`, `--debounce-ms`
+- Watch loop uses dependency-free polling snapshots + debounce
+- `collect_watch_paths()` parses config to include policy paths referenced by tests
+- Reuses `run::run` internally for each rerun
 
 Tests:
-- `collect_watch_paths_includes_policy`
-- `debounce_coalesces_events`
-- Manual testing (file-watching is inherently interactive)
+- `collect_watch_paths_includes_policy` ✅
+- Manual testing via `assay watch --help` and local rerun loop ✅
 
 ---
 

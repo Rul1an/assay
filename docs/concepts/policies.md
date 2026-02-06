@@ -220,10 +220,10 @@ arguments:
 
 ## Using Policies in Tests
 
-Reference policies in your `mcp-eval.yaml`:
+Reference policies in your `eval.yaml`:
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 version: "1"
 suite: my-agent
 
