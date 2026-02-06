@@ -350,12 +350,12 @@ fn format_verbose(explanation: &explain::TraceExplanation) -> String {
 
     for step in &explanation.steps {
         let icon = match step.verdict {
-            explain::StepVerdict::Allowed => "✅",
-            explain::StepVerdict::Blocked => "❌",
-            explain::StepVerdict::Warning => "⚠️",
+            explain::StepVerdict::Allowed => "OK",
+            explain::StepVerdict::Blocked => "BLOCKED",
+            explain::StepVerdict::Warning => "WARN",
         };
 
-        lines.push(format!("─── Step {} ───", step.index));
+        lines.push(format!("--- Step {} ---", step.index));
         lines.push(format!("  Tool: {} {}", step.tool, icon));
 
         if let Some(args) = &step.args {
@@ -370,7 +370,7 @@ fn format_verbose(explanation: &explain::TraceExplanation) -> String {
 
         lines.push("  Rules Evaluated:".to_string());
         for eval in &step.rules_evaluated {
-            let status = if eval.passed { "✓" } else { "✗" };
+            let status = if eval.passed { "PASS" } else { "FAIL" };
             lines.push(format!(
                 "    {} [{}] {}",
                 status, eval.rule_type, eval.rule_id
@@ -388,21 +388,18 @@ fn format_blocked_only(explanation: &explain::TraceExplanation) -> String {
     let mut lines = Vec::new();
 
     if explanation.blocked_steps == 0 {
-        lines.push("✅ All steps allowed".to_string());
+        lines.push("All steps allowed".to_string());
         return lines.join("\n");
     }
 
-    lines.push(format!(
-        "❌ {} blocked step(s):\n",
-        explanation.blocked_steps
-    ));
+    lines.push(format!("{} blocked step(s):\n", explanation.blocked_steps));
 
     for step in &explanation.steps {
         if step.verdict != explain::StepVerdict::Blocked {
             continue;
         }
 
-        lines.push(format!("[{}] {} ❌ BLOCKED", step.index, step.tool));
+        lines.push(format!("[{}] {} BLOCKED", step.index, step.tool));
 
         for eval in &step.rules_evaluated {
             if !eval.passed {
