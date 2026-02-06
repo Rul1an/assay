@@ -638,6 +638,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_policy_blocks_passthrough_modes() {
+        let _serial = crate::providers::network::lock_test_serial();
         let tmp = TempDir::new().unwrap();
         let mut client = VcrClient::new(VcrMode::Off, tmp.path().to_path_buf());
         let _guard = crate::providers::network::NetworkPolicyGuard::deny("unit test");

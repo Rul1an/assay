@@ -158,6 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn openai_client_respects_network_deny_policy() {
+        let _serial = crate::providers::network::lock_test_serial();
         let _guard = crate::providers::network::NetworkPolicyGuard::deny("unit test");
         let client = OpenAIClient::new("gpt-4o-mini".to_string(), "test-key".to_string(), 0.0, 8);
         let err = client
