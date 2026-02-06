@@ -26,6 +26,7 @@ assay --version
 | Command | Description |
 |---------|-------------|
 | [`assay run`](run.md) | Run tests against traces |
+| [`assay explain`](explain.md) | Explain why trace steps were allowed/blocked |
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
@@ -163,6 +164,14 @@ See [Configuration](../config/index.md) for full reference.
     Run tests against traces. The main command for CI/CD.
 
     [:octicons-arrow-right-24: Full reference](run.md)
+
+-   :material-file-search-outline:{ .lg .middle } __assay explain__
+
+    ---
+
+    Explain blocked/allowed trace steps and evaluated rules.
+
+    [:octicons-arrow-right-24: Full reference](explain.md)
 
 -   :material-import:{ .lg .middle } __assay import__
 
