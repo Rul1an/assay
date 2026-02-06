@@ -503,6 +503,75 @@ tests:
     }
 }
 
+#[test]
+fn contract_replay_offline_is_hermetic_under_network_deny() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"version: 1
+suite: replay-hermetic
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected: { type: must_contain, must_contain: ["passed"] }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("trace.jsonl"),
+        r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hi"}}
+{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"passed"}
+"#,
+    )
+    .unwrap();
+
+    let mut run_cmd = Command::cargo_bin("assay").unwrap();
+    run_cmd
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .arg("--trace-file")
+        .arg("trace.jsonl")
+        .arg("--strict")
+        .assert()
+        .success();
+
+    let mut bundle_cmd = Command::cargo_bin("assay").unwrap();
+    bundle_cmd
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("bundle")
+        .arg("create")
+        .arg("--from")
+        .arg(".")
+        .arg("--output")
+        .arg("replay-hermetic.tar.gz")
+        .assert()
+        .success();
+
+    fs::remove_file(dir.path().join("run.json")).unwrap();
+    fs::remove_file(dir.path().join("summary.json")).unwrap();
+
+    let mut replay_cmd = Command::cargo_bin("assay").unwrap();
+    replay_cmd
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .env("ASSAY_NETWORK_POLICY", "deny")
+        .arg("replay")
+        .arg("--bundle")
+        .arg("replay-hermetic.tar.gz")
+        .assert()
+        .success();
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["exit_code"], 0);
+    assert_eq!(run["provenance"]["replay"], true);
+    assert_eq!(run["provenance"]["replay_mode"], "offline");
+}
+
 fn test_status_map(run_json: &Value) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
     let Some(rows) = run_json.get("results").and_then(Value::as_array) else {

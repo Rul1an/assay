@@ -71,6 +71,7 @@ impl Embedder for OpenAIEmbedder {
             resp.body
         } else {
             // Direct HTTP request
+            crate::providers::network::check_outbound(url)?;
             let resp = self
                 .client
                 .post(url)

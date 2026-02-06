@@ -388,6 +388,7 @@ impl VcrClient {
             }
             VcrMode::Off => {
                 // Pass through, no recording
+                crate::providers::network::check_outbound(url)?;
                 let mut req = self.inner.post(url).json(body);
                 if let Some(auth) = auth_header {
                     req = req.header("Authorization", auth);
@@ -414,6 +415,7 @@ impl VcrClient {
         fingerprint: &str,
         should_record: bool,
     ) -> anyhow::Result<VcrResponse> {
+        crate::providers::network::check_outbound(url)?;
         let mut req = self.inner.post(url).json(body);
         if let Some(auth) = auth_header {
             req = req.header("Authorization", auth);
@@ -632,5 +634,20 @@ mod tests {
             VcrClient::kind_from_url("https://api.openai.com/v1/chat/completions"),
             "judge"
         );
+    }
+
+    #[tokio::test]
+    async fn test_network_policy_blocks_passthrough_modes() {
+        let tmp = TempDir::new().unwrap();
+        let mut client = VcrClient::new(VcrMode::Off, tmp.path().to_path_buf());
+        let _guard = crate::providers::network::NetworkPolicyGuard::deny("unit test");
+        let body = serde_json::json!({"input": "test", "model": "gpt-4o-mini"});
+        let err = client
+            .post_json("https://api.openai.com/v1/chat/completions", &body, None)
+            .await
+            .expect_err("deny policy must block passthrough network");
+        assert!(err
+            .to_string()
+            .contains("outbound network blocked by policy"));
     }
 }
