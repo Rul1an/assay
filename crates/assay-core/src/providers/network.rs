@@ -74,16 +74,19 @@ fn effective_policy() -> NetworkPolicy {
 }
 
 #[cfg(test)]
-fn test_serial_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+fn test_serial_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 #[cfg(test)]
-pub(crate) fn lock_test_serial() -> std::sync::MutexGuard<'static, ()> {
-    test_serial_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+pub(crate) fn lock_test_serial() -> tokio::sync::MutexGuard<'static, ()> {
+    test_serial_lock().blocking_lock()
+}
+
+#[cfg(test)]
+pub(crate) async fn lock_test_serial_async() -> tokio::sync::MutexGuard<'static, ()> {
+    test_serial_lock().lock().await
 }
 
 #[cfg(test)]
