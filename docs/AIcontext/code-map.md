@@ -5,7 +5,7 @@ This document provides a detailed mapping of important files, modules, and their
 ## File Structure Overview
 
 ```
-assay/                         # Version 2.15.0
+assay/                         # Version 2.16.0
 ├── crates/                    # Rust crates
 │   ├── assay-core/            # Core evaluation engine
 │   ├── assay-cli/             # CLI interface
