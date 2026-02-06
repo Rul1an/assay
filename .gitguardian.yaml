@@ -1,8 +1,10 @@
 # GitGuardian configuration
 # https://docs.gitguardian.com/ggshield-docs/reference/gitguardian-yaml
 
-# Ignore test fixtures containing intentionally fake cryptographic material
+# Ignore test fixtures and test code containing intentionally fake secrets
+# (scrub.rs: fake tokens/keys used to verify redaction patterns)
 paths-ignore:
+  - "crates/assay-core/src/replay/scrub.rs"
   - "crates/assay-evidence/tests/fixtures/**"
   - "crates/assay-mcp-server/tests/fixtures/**"
   - "**/test_vectors*.json"

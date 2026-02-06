@@ -270,28 +270,30 @@ fn test_jcs_key_ordering_in_bundle() {
 
 #[test]
 fn test_golden_hash() {
-    // This test verifies that the exact same input produces the exact same hash.
-    // If this test fails after code changes, either:
+    // Pinned golden digests: if this test fails after code changes, either:
     // 1. The change broke determinism (bad!)
-    // 2. The change intentionally modified the format (update the golden hash)
+    // 2. The change intentionally modified the format (update ALL three golden values)
 
-    let (_bundle, hash) = generate_bundle(1);
+    let (bundle, _container_hash) = generate_bundle(1);
+    let (manifest, events) = unpack_bundle(&bundle);
 
-    // Print for debugging (comment out in CI)
-    // println!("Bundle size: {} bytes", bundle.len());
-    // println!("Bundle hash: {}", hash);
+    // Content-level golden values (stable across platforms even if tar/gzip headers vary)
+    assert_eq!(
+        hash_bytes(&manifest),
+        "1412325ee64c94de98d21ed26750d23c26f71c47c4d156d70dfd6110da7541fa",
+        "Manifest content hash changed! Evidence format may have changed."
+    );
+    assert_eq!(
+        hash_bytes(&events),
+        "2c338577727ae79d1e4e0c64fb7f924951da3264ac3667caa0476e56c51e5917",
+        "Events content hash changed! Evidence format may have changed."
+    );
 
-    // The hash should be stable across runs.
-    // If you need to update this, run the test once to get the new hash.
-    // IMPORTANT: Only update this if you intentionally changed the format!
-
-    // For now, we just verify the hash is consistent within the test run
-    let (_, hash2) = generate_bundle(1);
-    assert_eq!(hash, hash2, "Hash must be stable within test run");
-
-    // Uncomment and fill in to create a true golden test:
-    // const GOLDEN_HASH: &str = "abc123..."; // Fill in after first run
-    // assert_eq!(hash, GOLDEN_HASH, "Bundle hash changed! Format may have changed.");
+    // Container-level golden value (may need update if tar/gzip library changes)
+    assert_eq!(
+        _container_hash, "755c02c38da2465fe6f41cc86d58e64a899d697f3e0bccd208e1d27003f81a10",
+        "Container hash changed! tar/gzip format may have changed."
+    );
 }
 
 // ============================================================================

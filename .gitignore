@@ -4,6 +4,7 @@ docs/maintainers/
 docs/project/
 
 # Local / one-off
+.claude/
 _v.txt
 ai-agent-eval-plugin/
 

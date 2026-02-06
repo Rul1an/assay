@@ -45,7 +45,6 @@ deny = [
 # Skip duplicate version warnings for specific crates
 skip = [
     # Transitive duplicates from ecosystem transitions (revisit periodically)
-    { crate = "base64@0.21" },      # assay-evidence uses 0.21, rest uses 0.22
     { crate = "getrandom@0.2" },    # rand 0.8 ecosystem
 ]
 

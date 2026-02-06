@@ -184,7 +184,17 @@ impl Authorizer {
         mandate: &MandateData,
         tool_call: &ToolCallData,
     ) -> Result<AuthzReceipt, AuthorizeError> {
-        let now = Utc::now();
+        self.authorize_at(Utc::now(), mandate, tool_call)
+    }
+
+    /// Like [`authorize_and_consume`] but with an explicit `now` timestamp.
+    /// Use this in tests to avoid flaky clock-dependent assertions.
+    pub fn authorize_at(
+        &self,
+        now: DateTime<Utc>,
+        mandate: &MandateData,
+        tool_call: &ToolCallData,
+    ) -> Result<AuthzReceipt, AuthorizeError> {
         let skew = Duration::seconds(self.config.clock_skew_seconds);
 
         // 1. Verify validity window (§7.6)
@@ -389,6 +399,7 @@ fn compute_transaction_ref(tx_object: &serde_json::Value) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn test_config() -> AuthzConfig {
         AuthzConfig {
@@ -458,18 +469,25 @@ mod tests {
     }
 
     // === Validity window tests (§7.6) ===
+    // All tests use authorize_at() with pinned timestamps to avoid clock races on slow CI.
+
+    /// Fixed reference time for all validity-window tests.
+    fn fixed_now() -> DateTime<Utc> {
+        Utc.timestamp_opt(1_700_000_000, 0).unwrap() // 2023-11-14T22:13:20Z
+    }
 
     #[test]
     fn test_authorize_rejects_expired() {
         let store = MandateStore::memory().unwrap();
         let config = test_config();
         let authorizer = Authorizer::new(store, config);
+        let now = fixed_now();
 
         let mut mandate = test_mandate();
-        mandate.expires_at = Some(Utc::now() - Duration::seconds(31)); // Beyond skew
+        mandate.expires_at = Some(now - Duration::seconds(31)); // Beyond 30s skew
 
         let tool_call = test_tool_call("search_products");
-        let result = authorizer.authorize_and_consume(&mandate, &tool_call);
+        let result = authorizer.authorize_at(now, &mandate, &tool_call);
 
         assert!(matches!(
             result,
@@ -482,12 +500,13 @@ mod tests {
         let store = MandateStore::memory().unwrap();
         let config = test_config();
         let authorizer = Authorizer::new(store, config);
+        let now = fixed_now();
 
         let mut mandate = test_mandate();
-        mandate.expires_at = Some(Utc::now() - Duration::seconds(5)); // Within skew
+        mandate.expires_at = Some(now - Duration::seconds(5)); // Within 30s skew
 
         let tool_call = test_tool_call("search_products");
-        let result = authorizer.authorize_and_consume(&mandate, &tool_call);
+        let result = authorizer.authorize_at(now, &mandate, &tool_call);
 
         assert!(result.is_ok());
     }
@@ -497,12 +516,13 @@ mod tests {
         let store = MandateStore::memory().unwrap();
         let config = test_config();
         let authorizer = Authorizer::new(store, config);
+        let now = fixed_now();
 
         let mut mandate = test_mandate();
-        mandate.not_before = Some(Utc::now() + Duration::seconds(31)); // Beyond skew
+        mandate.not_before = Some(now + Duration::seconds(31)); // Beyond 30s skew
 
         let tool_call = test_tool_call("search_products");
-        let result = authorizer.authorize_and_consume(&mandate, &tool_call);
+        let result = authorizer.authorize_at(now, &mandate, &tool_call);
 
         assert!(matches!(
             result,

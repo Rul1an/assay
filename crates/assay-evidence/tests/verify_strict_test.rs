@@ -6,6 +6,7 @@ use assay_evidence::bundle::writer::{verify_bundle, BundleWriter};
 use assay_evidence::crypto::id::compute_content_hash;
 use assay_evidence::types::EvidenceEvent;
 use chrono::{TimeZone, Utc};
+use sha2::Digest;
 use std::io::Cursor;
 
 /// Helper to create deterministic test events.
@@ -71,27 +72,93 @@ fn test_verify_run_root_matches() {
 // Contract Violation Tests
 // ============================================================================
 
+/// Verifies that BundleWriter normalizes events by setting content_hash
+/// even when the caller leaves it as None.
 #[test]
-fn test_reject_missing_content_hash() {
-    // Create event WITHOUT content_hash
+fn test_writer_normalizes_missing_content_hash() {
     let mut event = create_event(0);
     event.content_hash = None; // Explicitly remove
-
-    // Serialize manually to NDJSON (bypassing BundleWriter normalization)
-    let _events_json = serde_json::to_string(&event).unwrap() + "\n";
-
-    // Create fake bundle with missing content_hash
-    // This requires manually crafting the archive...
-    // For now, we verify that BundleWriter SETS content_hash
 
     let mut buffer = Vec::new();
     let mut writer = BundleWriter::new(&mut buffer);
     writer.add_event(event);
     writer.finish().unwrap();
 
-    // Verify succeeds because BundleWriter normalized the event
+    // Verify succeeds because BundleWriter normalized the event (set content_hash)
     let result = verify_bundle(Cursor::new(&buffer)).unwrap();
     assert_eq!(result.event_count, 1);
+}
+
+/// Proves that the verifier itself rejects events without content_hash by crafting
+/// a raw tar.gz bundle that bypasses BundleWriter normalization.
+#[test]
+fn test_verifier_rejects_missing_content_hash_raw_tar() {
+    use flate2::{Compression, GzBuilder};
+    use tar::{Builder, Header};
+
+    let mut event = create_event(0);
+    // Compute the correct content_hash first (to build a valid manifest)
+    let correct_hash = compute_content_hash(&event).unwrap();
+
+    // Now serialize the event WITHOUT content_hash (simulating a broken writer)
+    event.content_hash = None;
+    let events_ndjson = serde_json::to_string(&event).unwrap() + "\n";
+
+    // Build manifest that references the correct hash (but the event in the archive has None)
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "bundle_id": "test-missing-hash",
+        "producer": {"name": "test", "version": "1.0"},
+        "run_id": "run_deterministic_test",
+        "event_count": 1,
+        "run_root": correct_hash,
+        "algorithms": {"canon": "jcs", "hash": "sha256", "root": "chain"},
+        "files": {
+            "events.ndjson": {
+                "path": "events.ndjson",
+                "sha256": format!("sha256:{}", hex::encode(sha2::Sha256::digest(events_ndjson.as_bytes()))),
+                "bytes": events_ndjson.len()
+            }
+        }
+    });
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+
+    let mut buffer = Vec::new();
+    {
+        let encoder = GzBuilder::new().write(&mut buffer, Compression::default());
+        let mut tar = Builder::new(encoder);
+
+        let mut header = Header::new_gnu();
+        header.set_path("manifest.json").unwrap();
+        header.set_size(manifest_bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_cksum();
+        tar.append(&header, manifest_bytes.as_slice()).unwrap();
+
+        let events_bytes = events_ndjson.as_bytes();
+        let mut header = Header::new_gnu();
+        header.set_path("events.ndjson").unwrap();
+        header.set_size(events_bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_cksum();
+        tar.append(&header, events_bytes).unwrap();
+
+        tar.into_inner().unwrap().finish().unwrap();
+    }
+
+    // Verify must reject: content_hash is missing from the event
+    let result = verify_bundle(Cursor::new(&buffer));
+    assert!(
+        result.is_err(),
+        "Verifier must reject events without content_hash, got: {:?}",
+        result
+    );
 }
 
 #[test]
