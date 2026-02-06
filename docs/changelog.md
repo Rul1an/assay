@@ -28,6 +28,16 @@
 - feat(e9d.1): harden replay coverage contract and exit-profile stability (#170) @Rul1an
 - feat(e9c): replay bundle CLI flow + modular command refactor (single commit) (#168) @Rul1an
 - E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
+- ci: always publish required CI check for docs-only pull requests (#182) @Rul1an
+- docs(cli): add explain reference and define compliance coverage semantics (#180) @Rul1an
+- feat(explain): add --compliance-pack hints and coverage summary (P1-B) (#179) @Rul1an
+- feat(generate): add --diff policy evolution output (P1-A, clean) (#177) @Rul1an
+- feat(p0): init --from-trace, PR comment bot, SARIF truncation fix (#174) @Rul1an
+- feat(e9d.3): harden replay contract + strategic positioning & DX plan (#172) @Rul1an
+- feat(e9d.2): enforce core network deny for offline replay (#171) @Rul1an
+- feat(e9d.1): harden replay coverage contract and exit-profile stability (#170) @Rul1an
+- feat(e9c): replay bundle CLI flow + modular command refactor (single commit) (#168) @Rul1an
+- E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
 ## [2026-02-06]
 
 - E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
