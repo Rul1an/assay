@@ -1,5 +1,7 @@
 # Changelog
 
+- feat(e9c): replay bundle CLI flow + modular command refactor (single commit) (#168) @Rul1an
+- E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
 ## [2026-02-06]
 
 - E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
