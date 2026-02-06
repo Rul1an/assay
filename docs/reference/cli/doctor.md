@@ -69,4 +69,4 @@ After apply, doctor re-runs diagnostics and reports remaining error count.
 
 - [assay validate](validate.md)
 - [assay watch](watch.md)
-- [Troubleshooting](../../TROUBLESHOOTING.md)
+- [Troubleshooting](../../guides/troubleshooting.md)

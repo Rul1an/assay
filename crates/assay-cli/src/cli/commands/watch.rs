@@ -10,7 +10,7 @@ use crate::cli::args::{JudgeArgs, RunArgs, WatchArgs};
 pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
     use chrono::Local;
 
-    let watch_targets = collect_watch_paths(&args, legacy_mode)?;
+    let mut watch_targets = collect_watch_paths(&args, legacy_mode)?;
     if watch_targets.is_empty() {
         anyhow::bail!("no watch targets resolved");
     }
@@ -94,6 +94,16 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
             eprintln!("watch run failed: {}", e);
         }
 
+        match refresh_watch_targets(&args, legacy_mode, &mut watch_targets) {
+            Ok(true) => {
+                state = snapshot_paths(&watch_targets);
+            }
+            Ok(false) => {}
+            Err(err) => {
+                eprintln!("warning: failed to refresh watch targets: {}", err);
+            }
+        }
+
         eprintln!("---");
         eprintln!(
             "[{}] Waiting for changes...",
@@ -145,6 +155,30 @@ fn diff_paths(prev: &[(PathBuf, FileSnapshot)], curr: &[(PathBuf, FileSnapshot)]
     }
 
     changed
+}
+
+fn refresh_watch_targets(
+    args: &WatchArgs,
+    legacy_mode: bool,
+    watch_targets: &mut Vec<PathBuf>,
+) -> Result<bool> {
+    let next = collect_watch_paths(args, legacy_mode)?;
+    if *watch_targets == next {
+        return Ok(false);
+    }
+
+    let previous: BTreeSet<PathBuf> = watch_targets.iter().cloned().collect();
+    let current: BTreeSet<PathBuf> = next.iter().cloned().collect();
+    eprintln!("Updated watch paths:");
+    for path in current.difference(&previous) {
+        eprintln!("  + {}", path.display());
+    }
+    for path in previous.difference(&current) {
+        eprintln!("  - {}", path.display());
+    }
+
+    *watch_targets = next;
+    Ok(true)
 }
 
 async fn run_once(args: &WatchArgs, legacy_mode: bool) -> Result<i32> {

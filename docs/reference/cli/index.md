@@ -144,9 +144,16 @@ assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict
 Most run/ci commands read from `eval.yaml` by default:
 
 ```yaml
-version: 2
-policy: "policy.yaml"
-baseline: ".assay/baseline.json"
+version: 1
+suite: my-agent
+model: gpt-4o-mini
+tests:
+  - id: args_valid
+    input:
+      prompt: "Summarize this task."
+    expected:
+      type: args_valid
+      policy: policies/default.yaml
 ```
 
 See [Configuration](../config/index.md) for full reference.

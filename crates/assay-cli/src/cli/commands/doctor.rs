@@ -487,17 +487,38 @@ fn parse_unknown_field_error(err: &str) -> Option<(&str, Vec<String>)> {
         .filter(|s| !s.is_empty())?;
 
     let expected = err.split("expected one of").nth(1)?;
-    let candidates: Vec<String> = expected
-        .split(',')
-        .map(|s| s.trim().trim_matches('`').trim_matches('"').to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let mut candidates = extract_backticked_tokens(expected);
+    if candidates.is_empty() {
+        let expected = expected.split(" at line").next().unwrap_or(expected);
+        candidates = expected
+            .split(',')
+            .map(|s| s.trim().trim_matches('`').trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
 
     if candidates.is_empty() {
         None
     } else {
         Some((unknown, candidates))
     }
+}
+
+fn extract_backticked_tokens(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = input;
+    while let Some(start) = rest.find('`') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('`') else {
+            break;
+        };
+        let candidate = rest[..end].trim();
+        if !candidate.is_empty() {
+            out.push(candidate.to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    out
 }
 
 fn replace_yaml_key(content: &str, from: &str, to: &str) -> Option<String> {
@@ -537,6 +558,15 @@ mod tests {
         let (unknown, candidates) = parse_unknown_field_error(err).expect("parsed");
         assert_eq!(unknown, "response_format");
         assert!(candidates.iter().any(|c| c == "format"));
+    }
+
+    #[test]
+    fn parse_unknown_field_ignores_line_column_suffix() {
+        let err = "unknown field `response_format`, expected one of `format`, `out`, `trace_file` at line 4 column 3";
+        let (unknown, candidates) = parse_unknown_field_error(err).expect("parsed");
+        assert_eq!(unknown, "response_format");
+        assert!(candidates.iter().any(|c| c == "trace_file"));
+        assert!(candidates.iter().all(|c| !c.contains("line")));
     }
 
     #[test]

@@ -86,7 +86,8 @@ For automation, branch on `reason_code` + `reason_code_version` in `run.json` / 
 
 ## See Also
 
-- [assay ci](../../AIcontext/entry-points.md)
+- [CI Integration](../../getting-started/ci-integration.md)
 - [assay import](import.md)
 - [assay replay](replay.md)
 - [Configuration Reference](../config/index.md)
+- [Troubleshooting](../../guides/troubleshooting.md)
