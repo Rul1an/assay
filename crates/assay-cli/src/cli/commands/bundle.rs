@@ -30,7 +30,15 @@ fn cmd_verify(args: BundleVerifyArgs) -> anyhow::Result<i32> {
         }
         return Ok(exit_codes::EXIT_CONFIG_ERROR);
     }
-    eprintln!("bundle verify: OK ({})", args.bundle.display());
+    if res.warnings.is_empty() {
+        eprintln!("bundle verify: OK ({})", args.bundle.display());
+    } else {
+        eprintln!(
+            "bundle verify: OK with warnings ({}, {} warning(s))",
+            args.bundle.display(),
+            res.warnings.len()
+        );
+    }
     Ok(exit_codes::EXIT_SUCCESS)
 }
 
@@ -236,10 +244,22 @@ fn cmd_create(args: BundleCreateArgs) -> anyhow::Result<i32> {
         for e in &verify.errors {
             eprintln!("error: {}", e);
         }
-        anyhow::bail!("created bundle failed verification: {}", out_path.display());
+        anyhow::bail!(
+            "bundle create failed verification: {} ({} error(s))",
+            out_path.display(),
+            verify.errors.len()
+        );
     }
 
-    eprintln!("bundle created: {}", out_path.display());
+    if verify.warnings.is_empty() {
+        eprintln!("bundle created: {}", out_path.display());
+    } else {
+        eprintln!(
+            "bundle created with warnings: {} ({} warning(s))",
+            out_path.display(),
+            verify.warnings.len()
+        );
+    }
     Ok(exit_codes::EXIT_SUCCESS)
 }
 

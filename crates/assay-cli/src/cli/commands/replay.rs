@@ -1,5 +1,5 @@
 use super::super::args::{JudgeArgs, ReplayArgs, RunArgs};
-use crate::exit_codes::{self, ReasonCode, RunOutcome};
+use crate::exit_codes::{ReasonCode, RunOutcome};
 use anyhow::Context;
 use assay_core::replay::{read_bundle_tar_gz, verify_bundle, ReplayManifest};
 use sha2::{Digest, Sha256};
@@ -8,12 +8,47 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    let bundle_digest = sha256_file(&args.bundle)?;
+    let bundle_digest = match sha256_file(&args.bundle) {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!(
+                "warning: failed to compute bundle digest for {}: {}; using sha256:unknown",
+                args.bundle.display(),
+                err
+            );
+            "sha256:unknown".to_string()
+        }
+    };
     let replay_mode = if args.live { "live" } else { "offline" };
 
-    let file = std::fs::File::open(&args.bundle)
-        .with_context(|| format!("failed to open bundle: {}", args.bundle.display()))?;
-    let verify = verify_bundle(file)?;
+    let file = match std::fs::File::open(&args.bundle) {
+        Ok(file) => file,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                None,
+                ReasonCode::ECfgParse,
+                format!("failed to open bundle {}: {}", args.bundle.display(), err),
+                None,
+            );
+        }
+    };
+    let verify = match verify_bundle(file) {
+        Ok(v) => v,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                None,
+                ReasonCode::ECfgParse,
+                format!("failed to verify bundle: {}", err),
+                None,
+            );
+        }
+    };
     for warning in &verify.warnings {
         eprintln!("warning: {}", warning);
     }
@@ -21,12 +56,58 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         for error in &verify.errors {
             eprintln!("error: {}", error);
         }
-        return Ok(exit_codes::EXIT_CONFIG_ERROR);
+        let first = verify
+            .errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "unknown verify error".to_string());
+        return write_replay_failure(
+            &args,
+            &bundle_digest,
+            replay_mode,
+            None,
+            ReasonCode::ECfgParse,
+            format!(
+                "replay bundle verification failed ({} error(s)); first={}",
+                verify.errors.len(),
+                first
+            ),
+            None,
+        );
     }
 
-    let file = std::fs::File::open(&args.bundle)
-        .with_context(|| format!("failed to open bundle: {}", args.bundle.display()))?;
-    let read = read_bundle_tar_gz(file)?;
+    let file = match std::fs::File::open(&args.bundle) {
+        Ok(file) => file,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                None,
+                ReasonCode::ECfgParse,
+                format!(
+                    "failed to open verified bundle {}: {}",
+                    args.bundle.display(),
+                    err
+                ),
+                None,
+            );
+        }
+    };
+    let read = match read_bundle_tar_gz(file) {
+        Ok(read) => read,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                None,
+                ReasonCode::ECfgParse,
+                format!("failed to read replay bundle: {}", err),
+                None,
+            );
+        }
+    };
     let source_run_id = source_run_id_from_bundle(&read.manifest, &read.entries);
 
     if !args.live {
@@ -41,8 +122,31 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     }
 
-    let workspace = ReplayWorkspace::new()?;
-    write_entries(workspace.path(), &read.entries)?;
+    let workspace = match ReplayWorkspace::new() {
+        Ok(workspace) => workspace,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                source_run_id.clone(),
+                ReasonCode::ECfgParse,
+                format!("failed to create replay workspace: {}", err),
+                None,
+            );
+        }
+    };
+    if let Err(err) = write_entries(workspace.path(), &read.entries) {
+        return write_replay_failure(
+            &args,
+            &bundle_digest,
+            replay_mode,
+            source_run_id.clone(),
+            ReasonCode::ECfgParse,
+            format!("failed to materialize replay bundle contents: {}", err),
+            None,
+        );
+    }
 
     let config_path = match resolve_config_path(&read.manifest, &read.entries, workspace.path()) {
         Some(p) => p,
@@ -63,13 +167,23 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             &args,
             &bundle_digest,
             replay_mode,
-            source_run_id,
+            source_run_id.clone(),
             "Replay bundle missing trace required for offline replay".to_string(),
         );
     }
 
     if let Some(seed) = args.seed {
-        apply_seed_override(&config_path, seed)?;
+        if let Err(err) = apply_seed_override(&config_path, seed) {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                source_run_id.clone(),
+                ReasonCode::ECfgParse,
+                format!("failed to apply seed override: {}", err),
+                None,
+            );
+        }
     }
 
     let run_args = replay_run_args(
@@ -80,13 +194,22 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         args.exit_codes,
     );
 
-    let exit_code = super::cmd_run(run_args, legacy_mode).await?;
+    let exit_code = match super::cmd_run(run_args, legacy_mode).await {
+        Ok(code) => code,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                source_run_id.clone(),
+                ReasonCode::ECfgParse,
+                format!("replay execution failed: {}", err),
+                None,
+            );
+        }
+    };
 
-    if let Err(err) = annotate_replay_outputs(
-        &bundle_digest,
-        replay_mode,
-        source_run_id_from_bundle(&read.manifest, &read.entries),
-    ) {
+    if let Err(err) = annotate_replay_outputs(&bundle_digest, replay_mode, source_run_id) {
         eprintln!("warning: failed to annotate replay provenance: {}", err);
     }
 
@@ -141,12 +264,31 @@ fn write_missing_dependency(
     source_run_id: Option<String>,
     message: String,
 ) -> anyhow::Result<i32> {
-    let mut outcome = RunOutcome::from_reason(
+    write_replay_failure(
+        args,
+        bundle_digest,
+        replay_mode,
+        source_run_id,
         ReasonCode::EReplayMissingDependency,
-        Some(message),
+        message,
         Some("assay replay --bundle <path> --live"),
-    );
-    outcome.exit_code = ReasonCode::EReplayMissingDependency.exit_code_for(args.exit_codes);
+    )
+}
+
+fn write_replay_failure(
+    args: &ReplayArgs,
+    bundle_digest: &str,
+    replay_mode: &str,
+    source_run_id: Option<String>,
+    reason: ReasonCode,
+    message: String,
+    next_step_override: Option<&str>,
+) -> anyhow::Result<i32> {
+    let mut outcome = RunOutcome::from_reason(reason, Some(message), None);
+    if let Some(next_step) = next_step_override {
+        outcome.next_step = Some(next_step.to_string());
+    }
+    outcome.exit_code = reason.exit_code_for(args.exit_codes);
 
     let run_json_path = PathBuf::from("run.json");
     if let Err(err) = super::write_run_json_minimal(&outcome, &run_json_path) {
@@ -162,6 +304,7 @@ fn write_missing_dependency(
     }
 
     let summary_path = PathBuf::from("summary.json");
+    // Explicit early-exit seed policy: null seeds because replay run did not execute.
     let summary = super::summary_from_outcome(&outcome, true)
         .with_seeds(None, None)
         .with_replay_provenance(bundle_digest.to_string(), replay_mode, source_run_id);

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[command(
     name = "assay",
     version,
-    about = "CI-first PR regression gate for RAG pipelines (skeleton)"
+    about = "Policy-as-Code for AI Agents — deterministic testing, verifiable evidence, and runtime enforcement for MCP"
 )]
 pub struct Cli {
     #[command(subcommand)]

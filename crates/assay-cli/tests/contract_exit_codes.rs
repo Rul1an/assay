@@ -385,6 +385,7 @@ tests:
     assert_schema(&run);
     assert_eq!(run["exit_code"], 2);
     assert_eq!(run["reason_code"], "E_REPLAY_MISSING_DEPENDENCY");
+    assert_run_json_seeds_early_exit(&run);
     assert_eq!(run["provenance"]["replay"], true);
     assert_eq!(run["provenance"]["replay_mode"], "offline");
     assert!(run["provenance"]["bundle_digest"]
@@ -395,6 +396,61 @@ tests:
     let summary = read_summary_json(dir.path());
     assert_eq!(summary["exit_code"], 2);
     assert_eq!(summary["reason_code"], "E_REPLAY_MISSING_DEPENDENCY");
+    assert_summary_seeds_early_exit(&summary);
+    assert_eq!(summary["provenance"]["replay"], true);
+    assert_eq!(summary["provenance"]["replay_mode"], "offline");
+}
+
+#[test]
+fn contract_replay_verify_failure_writes_outputs_with_provenance() {
+    let dir = tempdir().unwrap();
+    let bundle_path = dir.path().join("bad-bundle.tar.gz");
+    let unsafe_config = r#"version: 1
+suite: replay-verify-fail
+model: dummy
+settings:
+  injected: "OPENAI_API_KEY=sk-abcdefghij1234567890abcdefghij"
+"#;
+
+    let entries = vec![BundleEntry {
+        path: "files/eval.yaml".to_string(),
+        data: unsafe_config.as_bytes().to_vec(),
+    }];
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+
+    write_bundle_tar_gz(
+        std::fs::File::create(&bundle_path).unwrap(),
+        &manifest,
+        &entries,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("replay")
+        .arg("--bundle")
+        .arg("bad-bundle.tar.gz")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_schema(&run);
+    assert_eq!(run["exit_code"], 2);
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+    assert_run_json_seeds_early_exit(&run);
+    assert_eq!(run["provenance"]["replay"], true);
+    assert_eq!(run["provenance"]["replay_mode"], "offline");
+    assert!(run["provenance"]["bundle_digest"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("sha256:"));
+
+    let summary = read_summary_json(dir.path());
+    assert_eq!(summary["exit_code"], 2);
+    assert_eq!(summary["reason_code"], "E_CFG_PARSE");
+    assert_summary_seeds_early_exit(&summary);
     assert_eq!(summary["provenance"]["replay"], true);
     assert_eq!(summary["provenance"]["replay_mode"], "offline");
 }
