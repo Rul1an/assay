@@ -1,6 +1,7 @@
 use super::super::args::RunArgs;
 use super::run_output::{
-    decide_run_outcome, export_baseline, summary_from_outcome, write_extended_run_json,
+    decide_run_outcome, export_baseline, reason_code_from_anyhow_error,
+    reason_code_from_error_message, summary_from_outcome, write_extended_run_json,
     write_run_json_minimal,
 };
 use super::runner_builder::{build_runner, ensure_parent_dir};
@@ -53,13 +54,8 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let cfg = match assay_core::config::load_config(&args.config, legacy_mode, false) {
         Ok(c) => c,
         Err(e) => {
-            // Heuristic: is it missing?
             let msg = e.to_string();
-            let reason = if msg.contains("not found") {
-                ReasonCode::EMissingConfig
-            } else {
-                ReasonCode::ECfgParse
-            };
+            let reason = reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
             return write_error(reason, msg);
         }
     };
@@ -100,18 +96,8 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
                 return write_error(ReasonCode::ECfgParse, diag.to_string());
             }
             let msg = e.to_string();
-            if msg.contains("config error") {
-                return write_error(ReasonCode::ECfgParse, msg.clone());
-            }
-            if msg.to_lowercase().contains("trace")
-                && (msg.contains("not found")
-                    || msg.contains("No such file")
-                    || msg.contains("failed to load trace"))
-            {
-                return write_error(ReasonCode::ETraceNotFound, msg);
-            }
-            // General initialization failure
-            return write_error(ReasonCode::ECfgParse, msg);
+            let reason = reason_code_from_anyhow_error(&e).unwrap_or(ReasonCode::ECfgParse);
+            return write_error(reason, msg);
         }
     };
 

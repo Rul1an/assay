@@ -1,6 +1,28 @@
 use crate::exit_codes::{ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
+pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode> {
+    use assay_core::errors::{RunError, RunErrorKind};
+
+    let classified = RunError::classify_message(message.to_string());
+    match classified.kind {
+        RunErrorKind::TraceNotFound => Some(ReasonCode::ETraceNotFound),
+        RunErrorKind::MissingConfig => Some(ReasonCode::EMissingConfig),
+        RunErrorKind::ConfigParse => Some(ReasonCode::ECfgParse),
+        RunErrorKind::InvalidArgs => Some(ReasonCode::EInvalidArgs),
+        RunErrorKind::ProviderRateLimit => Some(ReasonCode::ERateLimit),
+        RunErrorKind::ProviderTimeout => Some(ReasonCode::ETimeout),
+        RunErrorKind::ProviderServer => Some(ReasonCode::EProvider5xx),
+        RunErrorKind::Network => Some(ReasonCode::ENetworkError),
+        RunErrorKind::JudgeUnavailable => Some(ReasonCode::EJudgeUnavailable),
+        RunErrorKind::Other => None,
+    }
+}
+
+pub(crate) fn reason_code_from_anyhow_error(err: &anyhow::Error) -> Option<ReasonCode> {
+    reason_code_from_error_message(&assay_core::errors::RunError::from_anyhow(err).message)
+}
+
 pub(crate) fn decide_run_outcome(
     results: &[assay_core::model::TestResultRow],
     strict: bool,
@@ -15,21 +37,18 @@ pub(crate) fn decide_run_outcome(
         o
     };
 
-    // Priority 1: Config Errors (Exit 2)
-    // Granular detection per user request
+    // Priority 1: Config/Argument Errors (Exit 2)
     for r in results {
-        let msg = r.message.to_lowercase();
-        // Trace Not Found
-        if msg.contains("trace not found") || msg.contains("tracenotfound") {
-            return make_outcome(ReasonCode::ETraceNotFound, Some(r.message.clone()), None);
-        }
-        // Missing Config (generic heuristic)
-        if msg.contains("no config found") || msg.contains("config missing") {
-            return make_outcome(ReasonCode::EMissingConfig, Some(r.message.clone()), None);
-        }
-        // Config Parse / General Config Error
-        if msg.contains("config error") || msg.contains("configerror") {
-            return make_outcome(ReasonCode::ECfgParse, Some(r.message.clone()), None);
+        if let Some(reason) = reason_code_from_error_message(&r.message) {
+            if matches!(
+                reason,
+                ReasonCode::ETraceNotFound
+                    | ReasonCode::EMissingConfig
+                    | ReasonCode::ECfgParse
+                    | ReasonCode::EInvalidArgs
+            ) {
+                return make_outcome(reason, Some(r.message.clone()), None);
+            }
         }
     }
 
@@ -114,28 +133,20 @@ pub(crate) fn has_judge_verdict_abstain(details: &serde_json::Value) -> bool {
 fn pick_infra_reason(
     errors: &[&assay_core::model::TestResultRow],
 ) -> crate::exit_codes::ReasonCode {
-    // Heuristic: check messages for known infra patterns
     for r in errors {
-        let msg = r.message.to_lowercase();
-        if msg.contains("rate limit") || msg.contains("429") {
-            return ReasonCode::ERateLimit;
-        }
-        if msg.contains("timeout") {
-            return ReasonCode::ETimeout;
-        }
-        if msg.contains("500")
-            || msg.contains("502")
-            || msg.contains("503")
-            || msg.contains("504")
-            || msg.contains("provider error")
-        {
-            return ReasonCode::EProvider5xx;
-        }
-        if msg.contains("network") || msg.contains("connection") || msg.contains("dns") {
-            return ReasonCode::ENetworkError;
+        if let Some(reason) = reason_code_from_error_message(&r.message) {
+            if matches!(
+                reason,
+                ReasonCode::ERateLimit
+                    | ReasonCode::ETimeout
+                    | ReasonCode::EProvider5xx
+                    | ReasonCode::ENetworkError
+                    | ReasonCode::EJudgeUnavailable
+            ) {
+                return reason;
+            }
         }
     }
-    // Default fallback
     ReasonCode::EJudgeUnavailable
 }
 
@@ -285,7 +296,7 @@ pub(crate) fn export_baseline(
 
 #[cfg(test)]
 mod run_outcome_tests {
-    use super::{decide_run_outcome, has_judge_verdict_abstain};
+    use super::{decide_run_outcome, has_judge_verdict_abstain, reason_code_from_error_message};
     use crate::exit_codes::{ExitCodeVersion, ReasonCode, EXIT_INFRA_ERROR};
     use assay_core::model::{TestResultRow, TestStatus};
 
@@ -373,5 +384,41 @@ mod run_outcome_tests {
     fn test_has_judge_verdict_abstain_no_metrics() {
         let details = serde_json::json!({});
         assert!(!has_judge_verdict_abstain(&details));
+    }
+
+    #[test]
+    fn test_reason_code_from_error_message_maps_config_family() {
+        assert_eq!(
+            reason_code_from_error_message("trace not found: traces/missing.jsonl"),
+            Some(ReasonCode::ETraceNotFound)
+        );
+        assert_eq!(
+            reason_code_from_error_message("Config file not found: eval.yaml"),
+            Some(ReasonCode::EMissingConfig)
+        );
+        assert_eq!(
+            reason_code_from_error_message("config error: unknown field `foo`"),
+            Some(ReasonCode::ECfgParse)
+        );
+    }
+
+    #[test]
+    fn test_reason_code_from_error_message_maps_infra_family() {
+        assert_eq!(
+            reason_code_from_error_message("provider returned 429 rate limit"),
+            Some(ReasonCode::ERateLimit)
+        );
+        assert_eq!(
+            reason_code_from_error_message("request timeout while calling judge"),
+            Some(ReasonCode::ETimeout)
+        );
+        assert_eq!(
+            reason_code_from_error_message("provider error: 503"),
+            Some(ReasonCode::EProvider5xx)
+        );
+        assert_eq!(
+            reason_code_from_error_message("network connection reset by peer"),
+            Some(ReasonCode::ENetworkError)
+        );
     }
 }

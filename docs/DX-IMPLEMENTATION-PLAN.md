@@ -8,6 +8,23 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 
 ---
 
+## RFC-001 Execution Track
+
+Canonical RFC for debt-ranked execution:
+- [RFC-001: DX/UX & Governance](architecture/RFC-001-dx-ux-governance.md)
+
+PR order for the new track:
+1. PR-A1: typed error boundary + centralized reason-code mapping (Wave A start).
+2. PR-A2: remove strict-mode env mutation (`set_var`) in run/ci path.
+3. PR-A3: canonical config writing hardening (`init`/templates + docs).
+4. PR-B1/B2/B3: pipeline unification + coupling reduction + `--pack` to `--preset`.
+5. PR-C*: perf/scale only when benchmark data justifies it.
+
+Current branch focus:
+- PR-A1 (in progress): move run/ci hot-path error triage to typed boundary mapping with unit coverage.
+
+---
+
 ## P0/P1 Epic Execution Summary
 
 Compact execution view for all P0/P1 workstreams.
