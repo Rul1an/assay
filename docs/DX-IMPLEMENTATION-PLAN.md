@@ -8,6 +8,40 @@ This document turns the DX review into a concrete backlog with **per-file patchl
 
 ---
 
+## P0/P1 Epic Execution Summary
+
+Compact execution view for all P0/P1 workstreams.
+
+| Epic | Priority | Status | Outcome |
+|------|----------|--------|---------|
+| EP0-1 Blessed Init + CI Template Contract | P0 | Done | `assay init --ci` paved road + workflow contract |
+| EP0-2 CI Feedback Contracts (JUnit/SARIF/report I/O) | P0 | Done | stable CI outputs, robust reporting behavior |
+| EP0-3 Exit/Reason Contract | P0 | Done | deterministic exit/reason surfaces for automation |
+| EP1-1 GitHub Action v2.1 (compliance-pack first) | P1 | Planned (Next) | Action v2.1 P1 slice on existing PR/CI surfaces |
+| EP1-2 Golden Path (<30m first signal) | P1 | Planned | init bootstrap: hello-trace + smoke suite |
+| EP1-3 Explain + Compliance Hints | P1 | Planned | explain output with article mapping + next actions |
+| EP1-4 Drift Visibility (`generate --diff`) | P1 | Planned | reviewable policy/tool drift diffs |
+| EP1-5 Watch Determinism Hardening | P1 | Planned | deterministic trigger/debounce behavior |
+| EP1-6 Privacy-safe Observability Defaults | P1 | Planned | redaction/cardinality defaults and tests |
+| EP1-7 MCP Auth Hardening (E6a hard scope) | P1 | Planned | OAuth/JWT/JWKS no-pass-through baseline |
+| EP1-8 Replay Bundle Hardening | P1 | Planned | reproducible evidence bundle + manifest discipline |
+
+Recommended sequence:
+1. EP1-1 GitHub Action v2.1 (compliance-pack support).
+2. EP1-2 Golden Path (<30m first signal).
+3. EP1-3 Explain + Compliance Hints.
+4. EP1-4 Drift Visibility (`generate --diff`).
+5. EP1-5 Watch determinism hardening.
+6. EP1-6/EP1-7/EP1-8 parallel where capacity allows.
+
+Explicit deferred boundaries:
+- no native notify watcher backend now;
+- no full-repo docs link checker as hard CI gate;
+- no non-Unix atomic-write parity expansion in this slice;
+- no dedicated IDE governance control-plane in this phase.
+
+---
+
 ## Progress Update (2026-02-07)
 
 Recent implementation state (PR #184, follow-up commits on branch):
