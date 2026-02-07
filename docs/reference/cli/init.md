@@ -38,10 +38,15 @@ assay init
 
 ### Fast first signal (hello trace)
 Creates `eval.yaml`, `traces/hello.jsonl`, and `policy.yaml` (if missing).
+When `--config` points to another directory, the hello trace is written relative to that config path.
 
 ```bash
 assay init --hello-trace
 assay validate --config eval.yaml --trace-file traces/hello.jsonl
+
+# Config in a nested directory:
+assay init --hello-trace --config nested/eval.yaml
+assay validate --config nested/eval.yaml --trace-file nested/traces/hello.jsonl
 ```
 
 ### From existing trace

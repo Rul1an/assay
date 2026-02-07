@@ -17,6 +17,8 @@ Generates a runnable smoke setup:
 - `traces/hello.jsonl` with a deterministic trace fixture
 - `policy.yaml` with the default policy pack (created if not already present)
 
+If you pass `--config <path>`, the hello trace is written relative to that config directory.
+
 The hello trace is demo-only and non-sensitive. Treat real traces as potentially sensitive data and apply your redaction/recording guidelines.
 
 ## 2. Validate
