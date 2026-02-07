@@ -12,10 +12,6 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     let version = args.exit_codes;
     let run_json_path = PathBuf::from("run.json");
 
-    if args.deny_deprecations {
-        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
-    }
-
     // Helper to write error run.json + summary.json and return specific exit code
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = crate::exit_codes::RunOutcome::from_reason(reason, Some(msg), None);
@@ -85,7 +81,7 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     }
 
     let cfg = if args.config.exists() {
-        match assay_core::config::load_config(&args.config, legacy_mode, false) {
+        match assay_core::config::load_config(&args.config, legacy_mode, args.deny_deprecations) {
             Ok(c) => c,
             Err(e) => {
                 let msg = e.to_string();
@@ -104,7 +100,11 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     if cfg.version > 0 {
         eprintln!("Loaded config version: {}", cfg.version);
         if cfg.has_legacy_usage() {
-            eprintln!("WARN: Deprecated policy file usage detected. Run 'assay migrate'.");
+            let msg = "Deprecated policy file usage detected. Run 'assay migrate'.".to_string();
+            if args.deny_deprecations {
+                return write_error(ReasonCode::ECfgParse, msg);
+            }
+            eprintln!("WARN: {}", msg);
         }
     }
     // Strict mode implies no reruns by default policy (fail fast/accurate)

@@ -21,7 +21,8 @@ PR order for the new track:
 5. PR-C*: perf/scale only when benchmark data justifies it.
 
 Current branch focus:
-- PR-A1 (in progress): move run/ci hot-path error triage to typed boundary mapping with unit coverage.
+- PR-A1 (open): move run/ci hot-path error triage to typed boundary mapping with unit coverage.
+- PR-A2 (in progress): remove run/ci strict-mode env mutation and enforce deny-deprecations via explicit options.
 
 ---
 
