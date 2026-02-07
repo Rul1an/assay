@@ -1,6 +1,7 @@
 use anyhow::Result;
 use assay_core::config::{load_config, path_resolver::PathResolver};
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{DefaultHasher, Hasher};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -10,6 +11,7 @@ use crate::cli::args::{JudgeArgs, RunArgs, WatchArgs};
 const POLL_INTERVAL_MS: u64 = 250;
 const MIN_DEBOUNCE_MS: u64 = 50;
 const MAX_DEBOUNCE_MS: u64 = 60_000;
+const MAX_SNAPSHOT_HASH_BYTES: u64 = 256 * 1024;
 
 pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
     use chrono::Local;
@@ -134,26 +136,42 @@ struct FileSnapshot {
     exists: bool,
     len: Option<u64>,
     modified: Option<SystemTime>,
+    content_hash: Option<u64>,
 }
 
 fn snapshot_paths(paths: &[PathBuf]) -> BTreeMap<PathBuf, FileSnapshot> {
     let mut out = BTreeMap::new();
     for path in paths {
         let snapshot = match std::fs::metadata(path) {
-            Ok(meta) => FileSnapshot {
-                exists: true,
-                len: Some(meta.len()),
-                modified: meta.modified().ok(),
-            },
+            Ok(meta) => {
+                let len = meta.len();
+                FileSnapshot {
+                    exists: true,
+                    len: Some(len),
+                    modified: meta.modified().ok(),
+                    content_hash: snapshot_content_hash(path, len),
+                }
+            }
             Err(_) => FileSnapshot {
                 exists: false,
                 len: None,
                 modified: None,
+                content_hash: None,
             },
         };
         out.insert(path.clone(), snapshot);
     }
     out
+}
+
+fn snapshot_content_hash(path: &PathBuf, len: u64) -> Option<u64> {
+    if len > MAX_SNAPSHOT_HASH_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    hasher.write(&bytes);
+    Some(hasher.finish())
 }
 
 fn diff_paths(
@@ -267,8 +285,8 @@ pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result
             }
             Err(err) => {
                 eprintln!(
-                    "warning: failed to parse config while collecting watch paths: {}",
-                    err
+                    "warning: failed to parse config while collecting watch paths: {}; keeping core watch targets (config/trace/baseline)",
+                    err,
                 );
             }
         }
@@ -281,7 +299,7 @@ pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result
 mod tests {
     use super::{
         coalesce_changed_paths, collect_watch_paths, diff_paths, normalize_debounce_ms,
-        FileSnapshot, MAX_DEBOUNCE_MS, MIN_DEBOUNCE_MS,
+        snapshot_paths, FileSnapshot, MAX_DEBOUNCE_MS, MAX_SNAPSHOT_HASH_BYTES, MIN_DEBOUNCE_MS,
     };
     use crate::cli::args::WatchArgs;
     use std::collections::BTreeMap;
@@ -359,6 +377,7 @@ mod tests {
                 exists: true,
                 len: Some(10),
                 modified: None,
+                content_hash: None,
             },
         );
         prev.insert(
@@ -367,6 +386,7 @@ mod tests {
                 exists: true,
                 len: Some(20),
                 modified: None,
+                content_hash: None,
             },
         );
 
@@ -377,6 +397,7 @@ mod tests {
                 exists: true,
                 len: Some(20),
                 modified: None,
+                content_hash: None,
             },
         );
         curr.insert(
@@ -385,6 +406,7 @@ mod tests {
                 exists: true,
                 len: Some(10),
                 modified: None,
+                content_hash: None,
             },
         );
 
@@ -401,6 +423,7 @@ mod tests {
                 exists: true,
                 len: Some(1),
                 modified: None,
+                content_hash: None,
             },
         );
         prev.insert(
@@ -409,6 +432,7 @@ mod tests {
                 exists: true,
                 len: Some(2),
                 modified: None,
+                content_hash: None,
             },
         );
         prev.insert(
@@ -417,6 +441,7 @@ mod tests {
                 exists: true,
                 len: Some(3),
                 modified: None,
+                content_hash: None,
             },
         );
 
@@ -427,6 +452,7 @@ mod tests {
                 exists: true,
                 len: Some(1),
                 modified: None,
+                content_hash: None,
             },
         );
         curr.insert(
@@ -435,6 +461,7 @@ mod tests {
                 exists: true,
                 len: Some(99),
                 modified: None,
+                content_hash: None,
             },
         );
         curr.insert(
@@ -443,6 +470,7 @@ mod tests {
                 exists: true,
                 len: Some(4),
                 modified: None,
+                content_hash: None,
             },
         );
 
@@ -470,5 +498,85 @@ mod tests {
             changed,
             vec![PathBuf::from("a.yaml"), PathBuf::from("b.yaml")]
         );
+    }
+
+    #[test]
+    fn collect_watch_paths_parse_error_keeps_core_targets() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config = tmp.path().join("eval.yaml");
+        let trace = tmp.path().join("trace.jsonl");
+        let baseline = tmp.path().join("baseline.json");
+        let db = tmp.path().join("eval.db");
+
+        fs::write(&config, "version: [\n").expect("write invalid config");
+
+        let args = WatchArgs {
+            config: config.clone(),
+            trace_file: Some(trace.clone()),
+            baseline: Some(baseline.clone()),
+            db,
+            strict: false,
+            replay_strict: false,
+            clear: false,
+            debounce_ms: 300,
+        };
+
+        let paths = collect_watch_paths(&args, false).expect("collect paths");
+        assert!(paths.contains(&config));
+        assert!(paths.contains(&trace));
+        assert!(paths.contains(&baseline));
+    }
+
+    #[test]
+    fn diff_paths_detects_same_length_change_via_content_hash() {
+        let mut prev = BTreeMap::new();
+        prev.insert(
+            PathBuf::from("coarse.txt"),
+            FileSnapshot {
+                exists: true,
+                len: Some(3),
+                modified: None,
+                content_hash: Some(1),
+            },
+        );
+        let mut curr = BTreeMap::new();
+        curr.insert(
+            PathBuf::from("coarse.txt"),
+            FileSnapshot {
+                exists: true,
+                len: Some(3),
+                modified: None,
+                content_hash: Some(2),
+            },
+        );
+
+        let changed = diff_paths(&prev, &curr);
+        assert_eq!(changed, vec![PathBuf::from("coarse.txt")]);
+    }
+
+    #[test]
+    fn snapshot_paths_hashes_small_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("small.yaml");
+        fs::write(&file, "abc").expect("write file");
+
+        let snapshot = snapshot_paths(std::slice::from_ref(&file));
+        let state = snapshot.get(&file).expect("snapshot for file");
+        assert!(state.exists);
+        assert_eq!(state.len, Some(3));
+        assert!(state.content_hash.is_some());
+    }
+
+    #[test]
+    fn snapshot_paths_skips_hash_for_large_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("large.jsonl");
+        let data = vec![b'x'; (MAX_SNAPSHOT_HASH_BYTES as usize) + 1];
+        fs::write(&file, data).expect("write file");
+
+        let snapshot = snapshot_paths(std::slice::from_ref(&file));
+        let state = snapshot.get(&file).expect("snapshot for file");
+        assert!(state.exists);
+        assert!(state.content_hash.is_none());
     }
 }
