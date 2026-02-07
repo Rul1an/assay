@@ -28,7 +28,7 @@ An **evidence bundle** is a tamper-evident package containing:
 
 ```bash
 # Create bundle
-assay evidence export --out bundle.tar.gz
+assay evidence export --profile assay-profile.yaml --out bundle.tar.gz
 
 # Verify integrity
 assay evidence verify bundle.tar.gz
@@ -98,25 +98,19 @@ Each line is a self-contained event:
 Export your session from [MCP Inspector](https://github.com/modelcontextprotocol/inspector), then import:
 
 ```bash
-assay import --format mcp-inspector session.json --init
+assay import --format inspector session.json --out-trace traces/session.jsonl
 ```
 
 This creates:
-- `traces/session-YYYY-MM-DD.jsonl` — The normalized trace
-- `mcp-eval.yaml` — Test configuration
-- `policies/default.yaml` — Policy template
+- `traces/session.jsonl` — The normalized trace
+
+If you use `--init`, the current implementation still scaffolds legacy `mcp-eval.yaml`.
 
 ### From Other Formats
 
 ```bash
 # Raw JSON-RPC messages
 assay import --format jsonrpc messages.json
-
-# LangChain traces (coming soon)
-assay import --format langchain run.json
-
-# LlamaIndex traces (coming soon)
-assay import --format llamaindex trace.json
 ```
 
 ### Manual Creation
@@ -145,7 +139,7 @@ your-project/
 │       └── session-002.jsonl
 ├── traces/               # Your golden traces (commit these)
 │   └── golden.jsonl
-└── mcp-eval.yaml
+└── eval.yaml
 ```
 
 **Best practice:** Keep "golden" traces in a `traces/` folder at your repo root and commit them to Git. These are your baseline for regression testing.
@@ -171,30 +165,29 @@ If the underlying trace changes, the cache invalidates and tests re-run. This en
 
 ```bash
 # List all tools in a trace
-assay inspect --trace traces/golden.jsonl --tools
+awk -F'"' '/"tool"/ {print $4}' traces/golden.jsonl | sort | uniq -c
 
 # Output:
-# Tools found:
-#   - get_customer (5 calls)
-#   - update_customer (2 calls)
-#   - send_email (1 call)
+#   5 get_customer
+#   2 update_customer
+#   1 send_email
 ```
 
 ### Validate a Trace
 
 ```bash
 # Check trace format is valid
-assay validate --trace traces/golden.jsonl
+assay trace verify --trace traces/golden.jsonl --config eval.yaml
 
 # Output:
-# ✅ Trace valid: 8 events, 4 tool calls
+# ✅ Trace verifies against config coverage
 ```
 
 ### Compare Traces
 
 ```bash
 # Diff two traces
-assay diff --baseline traces/v1.jsonl --candidate traces/v2.jsonl
+diff -u traces/v1.jsonl traces/v2.jsonl
 
 # Output:
 # + Added: delete_customer (1 call)

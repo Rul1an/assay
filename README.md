@@ -44,7 +44,7 @@ assay validate --config eval.yaml --trace-file trace.jsonl
 
 ```bash
 # Import trace
-assay import --format inspector session.json --init
+assay import --format inspector session.json --out-trace traces/session.jsonl
 
 # Run tests
 assay run --config eval.yaml --trace-file traces/session.jsonl
@@ -56,7 +56,7 @@ assay run --config eval.yaml --trace-file traces/session.jsonl
 
 | Command | What it does |
 |---------|-------------|
-| `assay run` | Execute test suite against trace file. SARIF, JUnit, JSON output. |
+| `assay run` | Execute test suite against trace file and write `run.json`/`summary.json`. |
 | `assay ci` | CI-mode run. Adds `--sarif`, `--junit`, `--pr-comment` outputs. |
 | `assay validate` | Stateless policy check. Text, JSON, or SARIF output. |
 | `assay replay` | Replay from a self-contained bundle (offline, hermetic). |
@@ -87,7 +87,7 @@ assay run --config eval.yaml --trace-file traces/session.jsonl
 
 | Command | What it does |
 |---------|-------------|
-| `assay mcp-server` | MCP proxy with policy enforcement (JSON-RPC over stdio). |
+| `assay mcp wrap` | Wrap an MCP process with policy enforcement (JSON-RPC over stdio). |
 | `assay sandbox` | Landlock sandbox execution (Linux, rootless). |
 | `assay monitor` | eBPF/LSM runtime enforcement (Linux, requires capabilities). |
 

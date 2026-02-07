@@ -29,7 +29,7 @@ assay init --ci
 ### 3. Import from MCP Inspector
 
 ```bash
-assay import --format inspector session.json --init
+assay import --format inspector session.json --out-trace trace.jsonl
 ```
 
 ### 4. Run your first test

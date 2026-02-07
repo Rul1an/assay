@@ -48,7 +48,7 @@ All commands defined in `crates/assay-cli/src/cli/args.rs`, dispatched in `crate
 | `assay evidence diff` | Verified-only bundle comparison | `commands/evidence/diff.rs` |
 | `assay evidence explore` | Read-only TUI explorer | `commands/evidence/explore.rs` |
 | `assay evidence export` | Export evidence bundles | `commands/evidence.rs` |
-| `assay mcp-server` | MCP proxy with policy enforcement | `assay-mcp-server/src/main.rs` |
+| `assay mcp wrap` | Wrap MCP process with policy enforcement | `commands/mcp.rs` |
 | `assay monitor` | eBPF runtime monitoring (Linux) | `commands/monitor.rs` |
 | `assay sandbox` | Landlock sandbox execution | `commands/sandbox.rs` |
 | `assay doctor` | Diagnostic tool | `commands/doctor.rs` |

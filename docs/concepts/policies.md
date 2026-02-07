@@ -220,10 +220,10 @@ arguments:
 
 ## Using Policies in Tests
 
-Reference policies in your `mcp-eval.yaml`:
+Reference policies in your `eval.yaml`:
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 version: "1"
 suite: my-agent
 
@@ -435,5 +435,5 @@ git commit -m "Tighten discount limit to 30%"
 ## See Also
 
 - [args_valid Metric](../metrics/args-valid.md)
-- [Sequence Rules](../config/sequences.md)
-- [Migration Guide](../config/migration.md)
+- [Sequence Rules](../reference/config/sequences.md)
+- [Migration Guide](../reference/config/migration.md)

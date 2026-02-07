@@ -70,7 +70,7 @@ jobs:
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          assay run --policy policy.yaml -- pytest tests/
+          assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Verify evidence
         uses: Rul1an/assay/assay-action@v2
@@ -306,7 +306,7 @@ jobs:
       - name: Run tests
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
-          assay run --policy policy.yaml -- pytest
+          assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - uses: Rul1an/assay/assay-action@v2
         with:
@@ -347,7 +347,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run ${{ matrix.suite }} tests
-        run: assay run --policy policy.yaml -- pytest tests/${{ matrix.suite }}
+        run: assay ci --config eval.yaml --trace-file traces/${{ matrix.suite }}.jsonl --strict --junit .assay/reports/${{ matrix.suite }}.junit.xml --sarif .assay/reports/${{ matrix.suite }}.sarif.json
 
       - uses: Rul1an/assay/assay-action@v2
         with:
@@ -380,7 +380,7 @@ jobs:
       - name: Run tests
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
-          assay run --policy policy.yaml -- pytest tests/
+          assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Verify with compliance pack
         uses: Rul1an/assay/assay-action@v2
@@ -415,13 +415,13 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Run tests
-        run: assay run --policy policy.yaml -- pytest tests/
+        run: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 
       - name: Export evidence
-        run: assay evidence export --output evidence.tar.gz
+        run: assay evidence export --profile assay-profile.yaml --out evidence.tar.gz
 
       - name: Lint with pack
-        run: assay evidence lint --pack eu-ai-act-baseline --format sarif --output results.sarif
+        run: assay evidence lint evidence.tar.gz --pack eu-ai-act-baseline --format sarif > results.sarif
         continue-on-error: true
 
       # Assay writes reports (JUnit/SARIF) as "Best Effort".
@@ -446,7 +446,7 @@ The action looks for:
 Generate with:
 
 ```bash
-assay run --policy policy.yaml -- your-test-command
+assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml --sarif .assay/reports/sarif.json
 ```
 
 ### SARIF upload fails

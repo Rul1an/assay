@@ -86,6 +86,22 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 
 ---
 
+## Developer UX/DX Strategy (Feb 2026 Refresh)
+
+Assay execution priorities are now explicitly evaluated against five developer-facing dimensions:
+
+| Dimension | Why it matters for Assay | 2026 Direction |
+|-----------|---------------------------|----------------|
+| Time-to-first-signal | Teams adopt if first value arrives fast | Keep the golden path short (`init` -> trace -> run -> PR signal) |
+| Quality-of-feedback | Red/green alone is not enough for agent systems | Keep reason codes, explainability, and rerun hints as first-class contracts |
+| Workflow fit | Adoption follows existing surfaces | Prioritize CI/PR/SARIF/Security-tab integrations over new standalone UI |
+| Trust & auditability | Security/compliance requires reproducibility | Preserve deterministic outputs, seeds, and evidence bundle integrity |
+| Change resilience | MCP/tools/policies drift over time | Make drift visible with diff/explain flows before it becomes a blocking surprise |
+
+Execution rule: if a proposal does not clearly improve at least one of these dimensions without raising cognitive load, it is deferred.
+
+---
+
 ## Q1 2026: Trust & Telemetry ✅ Complete
 
 **Objective:** Establish Assay as the standard for agent auditability.
@@ -134,6 +150,8 @@ All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp
 | **P1** | Judge Reliability (SOTA E7) | High | High | ✅ Complete (Audit Grade) |
 | **P1** | Progress N/M (E4.3) | Low | High | ✅ Complete (PR #164) |
 | **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
+| **P1** | Golden path (<30 min first signal) | Medium | High | Planned |
+| **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | Planned |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |

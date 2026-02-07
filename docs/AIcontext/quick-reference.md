@@ -14,19 +14,19 @@
 
 ```bash
 # First-time setup
-assay init                    # Generate assay.yaml + policy.yaml
+assay init                    # Generate eval.yaml + policy.yaml
 assay init --ci               # Also generate GitHub workflow
 
 # Validate traces
-assay validate --trace-file traces.jsonl
-assay run --config assay.yaml --trace-file traces.jsonl
+assay validate --config eval.yaml --trace-file traces.jsonl
+assay run --config eval.yaml --trace-file traces.jsonl
 
 # CI gate (strict mode)
-assay ci --config assay.yaml --trace-file traces.jsonl
+assay ci --config eval.yaml --trace-file traces.jsonl
 
 # Debug failures
 assay doctor                  # Diagnose common issues
-assay explain --trace-file traces.jsonl  # Explain violations
+assay explain --trace traces.jsonl --policy policy.yaml  # Explain violations
 ```
 
 ## Exit Codes
@@ -86,7 +86,7 @@ Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safet
 
 | File | Purpose | Created By |
 |------|---------|------------|
-| `assay.yaml` | Main config | `assay init` |
+| `eval.yaml` | Main config | `assay init` |
 | `policy.yaml` | Policy rules | `assay init` |
 | `traces/*.jsonl` | Agent traces | SDK or import |
 | `baseline.json` | Regression baseline | `assay run --export-baseline` |
@@ -110,9 +110,8 @@ Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safet
 # Alternative (CLI only)
 - run: |
     assay ci \
-      --config assay.yaml \
-      --trace traces/ci.jsonl \
-      --output-dir .assay-reports \
+      --config ci-eval.yaml \
+      --trace-file traces/ci.jsonl \
       --junit .assay-reports/junit.xml \
       --sarif .assay-reports/sarif.json
 ```
@@ -217,31 +216,31 @@ assay tool verify tool-signed.yaml --trust-policy trust.yaml
 
 ### Pattern 1: CI Gate
 ```bash
-assay run --config assay.yaml --trace-file traces.jsonl --baseline baseline.json
+assay run --config eval.yaml --trace-file traces.jsonl --baseline baseline.json
 # Exit 0 = merge allowed
 # Exit 1 = block PR
 ```
 
 ### Pattern 2: Learning Mode
 ```bash
-assay record --capture --output profile.json
-assay generate --from-profile profile.json --output policy.yaml
+assay record --output policy.yaml -- your-agent-command
+assay generate -i traces/session.jsonl --output policy.yaml
 ```
 
 ### Pattern 3: Debug Violation
 ```bash
 assay doctor                           # Check setup
-assay explain --trace-file traces.jsonl  # Explain failure
+assay explain --trace traces.jsonl --policy policy.yaml  # Explain failure
 assay coverage --trace-file traces.jsonl # Check coverage
 ```
 
 ### Pattern 4: Baseline Regression
 ```bash
 # On main branch
-assay run --config assay.yaml --export-baseline baseline.json
+assay run --config eval.yaml --export-baseline baseline.json
 
 # On feature branch
-assay run --config assay.yaml --baseline baseline.json
+assay run --config eval.yaml --baseline baseline.json
 ```
 
 ## Crate Responsibilities

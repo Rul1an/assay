@@ -10,7 +10,7 @@ Assay can import agent sessions from various sources:
 
 | Format | Source | Status |
 |--------|--------|--------|
-| `mcp-inspector` | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | ✅ Supported |
+| `inspector` | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | ✅ Supported |
 | `jsonrpc` | Raw JSON-RPC 2.0 messages | ✅ Supported |
 | `langchain` | LangChain traces | 🔜 Coming soon |
 | `llamaindex` | LlamaIndex traces | 🔜 Coming soon |
@@ -30,7 +30,7 @@ The primary format for MCP-based agents.
 ### Import
 
 ```bash
-assay import --format mcp-inspector session.json
+assay import --format inspector session.json
 ```
 
 ### Format Structure
@@ -115,10 +115,13 @@ assay import --format jsonrpc messages.json
 
 Import from LangChain's tracing format.
 
-### Expected Usage
+### Current Status
+
+`assay import` currently supports only `inspector` and `jsonrpc` formats.
+For LangChain traces, convert to JSON-RPC first, then run:
 
 ```bash
-assay import --format langchain langchain_trace.json
+assay import --format jsonrpc converted.json
 ```
 
 ### Format (Preview)
@@ -151,10 +154,13 @@ Currently in development. Track progress at [GitHub Issue #42](https://github.co
 
 Import from LlamaIndex's instrumentation.
 
-### Expected Usage
+### Current Status
+
+`assay import` currently supports only `inspector` and `jsonrpc` formats.
+For LlamaIndex traces, convert to JSON-RPC first, then run:
 
 ```bash
-assay import --format llamaindex llamaindex_trace.json
+assay import --format jsonrpc converted.json
 ```
 
 ### Status
@@ -257,6 +263,6 @@ Check that each call has:
 
 ## See Also
 
-- [assay import](../cli/import.md)
+- [assay import](../reference/cli/import.md)
 - [Traces](../concepts/traces.md)
 - [MCP Quick Start](quickstart.md)

@@ -35,13 +35,11 @@ Assay's CI gate provides:
 
 ```bash
 # Export from MCP Inspector (or your agent framework)
-assay import --format mcp-inspector session.json --init
+assay import --format inspector session.json --out-trace traces/golden.jsonl
 ```
 
 This creates:
-- `traces/session.jsonl` — Your baseline behavior
-- `mcp-eval.yaml` — Test configuration
-- `policies/default.yaml` — Validation rules
+- `traces/golden.jsonl` — Your baseline behavior
 
 ### 2. Add to CI
 
@@ -66,11 +64,12 @@ jobs:
 
       - name: Run Tests
         run: |
-          assay run \
-            --config mcp-eval.yaml \
+          assay ci \
+            --config eval.yaml \
             --trace-file traces/golden.jsonl \
             --strict \
-            --output sarif \
+            --sarif .assay/reports/results.sarif \
+            --junit .assay/reports/junit.xml \
             --db :memory:
 
       - name: Upload Results
@@ -83,7 +82,7 @@ jobs:
 ### 3. Configure Policies
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 version: "1"
 suite: agent-regression
 
@@ -110,11 +109,9 @@ tests:
       - delete_*
       - admin_*
       - debug_*
-
-output:
-  format: [sarif, junit]
-  directory: .assay/reports
 ```
+
+Use `assay ci --sarif ... --junit ...` to choose report output paths in CI.
 
 ---
 
@@ -238,7 +235,7 @@ For the Assay repo, required status checks are: **CI**, **Smoke Install (E2E)**,
 jobs:
   fast-tests:
     # Assay (milliseconds, free)
-    - uses: Rul1an/assay-action@v1
+    - uses: Rul1an/assay/assay-action@v2
 
   slow-tests:
     needs: fast-tests  # Only if fast tests pass
@@ -276,7 +273,7 @@ If jobs take too long:
 
 ```bash
 # Use in-memory mode
-assay run --db :memory:
+assay ci --config eval.yaml --trace-file traces/focused-test.jsonl --db :memory:
 
 # Skip large traces
 --trace-file traces/focused-test.jsonl  # Not the 1000-call log
@@ -287,5 +284,5 @@ assay run --db :memory:
 ## See Also
 
 - [CI Integration](../getting-started/ci-integration.md)
-- [assay run](../cli/run.md)
+- [assay run](../reference/cli/run.md)
 - [Policies](../concepts/policies.md)

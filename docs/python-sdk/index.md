@@ -138,7 +138,7 @@ Returns:
 Use the CLI import command with OpenTelemetry:
 
 ```bash
-assay trace ingest-otel otel-export.json --out traces.jsonl
+assay trace ingest-otel --input otel-export.jsonl --db .eval/eval.db --out-trace traces.jsonl
 ```
 
 Or configure callbacks to write directly to `TraceWriter`.

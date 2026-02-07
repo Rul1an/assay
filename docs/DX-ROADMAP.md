@@ -1,8 +1,9 @@
 # DX Roadmap: P0-P2 Implementation Plan
 
-**Last updated:** 2026-02-06
+**Last updated:** 2026-02-07
 **Scope:** 6 features across 3 priority tiers + DX polish
-**EU AI Act deadline:** August 2, 2026
+**EU AI Act phased dates:** 2025-02-02, 2025-08-02, 2026-08-02
+**Planning assumption:** no stop-clock; roadmap tracks current phased dates.
 
 ---
 
@@ -15,10 +16,26 @@
 | SARIF truncation fix (E2.3) | P0 | Done | #174 |
 | Fork PR fallback (E2.4) | P0 | Already existed | — |
 | `next_step()` mapping (E4.1) | P0 | Already existed | — |
-| `generate --diff` | P1-A | Planned | — |
-| `explain` + compliance hints | P1-B | Planned | — |
-| `doctor --fix` | P2-A | Planned | — |
-| `watch` | P2-B | Planned | — |
+| `generate --diff` | P1-A | In review | #177 |
+| `explain` + compliance hints | P1-B | In review | #179 |
+| `doctor --fix` | P2-A | Done | #184 |
+| `watch` | P2-B | Done | #184 |
+| `watch` hardening (determinism/tests) | P1 | Planned | — |
+| Docs alignment + link guard | DX polish | Done | #184 |
+
+---
+
+## DX Scorecard (Feb 2026 Refresh)
+
+This roadmap now tracks developer experience on five dimensions that reflect how Assay is actually adopted in CI and day-to-day engineering loops.
+
+| Dimension | Current State | Next Concrete Move |
+|-----------|---------------|--------------------|
+| Time-to-first-signal | `init`, `doctor --fix`, `watch` are shipped and documented | Add a guaranteed "hello trace + smoke suite" init path so first useful signal is under 30 minutes |
+| Quality-of-feedback | Exit/reason codes, `run.json`/`summary.json`, doctor/explain flows are in place | Add copy-paste rerun hints and explicit "next best action" snippets in failure paths |
+| Workflow fit | GitHub Action v2, SARIF, PR comments, docs link guard are in place | Ship Action v2.1 compliance-pack support first |
+| Trust & auditability | Deterministic run contracts and evidence outputs exist | Continue replay bundle hardening as cross-team reproducibility surface |
+| Change resilience | `watch` refreshes config-derived targets; `generate --diff` and compliance explain are implemented | Harden contracts and docs/examples parity to prevent drift |
 
 ---
 
@@ -195,7 +212,7 @@ Tests:
 
 ---
 
-## P2 — Planned
+## P2 — Completed
 
 ### P2-A: `doctor --fix` — Self-Healing Setup
 
@@ -219,11 +236,15 @@ Config: eval.yaml
 Applied 2 fix(es). Remaining: 0 error(s).
 ```
 
-Implementation:
-- Add `--fix`, `--yes`, `--dry-run` to `DoctorArgs`
+Implementation (shipped):
+- Added `--fix`, `--yes`, `--dry-run` to `DoctorArgs`
+- Added fast-fail guard: `--yes`/`--dry-run` require `--fix`
 - `run_doctor_fix()` converts diagnostics to fix suggestions via `assay_core::agentic::build_suggestions()`
-- Prompt with `dialoguer` (already a dependency)
-- After applying: re-run validate to show remaining issues
+- Interactive confirmations via `dialoguer` (with `--yes` override)
+- Supports dry-run patch previews (unified diff)
+- Adds automatic trace-file creation fix path for `E_TRACE_MISS`
+- After applying: re-runs doctor diagnostics and reports remaining errors
+- Uses atomic temp-file+rename writes on Unix for parse-fix edits
 
 Fixable diagnostics:
 - `E_CFG_PARSE` with typo -> field rename
@@ -235,9 +256,9 @@ Non-fixable (show hints):
 - Performance -> suggest `--incremental`
 
 Tests:
-- `doctor_fix_typo_correction`
-- `doctor_fix_dry_run_no_writes`
-- `doctor_fix_creates_missing_trace`
+- `doctor_fix_yes_creates_missing_trace_file` ✅
+- `doctor_fix_dry_run_does_not_write_trace_file` ✅
+- `doctor_yes_without_fix_fails_fast` ✅
 
 ### P2-B: `watch` — Live Feedback Loop
 
@@ -261,17 +282,20 @@ Result: 11/12 passed
 [14:32:15] Waiting for changes...
 ```
 
-Implementation:
-- New dependency: `notify = { version = "7", optional = true }` behind `watch` feature flag
-- New `WatchArgs` struct with `--config`, `--trace-file`, `--baseline`, `--clear`, `--debounce-ms`
-- Watch loop: `notify` watcher -> debounce -> re-run suite
-- `collect_watch_paths()` parses config to find policy path
-- Reuses `cmd_run` internally
+Implementation (shipped):
+- Added `WatchArgs` with `--config`, `--trace-file`, `--baseline`, `--db`, `--strict`, `--replay-strict`, `--clear`, `--debounce-ms`
+- Watch loop uses dependency-free polling snapshots + debounce
+- Debounce is clamped to safe bounds (`50..=60000` ms)
+- `collect_watch_paths()` parses config to include policy paths referenced by tests
+- Watch targets are refreshed after reruns when config-derived paths change
+- Reuses `run::run` internally for each rerun
 
 Tests:
-- `collect_watch_paths_includes_policy`
-- `debounce_coalesces_events`
-- Manual testing (file-watching is inherently interactive)
+- `collect_watch_paths_includes_policy` ✅
+- `normalize_debounce_ms_clamps_low_values` ✅
+- `normalize_debounce_ms_clamps_high_values` ✅
+- `normalize_debounce_ms_keeps_in_range_values` ✅
+- Manual testing via `assay watch --help` and local rerun loop ✅
 
 ---
 
@@ -289,7 +313,53 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Recommended order: P0-A -> P0-B -> P1-B -> P1-A -> P2-A -> P2-B
+Current state: P0 and P2 are delivered, and P1-A/P1-B features exist but still require parity/contract hardening.
+
+Recommended order from here: Action v2.1 (P1 slice) -> Golden Path gate -> P1-A/P1-B hardening -> watch hardening.
+
+---
+
+## Next Steps (Roadmap-Aligned)
+
+Priority is based on this DX roadmap plus `/docs/ROADMAP.md` ("GitHub Action v2.1" marked as next):
+
+1. **Finish PR #184 merge and stabilization**
+   - Wait for full green CI and merge.
+   - Keep watch feature scope closed; follow-ups are hardening-only.
+2. **Start ROADMAP-next item: GitHub Action v2.1 (P1 scope first)**
+   - Implement compliance-pack support as a data dependency contract.
+   - Add parity tests for docs/examples commands used in Action docs.
+   - Keep BYOS push/OIDC and attestation as later slices.
+3. **Golden-path hardening: first signal in <30 min**
+   - Extend init flow with a minimal hello-trace fixture and smoke suite template.
+   - Ensure first run produces actionable output (success or controlled failure + next step).
+4. **P1-A/P1-B parity hardening (no feature expansion)**
+   - Lock CLI/help/output contracts and add docs/examples parity checks.
+   - Ensure explain/diff surfaces remain deterministic and reviewer-friendly.
+5. **Watch hardening (existing command)**
+   - Add path-map based trigger comparison and deterministic debounce-loop tests.
+   - Validate Windows coarse mtime behavior and parse-error fallback monitoring.
+6. **Deferred by design (not in #184)**
+   - Native `notify` watcher migration.
+   - Cross-platform atomic-write parity beyond Unix.
+   - Full-repo docs link checks (changed-files guard is now in place).
+
+## Permanent Gates
+
+- Gate A (contract): run/summary/SARIF/JUnit + Action I/O compatibility stays stable by default.
+- Gate B (onboarding): clean-repo -> first actionable signal remains <30 minutes.
+
+## Deliberate Non-Goals (Now)
+
+These items are intentionally **not** implemented in the current slice to keep risk and review scope controlled.
+
+| Item | Decision | Why | Revisit when |
+|------|----------|-----|--------------|
+| Native fs-notify watcher backend | Defer | Polling watcher is stable and dependency-free for P2; notify adds platform-specific edge cases | After deterministic watch-loop tests are in place |
+| Full-repo markdown link checker | Defer | Existing docs contain legacy links; changed-files guard prevents new drift without blocking current delivery | After legacy docs cleanup sprint |
+| Non-Unix atomic write parity for doctor autofix | Defer | Unix path already safe for common CI/dev path; cross-platform parity needs dedicated IO strategy and tests | Before declaring doctor autofix GA on Windows |
+| `watch --once` / CI mode | Defer | Helpful but not required for current developer watch loop | When adding watch integration tests in CI |
+| Dedicated IDE governance surface | Defer | Existing CLI + CI + PR surfaces already cover the core loop; separate IDE control plane adds maintenance and policy UX complexity | After Action v2.1 and drift-aware UX are stable |
 
 ---
 
@@ -310,9 +380,9 @@ Each feature includes a compliance upsell touch point:
 ## Verification Checklist
 
 For each feature:
-- [ ] `cargo build -p assay-cli` compiles
-- [ ] `cargo test -p assay-cli` passes
-- [ ] `cargo clippy -p assay-cli -- -D warnings` clean
-- [ ] Help text updated (`--help` shows new flags)
+- [x] `cargo build -p assay-cli` compiles
+- [x] `cargo test -p assay-cli` passes
+- [x] `cargo clippy -p assay-cli -- -D warnings` clean
+- [x] Help text updated (`--help` shows new flags)
 - [ ] Conversion hook present in at least 1 output path
-- [ ] No new dependencies without `optional = true` (except P2-B: `notify`)
+- [x] No new dependencies added for P2 watcher implementation

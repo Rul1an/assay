@@ -23,7 +23,7 @@ assay/                         # Version 2.16.0
 │   ├── assay-ebpf/            # eBPF programs
 │   └── assay-sim/             # Attack simulation
 ├── assay-python-sdk/          # Python SDK
-├── assay-action/              # GitHub Action (legacy, see below)
+├── assay-action/              # GitHub Action implementation (action.yml)
 ├── docs/                      # Documentation
 │   ├── architecture/          # ADRs and architecture docs
 │   └── AIcontext/             # This directory
@@ -31,19 +31,18 @@ assay/                         # Version 2.16.0
 ├── tests/                     # Integration tests
 └── .github/workflows/         # CI/CD workflows
 
-## GitHub Action (Separate Repository)
+## GitHub Action
 
 **Repository:** https://github.com/Rul1an/assay/tree/main/assay-action
 
-The GitHub Action is maintained in a separate repository for GitHub Marketplace publication.
+The GitHub Action lives in this monorepo under `assay-action/` and is referenced from workflows as:
 
 **Usage:**
 ```yaml
 - uses: Rul1an/assay/assay-action@v2
 ```
 
-**Note:** The `assay-action/` directory in this monorepo is legacy and redirects to the separate repository.
-```
+**Note:** The `assay-action/action.yml` file in this repository is the source action definition.
 
 ## Core Crate (`assay-core`)
 

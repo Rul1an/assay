@@ -1,6 +1,6 @@
 # Self-Correcting Agents
 
-Build agents that validate and fix their own actions using Assay's MCP server.
+Build agents that validate and fix their own actions using Assay's MCP wrapper.
 
 ---
 
@@ -21,7 +21,7 @@ This eliminates runtime errors from invalid tool calls.
 ### 1. Start the Server
 
 ```bash
-assay mcp-server --policy policies/ --port 3001
+assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 ```
 
 ### 2. Call from Your Agent
@@ -171,7 +171,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "assay": {
       "command": "assay",
-      "args": ["mcp-server", "--policy", "/path/to/policies"]
+      "args": ["mcp", "wrap", "--policy", "assay.yaml", "--", "/path/to/real-mcp-server"]
     }
   }
 }
@@ -184,7 +184,7 @@ from anthropic import Anthropic
 import json
 
 client = Anthropic()
-mcp_session = MCPSession("localhost:3001")
+mcp_session = MCPSession()  # Connect using your MCP client's stdio/transport config
 
 async def safe_execute(tool_name: str, args: dict) -> dict:
     """Execute a tool with automatic self-correction."""
@@ -312,28 +312,20 @@ High correction rates indicate:
 ### Verbose Server Logging
 
 ```bash
-assay mcp-server --policy policies/ --log-level debug
+assay mcp wrap --policy assay.yaml --verbose --dry-run -- <real-mcp-command> [args...]
 ```
 
 ### Test Policies Manually
 
 ```bash
-# Simulate a check
-curl -X POST http://localhost:3001/tools/call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "assay_check_args",
-    "arguments": {
-      "target_tool": "apply_discount",
-      "args": {"percent": 50}
-    }
-  }'
+# Validate a recorded trace against policy
+assay validate --config eval.yaml --trace-file traces/session.jsonl
 ```
 
 ---
 
 ## See Also
 
-- [assay mcp-server](../cli/mcp-server.md)
+- [MCP Runtime Commands](../reference/cli/mcp-server.md)
 - [Self-Correction Use Case](../use-cases/self-correction.md)
 - [Policies](../concepts/policies.md)

@@ -1,6 +1,6 @@
 # assay run
 
-Run tests against traces. The primary command for CI/CD pipelines.
+Execute a test suite against traces and write run artifacts.
 
 ---
 
@@ -12,257 +12,82 @@ assay run [OPTIONS]
 
 ---
 
-## Description
-
-Runs all tests defined in your configuration file against the specified trace(s). Console output: a start line "Running N tests...", then during the run throttled progress lines "Running test X/N..." (final N/N always; no N/M when 0 or 1 tests), then per-test results and summary. This is the main command for:
-
-- CI/CD regression gates
-- Local development testing
-- Baseline comparison
-
----
-
-## Options
-
-### Required
+## Common Options
 
 | Option | Description |
 |--------|-------------|
-| `--config`, `-c` | Path to mcp-eval.yaml (default: `mcp-eval.yaml`) |
+| `--config <PATH>` | Config file (default: `eval.yaml`) |
+| `--db <PATH>` | SQLite DB path (default: `.eval/eval.db`) |
+| `--trace-file <PATH>` | Trace file source for replay/validation |
+| `--strict` | Treat blocking results as failing exit status |
+| `--replay-strict` | Enforce strict replay semantics from trace input |
+| `--baseline <PATH>` | Compare against existing baseline |
+| `--export-baseline <PATH>` | Export baseline from current run |
+| `--no-cache` | Disable cache usage for this run |
+| `--refresh-cache` | Ignore incremental cache and re-run |
+| `--incremental` | Skip passing tests with unchanged fingerprints |
+| `--rerun-failures <N>` | Retry failed tests up to N times |
+| `--exit-codes <v1\|v2>` | Exit-code compatibility mode (default: `v2`) |
 
-### Trace Selection
-
-| Option | Description |
-|--------|-------------|
-| `--trace-file`, `-t` | Path to specific trace file |
-| `--trace-dir` | Directory containing trace files (runs all) |
-
-### Execution Mode
-
-| Option | Description |
-|--------|-------------|
-| `--strict` | Fail on any violation (default for CI) |
-| `--lenient` | Report violations but don't fail |
-| `--no-cache` | Skip cache, always re-run tests |
-| `--db` | Database path (use `:memory:` for in-memory) |
-
-### Output
-
-| Option | Description |
-|--------|-------------|
-| `--output`, `-o` | Output format: `sarif`, `junit`, `json`, `text` |
-| `--output-dir` | Directory for output files |
-| `--output-log` | Write detailed log to file |
-| `--verbose`, `-v` | Enable verbose output |
-| `--quiet`, `-q` | Suppress non-error output |
-
-### Filtering
-
-| Option | Description |
-|--------|-------------|
-| `--test` | Run only specific test(s) by ID |
-| `--metric` | Run only specific metric(s) |
-| `--tool` | Validate only specific tool(s) |
+Judge-related options are available via `--judge`, `--judge-model`, `--judge-samples`, etc.
 
 ---
 
 ## Examples
 
-### Basic Usage
-
 ```bash
-# Run all tests
-assay run --config mcp-eval.yaml
+# Basic run
+assay run --config eval.yaml --trace-file traces/golden.jsonl
 
-# Run with specific trace
-assay run --config mcp-eval.yaml --trace-file traces/golden.jsonl
+# Strict CI-style run
+assay run --config eval.yaml --trace-file traces/golden.jsonl --strict --db :memory:
+
+# Baseline check
+assay run --config eval.yaml --trace-file traces/golden.jsonl --baseline assay-baseline.json
+
+# Export baseline
+assay run --config eval.yaml --trace-file traces/golden.jsonl --export-baseline assay-baseline.json
 ```
 
-### CI Mode
+For dedicated CI report files (SARIF/JUnit/PR comment), use `assay ci`:
 
 ```bash
-# Strict mode with SARIF output
-assay run \
-  --config mcp-eval.yaml \
-  --strict \
-  --output sarif \
-  --db :memory:
-```
-
-### Development Mode
-
-```bash
-# Verbose output for debugging
-assay run --config mcp-eval.yaml --verbose
-
-# Lenient mode for exploration
-assay run --config mcp-eval.yaml --lenient
-```
-
-### Filtered Runs
-
-```bash
-# Run only specific tests
-assay run --config mcp-eval.yaml --test args_valid --test sequence_check
-
-# Validate only specific tools
-assay run --config mcp-eval.yaml --tool apply_discount --tool process_payment
-```
-
-### Multiple Traces
-
-```bash
-# Run against all traces in directory
-assay run --config mcp-eval.yaml --trace-dir traces/
-
-# Run against multiple specific traces
-assay run --config mcp-eval.yaml \
-  --trace-file traces/happy-path.jsonl \
-  --trace-file traces/edge-case.jsonl
+assay ci \
+  --config eval.yaml \
+  --trace-file traces/golden.jsonl \
+  --sarif .assay/reports/sarif.json \
+  --junit .assay/reports/junit.xml
 ```
 
 ---
 
-## Output Formats
+## Outputs
 
-### SARIF (GitHub Code Scanning)
-
-```bash
-assay run --config mcp-eval.yaml --output sarif
-# Creates: .assay/reports/results.sarif
-```
-
-Upload to GitHub:
-
-```yaml
-- uses: github/codeql-action/upload-sarif@v2
-  with:
-    sarif_file: .assay/reports/results.sarif
-```
-
-### JUnit (CI Test Results)
-
-```bash
-assay run --config mcp-eval.yaml --output junit
-# Creates: .assay/reports/junit.xml
-```
-
-This format is compatible with most CI providers (GitHub Actions, GitLab CI, Jenkins) for test reporting/summary.
-Assay ensures `junit.xml` follows the schema expected by `dorny/test-reporter` and standard parsers.
-Contract path: `.assay/reports/junit.xml` is the canonical location for automated pickup.
-
-### JSON (Programmatic)
-
-```bash
-assay run --config mcp-eval.yaml --output json
-# Creates: .assay/reports/results.json
-```
-
-### Text (Human-Readable)
-
-```bash
-assay run --config mcp-eval.yaml --output text
-
-# Output:
-# Assay v0.8.0 — Zero-Flake CI for AI Agents
-#
-# ┌───────────────────┬────────┬─────────────────────────┐
-# │ Test              │ Status │ Details                 │
-# ├───────────────────┼────────┼─────────────────────────┤
-# │ args_valid        │ ✅ PASS │ 47/47 calls valid       │
-# │ sequence_valid    │ ✅ PASS │ All rules satisfied     │
-# │ tool_blocklist    │ ✅ PASS │ No blocked tools called │
-# └───────────────────┴────────┴─────────────────────────┘
-#
-# Total: 3ms | 3 passed, 0 failed
-```
+`assay run` writes:
+- `run.json` (exit/status/reason metadata)
+- `summary.json` (machine-readable summary including seeds and optional judge metrics)
+- Console summary + footer
 
 ---
 
 ## Exit Codes
 
-Exit codes are **coarse** and intended for transport (e.g. CI pass/fail). For precise machine semantics, use `reason_code` and `reason_code_version` in `run.json` or `summary.json`.
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Test failure / policy failure |
+| `2` | Configuration or input error |
+| `3` | Infrastructure/judge/provider error |
+| `4` | Would block (sandbox/policy) |
 
-| Code | Meaning | CI Behavior |
-|------|---------|-------------|
-| 0 | All tests passed | Build succeeds |
-| 1 | One or more tests failed | Build fails |
-| 2 | Configuration / user error (e.g. missing trace, invalid config) | Build fails |
-| 3 | Infrastructure / judge unavailable (e.g. API down, rate limit) | Build fails |
-
-**Exit codes are transport; reason_code is semantics.** Downstream automation MUST branch on `(reason_code_version, reason_code)`; exit code is only coarse bucketing.
-
-### Reason codes
-
-When exit code ≠ 0, `run.json` and `summary.json` include a stable `reason_code` (e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`, `E_CFG_PARSE`) and `reason_code_version` (currently `1`). The full registry is in [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md) §5 and [Troubleshooting](../guides/troubleshooting.md). Use these for programmatic branching instead of exit code alone.
-
-### Compatibility (v1 vs v2)
-
-Default behaviour uses **v2** exit mapping. Legacy scripts that relied on the old mapping can use compatibility mode:
-
-- **CLI:** `--exit-codes=v1` or `--exit-codes=v2` (default)
-- **Environment:** `ASSAY_EXIT_CODES=v1` or `ASSAY_EXIT_CODES=v2`
-
-| Scenario | v1 (legacy) | v2 (default) |
-|----------|-------------|--------------|
-| Trace file not found | exit 3 | exit 2, reason_code `E_TRACE_NOT_FOUND` |
-| Judge/API unavailable | exit 3 | exit 3, reason_code `E_JUDGE_UNAVAILABLE` (etc.) |
-| Config/parse error | exit 2 | exit 2, reason_code `E_CFG_PARSE` (etc.) |
-| Test failure | exit 1 | exit 1, reason_code `E_TEST_FAILED` (etc.) |
-
-Exit code semantics and the reason code registry are defined in [ADR-019 PR Gate 2026 SOTA](../../architecture/ADR-019-PR-Gate-2026-SOTA.md) and [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md).
-
----
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `ASSAY_CONFIG` | Default config file if `--config` not specified |
-| `ASSAY_DB` | Default database path |
-| `ASSAY_EXIT_CODES` | Exit code mapping: `v1` (legacy) or `v2` (default). See [Compatibility](#compatibility-v1-vs-v2) above. |
-| `NO_COLOR` | Disable colored output |
-
----
-
-## GitHub Actions Example
-
-```yaml
-name: Agent Quality Gate
-
-on: [push, pull_request]
-
-jobs:
-  assay:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Assay
-        run: cargo install assay
-
-      - name: Run Tests
-        run: |
-          assay run \
-            --config mcp-eval.yaml \
-            --trace-file traces/golden.jsonl \
-            --strict \
-            --output sarif \
-            --db :memory:
-
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: .assay/reports/results.sarif
-```
+For automation, branch on `reason_code` + `reason_code_version` in `run.json` / `summary.json`.
 
 ---
 
 ## See Also
 
+- [CI Integration](../../getting-started/ci-integration.md)
 - [assay import](import.md)
-- [Configuration](../config/index.md)
-- [CI Integration](../getting-started/ci-integration.md)
-- [Troubleshooting](../guides/troubleshooting.md) — Exit 2 vs 3, reason codes, common errors
-- [SPEC-PR-Gate-Outputs-v1](../../architecture/SPEC-PR-Gate-Outputs-v1.md) — Reason code registry and output contracts
+- [assay replay](replay.md)
+- [Configuration Reference](../config/index.md)
+- [Troubleshooting](../../guides/troubleshooting.md)

@@ -47,7 +47,7 @@ You'll get a file like `session.json`:
 ## Step 2: Import into Assay
 
 ```bash
-assay import --format mcp-inspector session.json --init
+assay import --format inspector session.json --out-trace traces/session.jsonl
 ```
 
 Output:
@@ -56,23 +56,19 @@ Imported 12 tool calls from session.json
 Discovered 3 unique tools: get_customer, update_customer, send_email
 
 Created:
-  traces/session-2025-12-27.jsonl
-  mcp-eval.yaml
-  policies/default.yaml
+  traces/session.jsonl
 
 Next steps:
-  1. Review policies/default.yaml
-  2. Run: assay run --config mcp-eval.yaml
+  1. Run: assay run --config eval.yaml --trace-file traces/session.jsonl
+  2. Optional: scaffold policy/config with assay init --from-trace traces/session.jsonl
 ```
-
-The `--init` flag auto-generates everything you need.
 
 ---
 
 ## Step 3: Review the Generated Config
 
 ```yaml
-# mcp-eval.yaml (auto-generated)
+# eval.yaml (auto-generated)
 version: "1"
 suite: mcp-basics
 
@@ -129,7 +125,7 @@ tools:
 ## Step 5: Run Tests
 
 ```bash
-assay run --config mcp-eval.yaml
+assay run --config eval.yaml
 ```
 
 Output:
@@ -156,7 +152,7 @@ Total: 2ms | 2 passed, 0 failed
 Ensure tools are called in the correct order:
 
 ```yaml
-# mcp-eval.yaml (add this test)
+# eval.yaml (add this test)
 tests:
   # ... existing tests ...
 
@@ -187,14 +183,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Rul1an/assay-action@v1
         with:
-          config: mcp-eval.yaml
+          config: eval.yaml
 ```
 
 ---
 
 ## Complete Example
 
-Here's a full `mcp-eval.yaml` for a customer service agent:
+Here's a full `eval.yaml` for a customer service agent:
 
 ```yaml
 version: "1"
@@ -241,7 +237,7 @@ output:
 
 ## Troubleshooting
 
-### "Unknown format: mcp-inspector"
+### "Unknown format: inspector"
 
 Update to the latest Assay version:
 
@@ -307,7 +303,7 @@ The `id` field equals `use_id` (content-addressed), enabling deduplication on re
 
 ## Next Steps
 
-- [Sequence Rules DSL](../config/sequences.md) — Advanced ordering constraints
+- [Sequence Rules DSL](../reference/config/sequences.md) — Advanced ordering constraints
 - [Assay MCP Server](server.md) — Runtime validation for agents
 - [CI Integration](../getting-started/ci-integration.md) — GitHub Actions, GitLab, Azure
 - [Mandates Concept](../concepts/mandates.md) — User authorization for AI agents
@@ -319,9 +315,9 @@ The `id` field equals `use_id` (content-addressed), enabling deduplication on re
 | Step | Time |
 |------|------|
 | Export from MCP Inspector | 1 min |
-| `assay import --init` | 10 sec |
-| Review config | 2 min |
-| `assay run` | 3 sec |
+| `assay import --out-trace traces/session.jsonl` | 10 sec |
+| `assay init --from-trace traces/session.jsonl` (optional) | 2 min |
+| `assay run --config eval.yaml --trace-file traces/session.jsonl` | 3 sec |
 | Add to CI | 5 min |
 | **Total** | **~8 min** |
 

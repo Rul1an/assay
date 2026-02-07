@@ -1,10 +1,191 @@
 # DX Implementation Plan — Default Gate Readiness
 
-**Status:** Draft (updated after sanity check Jan 2026)
-**Date:** 2026-01
+**Status:** Living plan (updated after PR #184 implementation pass)
+**Date:** 2026-02
 **Source:** Critical DX review of [DX-REVIEW-MATERIALS.md](DX-REVIEW-MATERIALS.md); aligns with [ADR-019 PR Gate 2026 SOTA](architecture/ADR-019-PR-Gate-2026-SOTA.md) and [ROADMAP](ROADMAP.md). Aangepast na SOTA/DX reality check: technische correcties (GitHub Actions ref, SARIF limits, exit-codes compat), P0 Go/No-Go checklist, scope trims (E6a/E6b, cost guardrails, scrubbing deny-by-default). Score na aanpassingen: 9.7/10.
 
 This document turns the DX review into a concrete backlog with **per-file patchlist** and test cases. Work is ordered P0 (must-have before default gate) then P1 (SOTA).
+
+---
+
+## P0/P1 Epic Execution Summary
+
+Compact execution view for all P0/P1 workstreams.
+
+| Epic | Priority | Status | Outcome |
+|------|----------|--------|---------|
+| EP0-1 Blessed Init + CI Template Contract | P0 | Done | `assay init --ci` paved road + workflow contract |
+| EP0-2 CI Feedback Contracts (JUnit/SARIF/report I/O) | P0 | Done | stable CI outputs, robust reporting behavior |
+| EP0-3 Exit/Reason Contract | P0 | Done | deterministic exit/reason surfaces for automation |
+| EP1-1 GitHub Action v2.1 (compliance-pack first) | P1 | Planned (Next) | Action v2.1 P1 slice on existing PR/CI surfaces |
+| EP1-2 Golden Path (<30m first signal) | P1 | Planned | init bootstrap: hello-trace + smoke suite |
+| EP1-3 Explain + Compliance Hints | P1 | In review | feature delivered; parity/contract hardening pending |
+| EP1-4 Drift Visibility (`generate --diff`) | P1 | In review | feature delivered; parity/contract hardening pending |
+| EP1-5 Watch Determinism Hardening | P1 | Planned (Hardening-only) | existing watch behavior hardened for determinism/edge cases |
+| EP1-6 Privacy-safe Observability Defaults | P1 | Planned | redaction/cardinality defaults and tests |
+| EP1-7 MCP Auth Hardening (E6a hard scope) | P1 | Planned | OAuth/JWT/JWKS no-pass-through baseline |
+| EP1-8 Replay Bundle Hardening | P1 | Planned | reproducible evidence bundle + manifest discipline |
+
+Recommended sequence:
+1. EP1-1 GitHub Action v2.1 (compliance-pack support).
+2. EP1-2 Golden Path (<30m first signal).
+3. EP1-3 + EP1-4 parity hardening (docs/examples/contract tests; no feature expansion).
+4. EP1-5 Watch hardening (determinism + Windows/file edge cases + loop tests).
+5. EP1-6/EP1-7/EP1-8 parallel where capacity allows.
+
+Explicit deferred boundaries:
+- no native notify watcher backend now;
+- no full-repo docs link checker as hard CI gate;
+- no non-Unix atomic-write parity expansion in this slice;
+- no dedicated IDE governance control-plane in this phase.
+
+## No-Regression Gates (Permanent)
+
+Gate A (contract stability):
+- `run.json` / `summary.json` contracts, SARIF/JUnit outputs, and GitHub Action I/O remain backward-compatible by default.
+
+Gate B (onboarding velocity):
+- clean repo -> first actionable Assay signal remains under 30 minutes on documented golden path.
+
+Any P1 epic that violates A or B must either:
+- include an explicit migration plan, or
+- be split so contract/onboarding stability lands first.
+
+## P1 DX Contract Surfaces
+
+Per epic we define what is normative (stable contract) versus best-effort (implementation detail).
+
+### EP1-1 Action v2.1 (compliance-pack first)
+- Normative:
+  - compliance-pack resolution behavior and logged resolved pack reference.
+  - distinct failure modes: missing pack vs invalid pack vs lint/policy fail.
+  - output parity across Action surfaces (summary/SARIF/JUnit).
+- Best effort:
+  - internal caching strategy for pack resolution.
+  - non-contractual log phrasing.
+
+### EP1-2 Golden Path (<30m first signal)
+- Normative:
+  - documented bootstrap flow must produce an actionable first signal.
+  - generated scaffold commands in docs must execute as written.
+  - regression gate enforces onboarding time budget.
+- Best effort:
+  - exact sample fixture contents.
+  - cosmetic scaffold formatting.
+
+### EP1-3 Explain + Compliance Hints (in review)
+- Normative:
+  - `--compliance-pack` behavior and compatibility with non-pack mode.
+  - article hint + coverage summary field presence in supported output modes.
+  - failure output includes concrete next-action guidance.
+- Best effort:
+  - wording of explanatory prose.
+  - ordering of non-contractual detail lines.
+
+### EP1-4 Drift Visibility (`generate --diff`) (in review)
+- Normative:
+  - stable added/removed/changed semantics for drift output.
+  - deterministic diff output for identical inputs.
+  - `--diff` does not alter existing write semantics without explicit write flags.
+- Best effort:
+  - pretty-print formatting and grouping style.
+  - optional metadata lines.
+
+### EP1-5 Watch hardening (existing command, hardening only)
+- Normative:
+  - debounce clamp range and trigger-coalescing behavior.
+  - watch-loop exit semantics (loop lifecycle vs run result logging).
+  - config parse failure fallback: keep watching at least config/trace/baseline.
+- Best effort:
+  - polling interval tuning.
+  - filesystem timestamp granularity handling nuances.
+
+### EP1-6 Privacy-safe observability defaults
+- Normative:
+  - safe-by-default redaction and cardinality guardrails are on by default.
+  - unsafe raw prompt/body exposure requires explicit opt-in configuration.
+  - default exports do not leak prompt/response bodies.
+- Best effort:
+  - exact redaction text tokenization strategy.
+  - non-contractual telemetry attribute ordering.
+
+### EP1-7 MCP auth hardening (E6a)
+- Normative:
+  - RFC 8707 resource/audience constraints enforced.
+  - JWT alg/typ/crit validation and JWKS rotation behavior enforced.
+  - no-pass-through token behavior enforced.
+- Interop matrix (required):
+  - JWKS rotation / kid miss.
+  - alg confusion + typ/crit rejection.
+  - audience/resource mismatch handling.
+- Best effort:
+  - cache refresh cadence internals.
+  - diagnostics verbosity.
+
+### EP1-8 Replay bundle hardening
+- Normative:
+  - verify/scrub defaults are safe and on by default.
+  - bundle manifest captures deterministic replay-critical metadata.
+  - unsafe/raw capture paths require explicit opt-in.
+- Best effort:
+  - archive layout details that do not affect verification/replay contract.
+  - optional manifest annotation fields.
+
+---
+
+## Progress Update (2026-02-07)
+
+Recent implementation state (PR #184, follow-up commits on branch):
+
+- **Delivered (P2):**
+  - `assay doctor --fix` with `--yes` / `--dry-run` safety guards and post-apply re-validation.
+  - `assay watch` with config-derived watch targets, debounce clamp, and refreshed targets after reruns.
+  - E2E tests for doctor fix flow and unit tests for watch path/debounce behavior.
+- **Delivered (DX polish):**
+  - Docs aligned to current CLI behavior (`assay ci`, `assay mcp wrap`, `--out-trace`).
+  - Added changed-files local markdown link check workflow (`Docs Link Check`) to prevent new docs drift.
+- **Deferred on purpose (tracked as follow-up):**
+  - Native notify-based watcher migration.
+  - Cross-platform atomic-write parity beyond Unix.
+  - Full-repo (legacy-inclusive) docs link validation in CI.
+
+Roadmap-aligned next execution order from here:
+1. Finish merge/stabilization of PR #184.
+2. Start `docs/ROADMAP.md` next major milestone: **GitHub Action v2.1** (P1 slice: compliance pack support).
+3. Add "first signal <30 minutes" golden-path hardening (`init` hello-trace fixture + smoke suite template).
+4. Close EP1-3/EP1-4 as parity hardening only (contract tests + docs/examples parity; no feature expansion).
+5. Implement EP1-5 watch hardening follow-up (determinism + Windows timestamp edge cases + loop tests).
+6. Re-evaluate deferred items once the above tracks are stable.
+
+Explicit "do not implement now" decisions:
+- Do not migrate to a native notify watcher yet (keep dependency-free polling in place).
+- Do not switch to full-repo docs link validation yet (keep changed-files guard).
+- Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
+- Do not add a dedicated IDE governance control plane yet (focus on CLI/CI/PR surfaces first).
+
+EU AI Act date anchors used in this plan:
+- 2025-02-02: first phased obligations active.
+- 2025-08-02: GPAI-focused obligations active.
+- 2026-08-02: broader obligations active.
+
+## DX North Star (2026)
+
+Use this scorecard as a gate for roadmap choices. If a new item does not clearly improve at least one dimension below, it is de-prioritized.
+
+| Dimension | Practical Target | Current Baseline | Planned Work |
+|-----------|------------------|------------------|--------------|
+| Time-to-first-signal | First actionable result in <30 min | Good docs and commands, but no guaranteed hello-trace bootstrap | Golden-path hardening in init/templates |
+| Quality-of-feedback | Every failure routes to a next action | Reason codes + doctor/explain exist | Add explicit rerun/next-action hints in outputs and PR surfaces |
+| Workflow fit | Native PR/CI/Security integration | Action v2 + SARIF + PR comments already in place | Action v2.1 compliance-pack support first |
+| Trust & auditability | Reproducible and shareable evidence | Deterministic outputs and reason-code contracts exist | Replay bundle hardening and stronger manifest usage |
+| Change resilience | Drift visible before breakage | Watch refresh and docs alignment are in place | `generate --diff` + drift-aware explain output |
+
+### Execution Filters
+
+- Prefer paved-road improvements over adding new interfaces.
+- Keep policy gate decisions deterministic; keep reporting failures non-blocking where possible.
+- Prioritize low-cognitive-load defaults (self-service templates over manual config work).
+- Treat SARIF, run/summary JSON, and Action inputs/outputs as compatibility contracts.
 
 ---
 
@@ -48,12 +229,14 @@ De onderstaande epics groeperen het DX-plan in uitvoerbare eenheden. Per epic: *
 | E1.1 | Template v2: `assay init --ci` genereert `.github/workflows/assay.yml` met `Rul1an/assay/assay-action@v2` (moving major tag) of exact tag/SHA; geen v1-referentie | P0 | §1.1 |
 | E1.2 | Blessed entrypoint: documenteer `assay init --ci` als blessed, `assay init-ci` als alias | P0 | §1.2 |
 | E1.3 | One-click DX demo repos: `examples/dx-demo-node`, `examples/dx-demo-python` (minimal app, workflow, baseline, README) | P1 | §1.3 |
+| E1.4 | Golden-path bootstrap: `assay init` genereert optioneel hello-trace fixture + smoke suite voor snelle first signal | P1 | §1.2/§1.3 |
 
 **Acceptance criteria:**
 
 - [ ] `assay init --ci` → `.github/workflows/assay.yml` bevat `assay-action@v2` (golden/contract test).
 - [ ] Docs: init --ci = blessed; init-ci = alias; CI-integration + example repos link.
 - [ ] (P1) CI of smoke: `assay run` in dx-demo-node en dx-demo-python slaagt.
+- [ ] (P1) `assay init` kan een minimale trace + suite scaffolden die lokaal direct een bruikbaar signaal geeft.
 
 ---
 
@@ -69,7 +252,7 @@ De onderstaande epics groeperen het DX-plan in uitvoerbare eenheden. Per epic: *
 
 | ID | Story | Priority | Detail ref |
 |----|-------|----------|------------|
-| E2.1 | JUnit default + blessed snippet: action default `--output junit`; run.md snippet "failures as annotations" + "where is junit.xml" | P0 | §2.1 |
+| E2.1 | JUnit default + blessed snippet: use `assay ci --junit ...`; run.md snippet "failures as annotations" + "where is junit.xml" | P0 | §2.1 |
 | E2.2 | SARIF location invariant: elk result ≥1 location (synthetic fallback); contract test (schema + upload-smoke) | P0 | §2.2 |
 | E2.3 | SARIF limits: truncate + "N results omitted" bij overschrijding GitHub-limits; configureerbaar | P1 | §2.2 |
 | E2.4 | Fork PR: documenteer "geen SARIF/comment, wel job summary"; action al conditioneel | P1 | §2.3 |

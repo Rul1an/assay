@@ -241,7 +241,7 @@ blocklist:
 A test suite typically combines all three:
 
 ```yaml
-# mcp-eval.yaml
+# eval.yaml
 version: "1"
 suite: customer-service-agent
 
@@ -341,7 +341,7 @@ pub fn my_custom_metric(trace: &Trace, config: &Config) -> MetricResult {
 }
 ```
 
-Register in `mcp-eval.yaml`:
+Register in `eval.yaml`:
 
 ```yaml
 tests:
@@ -359,4 +359,4 @@ tests:
 - [sequence_valid Reference](../metrics/sequence-valid.md)
 - [tool_blocklist Reference](../metrics/tool-blocklist.md)
 - [Policies](policies.md)
-- [Sequence Rules DSL](../config/sequences.md)
+- [Sequence Rules DSL](../reference/config/sequences.md)

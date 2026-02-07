@@ -16,7 +16,7 @@ flowchart TD
     start[Developer starts] --> install[Install Assay CLI]
     install --> init[Run assay init]
     init --> detect[Auto-detect project type]
-    detect --> gen[Generate assay.yaml + policy.yaml]
+    detect --> gen[Generate eval.yaml + policy.yaml]
     gen --> capture[Capture traces]
     capture --> validate[Run assay validate]
     validate -->{Pass?}
@@ -30,9 +30,9 @@ flowchart TD
 1. **Install**: `pip install assay` or download binary
 2. **Initialize**: `assay init` - auto-detects project, generates secure defaults
 3. **Capture traces**: Use `AssayClient` or `assay import` to record tool calls
-4. **Validate**: `assay validate --trace-file traces.jsonl`
+4. **Validate**: `assay validate --config eval.yaml --trace-file traces.jsonl`
 5. **Iterate**: Fix agent or adjust policy until validation passes
-6. **CI Integration**: Add `assay run` to CI pipeline
+6. **CI Integration**: Add `assay ci` to CI pipeline
 
 ## Flow 2: CI/CD Regression Gate (Platform Engineer)
 
@@ -85,7 +85,7 @@ jobs:
       - name: Run tests with Assay
         run: |
           curl -fsSL https://getassay.dev/install.sh | sh
-          assay run --policy policy.yaml -- pytest tests/
+          assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
         uses: Rul1an/assay/assay-action@v2
@@ -96,7 +96,7 @@ jobs:
 **Alternative (CLI-only):**
 ```yaml
 - name: Run Assay
-  run: assay run --config assay.yaml --format sarif --sarif assay-results.sarif
+  run: assay ci --config eval.yaml --trace-file traces.jsonl --sarif assay-results.sarif --junit junit.xml
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v4
   with:
@@ -134,7 +134,7 @@ client.record_trace({
 
 2. **CLI Import**:
 ```bash
-assay import --format mcp-inspector session.json --init
+assay import --format inspector session.json --out-trace traces.jsonl
 ```
 
 3. **Pytest Plugin**:
@@ -147,17 +147,16 @@ def test_agent():
 
 **Replay Flow:**
 ```bash
-assay run --config assay.yaml --trace-file traces.jsonl
+assay run --config eval.yaml --trace-file traces.jsonl
 ```
 
 ## Flow 4: Policy Development & Learning Mode (Security Engineer)
 
 ```mermaid
 flowchart TD
-    start[Start Policy Development] --> profile[Capture Profile]
-    profile --> record[assay record --capture]
-    record --> generate[assay generate --from-profile]
-    generate --> policy[Generated policy.yaml]
+    start[Start Policy Development] --> profile[Capture Command Behavior]
+    profile --> record[assay record --output policy.yaml -- command]
+    record --> policy[Generated policy.yaml]
     policy --> review[Review & Refine]
     review --> test[Test with traces]
     test -->{Coverage OK?}
@@ -168,18 +167,18 @@ flowchart TD
 
 **Learning Mode Commands:**
 
-1. **Capture profile**: `assay record --capture --output profile.json`
-2. **Generate policy**: `assay generate --from-profile profile.json --output policy.yaml`
+1. **Capture + generate policy**: `assay record --output policy.yaml -- <your-command>`
+2. **Optional generate from existing trace**: `assay generate -i traces.jsonl --output policy.yaml`
 3. **Review**: Edit generated policy to add custom constraints
-4. **Test**: `assay validate --policy policy.yaml --trace-file traces.jsonl`
+4. **Test**: `assay validate --config eval.yaml --trace-file traces.jsonl`
 5. **Deploy**: Commit policy.yaml to repository
 
 ## Flow 5: Runtime Security (Security Engineer)
 
 ```mermaid
 flowchart TD
-    start[Production Deployment] --> mcp[Start MCP Server]
-    mcp --> proxy[assay mcp-server --policy policies/]
+    start[Production Deployment] --> mcp[Start MCP Wrapper]
+    mcp --> proxy[assay mcp wrap --policy assay.yaml -- command]
     proxy --> agent[Agent connects]
     agent --> toolcall[Agent makes tool call]
     toolcall --> check[Policy check]
@@ -195,7 +194,7 @@ flowchart TD
 
 1. **MCP Server**:
 ```bash
-assay mcp-server --policy policies/ --port 3000
+assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args]
 ```
 
 2. **Kernel Monitor** (Linux only):
@@ -203,11 +202,11 @@ assay mcp-server --policy policies/ --port 3000
 sudo assay monitor --policy policy.yaml --pid <agent-pid>
 ```
 
-3. **Agent Integration**: Agent connects to MCP server instead of direct tool execution
+3. **Agent Integration**: Start your MCP server through `assay mcp wrap` so calls are intercepted before execution
 
 **Tier 1 (Kernel) vs Tier 2 (Userspace):**
 - **Tier 1**: Exact paths, CIDRs, ports → enforced in kernel via eBPF/LSM
-- **Tier 2**: Glob/regex patterns, complex constraints → enforced in userspace (MCP server)
+- **Tier 2**: Glob/regex patterns, complex constraints → enforced in userspace (MCP wrapper/proxy)
 
 ## Flow 6: Baseline Regression Testing (Platform Engineer)
 
@@ -229,12 +228,12 @@ flowchart TD
 
 1. **On main branch**: Export baseline after successful run
 ```bash
-assay run --config assay.yaml --export-baseline baseline.json
+assay run --config eval.yaml --export-baseline baseline.json
 ```
 
 2. **On feature branch**: Compare against baseline
 ```bash
-assay run --config assay.yaml --baseline baseline.json
+assay run --config eval.yaml --baseline baseline.json
 ```
 
 3. **Gate**: If score drops below threshold (default 5%), PR is blocked
@@ -302,8 +301,8 @@ flowchart TD
 
 **MCP Integration Steps:**
 
-1. **Start MCP server**: `assay mcp-server --policy policies/`
-2. **Agent connects**: Agent uses Assay MCP server as proxy
+1. **Start MCP wrapper**: `assay mcp wrap --policy assay.yaml -- <real-mcp-command>`
+2. **Agent connects**: Agent connects through the wrapped MCP process
 3. **Tool calls intercepted**: Assay validates against policy before forwarding
 4. **Audit logging**: All tool calls logged for compliance
 
@@ -325,8 +324,8 @@ flowchart TD
 **Debugging Commands:**
 
 1. **Doctor**: `assay doctor` - Diagnoses common issues
-2. **Explain**: `assay explain --trace-file trace.jsonl` - Explains violations
-3. **Validate**: `assay validate --trace-file trace.jsonl` - Validates traces
+2. **Explain**: `assay explain --trace trace.jsonl --policy policy.yaml` - Explains violations
+3. **Validate**: `assay validate --config eval.yaml --trace-file trace.jsonl` - Validates traces
 4. **Coverage**: `assay coverage --trace-file trace.jsonl` - Shows coverage
 
 ## Flow 10: Migration & Upgrades (Platform Engineer)
@@ -444,10 +443,10 @@ See [CI Infrastructure](ci-infrastructure.md) for detailed documentation.
 | CI integration | Flow 2 | `Rul1an/assay/assay-action@v2` |
 | Recording traces | Flow 3 | `AssayClient` or `assay import` |
 | Policy development | Flow 4 | `assay generate` |
-| Production security | Flow 5 | `assay mcp-server` + `assay monitor` |
+| Production security | Flow 5 | `assay mcp wrap` + `assay monitor` |
 | Regression testing | Flow 6 | `assay run --baseline` |
 | Python development | Flow 7 | Python SDK |
-| MCP integration | Flow 8 | `assay mcp-server` |
+| MCP integration | Flow 8 | `assay mcp wrap` |
 | Debugging | Flow 9 | `assay doctor`, `assay explain` |
 | Upgrading | Flow 10 | `assay migrate` |
 | Evidence & Compliance | Flow 11 | `assay evidence export/verify/lint` |

@@ -27,11 +27,11 @@ This guide covers:
 # Install
 pip install assay
 
-# Import an MCP session (creates config automatically)
-assay import --format mcp-inspector session.json --init
+# Import an MCP session as trace
+assay import --format inspector session.json --out-trace traces/session.jsonl
 
 # Run tests
-assay run --config mcp-eval.yaml
+assay run --config eval.yaml --trace-file traces/session.jsonl
 
 # Add to CI
 # Copy the GitHub Action from ci-integration.md
