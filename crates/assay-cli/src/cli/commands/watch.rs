@@ -7,12 +7,24 @@ use std::time::{Duration, SystemTime};
 
 use crate::cli::args::{JudgeArgs, RunArgs, WatchArgs};
 
+const POLL_INTERVAL_MS: u64 = 250;
+const MIN_DEBOUNCE_MS: u64 = 50;
+const MAX_DEBOUNCE_MS: u64 = 60_000;
+
 pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
     use chrono::Local;
 
     let mut watch_targets = collect_watch_paths(&args, legacy_mode)?;
     if watch_targets.is_empty() {
         anyhow::bail!("no watch targets resolved");
+    }
+
+    let debounce_ms = normalize_debounce_ms(args.debounce_ms);
+    if debounce_ms != args.debounce_ms {
+        eprintln!(
+            "warning: --debounce-ms {} out of range; using {} (allowed: {}..={})",
+            args.debounce_ms, debounce_ms, MIN_DEBOUNCE_MS, MAX_DEBOUNCE_MS
+        );
     }
 
     eprintln!("Watching paths:");
@@ -32,8 +44,8 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
         Local::now().format("%H:%M:%S")
     );
 
-    let poll_interval = Duration::from_millis(250);
-    let debounce = Duration::from_millis(args.debounce_ms);
+    let poll_interval = Duration::from_millis(POLL_INTERVAL_MS);
+    let debounce = Duration::from_millis(debounce_ms);
     let mut state = snapshot_paths(&watch_targets);
 
     loop {
@@ -112,6 +124,10 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+fn normalize_debounce_ms(value: u64) -> u64 {
+    value.clamp(MIN_DEBOUNCE_MS, MAX_DEBOUNCE_MS)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,7 +273,7 @@ pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::collect_watch_paths;
+    use super::{collect_watch_paths, normalize_debounce_ms, MAX_DEBOUNCE_MS, MIN_DEBOUNCE_MS};
     use crate::cli::args::WatchArgs;
     use std::fs;
     use std::path::Path;
@@ -302,5 +318,24 @@ mod tests {
         assert!(paths
             .iter()
             .any(|p| p.ends_with(Path::new("policies/default.yaml"))));
+    }
+
+    #[test]
+    fn normalize_debounce_ms_clamps_low_values() {
+        assert_eq!(normalize_debounce_ms(0), MIN_DEBOUNCE_MS);
+        assert_eq!(normalize_debounce_ms(1), MIN_DEBOUNCE_MS);
+    }
+
+    #[test]
+    fn normalize_debounce_ms_clamps_high_values() {
+        assert_eq!(normalize_debounce_ms(u64::MAX), MAX_DEBOUNCE_MS);
+        assert_eq!(normalize_debounce_ms(MAX_DEBOUNCE_MS + 1), MAX_DEBOUNCE_MS);
+    }
+
+    #[test]
+    fn normalize_debounce_ms_keeps_in_range_values() {
+        assert_eq!(normalize_debounce_ms(MIN_DEBOUNCE_MS), MIN_DEBOUNCE_MS);
+        assert_eq!(normalize_debounce_ms(350), 350);
+        assert_eq!(normalize_debounce_ms(MAX_DEBOUNCE_MS), MAX_DEBOUNCE_MS);
     }
 }

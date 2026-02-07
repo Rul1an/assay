@@ -26,6 +26,7 @@ assay watch [OPTIONS]
 | `--debounce-ms <N>` | Debounce window before rerun (default: `350`). |
 
 `assay watch` also resolves and watches policy files referenced by tests in the config.
+Debounce values are clamped to a safe range (`50..=60000` ms).
 
 ---
 
@@ -47,13 +48,18 @@ assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict --clear
 - Polls watch targets for changes.
 - Debounces bursty edits.
 - Re-runs `assay run` with selected flags.
+- If a run fails, watch stays active and waits for the next change.
 - Stops on `Ctrl+C`.
 
 ---
 
 ## Exit Codes
 
-`assay watch` is a long-running loop. It exits when interrupted or on unrecoverable startup errors.
+`assay watch` is a long-running loop.
+
+- `0`: interrupted normally (Ctrl+C).
+- Non-zero: unrecoverable startup errors (for example invalid arguments or failure before the loop starts).
+- Per-run failures are reported in the loop output (`Result: exit <code>`) and do not terminate watch mode.
 
 ---
 

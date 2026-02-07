@@ -222,5 +222,5 @@ Clear error messages, actionable suggestions, standard output formats (SARIF, JU
 ## See Also
 
 - [Quick Start](../getting-started/quickstart.md)
-- [Configuration](../config/index.md)
-- [CLI Reference](../cli/index.md)
+- [Configuration](../reference/config/index.md)
+- [CLI Reference](../reference/cli/index.md)

@@ -68,3 +68,28 @@ fn doctor_fix_dry_run_does_not_write_trace_file() {
         "doctor --fix --dry-run --yes should not create trace file"
     );
 }
+
+#[test]
+fn doctor_yes_without_fix_fails_fast() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    let trace = temp.path().join("traces/main.jsonl");
+
+    write_minimal_config(&config);
+
+    let mut cmd = Command::cargo_bin("assay").expect("cargo bin");
+    cmd.current_dir(temp.path())
+        .arg("doctor")
+        .arg("--config")
+        .arg(&config)
+        .arg("--trace-file")
+        .arg(&trace)
+        .arg("--yes")
+        .assert()
+        .code(1);
+
+    assert!(
+        !trace.exists(),
+        "doctor --yes without --fix must not write trace file"
+    );
+}

@@ -319,6 +319,6 @@ Compare to LLM-based tests: 3-10 minutes, $0.50-$5.00 per run.
 
 ## Next Steps
 
-- [:octicons-arrow-right-24: Write custom policies](../config/policies.md)
+- [:octicons-arrow-right-24: Write custom policies](../reference/config/policies.md)
 - [:octicons-arrow-right-24: Debugging failed tests](../use-cases/debugging.md)
-- [:octicons-arrow-right-24: Sequence validation](../config/sequences.md)
+- [:octicons-arrow-right-24: Sequence validation](../reference/config/sequences.md)

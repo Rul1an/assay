@@ -425,6 +425,6 @@ Create traces that *should* fail to verify your rules catch violations.
 
 ## See Also
 
-- [Metrics Reference: sequence_valid](../metrics/sequence-valid.md)
+- [Metrics Reference: sequence_valid](../../metrics/sequence-valid.md)
 - [Policy Files](policies.md)
 - [Migration Guide](migration.md)

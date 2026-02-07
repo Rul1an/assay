@@ -263,6 +263,6 @@ Check that each call has:
 
 ## See Also
 
-- [assay import](../cli/import.md)
+- [assay import](../reference/cli/import.md)
 - [Traces](../concepts/traces.md)
 - [MCP Quick Start](quickstart.md)

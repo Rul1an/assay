@@ -26,7 +26,9 @@ assay doctor [OPTIONS]
 | `--yes` | Apply available fixes without prompt (used with `--fix`). |
 | `--dry-run` | Preview fixes without writing files (used with `--fix`). |
 
-Note: `--fix` currently supports text output mode.
+Notes:
+- `--fix` currently supports text output mode.
+- `--yes` and `--dry-run` require `--fix`.
 
 ---
 

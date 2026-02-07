@@ -303,7 +303,7 @@ The `id` field equals `use_id` (content-addressed), enabling deduplication on re
 
 ## Next Steps
 
-- [Sequence Rules DSL](../config/sequences.md) — Advanced ordering constraints
+- [Sequence Rules DSL](../reference/config/sequences.md) — Advanced ordering constraints
 - [Assay MCP Server](server.md) — Runtime validation for agents
 - [CI Integration](../getting-started/ci-integration.md) — GitHub Actions, GitLab, Azure
 - [Mandates Concept](../concepts/mandates.md) — User authorization for AI agents

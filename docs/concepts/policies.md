@@ -435,5 +435,5 @@ git commit -m "Tighten discount limit to 30%"
 ## See Also
 
 - [args_valid Metric](../metrics/args-valid.md)
-- [Sequence Rules](../config/sequences.md)
-- [Migration Guide](../config/migration.md)
+- [Sequence Rules](../reference/config/sequences.md)
+- [Migration Guide](../reference/config/migration.md)

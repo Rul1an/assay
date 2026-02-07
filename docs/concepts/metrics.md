@@ -359,4 +359,4 @@ tests:
 - [sequence_valid Reference](../metrics/sequence-valid.md)
 - [tool_blocklist Reference](../metrics/tool-blocklist.md)
 - [Policies](policies.md)
-- [Sequence Rules DSL](../config/sequences.md)
+- [Sequence Rules DSL](../reference/config/sequences.md)

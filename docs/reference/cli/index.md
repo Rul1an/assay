@@ -242,6 +242,6 @@ See [Configuration](../config/index.md) for full reference.
 
     Real-time kernel enforcement (SOTA). Blocks attacks before they happen.
 
-    [:octicons-arrow-right-24: Runtime Reference](../runtime-monitor.md)
+    [:octicons-arrow-right-24: Runtime Reference](../../guides/runtime-monitor.md)
 
 </div>

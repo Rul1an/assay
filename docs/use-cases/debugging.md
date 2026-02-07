@@ -253,6 +253,6 @@ With Assay, debugging should take minutes, not hours:
 
 ## See Also
 
-- [assay replay](../cli/replay.md)
+- [assay replay](../reference/cli/replay.md)
 - [Traces](../concepts/traces.md)
 - [Replay Engine](../concepts/replay.md)

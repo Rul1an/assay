@@ -6,6 +6,8 @@ use assay_core::errors::similarity::closest_prompt;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 use similar::TextDiff;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::{infer_policy_path, normalize_severity};
@@ -15,6 +17,10 @@ use crate::diagnostics::format::format_text;
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.fix && args.format == "json" {
         eprintln!("doctor --fix currently supports text output only; use --format text");
+        return Ok(1);
+    }
+    if (args.yes || args.dry_run) && !args.fix {
+        eprintln!("doctor: --yes/--dry-run require --fix");
         return Ok(1);
     }
 
@@ -457,7 +463,7 @@ fn try_fix_parse_error(
         return Ok(0);
     }
 
-    std::fs::write(config_path, after)
+    write_text_file(config_path, &after)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
     println!(
         "Applied: replaced '{}' with '{}' in {}",
@@ -475,6 +481,45 @@ fn try_fix_parse_error(
             println!("Config still has issues after fix: {}", e);
             Ok(1)
         }
+    }
+}
+
+fn write_text_file(path: &Path, content: &str) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or(Path::new("."));
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("assay-config");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let tmp = parent.join(format!(
+            ".{}.assay-tmp-{}-{}",
+            name,
+            std::process::id(),
+            nonce
+        ));
+
+        std::fs::write(&tmp, content)
+            .with_context(|| format!("failed to write temp file {}", tmp.display()))?;
+        std::fs::rename(&tmp, path).with_context(|| {
+            format!(
+                "failed to atomically replace {} with {}",
+                path.display(),
+                tmp.display()
+            )
+        })?;
+        return Ok(());
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(())
     }
 }
 
