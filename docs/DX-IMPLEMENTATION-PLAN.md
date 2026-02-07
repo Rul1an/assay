@@ -163,6 +163,37 @@ Explicit "do not implement now" decisions:
 - Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
 - Do not add a dedicated IDE governance control plane yet (focus on CLI/CI/PR surfaces first).
 
+### Post-#191 Follow-up Plan
+
+After integration PR `#191` lands in `main`, execution continues in three narrow follow-up slices to avoid scope creep:
+
+1. **PR A: init hello-trace colocation**
+   - Branch: `codex/p1-init-hello-trace-colocation`
+   - Change: make `assay init --hello-trace` write `traces/hello.jsonl` relative to the directory of `--config`.
+   - Acceptance:
+     - `assay init --hello-trace --config /tmp/x/eval.yaml` creates `/tmp/x/traces/hello.jsonl`.
+     - Existing default flow remains unchanged for local `eval.yaml`.
+
+2. **PR B: doctor dry-run exit contract**
+   - Branch: `codex/p1-doctor-dry-run-exit-contract`
+   - Change: align `doctor --fix --dry-run` exit codes with documented diagnostics contract.
+   - Acceptance:
+     - Dry-run still writes nothing.
+     - Exit code semantics are explicit and consistent across code, tests, and docs.
+     - `doctor_fix_e2e` expectations match the final contract.
+
+3. **PR C: watch RunArgs drift reduction (optional)**
+   - Branch: `codex/p1-watch-runargs-builder`
+   - Change: reduce/manual `RunArgs` duplication in watch execution path to avoid default drift over time.
+   - Acceptance:
+     - No behavior change in watch output/exit semantics.
+     - Refactor is covered by existing watch/run tests.
+
+Delivery guardrails for all three follow-ups:
+- Keep slices independent and reviewable.
+- Do not change run/summary/action output contracts unless explicitly intended and documented.
+- Update `docs/DX-ROADMAP.md` status immediately after each merge.
+
 EU AI Act date anchors used in this plan:
 - 2025-02-02: first phased obligations active.
 - 2025-08-02: GPAI-focused obligations active.

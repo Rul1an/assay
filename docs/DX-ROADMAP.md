@@ -25,6 +25,7 @@
 | `watch` | P2-B | Done | #184 |
 | `watch` hardening (determinism/tests) | P1 | Done | #188 |
 | `watch` edge hardening (coarse mtime + parse fallback) | P1 | In progress | codex/p1-watch-edge-hardening |
+| P0/P1 DX integration to `main` | P0/P1 | In review | #191 |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
 ---
@@ -330,18 +331,21 @@ Recommended order from here: merge P1-A/P1-B parity PR (#189) -> merge watch edg
 
 ## Next Steps (Roadmap-Aligned)
 
-1. **Merge P1-A/P1-B parity hardening PR**
-   - `#189`: docs/nav/help contract alignment for `generate` + `explain`.
-2. **Ship remaining watch edge hardening slice**
-   - branch: `codex/p1-watch-edge-hardening`
-   - scope: coarse-mtime robustness + parse-error fallback clarity/tests.
-3. **Close the P1 loop with permanent gates**
+1. **Merge integration PR to `main`**
+   - `#191`: merge accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
+2. **Follow-up A: init hello-trace colocation fix**
+   - branch: `codex/p1-init-hello-trace-colocation`
+   - scope: write `traces/hello.jsonl` relative to `--config` parent (not hard-coded to CWD).
+3. **Follow-up B: doctor dry-run exit contract**
+   - branch: `codex/p1-doctor-dry-run-exit-contract`
+   - scope: align `doctor --fix --dry-run` exit behavior with documented contract, update E2E/docs together.
+4. **Follow-up C (optional, low risk): watch RunArgs drift reduction**
+   - branch: `codex/p1-watch-runargs-builder`
+   - scope: reduce manual `RunArgs` duplication in watch path to prevent default drift.
+5. **Keep permanent gates + deferred boundaries**
    - Gate A (contract): keep run/summary/SARIF/JUnit + action I/O compatibility stable.
    - Gate B (onboarding): keep clean-repo -> first actionable signal under 30 minutes.
-4. **Deferred by design**
-   - Native `notify` watcher migration.
-   - Cross-platform atomic-write parity beyond Unix.
-   - Full-repo docs link checks (changed-files guard stays in place).
+   - Deferred by design: native `notify` backend, full-repo docs link checks, cross-platform atomic write parity beyond Unix.
 
 ## Permanent Gates
 
