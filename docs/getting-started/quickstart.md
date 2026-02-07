@@ -15,6 +15,7 @@ assay init --hello-trace
 Generates a runnable smoke setup:
 - `eval.yaml` with a minimal `hello_smoke` suite
 - `traces/hello.jsonl` with a deterministic trace fixture
+- `policy.yaml` with the default policy pack (created if not already present)
 
 The hello trace is demo-only and non-sensitive. Treat real traces as potentially sensitive data and apply your redaction/recording guidelines.
 

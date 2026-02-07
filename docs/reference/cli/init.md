@@ -37,6 +37,8 @@ assay init
 ```
 
 ### Fast first signal (hello trace)
+Creates `eval.yaml`, `traces/hello.jsonl`, and `policy.yaml` (if missing).
+
 ```bash
 assay init --hello-trace
 assay validate --config eval.yaml --trace-file traces/hello.jsonl
