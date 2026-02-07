@@ -1,11 +1,10 @@
 use crate::exit_codes::{ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
-pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode> {
-    use assay_core::errors::{RunError, RunErrorKind};
+fn reason_code_from_run_error_kind(kind: assay_core::errors::RunErrorKind) -> Option<ReasonCode> {
+    use assay_core::errors::RunErrorKind;
 
-    let classified = RunError::classify_message(message.to_string());
-    match classified.kind {
+    match kind {
         RunErrorKind::TraceNotFound => Some(ReasonCode::ETraceNotFound),
         RunErrorKind::MissingConfig => Some(ReasonCode::EMissingConfig),
         RunErrorKind::ConfigParse => Some(ReasonCode::ECfgParse),
@@ -19,8 +18,16 @@ pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode
     }
 }
 
+pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode> {
+    use assay_core::errors::RunError;
+
+    let classified = RunError::classify_message(message.to_string());
+    reason_code_from_run_error_kind(classified.kind)
+}
+
 pub(crate) fn reason_code_from_anyhow_error(err: &anyhow::Error) -> Option<ReasonCode> {
-    reason_code_from_error_message(&assay_core::errors::RunError::from_anyhow(err).message)
+    let classified = assay_core::errors::RunError::from_anyhow(err);
+    reason_code_from_run_error_kind(classified.kind)
 }
 
 pub(crate) fn decide_run_outcome(
