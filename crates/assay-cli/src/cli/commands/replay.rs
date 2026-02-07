@@ -668,6 +668,7 @@ impl Drop for ReplayWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::ExitCodeVersion;
     use assay_core::replay::{ReplayCoverage, ReplayManifest};
 
     #[test]
@@ -701,5 +702,33 @@ mod tests {
         assert_eq!(value["provenance"]["bundle_digest"], "sha256:abc");
         assert_eq!(value["provenance"]["replay_mode"], "offline");
         assert_eq!(value["provenance"]["source_run_id"], "123");
+    }
+
+    #[test]
+    fn replay_run_args_overrides_and_inherits_defaults() {
+        let args = replay_run_args(
+            PathBuf::from("custom/eval.yaml"),
+            Some(PathBuf::from("custom/trace.jsonl")),
+            PathBuf::from("custom/eval.db"),
+            true,
+            ExitCodeVersion::V1,
+        );
+
+        assert_eq!(args.config, PathBuf::from("custom/eval.yaml"));
+        assert_eq!(args.trace_file, Some(PathBuf::from("custom/trace.jsonl")));
+        assert_eq!(args.db, PathBuf::from("custom/eval.db"));
+        assert_eq!(args.quarantine_mode, "off");
+        assert!(args.refresh_cache);
+        assert!(args.no_cache);
+        assert!(args.judge.no_judge);
+        assert!(args.replay_strict);
+        assert_eq!(args.exit_codes, ExitCodeVersion::V1);
+
+        // Inherited from RunArgs defaults.
+        assert_eq!(args.embedder, "none");
+        assert_eq!(args.embedding_model, "text-embedding-3-small");
+        assert!(!args.strict);
+        assert!(!args.redact_prompts);
+        assert!(!args.no_verify);
     }
 }
