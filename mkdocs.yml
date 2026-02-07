@@ -175,6 +175,8 @@ nav:
     - assay init: reference/cli/init.md
     - assay validate: reference/cli/validate.md
     - assay run: reference/cli/run.md
+    - assay generate: reference/cli/generate.md
+    - assay explain: reference/cli/explain.md
     - assay doctor: reference/cli/doctor.md
     - assay watch: reference/cli/watch.md
     - assay sandbox: reference/cli/sandbox.md
