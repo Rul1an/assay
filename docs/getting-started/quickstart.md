@@ -20,7 +20,6 @@ Generates a runnable smoke setup:
 If you pass `--config <path>`, the hello trace is written relative to that config directory.
 
 The hello trace is demo-only and non-sensitive. Treat real traces as potentially sensitive data and apply your redaction/recording guidelines.
-
 ## 2. Validate
 
 ```bash

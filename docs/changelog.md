@@ -39,6 +39,12 @@
 - feat(e9c): replay bundle CLI flow + modular command refactor (single commit) (#168) @Rul1an
 - E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
 
+- dx: merge P0/P1 DX roadmap slices into main (#191) @Rul1an
+- fix(watch): edge harden coarse-mtime detection and fallback (#190) @Rul1an
+- docs(cli): harden generate/explain parity contracts (#189) @Rul1an
+- fix(watch): harden deterministic path diffing (#188) @Rul1an
+- feat(dx): add init --hello-trace golden path scaffold (#187) @Rul1an
+- feat(action-v2.1): add compliance pack failure modes + contract tests (#185) @Rul1an
 ## [2026-02-07]
 
 - ci: always publish required CI check for docs-only pull requests (#182) @Rul1an
