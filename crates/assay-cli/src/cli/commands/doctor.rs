@@ -278,7 +278,7 @@ async fn run_doctor_fix(
 
     if applied == 0 {
         println!("No fixes applied.");
-        return Ok(0);
+        return Ok(if initial_errors == 0 { 0 } else { 1 });
     }
 
     if args.dry_run {
