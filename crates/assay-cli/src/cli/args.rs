@@ -341,6 +341,34 @@ pub struct RunArgs {
     pub no_verify: bool,
 }
 
+impl Default for RunArgs {
+    fn default() -> Self {
+        Self {
+            config: PathBuf::from("eval.yaml"),
+            db: PathBuf::from(".eval/eval.db"),
+            rerun_failures: 0,
+            quarantine_mode: "warn".to_string(),
+            trace_file: None,
+            redact_prompts: false,
+            baseline: None,
+            export_baseline: None,
+            strict: false,
+            embedder: "none".to_string(),
+            embedding_model: "text-embedding-3-small".to_string(),
+            refresh_embeddings: false,
+            incremental: false,
+            refresh_cache: false,
+            no_cache: false,
+            explain_skip: false,
+            judge: JudgeArgs::default(),
+            replay_strict: false,
+            deny_deprecations: false,
+            exit_codes: crate::exit_codes::ExitCodeVersion::default(),
+            no_verify: false,
+        }
+    }
+}
+
 #[derive(Parser, Clone)]
 pub struct CiArgs {
     #[arg(long, default_value = "eval.yaml")]
@@ -467,6 +495,21 @@ pub struct JudgeArgs {
     /// Start with env (VERDICT_JUDGE_API_KEY could be supported but OPENAI_API_KEY is primary)
     #[arg(long, hide = true)]
     pub judge_api_key: Option<String>,
+}
+
+impl Default for JudgeArgs {
+    fn default() -> Self {
+        Self {
+            judge: "none".to_string(),
+            no_judge: false,
+            judge_model: None,
+            judge_samples: 3,
+            judge_refresh: false,
+            judge_temperature: 0.0,
+            judge_max_tokens: 800,
+            judge_api_key: None,
+        }
+    }
 }
 
 #[derive(Parser, Clone)]
