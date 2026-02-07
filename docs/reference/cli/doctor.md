@@ -29,6 +29,7 @@ assay doctor [OPTIONS]
 Notes:
 - `--fix` currently supports text output mode.
 - `--yes` and `--dry-run` require `--fix`.
+- `--dry-run` previews fixes but still returns non-zero when blocking diagnostics remain.
 
 ---
 
@@ -53,6 +54,7 @@ assay doctor --config eval.yaml --trace-file traces/main.jsonl --fix --dry-run -
 - Applying patch suggestions generated from diagnostics.
 - Creating a missing trace file for trace-path errors.
 - Previewing unified diffs in dry-run mode.
+- Preserving doctor exit semantics in dry-run mode (blocking diagnostics still exit with code `1`).
 
 After apply, doctor re-runs diagnostics and reports remaining error count.
 

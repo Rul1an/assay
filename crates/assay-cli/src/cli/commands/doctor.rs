@@ -172,6 +172,11 @@ async fn run_doctor_fix(
     diagnostics: &[Diagnostic],
     legacy_mode: bool,
 ) -> anyhow::Result<i32> {
+    let initial_errors = diagnostics
+        .iter()
+        .filter(|d| normalize_severity(&d.severity) == "error")
+        .count();
+
     let inferred_policy = infer_policy_path(config_path);
     let (_actions, mut patches) = build_suggestions(
         diagnostics,
@@ -200,7 +205,7 @@ async fn run_doctor_fix(
 
     if ops.is_empty() {
         println!("\nNo auto-fixable diagnostics found.");
-        return Ok(0);
+        return Ok(if initial_errors == 0 { 0 } else { 1 });
     }
 
     println!("\nAuto-fix candidates:");
@@ -278,7 +283,7 @@ async fn run_doctor_fix(
 
     if args.dry_run {
         println!("\nDry run complete. {} fix(es) previewed.", applied);
-        return Ok(0);
+        return Ok(if initial_errors == 0 { 0 } else { 1 });
     }
 
     let cfg = match load_config(config_path, legacy_mode, false) {
@@ -460,7 +465,7 @@ fn try_fix_parse_error(
             &after,
         );
         println!("Dry run complete. 1 fix(es) previewed.");
-        return Ok(0);
+        return Ok(1);
     }
 
     write_text_file(config_path, &after)
