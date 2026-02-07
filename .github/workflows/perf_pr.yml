@@ -1,4 +1,6 @@
-# PR: vergelijk met main-baseline via start-point + clone-thresholds.
+# PR: vergelijk altijd met main-baseline via start-point + clone-thresholds.
+# Gebruik expliciet `main` als start-point zodat feature/base branches die in
+# Bencher gearchiveerd zijn geen 404 "Head Version not found" veroorzaken.
 # Alleen same-repo PRs (secrets niet beschikbaar op forks).
 # Vereist: BENCHER_PROJECT, BENCHER_API_TOKEN.
 #
@@ -55,8 +57,7 @@ jobs:
                 --project "$BENCHER_PROJECT" \
                 --token "$BENCHER_API_TOKEN" \
                 --branch "$GITHUB_HEAD_REF" \
-                --start-point "$GITHUB_BASE_REF" \
-                --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+                --start-point main \
                 --start-point-clone-thresholds \
                 --start-point-reset \
                 --testbed ubuntu-latest \
@@ -79,8 +80,7 @@ jobs:
                 --project "$BENCHER_PROJECT" \
                 --token "$BENCHER_API_TOKEN" \
                 --branch "$GITHUB_HEAD_REF" \
-                --start-point "$GITHUB_BASE_REF" \
-                --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+                --start-point main \
                 --start-point-clone-thresholds \
                 --start-point-reset \
                 --testbed ubuntu-latest \

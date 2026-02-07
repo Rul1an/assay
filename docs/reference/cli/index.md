@@ -26,6 +26,7 @@ assay --version
 | Command | Description |
 |---------|-------------|
 | [`assay run`](run.md) | Run tests against traces |
+| [`assay generate`](generate.md) | Generate policy scaffolding from trace/profile input |
 | [`assay explain`](explain.md) | Explain why trace steps were allowed/blocked |
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
@@ -65,6 +66,16 @@ assay run --config eval.yaml --trace-file traces/golden.jsonl
 
 # CI reports
 assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif sarif.json --junit junit.xml
+```
+
+### Generate Policy (With Diff Preview)
+
+```bash
+# Generate policy from trace
+assay generate --input traces/session.jsonl --output policy.yaml
+
+# Preview changes against existing policy file
+assay generate --input traces/session.jsonl --output policy.yaml --diff --dry-run
 ```
 
 ### Replay Bundles
@@ -179,6 +190,14 @@ See [Configuration](../config/index.md) for full reference.
     Explain blocked/allowed trace steps and evaluated rules.
 
     [:octicons-arrow-right-24: Full reference](explain.md)
+
+-   :material-source-branch:{ .lg .middle } __assay generate__
+
+    ---
+
+    Generate policy scaffolding from traces/profiles and preview diffs.
+
+    [:octicons-arrow-right-24: Full reference](generate.md)
 
 -   :material-import:{ .lg .middle } __assay import__
 

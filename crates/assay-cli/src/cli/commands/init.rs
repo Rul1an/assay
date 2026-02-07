@@ -66,7 +66,19 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         println!("   Created {} (pack: {})", policy_path.display(), pack.name);
     }
 
-    write_file_if_missing(&args.config, crate::templates::ASSAY_CONFIG_DEFAULT_YAML)?;
+    let config_template = if args.hello_trace {
+        crate::templates::HELLO_EVAL_YAML
+    } else {
+        crate::templates::ASSAY_CONFIG_DEFAULT_YAML
+    };
+    write_file_if_missing(&args.config, config_template)?;
+
+    if args.hello_trace {
+        write_file_if_missing(
+            Path::new("traces/hello.jsonl"),
+            crate::templates::HELLO_TRACES_JSONL,
+        )?;
+    }
 
     // 2. Gitignore
     if args.gitignore {
@@ -104,7 +116,18 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         }
     }
 
-    println!("✅  Initialization complete. Run 'assay validate' to test.");
+    println!("✅  Initialization complete.");
+    if args.hello_trace {
+        println!(
+            "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive."
+        );
+        println!(
+            "   Next: assay validate --config {} --trace-file traces/hello.jsonl",
+            args.config.display()
+        );
+    } else {
+        println!("   Next: assay validate");
+    }
     Ok(exit_codes::OK)
 }
 

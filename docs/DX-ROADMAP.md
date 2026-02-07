@@ -16,11 +16,16 @@
 | SARIF truncation fix (E2.3) | P0 | Done | #174 |
 | Fork PR fallback (E2.4) | P0 | Already existed | — |
 | `next_step()` mapping (E4.1) | P0 | Already existed | — |
-| `generate --diff` | P1-A | In review | #177 |
-| `explain` + compliance hints | P1-B | In review | #179 |
+| GitHub Action v2.1 (pack failure contracts) | P1 | Done | #185 |
+| Golden path (`init --hello-trace`) | P1 | Done | #187 |
+| `generate --diff` (feature) | P1-A | Done | #177 |
+| `explain` + compliance hints (feature) | P1-B | Done | #179 |
+| P1-A/P1-B docs+help parity hardening | P1 | In review | #189 |
 | `doctor --fix` | P2-A | Done | #184 |
 | `watch` | P2-B | Done | #184 |
-| `watch` hardening (determinism/tests) | P1 | Planned | — |
+| `watch` hardening (determinism/tests) | P1 | Done | #188 |
+| `watch` edge hardening (coarse mtime + parse fallback) | P1 | In progress | codex/p1-watch-edge-hardening |
+| P0/P1 DX integration to `main` | P0/P1 | In review | #191 |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
 ---
@@ -31,11 +36,11 @@ This roadmap now tracks developer experience on five dimensions that reflect how
 
 | Dimension | Current State | Next Concrete Move |
 |-----------|---------------|--------------------|
-| Time-to-first-signal | `init`, `doctor --fix`, `watch` are shipped and documented | Add a guaranteed "hello trace + smoke suite" init path so first useful signal is under 30 minutes |
+| Time-to-first-signal | `init --hello-trace`, `doctor --fix`, `watch` are shipped and documented | Keep onboarding regression checks as a permanent gate |
 | Quality-of-feedback | Exit/reason codes, `run.json`/`summary.json`, doctor/explain flows are in place | Add copy-paste rerun hints and explicit "next best action" snippets in failure paths |
-| Workflow fit | GitHub Action v2, SARIF, PR comments, docs link guard are in place | Ship Action v2.1 compliance-pack support first |
+| Workflow fit | GitHub Action v2.1, SARIF, PR comments, docs link guard are in place | Continue docs/help parity checks for key CLI entry points |
 | Trust & auditability | Deterministic run contracts and evidence outputs exist | Continue replay bundle hardening as cross-team reproducibility surface |
-| Change resilience | `watch` refreshes config-derived targets; `generate --diff` and compliance explain are implemented | Harden contracts and docs/examples parity to prevent drift |
+| Change resilience | `watch` path diffing is deterministic; `generate --diff` and compliance explain are implemented | Close remaining watch edge hardening (coarse mtime + parse-error fallback coverage) |
 
 ---
 
@@ -295,6 +300,11 @@ Tests:
 - `normalize_debounce_ms_clamps_low_values` ✅
 - `normalize_debounce_ms_clamps_high_values` ✅
 - `normalize_debounce_ms_keeps_in_range_values` ✅
+- `diff_paths_is_order_independent` ✅
+- `diff_paths_detects_added_removed_and_modified_paths` ✅
+- `coalesce_changed_paths_sorts_and_deduplicates` ✅
+- `collect_watch_paths_parse_error_keeps_core_targets` (edge hardening branch) ⏳
+- `diff_paths_detects_same_length_change_via_content_hash` (edge hardening branch) ⏳
 - Manual testing via `assay watch --help` and local rerun loop ✅
 
 ---
@@ -313,36 +323,29 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Current state: P0 and P2 are delivered, and P1-A/P1-B features exist but still require parity/contract hardening.
+Current state: P0 and P2 are delivered; major P1 features are shipped; remaining P1 work is parity hardening closure.
 
-Recommended order from here: Action v2.1 (P1 slice) -> Golden Path gate -> P1-A/P1-B hardening -> watch hardening.
+Recommended order from here: merge P1-A/P1-B parity PR (#189) -> merge watch edge hardening slice -> keep contract/onboarding gates green.
 
 ---
 
 ## Next Steps (Roadmap-Aligned)
 
-Priority is based on this DX roadmap plus `/docs/ROADMAP.md` ("GitHub Action v2.1" marked as next):
-
-1. **Finish PR #184 merge and stabilization**
-   - Wait for full green CI and merge.
-   - Keep watch feature scope closed; follow-ups are hardening-only.
-2. **Start ROADMAP-next item: GitHub Action v2.1 (P1 scope first)**
-   - Implement compliance-pack support as a data dependency contract.
-   - Add parity tests for docs/examples commands used in Action docs.
-   - Keep BYOS push/OIDC and attestation as later slices.
-3. **Golden-path hardening: first signal in <30 min**
-   - Extend init flow with a minimal hello-trace fixture and smoke suite template.
-   - Ensure first run produces actionable output (success or controlled failure + next step).
-4. **P1-A/P1-B parity hardening (no feature expansion)**
-   - Lock CLI/help/output contracts and add docs/examples parity checks.
-   - Ensure explain/diff surfaces remain deterministic and reviewer-friendly.
-5. **Watch hardening (existing command)**
-   - Add path-map based trigger comparison and deterministic debounce-loop tests.
-   - Validate Windows coarse mtime behavior and parse-error fallback monitoring.
-6. **Deferred by design (not in #184)**
-   - Native `notify` watcher migration.
-   - Cross-platform atomic-write parity beyond Unix.
-   - Full-repo docs link checks (changed-files guard is now in place).
+1. **Merge integration PR to `main`**
+   - `#191`: merge accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
+2. **Follow-up A: init hello-trace colocation fix**
+   - branch: `codex/p1-init-hello-trace-colocation`
+   - scope: write `traces/hello.jsonl` relative to `--config` parent (not hard-coded to CWD).
+3. **Follow-up B: doctor dry-run exit contract**
+   - branch: `codex/p1-doctor-dry-run-exit-contract`
+   - scope: align `doctor --fix --dry-run` exit behavior with documented contract, update E2E/docs together.
+4. **Follow-up C (optional, low risk): watch RunArgs drift reduction**
+   - branch: `codex/p1-watch-runargs-builder`
+   - scope: reduce manual `RunArgs` duplication in watch path to prevent default drift.
+5. **Keep permanent gates + deferred boundaries**
+   - Gate A (contract): keep run/summary/SARIF/JUnit + action I/O compatibility stable.
+   - Gate B (onboarding): keep clean-repo -> first actionable signal under 30 minutes.
+   - Deferred by design: native `notify` backend, full-repo docs link checks, cross-platform atomic write parity beyond Unix.
 
 ## Permanent Gates
 

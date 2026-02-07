@@ -498,6 +498,10 @@ pub struct InitArgs {
     /// Enable heuristics (entropy/risk analysis) when generating from trace
     #[arg(long, requires = "from_trace")]
     pub heuristics: bool,
+
+    /// Generate a ready-to-run hello trace + smoke suite scaffold
+    #[arg(long, conflicts_with = "from_trace")]
+    pub hello_trace: bool,
 }
 
 #[derive(Parser, Clone)]

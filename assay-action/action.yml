@@ -172,12 +172,21 @@ outputs:
   pack_applied:
     description: 'Comma-separated list of applied pack IDs'
     value: ${{ steps.pack-lint.outputs.pack_applied }}
+  resolved_pack_refs:
+    description: 'Resolved pack references as name@version list'
+    value: ${{ steps.pack-lint.outputs.resolved_pack_refs }}
   pack_score:
     description: 'Compliance score (0-100) across all packs'
     value: ${{ steps.pack-lint.outputs.pack_score }}
   pack_articles:
     description: 'Comma-separated list of covered articles (e.g., "12(1),12(2)(a)")'
     value: ${{ steps.pack-lint.outputs.pack_articles }}
+  pack_status:
+    description: 'Compliance pack status: disabled, success, missing_pack, invalid_pack, runtime_error'
+    value: ${{ steps.pack-lint.outputs.pack_status || 'disabled' }}
+  pack_error_kind:
+    description: 'Pack error category when pack_status is not success'
+    value: ${{ steps.pack-lint.outputs.pack_error_kind }}
   bundle_url:
     description: 'URL of pushed evidence bundle in BYOS (if store set)'
     value: ${{ steps.byos-push.outputs.bundle_url }}
@@ -793,24 +802,67 @@ runs:
         set -euo pipefail
         export PATH="$HOME/.assay/bin:$PATH"
 
-        # Lint with packs (generates pack-enhanced SARIF)
+        PACK_STATUS="success"
+        PACK_ERROR_KIND=""
+
+        # Lint with packs (generates pack-enhanced SARIF). Use --fail-on none so
+        # policy findings do not masquerade as pack-loading/config errors.
+        # Pack-loading/config/runtime failures still fail this step with exit 3.
         while IFS= read -r bundle || [ -n "$bundle" ]; do
           [ -z "$bundle" ] && continue
           echo "Linting with packs: $bundle"
-          assay evidence lint \
+          OUT_SARIF="$REPORTS_DIR/pack-lint-$(basename "$bundle" .tar.gz).sarif"
+          OUT_ERR="$REPORTS_DIR/pack-lint-$(basename "$bundle" .tar.gz).stderr.log"
+
+          if assay evidence lint \
             --format sarif \
+            --fail-on none \
             --pack "$PACKS" \
-            --output "$REPORTS_DIR/pack-lint-$(basename "$bundle" .tar.gz).sarif" \
-            "$bundle" || true
+            "$bundle" > "$OUT_SARIF" 2> "$OUT_ERR"; then
+            :
+          else
+            EXIT_CODE=$?
+            ERR_MSG=$(head -n 2 "$OUT_ERR" | tr '\n' ' ' | sed 's/  */ /g')
+
+            if [ "$EXIT_CODE" -eq 3 ]; then
+              if grep -qi "not found" "$OUT_ERR"; then
+                PACK_STATUS="missing_pack"
+                PACK_ERROR_KIND="missing_pack"
+              else
+                PACK_STATUS="invalid_pack"
+                PACK_ERROR_KIND="invalid_pack"
+              fi
+            else
+              PACK_STATUS="runtime_error"
+              PACK_ERROR_KIND="runtime_error"
+            fi
+
+            echo "::error::Compliance pack lint failed (${PACK_ERROR_KIND}): ${ERR_MSG:-unknown error}"
+            break
+          fi
         done < "$BUNDLES_FILE"
+
+        if [ "$PACK_STATUS" != "success" ]; then
+          echo "pack_applied=" >> $GITHUB_OUTPUT
+          echo "resolved_pack_refs=" >> $GITHUB_OUTPUT
+          echo "pack_score=0" >> $GITHUB_OUTPUT
+          echo "pack_articles=" >> $GITHUB_OUTPUT
+          echo "pack_status=$PACK_STATUS" >> $GITHUB_OUTPUT
+          echo "pack_error_kind=$PACK_ERROR_KIND" >> $GITHUB_OUTPUT
+          exit 3
+        fi
 
         # Merge SARIF files (or copy if only one)
         SARIF_FILES=$(ls "$REPORTS_DIR"/pack-lint-*.sarif 2>/dev/null || echo "")
         if [ -z "$SARIF_FILES" ]; then
+          echo "::error::No SARIF files generated for compliance packs."
           echo "pack_applied=" >> $GITHUB_OUTPUT
-          echo "pack_score=100" >> $GITHUB_OUTPUT
+          echo "resolved_pack_refs=" >> $GITHUB_OUTPUT
+          echo "pack_score=0" >> $GITHUB_OUTPUT
           echo "pack_articles=" >> $GITHUB_OUTPUT
-          exit 0
+          echo "pack_status=runtime_error" >> $GITHUB_OUTPUT
+          echo "pack_error_kind=runtime_error" >> $GITHUB_OUTPUT
+          exit 3
         fi
 
         # Count SARIF files and merge if multiple
@@ -823,15 +875,19 @@ runs:
         fi
         SARIF="$REPORTS_DIR/pack-lint.sarif"
 
-        # Extract pack metadata from SARIF
-        PACK_APPLIED=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.pack // empty] | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
-        PACK_SCORE=$(jq -r '.runs[0].properties.complianceScore // 100' "$SARIF" 2>/dev/null || echo "100")
-        PACK_ARTICLES=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.article_ref // empty] | unique | sort | join(",")' "$SARIF" 2>/dev/null || echo "")
-        DISCLAIMER=$(jq -r '.runs[0].properties.disclaimer // empty' "$SARIF" 2>/dev/null || echo "")
+        # Extract pack metadata from SARIF (run-wide, deterministic).
+        RESOLVED_PACKS=$(jq -r '[.runs[].tool.driver.properties.assayPacks[]? | "\(.name)@\(.version)"] | sort | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
+        PACK_APPLIED="$RESOLVED_PACKS"
+        PACK_SCORE=$(jq -r '[.runs[].properties.complianceScore?] | if length == 0 then 100 else (add / length | floor) end' "$SARIF" 2>/dev/null || echo "100")
+        PACK_ARTICLES=$(jq -r '[.runs[].tool.driver.rules[]?.properties.article_ref // empty] | unique | sort | join(",")' "$SARIF" 2>/dev/null || echo "")
+        DISCLAIMER=$(jq -r '[.runs[].properties.disclaimer // empty] | unique | map(select(length > 0)) | join("\n\n---\n\n")' "$SARIF" 2>/dev/null || echo "")
 
         echo "pack_applied=$PACK_APPLIED" >> $GITHUB_OUTPUT
+        echo "resolved_pack_refs=$RESOLVED_PACKS" >> $GITHUB_OUTPUT
         echo "pack_score=$PACK_SCORE" >> $GITHUB_OUTPUT
         echo "pack_articles=$PACK_ARTICLES" >> $GITHUB_OUTPUT
+        echo "pack_status=success" >> $GITHUB_OUTPUT
+        echo "pack_error_kind=" >> $GITHUB_OUTPUT
 
         # Store disclaimer for Job Summary (multiline safe)
         if [ -n "$DISCLAIMER" ]; then
@@ -1094,8 +1150,11 @@ runs:
       shell: bash
       env:
         PACK_APPLIED: ${{ steps.pack-lint.outputs.pack_applied }}
+        RESOLVED_PACK_REFS: ${{ steps.pack-lint.outputs.resolved_pack_refs }}
         PACK_SCORE: ${{ steps.pack-lint.outputs.pack_score }}
         PACK_ARTICLES: ${{ steps.pack-lint.outputs.pack_articles }}
+        PACK_STATUS: ${{ steps.pack-lint.outputs.pack_status }}
+        PACK_ERROR_KIND: ${{ steps.pack-lint.outputs.pack_error_kind }}
         PACK_DISCLAIMER: ${{ steps.pack-lint.outputs.pack_disclaimer }}
         ATTESTATION_ID: ${{ steps.export-attestation.outputs.attestation_id }}
         ATTESTATION_URL: ${{ steps.export-attestation.outputs.attestation_url }}
@@ -1107,13 +1166,23 @@ runs:
       run: |
         {
           # Compliance Pack Results
-          if [ -n "$PACK_APPLIED" ]; then
+          if [ -n "$PACK_APPLIED" ] || [ -n "$PACK_STATUS" ]; then
             echo ""
             echo "## Compliance Pack Results"
             echo ""
             echo "| Pack | Score | Articles |"
             echo "|------|-------|----------|"
             echo "| $PACK_APPLIED | ${PACK_SCORE:-100}% | ${PACK_ARTICLES:-N/A} |"
+            if [ -n "$RESOLVED_PACK_REFS" ]; then
+              echo ""
+              echo "- Resolved packs: \`$RESOLVED_PACK_REFS\`"
+            fi
+            if [ -n "$PACK_STATUS" ]; then
+              echo "- Status: \`$PACK_STATUS\`"
+            fi
+            if [ -n "$PACK_ERROR_KIND" ]; then
+              echo "- Error kind: \`$PACK_ERROR_KIND\`"
+            fi
 
             # MANDATORY: Display disclaimer if present
             if [ -n "$PACK_DISCLAIMER" ]; then
