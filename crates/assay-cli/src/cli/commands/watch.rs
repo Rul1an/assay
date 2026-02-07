@@ -1,6 +1,6 @@
 use anyhow::Result;
 use assay_core::config::{load_config, path_resolver::PathResolver};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -82,8 +82,7 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
             let _ = std::io::stdout().flush();
         }
 
-        changed.sort();
-        changed.dedup();
+        coalesce_changed_paths(&mut changed);
         let trigger = changed
             .first()
             .map(|p| p.display().to_string())
@@ -137,8 +136,8 @@ struct FileSnapshot {
     modified: Option<SystemTime>,
 }
 
-fn snapshot_paths(paths: &[PathBuf]) -> Vec<(PathBuf, FileSnapshot)> {
-    let mut out = Vec::with_capacity(paths.len());
+fn snapshot_paths(paths: &[PathBuf]) -> BTreeMap<PathBuf, FileSnapshot> {
+    let mut out = BTreeMap::new();
     for path in paths {
         let snapshot = match std::fs::metadata(path) {
             Ok(meta) => FileSnapshot {
@@ -152,25 +151,32 @@ fn snapshot_paths(paths: &[PathBuf]) -> Vec<(PathBuf, FileSnapshot)> {
                 modified: None,
             },
         };
-        out.push((path.clone(), snapshot));
+        out.insert(path.clone(), snapshot);
     }
     out
 }
 
-fn diff_paths(prev: &[(PathBuf, FileSnapshot)], curr: &[(PathBuf, FileSnapshot)]) -> Vec<PathBuf> {
+fn diff_paths(
+    prev: &BTreeMap<PathBuf, FileSnapshot>,
+    curr: &BTreeMap<PathBuf, FileSnapshot>,
+) -> Vec<PathBuf> {
     let mut changed = Vec::new();
 
-    for ((prev_path, prev_state), (curr_path, curr_state)) in prev.iter().zip(curr.iter()) {
-        if prev_path != curr_path {
-            changed.push(curr_path.clone());
-            continue;
-        }
+    let all_paths: BTreeSet<PathBuf> = prev.keys().chain(curr.keys()).cloned().collect();
+    for path in all_paths {
+        let prev_state = prev.get(&path);
+        let curr_state = curr.get(&path);
         if prev_state != curr_state {
-            changed.push(curr_path.clone());
+            changed.push(path);
         }
     }
 
     changed
+}
+
+fn coalesce_changed_paths(changed: &mut Vec<PathBuf>) {
+    changed.sort();
+    changed.dedup();
 }
 
 fn refresh_watch_targets(
@@ -273,10 +279,15 @@ pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_watch_paths, normalize_debounce_ms, MAX_DEBOUNCE_MS, MIN_DEBOUNCE_MS};
+    use super::{
+        coalesce_changed_paths, collect_watch_paths, diff_paths, normalize_debounce_ms,
+        FileSnapshot, MAX_DEBOUNCE_MS, MIN_DEBOUNCE_MS,
+    };
     use crate::cli::args::WatchArgs;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
+    use std::path::PathBuf;
 
     #[test]
     fn collect_watch_paths_includes_policy() {
@@ -337,5 +348,127 @@ mod tests {
         assert_eq!(normalize_debounce_ms(MIN_DEBOUNCE_MS), MIN_DEBOUNCE_MS);
         assert_eq!(normalize_debounce_ms(350), 350);
         assert_eq!(normalize_debounce_ms(MAX_DEBOUNCE_MS), MAX_DEBOUNCE_MS);
+    }
+
+    #[test]
+    fn diff_paths_is_order_independent() {
+        let mut prev = BTreeMap::new();
+        prev.insert(
+            PathBuf::from("a.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(10),
+                modified: None,
+            },
+        );
+        prev.insert(
+            PathBuf::from("b.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(20),
+                modified: None,
+            },
+        );
+
+        let mut curr = BTreeMap::new();
+        curr.insert(
+            PathBuf::from("b.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(20),
+                modified: None,
+            },
+        );
+        curr.insert(
+            PathBuf::from("a.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(10),
+                modified: None,
+            },
+        );
+
+        let changed = diff_paths(&prev, &curr);
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn diff_paths_detects_added_removed_and_modified_paths() {
+        let mut prev = BTreeMap::new();
+        prev.insert(
+            PathBuf::from("same.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(1),
+                modified: None,
+            },
+        );
+        prev.insert(
+            PathBuf::from("removed.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(2),
+                modified: None,
+            },
+        );
+        prev.insert(
+            PathBuf::from("changed.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(3),
+                modified: None,
+            },
+        );
+
+        let mut curr = BTreeMap::new();
+        curr.insert(
+            PathBuf::from("same.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(1),
+                modified: None,
+            },
+        );
+        curr.insert(
+            PathBuf::from("changed.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(99),
+                modified: None,
+            },
+        );
+        curr.insert(
+            PathBuf::from("added.yaml"),
+            FileSnapshot {
+                exists: true,
+                len: Some(4),
+                modified: None,
+            },
+        );
+
+        let mut changed = diff_paths(&prev, &curr);
+        coalesce_changed_paths(&mut changed);
+        assert_eq!(
+            changed,
+            vec![
+                PathBuf::from("added.yaml"),
+                PathBuf::from("changed.yaml"),
+                PathBuf::from("removed.yaml"),
+            ]
+        );
+    }
+
+    #[test]
+    fn coalesce_changed_paths_sorts_and_deduplicates() {
+        let mut changed = vec![
+            PathBuf::from("b.yaml"),
+            PathBuf::from("a.yaml"),
+            PathBuf::from("a.yaml"),
+        ];
+        coalesce_changed_paths(&mut changed);
+        assert_eq!(
+            changed,
+            vec![PathBuf::from("a.yaml"), PathBuf::from("b.yaml")]
+        );
     }
 }
