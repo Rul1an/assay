@@ -2,8 +2,8 @@ use anyhow::Result;
 use assay_core::config::{load_config, path_resolver::PathResolver};
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{DefaultHasher, Hasher};
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::cli::args::{JudgeArgs, RunArgs, WatchArgs};
@@ -164,11 +164,19 @@ fn snapshot_paths(paths: &[PathBuf]) -> BTreeMap<PathBuf, FileSnapshot> {
     out
 }
 
-fn snapshot_content_hash(path: &PathBuf, len: u64) -> Option<u64> {
+fn snapshot_content_hash(path: &Path, len: u64) -> Option<u64> {
     if len > MAX_SNAPSHOT_HASH_BYTES {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = file.take(MAX_SNAPSHOT_HASH_BYTES + 1);
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_SNAPSHOT_HASH_BYTES {
+        return None;
+    }
+
     let mut hasher = DefaultHasher::new();
     hasher.write(&bytes);
     Some(hasher.finish())
