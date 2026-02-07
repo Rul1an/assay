@@ -41,3 +41,43 @@ fn test_init_hello_trace_contract() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_init_hello_trace_respects_config_parent_directory() {
+    let temp = tempdir().expect("temp dir");
+    let nested_config = temp.path().join("nested/eval.yaml");
+    let nested_trace = temp.path().join("nested/traces/hello.jsonl");
+    let root_trace = temp.path().join("traces/hello.jsonl");
+
+    #[allow(deprecated)]
+    let mut init = Command::cargo_bin("assay").expect("assay binary");
+    init.current_dir(temp.path())
+        .arg("init")
+        .arg("--hello-trace")
+        .arg("--config")
+        .arg(&nested_config)
+        .assert()
+        .success();
+
+    assert!(nested_config.exists(), "nested eval.yaml must exist");
+    assert!(
+        nested_trace.exists(),
+        "hello trace must be colocated with config"
+    );
+    assert!(
+        !root_trace.exists(),
+        "hello trace must not be written to CWD when --config points elsewhere"
+    );
+
+    #[allow(deprecated)]
+    let mut validate = Command::cargo_bin("assay").expect("assay binary");
+    validate
+        .current_dir(temp.path())
+        .arg("validate")
+        .arg("--config")
+        .arg("nested/eval.yaml")
+        .arg("--trace-file")
+        .arg("nested/traces/hello.jsonl")
+        .assert()
+        .success();
+}

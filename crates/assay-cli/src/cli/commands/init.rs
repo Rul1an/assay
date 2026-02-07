@@ -1,6 +1,6 @@
 use crate::cli::args::InitArgs;
 use crate::exit_codes;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     if args.list_packs {
@@ -73,11 +73,11 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     };
     write_file_if_missing(&args.config, config_template)?;
 
-    if args.hello_trace {
-        write_file_if_missing(
-            Path::new("traces/hello.jsonl"),
-            crate::templates::HELLO_TRACES_JSONL,
-        )?;
+    let hello_trace_path = args
+        .hello_trace
+        .then(|| hello_trace_path_for_config(&args.config));
+    if let Some(path) = &hello_trace_path {
+        write_file_if_missing(path, crate::templates::HELLO_TRACES_JSONL)?;
     }
 
     // 2. Gitignore
@@ -118,17 +118,26 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
 
     println!("✅  Initialization complete.");
     if args.hello_trace {
+        let hello_trace = hello_trace_path
+            .as_ref()
+            .expect("hello trace path must exist when --hello-trace is set");
         println!(
             "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive."
         );
         println!(
-            "   Next: assay validate --config {} --trace-file traces/hello.jsonl",
-            args.config.display()
+            "   Next: assay validate --config {} --trace-file {}",
+            args.config.display(),
+            hello_trace.display()
         );
     } else {
         println!("   Next: assay validate");
     }
     Ok(exit_codes::OK)
+}
+
+fn hello_trace_path_for_config(config_path: &Path) -> PathBuf {
+    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+    base.join("traces/hello.jsonl")
 }
 
 fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
