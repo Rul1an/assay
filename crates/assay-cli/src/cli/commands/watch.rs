@@ -238,14 +238,15 @@ async fn run_once(args: &WatchArgs, legacy_mode: bool) -> Result<i32> {
 }
 
 fn run_args_from_watch(args: &WatchArgs) -> RunArgs {
-    let mut run_args = RunArgs::default();
-    run_args.config = args.config.clone();
-    run_args.db = args.db.clone();
-    run_args.trace_file = args.trace_file.clone();
-    run_args.baseline = args.baseline.clone();
-    run_args.strict = args.strict;
-    run_args.replay_strict = args.replay_strict;
-    run_args
+    RunArgs {
+        config: args.config.clone(),
+        db: args.db.clone(),
+        trace_file: args.trace_file.clone(),
+        baseline: args.baseline.clone(),
+        strict: args.strict,
+        replay_strict: args.replay_strict,
+        ..RunArgs::default()
+    }
 }
 
 pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result<Vec<PathBuf>> {

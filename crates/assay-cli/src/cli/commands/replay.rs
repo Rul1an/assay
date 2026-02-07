@@ -1,4 +1,4 @@
-use super::super::args::{ReplayArgs, RunArgs};
+use super::super::args::{JudgeArgs, ReplayArgs, RunArgs};
 use crate::exit_codes::{ReasonCode, RunOutcome};
 use anyhow::Context;
 use assay_core::replay::{read_bundle_tar_gz, verify_bundle, ReplayManifest};
@@ -223,17 +223,23 @@ fn replay_run_args(
     replay_strict: bool,
     exit_codes: crate::exit_codes::ExitCodeVersion,
 ) -> RunArgs {
-    let mut args = RunArgs::default();
-    args.config = config;
-    args.db = db;
-    args.quarantine_mode = "off".to_string();
-    args.trace_file = trace_file;
-    args.refresh_cache = true;
-    args.no_cache = true;
-    args.judge.no_judge = true;
-    args.replay_strict = replay_strict;
-    args.exit_codes = exit_codes;
-    args
+    let judge = JudgeArgs {
+        no_judge: true,
+        ..JudgeArgs::default()
+    };
+
+    RunArgs {
+        config,
+        db,
+        quarantine_mode: "off".to_string(),
+        trace_file,
+        refresh_cache: true,
+        no_cache: true,
+        judge,
+        replay_strict,
+        exit_codes,
+        ..RunArgs::default()
+    }
 }
 
 fn write_missing_dependency(
