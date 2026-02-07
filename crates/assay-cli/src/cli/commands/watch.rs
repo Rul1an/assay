@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::cli::args::{JudgeArgs, RunArgs, WatchArgs};
+use crate::cli::args::{RunArgs, WatchArgs};
 
 const POLL_INTERVAL_MS: u64 = 250;
 const MIN_DEBOUNCE_MS: u64 = 50;
@@ -230,42 +230,23 @@ fn refresh_watch_targets(
 }
 
 async fn run_once(args: &WatchArgs, legacy_mode: bool) -> Result<i32> {
-    let run_args = RunArgs {
-        config: args.config.clone(),
-        db: args.db.clone(),
-        rerun_failures: 0,
-        quarantine_mode: "warn".to_string(),
-        trace_file: args.trace_file.clone(),
-        redact_prompts: false,
-        baseline: args.baseline.clone(),
-        export_baseline: None,
-        strict: args.strict,
-        embedder: "none".to_string(),
-        embedding_model: "text-embedding-3-small".to_string(),
-        refresh_embeddings: false,
-        incremental: false,
-        refresh_cache: false,
-        no_cache: false,
-        explain_skip: false,
-        judge: JudgeArgs {
-            judge: "none".to_string(),
-            no_judge: false,
-            judge_model: None,
-            judge_samples: 3,
-            judge_refresh: false,
-            judge_temperature: 0.0,
-            judge_max_tokens: 800,
-            judge_api_key: None,
-        },
-        replay_strict: args.replay_strict,
-        deny_deprecations: false,
-        exit_codes: crate::exit_codes::ExitCodeVersion::default(),
-        no_verify: false,
-    };
+    let run_args = run_args_from_watch(args);
 
     let code = super::run::run(run_args, legacy_mode).await?;
     eprintln!("Result: exit {}", code);
     Ok(code)
+}
+
+fn run_args_from_watch(args: &WatchArgs) -> RunArgs {
+    RunArgs {
+        config: args.config.clone(),
+        db: args.db.clone(),
+        trace_file: args.trace_file.clone(),
+        baseline: args.baseline.clone(),
+        strict: args.strict,
+        replay_strict: args.replay_strict,
+        ..RunArgs::default()
+    }
 }
 
 pub(crate) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result<Vec<PathBuf>> {
@@ -374,6 +355,33 @@ mod tests {
         assert_eq!(normalize_debounce_ms(MIN_DEBOUNCE_MS), MIN_DEBOUNCE_MS);
         assert_eq!(normalize_debounce_ms(350), 350);
         assert_eq!(normalize_debounce_ms(MAX_DEBOUNCE_MS), MAX_DEBOUNCE_MS);
+    }
+
+    #[test]
+    fn run_args_from_watch_uses_run_defaults() {
+        let args = WatchArgs {
+            config: PathBuf::from("eval.yaml"),
+            trace_file: Some(PathBuf::from("traces/dev.jsonl")),
+            baseline: Some(PathBuf::from(".assay/baseline.json")),
+            db: PathBuf::from(".eval/eval.db"),
+            strict: true,
+            replay_strict: true,
+            clear: false,
+            debounce_ms: 350,
+        };
+
+        let run_args = super::run_args_from_watch(&args);
+        assert_eq!(run_args.config, args.config);
+        assert_eq!(run_args.db, args.db);
+        assert_eq!(run_args.trace_file, args.trace_file);
+        assert_eq!(run_args.baseline, args.baseline);
+        assert!(run_args.strict);
+        assert!(run_args.replay_strict);
+
+        // Defaults stay inherited from RunArgs::default().
+        assert_eq!(run_args.quarantine_mode, "warn");
+        assert_eq!(run_args.embedder, "none");
+        assert_eq!(run_args.embedding_model, "text-embedding-3-small");
     }
 
     #[test]
