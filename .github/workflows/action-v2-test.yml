@@ -167,3 +167,61 @@ jobs:
             echo "ERROR: expected pack_error_kind=missing_pack"
             exit 1
           fi
+
+  test-invalid-pack-fails-cleanly:
+    name: Test (invalid compliance pack failure mode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Build Assay CLI
+        run: cargo build --release -p assay-cli
+
+      - name: Setup evidence directory with fixture
+        run: |
+          mkdir -p .assay/evidence
+          cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/
+
+      - name: Create invalid pack file
+        run: |
+          cat > invalid-pack.yaml <<'EOF'
+          name: broken-pack
+          kind: compliance
+          version: "1.0.0"
+          rules:
+            - id: BAD-001
+              message: "missing required fields on purpose"
+          EOF
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Run action with invalid pack (expected failure)
+        id: assay_invalid_pack
+        continue-on-error: true
+        uses: ./assay-action
+        with:
+          bundles: '.assay/evidence/*.tar.gz'
+          fail_on: none
+          pack: ./invalid-pack.yaml
+
+      - name: Validate invalid-pack failure mode outputs
+        run: |
+          echo "Step outcome: ${{ steps.assay_invalid_pack.outcome }}"
+          echo "Pack status: ${{ steps.assay_invalid_pack.outputs.pack_status }}"
+          echo "Pack error kind: ${{ steps.assay_invalid_pack.outputs.pack_error_kind }}"
+
+          if [ "${{ steps.assay_invalid_pack.outcome }}" != "failure" ]; then
+            echo "ERROR: expected action step to fail on invalid pack"
+            exit 1
+          fi
+
+          if [ "${{ steps.assay_invalid_pack.outputs.pack_status }}" != "invalid_pack" ]; then
+            echo "ERROR: expected pack_status=invalid_pack"
+            exit 1
+          fi
+
+          if [ "${{ steps.assay_invalid_pack.outputs.pack_error_kind }}" != "invalid_pack" ]; then
+            echo "ERROR: expected pack_error_kind=invalid_pack"
+            exit 1
+          fi

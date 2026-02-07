@@ -208,6 +208,10 @@ When `pack` is configured, the action distinguishes:
 
 Use `pack_status` and `pack_error_kind` outputs for CI routing.
 
+Behavior note:
+- compliance pack load/validation/runtime errors fail the action step
+- policy findings still follow normal `fail_on` threshold behavior
+
 ## Documentation
 
 - [Full Guide](https://github.com/Rul1an/assay/blob/main/docs/guides/github-action.md)

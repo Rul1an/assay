@@ -483,6 +483,10 @@ Check action outputs:
 
 The action also exposes `pack_error_kind` for machine-readable CI triage.
 
+Behavior note:
+- pack loading/validation/runtime errors fail the action step
+- policy findings continue to follow the normal `fail_on` threshold
+
 ## Security Notes
 
 - **Write operations** (baseline, BYOS push, attestation) only run on push to default branch

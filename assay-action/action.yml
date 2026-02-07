@@ -807,6 +807,7 @@ runs:
 
         # Lint with packs (generates pack-enhanced SARIF). Use --fail-on none so
         # policy findings do not masquerade as pack-loading/config errors.
+        # Pack-loading/config/runtime failures still fail this step with exit 3.
         while IFS= read -r bundle || [ -n "$bundle" ]; do
           [ -z "$bundle" ] && continue
           echo "Linting with packs: $bundle"
@@ -875,7 +876,7 @@ runs:
         SARIF="$REPORTS_DIR/pack-lint.sarif"
 
         # Extract pack metadata from SARIF (run-wide, deterministic).
-        RESOLVED_PACKS=$(jq -r '[.runs[].tool.driver.properties.assayPacks[]? | "\(.name)@\(.version)"] | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
+        RESOLVED_PACKS=$(jq -r '[.runs[].tool.driver.properties.assayPacks[]? | "\(.name)@\(.version)"] | sort | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
         PACK_APPLIED="$RESOLVED_PACKS"
         PACK_SCORE=$(jq -r '[.runs[].properties.complianceScore?] | if length == 0 then 100 else (add / length | floor) end' "$SARIF" 2>/dev/null || echo "100")
         PACK_ARTICLES=$(jq -r '[.runs[].tool.driver.rules[]?.properties.article_ref // empty] | unique | sort | join(",")' "$SARIF" 2>/dev/null || echo "")
