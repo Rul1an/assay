@@ -303,8 +303,8 @@ Tests:
 - `diff_paths_is_order_independent` ✅
 - `diff_paths_detects_added_removed_and_modified_paths` ✅
 - `coalesce_changed_paths_sorts_and_deduplicates` ✅
-- `collect_watch_paths_parse_error_keeps_core_targets` (edge hardening branch) ⏳
-- `diff_paths_detects_same_length_change_via_content_hash` (edge hardening branch) ⏳
+- `collect_watch_paths_parse_error_keeps_core_targets` ✅
+- `diff_paths_detects_same_length_change_via_content_hash` ✅
 - Manual testing via `assay watch --help` and local rerun loop ✅
 
 ---
@@ -323,26 +323,21 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Current state: P0 and P2 are delivered; major P1 features are shipped; remaining P1 work is parity hardening closure.
+Current state: P0/P1/P2 DX slices are integrated on `codex/p0-dx-magnets-clean`; integration to `main` is tracked in PR `#196`.
 
-Recommended order from here: merge P1-A/P1-B parity PR (#189) -> merge watch edge hardening slice -> keep contract/onboarding gates green.
+Recommended order from here: merge integration PR `#196` -> keep contract/onboarding gates green -> execute only deferred items when explicitly prioritized.
 
 ---
 
 ## Next Steps (Roadmap-Aligned)
 
 1. **Merge integration PR to `main`**
-   - `#191`: merge accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
-2. **Follow-up A: init hello-trace colocation fix**
-   - branch: `codex/p1-init-hello-trace-colocation`
-   - scope: write `traces/hello.jsonl` relative to `--config` parent (not hard-coded to CWD).
-3. **Follow-up B: doctor dry-run exit contract**
-   - branch: `codex/p1-doctor-dry-run-exit-contract`
-   - scope: align `doctor --fix --dry-run` exit behavior with documented contract, update E2E/docs together.
-4. **Follow-up C (optional, low risk): watch RunArgs drift reduction**
-   - branch: `codex/p1-watch-runargs-builder`
-   - scope: reduce manual `RunArgs` duplication in watch path to prevent default drift.
-5. **Keep permanent gates + deferred boundaries**
+   - `#196`: merge accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
+2. **Confirmed completed in this integration branch**
+   - `#193`: `init --hello-trace` colocation with `--config` parent.
+   - `#194`: `doctor --fix --dry-run` exit behavior aligned with diagnostics contract.
+   - `#195`: watch/replay `RunArgs` default-drift reduction + regression coverage.
+3. **Keep permanent gates + deferred boundaries**
    - Gate A (contract): keep run/summary/SARIF/JUnit + action I/O compatibility stable.
    - Gate B (onboarding): keep clean-repo -> first actionable signal under 30 minutes.
    - Deferred by design: native `notify` backend, full-repo docs link checks, cross-platform atomic write parity beyond Unix.
