@@ -1,6 +1,6 @@
 # DX Roadmap: P0-P2 Implementation Plan
 
-**Last updated:** 2026-02-06
+**Last updated:** 2026-02-07
 **Scope:** 6 features across 3 priority tiers + DX polish
 **EU AI Act deadline:** August 2, 2026
 
@@ -17,8 +17,9 @@
 | `next_step()` mapping (E4.1) | P0 | Already existed | — |
 | `generate --diff` | P1-A | Planned | — |
 | `explain` + compliance hints | P1-B | Planned | — |
-| `doctor --fix` | P2-A | Done | local |
-| `watch` | P2-B | Done | local |
+| `doctor --fix` | P2-A | Done | #184 |
+| `watch` | P2-B | Done | #184 |
+| Docs alignment + link guard | DX polish | Done | #184 |
 
 ---
 
@@ -221,11 +222,13 @@ Applied 2 fix(es). Remaining: 0 error(s).
 
 Implementation (shipped):
 - Added `--fix`, `--yes`, `--dry-run` to `DoctorArgs`
+- Added fast-fail guard: `--yes`/`--dry-run` require `--fix`
 - `run_doctor_fix()` converts diagnostics to fix suggestions via `assay_core::agentic::build_suggestions()`
 - Interactive confirmations via `dialoguer` (with `--yes` override)
 - Supports dry-run patch previews (unified diff)
 - Adds automatic trace-file creation fix path for `E_TRACE_MISS`
 - After applying: re-runs doctor diagnostics and reports remaining errors
+- Uses atomic temp-file+rename writes on Unix for parse-fix edits
 
 Fixable diagnostics:
 - `E_CFG_PARSE` with typo -> field rename
@@ -237,9 +240,9 @@ Non-fixable (show hints):
 - Performance -> suggest `--incremental`
 
 Tests:
-- `doctor_fix_typo_correction`
-- `doctor_fix_dry_run_no_writes`
-- `doctor_fix_creates_missing_trace`
+- `doctor_fix_yes_creates_missing_trace_file` ✅
+- `doctor_fix_dry_run_does_not_write_trace_file` ✅
+- `doctor_yes_without_fix_fails_fast` ✅
 
 ### P2-B: `watch` — Live Feedback Loop
 
@@ -266,11 +269,16 @@ Result: 11/12 passed
 Implementation (shipped):
 - Added `WatchArgs` with `--config`, `--trace-file`, `--baseline`, `--db`, `--strict`, `--replay-strict`, `--clear`, `--debounce-ms`
 - Watch loop uses dependency-free polling snapshots + debounce
+- Debounce is clamped to safe bounds (`50..=60000` ms)
 - `collect_watch_paths()` parses config to include policy paths referenced by tests
+- Watch targets are refreshed after reruns when config-derived paths change
 - Reuses `run::run` internally for each rerun
 
 Tests:
 - `collect_watch_paths_includes_policy` ✅
+- `normalize_debounce_ms_clamps_low_values` ✅
+- `normalize_debounce_ms_clamps_high_values` ✅
+- `normalize_debounce_ms_keeps_in_range_values` ✅
 - Manual testing via `assay watch --help` and local rerun loop ✅
 
 ---
@@ -289,7 +297,42 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Recommended order: P0-A -> P0-B -> P1-B -> P1-A -> P2-A -> P2-B
+Current state: P0 and P2 are delivered. Remaining scoped work in this roadmap is P1-A and P1-B.
+
+Recommended order from here: P1-B -> P1-A, while planning Action v2.1 work in parallel.
+
+---
+
+## Next Steps (Roadmap-Aligned)
+
+Priority is based on this DX roadmap plus `/docs/ROADMAP.md` ("GitHub Action v2.1" marked as next):
+
+1. **Finish PR #184 merge and stabilization**
+   - Wait for full green CI and merge.
+   - Open follow-up issue for watch loop hardening (path-map diff and deterministic trigger tests).
+2. **Start ROADMAP-next item: GitHub Action v2.1 (P1 scope first)**
+   - Implement compliance pack support first.
+   - Keep BYOS push/OIDC and attestation as later slices.
+3. **P1-B: `explain` + compliance hints**
+   - Lowest coupling, highest immediate UX/compliance value.
+   - Deliver article mapping + coverage summary in explain output.
+4. **P1-A: `generate --diff`**
+   - Reuse existing generate pipeline and emit policy evolution diffs.
+5. **Deferred by design (not in #184)**
+   - Native `notify` watcher migration.
+   - Cross-platform atomic-write parity beyond Unix.
+   - Full-repo docs link checks (changed-files guard is now in place).
+
+## Deliberate Non-Goals (Now)
+
+These items are intentionally **not** implemented in the current slice to keep risk and review scope controlled.
+
+| Item | Decision | Why | Revisit when |
+|------|----------|-----|--------------|
+| Native fs-notify watcher backend | Defer | Polling watcher is stable and dependency-free for P2; notify adds platform-specific edge cases | After deterministic watch-loop tests are in place |
+| Full-repo markdown link checker | Defer | Existing docs contain legacy links; changed-files guard prevents new drift without blocking current delivery | After legacy docs cleanup sprint |
+| Non-Unix atomic write parity for doctor autofix | Defer | Unix path already safe for common CI/dev path; cross-platform parity needs dedicated IO strategy and tests | Before declaring doctor autofix GA on Windows |
+| `watch --once` / CI mode | Defer | Helpful but not required for current developer watch loop | When adding watch integration tests in CI |
 
 ---
 
@@ -310,9 +353,9 @@ Each feature includes a compliance upsell touch point:
 ## Verification Checklist
 
 For each feature:
-- [ ] `cargo build -p assay-cli` compiles
-- [ ] `cargo test -p assay-cli` passes
-- [ ] `cargo clippy -p assay-cli -- -D warnings` clean
-- [ ] Help text updated (`--help` shows new flags)
+- [x] `cargo build -p assay-cli` compiles
+- [x] `cargo test -p assay-cli` passes
+- [x] `cargo clippy -p assay-cli -- -D warnings` clean
+- [x] Help text updated (`--help` shows new flags)
 - [ ] Conversion hook present in at least 1 output path
-- [ ] No new dependencies without `optional = true` (except P2-B: `notify`)
+- [x] No new dependencies added for P2 watcher implementation

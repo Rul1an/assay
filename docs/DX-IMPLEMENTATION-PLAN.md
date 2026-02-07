@@ -1,10 +1,40 @@
 # DX Implementation Plan — Default Gate Readiness
 
-**Status:** Draft (updated after sanity check Jan 2026)
-**Date:** 2026-01
+**Status:** Living plan (updated after PR #184 implementation pass)
+**Date:** 2026-02
 **Source:** Critical DX review of [DX-REVIEW-MATERIALS.md](DX-REVIEW-MATERIALS.md); aligns with [ADR-019 PR Gate 2026 SOTA](architecture/ADR-019-PR-Gate-2026-SOTA.md) and [ROADMAP](ROADMAP.md). Aangepast na SOTA/DX reality check: technische correcties (GitHub Actions ref, SARIF limits, exit-codes compat), P0 Go/No-Go checklist, scope trims (E6a/E6b, cost guardrails, scrubbing deny-by-default). Score na aanpassingen: 9.7/10.
 
 This document turns the DX review into a concrete backlog with **per-file patchlist** and test cases. Work is ordered P0 (must-have before default gate) then P1 (SOTA).
+
+---
+
+## Progress Update (2026-02-07)
+
+Recent implementation state (PR #184, follow-up commits on branch):
+
+- **Delivered (P2):**
+  - `assay doctor --fix` with `--yes` / `--dry-run` safety guards and post-apply re-validation.
+  - `assay watch` with config-derived watch targets, debounce clamp, and refreshed targets after reruns.
+  - E2E tests for doctor fix flow and unit tests for watch path/debounce behavior.
+- **Delivered (DX polish):**
+  - Docs aligned to current CLI behavior (`assay ci`, `assay mcp wrap`, `--out-trace`).
+  - Added changed-files local markdown link check workflow (`Docs Link Check`) to prevent new docs drift.
+- **Deferred on purpose (tracked as follow-up):**
+  - Native notify-based watcher migration.
+  - Cross-platform atomic-write parity beyond Unix.
+  - Full-repo (legacy-inclusive) docs link validation in CI.
+
+Roadmap-aligned next execution order from here:
+1. Finish merge/stabilization of PR #184.
+2. Start `docs/ROADMAP.md` next major milestone: **GitHub Action v2.1** (P1 slice: compliance pack support).
+3. Continue with DX roadmap **P1-B** (`explain` + compliance hints), then **P1-A** (`generate --diff`).
+4. Implement watch hardening follow-up for deterministic trigger behavior (path-map diff + deterministic tests).
+5. Re-evaluate deferred items once the above three tracks are stable.
+
+Explicit "do not implement now" decisions:
+- Do not migrate to a native notify watcher yet (keep dependency-free polling in place).
+- Do not switch to full-repo docs link validation yet (keep changed-files guard).
+- Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
 
 ---
 
