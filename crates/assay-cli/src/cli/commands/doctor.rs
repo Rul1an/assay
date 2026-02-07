@@ -512,7 +512,7 @@ fn write_text_file(path: &Path, content: &str) -> anyhow::Result<()> {
                 tmp.display()
             )
         })?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(unix))]
