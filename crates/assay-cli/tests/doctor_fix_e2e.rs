@@ -61,11 +61,41 @@ fn doctor_fix_dry_run_does_not_write_trace_file() {
         .arg("--dry-run")
         .arg("--yes")
         .assert()
-        .success();
+        .code(1);
 
     assert!(
         !trace.exists(),
         "doctor --fix --dry-run --yes should not create trace file"
+    );
+}
+
+#[test]
+fn doctor_fix_parse_error_dry_run_exits_nonzero_and_does_not_write() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+
+    fs::write(
+        &config,
+        "version: 1\nsuite: doctor-fix\nmodel: trace\nresponse_format: text\ntests:\n  - id: t1\n    input:\n      prompt: \"hello\"\n    expected:\n      type: must_contain\n      must_contain: [\"hello\"]\n",
+    )
+    .expect("write invalid eval config");
+    let before = fs::read_to_string(&config).expect("read before");
+
+    let mut cmd = Command::cargo_bin("assay").expect("cargo bin");
+    cmd.current_dir(temp.path())
+        .arg("doctor")
+        .arg("--config")
+        .arg(&config)
+        .arg("--fix")
+        .arg("--dry-run")
+        .arg("--yes")
+        .assert()
+        .code(1);
+
+    let after = fs::read_to_string(&config).expect("read after");
+    assert_eq!(
+        before, after,
+        "doctor --fix --dry-run must not modify config file"
     );
 }
 
