@@ -23,6 +23,20 @@
 
 ---
 
+## DX Scorecard (Feb 2026 Refresh)
+
+This roadmap now tracks developer experience on five dimensions that reflect how Assay is actually adopted in CI and day-to-day engineering loops.
+
+| Dimension | Current State | Next Concrete Move |
+|-----------|---------------|--------------------|
+| Time-to-first-signal | `init`, `doctor --fix`, `watch` are shipped and documented | Add a guaranteed "hello trace + smoke suite" init path so first useful signal is under 30 minutes |
+| Quality-of-feedback | Exit/reason codes, `run.json`/`summary.json`, doctor/explain flows are in place | Add copy-paste rerun hints and explicit "next best action" snippets in failure paths |
+| Workflow fit | GitHub Action v2, SARIF, PR comments, docs link guard are in place | Ship Action v2.1 compliance-pack support first |
+| Trust & auditability | Deterministic run contracts and evidence outputs exist | Continue replay bundle hardening as cross-team reproducibility surface |
+| Change resilience | `watch` refreshes config-derived targets; `generate --diff` and compliance explain are planned | Make policy/tool drift deltas explicit in explain/diff outputs |
+
+---
+
 ## Architecture Decision: Leverage Existing Modules
 
 Most building blocks already exist. The strategy is composition, not construction:
@@ -299,7 +313,7 @@ P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1
 
 Current state: P0 and P2 are delivered. Remaining scoped work in this roadmap is P1-A and P1-B.
 
-Recommended order from here: P1-B -> P1-A, while planning Action v2.1 work in parallel.
+Recommended order from here: Action v2.1 (P1 slice) -> P1-B -> P1-A.
 
 ---
 
@@ -313,12 +327,15 @@ Priority is based on this DX roadmap plus `/docs/ROADMAP.md` ("GitHub Action v2.
 2. **Start ROADMAP-next item: GitHub Action v2.1 (P1 scope first)**
    - Implement compliance pack support first.
    - Keep BYOS push/OIDC and attestation as later slices.
-3. **P1-B: `explain` + compliance hints**
+3. **Golden-path hardening: first signal in <30 min**
+   - Extend init flow with a minimal hello-trace fixture and smoke suite template.
+   - Ensure first run produces actionable output (success or controlled failure + next step).
+4. **P1-B: `explain` + compliance hints**
    - Lowest coupling, highest immediate UX/compliance value.
    - Deliver article mapping + coverage summary in explain output.
-4. **P1-A: `generate --diff`**
+5. **P1-A: `generate --diff`**
    - Reuse existing generate pipeline and emit policy evolution diffs.
-5. **Deferred by design (not in #184)**
+6. **Deferred by design (not in #184)**
    - Native `notify` watcher migration.
    - Cross-platform atomic-write parity beyond Unix.
    - Full-repo docs link checks (changed-files guard is now in place).
@@ -333,6 +350,7 @@ These items are intentionally **not** implemented in the current slice to keep r
 | Full-repo markdown link checker | Defer | Existing docs contain legacy links; changed-files guard prevents new drift without blocking current delivery | After legacy docs cleanup sprint |
 | Non-Unix atomic write parity for doctor autofix | Defer | Unix path already safe for common CI/dev path; cross-platform parity needs dedicated IO strategy and tests | Before declaring doctor autofix GA on Windows |
 | `watch --once` / CI mode | Defer | Helpful but not required for current developer watch loop | When adding watch integration tests in CI |
+| Dedicated IDE governance surface | Defer | Existing CLI + CI + PR surfaces already cover the core loop; separate IDE control plane adds maintenance and policy UX complexity | After Action v2.1 and drift-aware UX are stable |
 
 ---
 

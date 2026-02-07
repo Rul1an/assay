@@ -27,14 +27,35 @@ Recent implementation state (PR #184, follow-up commits on branch):
 Roadmap-aligned next execution order from here:
 1. Finish merge/stabilization of PR #184.
 2. Start `docs/ROADMAP.md` next major milestone: **GitHub Action v2.1** (P1 slice: compliance pack support).
-3. Continue with DX roadmap **P1-B** (`explain` + compliance hints), then **P1-A** (`generate --diff`).
-4. Implement watch hardening follow-up for deterministic trigger behavior (path-map diff + deterministic tests).
-5. Re-evaluate deferred items once the above three tracks are stable.
+3. Add "first signal <30 minutes" golden-path hardening (`init` hello-trace fixture + smoke suite template).
+4. Continue with DX roadmap **P1-B** (`explain` + compliance hints), then **P1-A** (`generate --diff`).
+5. Implement watch hardening follow-up for deterministic trigger behavior (path-map diff + deterministic tests).
+6. Re-evaluate deferred items once the above tracks are stable.
 
 Explicit "do not implement now" decisions:
 - Do not migrate to a native notify watcher yet (keep dependency-free polling in place).
 - Do not switch to full-repo docs link validation yet (keep changed-files guard).
 - Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
+- Do not add a dedicated IDE governance control plane yet (focus on CLI/CI/PR surfaces first).
+
+## DX North Star (2026)
+
+Use this scorecard as a gate for roadmap choices. If a new item does not clearly improve at least one dimension below, it is de-prioritized.
+
+| Dimension | Practical Target | Current Baseline | Planned Work |
+|-----------|------------------|------------------|--------------|
+| Time-to-first-signal | First actionable result in <30 min | Good docs and commands, but no guaranteed hello-trace bootstrap | Golden-path hardening in init/templates |
+| Quality-of-feedback | Every failure routes to a next action | Reason codes + doctor/explain exist | Add explicit rerun/next-action hints in outputs and PR surfaces |
+| Workflow fit | Native PR/CI/Security integration | Action v2 + SARIF + PR comments already in place | Action v2.1 compliance-pack support first |
+| Trust & auditability | Reproducible and shareable evidence | Deterministic outputs and reason-code contracts exist | Replay bundle hardening and stronger manifest usage |
+| Change resilience | Drift visible before breakage | Watch refresh and docs alignment are in place | `generate --diff` + drift-aware explain output |
+
+### Execution Filters
+
+- Prefer paved-road improvements over adding new interfaces.
+- Keep policy gate decisions deterministic; keep reporting failures non-blocking where possible.
+- Prioritize low-cognitive-load defaults (self-service templates over manual config work).
+- Treat SARIF, run/summary JSON, and Action inputs/outputs as compatibility contracts.
 
 ---
 
@@ -78,12 +99,14 @@ De onderstaande epics groeperen het DX-plan in uitvoerbare eenheden. Per epic: *
 | E1.1 | Template v2: `assay init --ci` genereert `.github/workflows/assay.yml` met `Rul1an/assay/assay-action@v2` (moving major tag) of exact tag/SHA; geen v1-referentie | P0 | §1.1 |
 | E1.2 | Blessed entrypoint: documenteer `assay init --ci` als blessed, `assay init-ci` als alias | P0 | §1.2 |
 | E1.3 | One-click DX demo repos: `examples/dx-demo-node`, `examples/dx-demo-python` (minimal app, workflow, baseline, README) | P1 | §1.3 |
+| E1.4 | Golden-path bootstrap: `assay init` genereert optioneel hello-trace fixture + smoke suite voor snelle first signal | P1 | §1.2/§1.3 |
 
 **Acceptance criteria:**
 
 - [ ] `assay init --ci` → `.github/workflows/assay.yml` bevat `assay-action@v2` (golden/contract test).
 - [ ] Docs: init --ci = blessed; init-ci = alias; CI-integration + example repos link.
 - [ ] (P1) CI of smoke: `assay run` in dx-demo-node en dx-demo-python slaagt.
+- [ ] (P1) `assay init` kan een minimale trace + suite scaffolden die lokaal direct een bruikbaar signaal geeft.
 
 ---
 
