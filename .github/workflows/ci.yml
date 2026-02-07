@@ -163,6 +163,7 @@ jobs:
           }
 
       - name: Sccache
+        if: runner.os != 'macOS'
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - name: Rust cache
@@ -174,13 +175,22 @@ jobs:
             ~/.sccache
           cache-on-failure: true
 
-      - name: Configure Environment
+      - name: Configure Environment (with sccache)
+        if: runner.os != 'macOS'
         shell: bash
         run: |
           {
             echo "RUSTC_WRAPPER=sccache"
             echo "SCCACHE_DIR=$HOME/.sccache"
             echo "SCCACHE_GHA_ENABLED=false"
+            echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Environment (macOS no sccache)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          {
             echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse"
           } >> "$GITHUB_ENV"
 
@@ -268,7 +278,9 @@ jobs:
   prep-self-hosted-actions-perms:
     name: Fix self-hosted _actions (for eBPF job)
     needs: [test]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # TEMPORARY DISABLED alongside ebpf-smoke-self-hosted (issue #130).
+    # Re-enable when self-hosted runner health is restored.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && false
     runs-on: [self-hosted]
     timeout-minutes: 2
     steps:

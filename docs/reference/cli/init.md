@@ -27,12 +27,21 @@ With `--from-trace`, generates a policy directly from recorded agent behavior in
 | `--list-packs` | List available packs and exit. |
 | `--from-trace <FILE>` | Generate policy from an existing trace file (JSONL). |
 | `--heuristics` | Enable entropy/risk analysis when generating from trace. Requires `--from-trace`. |
+| `--hello-trace` | Generate a runnable hello trace and smoke suite scaffold. |
 
 ## Examples
 
 ### Basic setup
 ```bash
 assay init
+```
+
+### Fast first signal (hello trace)
+Creates `eval.yaml`, `traces/hello.jsonl`, and `policy.yaml` (if missing).
+
+```bash
+assay init --hello-trace
+assay validate --config eval.yaml --trace-file traces/hello.jsonl
 ```
 
 ### From existing trace
