@@ -136,8 +136,13 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
 }
 
 fn hello_trace_path_for_config(config_path: &Path) -> PathBuf {
-    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
-    base.join("traces/hello.jsonl")
+    match config_path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() || parent == Path::new(".") => {
+            PathBuf::from("traces/hello.jsonl")
+        }
+        Some(parent) => parent.join("traces/hello.jsonl"),
+        None => PathBuf::from("traces/hello.jsonl"),
+    }
 }
 
 fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
