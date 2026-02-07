@@ -5,19 +5,26 @@ Run your first Assay validation in 60 seconds.
 ## Prerequisites
 
 - Assay installed ([installation guide](installation.md))
-- An MCP session log or trace file
 
 ## 1. Initialize
 
 ```bash
-assay init
+assay init --hello-trace
 ```
 
-Generates `assay.yaml` (policy definition) with secure defaults: blocks `exec`, `shell`, dangerous filesystem access.
+Generates a runnable smoke setup:
+- `eval.yaml` with a minimal `hello_smoke` suite
+- `traces/hello.jsonl` with a deterministic trace fixture
 
-## 2. Capture Traces
+## 2. Validate
 
-Import from MCP Inspector or create a trace file:
+```bash
+assay validate --config eval.yaml --trace-file traces/hello.jsonl
+```
+
+## 3. Capture Your Own Traces
+
+After the hello smoke passes, import from MCP Inspector or create your own trace file:
 
 ```bash
 # From MCP Inspector
@@ -27,7 +34,7 @@ assay import --format inspector session.json --out-trace trace.jsonl
 echo '{"tool": "read_file", "args": {"path": "/etc/passwd"}}' > trace.jsonl
 ```
 
-## 3. Validate
+## 4. Validate Your Own Trace
 
 ```bash
 assay validate --trace-file trace.jsonl
@@ -41,7 +48,7 @@ Output:
   Path '/etc/passwd' matches blocked pattern
 ```
 
-## 4. Export Evidence
+## 5. Export Evidence
 
 Create a verifiable evidence bundle:
 
@@ -53,7 +60,7 @@ assay evidence verify bundle.tar.gz
 
 Bundles are content-addressed (SHA-256). Tamper-evident.
 
-## 5. Lint for Issues
+## 6. Lint for Issues
 
 ```bash
 # Basic lint
@@ -65,7 +72,7 @@ assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
 
 SARIF output integrates with GitHub Code Scanning.
 
-## 6. CI Integration
+## 7. CI Integration
 
 ```bash
 assay init --ci
@@ -79,7 +86,7 @@ Or use the GitHub Action directly:
 - uses: Rul1an/assay/assay-action@v2
 ```
 
-## 7. Runtime Enforcement (Linux)
+## 8. Runtime Enforcement (Linux)
 
 Kernel-level blocking:
 
