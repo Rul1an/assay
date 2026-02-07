@@ -16,6 +16,8 @@ Generates a runnable smoke setup:
 - `eval.yaml` with a minimal `hello_smoke` suite
 - `traces/hello.jsonl` with a deterministic trace fixture
 
+The hello trace is demo-only and non-sensitive. Treat real traces as potentially sensitive data and apply your redaction/recording guidelines.
+
 ## 2. Validate
 
 ```bash

@@ -119,6 +119,9 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     println!("✅  Initialization complete.");
     if args.hello_trace {
         println!(
+            "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive."
+        );
+        println!(
             "   Next: assay validate --config {} --trace-file traces/hello.jsonl",
             args.config.display()
         );
