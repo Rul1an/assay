@@ -2,7 +2,8 @@
 
 **Last updated:** 2026-02-07
 **Scope:** 6 features across 3 priority tiers + DX polish
-**EU AI Act deadline:** August 2, 2026
+**EU AI Act phased dates:** 2025-02-02, 2025-08-02, 2026-08-02
+**Planning assumption:** no stop-clock; roadmap tracks current phased dates.
 
 ---
 
@@ -15,10 +16,11 @@
 | SARIF truncation fix (E2.3) | P0 | Done | #174 |
 | Fork PR fallback (E2.4) | P0 | Already existed | — |
 | `next_step()` mapping (E4.1) | P0 | Already existed | — |
-| `generate --diff` | P1-A | Planned | — |
-| `explain` + compliance hints | P1-B | Planned | — |
+| `generate --diff` | P1-A | In review | #177 |
+| `explain` + compliance hints | P1-B | In review | #179 |
 | `doctor --fix` | P2-A | Done | #184 |
 | `watch` | P2-B | Done | #184 |
+| `watch` hardening (determinism/tests) | P1 | Planned | — |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
 ---
@@ -33,7 +35,7 @@ This roadmap now tracks developer experience on five dimensions that reflect how
 | Quality-of-feedback | Exit/reason codes, `run.json`/`summary.json`, doctor/explain flows are in place | Add copy-paste rerun hints and explicit "next best action" snippets in failure paths |
 | Workflow fit | GitHub Action v2, SARIF, PR comments, docs link guard are in place | Ship Action v2.1 compliance-pack support first |
 | Trust & auditability | Deterministic run contracts and evidence outputs exist | Continue replay bundle hardening as cross-team reproducibility surface |
-| Change resilience | `watch` refreshes config-derived targets; `generate --diff` and compliance explain are planned | Make policy/tool drift deltas explicit in explain/diff outputs |
+| Change resilience | `watch` refreshes config-derived targets; `generate --diff` and compliance explain are implemented | Harden contracts and docs/examples parity to prevent drift |
 
 ---
 
@@ -311,9 +313,9 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Current state: P0 and P2 are delivered. Remaining scoped work in this roadmap is P1-A and P1-B.
+Current state: P0 and P2 are delivered, and P1-A/P1-B features exist but still require parity/contract hardening.
 
-Recommended order from here: Action v2.1 (P1 slice) -> P1-B -> P1-A.
+Recommended order from here: Action v2.1 (P1 slice) -> Golden Path gate -> P1-A/P1-B hardening -> watch hardening.
 
 ---
 
@@ -323,22 +325,29 @@ Priority is based on this DX roadmap plus `/docs/ROADMAP.md` ("GitHub Action v2.
 
 1. **Finish PR #184 merge and stabilization**
    - Wait for full green CI and merge.
-   - Open follow-up issue for watch loop hardening (path-map diff and deterministic trigger tests).
+   - Keep watch feature scope closed; follow-ups are hardening-only.
 2. **Start ROADMAP-next item: GitHub Action v2.1 (P1 scope first)**
-   - Implement compliance pack support first.
+   - Implement compliance-pack support as a data dependency contract.
+   - Add parity tests for docs/examples commands used in Action docs.
    - Keep BYOS push/OIDC and attestation as later slices.
 3. **Golden-path hardening: first signal in <30 min**
    - Extend init flow with a minimal hello-trace fixture and smoke suite template.
    - Ensure first run produces actionable output (success or controlled failure + next step).
-4. **P1-B: `explain` + compliance hints**
-   - Lowest coupling, highest immediate UX/compliance value.
-   - Deliver article mapping + coverage summary in explain output.
-5. **P1-A: `generate --diff`**
-   - Reuse existing generate pipeline and emit policy evolution diffs.
+4. **P1-A/P1-B parity hardening (no feature expansion)**
+   - Lock CLI/help/output contracts and add docs/examples parity checks.
+   - Ensure explain/diff surfaces remain deterministic and reviewer-friendly.
+5. **Watch hardening (existing command)**
+   - Add path-map based trigger comparison and deterministic debounce-loop tests.
+   - Validate Windows coarse mtime behavior and parse-error fallback monitoring.
 6. **Deferred by design (not in #184)**
    - Native `notify` watcher migration.
    - Cross-platform atomic-write parity beyond Unix.
    - Full-repo docs link checks (changed-files guard is now in place).
+
+## Permanent Gates
+
+- Gate A (contract): run/summary/SARIF/JUnit + Action I/O compatibility stays stable by default.
+- Gate B (onboarding): clean-repo -> first actionable signal remains <30 minutes.
 
 ## Deliberate Non-Goals (Now)
 

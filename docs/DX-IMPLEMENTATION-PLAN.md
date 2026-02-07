@@ -19,9 +19,9 @@ Compact execution view for all P0/P1 workstreams.
 | EP0-3 Exit/Reason Contract | P0 | Done | deterministic exit/reason surfaces for automation |
 | EP1-1 GitHub Action v2.1 (compliance-pack first) | P1 | Planned (Next) | Action v2.1 P1 slice on existing PR/CI surfaces |
 | EP1-2 Golden Path (<30m first signal) | P1 | Planned | init bootstrap: hello-trace + smoke suite |
-| EP1-3 Explain + Compliance Hints | P1 | Planned | explain output with article mapping + next actions |
-| EP1-4 Drift Visibility (`generate --diff`) | P1 | Planned | reviewable policy/tool drift diffs |
-| EP1-5 Watch Determinism Hardening | P1 | Planned | deterministic trigger/debounce behavior |
+| EP1-3 Explain + Compliance Hints | P1 | In review | feature delivered; parity/contract hardening pending |
+| EP1-4 Drift Visibility (`generate --diff`) | P1 | In review | feature delivered; parity/contract hardening pending |
+| EP1-5 Watch Determinism Hardening | P1 | Planned (Hardening-only) | existing watch behavior hardened for determinism/edge cases |
 | EP1-6 Privacy-safe Observability Defaults | P1 | Planned | redaction/cardinality defaults and tests |
 | EP1-7 MCP Auth Hardening (E6a hard scope) | P1 | Planned | OAuth/JWT/JWKS no-pass-through baseline |
 | EP1-8 Replay Bundle Hardening | P1 | Planned | reproducible evidence bundle + manifest discipline |
@@ -29,16 +29,107 @@ Compact execution view for all P0/P1 workstreams.
 Recommended sequence:
 1. EP1-1 GitHub Action v2.1 (compliance-pack support).
 2. EP1-2 Golden Path (<30m first signal).
-3. EP1-3 Explain + Compliance Hints.
-4. EP1-4 Drift Visibility (`generate --diff`).
-5. EP1-5 Watch determinism hardening.
-6. EP1-6/EP1-7/EP1-8 parallel where capacity allows.
+3. EP1-3 + EP1-4 parity hardening (docs/examples/contract tests; no feature expansion).
+4. EP1-5 Watch hardening (determinism + Windows/file edge cases + loop tests).
+5. EP1-6/EP1-7/EP1-8 parallel where capacity allows.
 
 Explicit deferred boundaries:
 - no native notify watcher backend now;
 - no full-repo docs link checker as hard CI gate;
 - no non-Unix atomic-write parity expansion in this slice;
 - no dedicated IDE governance control-plane in this phase.
+
+## No-Regression Gates (Permanent)
+
+Gate A (contract stability):
+- `run.json` / `summary.json` contracts, SARIF/JUnit outputs, and GitHub Action I/O remain backward-compatible by default.
+
+Gate B (onboarding velocity):
+- clean repo -> first actionable Assay signal remains under 30 minutes on documented golden path.
+
+Any P1 epic that violates A or B must either:
+- include an explicit migration plan, or
+- be split so contract/onboarding stability lands first.
+
+## P1 DX Contract Surfaces
+
+Per epic we define what is normative (stable contract) versus best-effort (implementation detail).
+
+### EP1-1 Action v2.1 (compliance-pack first)
+- Normative:
+  - compliance-pack resolution behavior and logged resolved pack reference.
+  - distinct failure modes: missing pack vs invalid pack vs lint/policy fail.
+  - output parity across Action surfaces (summary/SARIF/JUnit).
+- Best effort:
+  - internal caching strategy for pack resolution.
+  - non-contractual log phrasing.
+
+### EP1-2 Golden Path (<30m first signal)
+- Normative:
+  - documented bootstrap flow must produce an actionable first signal.
+  - generated scaffold commands in docs must execute as written.
+  - regression gate enforces onboarding time budget.
+- Best effort:
+  - exact sample fixture contents.
+  - cosmetic scaffold formatting.
+
+### EP1-3 Explain + Compliance Hints (in review)
+- Normative:
+  - `--compliance-pack` behavior and compatibility with non-pack mode.
+  - article hint + coverage summary field presence in supported output modes.
+  - failure output includes concrete next-action guidance.
+- Best effort:
+  - wording of explanatory prose.
+  - ordering of non-contractual detail lines.
+
+### EP1-4 Drift Visibility (`generate --diff`) (in review)
+- Normative:
+  - stable added/removed/changed semantics for drift output.
+  - deterministic diff output for identical inputs.
+  - `--diff` does not alter existing write semantics without explicit write flags.
+- Best effort:
+  - pretty-print formatting and grouping style.
+  - optional metadata lines.
+
+### EP1-5 Watch hardening (existing command, hardening only)
+- Normative:
+  - debounce clamp range and trigger-coalescing behavior.
+  - watch-loop exit semantics (loop lifecycle vs run result logging).
+  - config parse failure fallback: keep watching at least config/trace/baseline.
+- Best effort:
+  - polling interval tuning.
+  - filesystem timestamp granularity handling nuances.
+
+### EP1-6 Privacy-safe observability defaults
+- Normative:
+  - safe-by-default redaction and cardinality guardrails are on by default.
+  - unsafe raw prompt/body exposure requires explicit opt-in configuration.
+  - default exports do not leak prompt/response bodies.
+- Best effort:
+  - exact redaction text tokenization strategy.
+  - non-contractual telemetry attribute ordering.
+
+### EP1-7 MCP auth hardening (E6a)
+- Normative:
+  - RFC 8707 resource/audience constraints enforced.
+  - JWT alg/typ/crit validation and JWKS rotation behavior enforced.
+  - no-pass-through token behavior enforced.
+- Interop matrix (required):
+  - JWKS rotation / kid miss.
+  - alg confusion + typ/crit rejection.
+  - audience/resource mismatch handling.
+- Best effort:
+  - cache refresh cadence internals.
+  - diagnostics verbosity.
+
+### EP1-8 Replay bundle hardening
+- Normative:
+  - verify/scrub defaults are safe and on by default.
+  - bundle manifest captures deterministic replay-critical metadata.
+  - unsafe/raw capture paths require explicit opt-in.
+- Best effort:
+  - archive layout details that do not affect verification/replay contract.
+  - optional manifest annotation fields.
 
 ---
 
@@ -62,8 +153,8 @@ Roadmap-aligned next execution order from here:
 1. Finish merge/stabilization of PR #184.
 2. Start `docs/ROADMAP.md` next major milestone: **GitHub Action v2.1** (P1 slice: compliance pack support).
 3. Add "first signal <30 minutes" golden-path hardening (`init` hello-trace fixture + smoke suite template).
-4. Continue with DX roadmap **P1-B** (`explain` + compliance hints), then **P1-A** (`generate --diff`).
-5. Implement watch hardening follow-up for deterministic trigger behavior (path-map diff + deterministic tests).
+4. Close EP1-3/EP1-4 as parity hardening only (contract tests + docs/examples parity; no feature expansion).
+5. Implement EP1-5 watch hardening follow-up (determinism + Windows timestamp edge cases + loop tests).
 6. Re-evaluate deferred items once the above tracks are stable.
 
 Explicit "do not implement now" decisions:
@@ -71,6 +162,11 @@ Explicit "do not implement now" decisions:
 - Do not switch to full-repo docs link validation yet (keep changed-files guard).
 - Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
 - Do not add a dedicated IDE governance control plane yet (focus on CLI/CI/PR surfaces first).
+
+EU AI Act date anchors used in this plan:
+- 2025-02-02: first phased obligations active.
+- 2025-08-02: GPAI-focused obligations active.
+- 2026-08-02: broader obligations active.
 
 ## DX North Star (2026)
 
