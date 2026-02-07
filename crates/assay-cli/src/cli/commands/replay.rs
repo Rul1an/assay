@@ -223,37 +223,22 @@ fn replay_run_args(
     replay_strict: bool,
     exit_codes: crate::exit_codes::ExitCodeVersion,
 ) -> RunArgs {
+    let judge = JudgeArgs {
+        no_judge: true,
+        ..JudgeArgs::default()
+    };
+
     RunArgs {
         config,
         db,
-        rerun_failures: 0,
         quarantine_mode: "off".to_string(),
         trace_file,
-        redact_prompts: false,
-        baseline: None,
-        export_baseline: None,
-        strict: false,
-        embedder: "none".to_string(),
-        embedding_model: "text-embedding-3-small".to_string(),
-        refresh_embeddings: false,
-        incremental: false,
         refresh_cache: true,
         no_cache: true,
-        explain_skip: false,
-        judge: JudgeArgs {
-            judge: "none".to_string(),
-            no_judge: true,
-            judge_model: None,
-            judge_samples: 3,
-            judge_refresh: false,
-            judge_temperature: 0.0,
-            judge_max_tokens: 800,
-            judge_api_key: None,
-        },
+        judge,
         replay_strict,
-        deny_deprecations: false,
         exit_codes,
-        no_verify: false,
+        ..RunArgs::default()
     }
 }
 
@@ -683,6 +668,7 @@ impl Drop for ReplayWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::ExitCodeVersion;
     use assay_core::replay::{ReplayCoverage, ReplayManifest};
 
     #[test]
@@ -716,5 +702,33 @@ mod tests {
         assert_eq!(value["provenance"]["bundle_digest"], "sha256:abc");
         assert_eq!(value["provenance"]["replay_mode"], "offline");
         assert_eq!(value["provenance"]["source_run_id"], "123");
+    }
+
+    #[test]
+    fn replay_run_args_overrides_and_inherits_defaults() {
+        let args = replay_run_args(
+            PathBuf::from("custom/eval.yaml"),
+            Some(PathBuf::from("custom/trace.jsonl")),
+            PathBuf::from("custom/eval.db"),
+            true,
+            ExitCodeVersion::V1,
+        );
+
+        assert_eq!(args.config, PathBuf::from("custom/eval.yaml"));
+        assert_eq!(args.trace_file, Some(PathBuf::from("custom/trace.jsonl")));
+        assert_eq!(args.db, PathBuf::from("custom/eval.db"));
+        assert_eq!(args.quarantine_mode, "off");
+        assert!(args.refresh_cache);
+        assert!(args.no_cache);
+        assert!(args.judge.no_judge);
+        assert!(args.replay_strict);
+        assert_eq!(args.exit_codes, ExitCodeVersion::V1);
+
+        // Inherited from RunArgs defaults.
+        assert_eq!(args.embedder, "none");
+        assert_eq!(args.embedding_model, "text-embedding-3-small");
+        assert!(!args.strict);
+        assert!(!args.redact_prompts);
+        assert!(!args.no_verify);
     }
 }
