@@ -268,7 +268,9 @@ jobs:
   prep-self-hosted-actions-perms:
     name: Fix self-hosted _actions (for eBPF job)
     needs: [test]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # TEMPORARY DISABLED alongside ebpf-smoke-self-hosted (issue #130).
+    # Re-enable when self-hosted runner health is restored.
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && false
     runs-on: [self-hosted]
     timeout-minutes: 2
     steps:
