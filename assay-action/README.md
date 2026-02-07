@@ -163,7 +163,10 @@ jobs:
 | `findings_error` | Error count |
 | `findings_warn` | Warning count |
 | `reports_dir` | Reports directory path |
+| `resolved_pack_refs` | Resolved pack refs as `name@version` |
 | `pack_score` | Compliance score (0-100) |
+| `pack_status` | `disabled`, `success`, `missing_pack`, `invalid_pack`, `runtime_error` |
+| `pack_error_kind` | Machine-readable pack error category |
 | `coverage_percent` | Evidence coverage % |
 | `bundle_url` | BYOS URL (if pushed) |
 | `attestation_url` | Attestation URL (if generated) |
@@ -195,6 +198,15 @@ permissions:
 - **Fork PRs**: Verify + lint only (no writes)
 - **Same-repo PRs**: Verify + lint + SARIF + PR comment
 - **Default branch push**: All features (baseline, BYOS, attestation, badge)
+
+## Pack Failure Modes
+
+When `pack` is configured, the action distinguishes:
+- `missing_pack`: unknown pack name or missing file path
+- `invalid_pack`: pack schema/validation/parsing error
+- `runtime_error`: unexpected lint/runtime failure
+
+Use `pack_status` and `pack_error_kind` outputs for CI routing.
 
 ## Documentation
 

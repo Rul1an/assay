@@ -123,7 +123,10 @@ jobs:
 | `findings_warn` | Warning count |
 | `reports_dir` | Reports directory path |
 | `pack_applied` | Applied pack IDs (v2.1) |
+| `resolved_pack_refs` | Resolved pack refs as `name@version` (v2.1) |
 | `pack_score` | Compliance score 0-100 (v2.1) |
+| `pack_status` | Pack status: `disabled`, `success`, `missing_pack`, `invalid_pack`, `runtime_error` (v2.1) |
+| `pack_error_kind` | Pack error category when pack status is non-success (v2.1) |
 | `bundle_url` | BYOS bundle URL (v2.1) |
 | `attestation_id` | Attestation UUID (v2.1) |
 
@@ -470,6 +473,15 @@ Verify IAM trust relationship includes your repo:
   }
 }
 ```
+
+### Compliance pack step fails
+
+Check action outputs:
+- `pack_status=missing_pack`: pack ref not found (typo or missing file path)
+- `pack_status=invalid_pack`: pack schema/validation error
+- `pack_status=runtime_error`: unexpected lint/runtime failure
+
+The action also exposes `pack_error_kind` for machine-readable CI triage.
 
 ## Security Notes
 
