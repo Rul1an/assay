@@ -51,6 +51,11 @@ jsonschema = "0.40"
 tempfile = "3"
 assert_fs = "1.0"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+criterion = "0.8"
+
+[[bench]]
+name = "verify_lint_harness"
+harness = false
 
 [lints]
 workspace = true

@@ -75,6 +75,11 @@ name = "suite_run_worstcase"
 path = "benches/suite_run_worstcase.rs"
 harness = false
 
+[[bench]]
+name = "profile_store_harness"
+path = "benches/profile_store_harness.rs"
+harness = false
+
 [dev-dependencies]
 tempfile = "3"
 regex = "1"
