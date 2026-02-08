@@ -203,21 +203,49 @@ Current state:
 
 ### Wave C - Performance / Scale (Data-triggered)
 
-**Goal**: optimize only with evidence.
+**Goal**: optimize only with evidence, and keep correctness contracts first-class.
 
-| Task | Trigger | Files |
-|------|---------|-------|
-| C1: Single-pass streaming verify+lint | verify/lint CI cost > 5s | evidence lint/verify engine |
-| C2: `RunnerRef` shared refs | profiling shows clone overhead | core runner |
-| C3: Profile store batch ops | >10k profile entries | storage store |
-| C4: Stable run-id tracking beyond ring buffer | corpus growth pressure | storage layer |
+Wave C execution is intentionally split into a control-plane pre-step plus data-triggered slices.
+
+#### C0 - Observability and Trigger Gate (must land first)
+
+Before any perf refactor, publish a stable measurement surface:
+
+- `summary.json` perf block (phase timings + cache metrics + corpus counters).
+- CI baseline artifact (`bench-baseline.json`) per branch.
+- PR compare gate that distinguishes:
+  - informational drift (non-blocking),
+  - threshold regressions (blocking with explicit reason).
+
+Minimum fields to track:
+
+| Field | Meaning | Used by |
+|------|---------|---------|
+| `verify_ms` | evidence verify wall time | C1 trigger |
+| `lint_ms` | evidence lint wall time | C1 trigger |
+| `runner_clone_ms` | per-run clone overhead estimate | C2 trigger |
+| `profile_store_ms` | profile write/read phase time | C3 trigger |
+| `run_id_memory_bytes` | run-id tracking memory footprint | C4 trigger |
+
+#### C1-C4 Data-triggered slices
+
+| Task | Trigger | Files | Notes |
+|------|---------|-------|-------|
+| C1: Single-pass streaming verify+lint | `verify_ms + lint_ms > 5000` on representative CI corpus | evidence lint/verify engine | preserve fail-closed semantics and canonical verification order |
+| C2: `RunnerRef` shared refs | `runner_clone_ms` is material in profiles | core runner | optimize allocation/copy path only; no behavior drift |
+| C3: Profile store batch ops | profile corpus > 10k entries or `profile_store_ms` dominates run time | storage store | use transactional batching and deterministic ordering |
+| C4: Stable run-id tracking beyond ring buffer | sustained memory pressure or collision risk at scale | storage layer | introduce tiered set strategy with deterministic membership checks |
 
 **Acceptance criteria**:
-- [ ] Benchmarked improvements on realistic workloads
-- [ ] No regression in determinism/integrity
-- [ ] Criterion coverage updated
+- [ ] Every C-task references a recorded C0 metric snapshot in PR description.
+- [ ] Benchmarked improvements on realistic workloads (not only synthetic micro-benches).
+- [ ] No regression in determinism/integrity/evidence verification behavior.
+- [ ] Criterion coverage + regression thresholds updated.
+- [ ] No contract changes to run/summary/SARIF/JUnit unless explicitly versioned.
 
-**Stop line**: do not start without measured bottleneck evidence.
+**Stop line**:
+- Do not start C1-C4 without C0 instrumentation live.
+- Do not merge perf changes that improve speed but weaken fail-closed or determinism guarantees.
 
 ---
 
@@ -239,7 +267,7 @@ Security posture retained:
 
 1. Execute **Wave B1** (`run_pipeline`) to remove run/ci duplication on the core execution path.
 2. Follow with **Wave B2/B3** (coupling reduction + init `--pack` rename migration).
-3. Keep Wave C explicitly metrics-gated.
+3. Keep Wave C explicitly metrics-gated via C0 before any optimization slice.
 
 ---
 
