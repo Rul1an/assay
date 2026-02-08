@@ -73,16 +73,9 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-    let mut summary = build_summary_from_artifacts(
-        &outcome,
-        !args.no_verify,
-        &artifacts,
-        Some(&timings),
-        Some(report_ms),
-    );
+    let mut summary =
+        build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts, Some(&timings), None);
     summary = summary.with_sarif_omitted(sarif_omitted);
-    assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
     print_pipeline_summary(&artifacts, args.explain_skip, &summary);
 
@@ -103,6 +96,18 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         std::fs::write(comment_path, &md)?;
         eprintln!("Wrote PR comment to {}", comment_path.display());
     }
+
+    // Measure the full reporting phase (format writes + summary prep + console + telemetry + PR comment).
+    let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let mut final_summary = build_summary_from_artifacts(
+        &outcome,
+        !args.no_verify,
+        &artifacts,
+        Some(&timings),
+        Some(report_ms),
+    );
+    final_summary = final_summary.with_sarif_omitted(sarif_omitted);
+    assay_core::report::summary::write_summary(&final_summary, &summary_path)?;
 
     Ok(outcome.exit_code)
 }

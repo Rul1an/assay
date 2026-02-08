@@ -381,7 +381,11 @@ fn build_performance_metrics(
                 })
         })
         .collect();
-    slowest.sort_by(|a, b| b.duration_ms.cmp(&a.duration_ms));
+    slowest.sort_by(|a, b| {
+        b.duration_ms
+            .cmp(&a.duration_ms)
+            .then_with(|| a.test_id.cmp(&b.test_id))
+    });
     slowest.truncate(5);
     let slowest_tests = if slowest.is_empty() {
         None
@@ -509,5 +513,26 @@ mod tests {
         assert_eq!(slowest[2].test_id, "t6");
         assert_eq!(slowest[3].test_id, "t5");
         assert_eq!(slowest[4].test_id, "t2");
+    }
+
+    #[test]
+    fn performance_metrics_slowest_tie_breaks_by_test_id() {
+        let artifacts = assay_core::report::RunArtifacts {
+            run_id: 3,
+            suite: "demo".to_string(),
+            results: vec![
+                row("b", Some(42), false, TestStatus::Pass),
+                row("a", Some(42), false, TestStatus::Pass),
+                row("c", Some(42), false, TestStatus::Pass),
+            ],
+            order_seed: None,
+        };
+
+        let performance = build_performance_metrics(&artifacts, None, Some(1));
+        let slowest = performance.slowest_tests.expect("slowest tests");
+        assert_eq!(slowest.len(), 3);
+        assert_eq!(slowest[0].test_id, "a");
+        assert_eq!(slowest[1].test_id, "b");
+        assert_eq!(slowest[2].test_id, "c");
     }
 }
