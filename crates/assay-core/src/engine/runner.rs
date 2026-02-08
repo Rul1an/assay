@@ -11,6 +11,7 @@ use crate::report::progress::{ProgressEvent, ProgressSink};
 use crate::report::RunArtifacts;
 use crate::storage::store::Store;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
@@ -83,9 +84,13 @@ impl Runner {
         }
 
         let total = tests.len();
+        let mut clone_overhead_ms: u128 = 0;
         for tc in tests.iter() {
             let permit = sem.clone().acquire_owned().await?;
+            let clone_started = Instant::now();
             let this = self.clone_for_task();
+            clone_overhead_ms =
+                clone_overhead_ms.saturating_add(clone_started.elapsed().as_millis());
             let cfg = cfg.clone();
             let tc = tc.clone();
             join_set.spawn(async move {
@@ -148,6 +153,7 @@ impl Runner {
             suite: cfg.suite.clone(),
             results: rows,
             order_seed: cfg.settings.seed,
+            runner_clone_ms: Some(clone_overhead_ms.min(u128::from(u64::MAX)) as u64),
         })
     }
 
@@ -526,13 +532,14 @@ impl Runner {
         Ok(resp)
     }
 
-    fn clone_for_task(&self) -> RunnerRef {
-        RunnerRef {
+    fn clone_for_task(&self) -> Runner {
+        Runner {
             store: self.store.clone(),
             cache: self.cache.clone(),
             client: self.client.clone(),
             metrics: self.metrics.clone(),
             policy: self.policy.clone(),
+            _network_guard: None,
             embedder: self.embedder.clone(),
             refresh_embeddings: self.refresh_embeddings,
             incremental: self.incremental,
@@ -747,45 +754,5 @@ impl Runner {
             .await?;
 
         Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct RunnerRef {
-    store: Store,
-    cache: VcrCache,
-    client: Arc<dyn LlmClient>,
-    metrics: Vec<Arc<dyn Metric>>,
-    policy: RunPolicy,
-    embedder: Option<Arc<dyn crate::providers::embedder::Embedder>>,
-    refresh_embeddings: bool,
-    incremental: bool,
-    refresh_cache: bool,
-    judge: Option<crate::judge::JudgeService>,
-    baseline: Option<crate::baseline::Baseline>,
-}
-
-impl RunnerRef {
-    async fn run_test_with_policy(
-        &self,
-        cfg: &EvalConfig,
-        tc: &TestCase,
-        run_id: i64,
-    ) -> anyhow::Result<TestResultRow> {
-        let runner = Runner {
-            store: self.store.clone(),
-            cache: self.cache.clone(),
-            client: self.client.clone(),
-            metrics: self.metrics.clone(),
-            policy: self.policy.clone(),
-            _network_guard: None,
-            embedder: self.embedder.clone(),
-            refresh_embeddings: self.refresh_embeddings,
-            incremental: self.incremental,
-            refresh_cache: self.refresh_cache,
-            judge: self.judge.clone(),
-            baseline: self.baseline.clone(),
-        };
-        runner.run_test_with_policy(cfg, tc, run_id).await
     }
 }
