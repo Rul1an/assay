@@ -5,6 +5,7 @@ use super::pipeline::{
 };
 use super::run_output::write_extended_run_json;
 use std::path::PathBuf;
+use std::time::Instant;
 
 pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let version = args.exit_codes;
@@ -29,6 +30,8 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let cfg = execution.cfg;
     let artifacts = execution.artifacts;
     let outcome = execution.outcome;
+    let timings = execution.timings;
+    let report_start = Instant::now();
     // Use extended writer for authoritative reason coding in run.json (no SARIF in run command)
     write_extended_run_json(&artifacts, &outcome, &run_json_path, None)?;
 
@@ -36,12 +39,23 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let summary = build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts);
-    assay_core::report::summary::write_summary(&summary, &summary_path)?;
+    let mut summary =
+        build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts, Some(&timings), None);
 
     print_pipeline_summary(&artifacts, args.explain_skip, &summary);
 
     maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
+
+    // Measure the full reporting phase (outputs + summary prep + console + baseline export).
+    let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    summary = build_summary_from_artifacts(
+        &outcome,
+        !args.no_verify,
+        &artifacts,
+        Some(&timings),
+        Some(report_ms),
+    );
+    assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
     Ok(outcome.exit_code)
 }

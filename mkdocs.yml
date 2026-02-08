@@ -208,6 +208,7 @@ nav:
     - architecture/index.md
     - Crate Structure: architecture/crates.md
     - Data Flow: architecture/data-flow.md
+    - Performance Budgets: PERFORMANCE-BUDGETS.md
     - ADRs: architecture/adrs.md
 
   - Contributing:

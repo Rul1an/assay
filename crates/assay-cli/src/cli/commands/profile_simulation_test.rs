@@ -133,9 +133,11 @@ fn test_run_id_ring_buffer() {
     // But run_ids should be capped
     assert_eq!(profile.run_ids.len(), MAX_RUN_IDS);
 
-    // Check oldest and newest logic robustly
-    // Old runs should be evicted
-    assert!(!profile.has_run("run-0"));
+    // Old raw IDs are evicted from the short ring...
+    assert_eq!(profile.run_ids[0], "run-50");
+    // ...but dedupe should still detect recent history via digest ring.
+    assert!(profile.has_run("run-0"));
+    assert_eq!(profile.run_id_digests.len(), MAX_RUN_IDS + 50);
 
     // Newest run should be present
     let newest_id = format!("run-{}", MAX_RUN_IDS + 50 - 1);

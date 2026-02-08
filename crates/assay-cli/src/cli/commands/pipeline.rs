@@ -6,6 +6,7 @@ use super::run_output::{
 use super::runner_builder::{build_runner, ensure_parent_dir};
 use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Clone)]
 pub(crate) struct PipelineInput {
@@ -98,12 +99,34 @@ pub(crate) struct PipelineSuccess {
     pub cfg: assay_core::model::EvalConfig,
     pub artifacts: assay_core::report::RunArtifacts,
     pub outcome: RunOutcome,
+    pub timings: PipelineTimings,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PipelineTimings {
+    pub total_ms: u64,
+    pub config_load_ms: Option<u64>,
+    pub ingest_ms: Option<u64>,
+    pub runner_build_ms: Option<u64>,
+    pub run_suite_ms: Option<u64>,
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    let ms = start.elapsed().as_millis();
+    if ms > u128::from(u64::MAX) {
+        u64::MAX
+    } else {
+        ms as u64
+    }
 }
 
 pub(crate) async fn execute_pipeline(
     input: &PipelineInput,
     legacy_mode: bool,
 ) -> Result<PipelineSuccess, PipelineError> {
+    let pipeline_start = Instant::now();
+    let mut timings = PipelineTimings::default();
+
     if let Err(e) = ensure_parent_dir(&input.db) {
         return Err(PipelineError::Classified {
             reason: ReasonCode::ECfgParse,
@@ -125,8 +148,12 @@ pub(crate) async fn execute_pipeline(
             message: format!("Config file not found: {}", input.config.display()),
         });
     } else {
+        let config_start = Instant::now();
         match assay_core::config::load_config(&input.config, legacy_mode, input.deny_deprecations) {
-            Ok(c) => c,
+            Ok(c) => {
+                timings.config_load_ms = Some(elapsed_ms(config_start));
+                c
+            }
             Err(e) => {
                 let msg = e.to_string();
                 return Err(PipelineError::Classified {
@@ -170,8 +197,10 @@ pub(crate) async fn execute_pipeline(
         }
         if input.replay_strict {
             if let Some(trace_path) = &input.trace_file {
+                let ingest_start = Instant::now();
                 match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
                     Ok(stats) => {
+                        timings.ingest_ms = Some(elapsed_ms(ingest_start));
                         eprintln!(
                             "auto-ingest: loaded {} events into {} (from {})",
                             stats.event_count,
@@ -198,6 +227,7 @@ pub(crate) async fn execute_pipeline(
         input.rerun_failures
     };
 
+    let runner_build_start = Instant::now();
     let runner = build_runner(
         store,
         &input.trace_file,
@@ -215,6 +245,7 @@ pub(crate) async fn execute_pipeline(
         input.replay_strict,
     )
     .await;
+    timings.runner_build_ms = Some(elapsed_ms(runner_build_start));
 
     let runner = match runner {
         Ok(r) => r,
@@ -239,10 +270,12 @@ pub(crate) async fn execute_pipeline(
         eprintln!("Running {} tests...", total);
     }
     let progress = assay_core::report::console::default_progress_sink(total);
+    let run_suite_start = Instant::now();
     let mut artifacts = runner
         .run_suite(&cfg, progress)
         .await
         .map_err(PipelineError::Fatal)?;
+    timings.run_suite_ms = Some(elapsed_ms(run_suite_start));
 
     if input.redact_prompts {
         let policy = assay_core::redaction::RedactionPolicy::new(true);
@@ -252,11 +285,13 @@ pub(crate) async fn execute_pipeline(
     }
 
     let outcome = decide_run_outcome(&artifacts.results, input.strict, input.exit_codes);
+    timings.total_ms = elapsed_ms(pipeline_start);
 
     Ok(PipelineSuccess {
         cfg,
         artifacts,
         outcome,
+        timings,
     })
 }
 
@@ -288,6 +323,8 @@ pub(crate) fn build_summary_from_artifacts(
     outcome: &RunOutcome,
     verify_enabled: bool,
     artifacts: &assay_core::report::RunArtifacts,
+    pipeline_timings: Option<&PipelineTimings>,
+    report_ms: Option<u64>,
 ) -> assay_core::report::summary::Summary {
     let mut summary = summary_from_outcome(outcome, verify_enabled);
     let passed = artifacts
@@ -307,7 +344,74 @@ pub(crate) fn build_summary_from_artifacts(
     {
         summary = summary.with_judge_metrics(metrics);
     }
+    let performance = build_performance_metrics(artifacts, pipeline_timings, report_ms);
+    summary = summary.with_performance(performance);
     summary
+}
+
+fn build_performance_metrics(
+    artifacts: &assay_core::report::RunArtifacts,
+    pipeline_timings: Option<&PipelineTimings>,
+    report_ms: Option<u64>,
+) -> assay_core::report::summary::PerformanceMetrics {
+    let (total_ms, ingest_ms, eval_ms) = match pipeline_timings {
+        Some(t) => (
+            t.total_ms.saturating_add(report_ms.unwrap_or(0)),
+            t.ingest_ms,
+            t.run_suite_ms,
+        ),
+        None => (report_ms.unwrap_or(0), None, None),
+    };
+
+    let cache_hit_rate = if artifacts.results.is_empty() {
+        None
+    } else {
+        let cached = artifacts.results.iter().filter(|r| r.cached).count() as f64;
+        Some(cached / artifacts.results.len() as f64)
+    };
+
+    let mut slowest: Vec<assay_core::report::summary::SlowestTest> = artifacts
+        .results
+        .iter()
+        .filter_map(|row| {
+            row.duration_ms
+                .map(|d| assay_core::report::summary::SlowestTest {
+                    test_id: row.test_id.clone(),
+                    duration_ms: d,
+                })
+        })
+        .collect();
+    slowest.sort_by(|a, b| {
+        b.duration_ms
+            .cmp(&a.duration_ms)
+            .then_with(|| a.test_id.cmp(&b.test_id))
+    });
+    slowest.truncate(5);
+    let slowest_tests = if slowest.is_empty() {
+        None
+    } else {
+        Some(slowest)
+    };
+
+    let phase_timings = Some(assay_core::report::summary::PhaseTimings {
+        ingest_ms,
+        eval_ms,
+        judge_ms: None,
+        report_ms,
+    });
+
+    assay_core::report::summary::PerformanceMetrics {
+        total_duration_ms: total_ms,
+        verify_ms: None,
+        lint_ms: None,
+        runner_clone_ms: artifacts.runner_clone_ms,
+        runner_clone_count: None,
+        profile_store_ms: None,
+        run_id_memory_bytes: None,
+        cache_hit_rate,
+        slowest_tests,
+        phase_timings,
+    }
 }
 
 pub(crate) fn print_pipeline_summary(
@@ -332,5 +436,108 @@ pub(crate) fn maybe_export_baseline(
         if let Err(e) = export_baseline(path, config_path, cfg, &artifacts.results) {
             eprintln!("Failed to export baseline: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assay_core::model::{TestResultRow, TestStatus};
+    use serde_json::json;
+
+    fn row(id: &str, duration_ms: Option<u64>, cached: bool, status: TestStatus) -> TestResultRow {
+        TestResultRow {
+            test_id: id.to_string(),
+            status,
+            score: None,
+            cached,
+            message: String::new(),
+            details: json!({}),
+            duration_ms,
+            fingerprint: None,
+            skip_reason: None,
+            attempts: None,
+            error_policy_applied: None,
+        }
+    }
+
+    #[test]
+    fn performance_metrics_include_pipeline_and_report_timings() {
+        let artifacts = assay_core::report::RunArtifacts {
+            run_id: 1,
+            suite: "demo".to_string(),
+            results: vec![row("t1", Some(10), true, TestStatus::Pass)],
+            order_seed: None,
+            runner_clone_ms: Some(13),
+        };
+        let timings = PipelineTimings {
+            total_ms: 120,
+            config_load_ms: Some(5),
+            ingest_ms: Some(12),
+            runner_build_ms: Some(8),
+            run_suite_ms: Some(90),
+        };
+
+        let performance = build_performance_metrics(&artifacts, Some(&timings), Some(30));
+
+        assert_eq!(performance.total_duration_ms, 150);
+        let phases = performance.phase_timings.expect("phase timings");
+        assert_eq!(phases.ingest_ms, Some(12));
+        assert_eq!(phases.eval_ms, Some(90));
+        assert_eq!(phases.report_ms, Some(30));
+        assert_eq!(performance.runner_clone_ms, Some(13));
+    }
+
+    #[test]
+    fn performance_metrics_compute_cache_hit_rate_and_slowest_top5() {
+        let artifacts = assay_core::report::RunArtifacts {
+            run_id: 2,
+            suite: "demo".to_string(),
+            results: vec![
+                row("t1", Some(80), true, TestStatus::Pass),
+                row("t2", Some(20), false, TestStatus::Fail),
+                row("t3", Some(60), true, TestStatus::Pass),
+                row("t4", Some(10), false, TestStatus::Warn),
+                row("t5", Some(40), false, TestStatus::Pass),
+                row("t6", Some(50), false, TestStatus::Pass),
+            ],
+            order_seed: None,
+            runner_clone_ms: None,
+        };
+
+        let performance = build_performance_metrics(&artifacts, None, Some(7));
+
+        let hit_rate = performance.cache_hit_rate.expect("cache hit rate");
+        assert!((hit_rate - (2.0 / 6.0)).abs() < f64::EPSILON);
+
+        let slowest = performance.slowest_tests.expect("slowest tests");
+        assert_eq!(slowest.len(), 5);
+        assert_eq!(slowest[0].test_id, "t1");
+        assert_eq!(slowest[1].test_id, "t3");
+        assert_eq!(slowest[2].test_id, "t6");
+        assert_eq!(slowest[3].test_id, "t5");
+        assert_eq!(slowest[4].test_id, "t2");
+    }
+
+    #[test]
+    fn performance_metrics_slowest_tie_breaks_by_test_id() {
+        let artifacts = assay_core::report::RunArtifacts {
+            run_id: 3,
+            suite: "demo".to_string(),
+            results: vec![
+                row("b", Some(42), false, TestStatus::Pass),
+                row("a", Some(42), false, TestStatus::Pass),
+                row("c", Some(42), false, TestStatus::Pass),
+            ],
+            order_seed: None,
+            runner_clone_ms: None,
+        };
+
+        let performance = build_performance_metrics(&artifacts, None, Some(1));
+        let slowest = performance.slowest_tests.expect("slowest tests");
+        assert_eq!(slowest.len(), 3);
+        assert_eq!(slowest[0].test_id, "a");
+        assert_eq!(slowest[1].test_id, "b");
+        assert_eq!(slowest[2].test_id, "c");
     }
 }

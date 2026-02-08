@@ -226,6 +226,30 @@ pub struct PerformanceMetrics {
     /// Total run duration in milliseconds
     pub total_duration_ms: u64,
 
+    /// Evidence verify duration in milliseconds (Wave C trigger surface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_ms: Option<u64>,
+
+    /// Evidence lint duration in milliseconds (Wave C trigger surface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lint_ms: Option<u64>,
+
+    /// Runner clone overhead estimate in milliseconds (Wave C trigger surface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_clone_ms: Option<u64>,
+
+    /// Number of runner clone operations performed during suite execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_clone_count: Option<u64>,
+
+    /// Profile store phase duration in milliseconds (Wave C trigger surface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_store_ms: Option<u64>,
+
+    /// Run-id tracker memory footprint estimate in bytes (Wave C trigger surface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id_memory_bytes: Option<u64>,
+
     /// Cache hit rate (0.0 to 1.0)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_hit_rate: Option<f64>,
@@ -340,10 +364,22 @@ impl Summary {
     pub fn with_duration(mut self, duration_ms: u64) -> Self {
         self.performance = Some(PerformanceMetrics {
             total_duration_ms: duration_ms,
+            verify_ms: None,
+            lint_ms: None,
+            runner_clone_ms: None,
+            runner_clone_count: None,
+            profile_store_ms: None,
+            run_id_memory_bytes: None,
             cache_hit_rate: None,
             slowest_tests: None,
             phase_timings: None,
         });
+        self
+    }
+
+    /// Set full performance metrics payload.
+    pub fn with_performance(mut self, performance: PerformanceMetrics) -> Self {
+        self.performance = Some(performance);
         self
     }
 

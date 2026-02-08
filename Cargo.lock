@@ -248,6 +248,7 @@ dependencies = [
  "base64",
  "bytes",
  "chrono",
+ "criterion",
  "ed25519-dalek",
  "flate2",
  "futures",
