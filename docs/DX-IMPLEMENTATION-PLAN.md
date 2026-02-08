@@ -32,7 +32,8 @@ Current branch focus:
 - PR-B1/B2/B3 (merged to `main` via #204/#205/#209): pipeline unification + dispatch decoupling + `--preset` rename with compat aliases.
 - Wave C kickoff:
   - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
-  - PR-C1 (current branch): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
+  - PR-C1 (#213, in review): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
+  - PR-C2 (current branch): reduce runner per-task clone overhead and emit `runner_clone_ms` from core run artifacts.
 
 ---
 

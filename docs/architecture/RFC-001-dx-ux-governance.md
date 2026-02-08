@@ -1,6 +1,6 @@
 # RFC-001: DX/UX & Governance - Core Invariants + Debt-Ranked Execution Plan
 
-> **Status**: Active (Wave A merged, Wave B in progress)
+> **Status**: Active (Wave A/B merged, Wave C in progress)
 > **Date**: 2026-02-07
 > **Owner**: DX/Governance track
 > **Motivation**: Keep Assay's state-of-the-art core (replay/evidence/enforcement) strong while preventing CLI/plumbing debt from eroding the product wedge.
@@ -366,3 +366,5 @@ Security posture retained:
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
 - 2026-02-08: Wave B3 started as a migration-safe rename from `init --pack` to `init --preset` (aliases retained for compatibility).
 - 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
+- 2026-02-08: Wave C1 harness opened as `#213` (criterion workloads + budgets) and advanced with conflict resolution plus benchmark realism hardening.
+- 2026-02-08: Wave C2 started to remove duplicate per-task runner cloning and surface `runner_clone_ms` as a measured trigger signal.
