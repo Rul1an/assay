@@ -381,7 +381,11 @@ fn build_performance_metrics(
                 })
         })
         .collect();
-    slowest.sort_by(|a, b| b.duration_ms.cmp(&a.duration_ms));
+    slowest.sort_by(|a, b| {
+        b.duration_ms
+            .cmp(&a.duration_ms)
+            .then_with(|| a.test_id.cmp(&b.test_id))
+    });
     slowest.truncate(5);
     let slowest_tests = if slowest.is_empty() {
         None
@@ -401,7 +405,6 @@ fn build_performance_metrics(
         verify_ms: None,
         lint_ms: None,
         runner_clone_ms: artifacts.runner_clone_ms,
-        runner_clone_count: artifacts.runner_clone_count,
         profile_store_ms: None,
         run_id_memory_bytes: None,
         cache_hit_rate,
@@ -464,8 +467,7 @@ mod tests {
             suite: "demo".to_string(),
             results: vec![row("t1", Some(10), true, TestStatus::Pass)],
             order_seed: None,
-            runner_clone_ms: Some(3),
-            runner_clone_count: Some(1),
+            runner_clone_ms: Some(13),
         };
         let timings = PipelineTimings {
             total_ms: 120,
@@ -478,12 +480,11 @@ mod tests {
         let performance = build_performance_metrics(&artifacts, Some(&timings), Some(30));
 
         assert_eq!(performance.total_duration_ms, 150);
-        assert_eq!(performance.runner_clone_ms, Some(3));
-        assert_eq!(performance.runner_clone_count, Some(1));
         let phases = performance.phase_timings.expect("phase timings");
         assert_eq!(phases.ingest_ms, Some(12));
         assert_eq!(phases.eval_ms, Some(90));
         assert_eq!(phases.report_ms, Some(30));
+        assert_eq!(performance.runner_clone_ms, Some(13));
     }
 
     #[test]
@@ -500,8 +501,7 @@ mod tests {
                 row("t6", Some(50), false, TestStatus::Pass),
             ],
             order_seed: None,
-            runner_clone_ms: Some(12),
-            runner_clone_count: Some(6),
+            runner_clone_ms: None,
         };
 
         let performance = build_performance_metrics(&artifacts, None, Some(7));
@@ -516,5 +516,27 @@ mod tests {
         assert_eq!(slowest[2].test_id, "t6");
         assert_eq!(slowest[3].test_id, "t5");
         assert_eq!(slowest[4].test_id, "t2");
+    }
+
+    #[test]
+    fn performance_metrics_slowest_tie_breaks_by_test_id() {
+        let artifacts = assay_core::report::RunArtifacts {
+            run_id: 3,
+            suite: "demo".to_string(),
+            results: vec![
+                row("b", Some(42), false, TestStatus::Pass),
+                row("a", Some(42), false, TestStatus::Pass),
+                row("c", Some(42), false, TestStatus::Pass),
+            ],
+            order_seed: None,
+            runner_clone_ms: None,
+        };
+
+        let performance = build_performance_metrics(&artifacts, None, Some(1));
+        let slowest = performance.slowest_tests.expect("slowest tests");
+        assert_eq!(slowest.len(), 3);
+        assert_eq!(slowest[0].test_id, "a");
+        assert_eq!(slowest[1].test_id, "b");
+        assert_eq!(slowest[2].test_id, "c");
     }
 }

@@ -20,17 +20,22 @@ PR order for the new track:
 4. PR-B1/B2/B3: pipeline unification + coupling reduction + `--pack` to `--preset`.
 5. PR-C*: perf/scale only when benchmark data justifies it.
 
+Current blocker gates (re-assessed on implemented code):
+- **Wave A blocker**: A1 must become truly typed at classification boundary (stable fields first, substring fallback explicit/legacy only).
+- **Wave A blocker**: A1 boundary errors need stable forensic fields (path/status/provider) to avoid message-only support triage.
+- **Wave B blocker**: B1 requires explicit run-vs-ci parity contract tests for exit/reason and output invariants.
+- **P2 alerts (non-blocking)**: replay coupling wording update, A2 scope clarity (run/ci vs CLI-wide), B3 deprecation timeline as governance.
+
 Current branch focus:
 - PR-A1 (merged to `main` via #198): typed boundary mapping for run/ci hot-path triage with unit coverage.
 - PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
-- PR-B1 (#204, in review): shared `run_pipeline` unification for `assay run` and `assay ci`.
-- PR-B2 (current branch): move command dispatch business logic out of `commands/mod.rs`.
+- PR-B1/B2/B3 (merged to `main` via #204/#205/#209): pipeline unification + dispatch decoupling + `--preset` rename with compat aliases.
 - Wave C kickoff:
   - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
   - PR-C1 (#213, open): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
   - PR-C2 (#214, open): runner clone overhead measurement surfaced in summary performance metrics.
-  - PR-C3 (#215, open): profile load/merge/save timing metrics and trigger warnings.
-  - PR-C4 (#216, open): bounded run-id digest tracking beyond short ring buffer + memory/eviction visibility.
+  - PR-C3 (current branch): profile-store harness + runtime load/merge/save telemetry and trigger warnings.
+  - PR-C4 (next): bounded run-id digest tracking beyond short ring buffer + memory/eviction visibility.
 
 ---
 

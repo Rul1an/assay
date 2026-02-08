@@ -1,6 +1,6 @@
 # RFC-001: DX/UX & Governance - Core Invariants + Debt-Ranked Execution Plan
 
-> **Status**: Active (Wave A merged, Wave B in progress)
+> **Status**: Active (Wave A/B merged, Wave C in progress)
 > **Date**: 2026-02-07
 > **Owner**: DX/Governance track
 > **Motivation**: Keep Assay's state-of-the-art core (replay/evidence/enforcement) strong while preventing CLI/plumbing debt from eroding the product wedge.
@@ -201,6 +201,25 @@ Current state:
 
 **Stop line**: no perf rewrites; no output-contract behavior change.
 
+### Wave A/B Risk Controls (Current-State Reassessment)
+
+These controls reflect the implemented code state (not the original plan-only assumptions).
+
+#### P1 blockers (must close for "Wave A/B done")
+
+- **A1 is not fully typed yet**: `RunErrorKind` exists, but assignment is still primarily substring-driven in `classify_message`.
+  Required close condition: classify from typed context first (stable fields), with substring parsing only as explicit legacy fallback.
+- **A1 lacks stable forensic fields**: boundary errors need stable details (`path`, `status`, `provider`, etc.) so support/debug does not rely on free-form message strings.
+- **B1 needs explicit parity fence tests**: shared pipeline must have dedicated run-vs-ci contract tests for exit/reason behavior and output invariants (`run.json`, `summary.json`, SARIF/JUnit + non-blocking report-write behavior).
+
+#### P2 alerts (track, but not ship blockers)
+
+- **A1 source-of-truth wording**: risk is classifier hotspot fragility (message drift), not dual mapping layers.
+- **B1 replay coupling wording**: old `super::cmd_run` note is obsolete; coupling remains via direct `run::run` and `run_output::*` helpers.
+- **A2 scope clarity**: run/ci strict-path env mutation is largely addressed; CLI-wide env cleanup remains separate scope.
+- **A3 legacy-output flag**: not required if canonical output + contract tests stay stable.
+- **B3 deprecation deadline**: governance policy item, not a contract blocker while aliases are supported and tested.
+
 ### Wave C — Performance / Scale (Data-triggered)
 
 **Goal**: Optimize only with measured evidence. No speculative performance work.
@@ -345,7 +364,9 @@ Security posture retained:
 - 2026-02-07: Draft created from codebase audit + owner review. Wave A scoped for immediate execution.
 - 2026-02-08: Wave A merged to `main` (`#198`, `#202`). Wave B started.
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
+- 2026-02-08: Wave B3 started as a migration-safe rename from `init --pack` to `init --preset` (aliases retained for compatibility).
 - 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
+- 2026-02-08: Wave C1 harness opened as `#213` (criterion workloads + budgets) and advanced with benchmark realism hardening.
 - 2026-02-08: Wave C runner overhead instrumentation added as additive summary metrics (`runner_clone_ms`, `runner_clone_count`) to make C2 trigger measurable on real suites.
 - 2026-02-08: Wave C profile-store instrumentation added in `assay profile update` (load/merge/save timings + trigger warnings + optional JSON export via `ASSAY_PROFILE_PERF_JSON`).
 - 2026-02-08: Wave C run-id tracking hardened with a bounded digest ring beyond the short run-id window, plus memory/eviction visibility signals in profile perf telemetry.
