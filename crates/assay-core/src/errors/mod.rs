@@ -27,17 +27,26 @@ impl RunError {
     pub fn classify_message(message: impl Into<String>) -> Self {
         let message = message.into();
         let msg = message.to_lowercase();
+        let has_not_found_signal = msg.contains("no such file")
+            || msg.contains("not found")
+            || msg.contains("cannot find")
+            || msg.contains("can't find")
+            || msg.contains("could not find")
+            || msg.contains("os error 2");
 
         let kind = if msg.contains("trace not found")
             || msg.contains("tracenotfound")
             || msg.contains("failed to load trace")
-            || msg.contains("failed to ingest trace")
-            || (msg.contains("trace") && msg.contains("no such file"))
+            || (msg.contains("failed to ingest trace") && has_not_found_signal)
+            || (msg.contains("trace") && has_not_found_signal)
         {
             RunErrorKind::TraceNotFound
+        } else if msg.contains("failed to ingest trace") {
+            RunErrorKind::ConfigParse
         } else if msg.contains("no config found")
             || msg.contains("config missing")
             || msg.contains("config file not found")
+            || (msg.contains("failed to read config") && has_not_found_signal)
         {
             RunErrorKind::MissingConfig
         } else if msg.contains("cannot use --")
@@ -148,12 +157,27 @@ mod tests {
             RunErrorKind::TraceNotFound
         );
         assert_eq!(
-            RunError::classify_message("config file not found: eval.yaml").kind,
+            RunError::classify_message(
+                "ConfigError: failed to read config eval.yaml: No such file or directory (os error 2)"
+            )
+            .kind,
             RunErrorKind::MissingConfig
         );
         assert_eq!(
             RunError::classify_message("config error: unknown field `foo`").kind,
             RunErrorKind::ConfigParse
+        );
+        assert_eq!(
+            RunError::classify_message("Failed to ingest trace: invalid JSON on line 1").kind,
+            RunErrorKind::ConfigParse
+        );
+    }
+
+    #[test]
+    fn classify_message_does_not_misclassify_ingest_errors_as_not_found() {
+        assert_ne!(
+            RunError::classify_message("Failed to ingest trace: unsupported schema_version").kind,
+            RunErrorKind::TraceNotFound
         );
     }
 
