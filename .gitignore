@@ -2,6 +2,7 @@
 .private/
 docs/maintainers/
 docs/project/
+docs/DEMO-STRATEGY.md
 
 # Local / one-off
 .claude/
