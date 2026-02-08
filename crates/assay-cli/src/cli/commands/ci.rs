@@ -5,6 +5,7 @@ use super::pipeline::{
 };
 use super::run_output::write_extended_run_json;
 use std::path::PathBuf;
+use std::time::Instant;
 
 pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let version = args.exit_codes;
@@ -34,6 +35,8 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     let artifacts = execution.artifacts;
     // Determine outcome first (safety against report write failures)
     let mut outcome = execution.outcome;
+    let timings = execution.timings;
+    let report_start = Instant::now();
 
     // Write output formats (best effort); SARIF outcome needed for run.json/summary sarif.omitted
     if let Err(e) = (|| -> anyhow::Result<()> {
@@ -70,7 +73,14 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let mut summary = build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts);
+    let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let mut summary = build_summary_from_artifacts(
+        &outcome,
+        !args.no_verify,
+        &artifacts,
+        Some(&timings),
+        Some(report_ms),
+    );
     summary = summary.with_sarif_omitted(sarif_omitted);
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
