@@ -79,4 +79,5 @@ extend-exclude = [
     "**/docs/maintainers/**",
     "**/RESEARCH-ci-cd-ai-agents-feb2026.md",
     "**/DEMO-STRATEGY.md",
+    "**/CODE-ANALYSIS-REPORT.md",
 ]
