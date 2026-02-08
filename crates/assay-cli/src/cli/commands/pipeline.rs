@@ -1,10 +1,10 @@
 use super::super::args::{CiArgs, JudgeArgs, RunArgs};
 use super::run_output::{
-    decide_run_outcome, export_baseline, reason_code_from_anyhow_error,
-    reason_code_from_error_message, summary_from_outcome, write_run_json_minimal,
+    decide_run_outcome, export_baseline, summary_from_outcome, write_run_json_minimal,
 };
 use super::runner_builder::{build_runner, ensure_parent_dir};
 use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome};
+use assay_core::errors::RunError;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -91,7 +91,7 @@ impl PipelineInput {
 }
 
 pub(crate) enum PipelineError {
-    Classified { reason: ReasonCode, message: String },
+    Classified { run_error: RunError },
     Fatal(anyhow::Error),
 }
 
@@ -129,23 +129,28 @@ pub(crate) async fn execute_pipeline(
 
     if let Err(e) = ensure_parent_dir(&input.db) {
         return Err(PipelineError::Classified {
-            reason: ReasonCode::ECfgParse,
-            message: format!("Failed to create DB dir: {}", e),
+            run_error: RunError::config_parse(
+                Some(input.db.display().to_string()),
+                format!("Failed to create DB dir: {}", e),
+            ),
         });
     }
 
     if input.baseline.is_some() && input.export_baseline.is_some() {
         eprintln!("config error: cannot use --baseline and --export-baseline together");
         return Err(PipelineError::Classified {
-            reason: ReasonCode::EInvalidArgs,
-            message: "Cannot use --baseline and --export-baseline together".to_string(),
+            run_error: RunError::invalid_args(
+                "Cannot use --baseline and --export-baseline together",
+            ),
         });
     }
 
     let cfg = if input.require_config_exists && !input.config.exists() {
         return Err(PipelineError::Classified {
-            reason: ReasonCode::EMissingConfig,
-            message: format!("Config file not found: {}", input.config.display()),
+            run_error: RunError::missing_config(
+                input.config.display().to_string(),
+                "config path does not exist",
+            ),
         });
     } else {
         let config_start = Instant::now();
@@ -156,10 +161,12 @@ pub(crate) async fn execute_pipeline(
             }
             Err(e) => {
                 let msg = e.to_string();
-                return Err(PipelineError::Classified {
-                    reason: reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse),
-                    message: msg,
-                });
+                let run_error = if !input.config.exists() {
+                    RunError::missing_config(input.config.display().to_string(), msg)
+                } else {
+                    RunError::config_parse(Some(input.config.display().to_string()), msg)
+                };
+                return Err(PipelineError::Classified { run_error });
             }
         }
     };
@@ -171,8 +178,7 @@ pub(crate) async fn execute_pipeline(
         );
         if input.deny_deprecations {
             return Err(PipelineError::Classified {
-                reason: ReasonCode::ECfgParse,
-                message: msg,
+                run_error: RunError::config_parse(Some(input.config.display().to_string()), msg),
             });
         }
         eprintln!("WARN: {}", msg);
@@ -182,8 +188,10 @@ pub(crate) async fn execute_pipeline(
         Ok(s) => s,
         Err(e) => {
             return Err(PipelineError::Classified {
-                reason: ReasonCode::ECfgParse,
-                message: format!("Failed to open DB: {}", e),
+                run_error: RunError::config_parse(
+                    Some(input.db.display().to_string()),
+                    format!("Failed to open DB: {}", e),
+                ),
             });
         }
     };
@@ -191,8 +199,10 @@ pub(crate) async fn execute_pipeline(
     if input.ingest_trace_on_replay_strict {
         if let Err(e) = store.init_schema() {
             return Err(PipelineError::Classified {
-                reason: ReasonCode::ECfgParse,
-                message: format!("Failed to init DB schema: {}", e),
+                run_error: RunError::config_parse(
+                    Some(input.db.display().to_string()),
+                    format!("Failed to init DB schema: {}", e),
+                ),
             });
         }
         if input.replay_strict {
@@ -210,11 +220,15 @@ pub(crate) async fn execute_pipeline(
                     }
                     Err(e) => {
                         let msg = format!("Failed to ingest trace: {}", e);
-                        return Err(PipelineError::Classified {
-                            reason: reason_code_from_error_message(&msg)
-                                .unwrap_or(ReasonCode::ECfgParse),
-                            message: msg,
-                        });
+                        let run_error = if trace_path.exists() {
+                            RunError::config_parse(Some(trace_path.display().to_string()), msg)
+                        } else {
+                            RunError::trace_not_found(
+                                trace_path.display().to_string(),
+                                "trace path does not exist",
+                            )
+                        };
+                        return Err(PipelineError::Classified { run_error });
                     }
                 }
             }
@@ -253,14 +267,14 @@ pub(crate) async fn execute_pipeline(
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
                 eprintln!("{}", diag);
                 return Err(PipelineError::Classified {
-                    reason: ReasonCode::ECfgParse,
-                    message: diag.to_string(),
+                    run_error: RunError::config_parse(
+                        Some(input.config.display().to_string()),
+                        diag.to_string(),
+                    ),
                 });
             }
-            let msg = e.to_string();
             return Err(PipelineError::Classified {
-                reason: reason_code_from_anyhow_error(&e).unwrap_or(ReasonCode::ECfgParse),
-                message: msg,
+                run_error: RunError::from_anyhow(&e),
             });
         }
     };

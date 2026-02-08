@@ -21,10 +21,151 @@ pub enum RunErrorKind {
 pub struct RunError {
     pub kind: RunErrorKind,
     pub message: String,
+    pub path: Option<String>,
+    pub status: Option<u16>,
+    pub provider: Option<String>,
+    pub detail: Option<String>,
+    /// True when kind was inferred from free-form message parsing.
+    pub legacy_classified: bool,
 }
 
 impl RunError {
+    pub fn new(kind: RunErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            path: None,
+            status: None,
+            provider: None,
+            detail: None,
+            legacy_classified: false,
+        }
+    }
+
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn trace_not_found(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        let path = path.into();
+        let detail = detail.into();
+        Self::new(
+            RunErrorKind::TraceNotFound,
+            format!("Trace not found: {}", path),
+        )
+        .with_path(path)
+        .with_detail(detail)
+    }
+
+    pub fn missing_config(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        let path = path.into();
+        let detail = detail.into();
+        Self::new(
+            RunErrorKind::MissingConfig,
+            format!("Config file not found: {}", path),
+        )
+        .with_path(path)
+        .with_detail(detail)
+    }
+
+    pub fn config_parse(path: Option<String>, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::ConfigParse, detail.clone()).with_detail(detail);
+        if let Some(path) = path {
+            err = err.with_path(path);
+        }
+        err
+    }
+
+    pub fn invalid_args(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        Self::new(RunErrorKind::InvalidArgs, detail.clone()).with_detail(detail)
+    }
+
+    pub fn provider_rate_limit(
+        status: u16,
+        provider: Option<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::ProviderRateLimit, detail.clone())
+            .with_status(status)
+            .with_detail(detail);
+        if let Some(provider) = provider {
+            err = err.with_provider(provider);
+        }
+        err
+    }
+
+    pub fn provider_timeout(provider: Option<String>, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::ProviderTimeout, detail.clone()).with_detail(detail);
+        if let Some(provider) = provider {
+            err = err.with_provider(provider);
+        }
+        err
+    }
+
+    pub fn provider_server(
+        status: Option<u16>,
+        provider: Option<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::ProviderServer, detail.clone()).with_detail(detail);
+        if let Some(status) = status {
+            err = err.with_status(status);
+        }
+        if let Some(provider) = provider {
+            err = err.with_provider(provider);
+        }
+        err
+    }
+
+    pub fn network(provider: Option<String>, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::Network, detail.clone()).with_detail(detail);
+        if let Some(provider) = provider {
+            err = err.with_provider(provider);
+        }
+        err
+    }
+
+    pub fn judge_unavailable(provider: Option<String>, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let mut err = Self::new(RunErrorKind::JudgeUnavailable, detail.clone()).with_detail(detail);
+        if let Some(provider) = provider {
+            err = err.with_provider(provider);
+        }
+        err
+    }
+
+    pub fn other(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        Self::new(RunErrorKind::Other, detail.clone()).with_detail(detail)
+    }
+
     pub fn classify_message(message: impl Into<String>) -> Self {
+        Self::legacy_classify_message(message)
+    }
+
+    pub fn legacy_classify_message(message: impl Into<String>) -> Self {
         let message = message.into();
         let msg = message.to_lowercase();
         let has_not_found_signal = msg.contains("no such file")
@@ -82,11 +223,13 @@ impl RunError {
             RunErrorKind::Other
         };
 
-        Self { kind, message }
+        let mut run_error = Self::new(kind, message);
+        run_error.legacy_classified = true;
+        run_error
     }
 
     pub fn from_anyhow(err: &anyhow::Error) -> Self {
-        Self::classify_message(err.to_string())
+        Self::legacy_classify_message(err.to_string())
     }
 }
 
@@ -199,5 +342,30 @@ mod tests {
             RunError::classify_message("network dns resolution failed").kind,
             RunErrorKind::Network
         );
+    }
+
+    #[test]
+    fn typed_constructors_capture_stable_fields() {
+        let trace = RunError::trace_not_found("traces/missing.jsonl", "os error 2");
+        assert_eq!(trace.kind, RunErrorKind::TraceNotFound);
+        assert_eq!(trace.path.as_deref(), Some("traces/missing.jsonl"));
+        assert_eq!(trace.detail.as_deref(), Some("os error 2"));
+        assert!(!trace.legacy_classified);
+
+        let provider = RunError::provider_server(
+            Some(503),
+            Some("openai".to_string()),
+            "provider unavailable",
+        );
+        assert_eq!(provider.kind, RunErrorKind::ProviderServer);
+        assert_eq!(provider.status, Some(503));
+        assert_eq!(provider.provider.as_deref(), Some("openai"));
+        assert!(!provider.legacy_classified);
+    }
+
+    #[test]
+    fn legacy_classification_is_explicitly_marked() {
+        let legacy = RunError::classify_message("provider returned 429");
+        assert!(legacy.legacy_classified);
     }
 }

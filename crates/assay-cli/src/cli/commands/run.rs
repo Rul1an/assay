@@ -3,6 +3,7 @@ use super::pipeline::{
     build_summary_from_artifacts, execute_pipeline, maybe_export_baseline, print_pipeline_summary,
     write_error_artifacts, PipelineError, PipelineInput,
 };
+use super::run_output::reason_code_from_run_error;
 use super::run_output::write_extended_run_json;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -15,10 +16,12 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let execution = execute_pipeline(&input, legacy_mode).await;
     let execution = match execution {
         Ok(ok) => ok,
-        Err(PipelineError::Classified { reason, message }) => {
+        Err(PipelineError::Classified { run_error }) => {
+            let reason = reason_code_from_run_error(&run_error)
+                .unwrap_or(crate::exit_codes::ReasonCode::ECfgParse);
             return write_error_artifacts(
                 reason,
-                message,
+                run_error.message,
                 version,
                 !args.no_verify,
                 &run_json_path,

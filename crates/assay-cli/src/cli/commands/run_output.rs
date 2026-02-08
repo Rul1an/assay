@@ -18,16 +18,16 @@ fn reason_code_from_run_error_kind(kind: assay_core::errors::RunErrorKind) -> Op
     }
 }
 
+pub(crate) fn reason_code_from_run_error(err: &assay_core::errors::RunError) -> Option<ReasonCode> {
+    reason_code_from_run_error_kind(err.kind.clone())
+}
+
 pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode> {
     use assay_core::errors::RunError;
 
-    let classified = RunError::classify_message(message.to_string());
-    reason_code_from_run_error_kind(classified.kind)
-}
-
-pub(crate) fn reason_code_from_anyhow_error(err: &anyhow::Error) -> Option<ReasonCode> {
-    let classified = assay_core::errors::RunError::from_anyhow(err);
-    reason_code_from_run_error_kind(classified.kind)
+    // Legacy-only fallback for untyped paths.
+    let classified = RunError::legacy_classify_message(message.to_string());
+    reason_code_from_run_error(&classified)
 }
 
 pub(crate) fn decide_run_outcome(
@@ -303,8 +303,12 @@ pub(crate) fn export_baseline(
 
 #[cfg(test)]
 mod run_outcome_tests {
-    use super::{decide_run_outcome, has_judge_verdict_abstain, reason_code_from_error_message};
+    use super::{
+        decide_run_outcome, has_judge_verdict_abstain, reason_code_from_error_message,
+        reason_code_from_run_error,
+    };
     use crate::exit_codes::{ExitCodeVersion, ReasonCode, EXIT_INFRA_ERROR};
+    use assay_core::errors::RunError;
     use assay_core::model::{TestResultRow, TestStatus};
 
     #[test]
@@ -427,5 +431,15 @@ mod run_outcome_tests {
             reason_code_from_error_message("network connection reset by peer"),
             Some(ReasonCode::ENetworkError)
         );
+    }
+
+    #[test]
+    fn test_reason_code_from_run_error_uses_typed_kind() {
+        let typed = RunError::missing_config("eval.yaml", "missing");
+        assert_eq!(
+            reason_code_from_run_error(&typed),
+            Some(ReasonCode::EMissingConfig)
+        );
+        assert!(!typed.legacy_classified);
     }
 }
