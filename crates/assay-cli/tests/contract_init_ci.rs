@@ -72,3 +72,41 @@ fn test_init_ci_contract() {
         "Legacy threshold field alias should not be emitted in generated scaffold"
     );
 }
+
+#[test]
+fn test_init_preset_and_pack_alias_contract() {
+    let temp = tempdir().unwrap();
+
+    #[allow(deprecated)]
+    let mut preset_cmd = Command::cargo_bin("assay").unwrap();
+    preset_cmd
+        .current_dir(temp.path())
+        .arg("init")
+        .arg("--preset")
+        .arg("hardened")
+        .assert()
+        .success();
+
+    let policy_path = temp.path().join("policy.yaml");
+    assert!(
+        policy_path.exists(),
+        "init --preset must create policy scaffold"
+    );
+
+    let temp_alias = tempdir().unwrap();
+    #[allow(deprecated)]
+    let mut pack_alias_cmd = Command::cargo_bin("assay").unwrap();
+    pack_alias_cmd
+        .current_dir(temp_alias.path())
+        .arg("init")
+        .arg("--pack")
+        .arg("hardened")
+        .assert()
+        .success();
+
+    let alias_policy_path = temp_alias.path().join("policy.yaml");
+    assert!(
+        alias_policy_path.exists(),
+        "init --pack alias must remain backward-compatible"
+    );
+}

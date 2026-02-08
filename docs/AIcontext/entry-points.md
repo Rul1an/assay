@@ -39,8 +39,8 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 **Key Options**:
 - `--ci [github|gitlab]`: Generate CI scaffolding
 - `--gitignore`: Generate `.gitignore` for Assay artifacts
-- `--pack <default|hardened|dev>`: Select starter policy pack
-- `--list-packs`: List available packs
+- `--preset <default|hardened|dev>`: Select starter policy preset (backward alias: `--pack`)
+- `--list-presets`: List available presets (backward alias: `--list-packs`)
 - `--from-trace <PATH>`: Generate config/policy from an existing trace
 - `--heuristics`: Enable heuristics for `--from-trace`
 

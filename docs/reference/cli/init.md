@@ -14,7 +14,7 @@ assay init [OPTIONS]
 
 Scans your directory for known project types (MCP, Python, Node.js) and generates a security policy and config. Optionally generates CI scaffolding and `.gitignore`.
 
-With `--from-trace`, generates a policy directly from recorded agent behavior instead of using a preset pack.
+With `--from-trace`, generates a policy directly from recorded agent behavior instead of using a starter preset.
 
 ## Options
 
@@ -23,8 +23,8 @@ With `--from-trace`, generates a policy directly from recorded agent behavior in
 | `--config <FILE>` | Config filename. Default: `eval.yaml`. |
 | `--ci [PROVIDER]` | Generate CI scaffolding. `github` (default) or `gitlab`. |
 | `--gitignore` | Generate `.gitignore` for artifacts/db. |
-| `--pack <PACK>` | Policy pack: `default`, `hardened`, `dev`. Default: `default`. |
-| `--list-packs` | List available packs and exit. |
+| `--preset <PRESET>` | Starter preset: `default`, `hardened`, `dev`. Default: `default`. |
+| `--list-presets` | List available presets and exit. |
 | `--from-trace <FILE>` | Generate policy from an existing trace file (JSONL). |
 | `--heuristics` | Enable entropy/risk analysis when generating from trace. Requires `--from-trace`. |
 | `--hello-trace` | Generate a runnable hello trace and smoke suite scaffold. |
@@ -68,5 +68,8 @@ assay init --ci gitlab
 
 ### Hardened policy
 ```bash
+assay init --preset hardened --ci --gitignore
+
+# Backward-compatible alias (deprecated)
 assay init --pack hardened --ci --gitignore
 ```

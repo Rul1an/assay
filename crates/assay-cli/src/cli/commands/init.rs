@@ -3,7 +3,7 @@ use crate::exit_codes;
 use std::path::{Path, PathBuf};
 
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
-    if args.list_packs {
+    if args.list_presets {
         for p in crate::packs::list() {
             println!("{}\t{}", p.name, p.description);
         }
@@ -53,8 +53,8 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     println!("\n🏗️  Generating Assay Policy & Config...");
 
     // Write Policy Pack
-    let pack = crate::packs::get(&args.pack)
-        .ok_or_else(|| anyhow::anyhow!("unknown pack '{}'. Use --list-packs.", args.pack))?;
+    let pack = crate::packs::get(&args.preset)
+        .ok_or_else(|| anyhow::anyhow!("unknown preset '{}'. Use --list-presets.", args.preset))?;
 
     // Write policy file (respecting existing)
     let policy_path = Path::new("policy.yaml");
@@ -63,7 +63,11 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     } else {
         std::fs::write(policy_path, pack.policy_yaml)
             .map_err(|e| anyhow::anyhow!("failed to write {}: {}", policy_path.display(), e))?;
-        println!("   Created {} (pack: {})", policy_path.display(), pack.name);
+        println!(
+            "   Created {} (preset: {})",
+            policy_path.display(),
+            pack.name
+        );
     }
 
     let config_template = if args.hello_trace {

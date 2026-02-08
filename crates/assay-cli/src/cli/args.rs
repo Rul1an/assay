@@ -526,13 +526,15 @@ pub struct InitArgs {
     #[arg(long)]
     pub gitignore: bool,
 
-    /// Policy pack to use: default | hardened | dev
-    #[arg(long, default_value = "default")]
-    pub pack: String,
+    /// Starter preset to use: default | hardened | dev
+    /// Backward-compatible alias: --pack
+    #[arg(long = "preset", alias = "pack", default_value = "default")]
+    pub preset: String,
 
-    /// List available packs and exit
-    #[arg(long)]
-    pub list_packs: bool,
+    /// List available presets and exit
+    /// Backward-compatible alias: --list-packs
+    #[arg(long = "list-presets", alias = "list-packs")]
+    pub list_presets: bool,
 
     /// Generate policy from an existing trace file (JSONL events)
     #[arg(long)]

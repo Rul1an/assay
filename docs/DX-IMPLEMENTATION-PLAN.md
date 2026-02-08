@@ -24,7 +24,8 @@ Current branch focus:
 - PR-A1 (merged to `main` via #198): typed boundary mapping for run/ci hot-path triage with unit coverage.
 - PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
 - PR-B1 (#204, in review): shared `run_pipeline` unification for `assay run` and `assay ci`.
-- PR-B2 (current branch): move command dispatch business logic out of `commands/mod.rs`.
+- PR-B2 (#205, in review): move command dispatch business logic out of `commands/mod.rs`.
+- PR-B3 (current branch): rename `init --pack` to `--preset` with backward-compatible aliases.
 
 ---
 
