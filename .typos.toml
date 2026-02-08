@@ -77,4 +77,5 @@ extend-exclude = [
     # Dutch project docs (internal)
     "**/docs/project/**",
     "**/docs/maintainers/**",
+    "**/RESEARCH-ci-cd-ai-agents-feb2026.md",
 ]
