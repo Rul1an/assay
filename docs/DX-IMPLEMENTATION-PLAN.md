@@ -28,7 +28,8 @@ Current branch focus:
 - Wave C kickoff:
   - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
   - PR-C1 (#213, open): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
-  - PR-C2 (next): runner clone overhead measurement surfaced in summary performance metrics.
+  - PR-C2 (#214, open): runner clone overhead measurement surfaced in summary performance metrics.
+  - PR-C3 (next): profile load/merge/save timing metrics and trigger warnings.
 
 ---
 
