@@ -39,8 +39,16 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
+    let mut summary =
+        build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts, Some(&timings), None);
+
+    print_pipeline_summary(&artifacts, args.explain_skip, &summary);
+
+    maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
+
+    // Measure the full reporting phase (outputs + summary prep + console + baseline export).
     let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-    let summary = build_summary_from_artifacts(
+    summary = build_summary_from_artifacts(
         &outcome,
         !args.no_verify,
         &artifacts,
@@ -48,10 +56,6 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
         Some(report_ms),
     );
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
-
-    print_pipeline_summary(&artifacts, args.explain_skip, &summary);
-
-    maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
 
     Ok(outcome.exit_code)
 }
