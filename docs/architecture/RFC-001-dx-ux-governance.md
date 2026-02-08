@@ -201,6 +201,25 @@ Current state:
 
 **Stop line**: no perf rewrites; no output-contract behavior change.
 
+### Wave A/B Risk Controls (Current-State Reassessment)
+
+These controls reflect the implemented code state (not the original plan-only assumptions).
+
+#### P1 blockers (must close for "Wave A/B done")
+
+- **A1 is not fully typed yet**: `RunErrorKind` exists, but assignment is still primarily substring-driven in `classify_message`.
+  Required close condition: classify from typed context first (stable fields), with substring parsing only as explicit legacy fallback.
+- **A1 lacks stable forensic fields**: boundary errors need stable details (`path`, `status`, `provider`, etc.) so support/debug does not rely on free-form message strings.
+- **B1 needs explicit parity fence tests**: shared pipeline must have dedicated run-vs-ci contract tests for exit/reason behavior and output invariants (`run.json`, `summary.json`, SARIF/JUnit + non-blocking report-write behavior).
+
+#### P2 alerts (track, but not ship blockers)
+
+- **A1 source-of-truth wording**: risk is classifier hotspot fragility (message drift), not dual mapping layers.
+- **B1 replay coupling wording**: old `super::cmd_run` note is obsolete; coupling remains via direct `run::run` and `run_output::*` helpers.
+- **A2 scope clarity**: run/ci strict-path env mutation is largely addressed; CLI-wide env cleanup remains separate scope.
+- **A3 legacy-output flag**: not required if canonical output + contract tests stay stable.
+- **B3 deprecation deadline**: governance policy item, not a contract blocker while aliases are supported and tested.
+
 ### Wave C — Performance / Scale (Data-triggered)
 
 **Goal**: Optimize only with measured evidence. No speculative performance work.
