@@ -261,3 +261,4 @@ Security posture retained:
 - 2026-02-07: Draft created from codebase audit + owner review. Wave A scoped for immediate execution.
 - 2026-02-08: Wave A merged to `main` (`#198`, `#202`). Wave B started.
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
+- 2026-02-08: Wave B3 started as a migration-safe rename from `init --pack` to `init --preset` (aliases retained for compatibility).
