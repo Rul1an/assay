@@ -1,6 +1,6 @@
 # RFC-001: DX/UX & Governance - Core Invariants + Debt-Ranked Execution Plan
 
-> **Status**: Draft (internal)
+> **Status**: Active (Wave A merged, Wave B in progress)
 > **Date**: 2026-02-07
 > **Owner**: DX/Governance track
 > **Motivation**: Keep Assay's state-of-the-art core (replay/evidence/enforcement) strong while preventing CLI/plumbing debt from eroding the product wedge.
@@ -237,8 +237,8 @@ Security posture retained:
 
 ## 6) Recommended Next Steps
 
-1. Approve **Wave A** as immediate execution chunk (small, high ROI, contract-safe).
-2. In parallel, write a short pipeline sketch for Wave B (diagram + signatures).
+1. Execute **Wave B1** (`run_pipeline`) to remove run/ci duplication on the core execution path.
+2. Follow with **Wave B2/B3** (coupling reduction + init `--pack` rename migration).
 3. Keep Wave C explicitly metrics-gated.
 
 ---
@@ -259,3 +259,4 @@ Security posture retained:
 ## Decision Record
 
 - 2026-02-07: Draft created from codebase audit + owner review. Wave A scoped for immediate execution.
+- 2026-02-08: Wave A merged to `main` (`#198`, `#202`). Wave B started.
