@@ -163,6 +163,9 @@ struct ProfilePerfMetrics {
     profile_store_ms: u64,
     total_ms: u64,
     run_entries: usize,
+    run_id_window_len: usize,
+    run_id_digest_window_len: usize,
+    run_id_memory_bytes: u64,
 }
 
 fn cmd_init(args: InitArgs) -> Result<i32> {
@@ -279,6 +282,9 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
         profile_store_ms,
         total_ms,
         run_entries,
+        run_id_window_len: profile.run_ids.len(),
+        run_id_digest_window_len: profile.run_id_digests.len(),
+        run_id_memory_bytes: profile.run_id_memory_bytes_estimate(),
     };
 
     eprintln!(
@@ -309,6 +315,12 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
         eprintln!(
             "WARNING: profile merge is slow ({}ms > 1000ms trigger)",
             perf.merge_ms
+        );
+    }
+    if perf.run_id_digest_window_len >= MAX_RUN_ID_DIGESTS {
+        eprintln!(
+            "WARNING: run-id digest window is full ({} entries); old run-id dedupe evidence will be evicted over time",
+            perf.run_id_digest_window_len
         );
     }
 
