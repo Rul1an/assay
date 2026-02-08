@@ -368,3 +368,4 @@ Security posture retained:
 - 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
 - 2026-02-08: Wave C1 harness opened as `#213` (criterion workloads + budgets) and advanced with conflict resolution plus benchmark realism hardening.
 - 2026-02-08: Wave C2 started to remove duplicate per-task runner cloning and surface `runner_clone_ms` as a measured trigger signal.
+- 2026-02-08: Wave C3 started with a reproducible `profile_store_harness` benchmark for profile merge/load trigger measurement at 10k+ entry scale.

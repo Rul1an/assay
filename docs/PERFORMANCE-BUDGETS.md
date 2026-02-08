@@ -33,6 +33,18 @@ All classes:
 ASSAY_PERF_WORKLOAD=small,typical-pr,large cargo bench -p assay-evidence --bench verify_lint_harness
 ```
 
+Profile-store harness (C3):
+
+```bash
+cargo bench -p assay-cli --bench profile_store_harness
+```
+
+Profile-store single class:
+
+```bash
+ASSAY_PROFILE_PERF_WORKLOAD=large cargo bench -p assay-cli --bench profile_store_harness
+```
+
 ## Trigger Budgets (Ubuntu Baseline)
 
 These are trigger thresholds, not pass/fail release gates.
@@ -46,8 +58,8 @@ must use the explicit `verify+lint/*` series from the same Criterion run.
 - C2 trigger:
   - runner clone/build overhead > 10% of suite runtime on >=1000 tests
 - C3 trigger:
-  - profile merge `p95 > 1s` at >=10k entries
-  - or profile load `p95 > 500ms`
+  - profile merge `p95 > 1s` at >=10k entries (`profile/merge/typical-pr` or higher)
+  - or profile load `p95 > 500ms` (`profile/load/typical-pr` or higher)
 - C4 trigger:
   - run-id tracking evictions cause determinism or duplicate-merge issues
 

@@ -33,7 +33,8 @@ Current branch focus:
 - Wave C kickoff:
   - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
   - PR-C1 (#213, in review): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
-  - PR-C2 (current branch): reduce runner per-task clone overhead and emit `runner_clone_ms` from core run artifacts.
+  - PR-C2 (#217, in review): reduce runner per-task clone overhead and emit `runner_clone_ms` from core run artifacts.
+  - PR-C3 (current branch): profile-store perf harness for merge/load triggers (`profile_store_harness` bench).
 
 ---
 
