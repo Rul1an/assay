@@ -34,6 +34,14 @@ ASSAY_PERF_WORKLOAD=small,typical-pr,large cargo bench -p assay-evidence --bench
 
 These are trigger thresholds, not pass/fail release gates.
 
+Measurement protocol (to keep comparisons stable):
+- Runner: `ubuntu-latest` as baseline.
+- Percentiles: use both `p50` and `p95`.
+- Warm/cold split:
+  - cold = first run after clean build/artifact state
+  - warm = repeated runs on same runner/workdir
+  - trigger decisions use warm `p95` and cold `p50` together when relevant.
+
 - C1 trigger:
   - verify+lint `p95 > 5s` on `large`
   - or verify+lint `p50 > 2s` on `typical-pr`
@@ -44,6 +52,7 @@ These are trigger thresholds, not pass/fail release gates.
   - or profile load `p95 > 500ms`
 - C4 trigger:
   - run-id tracking evictions cause determinism or duplicate-merge issues
+  - hard bound for duplicate protection window: `N = 5000` recent run IDs
 
 ## Guardrails
 

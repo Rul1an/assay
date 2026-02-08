@@ -306,6 +306,7 @@ mod tests {
             updated_at: "2026-01-26T23:00:00Z".into(),
             total_runs: 1,
             run_ids: vec!["run1".into()],
+            run_id_digests: vec![],
             scope: None,
             entries: Default::default(),
         };
