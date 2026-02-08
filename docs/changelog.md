@@ -60,6 +60,11 @@
 - feat(dx-wave-a3): canonicalize init/template config writing (#200) @Rul1an
 - feat(dx-wave-a2): remove run/ci strict env mutation via explicit options (#199) @Rul1an
 - feat(dx-wave-a1): centralize run/ci error classification + RFC-001 (#198) @Rul1an
+- feat(dx-wave-b1): unify run/ci pipeline and reduce command coupling (#204) @Rul1an
+- feat(dx-wave-a2/a3): merge strict-options + canonical init templates into main (#202) @Rul1an
+- feat(dx-wave-a3): canonicalize init/template config writing (#200) @Rul1an
+- feat(dx-wave-a2): remove run/ci strict env mutation via explicit options (#199) @Rul1an
+- feat(dx-wave-a1): centralize run/ci error classification + RFC-001 (#198) @Rul1an
 ## [2026-02-08]
 
 - feat(dx-wave-a1): centralize run/ci error classification + RFC-001 (#198) @Rul1an
