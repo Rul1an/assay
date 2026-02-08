@@ -167,6 +167,11 @@ Recent implementation state:
 - **Wave A merged to `main`:**
   - `#198` (A1): centralized run/ci error classification via typed boundary helpers.
   - `#202` (A2/A3 integration): strict-mode env mutation removal + canonical scaffold/config writing.
+- **Wave B merged to `main` (B1/B2):**
+  - `#205`: shared pipeline + coupling reduction landing path.
+- **Wave B3 in final integration:**
+  - `#206` merged into `codex/rfc001-wave-b2-coupling`.
+  - `#209` open (`codex/rfc001-wave-b2-coupling` -> `main`) with auto-merge enabled.
 - **P0/P1 DX slices merged earlier to `main`:**
   - docs/CLI parity, `doctor --fix`, `watch` hardening, Action v2.1 pack contracts, and follow-up parity checks.
 - **Deferred by design (unchanged):**
@@ -174,16 +179,46 @@ Recent implementation state:
   - full-repo docs link checks as hard gate,
   - cross-platform atomic-write parity beyond Unix.
 
-Roadmap-aligned next execution order from here (after Wave B1 has landed):
-1. **Wave B2:** reduce `commands/mod.rs` coupling and replay dependency on re-exports.
-2. **Wave B3:** rename `init --pack` to `--preset` (migration-safe CLI/docs update).
-3. Re-evaluate Wave C only with measured bottlenecks.
+Roadmap-aligned next execution order from here:
+1. Land `#209` to complete Wave B3 on `main`.
+2. Start **Wave C0** (perf control-plane instrumentation and CI baseline artifacts).
+3. Execute C1-C4 only when C0 metrics cross trigger thresholds.
 
 Explicit "do not implement now" decisions:
 - Do not migrate to a native notify watcher yet (keep dependency-free polling in place).
 - Do not switch to full-repo docs link validation yet (keep changed-files guard).
 - Do not broaden doctor atomic-write guarantees beyond Unix in this slice.
 - Do not add a dedicated IDE governance control plane yet (focus on CLI/CI/PR surfaces first).
+
+### Wave C Execution Blueprint (SOTA 2026)
+
+Wave C is optimization-only and must stay contract-safe.
+
+#### C0 first: metrics and gates (required)
+
+Before C1-C4, add a stable perf signal surface:
+
+- `summary.json` perf fields:
+  - `verify_ms`, `lint_ms`, `runner_clone_ms`, `profile_store_ms`, `run_id_memory_bytes`.
+- CI artifact baseline (`bench-baseline.json`) for PR compare.
+- PR perf gate classes:
+  - informational drift (non-blocking),
+  - threshold regression (blocking with explicit reason).
+
+#### C1-C4 trigger table
+
+| Slice | Trigger | Guardrail |
+|------|---------|-----------|
+| C1 single-pass verify+lint | `verify_ms + lint_ms > 5000` on representative corpus | keep fail-closed verify semantics |
+| C2 RunnerRef ref-sharing | clone overhead visible in profiles | no behavior/contract drift |
+| C3 profile store batching | >10k entries or store phase dominates | deterministic ordering + transactional writes |
+| C4 run-id scaling | memory pressure/collision risk beyond ring buffer | deterministic membership semantics |
+
+#### Wave C hard stop-lines
+
+- No C-task without a referenced C0 measurement snapshot.
+- No optimization that changes run/summary/SARIF/JUnit contract shape without versioning.
+- No optimization that weakens determinism or evidence integrity guarantees.
 
 ### Post-#191 Follow-up Plan
 

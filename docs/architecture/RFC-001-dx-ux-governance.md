@@ -222,14 +222,16 @@ These controls reflect the implemented code state (not the original plan-only as
 
 ### Wave C — Performance / Scale (Data-triggered)
 
-**Goal**: Optimize only with measured evidence. No speculative performance work.
-**Prerequisite**: Wave B merged. C0 (harness) must land before any C1–C4 work starts.
+**Goal**: optimize only with measured evidence while preserving determinism/integrity contracts.
+**Prerequisite**: Wave B merged. C0 (observability + harness) must land before any C1–C4 work starts.
 
-#### C0: Reproducible perf harness + budgets (required first)
+#### C0: Observability + reproducible harness (required first)
 
-Without a harness, the "data-triggered" claim is unenforceable. This is the smallest investment with the biggest payoff — it makes all other C-tasks reviewable.
+Without a stable measurement surface, "data-triggered" claims are not reviewable.
 
 **Deliverables**:
+- Stable perf fields in `summary.json`:
+  - `verify_ms`, `lint_ms`, `runner_clone_ms`, `profile_store_ms`, `run_id_memory_bytes`
 - Fixture generator for bundles/events/profile corpora at defined workload classes:
   - `small`: 1MB bundle, 1k events, 10 rules
   - `typical-pr`: 10MB bundle, 10k events, 50 rules
@@ -341,7 +343,7 @@ Security posture retained:
 
 1. Execute **Wave B1** (`run_pipeline`) to remove run/ci duplication on the core execution path.
 2. Follow with **Wave B2/B3** (coupling reduction + init `--pack` rename migration).
-3. Keep Wave C explicitly metrics-gated.
+3. Keep Wave C explicitly metrics-gated via C0 before any optimization slice.
 
 ---
 
