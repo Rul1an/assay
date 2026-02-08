@@ -167,7 +167,7 @@ Recent implementation state:
   - full-repo docs link checks as hard gate,
   - cross-platform atomic-write parity beyond Unix.
 
-Roadmap-aligned next execution order from here:
+Roadmap-aligned next execution order from here (after Wave B1 has landed):
 1. **Wave B2:** reduce `commands/mod.rs` coupling and replay dependency on re-exports.
 2. **Wave B3:** rename `init --pack` to `--preset` (migration-safe CLI/docs update).
 3. Re-evaluate Wave C only with measured bottlenecks.
