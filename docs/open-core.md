@@ -55,6 +55,8 @@ Governance workflows and premium compliance content for organizations.
 
 ## Comparison
 
+### vs Compliance SaaS
+
 | | Assay | Typical Compliance SaaS |
 |--|-------|-------------------------|
 | Engine | OSS | Closed |
@@ -63,6 +65,19 @@ Governance workflows and premium compliance content for organizations.
 | Release provenance | SLSA (planned) | Varies |
 | Self-hosted | Yes | Usually no |
 | Audit trail | Yours | Vendor-held |
+
+### vs Agent CI/CD Tools (Feb 2026 landscape)
+
+| | Assay | Agent CI | LangSmith | Dagger |
+|--|-------|----------|-----------|--------|
+| Focus | Governance + audit | Eval-as-service | Observability + evals | Agentic runtime |
+| Deterministic replay | Yes | No | No | No |
+| Evidence bundles (tamper-evident) | Yes | No | No | No |
+| Compliance packs | Yes (open + commercial) | No | No | No |
+| Policy-as-code enforcement | Yes | Evals only | Evals only | Constrained tooling |
+| PR gates | Yes (SARIF + comments) | Yes | Yes | Yes |
+| Self-hosted | Yes | No (SaaS) | Partial | Yes |
+| Framework dependency | None (framework-agnostic) | Framework integrations | LangChain-native | Dagger SDK |
 
 ## References
 

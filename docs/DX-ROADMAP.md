@@ -32,7 +32,9 @@
 
 ## DX Scorecard (Feb 2026 Refresh)
 
-This roadmap now tracks developer experience on five dimensions that reflect how Assay is actually adopted in CI and day-to-day engineering loops.
+This roadmap tracks developer experience on five dimensions that reflect how Assay is adopted in CI and day-to-day engineering loops.
+
+**Market context**: GitHub's "Continuous AI" (Feb 2026), Agent CI, and multiple analyst reports now position policy-as-code as a standard best practice for agent deployments. The dominant deployment pattern is "fleet of small agents" — many small specialized agents per repo, each needing per-agent policy. This validates Assay's DX direction: fast init, per-agent policy, CI gates. See [RESEARCH-ci-cd-ai-agents-feb2026.md](architecture/RESEARCH-ci-cd-ai-agents-feb2026.md).
 
 | Dimension | Current State | Next Concrete Move |
 |-----------|---------------|--------------------|
@@ -358,6 +360,8 @@ These items are intentionally **not** implemented in the current slice to keep r
 | Non-Unix atomic write parity for doctor autofix | Defer | Unix path already safe for common CI/dev path; cross-platform parity needs dedicated IO strategy and tests | Before declaring doctor autofix GA on Windows |
 | `watch --once` / CI mode | Defer | Helpful but not required for current developer watch loop | When adding watch integration tests in CI |
 | Dedicated IDE governance surface | Defer | Existing CLI + CI + PR surfaces already cover the core loop; separate IDE control plane adds maintenance and policy UX complexity | After Action v2.1 and drift-aware UX are stable |
+| Observability dashboard | Not a play | Langfuse, LangSmith, Arize cover this market. Assay is governance, not monitoring. Integrate via OTel, don't build dashboards. | Only if evidence bundle query becomes a product need |
+| Eval-as-a-service | Not a play | Agent CI and LangSmith do evals. Assay does policy enforcement + evidence. Overlap on PR-gates but different value proposition. | N/A |
 
 ---
 

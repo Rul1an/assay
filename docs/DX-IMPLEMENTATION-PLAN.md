@@ -23,7 +23,8 @@ PR order for the new track:
 Current branch focus:
 - PR-A1 (merged to `main` via #198): typed boundary mapping for run/ci hot-path triage with unit coverage.
 - PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
-- PR-B1 (current): start shared run/ci pipeline unification on top of merged Wave A.
+- PR-B1 (#204, in review): shared `run_pipeline` unification for `assay run` and `assay ci`.
+- PR-B2 (current branch): move command dispatch business logic out of `commands/mod.rs`.
 
 ---
 
@@ -166,11 +167,10 @@ Recent implementation state:
   - full-repo docs link checks as hard gate,
   - cross-platform atomic-write parity beyond Unix.
 
-Roadmap-aligned next execution order from here:
-1. **Wave B1:** shared `run_pipeline` used by both `assay run` and `assay ci`.
-2. **Wave B2:** reduce `commands/mod.rs` coupling and replay dependency on re-exports.
-3. **Wave B3:** rename `init --pack` to `--preset` (migration-safe CLI/docs update).
-4. Re-evaluate Wave C only with measured bottlenecks.
+Roadmap-aligned next execution order from here (after Wave B1 has landed):
+1. **Wave B2:** reduce `commands/mod.rs` coupling and replay dependency on re-exports.
+2. **Wave B3:** rename `init --pack` to `--preset` (migration-safe CLI/docs update).
+3. Re-evaluate Wave C only with measured bottlenecks.
 
 Explicit "do not implement now" decisions:
 - Do not migrate to a native notify watcher yet (keep dependency-free polling in place).

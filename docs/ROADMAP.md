@@ -44,6 +44,20 @@ All these protocols converge on "tool calls + state transitions" — exactly wha
 
 See [Protocol Landscape Analysis](.private/docs/strategy/PROTOCOL-LANDSCAPE-2026.md) for detailed research
 
+### Market Validation (Feb 2026)
+
+The CI/CD-for-agents market is validating Assay's core assumptions:
+
+- **AAIF (Agentic AI Foundation)**: MCP, goose and AGENTS.md are now under Linux Foundation governance (Dec 2025). MCP as a vendor-neutral standard reduces protocol fragmentation risk and validates Assay's MCP-first bet.
+- **GitHub "Continuous AI"** (Feb 2026): repo-agents with read-only default + "Safe Outputs" — explicit contracts defining what agents may produce. This is Assay's policy-as-code model, validated by the largest development platform.
+- **Policy-as-code as best practice**: Multiple sources (V2Solutions, Skywork, Gartner) now list policy-as-code, least privilege, auditability and kill switches as enterprise requirements for agent deployment. Not a niche compliance need anymore.
+- **Fleet-of-small-agents pattern**: The dominant deployment pattern is many small specialized agents, not one generalist. More agents = more policies = more Assay usage per repo.
+- **Gartner risk signal**: >40% of agentic AI projects will be cancelled by end 2027 due to costs, unclear value, or inadequate risk controls. Governance tooling is a prerequisite, not a nice-to-have.
+
+**Competitive differentiation**: Agent CI (eval-as-service), Langfuse/LangSmith (observability), Dagger (agentic runtime) cover adjacent layers. None offers deterministic replay, evidence bundles with integrity guarantees, or compliance packs. Assay's unique position: governance + audit, not observability or eval-as-service.
+
+See [RESEARCH-ci-cd-ai-agents-feb2026.md](architecture/RESEARCH-ci-cd-ai-agents-feb2026.md) for detailed analysis
+
 ---
 
 ## Current State: Evidence Contract v1 ✅ Complete
@@ -100,6 +114,14 @@ Assay execution priorities are now explicitly evaluated against five developer-f
 
 Execution rule: if a proposal does not clearly improve at least one of these dimensions without raising cognitive load, it is deferred.
 
+### Deliberate Non-Plays
+
+Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-feb2026.md):
+
+- **Not observability**: Langfuse, LangSmith, Arize do this better and it's a different market. Integrate via OTel where needed, don't build dashboards.
+- **Not eval-as-a-service**: Agent CI and LangSmith do evals. Assay does policy enforcement + evidence. Overlap on PR-gates, but the value proposition is different.
+- **Not agent-building**: Dagger, Zencoder build agents. Assay validates them. Complementary, not competitive.
+
 ---
 
 ## Q1 2026: Trust & Telemetry ✅ Complete
@@ -152,12 +174,14 @@ Execution rule: if a proposal does not clearly improve at least one of these dim
 | **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
 | **P1** | Golden path (<30 min first signal) | Medium | High | Planned |
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | Planned |
+| **P1** | CLI debt reduction (Wave A: typed errors, set_var, config) | Medium | High | Planned |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
 
 See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md), [ADR-016 (Pack Taxonomy)](./architecture/ADR-016-Pack-Taxonomy.md)
 See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
+See Debt: [RFC-001 Debt Reduction](./architecture/RFC-001-debt-reduction.md) (Wave A: correctness, Wave B: maintainability, Wave C: performance)
 
 ### GitHub Action v2 ✅ Complete
 
@@ -320,12 +344,14 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 
 **Enabled by v2.11.0:** The mandate evidence module provides the foundation for AP2-style authorization tracking in these adapters.
 
+**AAIF governance note:** MCP and A2A are now under the Agentic AI Foundation (Linux Foundation, Dec 2025). This reduces protocol fragmentation risk and makes adapter investments more durable.
+
 ### B. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
 - [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay/assay-action@v2](https://github.com/marketplace/actions/assay-ai-agent-security)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
 - [ ] **GitLab CI**: Native integration
-- [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+- [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — conventions still experimental but Pydantic AI already follows them; monitor for stability before building bridge
 
 ### C. Additional Compliance Packs
 - [ ] **SOC 2 Pack**: Control mapping for Type II audits
