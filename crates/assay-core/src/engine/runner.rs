@@ -11,6 +11,7 @@ use crate::report::progress::{ProgressEvent, ProgressSink};
 use crate::report::RunArtifacts;
 use crate::storage::store::Store;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
@@ -83,9 +84,15 @@ impl Runner {
         }
 
         let total = tests.len();
+        let mut runner_clone_count = 0_u64;
+        let mut runner_clone_ms = 0_u64;
         for tc in tests.iter() {
             let permit = sem.clone().acquire_owned().await?;
+            let clone_start = Instant::now();
             let this = self.clone_for_task();
+            let clone_elapsed = clone_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            runner_clone_ms = runner_clone_ms.saturating_add(clone_elapsed);
+            runner_clone_count = runner_clone_count.saturating_add(1);
             let cfg = cfg.clone();
             let tc = tc.clone();
             join_set.spawn(async move {
@@ -148,6 +155,8 @@ impl Runner {
             suite: cfg.suite.clone(),
             results: rows,
             order_seed: cfg.settings.seed,
+            runner_clone_ms: Some(runner_clone_ms),
+            runner_clone_count: Some(runner_clone_count),
         })
     }
 

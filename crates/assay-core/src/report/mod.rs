@@ -17,4 +17,10 @@ pub struct RunArtifacts {
     /// Seed used for test order randomization (E7.2). Present when run used a seed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_seed: Option<u64>,
+    /// Estimated time spent cloning runner refs for test tasks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_clone_ms: Option<u64>,
+    /// Number of clone operations used to produce per-task runner refs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_clone_count: Option<u64>,
 }

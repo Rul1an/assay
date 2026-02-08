@@ -27,7 +27,8 @@ Current branch focus:
 - PR-B2 (current branch): move command dispatch business logic out of `commands/mod.rs`.
 - Wave C kickoff:
   - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
-  - PR-C1 (next): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
+  - PR-C1 (#213, open): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
+  - PR-C2 (next): runner clone overhead measurement surfaced in summary performance metrics.
 
 ---
 

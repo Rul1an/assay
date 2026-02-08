@@ -400,7 +400,8 @@ fn build_performance_metrics(
         total_duration_ms: total_ms,
         verify_ms: None,
         lint_ms: None,
-        runner_clone_ms: None,
+        runner_clone_ms: artifacts.runner_clone_ms,
+        runner_clone_count: artifacts.runner_clone_count,
         profile_store_ms: None,
         run_id_memory_bytes: None,
         cache_hit_rate,
@@ -463,6 +464,8 @@ mod tests {
             suite: "demo".to_string(),
             results: vec![row("t1", Some(10), true, TestStatus::Pass)],
             order_seed: None,
+            runner_clone_ms: Some(3),
+            runner_clone_count: Some(1),
         };
         let timings = PipelineTimings {
             total_ms: 120,
@@ -475,6 +478,8 @@ mod tests {
         let performance = build_performance_metrics(&artifacts, Some(&timings), Some(30));
 
         assert_eq!(performance.total_duration_ms, 150);
+        assert_eq!(performance.runner_clone_ms, Some(3));
+        assert_eq!(performance.runner_clone_count, Some(1));
         let phases = performance.phase_timings.expect("phase timings");
         assert_eq!(phases.ingest_ms, Some(12));
         assert_eq!(phases.eval_ms, Some(90));
@@ -495,6 +500,8 @@ mod tests {
                 row("t6", Some(50), false, TestStatus::Pass),
             ],
             order_seed: None,
+            runner_clone_ms: Some(12),
+            runner_clone_count: Some(6),
         };
 
         let performance = build_performance_metrics(&artifacts, None, Some(7));

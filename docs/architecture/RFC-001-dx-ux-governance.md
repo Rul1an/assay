@@ -346,3 +346,4 @@ Security posture retained:
 - 2026-02-08: Wave A merged to `main` (`#198`, `#202`). Wave B started.
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
 - 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
+- 2026-02-08: Wave C runner overhead instrumentation added as additive summary metrics (`runner_clone_ms`, `runner_clone_count`) to make C2 trigger measurable on real suites.
