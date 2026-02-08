@@ -1,7 +1,7 @@
 # DX Implementation Plan — Default Gate Readiness
 
-**Status:** Living plan (updated after PR #184 implementation pass)
-**Date:** 2026-02
+**Status:** Living plan (updated after Wave A merge)
+**Date:** 2026-02-08
 **Source:** Critical DX review of [DX-REVIEW-MATERIALS.md](DX-REVIEW-MATERIALS.md); aligns with [ADR-019 PR Gate 2026 SOTA](architecture/ADR-019-PR-Gate-2026-SOTA.md) and [ROADMAP](ROADMAP.md). Aangepast na SOTA/DX reality check: technische correcties (GitHub Actions ref, SARIF limits, exit-codes compat), P0 Go/No-Go checklist, scope trims (E6a/E6b, cost guardrails, scrubbing deny-by-default). Score na aanpassingen: 9.7/10.
 
 This document turns the DX review into a concrete backlog with **per-file patchlist** and test cases. Work is ordered P0 (must-have before default gate) then P1 (SOTA).
@@ -21,9 +21,9 @@ PR order for the new track:
 5. PR-C*: perf/scale only when benchmark data justifies it.
 
 Current branch focus:
-- PR-A1 (merged to `main`): typed boundary mapping for run/ci hot-path triage with unit coverage.
-- PR-A2 (stacked merge path): remove run/ci strict-mode env mutation and enforce deny-deprecations via explicit options.
-- PR-A3 (stacked merge path): canonicalize init/template config writing (`configVersion`, semantic fields) with contract tests.
+- PR-A1 (merged to `main` via #198): typed boundary mapping for run/ci hot-path triage with unit coverage.
+- PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
+- PR-B1 (current): start shared run/ci pipeline unification on top of merged Wave A.
 
 ---
 
@@ -152,29 +152,25 @@ Per epic we define what is normative (stable contract) versus best-effort (imple
 
 ---
 
-## Progress Update (2026-02-07)
+## Progress Update (2026-02-08)
 
-Recent implementation state (PR #184, follow-up commits on branch):
+Recent implementation state:
 
-- **Delivered (P2):**
-  - `assay doctor --fix` with `--yes` / `--dry-run` safety guards and post-apply re-validation.
-  - `assay watch` with config-derived watch targets, debounce clamp, and refreshed targets after reruns.
-  - E2E tests for doctor fix flow and unit tests for watch path/debounce behavior.
-- **Delivered (DX polish):**
-  - Docs aligned to current CLI behavior (`assay ci`, `assay mcp wrap`, `--out-trace`).
-  - Added changed-files local markdown link check workflow (`Docs Link Check`) to prevent new docs drift.
-- **Deferred on purpose (tracked as follow-up):**
-  - Native notify-based watcher migration.
-  - Cross-platform atomic-write parity beyond Unix.
-  - Full-repo (legacy-inclusive) docs link validation in CI.
+- **Wave A merged to `main`:**
+  - `#198` (A1): centralized run/ci error classification via typed boundary helpers.
+  - `#202` (A2/A3 integration): strict-mode env mutation removal + canonical scaffold/config writing.
+- **P0/P1 DX slices merged earlier to `main`:**
+  - docs/CLI parity, `doctor --fix`, `watch` hardening, Action v2.1 pack contracts, and follow-up parity checks.
+- **Deferred by design (unchanged):**
+  - native `notify` backend,
+  - full-repo docs link checks as hard gate,
+  - cross-platform atomic-write parity beyond Unix.
 
 Roadmap-aligned next execution order from here:
-1. Finish merge/stabilization of PR #184.
-2. Start `docs/ROADMAP.md` next major milestone: **GitHub Action v2.1** (P1 slice: compliance pack support).
-3. Add "first signal <30 minutes" golden-path hardening (`init` hello-trace fixture + smoke suite template).
-4. Close EP1-3/EP1-4 as parity hardening only (contract tests + docs/examples parity; no feature expansion).
-5. Implement EP1-5 watch hardening follow-up (determinism + Windows timestamp edge cases + loop tests).
-6. Re-evaluate deferred items once the above tracks are stable.
+1. **Wave B1:** shared `run_pipeline` used by both `assay run` and `assay ci`.
+2. **Wave B2:** reduce `commands/mod.rs` coupling and replay dependency on re-exports.
+3. **Wave B3:** rename `init --pack` to `--preset` (migration-safe CLI/docs update).
+4. Re-evaluate Wave C only with measured bottlenecks.
 
 Explicit "do not implement now" decisions:
 - Do not migrate to a native notify watcher yet (keep dependency-free polling in place).

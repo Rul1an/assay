@@ -25,6 +25,7 @@ pub mod kill;
 pub mod mcp;
 pub mod migrate;
 pub mod monitor;
+pub(crate) mod pipeline;
 pub mod policy;
 pub mod profile;
 #[cfg(test)]
@@ -42,10 +43,6 @@ pub mod sim;
 pub mod tool;
 pub mod validate;
 pub mod watch;
-
-// Re-exports for replay.rs backward compatibility (uses super::cmd_run etc.)
-pub(crate) use run::run as cmd_run;
-pub(crate) use run_output::{summary_from_outcome, write_run_json_minimal};
 
 use crate::exit_codes::EXIT_SUCCESS;
 

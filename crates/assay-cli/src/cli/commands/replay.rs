@@ -194,7 +194,7 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         args.exit_codes,
     );
 
-    let exit_code = match super::cmd_run(run_args, legacy_mode).await {
+    let exit_code = match super::run::run(run_args, legacy_mode).await {
         Ok(code) => code,
         Err(err) => {
             return write_replay_failure(
@@ -276,7 +276,7 @@ fn write_replay_failure(
     outcome.exit_code = reason.exit_code_for(args.exit_codes);
 
     let run_json_path = PathBuf::from("run.json");
-    if let Err(err) = super::write_run_json_minimal(&outcome, &run_json_path) {
+    if let Err(err) = super::run_output::write_run_json_minimal(&outcome, &run_json_path) {
         eprintln!("warning: failed to write run.json: {}", err);
     }
     if let Err(err) = annotate_run_json_provenance(
@@ -290,7 +290,7 @@ fn write_replay_failure(
 
     let summary_path = PathBuf::from("summary.json");
     // Explicit early-exit seed policy: null seeds because replay run did not execute.
-    let summary = super::summary_from_outcome(&outcome, true)
+    let summary = super::run_output::summary_from_outcome(&outcome, true)
         .with_seeds(None, None)
         .with_replay_provenance(bundle_digest.to_string(), replay_mode, source_run_id);
     if let Err(err) = assay_core::report::summary::write_summary(&summary, &summary_path) {

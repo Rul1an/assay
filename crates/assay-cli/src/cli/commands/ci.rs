@@ -1,162 +1,39 @@
 use super::super::args::CiArgs;
-use super::run_output::{
-    decide_run_outcome, export_baseline, reason_code_from_anyhow_error,
-    reason_code_from_error_message, summary_from_outcome, write_extended_run_json,
-    write_run_json_minimal,
+use super::pipeline::{
+    build_summary_from_artifacts, execute_pipeline, maybe_export_baseline, print_pipeline_summary,
+    write_error_artifacts, PipelineError, PipelineInput,
 };
-use super::runner_builder::{build_runner, ensure_parent_dir};
-use crate::exit_codes::ReasonCode;
+use super::run_output::write_extended_run_json;
 use std::path::PathBuf;
 
 pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let version = args.exit_codes;
     let run_json_path = PathBuf::from("run.json");
 
-    // Helper to write error run.json + summary.json and return specific exit code
-    let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
-        let mut o = crate::exit_codes::RunOutcome::from_reason(reason, Some(msg), None);
-        o.exit_code = reason.exit_code_for(version);
-        if let Err(e) = write_run_json_minimal(&o, &run_json_path) {
-            eprintln!("WARNING: failed to write run.json: {}", e);
+    let input = PipelineInput::from_ci(&args);
+    let execution = execute_pipeline(&input, legacy_mode).await;
+    let execution = match execution {
+        Ok(ok) => ok,
+        Err(PipelineError::Classified { reason, message }) => {
+            return write_error_artifacts(
+                reason,
+                message,
+                version,
+                !args.no_verify,
+                &run_json_path,
+            );
         }
-        let summary_path = run_json_path
-            .parent()
-            .map(|p| p.join("summary.json"))
-            .unwrap_or_else(|| PathBuf::from("summary.json"));
-        let summary = summary_from_outcome(&o, !args.no_verify).with_seeds(None, None);
-        if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
-            eprintln!("WARNING: failed to write summary.json: {}", e);
-        }
-        Ok(o.exit_code)
+        Err(PipelineError::Fatal(err)) => return Err(err),
     };
 
-    if let Err(e) = ensure_parent_dir(&args.db) {
-        return write_error(
-            ReasonCode::ECfgParse,
-            format!("Failed to create DB dir: {}", e),
-        );
+    if execution.cfg.version > 0 {
+        eprintln!("Loaded config version: {}", execution.cfg.version);
     }
 
-    // Argument Validation
-    if args.baseline.is_some() && args.export_baseline.is_some() {
-        eprintln!("config error: cannot use --baseline and --export-baseline together");
-        return write_error(
-            ReasonCode::EInvalidArgs,
-            "Cannot use --baseline and --export-baseline together".into(),
-        );
-    }
-
-    // Shared Store for Auto-Ingest
-    let store = match assay_core::storage::Store::open(&args.db) {
-        Ok(s) => s,
-        Err(e) => return write_error(ReasonCode::ECfgParse, format!("Failed to open DB: {}", e)),
-    };
-    if let Err(e) = store.init_schema() {
-        return write_error(
-            ReasonCode::ECfgParse,
-            format!("Failed to init DB schema: {}", e),
-        );
-    }
-
-    // In Strict Replay mode, we MUST ingest the trace into the DB
-    if args.replay_strict {
-        if let Some(trace_path) = &args.trace_file {
-            match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
-                Ok(stats) => {
-                    eprintln!(
-                        "auto-ingest: loaded {} events into {} (from {})",
-                        stats.event_count,
-                        args.db.display(),
-                        trace_path.display()
-                    );
-                }
-                Err(e) => {
-                    let msg = format!("Failed to ingest trace: {}", e);
-                    let reason =
-                        reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
-                    return write_error(reason, msg);
-                }
-            }
-        }
-    }
-
-    let cfg = if args.config.exists() {
-        match assay_core::config::load_config(&args.config, legacy_mode, args.deny_deprecations) {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = e.to_string();
-                let reason = reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
-                return write_error(reason, msg);
-            }
-        }
-    } else {
-        return write_error(
-            ReasonCode::EMissingConfig,
-            format!("Config file not found: {}", args.config.display()),
-        );
-    };
-
-    // Observability: Log config version
-    if cfg.version > 0 {
-        eprintln!("Loaded config version: {}", cfg.version);
-        if cfg.has_legacy_usage() {
-            let msg = "Deprecated policy file usage detected. Run 'assay migrate'.".to_string();
-            if args.deny_deprecations {
-                return write_error(ReasonCode::ECfgParse, msg);
-            }
-            eprintln!("WARN: {}", msg);
-        }
-    }
-    // Strict mode implies no reruns by default policy (fail fast/accurate)
-    let reruns = if args.strict { 0 } else { args.rerun_failures };
-
-    let runner = build_runner(
-        store,
-        &args.trace_file,
-        &cfg,
-        reruns,
-        &args.quarantine_mode,
-        &args.embedder,
-        &args.embedding_model,
-        args.refresh_embeddings,
-        args.incremental,
-        args.refresh_cache || args.no_cache,
-        &args.judge,
-        &args.baseline,
-        PathBuf::from(&args.config),
-        args.replay_strict,
-    )
-    .await;
-
-    let runner = match runner {
-        Ok(r) => r,
-        Err(e) => {
-            if let Some(diag) = assay_core::errors::try_map_error(&e) {
-                eprintln!("{}", diag);
-                return write_error(ReasonCode::ECfgParse, diag.to_string());
-            }
-            let msg = e.to_string();
-            let reason = reason_code_from_anyhow_error(&e).unwrap_or(ReasonCode::ECfgParse);
-            return write_error(reason, msg);
-        }
-    };
-
-    let total = cfg.tests.len();
-    if total > 0 {
-        eprintln!("Running {} tests...", total);
-    }
-    let progress = assay_core::report::console::default_progress_sink(total);
-    let mut artifacts = runner.run_suite(&cfg, progress).await?;
-
-    if args.redact_prompts {
-        let policy = assay_core::redaction::RedactionPolicy::new(true);
-        for row in &mut artifacts.results {
-            policy.redact_judge_metadata(&mut row.details);
-        }
-    }
-
+    let cfg = execution.cfg;
+    let artifacts = execution.artifacts;
     // Determine outcome first (safety against report write failures)
-    let mut outcome = decide_run_outcome(&artifacts.results, args.strict, args.exit_codes);
+    let mut outcome = execution.outcome;
 
     // Write output formats (best effort); SARIF outcome needed for run.json/summary sarif.omitted
     if let Err(e) = (|| -> anyhow::Result<()> {
@@ -193,32 +70,11 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         .parent()
         .map(|p| p.join("summary.json"))
         .unwrap_or_else(|| PathBuf::from("summary.json"));
-    let mut summary = summary_from_outcome(&outcome, !args.no_verify);
-    let passed = artifacts
-        .results
-        .iter()
-        .filter(|r| r.status.is_passing())
-        .count();
-    let failed = artifacts
-        .results
-        .iter()
-        .filter(|r| r.status.is_blocking())
-        .count();
-    summary = summary.with_results(passed, failed, artifacts.results.len());
-    summary = summary.with_seeds(artifacts.order_seed, None);
-    if let Some(metrics) =
-        assay_core::report::summary::judge_metrics_from_results(&artifacts.results)
-    {
-        summary = summary.with_judge_metrics(metrics);
-    }
+    let mut summary = build_summary_from_artifacts(&outcome, !args.no_verify, &artifacts);
     summary = summary.with_sarif_omitted(sarif_omitted);
     assay_core::report::summary::write_summary(&summary, &summary_path)?;
 
-    assay_core::report::console::print_summary(&artifacts.results, args.explain_skip);
-    assay_core::report::console::print_run_footer(
-        Some(&summary.seeds),
-        summary.judge_metrics.as_ref(),
-    );
+    print_pipeline_summary(&artifacts, args.explain_skip, &summary);
 
     let otel_cfg = assay_core::otel::OTelConfig {
         jsonl_path: args.otel_jsonl.clone(),
@@ -226,14 +82,7 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     };
     let _ = assay_core::otel::export_jsonl(&otel_cfg, &cfg.suite, &artifacts.results);
 
-    // PR11: Export baseline logic
-    if let Some(path) = &args.export_baseline {
-        if let Err(e) =
-            export_baseline(path, &PathBuf::from(&args.config), &cfg, &artifacts.results)
-        {
-            eprintln!("Failed to export baseline: {}", e);
-        }
-    }
+    maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
 
     // Write PR comment markdown if requested
     if let Some(comment_path) = &args.pr_comment {
