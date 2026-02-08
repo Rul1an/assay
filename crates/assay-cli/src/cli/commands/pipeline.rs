@@ -405,6 +405,7 @@ fn build_performance_metrics(
         verify_ms: None,
         lint_ms: None,
         runner_clone_ms: artifacts.runner_clone_ms,
+        runner_clone_count: None,
         profile_store_ms: None,
         run_id_memory_bytes: None,
         cache_hit_rate,

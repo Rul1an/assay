@@ -238,6 +238,10 @@ pub struct PerformanceMetrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_clone_ms: Option<u64>,
 
+    /// Number of runner clone operations performed during suite execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_clone_count: Option<u64>,
+
     /// Profile store phase duration in milliseconds (Wave C trigger surface).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_store_ms: Option<u64>,
@@ -363,6 +367,7 @@ impl Summary {
             verify_ms: None,
             lint_ms: None,
             runner_clone_ms: None,
+            runner_clone_count: None,
             profile_store_ms: None,
             run_id_memory_bytes: None,
             cache_hit_rate: None,

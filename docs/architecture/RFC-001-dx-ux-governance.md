@@ -297,7 +297,7 @@ Current state: 6 `.clone()` calls on Arc-wrapped fields per task (`engine/runner
 **Trigger**: Profile corpus growth causes ring buffer evictions that break replay determinism or cause duplicate-merge errors.
 
 **Invariant guardrail** (protects I1):
-- Double-merge of same `run_id` must be impossible across N runs (define N as a hard bound)
+- Double-merge of same `run_id` must be impossible across a hard bound **N = 5000** recent run IDs (bounded digest window)
 - Replacing the ring buffer must not break determinism or introduce memory blowups
 
 **Bounded structure options** (choose one):
@@ -366,5 +366,7 @@ Security posture retained:
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
 - 2026-02-08: Wave B3 started as a migration-safe rename from `init --pack` to `init --preset` (aliases retained for compatibility).
 - 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
-- 2026-02-08: Wave C1 harness opened as `#213` (criterion workloads + budgets) and advanced with conflict resolution plus benchmark realism hardening.
-- 2026-02-08: Wave C2 started to remove duplicate per-task runner cloning and surface `runner_clone_ms` as a measured trigger signal.
+- 2026-02-08: Wave C1 harness opened as `#213` (criterion workloads + budgets) and advanced with benchmark realism hardening.
+- 2026-02-08: Wave C runner overhead instrumentation added as additive summary metrics (`runner_clone_ms`, `runner_clone_count`) to make C2 trigger measurable on real suites.
+- 2026-02-08: Wave C profile-store instrumentation added in `assay profile update` (load/merge/save timings + trigger warnings + optional JSON export via `ASSAY_PROFILE_PERF_JSON`).
+- 2026-02-08: Wave C run-id tracking hardened with a bounded digest ring beyond the short run-id window, plus memory/eviction visibility signals in profile perf telemetry.

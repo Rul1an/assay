@@ -9,8 +9,10 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use super::profile_types::*;
 
@@ -151,6 +153,21 @@ pub fn run(args: ProfileArgs) -> Result<i32> {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct ProfilePerfMetrics {
+    load_profile_ms: u64,
+    read_events_ms: u64,
+    aggregate_ms: u64,
+    merge_ms: u64,
+    save_profile_ms: u64,
+    profile_store_ms: u64,
+    total_ms: u64,
+    run_entries: usize,
+    run_id_window_len: usize,
+    run_id_digest_window_len: usize,
+    run_id_memory_bytes: u64,
+}
+
 fn cmd_init(args: InitArgs) -> Result<i32> {
     if args.output.exists() {
         anyhow::bail!("profile already exists: {}", args.output.display());
@@ -193,9 +210,13 @@ fn enforce_scope(profile: &mut Profile, new_scope: Option<&String>, force: bool)
 }
 
 fn cmd_update(args: UpdateArgs) -> Result<i32> {
+    let total_start = Instant::now();
+
     // Load existing profile
+    let load_start = Instant::now();
     let mut profile = load_profile(&args.profile)
         .with_context(|| format!("failed to load profile: {}", args.profile.display()))?;
+    let load_profile_ms = elapsed_ms(load_start);
 
     // Enforce scope guard
     enforce_scope(&mut profile, args.scope.as_ref(), args.force)?;
@@ -210,13 +231,18 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
     }
 
     // Read events
+    let read_start = Instant::now();
     let events = read_events(&args.input)?;
+    let read_events_ms = elapsed_ms(read_start);
     if events.is_empty() {
         eprintln!("Warning: no events in input");
     }
 
     // Aggregate this run (deduplicated per artifact)
+    let aggregate_start = Instant::now();
     let run_data = aggregate_run(&events);
+    let aggregate_ms = elapsed_ms(aggregate_start);
+    let run_entries = run_data.files.len() + run_data.network.len() + run_data.processes.len();
 
     if args.verbose {
         eprintln!(
@@ -229,7 +255,9 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
     }
 
     // Merge into profile
+    let merge_start = Instant::now();
     let (new_count, updated_count) = merge_run(&mut profile, &run_data);
+    let merge_ms = elapsed_ms(merge_start);
 
     // Update metadata
     profile.total_runs += 1;
@@ -237,12 +265,71 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
     profile.updated_at = chrono::Utc::now().to_rfc3339();
 
     // Save
+    let save_start = Instant::now();
     save_profile(&profile, &args.profile)?;
+    let save_profile_ms = elapsed_ms(save_start);
+
+    let profile_store_ms = load_profile_ms
+        .saturating_add(merge_ms)
+        .saturating_add(save_profile_ms);
+    let total_ms = elapsed_ms(total_start);
+    let perf = ProfilePerfMetrics {
+        load_profile_ms,
+        read_events_ms,
+        aggregate_ms,
+        merge_ms,
+        save_profile_ms,
+        profile_store_ms,
+        total_ms,
+        run_entries,
+        run_id_window_len: profile.run_ids.len(),
+        run_id_digest_window_len: profile.run_id_digests.len(),
+        run_id_memory_bytes: profile.run_id_memory_bytes_estimate(),
+    };
 
     eprintln!(
         "Updated profile: {} total runs, {} new entries, {} updated",
         profile.total_runs, new_count, updated_count
     );
+
+    if args.verbose || profile_store_ms >= 500 {
+        eprintln!(
+            "profile-perf: load={}ms read={}ms aggregate={}ms merge={}ms save={}ms store={}ms total={}ms entries={}",
+            perf.load_profile_ms,
+            perf.read_events_ms,
+            perf.aggregate_ms,
+            perf.merge_ms,
+            perf.save_profile_ms,
+            perf.profile_store_ms,
+            perf.total_ms,
+            perf.run_entries
+        );
+    }
+    if perf.load_profile_ms > 500 {
+        eprintln!(
+            "WARNING: profile load is slow ({}ms > 500ms trigger)",
+            perf.load_profile_ms
+        );
+    }
+    if perf.merge_ms > 1_000 {
+        eprintln!(
+            "WARNING: profile merge is slow ({}ms > 1000ms trigger)",
+            perf.merge_ms
+        );
+    }
+    if perf.run_id_digest_window_len >= MAX_RUN_ID_DIGESTS {
+        eprintln!(
+            "WARNING: run-id digest window is full ({} entries); old run-id dedupe evidence will be evicted over time",
+            perf.run_id_digest_window_len
+        );
+    }
+
+    if let Ok(path) = std::env::var("ASSAY_PROFILE_PERF_JSON") {
+        let json = serde_json::to_string_pretty(&perf)?;
+        std::fs::write(&path, json)
+            .with_context(|| format!("failed to write profile perf json: {}", path))?;
+        eprintln!("Wrote profile perf metrics: {}", path);
+    }
 
     Ok(0)
 }
@@ -396,6 +483,10 @@ fn show_summary(profile: &Profile, top_n: usize) {
             show_top_stable(&profile.entries.network, profile.total_runs, top_n);
         }
     }
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn show_stability_distribution(
