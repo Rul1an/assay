@@ -99,7 +99,9 @@ fn test_init_default_writes_canonical_eval_config() {
         "default scaffold must write canonical configVersion field"
     );
     assert!(
-        !eval.contains("\nversion: "),
+        !eval
+            .lines()
+            .any(|line| line.trim_start().starts_with("version: ")),
         "default scaffold must not emit legacy version alias"
     );
 
@@ -145,7 +147,9 @@ fn test_init_from_trace_writes_canonical_eval_config() {
         "from-trace scaffold must write canonical configVersion field"
     );
     assert!(
-        !eval.contains("\nversion: "),
+        !eval
+            .lines()
+            .any(|line| line.trim_start().starts_with("version: ")),
         "from-trace scaffold must not emit legacy version alias"
     );
 

@@ -69,7 +69,7 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     let config_template = if args.hello_trace {
         crate::templates::HELLO_EVAL_YAML
     } else {
-        crate::templates::ASSAY_CONFIG_DEFAULT_YAML
+        crate::templates::EVAL_CONFIG_DEFAULT_YAML
     };
     write_file_if_missing(&args.config, config_template)?;
 
@@ -218,12 +218,13 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
 suite: "generated"
 model: "trace"
 tests:
-  - id: "generated_args_valid"
+  - id: "generated_from_trace"
     input:
       prompt: "__generated_from_trace__"
     expected:
-      type: args_valid
-      policy: "policy.yaml"
+      type: regex_match
+      pattern: ".*"
+      flags: ["s"]
 "#
     .to_string();
     write_file_if_missing(&args.config, &config_content)?;

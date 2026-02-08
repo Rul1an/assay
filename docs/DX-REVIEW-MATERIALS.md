@@ -28,7 +28,7 @@ assay init --ci github
 - Output: "Scanning project...", "Generating Assay Policy & Config...".
 - Gegenereerde bestanden:
   - `policy.yaml` — uit pack (default pack: veilige baseline; `--pack` kiest pack).
-  - `eval.yaml` (of `--config`) — [templates.rs ASSAY_CONFIG_DEFAULT_YAML](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs): canonieke eval scaffold (`configVersion: 1`, `suite`, `model`, starter `tests`).
+  - `eval.yaml` (of `--config`) — [templates.rs EVAL_CONFIG_DEFAULT_YAML](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs): canonieke eval scaffold (`configVersion: 1`, `suite`, `model`, starter `tests`).
   - Optioneel `.gitignore` (`.assay`, `*.db`, etc.) bij `--gitignore`.
 
 **init --ci:**
@@ -49,7 +49,7 @@ assay init --ci github
 **Relevante code:**
 
 - [crates/assay-cli/src/cli/commands/init.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/cli/commands/init.rs) — init flow, pack selection, write_file_if_missing.
-- [crates/assay-cli/src/templates.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs) — ASSAY_CONFIG_DEFAULT_YAML, CI_WORKFLOW_YML, CI_EVAL_YAML, CI_TRACES_JSONL.
+- [crates/assay-cli/src/templates.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs) — EVAL_CONFIG_DEFAULT_YAML, CI_WORKFLOW_YML, CI_EVAL_YAML, CI_TRACES_JSONL.
 - [docs/reference/cli/init.md](reference/cli/init.md) — init documentatie.
 
 ### A.2 Minimale voorbeeldrepo: 0 → CI gate

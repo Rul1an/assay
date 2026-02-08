@@ -129,7 +129,7 @@ pub const GITLAB_CI_YML: &str = r#"assay:
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/assay\n";
 
-pub const ASSAY_CONFIG_DEFAULT_YAML: &str = r#"configVersion: 1
+pub const EVAL_CONFIG_DEFAULT_YAML: &str = r#"configVersion: 1
 suite: "starter"
 model: "trace"
 tests:

@@ -58,7 +58,9 @@ fn test_init_ci_contract() {
         "CI eval scaffold must write canonical min_score field"
     );
     assert!(
-        !ci_eval.contains("\nversion: 1"),
+        !ci_eval
+            .lines()
+            .any(|line| line.trim_start().starts_with("version: 1")),
         "Legacy version alias should not be emitted in generated scaffold"
     );
     assert!(
