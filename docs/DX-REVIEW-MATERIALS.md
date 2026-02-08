@@ -28,7 +28,7 @@ assay init --ci github
 - Output: "Scanning project...", "Generating Assay Policy & Config...".
 - Gegenereerde bestanden:
   - `policy.yaml` — uit pack (default pack: veilige baseline; `--pack` kiest pack).
-  - `assay.yaml` (of `--config`) — [templates.rs ASSAY_CONFIG_DEFAULT_YAML](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs): `version: 2`, `policy: "policy.yaml"`, `baseline: ".assay/baseline.json"`.
+  - `eval.yaml` (of `--config`) — [templates.rs EVAL_CONFIG_DEFAULT_YAML](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs): canonieke eval scaffold (`configVersion: 1`, `suite`, `model`, starter `tests`).
   - Optioneel `.gitignore` (`.assay`, `*.db`, etc.) bij `--gitignore`.
 
 **init --ci:**
@@ -37,18 +37,19 @@ assay init --ci github
   - `ci-eval.yaml` — smoke suite (regex, json_schema, semantic_similarity).
   - `schemas/ci_answer.schema.json` — JSON Schema voor ci_smoke_schema.
   - `traces/ci.jsonl` — voorbeeldtrace voor replay.
-  - `.github/workflows/assay.yml` — **let op:** template gebruikt nog `Rul1an/assay-action@v1` en v1.4.0; aanbevolen is `Rul1an/assay/assay-action@v2` (zie [guides/github-action](getting-started/ci-integration.md)).
+  - `.github/workflows/assay.yml` — template gebruikt `Rul1an/assay/assay-action@v2` (zie [guides/github-action](getting-started/ci-integration.md)).
 
 **Defaults (veiligheid en bruikbaarheid):**
 
 - Policy pack: blocking defaults (Exec/Shell/Python geblokkeerd in typische baseline).
 - Config: verwijst naar policy + baseline path; geen onveilige defaults in gegenereerde YAML.
-- **Reviewpunten:** Template workflow versie (v1 vs v2), of `assay init --ci` een "blessed" quickstart is t.o.v. `assay init-ci`.
+- Config: canonieke v1 eval scaffold (`configVersion: 1`) met starter test.
+- **Reviewpunten:** parity tussen generated scaffold en CLI/docs contracten.
 
 **Relevante code:**
 
 - [crates/assay-cli/src/cli/commands/init.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/cli/commands/init.rs) — init flow, pack selection, write_file_if_missing.
-- [crates/assay-cli/src/templates.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs) — ASSAY_CONFIG_DEFAULT_YAML, CI_WORKFLOW_YML, CI_EVAL_YAML, CI_TRACES_JSONL.
+- [crates/assay-cli/src/templates.rs](https://github.com/Rul1an/assay/blob/main/crates/assay-cli/src/templates.rs) — EVAL_CONFIG_DEFAULT_YAML, CI_WORKFLOW_YML, CI_EVAL_YAML, CI_TRACES_JSONL.
 - [docs/reference/cli/init.md](reference/cli/init.md) — init documentatie.
 
 ### A.2 Minimale voorbeeldrepo: 0 → CI gate

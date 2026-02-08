@@ -734,6 +734,70 @@ tests:
     assert_eq!(run["provenance"]["replay_mode"], "offline");
 }
 
+#[test]
+fn contract_run_deny_deprecations_fails_on_legacy_policy_usage() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("eval.yaml"),
+        r#"configVersion: 1
+suite: strict-deprecations
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected:
+      type: args_valid
+      policy: policy.yaml
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("eval.yaml")
+        .arg("--deny-deprecations")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_ci_deny_deprecations_fails_on_legacy_policy_usage() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("eval.yaml"),
+        r#"configVersion: 1
+suite: strict-deprecations-ci
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected:
+      type: args_valid
+      policy: policy.yaml
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("ci")
+        .arg("--config")
+        .arg("eval.yaml")
+        .arg("--deny-deprecations")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
 fn test_status_map(run_json: &Value) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
     let Some(rows) = run_json.get("results").and_then(Value::as_array) else {

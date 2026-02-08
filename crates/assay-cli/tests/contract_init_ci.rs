@@ -41,4 +41,34 @@ fn test_init_ci_contract() {
         !content.contains("curl -fsSL"),
         "Must not use pipe-to-shell installation"
     );
+
+    let ci_eval_path = temp.path().join("ci-eval.yaml");
+    assert!(ci_eval_path.exists(), "ci-eval.yaml must be generated");
+    let ci_eval = fs::read_to_string(ci_eval_path).unwrap();
+    assert!(
+        ci_eval.contains("configVersion: 1"),
+        "CI eval scaffold must write canonical configVersion field"
+    );
+    assert!(
+        ci_eval.contains("semantic_similarity_to: \"Hello Semantic\""),
+        "CI eval scaffold must write canonical semantic_similarity_to field"
+    );
+    assert!(
+        ci_eval.contains("min_score: 0.99"),
+        "CI eval scaffold must write canonical min_score field"
+    );
+    assert!(
+        !ci_eval
+            .lines()
+            .any(|line| line.trim_start().starts_with("version: 1")),
+        "Legacy version alias should not be emitted in generated scaffold"
+    );
+    assert!(
+        !ci_eval.contains("\n      text:"),
+        "Legacy semantic field alias should not be emitted in generated scaffold"
+    );
+    assert!(
+        !ci_eval.contains("\n      threshold:"),
+        "Legacy threshold field alias should not be emitted in generated scaffold"
+    );
 }
