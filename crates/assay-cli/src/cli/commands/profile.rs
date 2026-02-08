@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::pipeline_error::elapsed_ms;
 use super::profile_types::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,7 +262,7 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
 
     // Update metadata
     profile.total_runs += 1;
-    profile.add_run_id(args.run_id.clone());
+    let run_id_digest_evicted = profile.add_run_id(args.run_id.clone());
     profile.updated_at = chrono::Utc::now().to_rfc3339();
 
     // Save
@@ -317,7 +318,7 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
             perf.merge_ms
         );
     }
-    if perf.run_id_digest_window_len >= MAX_RUN_ID_DIGESTS {
+    if run_id_digest_evicted {
         eprintln!(
             "WARNING: run-id digest window is full ({} entries); old run-id dedupe evidence will be evicted over time",
             perf.run_id_digest_window_len
@@ -483,10 +484,6 @@ fn show_summary(profile: &Profile, top_n: usize) {
             show_top_stable(&profile.entries.network, profile.total_runs, top_n);
         }
     }
-}
-
-fn elapsed_ms(start: Instant) -> u64 {
-    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn show_stability_distribution(

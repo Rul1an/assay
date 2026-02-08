@@ -1,7 +1,8 @@
 use super::super::args::RunArgs;
-use super::pipeline::{
-    build_summary_from_artifacts, execute_pipeline, maybe_export_baseline, print_pipeline_summary,
-    write_error_artifacts, PipelineError, PipelineInput,
+use super::pipeline::{execute_pipeline, PipelineInput};
+use super::pipeline_error::elapsed_ms;
+use super::reporting::{
+    build_summary_from_artifacts, maybe_export_baseline, print_pipeline_summary,
 };
 use super::run_output::write_extended_run_json;
 use std::path::PathBuf;
@@ -12,19 +13,9 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let run_json_path = PathBuf::from("run.json");
 
     let input = PipelineInput::from_run(&args);
-    let execution = execute_pipeline(&input, legacy_mode).await;
-    let execution = match execution {
+    let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
-        Err(PipelineError::Classified { reason, message }) => {
-            return write_error_artifacts(
-                reason,
-                message,
-                version,
-                !args.no_verify,
-                &run_json_path,
-            );
-        }
-        Err(PipelineError::Fatal(err)) => return Err(err),
+        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path),
     };
 
     let cfg = execution.cfg;
@@ -47,7 +38,7 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     maybe_export_baseline(&args.export_baseline, &args.config, &cfg, &artifacts);
 
     // Measure the full reporting phase (outputs + summary prep + console + baseline export).
-    let report_ms = report_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let report_ms = elapsed_ms(report_start);
     summary = build_summary_from_artifacts(
         &outcome,
         !args.no_verify,

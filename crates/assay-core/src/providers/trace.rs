@@ -205,10 +205,6 @@ impl TraceClient {
                                         if is_model {
                                             state.input_is_model = true;
                                         }
-                                        // DEBUG: remove me
-                                        /*
-                                        eprintln!("DEBUG: TraceClient extracted prompt: '{}' is_model={}", state.input.as_ref().unwrap(), is_model);
-                                        */
                                     }
                                 }
 
@@ -360,7 +356,6 @@ impl TraceClient {
         keys.sort();
         let mut hasher = sha2::Sha256::new();
         for k in keys {
-            use sha2::Digest;
             hasher.update(k.as_bytes());
             if let Some(v) = traces.get(k) {
                 // hash validation relevant parts of response

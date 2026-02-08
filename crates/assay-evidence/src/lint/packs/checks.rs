@@ -453,7 +453,7 @@ fn compile_glob(pattern: &str) -> Option<GlobMatcher> {
     Glob::new(pattern).ok().map(|g| g.compile_matcher())
 }
 
-/// Get a value from JSON using a JSON Pointer path (RFC 6901).
+/// Get a value using serde_json's RFC 6901 JSON Pointer implementation.
 fn json_pointer_get<'a>(
     value: &'a serde_json::Value,
     pointer: &str,
@@ -461,25 +461,11 @@ fn json_pointer_get<'a>(
     if pointer.is_empty() || pointer == "/" {
         return Some(value);
     }
-
-    let path = pointer.strip_prefix('/').unwrap_or(pointer);
-
-    let mut current = value;
-    for part in path.split('/') {
-        // Unescape JSON Pointer escapes
-        let unescaped = part.replace("~1", "/").replace("~0", "~");
-
-        current = match current {
-            serde_json::Value::Object(map) => map.get(&unescaped)?,
-            serde_json::Value::Array(arr) => {
-                let idx: usize = unescaped.parse().ok()?;
-                arr.get(idx)?
-            }
-            _ => return None,
-        };
+    if pointer.starts_with('/') {
+        return value.pointer(pointer);
     }
-
-    Some(current)
+    let normalized = format!("/{}", pointer);
+    value.pointer(&normalized)
 }
 
 // Extension trait to add pack metadata to LintFinding

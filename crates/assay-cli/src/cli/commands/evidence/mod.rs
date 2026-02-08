@@ -100,7 +100,7 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
         .with_context(|| format!("failed to load profile from {}", args.profile.display()))?;
 
     // 2. Map Profile -> EvidenceEvents
-    let run_id_opt = profile.run_ids.last().cloned();
+    let run_id_opt = profile.run_ids.back().cloned();
 
     let mut mapper = EvidenceMapper::new(run_id_opt, &profile.name);
     let events = mapper.map_profile(&profile, args.detail)?;

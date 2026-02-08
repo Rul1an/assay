@@ -5,7 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::mem;
 
 pub const PROFILE_VERSION: &str = "1.0";
 pub const MAX_RUN_IDS: usize = 200;
@@ -31,10 +32,10 @@ pub struct Profile {
 
     /// Idempotency: last N run IDs (ring buffer)
     #[serde(default)]
-    pub run_ids: Vec<String>,
+    pub run_ids: VecDeque<String>,
     /// Stable digest ring to keep duplicate detection beyond run_ids window.
     #[serde(default)]
-    pub run_id_digests: Vec<String>,
+    pub run_id_digests: VecDeque<String>,
 
     pub entries: ProfileEntries,
 }
@@ -49,8 +50,8 @@ impl Profile {
             updated_at: now,
             scope,
             total_runs: 0,
-            run_ids: Vec::new(),
-            run_id_digests: Vec::new(),
+            run_ids: VecDeque::new(),
+            run_id_digests: VecDeque::new(),
             entries: ProfileEntries::default(),
         }
     }
@@ -63,21 +64,25 @@ impl Profile {
         self.run_id_digests.iter().any(|d| d == &digest)
     }
 
-    pub fn add_run_id(&mut self, run_id: String) {
-        if self.has_run(&run_id) {
-            return;
+    pub fn add_run_id(&mut self, run_id: String) -> bool {
+        if self.run_ids.iter().any(|id| id == &run_id) {
+            return false;
         }
-
         let digest = run_id_digest(&run_id);
-        self.run_ids.push(run_id);
+        if self.run_id_digests.iter().any(|d| d == &digest) {
+            return false;
+        }
+        self.run_ids.push_back(run_id);
         if self.run_ids.len() > MAX_RUN_IDS {
-            self.run_ids.remove(0);
+            let _ = self.run_ids.pop_front();
         }
 
-        self.run_id_digests.push(digest);
+        self.run_id_digests.push_back(digest);
         if self.run_id_digests.len() > MAX_RUN_ID_DIGESTS {
-            self.run_id_digests.remove(0);
+            let _ = self.run_id_digests.pop_front();
+            return true;
         }
+        false
     }
 
     pub fn total_entries(&self) -> usize {
@@ -85,13 +90,16 @@ impl Profile {
     }
 
     pub fn run_id_memory_bytes_estimate(&self) -> u64 {
-        let raw_ids: usize = self.run_ids.iter().map(std::string::String::len).sum();
-        let digests: usize = self
+        let raw_data: usize = self.run_ids.iter().map(std::string::String::capacity).sum();
+        let digest_data: usize = self
             .run_id_digests
             .iter()
-            .map(std::string::String::len)
+            .map(std::string::String::capacity)
             .sum();
-        (raw_ids + digests) as u64
+        let raw_slots = self.run_ids.capacity() * mem::size_of::<String>();
+        let digest_slots = self.run_id_digests.capacity() * mem::size_of::<String>();
+        let deques_overhead = 2 * mem::size_of::<VecDeque<String>>();
+        (raw_data + digest_data + raw_slots + digest_slots + deques_overhead) as u64
     }
 }
 
@@ -251,7 +259,7 @@ mod tests {
     fn idempotency() {
         let mut p = Profile::new("test", None);
         assert!(!p.has_run("run-1"));
-        p.add_run_id("run-1".into());
+        assert!(!p.add_run_id("run-1".into()));
         assert!(p.has_run("run-1"));
     }
 
@@ -259,7 +267,7 @@ mod tests {
     fn ring_buffer() {
         let mut p = Profile::new("test", None);
         for i in 0..(MAX_RUN_IDS + 10) {
-            p.add_run_id(format!("run-{}", i));
+            let _ = p.add_run_id(format!("run-{}", i));
         }
         assert_eq!(p.run_ids.len(), MAX_RUN_IDS);
         assert!(p.has_run("run-0"));
@@ -271,12 +279,23 @@ mod tests {
     fn digest_ring_buffer_eviction() {
         let mut p = Profile::new("test", None);
         for i in 0..(MAX_RUN_ID_DIGESTS + 50) {
-            p.add_run_id(format!("run-{}", i));
+            let _ = p.add_run_id(format!("run-{}", i));
         }
         assert_eq!(p.run_id_digests.len(), MAX_RUN_ID_DIGESTS);
         assert!(!p.has_run("run-0"));
         let newest = format!("run-{}", MAX_RUN_ID_DIGESTS + 49);
         assert!(p.has_run(&newest));
+    }
+
+    #[test]
+    fn digest_eviction_signal_only_when_overflowing() {
+        let mut p = Profile::new("test", None);
+        let mut last_evicted = false;
+        for i in 0..MAX_RUN_ID_DIGESTS {
+            last_evicted = p.add_run_id(format!("run-{}", i));
+        }
+        assert!(!last_evicted);
+        assert!(p.add_run_id(format!("run-{}", MAX_RUN_ID_DIGESTS)));
     }
 
     #[test]

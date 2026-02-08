@@ -252,6 +252,7 @@ impl EvidenceMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     #[test]
     fn test_scrub_subject_paths() {
@@ -305,8 +306,8 @@ mod tests {
             created_at: "2026-01-26T22:00:00Z".into(),
             updated_at: "2026-01-26T23:00:00Z".into(),
             total_runs: 1,
-            run_ids: vec!["run1".into()],
-            run_id_digests: vec![],
+            run_ids: VecDeque::from(vec!["run1".into()]),
+            run_id_digests: VecDeque::new(),
             scope: None,
             entries: Default::default(),
         };
