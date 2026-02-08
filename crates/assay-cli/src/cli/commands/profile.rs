@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::pipeline_error::elapsed_ms;
 use super::profile_types::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -483,10 +484,6 @@ fn show_summary(profile: &Profile, top_n: usize) {
             show_top_stable(&profile.entries.network, profile.total_runs, top_n);
         }
     }
-}
-
-fn elapsed_ms(start: Instant) -> u64 {
-    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn show_stability_distribution(

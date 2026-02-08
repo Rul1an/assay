@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod migrate;
 pub mod monitor;
 pub(crate) mod pipeline;
+pub(crate) mod pipeline_error;
 pub mod policy;
 pub mod profile;
 #[cfg(test)]
@@ -33,6 +34,7 @@ mod profile_simulation_test;
 pub mod profile_types;
 pub(crate) mod quarantine;
 pub mod record;
+pub(crate) mod reporting;
 pub(crate) mod run;
 pub(crate) mod run_output;
 pub(crate) mod runner_builder;
