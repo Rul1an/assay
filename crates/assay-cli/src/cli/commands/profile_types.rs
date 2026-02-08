@@ -65,10 +65,10 @@ impl Profile {
     }
 
     pub fn add_run_id(&mut self, run_id: String) -> bool {
-        let digest = run_id_digest(&run_id);
         if self.run_ids.iter().any(|id| id == &run_id) {
             return false;
         }
+        let digest = run_id_digest(&run_id);
         if self.run_id_digests.iter().any(|d| d == &digest) {
             return false;
         }
