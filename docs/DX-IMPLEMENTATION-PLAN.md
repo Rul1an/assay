@@ -22,7 +22,8 @@ PR order for the new track:
 
 Current branch focus:
 - PR-A1 (open): move run/ci hot-path error triage to typed boundary mapping with unit coverage.
-- PR-A2 (in progress): remove run/ci strict-mode env mutation and enforce deny-deprecations via explicit options.
+- PR-A2 (open): remove run/ci strict-mode env mutation and enforce deny-deprecations via explicit options.
+- PR-A3 (in progress): canonicalize init/template config writing (`configVersion`, semantic fields) with contract tests.
 
 ---
 
