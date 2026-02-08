@@ -261,7 +261,7 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
 
     // Update metadata
     profile.total_runs += 1;
-    profile.add_run_id(args.run_id.clone());
+    let run_id_digest_evicted = profile.add_run_id(args.run_id.clone());
     profile.updated_at = chrono::Utc::now().to_rfc3339();
 
     // Save
@@ -317,7 +317,7 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
             perf.merge_ms
         );
     }
-    if perf.run_id_digest_window_len >= MAX_RUN_ID_DIGESTS {
+    if run_id_digest_evicted {
         eprintln!(
             "WARNING: run-id digest window is full ({} entries); old run-id dedupe evidence will be evicted over time",
             perf.run_id_digest_window_len
