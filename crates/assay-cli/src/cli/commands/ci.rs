@@ -1,6 +1,7 @@
 use super::super::args::CiArgs;
 use super::run_output::{
-    decide_run_outcome, export_baseline, summary_from_outcome, write_extended_run_json,
+    decide_run_outcome, export_baseline, reason_code_from_anyhow_error,
+    reason_code_from_error_message, summary_from_outcome, write_extended_run_json,
     write_run_json_minimal,
 };
 use super::runner_builder::{build_runner, ensure_parent_dir};
@@ -75,13 +76,9 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
                 }
                 Err(e) => {
                     let msg = format!("Failed to ingest trace: {}", e);
-                    if msg.contains("No such file")
-                        || msg.contains("not found")
-                        || msg.contains("failed to ingest trace")
-                    {
-                        return write_error(ReasonCode::ETraceNotFound, msg);
-                    }
-                    return write_error(ReasonCode::ECfgParse, msg);
+                    let reason =
+                        reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
+                    return write_error(reason, msg);
                 }
             }
         }
@@ -90,7 +87,11 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     let cfg = if args.config.exists() {
         match assay_core::config::load_config(&args.config, legacy_mode, false) {
             Ok(c) => c,
-            Err(e) => return write_error(ReasonCode::ECfgParse, e.to_string()),
+            Err(e) => {
+                let msg = e.to_string();
+                let reason = reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
+                return write_error(reason, msg);
+            }
         }
     } else {
         return write_error(
@@ -135,19 +136,8 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
                 return write_error(ReasonCode::ECfgParse, diag.to_string());
             }
             let msg = e.to_string();
-            if msg.contains("config error") {
-                return write_error(ReasonCode::ECfgParse, msg.clone());
-            }
-            let msg_lower = msg.to_lowercase();
-            if msg_lower.contains("trace")
-                && (msg_lower.contains("not found")
-                    || msg_lower.contains("no such file")
-                    || msg_lower.contains("failed to load trace")
-                    || msg_lower.contains("failed to ingest trace"))
-            {
-                return write_error(ReasonCode::ETraceNotFound, msg);
-            }
-            return write_error(ReasonCode::ECfgParse, msg);
+            let reason = reason_code_from_anyhow_error(&e).unwrap_or(ReasonCode::ECfgParse);
+            return write_error(reason, msg);
         }
     };
 

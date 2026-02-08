@@ -3,6 +3,93 @@ pub mod similarity;
 
 pub use diagnostic::Diagnostic;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunErrorKind {
+    TraceNotFound,
+    MissingConfig,
+    ConfigParse,
+    InvalidArgs,
+    ProviderRateLimit,
+    ProviderTimeout,
+    ProviderServer,
+    Network,
+    JudgeUnavailable,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunError {
+    pub kind: RunErrorKind,
+    pub message: String,
+}
+
+impl RunError {
+    pub fn classify_message(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let msg = message.to_lowercase();
+        let has_not_found_signal = msg.contains("no such file")
+            || msg.contains("not found")
+            || msg.contains("cannot find")
+            || msg.contains("can't find")
+            || msg.contains("could not find")
+            || msg.contains("os error 2");
+
+        let kind = if msg.contains("trace not found")
+            || msg.contains("tracenotfound")
+            || msg.contains("failed to load trace")
+            || (msg.contains("failed to ingest trace") && has_not_found_signal)
+            || (msg.contains("trace") && has_not_found_signal)
+        {
+            RunErrorKind::TraceNotFound
+        } else if msg.contains("failed to ingest trace") {
+            RunErrorKind::ConfigParse
+        } else if msg.contains("no config found")
+            || msg.contains("config missing")
+            || msg.contains("config file not found")
+            || (msg.contains("failed to read config") && has_not_found_signal)
+        {
+            RunErrorKind::MissingConfig
+        } else if msg.contains("cannot use --")
+            || msg.contains("invalid argument")
+            || msg.contains("invalid args")
+        {
+            RunErrorKind::InvalidArgs
+        } else if msg.contains("config error")
+            || msg.contains("configerror")
+            || msg.contains("failed to parse yaml")
+            || msg.contains("unknown field")
+        {
+            RunErrorKind::ConfigParse
+        } else if msg.contains("rate limit") || msg.contains("429") {
+            RunErrorKind::ProviderRateLimit
+        } else if msg.contains("timeout") {
+            RunErrorKind::ProviderTimeout
+        } else if msg.contains("500")
+            || msg.contains("502")
+            || msg.contains("503")
+            || msg.contains("504")
+            || msg.contains("provider error")
+        {
+            RunErrorKind::ProviderServer
+        } else if msg.contains("network") || msg.contains("connection") || msg.contains("dns") {
+            RunErrorKind::Network
+        } else if msg.contains("judge unavailable")
+            || msg.contains("judge error")
+            || msg.contains("judge failed")
+        {
+            RunErrorKind::JudgeUnavailable
+        } else {
+            RunErrorKind::Other
+        };
+
+        Self { kind, message }
+    }
+
+    pub fn from_anyhow(err: &anyhow::Error) -> Self {
+        Self::classify_message(err.to_string())
+    }
+}
+
 /// Helper to map common anyhow errors to structured Diagnostics
 pub fn try_map_error(err: &anyhow::Error) -> Option<Diagnostic> {
     // 1) First, try to downcast if it's already a Diagnostic
@@ -58,3 +145,59 @@ impl Display for ConfigError {
     }
 }
 impl std::error::Error for ConfigError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunError, RunErrorKind};
+
+    #[test]
+    fn classify_message_maps_config_errors() {
+        assert_eq!(
+            RunError::classify_message("trace not found: traces/missing.jsonl").kind,
+            RunErrorKind::TraceNotFound
+        );
+        assert_eq!(
+            RunError::classify_message(
+                "ConfigError: failed to read config eval.yaml: No such file or directory (os error 2)"
+            )
+            .kind,
+            RunErrorKind::MissingConfig
+        );
+        assert_eq!(
+            RunError::classify_message("config error: unknown field `foo`").kind,
+            RunErrorKind::ConfigParse
+        );
+        assert_eq!(
+            RunError::classify_message("Failed to ingest trace: invalid JSON on line 1").kind,
+            RunErrorKind::ConfigParse
+        );
+    }
+
+    #[test]
+    fn classify_message_does_not_misclassify_ingest_errors_as_not_found() {
+        assert_ne!(
+            RunError::classify_message("Failed to ingest trace: unsupported schema_version").kind,
+            RunErrorKind::TraceNotFound
+        );
+    }
+
+    #[test]
+    fn classify_message_maps_infra_errors() {
+        assert_eq!(
+            RunError::classify_message("provider returned 429").kind,
+            RunErrorKind::ProviderRateLimit
+        );
+        assert_eq!(
+            RunError::classify_message("request timeout while calling provider").kind,
+            RunErrorKind::ProviderTimeout
+        );
+        assert_eq!(
+            RunError::classify_message("provider error: 503").kind,
+            RunErrorKind::ProviderServer
+        );
+        assert_eq!(
+            RunError::classify_message("network dns resolution failed").kind,
+            RunErrorKind::Network
+        );
+    }
+}
