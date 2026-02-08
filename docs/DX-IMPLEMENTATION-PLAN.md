@@ -30,7 +30,7 @@ Current branch focus:
   - PR-C1 (#213, open): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
   - PR-C2 (#214, open): runner clone overhead measurement surfaced in summary performance metrics.
   - PR-C3 (#215, open): profile load/merge/save timing metrics and trigger warnings.
-  - PR-C4 (next): bounded run-id digest tracking beyond short ring buffer + memory/eviction visibility.
+  - PR-C4 (#216, open): bounded run-id digest tracking beyond short ring buffer + memory/eviction visibility.
 
 ---
 
