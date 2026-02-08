@@ -142,9 +142,8 @@ pub struct RunOptions {
 Current state: mixed `version` shapes/values across templates.
 
 **Fix direction**: read-compatible, write-canonical.
-- Eval config: `version: 1` (int)
+- Eval config: `configVersion: 1` (canonical key, int)
 - Policy: `version: "1.0"` (string)
-- Assay config: `version: 2` (int)
 
 ### D6 - "Pack" naming collision
 

@@ -36,6 +36,8 @@ With `--from-trace`, generates a policy directly from recorded agent behavior in
 assay init
 ```
 
+Creates `eval.yaml` with a canonical v1 scaffold (`configVersion: 1`) and a starter smoke test template you can replace with real prompts/expectations.
+
 ### Fast first signal (hello trace)
 Creates `eval.yaml`, `traces/hello.jsonl`, and `policy.yaml` (if missing).
 When `--config` points to another directory, the hello trace is written relative to that config path.

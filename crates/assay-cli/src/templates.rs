@@ -1,4 +1,4 @@
-pub const CI_EVAL_YAML: &str = r#"version: 1
+pub const CI_EVAL_YAML: &str = r#"configVersion: 1
 suite: "ci_smoke"
 model: "trace"
 tests:
@@ -20,8 +20,8 @@ tests:
       prompt: "ci_semantic"
     expected:
       type: semantic_similarity_to
-      text: "Hello Semantic"
-      threshold: 0.99
+      semantic_similarity_to: "Hello Semantic"
+      min_score: 0.99
 "#;
 
 pub const CI_SCHEMA_JSON: &str = r#"{
@@ -38,7 +38,7 @@ pub const CI_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "assay.trace"
 {"schema_version": 1, "type": "assay.trace", "request_id": "ci_3", "prompt": "ci_semantic", "response": "Hello Semantic", "model": "trace", "provider": "trace", "meta": {"assay": {"embeddings": {"model":"trace-embed","response":[1.0,0.0,0.0],"reference":[1.0,0.0,0.0],"source_response":"trace","source_reference":"trace"}}}}
 "#;
 
-pub const HELLO_EVAL_YAML: &str = r#"version: 1
+pub const HELLO_EVAL_YAML: &str = r#"configVersion: 1
 suite: "hello_smoke"
 model: "trace"
 tests:
@@ -129,7 +129,15 @@ pub const GITLAB_CI_YML: &str = r#"assay:
 
 pub const GITIGNORE: &str = "/.eval/\n/out/\n*.db\n*.db-shm\n*.db-wal\n/assay\n";
 
-pub const ASSAY_CONFIG_DEFAULT_YAML: &str = r#"version: 2
-policy: "policy.yaml"
-baseline: ".assay/baseline.json"
+pub const ASSAY_CONFIG_DEFAULT_YAML: &str = r#"configVersion: 1
+suite: "starter"
+model: "trace"
+tests:
+  - id: "starter_regex"
+    input:
+      prompt: "replace_with_real_prompt"
+    expected:
+      type: regex_match
+      pattern: ".*"
+      flags: ["s"]
 "#;
