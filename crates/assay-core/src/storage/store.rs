@@ -1,3 +1,4 @@
+use super::now_rfc3339ish;
 use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestResultRow, TestStatus};
 use crate::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
 use anyhow::Context;
@@ -747,15 +748,6 @@ impl Store {
         .context("update episode outcome")?;
         Ok(())
     }
-}
-
-fn now_rfc3339ish() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    format!("unix:{}", secs)
 }
 
 fn status_to_outcome(s: &TestStatus) -> &'static str {

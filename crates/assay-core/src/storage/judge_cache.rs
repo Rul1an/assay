@@ -1,3 +1,4 @@
+use super::now_rfc3339ish;
 use crate::storage::Store;
 use rusqlite::params;
 
@@ -56,13 +57,4 @@ impl JudgeCache {
         )?;
         Ok(())
     }
-}
-
-fn now_rfc3339ish() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    format!("unix:{}", secs)
 }

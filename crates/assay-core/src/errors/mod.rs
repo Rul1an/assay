@@ -266,7 +266,7 @@ pub fn try_map_error(err: &anyhow::Error) -> Option<Diagnostic> {
         return Some(
             Diagnostic::new(
                 diagnostic::codes::E_BASE_MISMATCH,
-                "Baseline incompatbile with current run",
+                "Baseline incompatible with current run",
             )
             .with_context(serde_json::json!({ "raw_error": msg }))
             .with_fix_step("Regenerate baseline on main branch: assay ci --export-baseline ...")

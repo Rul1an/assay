@@ -13,10 +13,10 @@ pub struct SimReport {
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct SimSummary {
     pub total: usize,
-    pub passed: usize,   // New: For invariants
+    pub passed: usize,   // For invariant checks
     pub blocked: usize,  // For attacks
     pub bypassed: usize, // For attacks
-    pub failed: usize,   // New: For invariants
+    pub failed: usize,   // For invariant checks
     pub errors: usize,
 }
 
@@ -27,13 +27,13 @@ pub struct AttackResult {
     pub error_class: Option<String>,
     pub error_code: Option<String>,
     pub message: Option<String>,
-    pub duration_ms: u64, // New: DX requirement
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub enum AttackStatus {
-    Passed,   // New: Invariant held
-    Failed,   // New: Invariant broken
+    Passed,   // Invariant held
+    Failed,   // Invariant broken
     Blocked,  // Attack was stopped
     Bypassed, // Attack succeeded
     Error,    // Infrastructure error
