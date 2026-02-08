@@ -25,6 +25,9 @@ Current branch focus:
 - PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
 - PR-B1 (#204, in review): shared `run_pipeline` unification for `assay run` and `assay ci`.
 - PR-B2 (current branch): move command dispatch business logic out of `commands/mod.rs`.
+- Wave C kickoff:
+  - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
+  - PR-C1 (next): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
 
 ---
 
