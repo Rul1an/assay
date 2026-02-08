@@ -9,7 +9,7 @@
 How to explain this release to users in 4 commands:
 
 ```bash
-$ assay init --pack default    # Generate secure config
+$ assay init --preset default  # Generate secure config
 $ assay validate               # Find issues
 $ assay fix --dry-run          # Preview fixes
 $ assay fix --yes              # Apply fixes
@@ -35,7 +35,7 @@ Assay v1.5.0 transforms the tool from a passive validator to an active **Self-Co
 
 ## 4. Security Capabilities (The "Why")
 
-### Policy Packs (`assay init --pack`)
+### Policy Presets (`assay init --preset`)
 These packs are designed to map to common threat vectors (OWASP for LLMs).
 
 #### `default` (Balanced)
