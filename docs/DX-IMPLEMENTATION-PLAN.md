@@ -29,9 +29,13 @@ Current blocker gates (re-assessed on implemented code):
 Current branch focus:
 - PR-A1 (merged to `main` via #198): typed boundary mapping for run/ci hot-path triage with unit coverage.
 - PR-A2/A3 (merged to `main` via #202): strict-mode env mutation removal + canonical init/template config writing.
-- PR-B1 (#204, in review): shared `run_pipeline` unification for `assay run` and `assay ci`.
-- PR-B2 (#205, in review): move command dispatch business logic out of `commands/mod.rs`.
-- PR-B3 (current branch): rename `init --pack` to `--preset` with backward-compatible aliases.
+- PR-B1/B2/B3 (merged to `main` via #204/#205/#209): pipeline unification + dispatch decoupling + `--preset` rename with compat aliases.
+- Wave C kickoff:
+  - PR-C0 (#212, open): additive performance trigger metrics + Wave C trigger guardrails in RFC-001.
+  - PR-C1 (#213, open): reproducible verify/lint perf harness + workload budgets (`docs/PERFORMANCE-BUDGETS.md`).
+  - PR-C2 (#214, open): runner clone overhead measurement surfaced in summary performance metrics.
+  - PR-C3 (current branch): profile-store harness + runtime load/merge/save telemetry and trigger warnings.
+  - PR-C4 (next): bounded run-id digest tracking beyond short ring buffer + memory/eviction visibility.
 
 ---
 

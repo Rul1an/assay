@@ -4,10 +4,13 @@
 //! which artifacts are stable (consistently observed) vs noise (sporadic).
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub const PROFILE_VERSION: &str = "1.0";
 pub const MAX_RUN_IDS: usize = 200;
+/// Hard duplicate-protection bound (N) for recent run IDs.
+pub const MAX_RUN_ID_DIGESTS: usize = 5_000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profile Schema
@@ -29,6 +32,9 @@ pub struct Profile {
     /// Idempotency: last N run IDs (ring buffer)
     #[serde(default)]
     pub run_ids: Vec<String>,
+    /// Stable digest ring to keep duplicate detection beyond run_ids window.
+    #[serde(default)]
+    pub run_id_digests: Vec<String>,
 
     pub entries: ProfileEntries,
 }
@@ -44,24 +50,54 @@ impl Profile {
             scope,
             total_runs: 0,
             run_ids: Vec::new(),
+            run_id_digests: Vec::new(),
             entries: ProfileEntries::default(),
         }
     }
 
     pub fn has_run(&self, run_id: &str) -> bool {
-        self.run_ids.iter().any(|id| id == run_id)
+        if self.run_ids.iter().any(|id| id == run_id) {
+            return true;
+        }
+        let digest = run_id_digest(run_id);
+        self.run_id_digests.iter().any(|d| d == &digest)
     }
 
     pub fn add_run_id(&mut self, run_id: String) {
+        if self.has_run(&run_id) {
+            return;
+        }
+
+        let digest = run_id_digest(&run_id);
         self.run_ids.push(run_id);
         if self.run_ids.len() > MAX_RUN_IDS {
             self.run_ids.remove(0);
+        }
+
+        self.run_id_digests.push(digest);
+        if self.run_id_digests.len() > MAX_RUN_ID_DIGESTS {
+            self.run_id_digests.remove(0);
         }
     }
 
     pub fn total_entries(&self) -> usize {
         self.entries.files.len() + self.entries.network.len() + self.entries.processes.len()
     }
+
+    pub fn run_id_memory_bytes_estimate(&self) -> u64 {
+        let raw_ids: usize = self.run_ids.iter().map(std::string::String::len).sum();
+        let digests: usize = self
+            .run_id_digests
+            .iter()
+            .map(std::string::String::len)
+            .sum();
+        (raw_ids + digests) as u64
+    }
+}
+
+fn run_id_digest(run_id: &str) -> String {
+    let digest = Sha256::digest(run_id.as_bytes());
+    hex::encode(digest)
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -226,8 +262,21 @@ mod tests {
             p.add_run_id(format!("run-{}", i));
         }
         assert_eq!(p.run_ids.len(), MAX_RUN_IDS);
-        assert!(!p.has_run("run-0"));
+        assert!(p.has_run("run-0"));
         assert!(p.has_run("run-10"));
+        assert_eq!(p.run_id_digests.len(), MAX_RUN_IDS + 10);
+    }
+
+    #[test]
+    fn digest_ring_buffer_eviction() {
+        let mut p = Profile::new("test", None);
+        for i in 0..(MAX_RUN_ID_DIGESTS + 50) {
+            p.add_run_id(format!("run-{}", i));
+        }
+        assert_eq!(p.run_id_digests.len(), MAX_RUN_ID_DIGESTS);
+        assert!(!p.has_run("run-0"));
+        let newest = format!("run-{}", MAX_RUN_ID_DIGESTS + 49);
+        assert!(p.has_run(&newest));
     }
 
     #[test]
