@@ -13,10 +13,6 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let version = args.exit_codes;
     let run_json_path = PathBuf::from("run.json");
 
-    if args.deny_deprecations {
-        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
-    }
-
     // Helper to write error run.json + summary.json and return specific exit code
     let write_error = |reason: ReasonCode, msg: String| -> anyhow::Result<i32> {
         let mut o = crate::exit_codes::RunOutcome::from_reason(reason, Some(msg), None);
@@ -51,18 +47,26 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
         );
     }
 
-    let cfg = match assay_core::config::load_config(&args.config, legacy_mode, false) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = e.to_string();
-            let reason = reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
-            return write_error(reason, msg);
-        }
-    };
+    let cfg =
+        match assay_core::config::load_config(&args.config, legacy_mode, args.deny_deprecations) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = e.to_string();
+                let reason = reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse);
+                return write_error(reason, msg);
+            }
+        };
 
     // Check for deprecated legacy usage
     if !cfg.is_legacy() && cfg.has_legacy_usage() {
-        eprintln!("WARN: Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.", cfg.version);
+        let msg = format!(
+            "Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.",
+            cfg.version
+        );
+        if args.deny_deprecations {
+            return write_error(ReasonCode::ECfgParse, msg);
+        }
+        eprintln!("WARN: {}", msg);
     }
 
     let store = match assay_core::storage::Store::open(&args.db) {
