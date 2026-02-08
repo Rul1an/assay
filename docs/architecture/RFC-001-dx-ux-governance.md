@@ -201,23 +201,106 @@ Current state:
 
 **Stop line**: no perf rewrites; no output-contract behavior change.
 
-### Wave C - Performance / Scale (Data-triggered)
+### Wave C — Performance / Scale (Data-triggered)
 
-**Goal**: optimize only with evidence.
+**Goal**: Optimize only with measured evidence. No speculative performance work.
+**Prerequisite**: Wave B merged. C0 (harness) must land before any C1–C4 work starts.
 
-| Task | Trigger | Files |
-|------|---------|-------|
-| C1: Single-pass streaming verify+lint | verify/lint CI cost > 5s | evidence lint/verify engine |
-| C2: `RunnerRef` shared refs | profiling shows clone overhead | core runner |
-| C3: Profile store batch ops | >10k profile entries | storage store |
-| C4: Stable run-id tracking beyond ring buffer | corpus growth pressure | storage layer |
+#### C0: Reproducible perf harness + budgets (required first)
 
-**Acceptance criteria**:
-- [ ] Benchmarked improvements on realistic workloads
-- [ ] No regression in determinism/integrity
-- [ ] Criterion coverage updated
+Without a harness, the "data-triggered" claim is unenforceable. This is the smallest investment with the biggest payoff — it makes all other C-tasks reviewable.
 
-**Stop line**: do not start without measured bottleneck evidence.
+**Deliverables**:
+- Fixture generator for bundles/events/profile corpora at defined workload classes:
+  - `small`: 1MB bundle, 1k events, 10 rules
+  - `typical-pr`: 10MB bundle, 10k events, 50 rules
+  - `large`: 50MB+ bundle, 100k+ events, 500+ rules
+- Criterion benches: `cargo bench -p assay-evidence -- verify_lint`
+- Performance budgets document: p50/p95 targets per workload class, per runner (ubuntu-latest baseline)
+
+**Files**: new bench in `assay-evidence/benches/`, fixture generator, `docs/PERFORMANCE-BUDGETS.md`
+
+#### C1: Single-pass streaming verify+lint
+
+**Trigger** (any of):
+- verify+lint p95 > 5s on ubuntu-latest for `large` workload class (>=50MB or >=100k events or >=500 rules)
+- verify+lint p50 > 2s on `typical-pr` workload class
+
+**Scope definition** — "single-pass" means one decompress + one tar walk:
+1. Read `manifest.json`
+2. Stream entries (no full buffer in memory)
+3. Verify hashes/sizes per entry against manifest
+4. Scan for forbidden patterns
+5. Collect lint events
+6. Produce identical error/warning set as current multi-pass
+
+**Invariant guardrails** (protects I2 + I4):
+- `VerifyLimits` (max entry size, max total uncompressed, max files) remain enforced — streaming is the opportunity to make limits _better_, not weaker
+- Golden tests: verify+lint output on reference bundles must be byte-identical before and after
+- No semantic changes to verify/lint outputs; only performance and memory behavior may change
+
+**Files**: `assay-evidence/src/lint/engine.rs`, `assay-evidence/src/verify.rs`
+
+#### C2: `RunnerRef` shared refs (no per-task clone)
+
+**Trigger**:
+- Runner clone/build overhead > 10% of total suite runtime on a suite of >=1000 tests
+
+**Measurement points** (add behind `debug`/`perf` feature flag):
+- `runner_build_ms`: time to construct runner
+- `runner_clone_count`: number of Arc field clones per suite
+- `runner_clone_ms`: cumulative clone time
+
+Current state: 6 `.clone()` calls on Arc-wrapped fields per task (`engine/runner.rs:529-543`, `768-791`). At current suite sizes (<100 tests) this is negligible.
+
+**Files**: `assay-core/src/engine/runner.rs`
+
+#### C3: Profile store scaling
+
+**Trigger** (any of):
+- Profile merge of 1 run > 1s p95 at >=10k entries
+- Profile load > 500ms p95
+
+**Decision required before implementation**: identify the actual bottleneck:
+- Write path: merge/update complexity
+- Read path: lookups per event (hot path)
+- Serialization: load/serialize cost
+
+**Storage strategy options** (decide based on profiling, not upfront):
+- SQLite (already used for eval DB — one DB or two?)
+- Append-only log + compaction
+- Current YAML with batch operations
+
+**Files**: `assay-core/src/storage/store.rs` (884 lines, no in-file tests — tests should be added as part of this work regardless of which storage strategy is chosen)
+
+#### C4: Stable run-id tracking beyond ring buffer
+
+**Trigger**: Profile corpus growth causes ring buffer evictions that break replay determinism or cause duplicate-merge errors.
+
+**Invariant guardrail** (protects I1):
+- Double-merge of same `run_id` must be impossible across N runs (define N as a hard bound)
+- Replacing the ring buffer must not break determinism or introduce memory blowups
+
+**Bounded structure options** (choose one):
+- Stable hash-set on disk (SQLite) — deterministic, no false positives, proven
+- Bloom filter + periodic reset with epoch — space-efficient but false positives affect UX (false "already merged" errors); only acceptable if error path is graceful
+
+**Files**: `assay-core/src/storage/`
+
+#### Acceptance criteria (all C tasks)
+
+- [ ] C0 harness exists and produces reproducible results before any C1–C4 work starts
+- [ ] Benchmarked improvement on the relevant workload class (p50 and p95)
+- [ ] Golden tests prove semantic equivalence of outputs (verify/lint/run results)
+- [ ] No regression in determinism (I1) or integrity (I2)
+- [ ] Criterion benches updated with before/after
+- [ ] No new dependencies without justification
+
+#### Non-goal
+
+No semantic changes to verify/lint/run outputs. Only performance and memory behavior may change, and must be proven equivalent via golden tests on reference fixtures.
+
+**Stop line**: Do not start C1–C4 without C0 harness in place. Do not start any C-task without measured bottleneck evidence on the defined workload classes.
 
 ---
 
@@ -253,6 +336,7 @@ Security posture retained:
 - No full codebase `thiserror` migration; only core->cli boundary typing.
 - No cross-platform atomic write rewrite in this RFC scope.
 - No broad Arc-free runner rewrite without scale evidence.
+- No semantic changes to verify/lint/run outputs in Wave C; only performance/memory behavior, proven equivalent via golden tests.
 
 ---
 
@@ -261,3 +345,4 @@ Security posture retained:
 - 2026-02-07: Draft created from codebase audit + owner review. Wave A scoped for immediate execution.
 - 2026-02-08: Wave A merged to `main` (`#198`, `#202`). Wave B started.
 - 2026-02-08: Wave B1 opened as `#204` (shared run/ci pipeline); Wave B2 branch extracted dispatch logic from `commands/mod.rs` into `commands/dispatch.rs`.
+- 2026-02-08: Wave C rewritten with concrete triggers (workload classes, percentiles, runner platform), C0 harness prerequisite, scope guardrails for C1 (streaming invariants), and measurable thresholds for C2-C4.
