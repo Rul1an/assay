@@ -26,6 +26,10 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
         Err(PipelineError::Fatal(err)) => return Err(err),
     };
 
+    if execution.cfg.version > 0 {
+        eprintln!("Loaded config version: {}", execution.cfg.version);
+    }
+
     let cfg = execution.cfg;
     let artifacts = execution.artifacts;
     // Determine outcome first (safety against report write failures)

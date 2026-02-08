@@ -112,10 +112,43 @@ pub(crate) async fn execute_pipeline(
     }
 
     if input.baseline.is_some() && input.export_baseline.is_some() {
+        eprintln!("config error: cannot use --baseline and --export-baseline together");
         return Err(PipelineError::Classified {
             reason: ReasonCode::EInvalidArgs,
             message: "Cannot use --baseline and --export-baseline together".to_string(),
         });
+    }
+
+    let cfg = if input.require_config_exists && !input.config.exists() {
+        return Err(PipelineError::Classified {
+            reason: ReasonCode::EMissingConfig,
+            message: format!("Config file not found: {}", input.config.display()),
+        });
+    } else {
+        match assay_core::config::load_config(&input.config, legacy_mode, input.deny_deprecations) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = e.to_string();
+                return Err(PipelineError::Classified {
+                    reason: reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse),
+                    message: msg,
+                });
+            }
+        }
+    };
+
+    if !cfg.is_legacy() && cfg.has_legacy_usage() {
+        let msg = format!(
+            "Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.",
+            cfg.version
+        );
+        if input.deny_deprecations {
+            return Err(PipelineError::Classified {
+                reason: ReasonCode::ECfgParse,
+                message: msg,
+            });
+        }
+        eprintln!("WARN: {}", msg);
     }
 
     let store = match assay_core::storage::Store::open(&input.db) {
@@ -157,38 +190,6 @@ pub(crate) async fn execute_pipeline(
                 }
             }
         }
-    }
-
-    let cfg = if input.require_config_exists && !input.config.exists() {
-        return Err(PipelineError::Classified {
-            reason: ReasonCode::EMissingConfig,
-            message: format!("Config file not found: {}", input.config.display()),
-        });
-    } else {
-        match assay_core::config::load_config(&input.config, legacy_mode, input.deny_deprecations) {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = e.to_string();
-                return Err(PipelineError::Classified {
-                    reason: reason_code_from_error_message(&msg).unwrap_or(ReasonCode::ECfgParse),
-                    message: msg,
-                });
-            }
-        }
-    };
-
-    if !cfg.is_legacy() && cfg.has_legacy_usage() {
-        let msg = format!(
-            "Deprecated policy file usage detected in version {} config. Run 'assay migrate' to inline policies.",
-            cfg.version
-        );
-        if input.deny_deprecations {
-            return Err(PipelineError::Classified {
-                reason: ReasonCode::ECfgParse,
-                message: msg,
-            });
-        }
-        eprintln!("WARN: {}", msg);
     }
 
     let reruns = if input.strict_zero_reruns && input.strict {
