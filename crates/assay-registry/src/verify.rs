@@ -289,21 +289,6 @@ fn verify_dsse_signature_bytes(
     )
 }
 
-/// Legacy: Verify DSSE signature over content string.
-///
-/// **Deprecated**: Use `verify_dsse_signature_bytes` which properly handles
-/// canonical byte comparison per SPEC §6.3.
-#[cfg(test)]
-fn verify_dsse_signature(
-    content: &str,
-    envelope: &DsseEnvelope,
-    trust_store: &TrustStore,
-) -> RegistryResult<()> {
-    // Canonicalize content first
-    let canonical_bytes = canonicalize_for_dsse(content)?;
-    verify_dsse_signature_bytes(&canonical_bytes, envelope, trust_store)
-}
-
 /// Verify a single signature.
 fn verify_single_signature(
     pae: &[u8],
@@ -355,6 +340,17 @@ mod tests {
 
     fn generate_keypair() -> SigningKey {
         SigningKey::generate(&mut rand::thread_rng())
+    }
+
+    // Legacy compatibility helper kept test-local: production path verifies
+    // canonical bytes via verify_dsse_signature_bytes; callers canonicalize.
+    fn verify_dsse_signature_legacy_for_tests(
+        content: &str,
+        envelope: &DsseEnvelope,
+        trust_store: &TrustStore,
+    ) -> RegistryResult<()> {
+        let canonical_bytes = canonicalize_for_dsse(content)?;
+        verify_dsse_signature_bytes(&canonical_bytes, envelope, trust_store)
     }
 
     #[test]
@@ -689,7 +685,7 @@ mod tests {
         .unwrap();
         let content_str = String::from_utf8(canonical.clone()).unwrap();
 
-        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests(&content_str, &envelope, &trust_store);
         assert!(result.is_ok(), "DSSE signature should verify: {:?}", result);
     }
 
@@ -732,7 +728,7 @@ mod tests {
         .unwrap();
         let tampered_str = String::from_utf8(tampered_canonical).unwrap();
 
-        let result = verify_dsse_signature(&tampered_str, &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests(&tampered_str, &envelope, &trust_store);
         assert!(
             matches!(result, Err(RegistryError::DigestMismatch { .. })),
             "Should return DigestMismatch for payload != content: {:?}",
@@ -758,7 +754,7 @@ mod tests {
         .unwrap();
         let content_str = String::from_utf8(canonical).unwrap();
 
-        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests(&content_str, &envelope, &trust_store);
         assert!(
             matches!(result, Err(RegistryError::KeyNotTrusted { .. })),
             "Should return KeyNotTrusted for unknown key: {:?}",
@@ -776,7 +772,7 @@ mod tests {
         };
 
         let trust_store = TrustStore::new();
-        let result = verify_dsse_signature("test", &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests("test", &envelope, &trust_store);
 
         assert!(
             matches!(result, Err(RegistryError::SignatureInvalid { .. })),
@@ -802,7 +798,7 @@ mod tests {
 
         let trust_store = TrustStore::new();
         let content_str = String::from_utf8(canonical).unwrap();
-        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests(&content_str, &envelope, &trust_store);
 
         assert!(
             matches!(result, Err(RegistryError::SignatureInvalid { .. })),
@@ -857,7 +853,7 @@ mod tests {
             .unwrap();
 
         let content_str = String::from_utf8(canonical).unwrap();
-        let result = verify_dsse_signature(&content_str, &envelope, &trust_store);
+        let result = verify_dsse_signature_legacy_for_tests(&content_str, &envelope, &trust_store);
 
         assert!(
             matches!(result, Err(RegistryError::SignatureInvalid { .. })),
@@ -1034,7 +1030,7 @@ mod tests {
             .block_on(trust_store.add_pinned_key(&trusted_key))
             .unwrap();
 
-        let legacy_ok = verify_dsse_signature(content, &envelope, &trust_store);
+        let legacy_ok = verify_dsse_signature_legacy_for_tests(content, &envelope, &trust_store);
         assert!(
             legacy_ok.is_ok(),
             "legacy helper should canonicalize input before verification: {:?}",
@@ -1050,7 +1046,8 @@ mod tests {
         );
 
         let tampered_content = "z: 4\na: 1\nm: 2";
-        let legacy_err = verify_dsse_signature(tampered_content, &envelope, &trust_store);
+        let legacy_err =
+            verify_dsse_signature_legacy_for_tests(tampered_content, &envelope, &trust_store);
         assert!(
             matches!(legacy_err, Err(RegistryError::DigestMismatch { .. })),
             "legacy helper should keep mismatch classification: {:?}",
