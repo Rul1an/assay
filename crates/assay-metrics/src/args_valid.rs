@@ -4,6 +4,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::policy_warning::should_emit_deprecated_policy_warning;
+use crate::tool_calls::extract_tool_calls_best_effort;
+
 pub struct ArgsValidMetric;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,67 +28,6 @@ struct StructuredPolicy {
 enum PolicySource {
     SchemaMap(HashMap<String, serde_json::Value>),
     Structured(StructuredPolicy),
-}
-
-fn parse_tool_call_entry(v: &serde_json::Value, idx: usize) -> Option<ToolCallRecord> {
-    if let Ok(call) = serde_json::from_value::<ToolCallRecord>(v.clone()) {
-        return Some(call);
-    }
-    let obj = v.as_object()?;
-    let tool_name = obj
-        .get("tool_name")
-        .or(obj.get("tool"))
-        .and_then(|x| x.as_str())
-        .map(ToString::to_string)?;
-
-    let args = obj
-        .get("args")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let id = obj
-        .get("id")
-        .and_then(|x| x.as_str())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("legacy-{}", idx));
-    let index = obj
-        .get("index")
-        .and_then(|x| x.as_u64())
-        .map(|x| x as usize)
-        .unwrap_or(idx);
-    let ts_ms = obj
-        .get("ts_ms")
-        .or(obj.get("timestamp"))
-        .and_then(|x| x.as_u64())
-        .unwrap_or(0);
-    let result = obj.get("result").cloned();
-    let error = obj.get("error").cloned();
-
-    Some(ToolCallRecord {
-        id,
-        tool_name,
-        args,
-        result,
-        error,
-        index,
-        ts_ms,
-    })
-}
-
-fn extract_tool_calls(resp: &LlmResponse) -> Vec<ToolCallRecord> {
-    let Some(val) = resp.meta.get("tool_calls") else {
-        return Vec::new();
-    };
-    if let Ok(calls) = serde_json::from_value::<Vec<ToolCallRecord>>(val.clone()) {
-        return calls;
-    }
-    val.as_array()
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .filter_map(|(idx, entry)| parse_tool_call_entry(entry, idx))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn matches_tool_pattern(tool_name: &str, pattern: &str) -> bool {
@@ -230,18 +172,15 @@ impl Metric for ArgsValidMetric {
                 })?;
             PolicySource::SchemaMap(schemas)
         } else if let Some(path) = policy_path {
-            static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-            WARN_ONCE.call_once(|| {
-                if std::env::var("MCP_CONFIG_LEGACY").is_err() {
-                    eprintln!(
-                        "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
-                        path
-                    );
-                    eprintln!(
-                        "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
-                    );
-                }
-            });
+            if should_emit_deprecated_policy_warning(self.name(), path) {
+                eprintln!(
+                    "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
+                    path
+                );
+                eprintln!(
+                    "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
+                );
+            }
 
             load_policy_source(Path::new(path))?
         } else {
@@ -249,7 +188,7 @@ impl Metric for ArgsValidMetric {
         };
 
         // No calls -> valid args (vacuously true)
-        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls(resp);
+        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_best_effort(resp);
 
         let mut errors: Vec<serde_json::Value> = Vec::new();
 
@@ -562,5 +501,67 @@ schemas:
         );
 
         let _ = std::fs::remove_file(policy_path);
+    }
+
+    #[test]
+    fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
+        let resp = LlmResponse {
+            meta: serde_json::json!({
+                "tool_calls": [
+                    {
+                        "id": "c0",
+                        "tool_name": "alpha",
+                        "args": {"k":"v"},
+                        "result": {"ok": true},
+                        "error": "none",
+                        "index": 7,
+                        "ts_ms": 42
+                    },
+                    {
+                        "tool": "beta",
+                        "args": ["x"],
+                        "error": {"code": "E_FAIL"}
+                    },
+                    {
+                        "args": {"missing_tool": true}
+                    }
+                ]
+            }),
+            ..Default::default()
+        };
+
+        let calls = extract_tool_calls_best_effort(&resp);
+        assert_eq!(calls.len(), 2, "non-parseable entries must be skipped");
+
+        assert_eq!(calls[0].tool_name, "alpha");
+        assert_eq!(calls[0].id, "c0");
+        assert_eq!(calls[0].index, 7);
+        assert_eq!(calls[0].ts_ms, 42);
+        assert_eq!(calls[0].args, serde_json::json!({"k":"v"}));
+        assert_eq!(calls[0].result, Some(serde_json::json!({"ok": true})));
+        assert_eq!(calls[0].error, Some(serde_json::json!("none")));
+
+        assert_eq!(calls[1].tool_name, "beta");
+        assert_eq!(calls[1].id, "legacy-1");
+        assert_eq!(calls[1].index, 1);
+        assert_eq!(calls[1].ts_ms, 0);
+        assert_eq!(calls[1].args, serde_json::json!(["x"]));
+        assert_eq!(calls[1].result, None);
+        assert_eq!(calls[1].error, Some(serde_json::json!({"code":"E_FAIL"})));
+    }
+
+    #[test]
+    fn extract_tool_calls_best_effort_returns_empty_for_missing_or_non_array_tool_calls() {
+        let missing = LlmResponse {
+            meta: serde_json::json!({}),
+            ..Default::default()
+        };
+        assert!(extract_tool_calls_best_effort(&missing).is_empty());
+
+        let non_array = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "x"}}),
+            ..Default::default()
+        };
+        assert!(extract_tool_calls_best_effort(&non_array).is_empty());
     }
 }

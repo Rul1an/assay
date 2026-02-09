@@ -2,6 +2,9 @@ use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
 
+use crate::policy_warning::should_emit_deprecated_policy_warning;
+use crate::tool_calls::extract_tool_calls_canonical_or_empty;
+
 pub struct SequenceValidMetric;
 
 #[async_trait]
@@ -27,13 +30,15 @@ impl Metric for SequenceValidMetric {
 
         // 1. Resolve Rules & Sequence from Policy File (if any)
         let (file_sequence, file_rules) = if let Some(path) = policy_path {
-            static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-            WARN_ONCE.call_once(|| {
-                if std::env::var("MCP_CONFIG_LEGACY").is_err() {
-                    eprintln!("WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.", path);
-                    eprintln!("      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'.");
-                }
-            });
+            if should_emit_deprecated_policy_warning(self.name(), path) {
+                eprintln!(
+                    "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
+                    path
+                );
+                eprintln!(
+                    "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
+                );
+            }
 
             let content = std::fs::read_to_string(path).map_err(|e| {
                 anyhow::anyhow!(
@@ -66,11 +71,7 @@ impl Metric for SequenceValidMetric {
         }
 
         // Parse Tool Calls
-        let tool_calls: Vec<ToolCallRecord> = if let Some(val) = resp.meta.get("tool_calls") {
-            serde_json::from_value(val.clone()).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_canonical_or_empty(resp);
 
         // Sort by index
         let mut actual_sequence = tool_calls.clone();
@@ -302,5 +303,40 @@ mod tests {
         assert_eq!(result.score, 0.0);
         let msg = result.details["message"].as_str().unwrap();
         assert!(msg.contains("matches blocklist pattern 'rm'"));
+    }
+
+    #[tokio::test]
+    async fn test_malformed_tool_calls_fail_open_to_empty_sequence() {
+        let metric = SequenceValidMetric;
+        let tc = TestCase {
+            id: "test".to_string(),
+            input: TestInput {
+                prompt: "prompt".to_string(),
+                context: None,
+            },
+            expected: Expected::MustContain {
+                must_contain: vec![],
+            },
+            assertions: None,
+            tags: vec![],
+            metadata: None,
+            on_error: None,
+        };
+        let resp = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "A"}}),
+            ..Default::default()
+        };
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: None,
+            rules: Some(vec![SequenceRule::Require {
+                tool: "A".to_string(),
+            }]),
+        };
+
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+        assert_eq!(result.score, 0.0, "malformed should be treated as empty");
+        let msg = result.details["message"].as_str().unwrap();
+        assert!(msg.contains("required tool 'A' not found"), "msg={}", msg);
     }
 }
