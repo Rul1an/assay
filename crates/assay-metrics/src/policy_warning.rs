@@ -1,11 +1,39 @@
-use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 type WarningKey = (String, String);
+const MAX_WARNING_KEYS: usize = 4_096;
 
-fn warning_cache() -> &'static Mutex<HashSet<WarningKey>> {
-    static CACHE: OnceLock<Mutex<HashSet<WarningKey>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashSet::new()))
+#[derive(Default)]
+struct WarningCache {
+    seen: HashSet<WarningKey>,
+    order: VecDeque<WarningKey>,
+}
+
+impl WarningCache {
+    fn insert(&mut self, key: WarningKey) -> bool {
+        if !self.seen.insert(key.clone()) {
+            return false;
+        }
+
+        self.order.push_back(key);
+        if self.order.len() > MAX_WARNING_KEYS {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen.remove(&oldest);
+            }
+        }
+        true
+    }
+}
+
+fn warning_cache() -> &'static Mutex<WarningCache> {
+    static CACHE: OnceLock<Mutex<WarningCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(WarningCache::default()))
+}
+
+fn lock_warning_cache() -> MutexGuard<'static, WarningCache> {
+    // Recover poisoned mutex state rather than panicking in warning-only path.
+    warning_cache().lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn should_emit_deprecated_policy_warning_impl(
@@ -18,9 +46,7 @@ fn should_emit_deprecated_policy_warning_impl(
     }
 
     let key = (metric_name.to_string(), policy_path.to_string());
-    let mut cache = warning_cache()
-        .lock()
-        .expect("policy warning cache mutex must not be poisoned");
+    let mut cache = lock_warning_cache();
     cache.insert(key)
 }
 
@@ -81,6 +107,35 @@ mod tests {
         ));
         assert!(should_emit_deprecated_policy_warning_impl(
             &metric, &path, false
+        ));
+    }
+
+    #[test]
+    fn cache_is_bounded_and_old_entries_evict() {
+        let stable_metric = "bounded_metric".to_string();
+        let stable_path = "/tmp/bounded_policy.yaml".to_string();
+        assert!(should_emit_deprecated_policy_warning_impl(
+            &stable_metric,
+            &stable_path,
+            false
+        ));
+        assert!(!should_emit_deprecated_policy_warning_impl(
+            &stable_metric,
+            &stable_path,
+            false
+        ));
+
+        for i in 0..(MAX_WARNING_KEYS + 32) {
+            let metric = format!("m_{}", i);
+            let path = format!("/tmp/p_{}.yaml", i);
+            let _ = should_emit_deprecated_policy_warning_impl(&metric, &path, false);
+        }
+
+        // After bounded eviction, older keys can be emitted again.
+        assert!(should_emit_deprecated_policy_warning_impl(
+            &stable_metric,
+            &stable_path,
+            false
         ));
     }
 }
