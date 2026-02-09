@@ -1,7 +1,7 @@
+use super::test_bundle::create_single_event_bundle;
 use crate::report::{AttackResult, AttackStatus};
 use anyhow::Result;
-use assay_evidence::{verify_bundle, BundleWriter, VerifyError};
-use chrono::{TimeZone, Utc};
+use assay_evidence::{verify_bundle, VerifyError};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::io::{self, Cursor, ErrorKind, Read};
@@ -88,7 +88,7 @@ pub fn malformed_gzip_stream() -> Vec<u8> {
 /// and verifies the outcome is either `Blocked` or `Error` (never `Bypassed`, never panic).
 pub fn check_chaos_attacks(seed: u64) -> Result<Vec<AttackResult>> {
     let mut results = Vec::new();
-    let valid_bundle = create_test_bundle()?;
+    let valid_bundle = create_single_event_bundle()?;
     let iterations = 20;
 
     // 1. IO chaos reader iterations
@@ -176,20 +176,4 @@ pub fn check_chaos_attacks(seed: u64) -> Result<Vec<AttackResult>> {
     }
 
     Ok(results)
-}
-
-fn create_test_bundle() -> Result<Vec<u8>> {
-    let mut buffer = Vec::new();
-    let mut writer = BundleWriter::new(&mut buffer);
-    let mut event = assay_evidence::types::EvidenceEvent::new(
-        "assay.test",
-        "urn:test",
-        "run",
-        0,
-        serde_json::json!({}),
-    );
-    event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
-    writer.add_event(event);
-    writer.finish()?;
-    Ok(buffer)
 }

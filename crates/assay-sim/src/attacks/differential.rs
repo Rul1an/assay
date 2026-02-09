@@ -1,3 +1,4 @@
+use super::test_bundle::create_differential_bundle;
 use crate::mutators::bitflip::BitFlip;
 use crate::mutators::inject::InjectFile;
 use crate::mutators::truncate::Truncate;
@@ -7,8 +8,6 @@ use crate::subprocess::{subprocess_verify, SubprocessResult};
 use anyhow::{Context, Result};
 use assay_evidence::crypto::id::{compute_content_hash, compute_run_root};
 use assay_evidence::types::EvidenceEvent;
-use assay_evidence::BundleWriter;
-use chrono::{TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read};
 use std::time::{Duration, Instant};
@@ -189,7 +188,7 @@ fn reference_verify_inner(bundle_data: &[u8]) -> Result<ReferenceResult> {
 /// 5. If both reject → `AttackStatus::Passed`
 /// 6. If production rejects but reference accepts → `AttackStatus::Passed` (stricter is OK, logged)
 pub fn check_differential_parity(seed: u64) -> Result<Vec<AttackResult>> {
-    let valid_bundle = create_test_bundle()?;
+    let valid_bundle = create_differential_bundle()?;
     let mut results = Vec::new();
     let timeout = Duration::from_secs(30);
 
@@ -363,22 +362,4 @@ fn truncate_hash(s: &str, max: usize) -> String {
     } else {
         format!("{}…", &s[..max])
     }
-}
-
-fn create_test_bundle() -> Result<Vec<u8>> {
-    let mut buffer = Vec::new();
-    let mut writer = BundleWriter::new(&mut buffer);
-    for seq in 0..3u64 {
-        let mut event = EvidenceEvent::new(
-            "assay.test",
-            "urn:test",
-            "diffrun",
-            seq,
-            serde_json::json!({"seq": seq}),
-        );
-        event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
-        writer.add_event(event);
-    }
-    writer.finish()?;
-    Ok(buffer)
 }
