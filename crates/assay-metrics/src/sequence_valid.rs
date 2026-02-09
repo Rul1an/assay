@@ -2,6 +2,8 @@ use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
 
+use crate::tool_calls::extract_tool_calls_canonical_or_empty;
+
 pub struct SequenceValidMetric;
 
 #[async_trait]
@@ -66,11 +68,7 @@ impl Metric for SequenceValidMetric {
         }
 
         // Parse Tool Calls
-        let tool_calls: Vec<ToolCallRecord> = if let Some(val) = resp.meta.get("tool_calls") {
-            serde_json::from_value(val.clone()).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_canonical_or_empty(resp);
 
         // Sort by index
         let mut actual_sequence = tool_calls.clone();
