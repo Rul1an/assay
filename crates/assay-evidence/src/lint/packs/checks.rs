@@ -146,7 +146,7 @@ fn check_json_path_exists(
         };
 
         for path in paths {
-            if json_pointer_get(&json, path).is_some() {
+            if value_pointer(&json, path).is_some() {
                 return CheckResult {
                     passed: true,
                     finding: None,
@@ -263,7 +263,7 @@ fn check_event_field_present(
         };
 
         for path in paths {
-            if json_pointer_get(&json, path).is_some() {
+            if value_pointer(&json, path).is_some() {
                 return CheckResult {
                     passed: true,
                     finding: None,
@@ -343,7 +343,7 @@ fn check_manifest_field(
         }
     };
 
-    let has_field = json_pointer_get(&manifest_json, path).is_some();
+    let has_field = value_pointer(&manifest_json, path).is_some();
 
     if has_field {
         CheckResult {
@@ -355,7 +355,7 @@ fn check_manifest_field(
         let severity = if required {
             rule.severity
         } else {
-            Severity::Warning
+            Severity::Warn
         };
 
         CheckResult {
@@ -421,7 +421,7 @@ fn create_finding_with_severity(
 
     LintFinding {
         rule_id: canonical_id,
-        severity: convert_severity(severity),
+        severity,
         message,
         location,
         fingerprint,
@@ -439,33 +439,23 @@ fn create_finding_with_severity(
     )
 }
 
-/// Convert pack severity to lint severity.
-fn convert_severity(severity: Severity) -> crate::lint::Severity {
-    match severity {
-        Severity::Error => crate::lint::Severity::Error,
-        Severity::Warning => crate::lint::Severity::Warn,
-        Severity::Info => crate::lint::Severity::Info,
-    }
-}
-
 /// Compile a glob pattern.
 fn compile_glob(pattern: &str) -> Option<GlobMatcher> {
     Glob::new(pattern).ok().map(|g| g.compile_matcher())
 }
 
-/// Get a value using serde_json's RFC 6901 JSON Pointer implementation.
-fn json_pointer_get<'a>(
-    value: &'a serde_json::Value,
-    pointer: &str,
-) -> Option<&'a serde_json::Value> {
+fn value_pointer<'a>(value: &'a serde_json::Value, pointer: &str) -> Option<&'a serde_json::Value> {
     if pointer.is_empty() || pointer == "/" {
         return Some(value);
     }
-    if pointer.starts_with('/') {
-        return value.pointer(pointer);
-    }
-    let normalized = format!("/{}", pointer);
-    value.pointer(&normalized)
+    let normalized;
+    let pointer = if pointer.starts_with('/') {
+        pointer
+    } else {
+        normalized = format!("/{}", pointer);
+        normalized.as_str()
+    };
+    value.pointer(pointer)
 }
 
 // Extension trait to add pack metadata to LintFinding
@@ -507,7 +497,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_json_pointer_get() {
+    fn test_value_pointer() {
         let json: serde_json::Value = serde_json::json!({
             "run_id": "abc123",
             "data": {
@@ -518,11 +508,12 @@ mod tests {
             }
         });
 
-        assert!(json_pointer_get(&json, "/run_id").is_some());
-        assert!(json_pointer_get(&json, "/data/traceparent").is_some());
-        assert!(json_pointer_get(&json, "/data/nested/deep").is_some());
-        assert!(json_pointer_get(&json, "/missing").is_none());
-        assert!(json_pointer_get(&json, "/data/missing").is_none());
+        assert!(value_pointer(&json, "/run_id").is_some());
+        assert!(value_pointer(&json, "run_id").is_some());
+        assert!(value_pointer(&json, "/data/traceparent").is_some());
+        assert!(value_pointer(&json, "/data/nested/deep").is_some());
+        assert!(value_pointer(&json, "/missing").is_none());
+        assert!(value_pointer(&json, "/data/missing").is_none());
     }
 
     #[test]

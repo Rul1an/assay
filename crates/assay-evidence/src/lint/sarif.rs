@@ -71,7 +71,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                     "text": r.description
                 },
                 "defaultConfiguration": {
-                    "level": severity_to_sarif_level(&r.default_severity)
+                    "level": r.default_severity.as_sarif_level()
                 }
             });
 
@@ -395,12 +395,4 @@ fn extract_tag(findings: &[super::LintFinding], rule_id: &str, prefix: &str) -> 
                 .and_then(|t| t.strip_prefix(prefix))
                 .map(|s| s.to_string())
         })
-}
-
-fn severity_to_sarif_level(severity: &super::Severity) -> &'static str {
-    match severity {
-        super::Severity::Error => "error",
-        super::Severity::Warn => "warning",
-        super::Severity::Info => "note",
-    }
 }

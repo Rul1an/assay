@@ -4,17 +4,28 @@ pub mod rules;
 pub mod sarif;
 
 use crate::bundle::writer::Manifest;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Severity {
+    #[serde(alias = "error", alias = "Error")]
     Error,
+    #[serde(alias = "warn", alias = "Warn", alias = "warning", alias = "Warning")]
     Warn,
+    #[serde(alias = "info", alias = "Info")]
     Info,
 }
 
 impl Severity {
+    pub fn priority(&self) -> u8 {
+        match self {
+            Severity::Info => 0,
+            Severity::Warn => 1,
+            Severity::Error => 2,
+        }
+    }
+
     pub fn as_sarif_level(&self) -> &str {
         match self {
             Severity::Error => "error",
