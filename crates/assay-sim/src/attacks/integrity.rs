@@ -1,16 +1,17 @@
+use super::test_bundle::create_single_event_bundle;
 use crate::mutators::inject::InjectFile;
 use crate::mutators::Mutator;
 use crate::report::SimReport;
 use anyhow::Result;
 use assay_evidence::types::EvidenceEvent;
-use assay_evidence::{verify_bundle, BundleWriter, VerifyError};
+use assay_evidence::{verify_bundle, VerifyError};
 use chrono::{TimeZone, Utc};
 use rand::Rng;
 use rand::SeedableRng;
 use std::io::Cursor;
 
 pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> {
-    let valid_bundle = create_test_bundle()?;
+    let valid_bundle = create_single_event_bundle()?;
 
     // 1. BitFlip (Harder)
     run_attack(report, "integrity.bitflip", || {
@@ -127,14 +128,6 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
     })?;
 
     Ok(())
-}
-
-fn create_test_bundle() -> Result<Vec<u8>> {
-    let mut buffer = Vec::new();
-    let mut writer = BundleWriter::new(&mut buffer);
-    writer.add_event(create_event(0));
-    writer.finish()?;
-    Ok(buffer)
 }
 
 fn create_event(seq: u64) -> EvidenceEvent {
