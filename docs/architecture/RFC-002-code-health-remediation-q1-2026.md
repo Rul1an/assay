@@ -1,6 +1,6 @@
 # RFC-002: Code Health Remediation Plan (Q1 2026)
 
-- Status: Proposed
+- Status: Active (E1-E4 delivered, E5 planned)
 - Date: 2026-02-09
 - Owner: DX/Core
 - Scope: `assay-cli`, `assay-core`, `assay-evidence`, `assay-metrics`, `assay-sim`, `assay-registry`
@@ -10,7 +10,7 @@
 
 ## 1. Context
 
-After completing the runner/trace decompositions (D1/D2), the remaining technical debt is concentrated in:
+After completing the runner/trace decompositions (D1/D2), the code-health backlog was concentrated in:
 
 1. `store.rs` (duplicatie + timestamp-inconsistentie + structuur)
 2. `monitor.rs` (still monolithic; helper extraction in progress)
@@ -19,10 +19,11 @@ After completing the runner/trace decompositions (D1/D2), the remaining technica
 5. small but risky inconsistencies (registry digest helpers, pack name validation, deprecated wrappers)
 
 Doel van deze RFC: de resterende punten afbouwen met minimale regressierisico's en maximale reviewbaarheid.
+Current state: E1-E4 are delivered; E5 (`generate.rs` decomposition) moves to a dedicated follow-up RFC.
 
-## 2. Verified Snapshot (2026-02-09)
+## 2. Verified Snapshot (2026-02-09, refreshed)
 
-Based on current code inspection:
+Based on merged slices on `main`:
 
 - P1 findings opgelost:
   - run/ci error-handler duplicatie (pipeline error API)
@@ -32,14 +33,14 @@ Based on current code inspection:
   - sim attack bundle dedup
   - trace `from_path` decompositie
   - runner `run_test_with_policy` decompositie
-- P1 finding gedeeltelijk:
-  - monitor monoliet: helper-extractie gestart, event loop/Tier1-flow nog groot
-- Open kern:
-  - `store.rs` timestamp canonicalisatie + structuur
-  - metrics tool-call extractie duplicatie
-  - registry dead/deprecated digest/signature paden
-  - `generate.rs` opsplitsing
-  - comment/dead-code cleanup batch
+- Delivered in RFC-002 execution:
+  - E1 Store consistency (`#242`)
+  - E2 Metrics extraction + warning dedup (`#245`, `#246`)
+  - E3 Registry digest/signature cleanup (`#247`, `#250`, `#252`)
+  - E4 Comment/noise cleanup batch (`#253`, `#254`, `#255`, `#256`)
+- Remaining structural backlog outside delivered E1-E4:
+  - `monitor.rs` monolith (helper extraction is partial)
+  - `generate.rs` decomposition (moved to RFC-003)
 
 ## 3. Research Baseline (Best Practices, SOTA, Feb 2026)
 
@@ -86,9 +87,9 @@ Rationale: aligns with SQLite textual datetime practice and avoids downstream pa
 
 Geen "single giant PR" voor monolieten. Maximaal 1 concern per PR, met diffstat en contract-gates in de PR-body.
 
-## 5. Execution Plan (Next Steps)
+## 5. Execution Plan (RFC-002 Delivery + Next)
 
-## E1 - Store Consistency Slice (P1/P2)
+## E1 - Store Consistency Slice (P1/P2) - Delivered
 
 Scope:
 
@@ -120,7 +121,7 @@ E1 characterization contract checklist:
 - Freeze canonical timestamp contract (UTC + fixed precision)
 - Verify no conflict/side-effect drift from dedup (insert behavior + error path unchanged)
 
-## E2 - Metrics Extract Helper Slice (P2)
+## E2 - Metrics Extract Helper Slice (P2) - Delivered
 
 Scope:
 
@@ -140,7 +141,7 @@ Stop-line:
 - Geen metric contract-wijziging
 - Geen score/reason drift
 
-## E3 - Registry Dead/Legacy Cleanup (P2/P3)
+## E3 - Registry Dead/Legacy Cleanup (P2/P3) - Delivered
 
 Scope:
 
@@ -156,7 +157,7 @@ Stop-line:
 
 - DSSE verify semantics identiek
 
-## E4 - Comment/Noise/Low-risk Cleanup (P3)
+## E4 - Comment/Noise/Low-risk Cleanup (P3) - Delivered
 
 Scope:
 
@@ -168,9 +169,12 @@ Gate:
 
 - crate-local tests + clippy clean
 
-## E5 - Generate Decomposition RFC (separate)
+## E5 - Generate Decomposition RFC (separate, active follow-up)
 
 `generate.rs` wordt als aparte traject-RFC behandeld wegens omvang en cross-concern risico.
+Active follow-up document:
+
+- `docs/architecture/RFC-003-generate-decomposition-q1-2026.md`
 
 ## 6. Risk Controls
 
@@ -193,9 +197,9 @@ Gate:
 
 RFC-002 is "Done" wanneer E1-E4 gemerged zijn en:
 
-- Open P1 findings uit CODE-ANALYSIS rapport = 0
+- Open P1 findings uit de RFC-002 targetset = 0
 - Minimaal 6 P2 findings opgelost zonder contractwijziging
-- Geen nieuwe monoliet > bestaande baseline in kritieke commands/core paden
+- Geen regressie in output-contracten (`run.json`, `summary.json`, SARIF, JUnit)
 
 ## 9. Out of Scope
 
