@@ -6,6 +6,21 @@
 
 ---
 
+## Status Refresh (2026-02-09)
+
+This report is the original finding snapshot. For the verified remediation status and
+next execution order, see:
+
+- `docs/architecture/RFC-002-code-health-remediation-q1-2026.md`
+
+High-level refresh:
+
+- P1s already closed in recent merges: #1, #2, #3, #4, #5, #6, #7, #9, #10
+- P1 still open/in progress: #8 (`monitor.rs` monolith; helper extraction in progress)
+- Remaining work is now concentrated in `store.rs`, `generate.rs`, metrics dedup, and low-risk cleanup slices.
+
+---
+
 ## Totaal
 
 | Categorie | P1 | P2 | P3 | Totaal |
