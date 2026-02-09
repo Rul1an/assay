@@ -206,8 +206,175 @@ fn dump_prefix_hex(data: &[u8], n: usize) -> String {
 }
 
 #[cfg(target_os = "linux")]
+fn find_violation_rule<'a>(
+    event: &assay_common::MonitorEvent,
+    rules: &'a [ActiveRule],
+) -> Option<&'a ActiveRule> {
+    if rules.is_empty() || event.event_type != assay_common::EVENT_OPENAT {
+        return None;
+    }
+
+    let raw = decode_utf8_cstr(&event.data);
+    let path = normalize_path_syntactic(&raw);
+    for r in rules {
+        if r.allow.is_match(&path) {
+            let blocked = r.deny.as_ref().map(|d| d.is_match(&path)).unwrap_or(false);
+            if !blocked {
+                return Some(r);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+async fn maybe_enforce_violation(
+    event: &assay_common::MonitorEvent,
+    rule: &ActiveRule,
+    kill_config: Option<&assay_core::mcp::runtime_features::KillSwitchConfig>,
+    quiet: bool,
+) {
+    if !quiet {
+        println!(
+            "[PID {}] 🚨 VIOLATION: Rule '{}' matched file access",
+            event.pid, rule.id
+        );
+    }
+
+    if rule.action != assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
+        return;
+    }
+
+    // Check Kill Switch Configuration
+    let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;
+    let default_grace = 3000;
+
+    let (enabled, mode, grace) = if let Some(kc) = kill_config {
+        let trigger = kc.triggers.iter().find(|t| t.on_rule == rule.id);
+        let mode = trigger
+            .and_then(|t| t.mode.clone())
+            .unwrap_or(kc.mode.clone());
+        (kc.enabled, mode, kc.grace_period_ms)
+    } else {
+        (false, default_mode, default_grace)
+    };
+
+    if enabled {
+        if !quiet {
+            println!(
+                "[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)",
+                event.pid, mode, grace
+            );
+        }
+        kill_pid(event.pid, mode, grace).await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn log_monitor_event(event: &assay_common::MonitorEvent, args: &MonitorArgs) {
+    use assay_common::{EVENT_CONNECT, EVENT_OPENAT};
+
+    if args.quiet {
+        return;
+    }
+
+    match event.event_type {
+        EVENT_OPENAT => println!(
+            "[PID {}] openat: {}",
+            event.pid,
+            decode_utf8_cstr(&event.data)
+        ),
+        EVENT_CONNECT => println!(
+            "[PID {}] connect sockaddr[0..32]=0x{}",
+            event.pid,
+            dump_prefix_hex(&event.data, 32)
+        ),
+        10 /* EVENT_FILE_BLOCKED */ => println!(
+            "[PID {}] 🛡️ BLOCKED FILE: {}",
+            event.pid,
+            decode_utf8_cstr(&event.data)
+        ),
+        11 /* EVENT_FILE_ALLOWED */ => println!(
+            "[PID {}] 🟢 ALLOWED FILE: {}",
+            event.pid,
+            decode_utf8_cstr(&event.data)
+        ),
+        20 /* EVENT_CONNECT_BLOCKED */ => println!(
+            "[PID {}] 🛡️ BLOCKED NET : {}",
+            event.pid,
+            dump_prefix_hex(&event.data, 20)
+        ), // IP/Port packed
+        112 => {
+            // SOTA Inode Resolution Event (Event 112)
+            // ABI: dev(u64) | ino(u64) | gen(u32)
+            // Using robust from_ne_bytes parsing
+            let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
+            let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
+            let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]);
+
+            let dev = u64::from_ne_bytes(dev_bytes);
+            let ino = u64::from_ne_bytes(ino_bytes);
+            let gen = u32::from_ne_bytes(gen_bytes);
+
+            println!(
+                "[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}",
+                event.pid, dev, dev, ino, gen
+            );
+        }
+        101..=104 => {
+            let chunk_idx = event.event_type - 101;
+            let start_offset = chunk_idx * 64;
+            let dump = dump_prefix_hex(&event.data, 64);
+            println!(
+                "[PID {}] 🔍 STRUCT DUMP Part {} (Offset {}-{}): {}",
+                event.pid,
+                chunk_idx + 1,
+                start_offset,
+                start_offset + 64,
+                dump
+            );
+        }
+        105 => {
+            let path = decode_utf8_cstr(&event.data);
+            println!(
+                "[PID {}] 📂 FILE OPEN (Manual Resolution): {}",
+                event.pid, path
+            );
+        }
+        106 => {
+            println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
+        }
+        107 => {
+            println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
+        }
+        108 => {
+            println!(
+                "[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})",
+                event.pid, event.data[0]
+            );
+        }
+        109 => {
+            println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
+        }
+        110 => {
+            let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+            println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
+        }
+        111 => {
+            let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
+            println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
+            // Ignore debug events
+        }
+        _ => if args.monitor_all || !args.quiet {
+            // Optional: Log unknown events via `log` crate, or just ignore in clean CLI.
+            // println!("[PID {}] Unknown event type {} len={}", event.pid, event.event_type, event.data.len());
+        },
+    }
+}
+
+#[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
-    use assay_common::{get_inode_generation, strict_open, EVENT_CONNECT, EVENT_OPENAT};
+    use assay_common::{get_inode_generation, strict_open};
     use assay_monitor::Monitor;
 
     let mut runtime_config = None;
@@ -537,24 +704,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
             event_res = stream.next() => {
                 match event_res {
                     Some(Ok(event)) => {
-                        let mut violation_rule: Option<&ActiveRule> = None;
-
-                        // ENFORCEMENT LOGIC (Linux Only) - Tier 2
-                        if !rules.is_empty() && event.event_type == EVENT_OPENAT {
-                             let raw = decode_utf8_cstr(&event.data);
-                             let path = normalize_path_syntactic(&raw);
-
-                             for r in &rules {
-                                 if r.allow.is_match(&path) {
-                                     // Check deny list (not)
-                                     let blocked = r.deny.as_ref().map(|d| d.is_match(&path)).unwrap_or(false);
-                                     if !blocked {
-                                         violation_rule = Some(r);
-                                         break; // First match triggers
-                                     }
-                                 }
-                             }
-                        }
+                        let violation_rule = find_violation_rule(&event, &rules);
 
                         // REACT (Tier 2)
                         // Note: If Kernel blocked it (Tier 1), we get EVENT_FILE_BLOCKED instead of openat?
@@ -566,91 +716,17 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
                         // But for now, rigorous enforcement is safer.
 
                         if let Some(rule) = violation_rule {
-                             if !args.quiet {
-                                 println!("[PID {}] 🚨 VIOLATION: Rule '{}' matched file access", event.pid, rule.id);
-                             }
-
-                             if rule.action == assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
-                                 // Check Kill Switch Configuration
-                                 let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;
-                                 let default_grace = 3000;
-
-                                 let (enabled, mode, grace) = if let Some(kc) = &kill_config {
-                                     let trigger = kc.triggers.iter().find(|t| t.on_rule == rule.id);
-                                     let mode = trigger.and_then(|t| t.mode.clone()).unwrap_or(kc.mode.clone());
-                                     (kc.enabled, mode, kc.grace_period_ms)
-                                 } else {
-                                     (false, default_mode, default_grace)
-                                 };
-
-                                 if enabled {
-                                      if !args.quiet { println!("[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)", event.pid, mode, grace); }
-                                      kill_pid(event.pid, mode, grace).await;
-                                 }
-                             }
+                            maybe_enforce_violation(
+                                &event,
+                                rule,
+                                kill_config.as_ref(),
+                                args.quiet,
+                            )
+                            .await;
                         }
 
                         // LOGGING
-                        if !args.quiet {
-                             // Import from assay-common required?
-                             // We use literal values or import
-                             match event.event_type {
-                                EVENT_OPENAT => println!("[PID {}] openat: {}", event.pid, decode_utf8_cstr(&event.data)),
-                                EVENT_CONNECT => println!("[PID {}] connect sockaddr[0..32]=0x{}", event.pid, dump_prefix_hex(&event.data, 32)),
-                                10 /* EVENT_FILE_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
-                                11 /* EVENT_FILE_ALLOWED */ => println!("[PID {}] 🟢 ALLOWED FILE: {}", event.pid, decode_utf8_cstr(&event.data)),
-                                20 /* EVENT_CONNECT_BLOCKED */ => println!("[PID {}] 🛡️ BLOCKED NET : {}", event.pid, dump_prefix_hex(&event.data, 20)), // IP/Port packed
-                                112 => {
-                                     // SOTA Inode Resolution Event (Event 112)
-                                     // ABI: dev(u64) | ino(u64) | gen(u32)
-                                     // Using robust from_ne_bytes parsing
-                                     let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
-                                     let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
-                                     let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]);
-
-                                     let dev = u64::from_ne_bytes(dev_bytes);
-                                     let ino = u64::from_ne_bytes(ino_bytes);
-                                     let gen = u32::from_ne_bytes(gen_bytes);
-
-                                     println!("[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}", event.pid, dev, dev, ino, gen);
-                                }
-                                101..=104 => {
-                                    let chunk_idx = event.event_type - 101;
-                                    let start_offset = chunk_idx * 64;
-                                    let dump = dump_prefix_hex(&event.data, 64);
-                                    println!("[PID {}] 🔍 STRUCT DUMP Part {} (Offset {}-{}): {}", event.pid, chunk_idx+1, start_offset, start_offset+64, dump);
-                                }
-                                105 => {
-                                    let path = decode_utf8_cstr(&event.data);
-                                    println!("[PID {}] 📂 FILE OPEN (Manual Resolution): {}", event.pid, path);
-                                }
-                                106 => {
-                                    println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
-                                }
-                                107 => {
-                                    println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
-                                }
-                                108 => {
-                                    println!("[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})", event.pid, event.data[0]);
-                                }
-                                109 => {
-                                    println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
-                                }
-                                110 => {
-                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
-                                    println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
-                                }
-                                111 => {
-                                    let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
-                                    println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
-                                    // Ignore debug events
-                                }
-                                _ => if args.monitor_all || !args.quiet {
-                                     // Optional: Log unknown events via `log` crate, or just ignore in clean CLI.
-                                     // println!("[PID {}] Unknown event type {} len={}", event.pid, event.event_type, event.data.len());
-                                }
-                            }
-                        }
+                        log_monitor_event(&event, &args);
                     }
                     Some(Err(e)) => {
                         eprintln!("Monitor stream error: {}", e);
