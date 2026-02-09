@@ -2,6 +2,7 @@ use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
 
+use crate::policy_warning::should_emit_deprecated_policy_warning;
 use crate::tool_calls::extract_tool_calls_canonical_or_empty;
 
 pub struct SequenceValidMetric;
@@ -29,13 +30,15 @@ impl Metric for SequenceValidMetric {
 
         // 1. Resolve Rules & Sequence from Policy File (if any)
         let (file_sequence, file_rules) = if let Some(path) = policy_path {
-            static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-            WARN_ONCE.call_once(|| {
-                if std::env::var("MCP_CONFIG_LEGACY").is_err() {
-                    eprintln!("WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.", path);
-                    eprintln!("      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'.");
-                }
-            });
+            if should_emit_deprecated_policy_warning(self.name(), path) {
+                eprintln!(
+                    "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
+                    path
+                );
+                eprintln!(
+                    "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
+                );
+            }
 
             let content = std::fs::read_to_string(path).map_err(|e| {
                 anyhow::anyhow!(

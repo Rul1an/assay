@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::policy_warning::should_emit_deprecated_policy_warning;
 use crate::tool_calls::extract_tool_calls_best_effort;
 
 pub struct ArgsValidMetric;
@@ -171,18 +172,15 @@ impl Metric for ArgsValidMetric {
                 })?;
             PolicySource::SchemaMap(schemas)
         } else if let Some(path) = policy_path {
-            static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-            WARN_ONCE.call_once(|| {
-                if std::env::var("MCP_CONFIG_LEGACY").is_err() {
-                    eprintln!(
-                        "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
-                        path
-                    );
-                    eprintln!(
-                        "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
-                    );
-                }
-            });
+            if should_emit_deprecated_policy_warning(self.name(), path) {
+                eprintln!(
+                    "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
+                    path
+                );
+                eprintln!(
+                    "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
+                );
+            }
 
             load_policy_source(Path::new(path))?
         } else {
