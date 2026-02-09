@@ -6,7 +6,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, IF_NONE_MATCH, USER
 use tracing::{debug, warn};
 
 use crate::auth::TokenProvider;
-use crate::canonicalize::compute_canonical_digest;
+use crate::digest::compute_canonical_or_raw_digest;
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::{
     DsseEnvelope, FetchResult, KeysManifest, PackHeaders, PackMeta, RegistryConfig,
@@ -394,15 +394,7 @@ impl RegistryClient {
 /// Uses JCS canonicalization for valid YAML, falls back to raw SHA-256 for
 /// non-YAML content (e.g., error responses).
 fn compute_digest(content: &str) -> String {
-    match compute_canonical_digest(content) {
-        Ok(digest) => digest,
-        Err(_) => {
-            // Fall back to raw digest for non-YAML content
-            use sha2::{Digest, Sha256};
-            let hash = Sha256::digest(content.as_bytes());
-            format!("sha256:{:x}", hash)
-        }
-    }
+    compute_canonical_or_raw_digest(content, |_| {})
 }
 
 /// Parse pack name and version from URL.
@@ -457,6 +449,9 @@ fn parse_revocation_body(body: &str, header_reason: Option<String>) -> (String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonicalize::compute_canonical_digest;
+    use crate::digest::sha256_hex_bytes;
+    use crate::verify::compute_digest as verify_compute_digest;
 
     #[test]
     fn test_compute_digest_canonical() {
@@ -478,6 +473,38 @@ mod tests {
         let digest = compute_digest(content);
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), 7 + 64);
+    }
+
+    #[test]
+    fn test_compute_digest_parity_with_verify_module() {
+        let canonical_yaml = "name: test\nversion: \"1.0.0\"\nkind: compliance";
+        let invalid_yaml = "this is not: valid: yaml: [[";
+
+        // Canonical path must remain canonicalizable.
+        assert!(compute_canonical_digest(canonical_yaml).is_ok());
+        assert_eq!(
+            compute_digest(canonical_yaml),
+            verify_compute_digest(canonical_yaml)
+        );
+
+        // Fallback path must remain non-canonical and use raw bytes SHA-256.
+        assert!(compute_canonical_digest(invalid_yaml).is_err());
+        let raw_fallback = sha256_hex_bytes(invalid_yaml.as_bytes());
+        assert_eq!(compute_digest(invalid_yaml), raw_fallback);
+        assert_eq!(
+            compute_digest(invalid_yaml),
+            verify_compute_digest(invalid_yaml)
+        );
+    }
+
+    #[test]
+    fn test_compute_digest_has_lowercase_hex_shape() {
+        let digest = compute_digest("name: test\nversion: \"1.0.0\"");
+        assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest.len(), 7 + 64);
+        assert!(digest[7..]
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
