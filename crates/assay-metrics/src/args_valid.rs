@@ -563,4 +563,66 @@ schemas:
 
         let _ = std::fs::remove_file(policy_path);
     }
+
+    #[test]
+    fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
+        let resp = LlmResponse {
+            meta: serde_json::json!({
+                "tool_calls": [
+                    {
+                        "id": "c0",
+                        "tool_name": "alpha",
+                        "args": {"k":"v"},
+                        "result": {"ok": true},
+                        "error": "none",
+                        "index": 7,
+                        "ts_ms": 42
+                    },
+                    {
+                        "tool": "beta",
+                        "args": ["x"],
+                        "error": {"code": "E_FAIL"}
+                    },
+                    {
+                        "args": {"missing_tool": true}
+                    }
+                ]
+            }),
+            ..Default::default()
+        };
+
+        let calls = extract_tool_calls(&resp);
+        assert_eq!(calls.len(), 2, "non-parseable entries must be skipped");
+
+        assert_eq!(calls[0].tool_name, "alpha");
+        assert_eq!(calls[0].id, "c0");
+        assert_eq!(calls[0].index, 7);
+        assert_eq!(calls[0].ts_ms, 42);
+        assert_eq!(calls[0].args, serde_json::json!({"k":"v"}));
+        assert_eq!(calls[0].result, Some(serde_json::json!({"ok": true})));
+        assert_eq!(calls[0].error, Some(serde_json::json!("none")));
+
+        assert_eq!(calls[1].tool_name, "beta");
+        assert_eq!(calls[1].id, "legacy-1");
+        assert_eq!(calls[1].index, 1);
+        assert_eq!(calls[1].ts_ms, 0);
+        assert_eq!(calls[1].args, serde_json::json!(["x"]));
+        assert_eq!(calls[1].result, None);
+        assert_eq!(calls[1].error, Some(serde_json::json!({"code":"E_FAIL"})));
+    }
+
+    #[test]
+    fn extract_tool_calls_best_effort_returns_empty_for_missing_or_non_array_tool_calls() {
+        let missing = LlmResponse {
+            meta: serde_json::json!({}),
+            ..Default::default()
+        };
+        assert!(extract_tool_calls(&missing).is_empty());
+
+        let non_array = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "x"}}),
+            ..Default::default()
+        };
+        assert!(extract_tool_calls(&non_array).is_empty());
+    }
 }

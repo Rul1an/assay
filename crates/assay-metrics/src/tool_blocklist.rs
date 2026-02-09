@@ -39,3 +39,90 @@ impl Metric for ToolBlocklistMetric {
         Ok(MetricResult::pass(1.0))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assay_core::model::TestInput;
+
+    fn test_case() -> TestCase {
+        TestCase {
+            id: "tb1".to_string(),
+            input: TestInput {
+                prompt: "ignore".to_string(),
+                context: None,
+            },
+            expected: Expected::MustContain {
+                must_contain: vec![],
+            },
+            assertions: None,
+            on_error: None,
+            tags: vec![],
+            metadata: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_tool_calls_blocklisted_tool_fails() {
+        let metric = ToolBlocklistMetric;
+        let tc = test_case();
+        let expected = Expected::ToolBlocklist {
+            blocked: vec!["exec".to_string()],
+        };
+        let resp = LlmResponse {
+            meta: serde_json::json!({
+                "tool_calls": [{
+                    "id": "c1",
+                    "tool_name": "exec",
+                    "args": {"command": "ls"},
+                    "result": null,
+                    "error": null,
+                    "index": 0,
+                    "ts_ms": 1
+                }]
+            }),
+            ..Default::default()
+        };
+
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+        assert!(!result.passed);
+        assert_eq!(result.score, 0.0);
+        assert!(result.details["message"]
+            .as_str()
+            .unwrap()
+            .contains("Blocked tool called: exec"));
+    }
+
+    #[tokio::test]
+    async fn malformed_or_legacy_tool_calls_are_canonical_or_empty() {
+        let metric = ToolBlocklistMetric;
+        let tc = test_case();
+        let expected = Expected::ToolBlocklist {
+            blocked: vec!["exec".to_string()],
+        };
+
+        // Non-array malformed payload -> empty -> pass.
+        let malformed_resp = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "exec"}}),
+            ..Default::default()
+        };
+        let malformed = metric
+            .evaluate(&tc, &expected, &malformed_resp)
+            .await
+            .unwrap();
+        assert!(malformed.passed);
+
+        // Legacy minimal shape is not canonical ToolCallRecord -> empty -> pass.
+        let legacy_resp = LlmResponse {
+            meta: serde_json::json!({
+                "tool_calls": [{
+                    "tool_name": "exec",
+                    "args": {"command": "ls"}
+                }]
+            }),
+            ..Default::default()
+        };
+        let legacy = metric.evaluate(&tc, &expected, &legacy_resp).await.unwrap();
+        assert!(legacy.passed);
+    }
+}

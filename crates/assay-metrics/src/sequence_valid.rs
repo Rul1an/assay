@@ -303,4 +303,39 @@ mod tests {
         let msg = result.details["message"].as_str().unwrap();
         assert!(msg.contains("matches blocklist pattern 'rm'"));
     }
+
+    #[tokio::test]
+    async fn test_malformed_tool_calls_fail_open_to_empty_sequence() {
+        let metric = SequenceValidMetric;
+        let tc = TestCase {
+            id: "test".to_string(),
+            input: TestInput {
+                prompt: "prompt".to_string(),
+                context: None,
+            },
+            expected: Expected::MustContain {
+                must_contain: vec![],
+            },
+            assertions: None,
+            tags: vec![],
+            metadata: None,
+            on_error: None,
+        };
+        let resp = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "A"}}),
+            ..Default::default()
+        };
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: None,
+            rules: Some(vec![SequenceRule::Require {
+                tool: "A".to_string(),
+            }]),
+        };
+
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+        assert_eq!(result.score, 0.0, "malformed should be treated as empty");
+        let msg = result.details["message"].as_str().unwrap();
+        assert!(msg.contains("required tool 'A' not found"), "msg={}", msg);
+    }
 }
