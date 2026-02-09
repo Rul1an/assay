@@ -434,9 +434,7 @@ impl Runner {
             metric_versions: &metric_versions,
         });
 
-        // Incremental Check
-        // Note: Global --incremental flag should be checked here.
-        // Assuming self.incremental is available.
+        // Incremental cache check.
         if self.incremental && !self.refresh_cache {
             if let Some(prev) = self.store.get_last_passing_by_fingerprint(&fp.hex)? {
                 // Return Skipped Result
