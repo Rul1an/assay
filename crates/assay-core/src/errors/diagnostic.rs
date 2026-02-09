@@ -95,6 +95,7 @@ pub mod codes {
     pub const E_BASE_MISMATCH: &str = "E_BASE_MISMATCH";
     pub const E_REPLAY_STRICT_MISSING: &str = "E_REPLAY_STRICT_MISSING";
     pub const E_EMB_DIMS: &str = "E_EMB_DIMS";
+    pub const E_POLICY_VIOLATION: &str = "E_POLICY_VIOLATION";
 
     // Warnings (Exit 0)
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
