@@ -72,37 +72,7 @@ impl Store {
              LIMIT ?2",
         )?;
 
-        let rows = stmt.query_map(rusqlite::params![suite, limit], |row| {
-            let attempts_str: Option<String> = row.get(4)?;
-
-            // Rehydrate "details" from last attempt (important for calibration)
-            let attempts: Option<Vec<crate::model::AttemptRow>> = match attempts_str {
-                Some(s) if !s.trim().is_empty() => serde_json::from_str(&s).ok(),
-                _ => None,
-            };
-
-            let (message, details) = attempts
-                .as_ref()
-                .and_then(|v| v.last())
-                .map(|a| (a.message.clone(), a.details.clone()))
-                .unwrap_or_else(|| (String::new(), serde_json::json!({})));
-
-            let cached = false;
-
-            Ok(crate::model::TestResultRow {
-                test_id: row.get(0)?,
-                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
-                message,
-                duration_ms: row.get(2)?,
-                details,
-                score: row.get(3)?,
-                cached,
-                fingerprint: row.get(5)?,
-                skip_reason: row.get(6)?,
-                attempts,
-                error_policy_applied: None,
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params![suite, limit], row_to_test_result)?;
 
         let mut results = Vec::new();
         for r in rows {
@@ -129,40 +99,7 @@ impl Store {
              ORDER BY r.id DESC",
         )?;
 
-        let rows = stmt.query_map(rusqlite::params![suite, n], |row| {
-            let attempts_str: Option<String> = row.get(4)?;
-
-            let (message, details) =
-                if let Some(s) = attempts_str.as_ref().filter(|s| !s.trim().is_empty()) {
-                    if let Ok(attempts) = serde_json::from_str::<Vec<crate::model::AttemptRow>>(s) {
-                        attempts
-                            .last()
-                            .map(|a| (a.message.clone(), a.details.clone()))
-                            .unwrap_or_else(|| (String::new(), serde_json::json!({})))
-                    } else {
-                        (String::new(), serde_json::json!({}))
-                    }
-                } else {
-                    (String::new(), serde_json::json!({}))
-                };
-
-            let attempts: Option<Vec<crate::model::AttemptRow>> =
-                attempts_str.and_then(|s| serde_json::from_str(&s).ok());
-
-            Ok(crate::model::TestResultRow {
-                test_id: row.get(0)?,
-                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
-                message,
-                duration_ms: row.get(2)?,
-                details,
-                score: row.get(3)?,
-                cached: false,
-                fingerprint: row.get(5)?,
-                skip_reason: row.get(6)?,
-                attempts,
-                error_policy_applied: None,
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params![suite, n], row_to_test_result)?;
 
         let mut results = Vec::new();
         for r in rows {
@@ -197,40 +134,7 @@ impl Store {
              ORDER BY r.test_id ASC",
         )?;
 
-        let rows = stmt.query_map(params![run_id], |row| {
-            let attempts_str: Option<String> = row.get(4)?;
-
-            let (message, details) =
-                if let Some(s) = attempts_str.as_ref().filter(|s| !s.trim().is_empty()) {
-                    if let Ok(attempts) = serde_json::from_str::<Vec<crate::model::AttemptRow>>(s) {
-                        attempts
-                            .last()
-                            .map(|a| (a.message.clone(), a.details.clone()))
-                            .unwrap_or_else(|| (String::new(), serde_json::json!({})))
-                    } else {
-                        (String::new(), serde_json::json!({}))
-                    }
-                } else {
-                    (String::new(), serde_json::json!({}))
-                };
-
-            let attempts: Option<Vec<crate::model::AttemptRow>> =
-                attempts_str.and_then(|s| serde_json::from_str(&s).ok());
-
-            Ok(crate::model::TestResultRow {
-                test_id: row.get(0)?,
-                status: crate::model::TestStatus::parse(&row.get::<_, String>(1)?),
-                message,
-                duration_ms: row.get(2)?,
-                details,
-                score: row.get(3)?,
-                cached: false,
-                fingerprint: row.get(5)?,
-                skip_reason: row.get(6)?,
-                attempts,
-                error_policy_applied: None,
-            })
-        })?;
+        let rows = stmt.query_map(params![run_id], row_to_test_result)?;
 
         let mut results = Vec::new();
         for r in rows {
@@ -256,11 +160,7 @@ impl Store {
 
         let mut rows = stmt.query(params![fingerprint])?;
         if let Some(row) = rows.next()? {
-            let outcome: String = row.get(1)?;
-            let status = match outcome.as_str() {
-                "pass" => TestStatus::Pass,
-                _ => TestStatus::Pass,
-            };
+            let status = TestStatus::Pass;
 
             let skip_reason: Option<String> = row.get(5)?;
             let run_id: i64 = row.get(6)?;
@@ -551,48 +451,7 @@ impl Store {
         }
         let episode_id = episode_ids[0].clone();
 
-        // 2. Fetch Steps
-        let mut stmt_steps = conn.prepare("SELECT id, episode_id, idx, kind, name, content FROM steps WHERE episode_id = ? ORDER BY idx ASC")?;
-        let step_rows = stmt_steps
-            .query_map(params![episode_id], |row| {
-                Ok(crate::storage::rows::StepRow {
-                    id: row.get(0)?,
-                    episode_id: row.get(1)?,
-                    idx: row.get(2)?,
-                    kind: row.get(3)?,
-                    name: row.get(4)?,
-                    content: row.get(5)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // 3. Fetch ToolCalls (Joined for ordering)
-        let mut stmt_tools = conn.prepare(
-            "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
-             FROM tool_calls tc
-             JOIN steps s ON tc.step_id = s.id
-             WHERE tc.episode_id = ?
-             ORDER BY s.idx ASC, tc.call_index ASC"
-        )?;
-        let tool_rows = stmt_tools
-            .query_map(params![episode_id], |row| {
-                Ok(crate::storage::rows::ToolCallRow {
-                    id: row.get(0)?,
-                    step_id: row.get(1)?,
-                    episode_id: row.get(2)?,
-                    tool_name: row.get(3)?,
-                    call_index: row.get(4)?,
-                    args: row.get(5)?,
-                    result: row.get(6)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(crate::agent_assertions::EpisodeGraph {
-            episode_id,
-            steps: step_rows,
-            tool_calls: tool_rows,
-        })
+        load_episode_graph_for_episode_id(&conn, &episode_id)
     }
 
     // --- Trace V2 Storage ---
@@ -802,61 +661,7 @@ impl Store {
         let episode_id: String = stmt.query_row(params![test_id], |row| row.get(0))
             .map_err(|e| anyhow::anyhow!("E_TRACE_EPISODE_MISSING: No episode found for test_id={} (fallback check) : {}", test_id, e))?;
 
-        // 2. Load steps (V2 schema)
-        let mut stmt = conn.prepare(
-            "SELECT id, episode_id, idx, kind, name, content
-             FROM steps
-             WHERE episode_id = ?1
-             ORDER BY idx ASC",
-        )?;
-
-        let steps_iter = stmt.query_map(params![episode_id], |row| {
-            Ok(crate::storage::rows::StepRow {
-                id: row.get(0)?,
-                episode_id: row.get(1)?,
-                idx: row.get(2)?,
-                kind: row.get(3)?,
-                name: row.get(4)?,
-                content: row.get(5)?,
-            })
-        })?;
-
-        let mut steps = Vec::new();
-        for step in steps_iter {
-            steps.push(step?);
-        }
-
-        // 3. Load tool calls (Joined for ordering)
-        let mut stmt_tools = conn.prepare(
-            "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
-             FROM tool_calls tc
-             JOIN steps s ON tc.step_id = s.id
-             WHERE tc.episode_id = ?
-             ORDER BY s.idx ASC, tc.call_index ASC"
-        )?;
-
-        let tc_iter = stmt_tools.query_map(params![episode_id], |row| {
-            Ok(crate::storage::rows::ToolCallRow {
-                id: row.get(0)?,
-                step_id: row.get(1)?,
-                episode_id: row.get(2)?,
-                tool_name: row.get(3)?,
-                call_index: row.get(4)?,
-                args: row.get(5)?,
-                result: row.get(6)?,
-            })
-        })?;
-
-        let mut tool_calls = Vec::new();
-        for tc in tc_iter {
-            tool_calls.push(tc?);
-        }
-
-        Ok(crate::agent_assertions::EpisodeGraph {
-            episode_id,
-            steps,
-            tool_calls,
-        })
+        load_episode_graph_for_episode_id(&conn, &episode_id)
     }
 }
 
@@ -873,4 +678,89 @@ fn add_column_if_missing(
         conn.execute(&sql, [])?;
     }
     Ok(())
+}
+
+fn parse_attempts(attempts_str: Option<String>) -> Option<Vec<AttemptRow>> {
+    attempts_str
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+fn message_and_details_from_attempts(
+    attempts: Option<&[AttemptRow]>,
+) -> (String, serde_json::Value) {
+    attempts
+        .and_then(|v| v.last())
+        .map(|a| (a.message.clone(), a.details.clone()))
+        .unwrap_or_else(|| (String::new(), serde_json::json!({})))
+}
+
+fn row_to_test_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestResultRow> {
+    let attempts = parse_attempts(row.get(4)?);
+    let (message, details) = message_and_details_from_attempts(attempts.as_deref());
+
+    Ok(TestResultRow {
+        test_id: row.get(0)?,
+        status: TestStatus::parse(&row.get::<_, String>(1)?),
+        message,
+        duration_ms: row.get(2)?,
+        details,
+        score: row.get(3)?,
+        cached: false,
+        fingerprint: row.get(5)?,
+        skip_reason: row.get(6)?,
+        attempts,
+        error_policy_applied: None,
+    })
+}
+
+fn load_episode_graph_for_episode_id(
+    conn: &Connection,
+    episode_id: &str,
+) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
+    let mut stmt_steps = conn.prepare(
+        "SELECT id, episode_id, idx, kind, name, content
+         FROM steps
+         WHERE episode_id = ?1
+         ORDER BY idx ASC",
+    )?;
+    let step_rows = stmt_steps
+        .query_map(params![episode_id], |row| {
+            Ok(crate::storage::rows::StepRow {
+                id: row.get(0)?,
+                episode_id: row.get(1)?,
+                idx: row.get(2)?,
+                kind: row.get(3)?,
+                name: row.get(4)?,
+                content: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt_tools = conn.prepare(
+        "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
+         FROM tool_calls tc
+         JOIN steps s ON tc.step_id = s.id
+         WHERE tc.episode_id = ?1
+         ORDER BY s.idx ASC, tc.call_index ASC",
+    )?;
+    let tool_rows = stmt_tools
+        .query_map(params![episode_id], |row| {
+            Ok(crate::storage::rows::ToolCallRow {
+                id: row.get(0)?,
+                step_id: row.get(1)?,
+                episode_id: row.get(2)?,
+                tool_name: row.get(3)?,
+                call_index: row.get(4)?,
+                args: row.get(5)?,
+                result: row.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(crate::agent_assertions::EpisodeGraph {
+        episode_id: episode_id.to_string(),
+        steps: step_rows,
+        tool_calls: tool_rows,
+    })
 }
