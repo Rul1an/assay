@@ -546,7 +546,7 @@ pub enum TestStatus {
     Error,
     Skipped,
     Unstable,
-    /// New: Action was allowed despite error (fail-open mode)
+    /// Action was allowed despite an upstream error (fail-open mode).
     AllowedOnError,
 }
 
