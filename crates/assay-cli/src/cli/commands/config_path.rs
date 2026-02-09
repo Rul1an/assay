@@ -57,9 +57,7 @@ pub struct McpServerEntry {
     pub env: Option<std::collections::HashMap<String, String>>,
 }
 
-// ============================================================================
-// Path Detection
-// ============================================================================
+// Path detection
 
 /// Detect the config file path for a given MCP client
 pub fn detect_config_path(client: McpClient) -> Option<PathBuf> {
@@ -137,9 +135,7 @@ pub fn detect_config(client: McpClient) -> Option<ConfigDetection> {
     })
 }
 
-// ============================================================================
-// Config Generation
-// ============================================================================
+// Config generation
 
 /// Generate an MCP server config entry for Assay wrapper
 pub fn generate_assay_config(
@@ -231,9 +227,7 @@ pub fn default_policy_path() -> PathBuf {
         .join("assay/policy.yaml")
 }
 
-// ============================================================================
-// JSON Output Formatting
-// ============================================================================
+// JSON output formatting
 
 /// Format the generated config as a JSON snippet for mcpServers
 pub fn format_as_mcp_servers_entry(config: &GeneratedConfig) -> String {
@@ -244,9 +238,7 @@ pub fn format_as_mcp_servers_entry(config: &GeneratedConfig) -> String {
     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".to_string())
 }
 
-// ============================================================================
-// CLI Output Helper
-// ============================================================================
+// CLI output helper
 
 /// Generate the full CLI output for `assay mcp config-path`
 pub fn generate_cli_output(
@@ -313,9 +305,7 @@ pub fn generate_cli_output(
     output
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
+// Entry point
 
 pub fn run(args: crate::cli::args::ConfigPathArgs) {
     let client = match McpClient::from_str(&args.client) {
@@ -337,12 +327,7 @@ pub fn run(args: crate::cli::args::ConfigPathArgs) {
         Some((cmd.to_string(), args))
     });
 
-    // We need a lifetime-bound slice for the tuple if we want to pass it around as (&str, &[String])
-    // But since we own the strings inside the loop/closure, it's tricky to return references to them easily
-    // without keeping the owner alive.
-    // Let's just restructure the logic to avoid the complex double-parsing.
-
-    // Easier approach: hold the owned vector
+    // Hold owned values, then take references for downstream helpers.
     let (server_cmd_owned, server_args_owned) = match wrapped_tuple {
         Some((cmd, args)) => (Some(cmd), args),
         None => (None, vec![]),
