@@ -509,6 +509,7 @@ mod tests {
         });
 
         assert!(value_pointer(&json, "/run_id").is_some());
+        assert!(value_pointer(&json, "run_id").is_some());
         assert!(value_pointer(&json, "/data/traceparent").is_some());
         assert!(value_pointer(&json, "/data/nested/deep").is_some());
         assert!(value_pointer(&json, "/missing").is_none());

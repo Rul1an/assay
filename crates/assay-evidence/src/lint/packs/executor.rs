@@ -149,14 +149,14 @@ impl PackExecutor {
             return (findings, false, 0);
         }
 
-        // Sort by severity (lowest first for truncation)
+        // Sort by severity (highest first), then truncate so lowest severities are dropped first.
         findings.sort_by(|a, b| {
             let a_priority = a.severity.priority();
             let b_priority = b.severity.priority();
-            a_priority.cmp(&b_priority)
+            b_priority.cmp(&a_priority)
         });
 
-        // Truncate lowest severity first
+        // Keep highest-severity results first.
         let truncated_count = findings.len() - max_results;
         findings.truncate(max_results);
 
