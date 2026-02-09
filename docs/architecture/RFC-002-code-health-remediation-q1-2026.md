@@ -75,9 +75,10 @@ For all remaining findings:
 
 For `store.rs`, we choose a canonical timestamp representation for `runs.started_at`:
 
-- Canonical write format: RFC3339 text
+- Canonical write format: RFC3339 UTC (`Z`) with fixed millisecond precision
 - Geen mixed writes (`unix:N` vs RFC3339) meer in dezelfde kolom
 - Read-compat blijft intact voor legacy waarden
+- All new writes route through one helper (`now_rfc3339ish`) for format consistency
 
 Rationale: aligns with SQLite textual datetime practice and avoids downstream parse ambiguity.
 
@@ -94,16 +95,30 @@ Scope:
 - Dedup `insert_run`/`create_run` overlap
 - Timestamp write canonicalisatie in `store.rs`
 - Eventuele `impl Store` structurering (zonder gedrag te wijzigen)
+- Characterization tests first, then extract-only/dedup
 
 Gate:
 
+- `cargo test -p assay-core --test store_consistency_e1 -- --nocapture`
 - `cargo test -p assay-core storage -- --nocapture`
+- `cargo test -p assay-core --lib -- --nocapture`
 - `cargo check -p assay-core`
+- `cargo clippy -p assay-core -- -D warnings`
 
 Stop-line:
 
 - Geen schemawijziging
 - Geen verandering aan query-semantiek
+- No ordering/selection drift: latest-run and run-list selection semantics blijven identiek
+- No timestamp-format drift: all new writes use canonical helper format only
+
+E1 characterization contract checklist:
+
+- Freeze hoe "latest run" wordt bepaald (ID-based selection blijft leidend)
+- Freeze `insert_run` vs `create_run` invariants (status, suite, config_json behavior)
+- Freeze legacy read-compat for `runs.started_at` (`unix:*` values remain readable)
+- Freeze canonical timestamp contract (UTC + fixed precision)
+- Verify no conflict/side-effect drift from dedup (insert behavior + error path unchanged)
 
 ## E2 - Metrics Extract Helper Slice (P2)
 
