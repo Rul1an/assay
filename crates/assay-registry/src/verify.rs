@@ -187,7 +187,6 @@ pub fn compute_digest_strict(content: &str) -> Result<String, CanonicalizeError>
 /// **Deprecated**: Use `compute_digest` for canonical JCS digest per SPEC §6.2.
 /// This function is only for backward compatibility with pre-v1.0.2 digests.
 #[deprecated(since = "2.11.0", note = "use compute_digest for canonical JCS digest")]
-#[allow(dead_code)]
 pub fn compute_digest_raw(content: &str) -> String {
     sha256_hex_bytes(content.as_bytes())
 }
@@ -294,7 +293,7 @@ fn verify_dsse_signature_bytes(
 ///
 /// **Deprecated**: Use `verify_dsse_signature_bytes` which properly handles
 /// canonical byte comparison per SPEC §6.3.
-#[allow(dead_code)]
+#[cfg(test)]
 fn verify_dsse_signature(
     content: &str,
     envelope: &DsseEnvelope,
