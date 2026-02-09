@@ -385,6 +385,9 @@ impl Metric for ArgsValidMetric {
 mod tests {
     use super::*;
     use assay_core::model::{TestInput, ToolCallRecord};
+    use std::fs::OpenOptions;
+    use std::io::{ErrorKind, Write};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn make_expected_with_policy(path: &str) -> Expected {
@@ -431,13 +434,28 @@ mod tests {
     }
 
     fn write_temp_policy(contents: &str) -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let pid = std::process::id();
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("assay_args_valid_{}.yaml", ts));
-        std::fs::write(&path, contents).unwrap();
-        path.to_string_lossy().to_string()
+        for attempt in 0..32u32 {
+            let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "assay_args_valid_{}_{}_{}_{}.yaml",
+                pid, ts, seq, attempt
+            ));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    file.write_all(contents.as_bytes()).unwrap();
+                    return path.to_string_lossy().to_string();
+                }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("failed to create temp policy file: {err}"),
+            }
+        }
+        panic!("failed to allocate unique temp policy file name after retries");
     }
 
     #[tokio::test]
