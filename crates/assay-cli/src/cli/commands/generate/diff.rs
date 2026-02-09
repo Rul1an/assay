@@ -248,3 +248,70 @@ pub(super) fn print_policy_diff(diff: &PolicyDiff, output_path: &Path) {
         added, removed, changed
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::diff_policies;
+    use crate::cli::commands::generate::model::{Entry, Policy};
+
+    fn e(pattern: &str, count: Option<u32>, stability: Option<f64>) -> Entry {
+        Entry::WithMeta {
+            pattern: pattern.to_string(),
+            count,
+            stability,
+            runs_seen: None,
+            risk: None,
+            reasons: None,
+        }
+    }
+
+    #[test]
+    fn diff_empty_to_populated() {
+        let old = Policy::default();
+        let mut new = Policy::default();
+        new.files.allow.push(Entry::Simple("/tmp/a".into()));
+        new.network
+            .allow_destinations
+            .push(Entry::Simple("api.example.com:443".into()));
+
+        let diff = diff_policies(&old, &new);
+        assert_eq!(diff.files_allow.added, vec!["/tmp/a".to_string()]);
+        assert_eq!(
+            diff.network_allow.added,
+            vec!["api.example.com:443".to_string()]
+        );
+    }
+
+    #[test]
+    fn diff_removed_entries() {
+        let mut old = Policy::default();
+        old.files.allow.push(Entry::Simple("/tmp/old".into()));
+        let new = Policy::default();
+
+        let diff = diff_policies(&old, &new);
+        assert_eq!(diff.files_allow.removed, vec!["/tmp/old".to_string()]);
+        assert!(diff.files_allow.added.is_empty());
+    }
+
+    #[test]
+    fn diff_stability_change() {
+        let mut old = Policy::default();
+        old.files.allow.push(e("/tmp/file", Some(3), Some(0.70)));
+        let mut new = Policy::default();
+        new.files.allow.push(e("/tmp/file", Some(3), Some(0.90)));
+
+        let diff = diff_policies(&old, &new);
+        assert_eq!(diff.files_allow.changed.len(), 1);
+        assert_eq!(diff.files_allow.changed[0].pattern, "/tmp/file");
+    }
+
+    #[test]
+    fn diff_no_changes() {
+        let mut old = Policy::default();
+        old.files.allow.push(Entry::Simple("/tmp/same".into()));
+        let new = old.clone();
+
+        let diff = diff_policies(&old, &new);
+        assert!(diff.is_empty());
+    }
+}
