@@ -15,9 +15,10 @@ next execution order, see:
 
 High-level refresh:
 
-- P1s already closed in recent merges: #1, #2, #3, #4, #5, #6, #7, #9, #10
-- P1 still open/in progress: #8 (`monitor.rs` monolith; helper extraction in progress)
-- Remaining work is now concentrated in `store.rs`, `generate.rs`, metrics dedup, and low-risk cleanup slices.
+- P1s closed in recent merges: #1, #2, #3, #4, #5, #6, #7, #9, #10
+- P2/P3 batches from RFC-002 E1-E4 delivered (store consistency, metrics dedup, registry cleanup, comment cleanup).
+- P1 still open/in progress: #8 (`monitor.rs` monolith; helper extraction in progress).
+- Current next structural focus: `generate.rs` decomposition (tracked in RFC-003).
 
 ---
 
