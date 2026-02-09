@@ -9,11 +9,11 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Severity {
-    #[serde(rename = "error", alias = "Error")]
+    #[serde(alias = "error", alias = "Error")]
     Error,
-    #[serde(rename = "warn", alias = "Warn", alias = "warning", alias = "Warning")]
+    #[serde(alias = "warn", alias = "Warn", alias = "warning", alias = "Warning")]
     Warn,
-    #[serde(rename = "info", alias = "Info")]
+    #[serde(alias = "info", alias = "Info")]
     Info,
 }
 

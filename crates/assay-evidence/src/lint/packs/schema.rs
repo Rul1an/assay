@@ -50,7 +50,7 @@ where
         "warning" | "Warning" | "warn" | "Warn" => Ok(Severity::Warn),
         "info" | "Info" => Ok(Severity::Info),
         _ => Err(D::Error::custom(format!(
-            "invalid severity '{}'; expected error|warning|info",
+            "invalid severity '{}'; expected error|warning|warn|info",
             raw
         ))),
     }
