@@ -415,6 +415,17 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
+    fn test_compute_digest_raw_matches_bytes_helper() {
+        // Use clearly non-canonical, malformed YAML-like text to avoid ambiguity:
+        // this contract freezes raw byte hashing parity only.
+        let content = "this is not: valid: yaml: [[";
+        let wrapped = compute_digest_raw(content);
+        let helper = crate::digest::sha256_hex_bytes(content.as_bytes());
+        assert_eq!(wrapped, helper);
+    }
+
+    #[test]
     fn test_verify_digest_success() {
         let content = "name: test\nversion: \"1.0.0\"";
         let expected = compute_digest(content);
@@ -993,6 +1004,65 @@ mod tests {
             matches!(result, Err(RegistryError::DigestMismatch { .. })),
             "Raw bytes should not match canonical payload: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_verify_dsse_signature_legacy_helper_matches_bytes_path() {
+        let seed: [u8; 32] = [0x31; 32];
+        let signing_key = keypair_from_seed(seed);
+        let content = "z: 3\na: 1\nm: 2";
+
+        let (envelope, key_id) = create_signed_envelope(&signing_key, content);
+
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        let legacy_ok = verify_dsse_signature(content, &envelope, &trust_store);
+        assert!(
+            legacy_ok.is_ok(),
+            "legacy helper should canonicalize input before verification: {:?}",
+            legacy_ok
+        );
+
+        let canonical_bytes = canonicalize_for_dsse(content).unwrap();
+        let bytes_ok = verify_dsse_signature_bytes(&canonical_bytes, &envelope, &trust_store);
+        assert!(
+            bytes_ok.is_ok(),
+            "bytes API should verify the same canonical payload: {:?}",
+            bytes_ok
+        );
+
+        let tampered_content = "z: 4\na: 1\nm: 2";
+        let legacy_err = verify_dsse_signature(tampered_content, &envelope, &trust_store);
+        assert!(
+            matches!(legacy_err, Err(RegistryError::DigestMismatch { .. })),
+            "legacy helper should keep mismatch classification: {:?}",
+            legacy_err
+        );
+
+        let tampered_canonical = canonicalize_for_dsse(tampered_content).unwrap();
+        let bytes_err = verify_dsse_signature_bytes(&tampered_canonical, &envelope, &trust_store);
+        assert!(
+            matches!(bytes_err, Err(RegistryError::DigestMismatch { .. })),
+            "bytes API should keep mismatch classification: {:?}",
+            bytes_err
         );
     }
 }
