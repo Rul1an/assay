@@ -2,6 +2,8 @@
 //!
 //! Defines the structure of compliance/security/quality packs per SPEC-Pack-Engine-v1.
 
+pub use crate::lint::Severity;
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
 /// Pack kind determines validation rules and collision policy.
@@ -26,42 +28,31 @@ impl std::fmt::Display for PackKind {
     }
 }
 
-/// Rule severity level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
+fn serialize_pack_severity<S>(severity: &Severity, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let value = match severity {
+        Severity::Error => "error",
+        Severity::Warn => "warning",
+        Severity::Info => "info",
+    };
+    serializer.serialize_str(value)
 }
 
-impl Severity {
-    /// Convert to SARIF level string.
-    pub fn as_sarif_level(&self) -> &'static str {
-        match self {
-            Severity::Error => "error",
-            Severity::Warning => "warning",
-            Severity::Info => "note",
-        }
-    }
-
-    /// Ordering for truncation (lowest severity first).
-    pub fn priority(&self) -> u8 {
-        match self {
-            Severity::Info => 0,
-            Severity::Warning => 1,
-            Severity::Error => 2,
-        }
-    }
-}
-
-impl std::fmt::Display for Severity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Severity::Error => write!(f, "error"),
-            Severity::Warning => write!(f, "warning"),
-            Severity::Info => write!(f, "info"),
-        }
+fn deserialize_pack_severity<'de, D>(deserializer: D) -> Result<Severity, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    match raw.as_str() {
+        "error" | "Error" => Ok(Severity::Error),
+        "warning" | "Warning" | "warn" | "Warn" => Ok(Severity::Warn),
+        "info" | "Info" => Ok(Severity::Info),
+        _ => Err(D::Error::custom(format!(
+            "invalid severity '{}'; expected error|warning|info",
+            raw
+        ))),
     }
 }
 
@@ -154,6 +145,10 @@ pub struct PackRule {
     pub id: String,
 
     /// Rule severity.
+    #[serde(
+        serialize_with = "serialize_pack_severity",
+        deserialize_with = "deserialize_pack_severity"
+    )]
     pub severity: Severity,
 
     /// One-line description.
@@ -466,8 +461,8 @@ mod tests {
 
     #[test]
     fn test_severity_priority() {
-        assert!(Severity::Info.priority() < Severity::Warning.priority());
-        assert!(Severity::Warning.priority() < Severity::Error.priority());
+        assert!(Severity::Info.priority() < Severity::Warn.priority());
+        assert!(Severity::Warn.priority() < Severity::Error.priority());
     }
 
     #[test]

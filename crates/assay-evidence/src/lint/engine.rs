@@ -199,8 +199,8 @@ fn truncate_findings(
 
     // Sort by severity priority (highest first to keep)
     findings.sort_by(|a, b| {
-        let a_priority = severity_priority(&a.severity);
-        let b_priority = severity_priority(&b.severity);
+        let a_priority = a.severity.priority();
+        let b_priority = b.severity.priority();
         b_priority.cmp(&a_priority)
     });
 
@@ -209,15 +209,6 @@ fn truncate_findings(
     findings.truncate(max_results);
 
     (findings, true, truncated_count)
-}
-
-/// Get severity priority for sorting.
-fn severity_priority(severity: &Severity) -> u8 {
-    match severity {
-        Severity::Info => 0,
-        Severity::Warn => 1,
-        Severity::Error => 2,
-    }
 }
 
 #[cfg(test)]

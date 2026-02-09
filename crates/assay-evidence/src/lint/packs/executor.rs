@@ -151,8 +151,8 @@ impl PackExecutor {
 
         // Sort by severity (lowest first for truncation)
         findings.sort_by(|a, b| {
-            let a_priority = severity_priority(&a.severity);
-            let b_priority = severity_priority(&b.severity);
+            let a_priority = a.severity.priority();
+            let b_priority = b.severity.priority();
             a_priority.cmp(&b_priority)
         });
 
@@ -162,21 +162,12 @@ impl PackExecutor {
 
         // Re-sort for display (highest severity first)
         findings.sort_by(|a, b| {
-            let a_priority = severity_priority(&a.severity);
-            let b_priority = severity_priority(&b.severity);
+            let a_priority = a.severity.priority();
+            let b_priority = b.severity.priority();
             b_priority.cmp(&a_priority)
         });
 
         (findings, true, truncated_count)
-    }
-}
-
-/// Get severity priority for sorting.
-fn severity_priority(severity: &crate::lint::Severity) -> u8 {
-    match severity {
-        crate::lint::Severity::Info => 0,
-        crate::lint::Severity::Warn => 1,
-        crate::lint::Severity::Error => 2,
     }
 }
 
