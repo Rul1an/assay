@@ -251,6 +251,8 @@ fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
 
     let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
     let tool_args = v.get("args").cloned();
+    let has_tool_calls = v.get("tool_calls").and_then(|v| v.as_array()).is_some();
+    let has_tool_signal = tool_name.is_some() || has_tool_calls;
     if let Some(tool) = tool_name {
         let record = crate::model::ToolCallRecord {
             id: "legacy-v1".to_string(),
@@ -264,6 +266,24 @@ fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
         parsed.meta["tool_calls"] = serde_json::json!([record]);
     } else if let Some(calls) = v.get("tool_calls").and_then(|v| v.as_array()) {
         parsed.meta["tool_calls"] = serde_json::Value::Array(calls.clone());
+    }
+
+    // Legacy tool-only fixtures (tool/args/result without prompt/response) are common
+    // in policy demos. Canonicalize to a deterministic fallback lookup key so
+    // `input: "ignore"` works out of the box.
+    if has_tool_signal && parsed.prompt.is_none() {
+        parsed.prompt = Some("ignore".to_string());
+    }
+
+    if has_tool_signal && parsed.response.is_none() {
+        let response = match v.get("result") {
+            Some(result) => result
+                .as_str()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| result.to_string()),
+            None => String::new(),
+        };
+        parsed.response = Some(response);
     }
 }
 
@@ -765,6 +785,33 @@ mod tests {
             Some("fs.write")
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_legacy_tool_only_record_uses_ignore_fallback_prompt() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        writeln!(
+            tmp,
+            r#"{{"tool":"fs.read","args":{{"path":"/tmp/input.txt"}},"result":"ok"}}"#
+        )?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("ignore", None).await?;
+        assert_eq!(resp.text, "ok");
+
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/tool_name")
+                .and_then(|v| v.as_str()),
+            Some("fs.read")
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/args/path")
+                .and_then(|v| v.as_str()),
+            Some("/tmp/input.txt")
+        );
         Ok(())
     }
 
