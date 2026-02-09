@@ -213,3 +213,89 @@ fn make_entry_profile(
         reasons: Some(reasons),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::classify_entry;
+    use crate::cli::commands::generate::GenerateArgs;
+    use crate::cli::commands::heuristics;
+    use std::path::PathBuf;
+
+    fn default_args() -> GenerateArgs {
+        GenerateArgs {
+            input: None,
+            profile: None,
+            output: PathBuf::from("policy.yaml"),
+            name: "".into(),
+            format: "yaml".into(),
+            dry_run: false,
+            diff: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.8,
+            min_runs: 1,
+            wilson_z: 1.96,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+        }
+    }
+
+    #[test]
+    fn classify_stable_low_risk() {
+        let args = default_args();
+
+        assert_eq!(
+            classify_entry(0.9, None, &args, 10, 10),
+            Some(("allow", false))
+        );
+        assert_eq!(
+            classify_entry(0.7, None, &args, 10, 7),
+            Some(("needs_review", false))
+        );
+        assert_eq!(classify_entry(0.3, None, &args, 10, 3), None);
+    }
+
+    #[test]
+    fn classify_new_is_risky() {
+        let mut args = default_args();
+        args.new_is_risky = true;
+
+        assert_eq!(
+            classify_entry(0.3, None, &args, 10, 3),
+            Some(("needs_review", false))
+        );
+    }
+
+    #[test]
+    fn classify_min_runs_gates_early_noise() {
+        let mut args = default_args();
+        args.min_runs = 5;
+
+        assert_eq!(classify_entry(0.99, None, &args, 1, 1), None);
+
+        args.new_is_risky = true;
+        assert_eq!(
+            classify_entry(0.99, None, &args, 1, 1),
+            Some(("needs_review", false))
+        );
+
+        args.new_is_risky = false;
+        assert_eq!(classify_entry(0.99, None, &args, 10, 1), None);
+    }
+
+    #[test]
+    fn classify_risk_overrides() {
+        let mut args = default_args();
+        args.heuristics = true;
+        args.min_runs = 5;
+
+        let mut risk = heuristics::RiskAssessment::default();
+        risk.add(heuristics::RiskLevel::DenyRecommended, "test".to_string());
+
+        assert_eq!(
+            classify_entry(0.95, Some(&risk), &args, 1, 1),
+            Some(("deny", true))
+        );
+    }
+}
