@@ -1,15 +1,31 @@
 #![allow(deprecated)]
 
 use assert_cmd::Command;
+#[cfg(target_os = "linux")]
 use std::io::Write;
+#[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 
 fn normalize(s: &[u8]) -> String {
     String::from_utf8_lossy(s).replace("\r\n", "\n")
 }
 
+#[cfg(not(target_os = "linux"))]
 #[test]
-fn contract_monitor_missing_ebpf_path_exit_40() {
+fn contract_monitor_non_linux_exit_40_not_supported() {
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    let assert = cmd.arg("monitor").assert().code(40);
+
+    let stderr = normalize(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("only supported on Linux"),
+        "platform-gate diagnostic line changed unexpectedly: {stderr}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_missing_ebpf_path_exit_40_not_found() {
     let mut cmd = Command::cargo_bin("assay").expect("assay binary");
     let assert = cmd
         .arg("monitor")
@@ -20,13 +36,14 @@ fn contract_monitor_missing_ebpf_path_exit_40() {
 
     let stderr = normalize(&assert.get_output().stderr);
     assert!(
-        stderr.contains("only supported on Linux") || stderr.contains("eBPF object not found"),
+        stderr.contains("eBPF object not found"),
         "missing-ebpf diagnostic line changed unexpectedly: {stderr}"
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
-fn contract_monitor_invalid_ebpf_payload_exit_40() {
+fn contract_monitor_invalid_ebpf_payload_exit_40_load_fail() {
     let mut invalid_ebpf = NamedTempFile::new().expect("temp ebpf");
     invalid_ebpf
         .write_all(b"this-is-not-a-valid-ebpf-object")
@@ -42,7 +59,7 @@ fn contract_monitor_invalid_ebpf_payload_exit_40() {
 
     let stderr = normalize(&assert.get_output().stderr);
     assert!(
-        stderr.contains("only supported on Linux") || stderr.contains("Failed to load eBPF"),
+        stderr.contains("Failed to load eBPF"),
         "invalid-ebpf diagnostic line changed unexpectedly: {stderr}"
     );
 }
@@ -65,7 +82,10 @@ fn contract_monitor_parse_fail_policy_exit_1() {
 
     let stderr = normalize(&assert.get_output().stderr).to_lowercase();
     assert!(
-        stderr.contains("error") || stderr.contains("yaml") || stderr.contains("policy"),
+        stderr.contains("yaml")
+            || stderr.contains("expected")
+            || stderr.contains("line")
+            || stderr.contains("column"),
         "parse-fail diagnostic line changed unexpectedly: {stderr}"
     );
 }
