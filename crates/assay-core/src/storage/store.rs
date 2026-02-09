@@ -196,28 +196,22 @@ impl Store {
     }
 
     pub fn insert_run(&self, suite: &str) -> anyhow::Result<i64> {
+        let started_at = now_rfc3339ish();
         let conn = self.conn.lock().unwrap();
-        let started_at = chrono::Utc::now().to_rfc3339();
-        conn.execute(
-            "INSERT INTO runs(suite, started_at, status) VALUES (?1, ?2, ?3)",
-            params![suite, started_at, "running"],
-        )?;
-        Ok(conn.last_insert_rowid())
+        insert_run_row(&conn, suite, &started_at, "running", None)
     }
 
     pub fn create_run(&self, cfg: &EvalConfig) -> anyhow::Result<i64> {
         let started_at = now_rfc3339ish();
+        let config_json = serde_json::to_string(cfg)?;
         let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO runs(suite, started_at, status, config_json) VALUES (?1, ?2, ?3, ?4)",
-            params![
-                cfg.suite,
-                started_at,
-                "running",
-                serde_json::to_string(cfg)?
-            ],
-        )?;
-        Ok(conn.last_insert_rowid())
+        insert_run_row(
+            &conn,
+            &cfg.suite,
+            &started_at,
+            "running",
+            Some(config_json.as_str()),
+        )
     }
 
     pub fn finalize_run(&self, run_id: i64, status: &str) -> anyhow::Result<()> {
@@ -712,6 +706,20 @@ fn row_to_test_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestResultRow
         attempts,
         error_policy_applied: None,
     })
+}
+
+fn insert_run_row(
+    conn: &Connection,
+    suite: &str,
+    started_at: &str,
+    status: &str,
+    config_json: Option<&str>,
+) -> anyhow::Result<i64> {
+    conn.execute(
+        "INSERT INTO runs(suite, started_at, status, config_json) VALUES (?1, ?2, ?3, ?4)",
+        params![suite, started_at, status, config_json],
+    )?;
+    Ok(conn.last_insert_rowid())
 }
 
 fn load_episode_graph_for_episode_id(
