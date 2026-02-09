@@ -6,7 +6,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, IF_NONE_MATCH, USER
 use tracing::{debug, warn};
 
 use crate::auth::TokenProvider;
-use crate::canonicalize::compute_canonical_digest;
+use crate::digest::compute_canonical_or_raw_digest;
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::{
     DsseEnvelope, FetchResult, KeysManifest, PackHeaders, PackMeta, RegistryConfig,
@@ -394,15 +394,7 @@ impl RegistryClient {
 /// Uses JCS canonicalization for valid YAML, falls back to raw SHA-256 for
 /// non-YAML content (e.g., error responses).
 fn compute_digest(content: &str) -> String {
-    match compute_canonical_digest(content) {
-        Ok(digest) => digest,
-        Err(_) => {
-            // Fall back to raw digest for non-YAML content
-            use sha2::{Digest, Sha256};
-            let hash = Sha256::digest(content.as_bytes());
-            format!("sha256:{:x}", hash)
-        }
-    }
+    compute_canonical_or_raw_digest(content, |_| {})
 }
 
 /// Parse pack name and version from URL.
@@ -457,6 +449,7 @@ fn parse_revocation_body(body: &str, header_reason: Option<String>) -> (String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonicalize::compute_canonical_digest;
     use crate::verify::compute_digest as verify_compute_digest;
 
     #[test]

@@ -49,6 +49,7 @@ pub mod auth;
 pub mod cache;
 pub mod canonicalize;
 pub mod client;
+mod digest;
 pub mod error;
 pub mod lockfile;
 pub mod reference;

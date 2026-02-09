@@ -6,11 +6,11 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use sha2::{Digest, Sha256};
 
 use crate::canonicalize::{
     compute_canonical_digest, parse_yaml_strict, to_canonical_jcs_bytes, CanonicalizeError,
 };
+use crate::digest::{compute_canonical_or_raw_digest, sha256_hex_bytes};
 use crate::error::{RegistryError, RegistryResult};
 use crate::trust::TrustStore;
 use crate::types::{DsseEnvelope, FetchResult};
@@ -167,20 +167,12 @@ pub fn verify_digest(content: &str, expected: &str) -> RegistryResult<()> {
 ///
 /// For content that may not be valid YAML, falls back to raw SHA-256.
 pub fn compute_digest(content: &str) -> String {
-    // Try canonical digest first
-    match compute_canonical_digest(content) {
-        Ok(digest) => digest,
-        Err(e) => {
-            // Log warning and fall back to raw digest for non-YAML content
-            tracing::warn!(
-                error = %e,
-                "canonical digest failed, falling back to raw digest"
-            );
-            // Inline raw digest to avoid deprecation warning
-            let hash = Sha256::digest(content.as_bytes());
-            format!("sha256:{:x}", hash)
-        }
-    }
+    compute_canonical_or_raw_digest(content, |e| {
+        tracing::warn!(
+            error = %e,
+            "canonical digest failed, falling back to raw digest"
+        );
+    })
 }
 
 /// Compute canonical digest, returning error on invalid YAML.
@@ -197,8 +189,7 @@ pub fn compute_digest_strict(content: &str) -> Result<String, CanonicalizeError>
 #[deprecated(since = "2.11.0", note = "use compute_digest for canonical JCS digest")]
 #[allow(dead_code)]
 pub fn compute_digest_raw(content: &str) -> String {
-    let hash = Sha256::digest(content.as_bytes());
-    format!("sha256:{:x}", hash)
+    sha256_hex_bytes(content.as_bytes())
 }
 
 /// Parse DSSE envelope from Base64.
@@ -346,8 +337,7 @@ fn verify_single_signature(
 
 /// Compute key ID from public key bytes (SPKI DER).
 pub fn compute_key_id(spki_bytes: &[u8]) -> String {
-    let hash = Sha256::digest(spki_bytes);
-    format!("sha256:{:x}", hash)
+    sha256_hex_bytes(spki_bytes)
 }
 
 /// Compute key ID from a VerifyingKey.
