@@ -6,8 +6,10 @@ mod json_schema;
 mod judge;
 mod must_contain;
 mod must_not_contain;
+mod policy_warning;
 mod regex_match;
 mod semantic;
+mod tool_calls;
 
 pub mod args_valid;
 pub mod sequence_valid;
