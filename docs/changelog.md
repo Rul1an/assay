@@ -195,6 +195,20 @@
 - fix(trace): default tool-only trace fixtures to input=ignore (#236) @Rul1an
 - test(runner): freeze retry/flake/on_error contracts before decomposition (#233) @Rul1an
 - fix(trace): harden episode-end/EOF metadata merge semantics (#232) @Rul1an
+- chore(core-e4b): tighten error-mapping comments (#254) @Rul1an
+- refactor(registry-e3b): keep legacy DSSE helper test-local (#252) @Rul1an
+- test(registry-e3a): freeze legacy digest/signature contracts (#250) @Rul1an
+- refactor(registry-e2c): freeze digest contracts and dedup helpers (#247) @Rul1an
+- refactor(metrics-e2b): centralize policy warning dedup semantics (#246) @Rul1an
+- refactor(metrics-e2a): unify tool-call extraction across metrics (#245) @Rul1an
+- docs(rfc-002): harden E1 stop-lines and gates from review (#244) @Rul1an
+- refactor(storage-e1): unify run writes and canonicalize started_at (#242) @Rul1an
+- docs(rfc): add RFC-002 code-health remediation plan (#241) @Rul1an
+- refactor(monitor): extract run_linux helpers (extract-only) (#239) @Rul1an
+- fix(args_valid): enforce policy allow/deny in runtime path (#238) @Rul1an
+- refactor(runner): decompose run_test_with_policy extract-only (#237) @Rul1an
+- fix(trace): default tool-only trace fixtures to input=ignore (#236) @Rul1an
+- test(runner): freeze retry/flake/on_error contracts before decomposition (#233) @Rul1an
 ## [2026-02-09]
 
 - test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
