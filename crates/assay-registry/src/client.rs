@@ -457,6 +457,7 @@ fn parse_revocation_body(body: &str, header_reason: Option<String>) -> (String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::verify::compute_digest as verify_compute_digest;
 
     #[test]
     fn test_compute_digest_canonical() {
@@ -478,6 +479,31 @@ mod tests {
         let digest = compute_digest(content);
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), 7 + 64);
+    }
+
+    #[test]
+    fn test_compute_digest_parity_with_verify_module() {
+        let canonical_yaml = "name: test\nversion: \"1.0.0\"\nkind: compliance";
+        let invalid_yaml = "this is not: valid: yaml: [[";
+
+        assert_eq!(
+            compute_digest(canonical_yaml),
+            verify_compute_digest(canonical_yaml)
+        );
+        assert_eq!(
+            compute_digest(invalid_yaml),
+            verify_compute_digest(invalid_yaml)
+        );
+    }
+
+    #[test]
+    fn test_compute_digest_has_lowercase_hex_shape() {
+        let digest = compute_digest("name: test\nversion: \"1.0.0\"");
+        assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest.len(), 7 + 64);
+        assert!(digest[7..]
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
