@@ -173,75 +173,113 @@ impl Runner {
         let mut last_output: Option<LlmResponse> = None;
 
         for i in 0..max_attempts {
-            // Catch execution errors and convert to ResultRow to leverage retry/reporting logic
-            let (row, output) = match self.run_test_once(cfg, tc).await {
-                Ok(res) => res,
-                Err(e) => {
-                    let msg = if let Some(diag) = try_map_error(&e) {
-                        diag.to_string()
-                    } else {
-                        e.to_string()
-                    };
-
-                    let policy_result = error_policy.apply_to_error(&e);
-                    let (status, final_msg, applied_policy) = match policy_result {
-                        ErrorPolicyResult::Blocked { reason } => {
-                            (TestStatus::Error, reason, ErrorPolicy::Block)
-                        }
-                        ErrorPolicyResult::Allowed { warning } => {
-                            crate::on_error::log_fail_safe(&warning, None);
-                            (TestStatus::AllowedOnError, warning, ErrorPolicy::Allow)
-                        }
-                    };
-
-                    (
-                        TestResultRow {
-                            test_id: tc.id.clone(),
-                            status,
-                            score: None,
-                            cached: false,
-                            message: final_msg,
-                            details: serde_json::json!({
-                                "error": msg,
-                                "policy_applied": applied_policy
-                            }),
-                            duration_ms: None,
-                            fingerprint: None,
-                            skip_reason: None,
-                            attempts: None,
-                            error_policy_applied: Some(applied_policy),
-                        },
-                        LlmResponse {
-                            text: "".into(),
-                            provider: "error".into(),
-                            model: cfg.model.clone(),
-                            cached: false,
-                            meta: serde_json::json!({}),
-                        },
-                    )
-                }
-            };
-            attempts.push(AttemptRow {
-                attempt_no: i + 1,
-                status: row.status,
-                message: row.message.clone(),
-                duration_ms: row.duration_ms,
-                details: row.details.clone(),
-            });
+            let (row, output) = self.run_attempt_with_policy(cfg, tc, error_policy).await;
+            Self::record_attempt(&mut attempts, i + 1, &row);
             last_row = Some(row.clone());
             last_output = Some(output.clone());
 
-            match row.status {
-                TestStatus::Pass | TestStatus::Warn | TestStatus::AllowedOnError => break,
-                TestStatus::Skipped => break, // Should not happen in loop
-                TestStatus::Fail | TestStatus::Error | TestStatus::Flaky | TestStatus::Unstable => {
-                    continue
-                }
+            if Self::should_stop_retries(row.status) {
+                break;
             }
         }
 
         let class = classify_attempts(&attempts);
-        let mut final_row = last_row.unwrap_or(TestResultRow {
+        let mut final_row = last_row.unwrap_or_else(|| Self::no_attempts_row(tc));
+        self.apply_quarantine_overlay(&mut final_row, q_reason.as_deref());
+        Self::apply_failure_classification(&mut final_row, class, attempts.len());
+
+        let output = last_output.unwrap_or_else(|| self.empty_output_for_model(cfg));
+
+        final_row.attempts = Some(attempts.clone());
+        self.apply_agent_assertions(run_id, tc, &mut final_row)?;
+
+        self.store
+            .insert_result_embedded(run_id, &final_row, &attempts, &output)?;
+
+        Ok(final_row)
+    }
+
+    async fn run_attempt_with_policy(
+        &self,
+        cfg: &EvalConfig,
+        tc: &TestCase,
+        error_policy: ErrorPolicy,
+    ) -> (TestResultRow, LlmResponse) {
+        match self.run_test_once(cfg, tc).await {
+            Ok(res) => res,
+            Err(e) => Self::error_row_and_output(cfg, tc, e, error_policy),
+        }
+    }
+
+    fn error_row_and_output(
+        cfg: &EvalConfig,
+        tc: &TestCase,
+        e: anyhow::Error,
+        error_policy: ErrorPolicy,
+    ) -> (TestResultRow, LlmResponse) {
+        let msg = if let Some(diag) = try_map_error(&e) {
+            diag.to_string()
+        } else {
+            e.to_string()
+        };
+
+        let policy_result = error_policy.apply_to_error(&e);
+        let (status, final_msg, applied_policy) = match policy_result {
+            ErrorPolicyResult::Blocked { reason } => {
+                (TestStatus::Error, reason, ErrorPolicy::Block)
+            }
+            ErrorPolicyResult::Allowed { warning } => {
+                crate::on_error::log_fail_safe(&warning, None);
+                (TestStatus::AllowedOnError, warning, ErrorPolicy::Allow)
+            }
+        };
+
+        (
+            TestResultRow {
+                test_id: tc.id.clone(),
+                status,
+                score: None,
+                cached: false,
+                message: final_msg,
+                details: serde_json::json!({
+                    "error": msg,
+                    "policy_applied": applied_policy
+                }),
+                duration_ms: None,
+                fingerprint: None,
+                skip_reason: None,
+                attempts: None,
+                error_policy_applied: Some(applied_policy),
+            },
+            LlmResponse {
+                text: "".into(),
+                provider: "error".into(),
+                model: cfg.model.clone(),
+                cached: false,
+                meta: serde_json::json!({}),
+            },
+        )
+    }
+
+    fn record_attempt(attempts: &mut Vec<AttemptRow>, attempt_no: u32, row: &TestResultRow) {
+        attempts.push(AttemptRow {
+            attempt_no,
+            status: row.status,
+            message: row.message.clone(),
+            duration_ms: row.duration_ms,
+            details: row.details.clone(),
+        });
+    }
+
+    fn should_stop_retries(status: TestStatus) -> bool {
+        matches!(
+            status,
+            TestStatus::Pass | TestStatus::Warn | TestStatus::AllowedOnError | TestStatus::Skipped
+        )
+    }
+
+    fn no_attempts_row(tc: &TestCase) -> TestResultRow {
+        TestResultRow {
             test_id: tc.id.clone(),
             status: TestStatus::Error,
             score: None,
@@ -253,9 +291,10 @@ impl Runner {
             skip_reason: None,
             attempts: None,
             error_policy_applied: None,
-        });
+        }
+    }
 
-        // quarantine overlay
+    fn apply_quarantine_overlay(&self, final_row: &mut TestResultRow, q_reason: Option<&str>) {
         if let Some(reason) = q_reason {
             match self.policy.quarantine_mode {
                 QuarantineMode::Off => {}
@@ -269,7 +308,13 @@ impl Runner {
                 }
             }
         }
+    }
 
+    fn apply_failure_classification(
+        final_row: &mut TestResultRow,
+        class: FailureClass,
+        attempt_len: usize,
+    ) {
         match class {
             FailureClass::Skipped => {
                 final_row.status = TestStatus::Skipped;
@@ -278,12 +323,12 @@ impl Runner {
             FailureClass::Flaky => {
                 final_row.status = TestStatus::Flaky;
                 final_row.message = "flake detected (rerun passed)".into();
-                final_row.details["flake"] = serde_json::json!({ "attempts": attempts.len() });
+                final_row.details["flake"] = serde_json::json!({ "attempts": attempt_len });
             }
             FailureClass::Unstable => {
                 final_row.status = TestStatus::Unstable;
                 final_row.message = "unstable outcomes detected".into();
-                final_row.details["unstable"] = serde_json::json!({ "attempts": attempts.len() });
+                final_row.details["unstable"] = serde_json::json!({ "attempts": attempt_len });
             }
             FailureClass::Error => final_row.status = TestStatus::Error,
             FailureClass::DeterministicFail => {
@@ -297,21 +342,26 @@ impl Runner {
                 }
             }
         }
+    }
 
-        let output = last_output.unwrap_or(LlmResponse {
+    fn empty_output_for_model(&self, cfg: &EvalConfig) -> LlmResponse {
+        LlmResponse {
             text: "".into(),
             provider: self.client.provider_name().to_string(),
             model: cfg.model.clone(),
             cached: false,
             meta: serde_json::json!({}),
-        });
+        }
+    }
 
-        final_row.attempts = Some(attempts.clone());
-
-        // PR-4.0.3 Agent Assertions
+    fn apply_agent_assertions(
+        &self,
+        run_id: i64,
+        tc: &TestCase,
+        final_row: &mut TestResultRow,
+    ) -> anyhow::Result<()> {
         if let Some(assertions) = &tc.assertions {
             if !assertions.is_empty() {
-                // Verify assertions against DB
                 match crate::agent_assertions::verify_assertions(
                     &self.store,
                     run_id,
@@ -323,7 +373,6 @@ impl Runner {
                             // Assertion Failures
                             final_row.status = TestStatus::Fail;
 
-                            // serialize diagnostics
                             let diag_json: Vec<serde_json::Value> = diags
                                 .iter()
                                 .map(|d| serde_json::to_value(d).unwrap_or_default())
@@ -352,11 +401,7 @@ impl Runner {
                 }
             }
         }
-
-        self.store
-            .insert_result_embedded(run_id, &final_row, &attempts, &output)?;
-
-        Ok(final_row)
+        Ok(())
     }
 
     async fn run_test_once(
