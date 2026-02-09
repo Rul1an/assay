@@ -42,10 +42,12 @@ High-level concern map:
    - No schema drift in generated policy format (yaml/json)
    - No CLI flag behavior changes
    - No change in exit code behavior (`run` still returns `Result<i32>`, with `Ok(0)` on success)
+   - Golden assertions must prove policy output, `--diff` output, and `read_events` diagnostics remain stable
 2. No semantic drift in classification:
    - Wilson/laplace/min_runs/new_is_risky logic remains identical
 3. No diff-output semantic drift:
    - Added/removed/changed calculation remains identical
+   - Output order remains deterministic independent of insertion order
 4. No hidden tolerance changes:
    - `read_events` parse/skip/error-rate behavior unchanged
 
@@ -88,8 +90,9 @@ Proposed end-state under `crates/assay-cli/src/cli/commands/generate/`:
 - `diff.rs`:
   - `EntryFingerprint`, `EntryChange`, `SectionDiff`, `PolicyDiff`
   - `parse_existing_policy`, `diff_policies`, `print_policy_diff`
-- `tests.rs` (or per-module `#[cfg(test)]`):
-  - migrated existing tests with identical assertions
+- tests:
+  - prefer per-module `#[cfg(test)]` for locality and to avoid widening visibility
+  - keep helper visibility minimal (`pub(crate)` only when required)
 
 Compatibility requirement:
 
@@ -105,14 +108,30 @@ Add targeted characterization tests before moving logic:
    - skip empty/comment lines
    - unparsable lines count/warn behavior
    - hard error when all lines invalid
+   - warnings snapshot: stable core diagnostics for skipped lines and high-error-rate path
 2. `run` mode gating:
    - requires exactly one of `--input` or `--profile`
+   - explicit edge cases: both-set, neither-set, `--diff` with missing output file
+   - assert error class and expected exit behavior at command boundary
 3. classification invariants:
    - stable allow/review/skip transitions
    - risk override precedence
    - min-runs gate behavior
 4. diff invariants:
    - added/removed/changed semantics unchanged
+   - deterministic stderr output independent of insertion order
+5. output goldens:
+   - generated policy YAML snapshot with normalized dynamic fields
+   - `--diff` stderr snapshot with stable summary line and `(no changes)` path
+
+G1 minimal test matrix (must exist before any extraction PR):
+
+1. `generate_contract_policy_yaml_golden`
+2. `generate_contract_diff_stderr_golden`
+3. `generate_contract_read_events_warnings_golden`
+4. `generate_contract_mode_gating_none_or_both`
+5. `generate_contract_mode_gating_diff_missing_output`
+6. `generate_contract_diff_deterministic_on_shuffled_input`
 
 Gate:
 
@@ -125,6 +144,8 @@ Scope:
 
 - Move args + model DTOs + `serialize` to `args.rs` / `model.rs`
 - Keep function bodies unchanged
+- Preserve serde/clap attrs exactly (no rename/default/order drift)
+- Preserve default values exactly (including float defaults and bool switches)
 
 Gate:
 
@@ -137,6 +158,7 @@ Scope:
 
 - Move `Stats`, `Aggregated`, `read_events`, `aggregate` into `ingest.rs`
 - Preserve all warning/error strings
+- Consolidate diagnostics through local constants/helpers to reduce accidental wording drift
 
 Gate:
 
@@ -149,6 +171,7 @@ Scope:
 
 - Move profile generation/classification helpers into `profile.rs`
 - Keep algorithm and ordering unchanged
+- Guardrail: if `profile.rs` grows beyond ~400 LOC, split follow-up into `classify.rs` and `profile_emit.rs`
 
 Gate:
 
@@ -173,6 +196,8 @@ Scope:
 
 - Reduce `mod.rs` to orchestration only
 - Keep `run` signature and return semantics unchanged
+- Keep dispatch compatibility: `crate::cli::commands::generate::run` remains unchanged for callers
+- No non-generate command import churn beyond module path rewiring
 
 Gate:
 
@@ -197,6 +222,7 @@ Each PR must include:
 - Non-goals section
 - Contract gates section
 - Output impact statement (`none`)
+- Acceptance checks section with explicit old->new mapping for moved functions
 
 ## 8. Risks and Mitigations
 
@@ -206,6 +232,8 @@ Each PR must include:
    - Mitigation: freeze diff tests and keep summary formatting assertions
 3. Risk: accidental CLI behavior drift
    - Mitigation: mode-gating tests and unchanged `run` entrypoint
+4. Risk: snapshot brittleness from dynamic fields
+   - Mitigation: normalize timestamp/path fields in golden helpers, assert stable core diagnostics
 
 ## 9. Definition of Done
 
