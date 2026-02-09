@@ -197,9 +197,12 @@ jobs:
     name: Free disk (before matrix)
     needs: [lint, build-artifacts, check-ebpf-changes]
     # Skip for fork PRs OR when only dependencies changed (no eBPF code)
+    # TEMPORARY DISABLED alongside matrix-test (issue #130, self-hosted runner health).
+    # Re-enable when self-hosted runner is stable again by removing '&& false'.
     if: |
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
-      needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
+      needs.check-ebpf-changes.outputs.ebpf_changed == 'true' &&
+      false
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
     steps:
