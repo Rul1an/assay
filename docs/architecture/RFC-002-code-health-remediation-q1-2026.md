@@ -1,12 +1,27 @@
 # RFC-002: Code Health Remediation Plan (Q1 2026)
 
-- Status: Active (E1-E4 delivered, E5 planned)
+- Status: Active (E1-E4 delivered, E5 tracked in RFC-003)
 - Date: 2026-02-09
 - Owner: DX/Core
 - Scope: `assay-cli`, `assay-core`, `assay-evidence`, `assay-metrics`, `assay-sim`, `assay-registry`
 - Inputs:
   - `docs/architecture/CODE-ANALYSIS-REPORT.md`
   - `docs/architecture/PLAN-pipeline-decomposition.md`
+
+## 0. Delivery Evidence (mechanical)
+
+| Item | Status | Reference | Merge SHA | Date |
+|------|--------|-----------|-----------|------|
+| E1 Store consistency | Merged | PR #242 | `d9afdc70` | 2026-02-09 |
+| E2 Metrics extraction/dedup | Merged | PR #245 | `39448078` | 2026-02-09 |
+| E3 Registry cleanup A | Merged | PR #247 | `ae6e76c4` | 2026-02-09 |
+| E3 Registry cleanup B | Merged | PR #250 | `34a03810` | 2026-02-09 |
+| E3 Registry cleanup C | Merged | PR #252 | `e06f2458` | 2026-02-09 |
+| E4 Comment cleanup A | Merged | PR #253 | `47c9c6b3` | 2026-02-09 |
+| E4 Comment cleanup B | Merged | PR #254 | `574d9316` | 2026-02-09 |
+| E4 Comment cleanup C | Merged | PR #255 | `c9f67b19` | 2026-02-09 |
+| E4 Comment cleanup D | Merged | PR #256 | `54dff1ee` | 2026-02-09 |
+| E5 Generate decomposition | Active | RFC-003 / PR #271 | - | Open |
 
 ## 1. Context
 

@@ -1,12 +1,24 @@
 # RFC-003: Generate Command Decomposition Plan (Q1 2026)
 
-- Status: Proposed
+- Status: Active (G1-G5 merged, G6 open)
 - Date: 2026-02-09
 - Owner: DX/Core
 - Scope: `crates/assay-cli/src/cli/commands/generate.rs`
 - Related:
   - `docs/architecture/RFC-002-code-health-remediation-q1-2026.md` (E5)
   - `docs/architecture/CODE-ANALYSIS-REPORT.md` (#27)
+
+## 0. Status Evidence (mechanical)
+
+| Item | Status | Reference | Merge SHA | Date |
+|------|--------|-----------|-----------|------|
+| G1 | Merged | PR #260 | `99588b59` | 2026-02-09 |
+| G2 | Merged | PR #262 | `545fcd09` | 2026-02-09 |
+| G3 | Merged | PR #264 | `059e23d2` | 2026-02-09 |
+| G4 | Merged | PR #266 | `a661b911` | 2026-02-09 |
+| G5 | Merged | PR #268 | `b3d386bf` | 2026-02-09 |
+| G6 | Open | PR #271 | - | Open |
+| Generate validate finite checks | Merged | PR #270 | `7cc96a8a` | 2026-02-10 |
 
 ## 1. Context
 
