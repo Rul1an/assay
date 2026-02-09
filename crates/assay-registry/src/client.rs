@@ -450,6 +450,7 @@ fn parse_revocation_body(body: &str, header_reason: Option<String>) -> (String, 
 mod tests {
     use super::*;
     use crate::canonicalize::compute_canonical_digest;
+    use crate::digest::sha256_hex_bytes;
     use crate::verify::compute_digest as verify_compute_digest;
 
     #[test]
@@ -479,10 +480,17 @@ mod tests {
         let canonical_yaml = "name: test\nversion: \"1.0.0\"\nkind: compliance";
         let invalid_yaml = "this is not: valid: yaml: [[";
 
+        // Canonical path must remain canonicalizable.
+        assert!(compute_canonical_digest(canonical_yaml).is_ok());
         assert_eq!(
             compute_digest(canonical_yaml),
             verify_compute_digest(canonical_yaml)
         );
+
+        // Fallback path must remain non-canonical and use raw bytes SHA-256.
+        assert!(compute_canonical_digest(invalid_yaml).is_err());
+        let raw_fallback = sha256_hex_bytes(invalid_yaml.as_bytes());
+        assert_eq!(compute_digest(invalid_yaml), raw_fallback);
         assert_eq!(
             compute_digest(invalid_yaml),
             verify_compute_digest(invalid_yaml)
