@@ -140,6 +140,98 @@ tests:
 }
 
 #[test]
+fn parity_success_path_run_vs_ci() {
+    let run_dir = tempdir().expect("tempdir");
+    let ci_dir = tempdir().expect("tempdir");
+    let eval = r#"version: 1
+suite: parity-success
+model: trace
+tests:
+  - id: t1
+    input: { prompt: "hello" }
+    expected: { type: must_contain, must_contain: ["passed"] }
+"#;
+    let trace = r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hello"}}
+{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"passed"}
+"#;
+    fs::write(run_dir.path().join("eval.yaml"), eval).expect("write eval");
+    fs::write(ci_dir.path().join("eval.yaml"), eval).expect("write eval");
+    fs::write(run_dir.path().join("trace.jsonl"), trace).expect("write trace");
+    fs::write(ci_dir.path().join("trace.jsonl"), trace).expect("write trace");
+
+    run_assay(
+        run_dir.path(),
+        "run",
+        &["--config", "eval.yaml", "--trace-file", "trace.jsonl"],
+        0,
+    );
+    run_assay(
+        ci_dir.path(),
+        "ci",
+        &["--config", "eval.yaml", "--trace-file", "trace.jsonl"],
+        0,
+    );
+
+    let run_run = read_run_json(run_dir.path());
+    let run_summary = read_summary_json(run_dir.path());
+    let ci_run = read_run_json(ci_dir.path());
+    let ci_summary = read_summary_json(ci_dir.path());
+
+    assert_eq!(run_run["exit_code"], 0);
+    assert_eq!(ci_run["exit_code"], 0);
+    assert_eq!(
+        run_run["reason_code"], ci_run["reason_code"],
+        "run and ci must agree on success reason_code representation"
+    );
+    assert_eq!(run_run["exit_code"], run_summary["exit_code"]);
+    assert_eq!(ci_run["exit_code"], ci_summary["exit_code"]);
+}
+
+#[test]
+fn parity_runtime_fail_run_vs_ci() {
+    let run_dir = tempdir().expect("tempdir");
+    let ci_dir = tempdir().expect("tempdir");
+    let eval = r#"version: 1
+suite: parity-runtime-fail
+model: trace
+tests:
+  - id: t1
+    input: { prompt: "hello" }
+    expected: { type: must_contain, must_contain: ["passed"] }
+"#;
+    let trace = r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hello"}}
+{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"nope"}
+"#;
+    fs::write(run_dir.path().join("eval.yaml"), eval).expect("write eval");
+    fs::write(ci_dir.path().join("eval.yaml"), eval).expect("write eval");
+    fs::write(run_dir.path().join("trace.jsonl"), trace).expect("write trace");
+    fs::write(ci_dir.path().join("trace.jsonl"), trace).expect("write trace");
+
+    run_assay(
+        run_dir.path(),
+        "run",
+        &["--config", "eval.yaml", "--trace-file", "trace.jsonl"],
+        1,
+    );
+    run_assay(
+        ci_dir.path(),
+        "ci",
+        &["--config", "eval.yaml", "--trace-file", "trace.jsonl"],
+        1,
+    );
+
+    let run_run = read_run_json(run_dir.path());
+    let run_summary = read_summary_json(run_dir.path());
+    let ci_run = read_run_json(ci_dir.path());
+    let ci_summary = read_summary_json(ci_dir.path());
+
+    assert_failure_contract(&run_run, &run_summary);
+    assert_failure_contract(&ci_run, &ci_summary);
+    assert_eq!(run_run["reason_code"], "E_TEST_FAILED");
+    assert_eq!(ci_run["reason_code"], "E_TEST_FAILED");
+}
+
+#[test]
 fn ci_report_outputs_contract_default_names_and_non_blocking_failures() {
     let dir = tempdir().expect("tempdir");
     fs::write(

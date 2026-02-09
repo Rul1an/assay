@@ -22,6 +22,35 @@ pub(crate) fn reason_code_from_run_error(err: &assay_core::errors::RunError) -> 
     reason_code_from_run_error_kind(err.kind.clone())
 }
 
+fn run_error_kind_from_details(
+    details: &serde_json::Value,
+) -> Option<assay_core::errors::RunErrorKind> {
+    use assay_core::errors::RunErrorKind;
+
+    let kind = details.get("run_error_kind")?.as_str()?;
+    match kind {
+        "trace_not_found" => Some(RunErrorKind::TraceNotFound),
+        "missing_config" => Some(RunErrorKind::MissingConfig),
+        "config_parse" => Some(RunErrorKind::ConfigParse),
+        "invalid_args" => Some(RunErrorKind::InvalidArgs),
+        "provider_rate_limit" => Some(RunErrorKind::ProviderRateLimit),
+        "provider_timeout" => Some(RunErrorKind::ProviderTimeout),
+        "provider_server" => Some(RunErrorKind::ProviderServer),
+        "network" => Some(RunErrorKind::Network),
+        "judge_unavailable" => Some(RunErrorKind::JudgeUnavailable),
+        "other" => Some(RunErrorKind::Other),
+        _ => None,
+    }
+}
+
+fn reason_code_from_result_row(row: &assay_core::model::TestResultRow) -> Option<ReasonCode> {
+    // Typed-first mapping in hot path; message classification remains explicit legacy fallback.
+    if let Some(kind) = run_error_kind_from_details(&row.details) {
+        return reason_code_from_run_error_kind(kind);
+    }
+    reason_code_from_error_message(&row.message)
+}
+
 pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode> {
     use assay_core::errors::RunError;
 
@@ -46,7 +75,7 @@ pub(crate) fn decide_run_outcome(
 
     // Priority 1: Config/Argument Errors (Exit 2)
     for r in results {
-        if let Some(reason) = reason_code_from_error_message(&r.message) {
+        if let Some(reason) = reason_code_from_result_row(r) {
             if matches!(
                 reason,
                 ReasonCode::ETraceNotFound
@@ -141,7 +170,7 @@ fn pick_infra_reason(
     errors: &[&assay_core::model::TestResultRow],
 ) -> crate::exit_codes::ReasonCode {
     for r in errors {
-        if let Some(reason) = reason_code_from_error_message(&r.message) {
+        if let Some(reason) = reason_code_from_result_row(r) {
             if matches!(
                 reason,
                 ReasonCode::ERateLimit
@@ -441,5 +470,31 @@ mod run_outcome_tests {
             Some(ReasonCode::EMissingConfig)
         );
         assert!(!typed.legacy_classified);
+    }
+
+    #[test]
+    fn test_decide_outcome_uses_typed_details_before_legacy_message_fallback() {
+        let row = TestResultRow {
+            test_id: "typed".into(),
+            status: TestStatus::Error,
+            score: None,
+            cached: false,
+            message: "untyped error text".into(),
+            details: serde_json::json!({
+                "run_error_kind": "invalid_args"
+            }),
+            duration_ms: None,
+            fingerprint: None,
+            skip_reason: None,
+            attempts: None,
+            error_policy_applied: None,
+        };
+
+        let outcome = decide_run_outcome(&[row], true, ExitCodeVersion::V2);
+        assert_eq!(outcome.reason_code, ReasonCode::EInvalidArgs.as_str());
+        assert_eq!(
+            outcome.exit_code,
+            ReasonCode::EInvalidArgs.exit_code_for(ExitCodeVersion::V2)
+        );
     }
 }

@@ -1,7 +1,7 @@
 use crate::attempts::{classify_attempts, FailureClass};
 use crate::cache::key::cache_key;
 use crate::cache::vcr::VcrCache;
-use crate::errors::try_map_error;
+use crate::errors::{try_map_error, RunError, RunErrorKind};
 use crate::metrics_api::Metric;
 use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestCase, TestResultRow, TestStatus};
 use crate::on_error::{ErrorPolicy, ErrorPolicyResult};
@@ -233,6 +233,22 @@ impl Runner {
                 (TestStatus::AllowedOnError, warning, ErrorPolicy::Allow)
             }
         };
+        let run_error = e
+            .downcast_ref::<RunError>()
+            .cloned()
+            .unwrap_or_else(|| RunError::from_anyhow(&e));
+        let run_error_kind = match &run_error.kind {
+            RunErrorKind::TraceNotFound => "trace_not_found",
+            RunErrorKind::MissingConfig => "missing_config",
+            RunErrorKind::ConfigParse => "config_parse",
+            RunErrorKind::InvalidArgs => "invalid_args",
+            RunErrorKind::ProviderRateLimit => "provider_rate_limit",
+            RunErrorKind::ProviderTimeout => "provider_timeout",
+            RunErrorKind::ProviderServer => "provider_server",
+            RunErrorKind::Network => "network",
+            RunErrorKind::JudgeUnavailable => "judge_unavailable",
+            RunErrorKind::Other => "other",
+        };
 
         (
             TestResultRow {
@@ -243,7 +259,15 @@ impl Runner {
                 message: final_msg,
                 details: serde_json::json!({
                     "error": msg,
-                    "policy_applied": applied_policy
+                    "policy_applied": applied_policy,
+                    "run_error_kind": run_error_kind,
+                    "run_error_legacy": run_error.legacy_classified,
+                    "run_error": {
+                        "path": run_error.path,
+                        "status": run_error.status,
+                        "provider": run_error.provider,
+                        "detail": run_error.detail
+                    }
                 }),
                 duration_ms: None,
                 fingerprint: None,
