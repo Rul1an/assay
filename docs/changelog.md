@@ -107,6 +107,13 @@
 - refactor(sim): deduplicate attack test-bundle generation (#225) @Rul1an
 - refactor(storage): deduplicate result rehydration and episode graph loading (#223) @Rul1an
 - refactor(evidence): unify severity model and remove lint duplication (#222) @Rul1an
+- refactor(trace): decompose from_path into extract-only helpers (#230) @Rul1an
+- test(trace): freeze from_path parser contracts before decomposition (#228) @Rul1an
+- test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
+- ci(kernel-matrix): skip cleanup-runner while matrix is disabled (#226) @Rul1an
+- refactor(sim): deduplicate attack test-bundle generation (#225) @Rul1an
+- refactor(storage): deduplicate result rehydration and episode graph loading (#223) @Rul1an
+- refactor(evidence): unify severity model and remove lint duplication (#222) @Rul1an
 ## [2026-02-09]
 
 - test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
