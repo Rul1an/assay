@@ -291,7 +291,10 @@ impl Runner {
                 final_row.status = TestStatus::Fail;
             }
             FailureClass::DeterministicPass => {
-                final_row.status = TestStatus::Pass;
+                // Preserve explicit fail-open semantics instead of collapsing into plain pass.
+                if final_row.status != TestStatus::AllowedOnError {
+                    final_row.status = TestStatus::Pass;
+                }
             }
         }
 
@@ -753,6 +756,220 @@ impl Runner {
             )
             .await?;
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metrics_api::{Metric, MetricResult};
+    use crate::model::{Expected, Settings, TestInput};
+    use crate::on_error::ErrorPolicy;
+    use crate::providers::llm::fake::FakeClient;
+    use crate::providers::llm::LlmClient;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone, Copy)]
+    enum MetricMode {
+        FailThenPass,
+        AlwaysFail,
+    }
+
+    struct ScriptedMetric {
+        mode: MetricMode,
+        calls: AtomicUsize,
+    }
+
+    impl ScriptedMetric {
+        fn fail_then_pass() -> Self {
+            Self {
+                mode: MetricMode::FailThenPass,
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn always_fail() -> Self {
+            Self {
+                mode: MetricMode::AlwaysFail,
+                calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Metric for ScriptedMetric {
+        fn name(&self) -> &'static str {
+            "scripted"
+        }
+
+        async fn evaluate(
+            &self,
+            _tc: &TestCase,
+            _expected: &Expected,
+            _resp: &LlmResponse,
+        ) -> anyhow::Result<MetricResult> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            match self.mode {
+                MetricMode::FailThenPass => {
+                    if n == 0 {
+                        Ok(MetricResult::fail(0.0, "scripted_fail_once"))
+                    } else {
+                        Ok(MetricResult::pass(1.0))
+                    }
+                }
+                MetricMode::AlwaysFail => Ok(MetricResult::fail(0.0, "scripted_fail")),
+            }
+        }
+    }
+
+    struct ErrorClient;
+
+    #[async_trait]
+    impl LlmClient for ErrorClient {
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _context: Option<&[String]>,
+        ) -> anyhow::Result<LlmResponse> {
+            Err(anyhow::anyhow!("scripted provider error"))
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "error_client"
+        }
+    }
+
+    fn runner_for_contract_tests(
+        client: Arc<dyn LlmClient>,
+        metrics: Vec<Arc<dyn Metric>>,
+        rerun_failures: u32,
+    ) -> Runner {
+        let store = Store::memory().expect("in-memory store");
+        store.init_schema().expect("schema init");
+        Runner {
+            store: store.clone(),
+            cache: VcrCache::new(store),
+            client,
+            metrics,
+            policy: RunPolicy {
+                rerun_failures,
+                quarantine_mode: QuarantineMode::Off,
+                replay_strict: false,
+            },
+            _network_guard: None,
+            embedder: None,
+            refresh_embeddings: false,
+            incremental: false,
+            refresh_cache: false,
+            judge: None,
+            baseline: None,
+        }
+    }
+
+    fn single_test_config(on_error: ErrorPolicy) -> EvalConfig {
+        EvalConfig {
+            version: 1,
+            suite: "runner-contract".to_string(),
+            model: "fake-model".to_string(),
+            settings: Settings {
+                parallel: Some(1),
+                cache: Some(false),
+                seed: Some(1234),
+                on_error,
+                ..Default::default()
+            },
+            thresholds: Default::default(),
+            otel: Default::default(),
+            tests: vec![TestCase {
+                id: "t1".to_string(),
+                input: TestInput {
+                    prompt: "contract prompt".to_string(),
+                    context: None,
+                },
+                // Expected payload is not used by scripted metrics, but keeps test case valid.
+                expected: Expected::MustContain {
+                    must_contain: vec!["ok".to_string()],
+                },
+                assertions: None,
+                on_error: None,
+                tags: vec![],
+                metadata: None,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn runner_contract_flake_fail_then_pass_classified_flaky() -> anyhow::Result<()> {
+        let cfg = single_test_config(ErrorPolicy::Block);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let metric = Arc::new(ScriptedMetric::fail_then_pass());
+        let runner = runner_for_contract_tests(client, vec![metric], 1);
+
+        let artifacts = runner.run_suite(&cfg, None).await?;
+        let row = artifacts
+            .results
+            .iter()
+            .find(|r| r.test_id == "t1")
+            .expect("result for t1");
+
+        assert_eq!(row.status, TestStatus::Flaky);
+        assert_eq!(row.message, "flake detected (rerun passed)");
+        let attempts = row.attempts.as_ref().expect("attempts");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].status, TestStatus::Fail);
+        assert_eq!(attempts[1].status, TestStatus::Pass);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_contract_fail_after_retries_stays_fail() -> anyhow::Result<()> {
+        let cfg = single_test_config(ErrorPolicy::Block);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let metric = Arc::new(ScriptedMetric::always_fail());
+        let runner = runner_for_contract_tests(client, vec![metric], 1);
+
+        let artifacts = runner.run_suite(&cfg, None).await?;
+        let row = artifacts
+            .results
+            .iter()
+            .find(|r| r.test_id == "t1")
+            .expect("result for t1");
+
+        assert_eq!(row.status, TestStatus::Fail);
+        assert!(
+            row.message.contains("failed: scripted"),
+            "expected stable failure reason, got: {}",
+            row.message
+        );
+        let attempts = row.attempts.as_ref().expect("attempts");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].status, TestStatus::Fail);
+        assert_eq!(attempts[1].status, TestStatus::Fail);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_contract_on_error_allow_marks_allowed_and_policy_applied() -> anyhow::Result<()>
+    {
+        let cfg = single_test_config(ErrorPolicy::Allow);
+        let client = Arc::new(ErrorClient);
+        let runner = runner_for_contract_tests(client, vec![], 2);
+
+        let artifacts = runner.run_suite(&cfg, None).await?;
+        let row = artifacts
+            .results
+            .iter()
+            .find(|r| r.test_id == "t1")
+            .expect("result for t1");
+
+        assert_eq!(row.status, TestStatus::AllowedOnError);
+        assert_eq!(row.error_policy_applied, Some(ErrorPolicy::Allow));
+        assert_eq!(row.details["policy_applied"], serde_json::json!("allow"));
+        let attempts = row.attempts.as_ref().expect("attempts");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].status, TestStatus::AllowedOnError);
         Ok(())
     }
 }
