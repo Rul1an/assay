@@ -71,7 +71,7 @@ impl Diagnostic {
     }
 
     pub fn format_plain(&self) -> String {
-        // Strip out any ansi codes if we added them (we didn't yet), just text
+        // Plain output path currently mirrors terminal formatting.
         self.format_terminal()
     }
 }
