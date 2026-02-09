@@ -203,7 +203,7 @@ entries:
 }
 
 #[test]
-fn generate_contract_diff_missing_output_path_is_handled() {
+fn generate_contract_diff_missing_baseline_output_file_is_handled() {
     let tmp = tempdir().expect("tempdir");
     let input = tmp.path().join("trace.jsonl");
     let output_path = tmp.path().join("nonexistent-policy.yaml");
@@ -283,7 +283,7 @@ fn generate_contract_same_input_twice_deterministic() {
 }
 
 #[test]
-fn generate_contract_diff_deterministic_on_shuffled_input() {
+fn generate_contract_dry_run_deterministic_on_shuffled_input() {
     let tmp = tempdir().expect("tempdir");
     let input_a = tmp.path().join("a.jsonl");
     let input_b = tmp.path().join("b.jsonl");
