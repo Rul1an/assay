@@ -151,7 +151,7 @@ impl Store {
         // We want the most recent passing result for this fingerprint.
         // run_id DESC ensures recency.
         let mut stmt = conn.prepare(
-            "SELECT r.test_id, r.outcome, r.score, r.duration_ms, r.output_json, r.skip_reason, run.id, run.started_at
+            "SELECT r.test_id, r.score, r.duration_ms, r.output_json, r.skip_reason, run.id, run.started_at
              FROM results r
              JOIN runs run ON r.run_id = run.id
              WHERE r.fingerprint = ?1 AND r.outcome = 'pass'
@@ -162,9 +162,9 @@ impl Store {
         if let Some(row) = rows.next()? {
             let status = TestStatus::Pass;
 
-            let skip_reason: Option<String> = row.get(5)?;
-            let run_id: i64 = row.get(6)?;
-            let started_at: String = row.get(7)?;
+            let skip_reason: Option<String> = row.get(4)?;
+            let run_id: i64 = row.get(5)?;
+            let started_at: String = row.get(6)?;
 
             let details = serde_json::json!({
                 "skip": {
@@ -173,7 +173,7 @@ impl Store {
                     "previous_run_id": run_id,
                     "previous_at": started_at,
                     "origin_run_id": run_id,
-                    "previous_score": row.get::<_, Option<f64>>(2)?
+                    "previous_score": row.get::<_, Option<f64>>(1)?
                 }
             });
 
@@ -181,8 +181,8 @@ impl Store {
                 test_id: row.get(0)?,
                 status,
                 message: skip_reason.unwrap_or_else(|| "fingerprint_match".to_string()),
-                score: row.get(2)?,
-                duration_ms: row.get(3)?,
+                score: row.get(1)?,
+                duration_ms: row.get(2)?,
                 cached: true,
                 details,
                 fingerprint: Some(fingerprint.to_string()),
