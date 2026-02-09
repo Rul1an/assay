@@ -136,11 +136,11 @@ fn handle_typed_event(
                     if let Some(p) = state.input {
                         parsed.prompt = Some(p);
                         parsed.response = state.output;
-                        if !state.tool_calls.is_empty() {
-                            state.meta["tool_calls"] =
-                                serde_json::to_value(&state.tool_calls).unwrap_or_default();
-                        }
+                        merge_tool_calls_into_meta(&mut state.meta, &state.tool_calls);
                         parsed.meta = state.meta;
+                        if let Some(model) = state.model {
+                            parsed.model = model;
+                        }
                     }
                 }
             }
@@ -211,6 +211,27 @@ fn handle_typed_event(
             LineDisposition::Continue
         }
         _ => LineDisposition::Continue,
+    }
+}
+
+fn merge_tool_calls_into_meta(
+    meta: &mut serde_json::Value,
+    tool_calls: &[crate::model::ToolCallRecord],
+) {
+    if tool_calls.is_empty() {
+        return;
+    }
+
+    let tool_calls_value = serde_json::to_value(tool_calls).unwrap_or_default();
+    match meta {
+        serde_json::Value::Object(map) => {
+            map.insert("tool_calls".to_string(), tool_calls_value);
+        }
+        _ => {
+            let mut map = serde_json::Map::new();
+            map.insert("tool_calls".to_string(), tool_calls_value);
+            *meta = serde_json::Value::Object(map);
+        }
     }
 }
 
@@ -292,12 +313,13 @@ fn flush_active_episodes(
     traces: &mut HashMap<String, LlmResponse>,
     active_episodes: HashMap<String, EpisodeState>,
 ) {
-    for (id, state) in active_episodes {
+    for (id, mut state) in active_episodes {
         if let (Some(p), Some(r)) = (state.input.clone(), state.output.clone()) {
             if traces.contains_key(&p) {
                 eprintln!("Warning: Duplicate prompt skipped at EOF for id {}", id);
                 continue;
             }
+            merge_tool_calls_into_meta(&mut state.meta, &state.tool_calls);
             traces.insert(
                 p,
                 LlmResponse {
@@ -581,6 +603,88 @@ mod tests {
         let client = TraceClient::from_path(tmp.path())?;
         let resp = client.complete("flush_me", None).await?;
         assert_eq!(resp.text, "flushed_output");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_episode_end_with_null_meta_preserves_tool_calls() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        let ep_start = r#"{"type":"episode_start","episode_id":"e_meta_null","timestamp":100,"input":{"prompt":"meta_null_prompt"},"meta":null}"#;
+        let tool_call = r#"{"type":"tool_call","episode_id":"e_meta_null","step_id":"s1","timestamp":101,"tool_name":"fs.read","call_index":0,"args":{"path":"/tmp/demo.txt"}}"#;
+        let ep_end = r#"{"type":"episode_end","episode_id":"e_meta_null","timestamp":102,"final_output":"done"}"#;
+
+        writeln!(tmp, "{}", ep_start)?;
+        writeln!(tmp, "{}", tool_call)?;
+        writeln!(tmp, "{}", ep_end)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("meta_null_prompt", None).await?;
+        assert_eq!(resp.text, "done");
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(1)
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/tool_name")
+                .and_then(|v| v.as_str()),
+            Some("fs.read")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_episode_end_propagates_step_model_to_response() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        let ep_start = r#"{"type":"episode_start","episode_id":"e_model","timestamp":100,"input":{"prompt":"model_prompt"}}"#;
+        let step1 = r#"{"type":"step","episode_id":"e_model","step_id":"s1","kind":"model","timestamp":101,"content":"{\"completion\":\"model_output\",\"model\":\"gpt-4o-mini\"}"}"#;
+        let ep_end = r#"{"type":"episode_end","episode_id":"e_model","timestamp":102}"#;
+
+        writeln!(tmp, "{}", ep_start)?;
+        writeln!(tmp, "{}", step1)?;
+        writeln!(tmp, "{}", ep_end)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("model_prompt", None).await?;
+        assert_eq!(resp.text, "model_output");
+        assert_eq!(resp.model, "gpt-4o-mini");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_eof_flush_preserves_tool_calls_in_meta() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        let ep_start = r#"{"type":"episode_start","episode_id":"e_eof_tools","timestamp":100,"input":{"prompt":"eof_tools_prompt"}}"#;
+        let tool_call = r#"{"type":"tool_call","episode_id":"e_eof_tools","step_id":"s1","timestamp":101,"tool_name":"fs.write","call_index":0,"args":{"path":"/tmp/out.txt"}}"#;
+        let step1 = r#"{"type":"step","episode_id":"e_eof_tools","step_id":"s2","kind":"model","timestamp":102,"content":"{\"completion\":\"eof_output\"}"}"#;
+        // Intentionally no episode_end: exercises EOF flush path.
+
+        writeln!(tmp, "{}", ep_start)?;
+        writeln!(tmp, "{}", tool_call)?;
+        writeln!(tmp, "{}", step1)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("eof_tools_prompt", None).await?;
+        assert_eq!(resp.text, "eof_output");
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(1)
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/tool_name")
+                .and_then(|v| v.as_str()),
+            Some("fs.write")
+        );
 
         Ok(())
     }
