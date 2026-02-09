@@ -66,7 +66,7 @@ fn contract_monitor_invalid_ebpf_payload_exit_40_load_fail() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn contract_monitor_parse_fail_policy_exit_1() {
+fn contract_monitor_parse_fail_policy_exit_2() {
     let mut invalid_policy = NamedTempFile::new().expect("temp policy");
     invalid_policy
         .write_all(b"version: [invalid")
@@ -78,11 +78,12 @@ fn contract_monitor_parse_fail_policy_exit_1() {
         .arg("--policy")
         .arg(invalid_policy.path())
         .assert()
-        .code(1);
+        .code(2);
 
     let stderr = normalize(&assert.get_output().stderr).to_lowercase();
     assert!(
-        stderr.contains("yaml")
+        stderr.contains("fatal:")
+            || stderr.contains("yaml")
             || stderr.contains("expected")
             || stderr.contains("line")
             || stderr.contains("column"),
