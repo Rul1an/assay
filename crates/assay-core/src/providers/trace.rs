@@ -587,4 +587,147 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_from_path_invalid_json_has_line_context() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        writeln!(tmp, "not-json")?;
+
+        let err = match TraceClient::from_path(tmp.path()) {
+            Ok(_) => panic!("invalid JSON must fail"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("Invalid trace format"));
+        assert!(err.contains("line 1"));
+        assert!(err.contains("Content: not-json"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_legacy_tool_fields_promote_to_tool_calls_meta() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        writeln!(
+            tmp,
+            r#"{{"prompt":"legacy_tool","response":"ok","tool":"fs.read","args":{{"path":"/tmp/demo.txt"}}}}"#
+        )?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("legacy_tool", None).await?;
+        assert_eq!(resp.text, "ok");
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(1)
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/tool_name")
+                .and_then(|v| v.as_str()),
+            Some("fs.read")
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/0/args/path")
+                .and_then(|v| v.as_str()),
+            Some("/tmp/demo.txt")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_legacy_preexisting_tool_calls_are_preserved_without_duplication(
+    ) -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        writeln!(
+            tmp,
+            r#"{{"prompt":"legacy_with_calls","response":"ok","tool_calls":[{{"tool_name":"fs.read","args":{{"path":"/tmp/a"}}}},{{"tool_name":"fs.write","args":{{"path":"/tmp/b"}}}}]}}"#
+        )?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("legacy_with_calls", None).await?;
+        assert_eq!(resp.text, "ok");
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(2)
+        );
+        assert_eq!(
+            resp.meta
+                .pointer("/tool_calls/1/tool_name")
+                .and_then(|v| v.as_str()),
+            Some("fs.write")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_v2_non_model_prompt_is_only_fallback() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        let ep_start =
+            r#"{"type":"episode_start","episode_id":"e_prio","timestamp":100,"input":null}"#;
+        let step_tool = r#"{"type":"step","episode_id":"e_prio","step_id":"s_tool","kind":"tool","timestamp":101,"content":"{\"prompt\":\"fallback_prompt\",\"completion\":\"tool_out\"}","meta":{}}"#;
+        let step_model = r#"{"type":"step","episode_id":"e_prio","step_id":"s_model","kind":"model","timestamp":102,"content":"{\"prompt\":\"authoritative_prompt\",\"completion\":\"model_out\"}","meta":{}}"#;
+        let ep_end = r#"{"type":"episode_end","episode_id":"e_prio","timestamp":103}"#;
+
+        writeln!(tmp, "{}", ep_start)?;
+        writeln!(tmp, "{}", step_tool)?;
+        writeln!(tmp, "{}", step_model)?;
+        writeln!(tmp, "{}", ep_end)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("authoritative_prompt", None).await?;
+        assert_eq!(resp.text, "model_out");
+        assert!(
+            client.complete("fallback_prompt", None).await.is_err(),
+            "fallback prompt must not remain addressable after model prompt extraction"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_eof_flush_duplicate_prompt_key_keeps_first_entry() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        // Duplicate key definition for TraceClient insertion is prompt string.
+        // request_id differences do not allow overwriting an existing prompt key.
+        writeln!(
+            tmp,
+            r#"{{"request_id":"r1","prompt":"dup_prompt","response":"first_response"}}"#
+        )?;
+        let ep_start = r#"{"type":"episode_start","episode_id":"e_dup","timestamp":100,"input":{"prompt":"dup_prompt"}}"#;
+        let step1 = r#"{"type":"step","episode_id":"e_dup","step_id":"s1","kind":"model","timestamp":101,"content":"{\"completion\":\"second_response\"}"}"#;
+        // No episode_end on purpose; this exercises EOF flush path.
+        writeln!(tmp, "{}", ep_start)?;
+        writeln!(tmp, "{}", step1)?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp = client.complete("dup_prompt", None).await?;
+        assert_eq!(resp.text, "first_response");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_from_path_accepts_crlf_jsonl_lines() -> anyhow::Result<()> {
+        let mut tmp = NamedTempFile::new()?;
+        use std::io::Write as _;
+        tmp.as_file_mut().write_all(
+            b"{\"prompt\":\"crlf_prompt_1\",\"response\":\"ok1\"}\r\n{\"prompt\":\"crlf_prompt_2\",\"response\":\"ok2\"}\r\n",
+        )?;
+
+        let client = TraceClient::from_path(tmp.path())?;
+        let resp1 = client.complete("crlf_prompt_1", None).await?;
+        let resp2 = client.complete("crlf_prompt_2", None).await?;
+        assert_eq!(resp1.text, "ok1");
+        assert_eq!(resp2.text, "ok2");
+
+        Ok(())
+    }
 }
