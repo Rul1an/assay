@@ -64,6 +64,12 @@ pub struct GenerateArgs {
 
 impl GenerateArgs {
     pub fn validate(&self) -> Result<()> {
+        Self::validate_finite("--min-stability", self.min_stability)?;
+        Self::validate_finite("--review-threshold", self.review_threshold)?;
+        Self::validate_finite("--alpha", self.alpha)?;
+        Self::validate_finite("--wilson-z", self.wilson_z)?;
+        Self::validate_finite("--entropy-threshold", self.entropy_threshold)?;
+
         if self.min_stability < 0.0 || self.min_stability > 1.0 {
             anyhow::bail!("--min-stability must be between 0.0 and 1.0");
         }
@@ -87,5 +93,63 @@ impl GenerateArgs {
             anyhow::bail!("--entropy-threshold must be non-negative");
         }
         Ok(())
+    }
+
+    fn validate_finite(flag: &str, value: f64) -> Result<()> {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            anyhow::bail!("{flag} must be finite");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GenerateArgs;
+    use std::path::PathBuf;
+
+    fn valid_args() -> GenerateArgs {
+        GenerateArgs {
+            input: None,
+            profile: None,
+            output: PathBuf::from("policy.yaml"),
+            name: "Generated Policy".to_string(),
+            format: "yaml".to_string(),
+            dry_run: false,
+            diff: false,
+            heuristics: false,
+            entropy_threshold: 3.8,
+            min_stability: 0.7,
+            review_threshold: 0.6,
+            new_is_risky: false,
+            alpha: 1.0,
+            min_runs: 1,
+            wilson_z: 1.96,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_nan_min_stability() {
+        let mut args = valid_args();
+        args.min_stability = f64::NAN;
+        let err = args.validate().expect_err("NaN must be rejected");
+        assert!(err.to_string().contains("--min-stability must be finite"));
+    }
+
+    #[test]
+    fn validate_rejects_infinite_alpha() {
+        let mut args = valid_args();
+        args.alpha = f64::INFINITY;
+        let err = args
+            .validate()
+            .expect_err("infinite alpha must be rejected");
+        assert!(err.to_string().contains("--alpha must be finite"));
+    }
+
+    #[test]
+    fn validate_accepts_finite_values() {
+        let args = valid_args();
+        args.validate().expect("finite defaults should pass");
     }
 }
