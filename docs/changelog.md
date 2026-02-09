@@ -275,6 +275,18 @@
 - refactor(registry-e3b): keep legacy DSSE helper test-local (#252) @Rul1an
 - test(registry-e3a): freeze legacy digest/signature contracts (#250) @Rul1an
 - refactor(registry-e2c): freeze digest contracts and dedup helpers (#247) @Rul1an
+- refactor(generate-e5-g5): extract diff subsystem (no behavior drift) (#268) @Rul1an
+- refactor(generate-e5-g4): extract profile/classification layer (no logic drift) (#266) @Rul1an
+- refactor(generate-e5-g3): extract ingest/aggregation layer (no behavior drift) (#264) @Rul1an
+- refactor(generate-e5-g2): extract args/model DTO layer (no logic move) (#262) @Rul1an
+- test(generate-e5-g1): freeze generate ingest/mode/diff contracts (#260) @Rul1an
+- docs(rfc-003): add generate decomposition plan and refresh RFC-002 status (#259) @Rul1an
+- chore(core-e4d): normalize AllowedOnError comment (#256) @Rul1an
+- chore(cli-e4c): reduce config-path comment noise (#255) @Rul1an
+- chore(core-e4b): tighten error-mapping comments (#254) @Rul1an
+- chore(core-e4a): clean stale comments in runner and diagnostics (#253) @Rul1an
+- refactor(registry-e3b): keep legacy DSSE helper test-local (#252) @Rul1an
+- test(registry-e3a): freeze legacy digest/signature contracts (#250) @Rul1an
 ## [2026-02-09]
 
 - test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
