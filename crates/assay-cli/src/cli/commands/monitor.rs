@@ -79,6 +79,133 @@ pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct ActiveRule {
+    id: String,
+    action: assay_core::mcp::runtime_features::MonitorAction,
+
+    // NOTE: Despite the name, `allow` represents the set of glob patterns whose
+    // matches cause this rule to fire (i.e., be treated as a violation). A path
+    // that matches `allow` and is *not* matched by `deny` will trigger the rule.
+    allow: globset::GlobSet,
+    deny: Option<globset::GlobSet>, // for match.not
+}
+
+#[cfg(target_os = "linux")]
+fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobSet> {
+    let mut b = globset::GlobSetBuilder::new();
+    for g in globs {
+        b.add(globset::Glob::new(g)?);
+    }
+    Ok(b.build()?)
+}
+
+#[cfg(target_os = "linux")]
+fn normalize_path_syntactic(input: &str) -> String {
+    // Syntactic normalization (no filesystem canonicalize -> less TOCTOU)
+    // - collapse '//' -> '/'
+    // - remove '/./'
+    // - resolve '/../' in-place
+    let is_absolute = input.starts_with('/');
+    let mut parts = Vec::new();
+    for part in input.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            x => parts.push(x),
+        }
+    }
+    if is_absolute {
+        if parts.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", parts.join("/"))
+        }
+    } else {
+        parts.join("/")
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
+    unsafe {
+        libc::kill(
+            pid as i32,
+            if mode == assay_core::mcp::runtime_features::KillMode::Immediate {
+                libc::SIGKILL
+            } else {
+                libc::SIGTERM
+            },
+        );
+    }
+    if mode == assay_core::mcp::runtime_features::KillMode::Graceful {
+        tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn compile_active_rules(
+    runtime_config: Option<&assay_core::mcp::runtime_features::RuntimeMonitorConfig>,
+) -> Vec<ActiveRule> {
+    let mut rules = Vec::new();
+    if let Some(cfg) = runtime_config {
+        for r in &cfg.rules {
+            let kind = r.rule_type.clone();
+            let mc = &r.match_config;
+
+            // support only file_open for now
+            if !matches!(
+                kind,
+                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen
+            ) {
+                continue;
+            }
+
+            match compile_globset(&mc.path_globs) {
+                Ok(allow) => {
+                    let deny = mc
+                        .not
+                        .as_ref()
+                        .map(|n| compile_globset(&n.path_globs))
+                        .transpose()
+                        .unwrap_or(None);
+                    rules.push(ActiveRule {
+                        id: r.id.clone(),
+                        action: r.action.clone(),
+                        allow,
+                        deny,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
+                }
+            }
+        }
+    }
+    rules
+}
+
+#[cfg(target_os = "linux")]
+fn decode_utf8_cstr(data: &[u8]) -> String {
+    let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+    String::from_utf8_lossy(&data[..end]).to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn dump_prefix_hex(data: &[u8], n: usize) -> String {
+    data.iter()
+        .take(n)
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+#[cfg(target_os = "linux")]
 async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
     use assay_common::{get_inode_generation, strict_open, EVENT_CONNECT, EVENT_OPENAT};
     use assay_monitor::Monitor;
@@ -186,112 +313,7 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    #[cfg(target_os = "linux")]
-    #[derive(Debug)]
-    struct ActiveRule {
-        id: String,
-        action: assay_core::mcp::runtime_features::MonitorAction,
-
-        // NOTE: Despite the name, `allow` represents the set of glob patterns whose
-        // matches cause this rule to fire (i.e., be treated as a violation). A path
-        // that matches `allow` and is *not* matched by `deny` will trigger the rule.
-        allow: globset::GlobSet,
-        deny: Option<globset::GlobSet>, // for match.not
-    }
-
-    #[cfg(target_os = "linux")]
-    fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobSet> {
-        let mut b = globset::GlobSetBuilder::new();
-        for g in globs {
-            b.add(globset::Glob::new(g)?);
-        }
-        Ok(b.build()?)
-    }
-
-    #[cfg(target_os = "linux")]
-    fn normalize_path_syntactic(input: &str) -> String {
-        // Syntactic normalization (no filesystem canonicalize -> less TOCTOU)
-        // - collapse '//' -> '/'
-        // - remove '/./'
-        // - resolve '/../' in-place
-        let is_absolute = input.starts_with('/');
-        let mut parts = Vec::new();
-        for part in input.split('/') {
-            match part {
-                "" | "." => {}
-                ".." => {
-                    parts.pop();
-                }
-                x => parts.push(x),
-            }
-        }
-        if is_absolute {
-            if parts.is_empty() {
-                "/".to_string()
-            } else {
-                format!("/{}", parts.join("/"))
-            }
-        } else {
-            parts.join("/")
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
-        unsafe {
-            libc::kill(
-                pid as i32,
-                if mode == assay_core::mcp::runtime_features::KillMode::Immediate {
-                    libc::SIGKILL
-                } else {
-                    libc::SIGTERM
-                },
-            );
-        }
-        if mode == assay_core::mcp::runtime_features::KillMode::Graceful {
-            tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
-            unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-            }
-        }
-    }
-
-    let mut rules = Vec::new();
-    if let Some(cfg) = &runtime_config {
-        for r in &cfg.rules {
-            let kind = r.rule_type.clone();
-            let mc = &r.match_config;
-
-            // support only file_open for now (openat)
-            // Note: need to import MonitorRuleType or use full path
-            if !matches!(
-                kind,
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen
-            ) {
-                continue;
-            }
-
-            match compile_globset(&mc.path_globs) {
-                Ok(allow) => {
-                    let deny = mc
-                        .not
-                        .as_ref()
-                        .map(|n| compile_globset(&n.path_globs))
-                        .transpose()
-                        .unwrap_or(None);
-                    rules.push(ActiveRule {
-                        id: r.id.clone(),
-                        action: r.action.clone(),
-                        allow,
-                        deny,
-                    });
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
-                }
-            }
-        }
-    }
+    let rules = compile_active_rules(runtime_config.as_ref());
 
     // --- Tier 1 Policy Compilation ---
     if let Some(cfg) = &runtime_config {
@@ -501,19 +523,6 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         Some(d) => tokio::time::sleep(d.into()).boxed(),
         None => std::future::pending().boxed(),
     };
-
-    fn decode_utf8_cstr(data: &[u8]) -> String {
-        let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
-        String::from_utf8_lossy(&data[..end]).to_string()
-    }
-
-    fn dump_prefix_hex(data: &[u8], n: usize) -> String {
-        data.iter()
-            .take(n)
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join("")
-    }
 
     loop {
         tokio::select! {
