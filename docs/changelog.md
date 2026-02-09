@@ -152,6 +152,21 @@
 - refactor(sim): deduplicate attack test-bundle generation (#225) @Rul1an
 - refactor(storage): deduplicate result rehydration and episode graph loading (#223) @Rul1an
 - refactor(evidence): unify severity model and remove lint duplication (#222) @Rul1an
+- refactor(metrics-e2b): centralize policy warning dedup semantics (#246) @Rul1an
+- refactor(metrics-e2a): unify tool-call extraction across metrics (#245) @Rul1an
+- docs(rfc-002): harden E1 stop-lines and gates from review (#244) @Rul1an
+- refactor(storage-e1): unify run writes and canonicalize started_at (#242) @Rul1an
+- docs(rfc): add RFC-002 code-health remediation plan (#241) @Rul1an
+- refactor(monitor): extract run_linux helpers (extract-only) (#239) @Rul1an
+- fix(args_valid): enforce policy allow/deny in runtime path (#238) @Rul1an
+- refactor(runner): decompose run_test_with_policy extract-only (#237) @Rul1an
+- fix(trace): default tool-only trace fixtures to input=ignore (#236) @Rul1an
+- test(runner): freeze retry/flake/on_error contracts before decomposition (#233) @Rul1an
+- fix(trace): harden episode-end/EOF metadata merge semantics (#232) @Rul1an
+- refactor(trace): decompose from_path into extract-only helpers (#230) @Rul1an
+- test(trace): freeze from_path parser contracts before decomposition (#228) @Rul1an
+- test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
+- ci(kernel-matrix): skip cleanup-runner while matrix is disabled (#226) @Rul1an
 ## [2026-02-09]
 
 - test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
