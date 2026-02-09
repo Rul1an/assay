@@ -15,6 +15,317 @@ pub struct TraceClient {
     traces: Arc<HashMap<String, LlmResponse>>,
     fingerprint: String,
 }
+struct EpisodeState {
+    input: Option<String>,
+    output: Option<String>,
+    model: Option<String>,
+    meta: serde_json::Value,
+    input_is_model: bool,
+    tool_calls: Vec<crate::model::ToolCallRecord>,
+}
+
+struct ParsedTraceRecord {
+    prompt: Option<String>,
+    response: Option<String>,
+    model: String,
+    meta: serde_json::Value,
+    request_id: Option<String>,
+}
+
+impl ParsedTraceRecord {
+    fn new() -> Self {
+        Self {
+            prompt: None,
+            response: None,
+            model: "trace".to_string(),
+            meta: serde_json::json!({}),
+            request_id: None,
+        }
+    }
+}
+
+enum LineDisposition {
+    Continue,
+    MaybeInsert,
+    ParseLegacy,
+}
+
+fn parse_trace_line_json(line: &str, line_no: usize) -> anyhow::Result<serde_json::Value> {
+    serde_json::from_str(line).map_err(|e| {
+        anyhow::anyhow!(
+            "line {}: Invalid trace format. Expected JSONL object.\n  Error: {}\n  Content: {}",
+            line_no,
+            e,
+            line.chars().take(50).collect::<String>()
+        )
+    })
+}
+
+fn handle_typed_event(
+    v: &serde_json::Value,
+    active_episodes: &mut HashMap<String, EpisodeState>,
+    parsed: &mut ParsedTraceRecord,
+) -> LineDisposition {
+    let Some(t) = v.get("type").and_then(|t| t.as_str()) else {
+        return LineDisposition::ParseLegacy;
+    };
+
+    match t {
+        "assay.trace" => {
+            parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
+            parsed.response = v
+                .get("response")
+                .or(v.get("text"))
+                .and_then(|s| s.as_str())
+                .map(String::from);
+            if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
+                parsed.model = m.to_string();
+            }
+            if let Some(m) = v.get("meta") {
+                parsed.meta = m.clone();
+            }
+            if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
+                parsed.request_id = Some(r.to_string());
+            }
+            LineDisposition::MaybeInsert
+        }
+        "episode_start" => {
+            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::EpisodeStart>(v.clone())
+            {
+                let input_prompt = ev
+                    .input
+                    .get("prompt")
+                    .and_then(|s| s.as_str())
+                    .map(String::from);
+                let has_input = input_prompt.is_some();
+                let state = EpisodeState {
+                    input: input_prompt,
+                    output: None,
+                    model: None,
+                    meta: ev.meta,
+                    input_is_model: has_input,
+                    tool_calls: Vec::new(),
+                };
+                active_episodes.insert(ev.episode_id, state);
+            }
+            LineDisposition::Continue
+        }
+        "tool_call" => {
+            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::ToolCallEntry>(v.clone())
+            {
+                if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
+                    state.tool_calls.push(crate::model::ToolCallRecord {
+                        id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
+                        tool_name: ev.tool_name,
+                        args: ev.args,
+                        result: ev.result,
+                        error: ev.error.map(serde_json::Value::String),
+                        index: state.tool_calls.len(),
+                        ts_ms: ev.timestamp,
+                    });
+                }
+            }
+            LineDisposition::Continue
+        }
+        "episode_end" => {
+            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::EpisodeEnd>(v.clone()) {
+                if let Some(mut state) = active_episodes.remove(&ev.episode_id) {
+                    if let Some(out) = ev.final_output {
+                        state.output = Some(out);
+                    }
+                    if let Some(p) = state.input {
+                        parsed.prompt = Some(p);
+                        parsed.response = state.output;
+                        if !state.tool_calls.is_empty() {
+                            state.meta["tool_calls"] =
+                                serde_json::to_value(&state.tool_calls).unwrap_or_default();
+                        }
+                        parsed.meta = state.meta;
+                    }
+                }
+            }
+            LineDisposition::MaybeInsert
+        }
+        "step" => {
+            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::StepEntry>(v.clone()) {
+                if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
+                    let is_model = ev.kind == "model";
+                    let can_extract_prompt = if is_model {
+                        !state.input_is_model
+                    } else {
+                        state.input.is_none()
+                    };
+
+                    if can_extract_prompt {
+                        let mut found_prompt = None;
+                        if let Some(c) = &ev.content {
+                            if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c) {
+                                if let Some(p) = c_json.get("prompt").and_then(|s| s.as_str()) {
+                                    found_prompt = Some(p.to_string());
+                                }
+                            }
+                        }
+                        if found_prompt.is_none() {
+                            if let Some(p) = ev.meta.get("gen_ai.prompt").and_then(|s| s.as_str()) {
+                                found_prompt = Some(p.to_string());
+                            }
+                        }
+                        if let Some(p) = found_prompt {
+                            state.input = Some(p);
+                            if is_model {
+                                state.input_is_model = true;
+                            }
+                        }
+                    }
+
+                    if let Some(c) = &ev.content {
+                        let mut extracted = None;
+                        if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c) {
+                            if let Some(resp) = c_json.get("completion").and_then(|s| s.as_str()) {
+                                extracted = Some(resp.to_string());
+                                if let Some(m) = c_json.get("model").and_then(|s| s.as_str()) {
+                                    state.model = Some(m.to_string());
+                                }
+                            }
+                        }
+                        if let Some(out) = extracted {
+                            state.output = Some(out);
+                        } else {
+                            state.output = Some(c.clone());
+                        }
+                    }
+
+                    if let Some(resp) = ev.meta.get("gen_ai.completion").and_then(|s| s.as_str()) {
+                        state.output = Some(resp.to_string());
+                    }
+                    if let Some(m) = ev
+                        .meta
+                        .get("gen_ai.request.model")
+                        .or(ev.meta.get("gen_ai.response.model"))
+                        .and_then(|s| s.as_str())
+                    {
+                        state.model = Some(m.to_string());
+                    }
+                }
+            }
+            LineDisposition::Continue
+        }
+        _ => LineDisposition::Continue,
+    }
+}
+
+fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
+    parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
+    parsed.response = v
+        .get("response")
+        .or(v.get("text"))
+        .and_then(|s| s.as_str())
+        .map(String::from);
+    if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
+        parsed.model = m.to_string();
+    }
+    if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
+        parsed.request_id = Some(r.to_string());
+    }
+
+    let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
+    let tool_args = v.get("args").cloned();
+    if let Some(tool) = tool_name {
+        let record = crate::model::ToolCallRecord {
+            id: "legacy-v1".to_string(),
+            tool_name: tool,
+            args: tool_args.unwrap_or(serde_json::json!({})),
+            result: None,
+            error: None,
+            index: 0,
+            ts_ms: 0,
+        };
+        parsed.meta["tool_calls"] = serde_json::json!([record]);
+    } else if let Some(calls) = v.get("tool_calls").and_then(|v| v.as_array()) {
+        parsed.meta["tool_calls"] = serde_json::Value::Array(calls.clone());
+    }
+}
+
+fn insert_trace_record(
+    traces: &mut HashMap<String, LlmResponse>,
+    request_ids: &mut HashSet<String>,
+    parsed: ParsedTraceRecord,
+    line_no: usize,
+) -> anyhow::Result<()> {
+    let (Some(prompt), Some(response)) = (parsed.prompt, parsed.response) else {
+        return Ok(());
+    };
+
+    if let Some(rid) = &parsed.request_id {
+        if request_ids.contains(rid) {
+            return Err(anyhow::anyhow!(
+                "line {}: Duplicate request_id {}",
+                line_no,
+                rid
+            ));
+        }
+        request_ids.insert(rid.clone());
+    }
+
+    if traces.contains_key(&prompt) {
+        return Err(anyhow::anyhow!(
+            "Duplicate prompt found in trace file: {}",
+            prompt
+        ));
+    }
+
+    traces.insert(
+        prompt,
+        LlmResponse {
+            text: response,
+            meta: parsed.meta,
+            model: parsed.model,
+            provider: "trace".to_string(),
+            ..Default::default()
+        },
+    );
+
+    Ok(())
+}
+
+fn flush_active_episodes(
+    traces: &mut HashMap<String, LlmResponse>,
+    active_episodes: HashMap<String, EpisodeState>,
+) {
+    for (id, state) in active_episodes {
+        if let (Some(p), Some(r)) = (state.input.clone(), state.output.clone()) {
+            if traces.contains_key(&p) {
+                eprintln!("Warning: Duplicate prompt skipped at EOF for id {}", id);
+                continue;
+            }
+            traces.insert(
+                p,
+                LlmResponse {
+                    text: r,
+                    meta: state.meta,
+                    model: state.model.unwrap_or_else(|| "trace".to_string()),
+                    provider: "trace".to_string(),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+}
+
+fn compute_trace_fingerprint(traces: &HashMap<String, LlmResponse>) -> String {
+    let mut keys: Vec<&String> = traces.keys().collect();
+    keys.sort();
+    let mut hasher = sha2::Sha256::new();
+    for k in keys {
+        hasher.update(k.as_bytes());
+        if let Some(v) = traces.get(k) {
+            hasher.update(v.text.as_bytes());
+            hasher.update(v.model.as_bytes());
+        }
+    }
+    hex::encode(hasher.finalize())
+}
+
 impl TraceClient {
     pub fn from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let file = File::open(path.as_ref()).map_err(|e| {
@@ -28,343 +339,29 @@ impl TraceClient {
 
         let mut traces = HashMap::new();
         let mut request_ids = HashSet::new();
-
-        // State for accumulating V2 episodes
-        struct EpisodeState {
-            input: Option<String>,
-            output: Option<String>,
-            model: Option<String>,
-            meta: serde_json::Value,
-            input_is_model: bool,
-            tool_calls: Vec<crate::model::ToolCallRecord>,
-        }
         let mut active_episodes: HashMap<String, EpisodeState> = HashMap::new();
 
         for (i, line_res) in reader.lines().enumerate() {
+            let line_no = i + 1;
             let line = line_res?;
             if line.trim().is_empty() {
                 continue;
             }
 
-            // Attempt V2 Parse first (TraceEntry enum)
-            // If it fails, fallback to legacy V1 (TraceEntryV1/TraceEntry struct local def)
-            // Actually, we can use `TraceEntry` enum from schema if we have it?
-            // But schema might not be strictly followed in loose JSON files.
-            // Let's use serde_json::Value to sniff.
+            let v = parse_trace_line_json(&line, line_no)?;
+            let mut parsed = ParsedTraceRecord::new();
 
-            let v: serde_json::Value = serde_json::from_str(&line).map_err(|e| {
-                anyhow::anyhow!(
-                    "line {}: Invalid trace format. Expected JSONL object.\n  Error: {}\n  Content: {}",
-                    i + 1,
-                    e,
-                    line.chars().take(50).collect::<String>()
-                )
-            })?;
-
-            // Heuristic detection
-            let mut prompt_opt = None;
-            let mut response_opt = None;
-            let mut model = "trace".to_string();
-            let mut meta = serde_json::json!({});
-            let mut request_id_check = None;
-
-            if let Some(t) = v.get("type").and_then(|t| t.as_str()) {
-                match t {
-                    "assay.trace" => {
-                        // V1
-                        prompt_opt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
-                        response_opt = v
-                            .get("response")
-                            .or(v.get("text"))
-                            .and_then(|s| s.as_str())
-                            .map(String::from);
-                        if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
-                            model = m.to_string();
-                        }
-                        if let Some(m) = v.get("meta") {
-                            meta = m.clone();
-                        }
-                        if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
-                            request_id_check = Some(r.to_string());
-                        }
-                    }
-                    "episode_start" => {
-                        // START V2
-                        if let Ok(ev) =
-                            serde_json::from_value::<crate::trace::schema::EpisodeStart>(v.clone())
-                        {
-                            let input_prompt = ev
-                                .input
-                                .get("prompt")
-                                .and_then(|s| s.as_str())
-                                .map(String::from);
-                            let has_input = input_prompt.is_some();
-                            let state = EpisodeState {
-                                input: input_prompt,
-                                output: None, // accum later
-                                model: None,  // extract from steps?
-                                meta: ev.meta,
-                                input_is_model: has_input, // authoritative only if present
-                                tool_calls: Vec::new(),
-                            };
-                            active_episodes.insert(ev.episode_id, state);
-                            continue; // Wait for end
-                        }
-                    }
-                    "tool_call" => {
-                        if let Ok(ev) =
-                            serde_json::from_value::<crate::trace::schema::ToolCallEntry>(v.clone())
-                        {
-                            if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
-                                state.tool_calls.push(crate::model::ToolCallRecord {
-                                    id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
-                                    tool_name: ev.tool_name,
-                                    args: ev.args,
-                                    result: ev.result,
-                                    error: ev.error.map(serde_json::Value::String),
-                                    index: state.tool_calls.len(), // Global index for sequence validation
-                                    ts_ms: ev.timestamp,
-                                });
-                            }
-                        }
-                    }
-                    "episode_end" => {
-                        // END V2
-                        if let Ok(ev) =
-                            serde_json::from_value::<crate::trace::schema::EpisodeEnd>(v.clone())
-                        {
-                            if let Some(mut state) = active_episodes.remove(&ev.episode_id) {
-                                // Finalize
-                                if let Some(out) = ev.final_output {
-                                    state.output = Some(out);
-                                }
-
-                                if let Some(p) = state.input {
-                                    prompt_opt = Some(p);
-                                    response_opt = state.output;
-
-                                    // Inject tool calls into meta
-                                    if !state.tool_calls.is_empty() {
-                                        state.meta["tool_calls"] =
-                                            serde_json::to_value(&state.tool_calls)
-                                                .unwrap_or_default();
-                                    }
-
-                                    meta = state.meta;
-                                    // model?
-                                }
-                            }
-                        }
-                    }
-
-                    "step" => {
-                        if let Ok(ev) =
-                            serde_json::from_value::<crate::trace::schema::StepEntry>(v.clone())
-                        {
-                            if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
-                                // PROMPT EXTRACTION
-                                // Logic:
-                                // 1. If step is MODEL: Prefer this prompt over any previous (unless locked? No, "First Wins" for model steps).
-                                //    Actually standard "First Wins" means first MODEL step.
-                                // 2. If step is NOT model: Use as fallback only if we have NO input yet.
-
-                                let is_model = ev.kind == "model";
-                                let can_extract = if is_model {
-                                    // If we are model, we overwrite if current input is NOT model (fallback) OR if input is None.
-                                    // If we already have a model input, we skip (First Model Wins).
-                                    !state.input_is_model
-                                } else {
-                                    // If not model, only extract if we have absolutely nothing.
-                                    state.input.is_none()
-                                };
-
-                                if can_extract {
-                                    let mut found_prompt = None;
-
-                                    if let Some(c) = &ev.content {
-                                        if let Ok(c_json) =
-                                            serde_json::from_str::<serde_json::Value>(c)
-                                        {
-                                            if let Some(p) =
-                                                c_json.get("prompt").and_then(|s| s.as_str())
-                                            {
-                                                found_prompt = Some(p.to_string());
-                                            }
-                                        }
-                                    }
-                                    if found_prompt.is_none() {
-                                        if let Some(p) =
-                                            ev.meta.get("gen_ai.prompt").and_then(|s| s.as_str())
-                                        {
-                                            found_prompt = Some(p.to_string());
-                                        }
-                                    }
-
-                                    if let Some(p) = found_prompt {
-                                        state.input = Some(p);
-                                        if is_model {
-                                            state.input_is_model = true;
-                                        }
-                                    }
-                                }
-
-                                // --- OUTPUT EXTRACTION (Last Wins) ---
-                                // Rule 4: Step Content "completion"
-                                if let Some(c) = &ev.content {
-                                    let mut extracted = None;
-                                    if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c)
-                                    {
-                                        if let Some(resp) =
-                                            c_json.get("completion").and_then(|s| s.as_str())
-                                        {
-                                            extracted = Some(resp.to_string());
-                                            // Capture model if present
-                                            if let Some(m) =
-                                                c_json.get("model").and_then(|s| s.as_str())
-                                            {
-                                                state.model = Some(m.to_string());
-                                            }
-                                        }
-                                    }
-
-                                    if let Some(out) = extracted {
-                                        state.output = Some(out);
-                                    } else {
-                                        // Fallback: use raw content as output if structured extraction failed
-                                        state.output = Some(c.clone());
-                                    }
-                                }
-                                // Rule 5: Step Meta "gen_ai.completion"
-                                if let Some(resp) =
-                                    ev.meta.get("gen_ai.completion").and_then(|s| s.as_str())
-                                {
-                                    state.output = Some(resp.to_string());
-                                }
-                                if let Some(m) = ev
-                                    .meta
-                                    .get("gen_ai.request.model")
-                                    .or(ev.meta.get("gen_ai.response.model"))
-                                    .and_then(|s| s.as_str())
-                                {
-                                    state.model = Some(m.to_string());
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    _ => {
-                        continue;
-                    }
-                }
-            } else {
-                // Legacy loose JSON (no type)
-                prompt_opt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
-                response_opt = v
-                    .get("response")
-                    .or(v.get("text"))
-                    .and_then(|s| s.as_str())
-                    .map(String::from);
-                // Fix: Extract other fields too
-                if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
-                    model = m.to_string();
-                }
-                if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
-                    request_id_check = Some(r.to_string());
-                }
-
-                // Fix: Extract tool calls for V1/Legacy trace validation
-                let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
-                let tool_args = v.get("args").cloned();
-
-                if let Some(tool) = tool_name {
-                    let record = crate::model::ToolCallRecord {
-                        id: "legacy-v1".to_string(),
-                        tool_name: tool,
-                        args: tool_args.unwrap_or(serde_json::json!({})),
-                        result: None,
-                        error: None,
-                        index: 0,
-                        ts_ms: 0,
-                    };
-                    meta["tool_calls"] = serde_json::json!([record]);
-                } else if let Some(calls) = v.get("tool_calls").and_then(|v| v.as_array()) {
-                    // Propagate full list if present in V1
-                    meta["tool_calls"] = serde_json::Value::Array(calls.clone());
-                }
+            match handle_typed_event(&v, &mut active_episodes, &mut parsed) {
+                LineDisposition::Continue => continue,
+                LineDisposition::MaybeInsert => {}
+                LineDisposition::ParseLegacy => parse_legacy_record(&v, &mut parsed),
             }
 
-            if let (Some(p), Some(r)) = (prompt_opt, response_opt) {
-                // Finalize Entry
-                // Uniqueness Check
-                if let Some(rid) = &request_id_check {
-                    if request_ids.contains(rid) {
-                        return Err(anyhow::anyhow!(
-                            "line {}: Duplicate request_id {}",
-                            i + 1,
-                            rid
-                        ));
-                    }
-                    request_ids.insert(rid.clone());
-                }
-
-                if traces.contains_key(&p) {
-                    // Duplicate prompt handling? Overwrite or Error?
-                    // Existing code errors.
-                    return Err(anyhow::anyhow!(
-                        "Duplicate prompt found in trace file: {}",
-                        p
-                    ));
-                }
-
-                traces.insert(
-                    p,
-                    LlmResponse {
-                        text: r,
-                        meta,
-                        model,
-                        provider: "trace".to_string(),
-                        ..Default::default()
-                    },
-                );
-            }
+            insert_trace_record(&mut traces, &mut request_ids, parsed, line_no)?;
         }
 
-        // Flush active episodes at EOF
-        for (id, state) in active_episodes {
-            if let (Some(p), Some(r)) = (state.input.clone(), state.output.clone()) {
-                // ... reuse insertion logic (refactor to helper?) ...
-                // Duplicate check
-                if traces.contains_key(&p) {
-                    eprintln!("Warning: Duplicate prompt skipped at EOF for id {}", id);
-                    continue;
-                }
-                traces.insert(
-                    p,
-                    LlmResponse {
-                        text: r,
-                        meta: state.meta,
-                        model: state.model.unwrap_or_else(|| "trace".to_string()),
-                        provider: "trace".to_string(),
-                        ..Default::default()
-                    },
-                );
-            }
-        }
-
-        // Compute deterministic fingerprint of traces
-        let mut keys: Vec<&String> = traces.keys().collect();
-        keys.sort();
-        let mut hasher = sha2::Sha256::new();
-        for k in keys {
-            hasher.update(k.as_bytes());
-            if let Some(v) = traces.get(k) {
-                // hash validation relevant parts of response
-                hasher.update(v.text.as_bytes());
-                // include meta/model? yes for completeness
-                hasher.update(v.model.as_bytes());
-            }
-        }
-        let fingerprint = hex::encode(hasher.finalize());
+        flush_active_episodes(&mut traces, active_episodes);
+        let fingerprint = compute_trace_fingerprint(&traces);
 
         Ok(Self {
             traces: Arc::new(traces),
