@@ -342,8 +342,8 @@ mod tests {
         SigningKey::generate(&mut rand::thread_rng())
     }
 
-    // Legacy compatibility helper kept test-local: production path uses
-    // canonical bytes via verify_dsse_signature_bytes.
+    // Legacy compatibility helper kept test-local: production path verifies
+    // canonical bytes via verify_dsse_signature_bytes; callers canonicalize.
     fn verify_dsse_signature_legacy_for_tests(
         content: &str,
         envelope: &DsseEnvelope,
