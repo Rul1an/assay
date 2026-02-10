@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn asciinema rec --overwrite --output-format=asciicast-v2 demo/output/hero.cast
+
+# Wait for initial shell prompt (assuming standard bash/zsh prompt ending in $ or %)
+expect -re "\[\$%#\] "
+send "export PS1='➜ '\r"
+expect "➜ "
+
+# Setup environment
+send "export PATH=\$PWD/target/release:\$PWD/target/debug:\$PATH\r"
+expect "➜ "
+send "cd demo/fixtures\r"
+expect "➜ "
+send "clear\r"
+expect "➜ "
+
+# Scene 1: Unsafe Run
+send "assay run --config eval.yaml --trace-file traces/unsafe.jsonl\r"
+expect "➜ "
+sleep 2
+
+# Scene 2: Safe Run
+send "assay run --config eval.yaml --trace-file traces/safe.jsonl\r"
+expect "➜ "
+sleep 2
+
+# Exit recording
+send "exit\r"
+expect eof
