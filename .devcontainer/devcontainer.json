@@ -4,7 +4,7 @@
     "features": {
         "ghcr.io/devcontainers/features/github-cli:1": {}
     },
-    "onCreateCommand": "cargo install --path . --locked 2>/dev/null || cargo install assay --locked",
+    "onCreateCommand": "cargo install --path crates/assay-cli --locked 2>/dev/null || cargo install assay-cli --locked",
     "postCreateCommand": "bash .devcontainer/welcome.sh",
     "customizations": {
         "vscode": {

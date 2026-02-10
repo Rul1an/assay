@@ -4,7 +4,7 @@ set -e
 # Verify assay is available
 if ! command -v assay &> /dev/null; then
     echo "⚠️  Assay binary not found. Building from source..."
-    cargo install --path . --locked 2>/dev/null || cargo install assay --locked
+    cargo install --path crates/assay-cli --locked 2>/dev/null || cargo install assay-cli --locked
 fi
 
 VERSION=$(assay --version 2>/dev/null || echo "unknown")
