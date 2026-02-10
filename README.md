@@ -6,11 +6,29 @@
 
 **Policy-as-Code for AI Agents.**
 
+Runs offline. No telemetry. No vendor lock-in.
+
 Assay validates AI agent behavior against policies. Record traces, generate policies, run deterministic CI gates, produce evidence bundles for audit. Works with any MCP-compatible agent.
 
 > **Open Core:** Engine + baseline packs are MIT/Apache-2.0.
 > Compliance packs (EU AI Act, SOC2) are commercial.
 > See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).
+
+<div align="center">
+  <img src="demo/output/hero.gif" alt="Assay Demo" width="100%" />
+</div>
+
+<!-- MP4 version available at demo/output/hero.mp4 for docs sites -->
+
+<div align="center">
+  <a href="https://codespaces.new/Rul1an/assay?quickstart=1">
+    <img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces" width="160" />
+  </a>
+  &nbsp;&nbsp;&nbsp;
+  <code>cargo install assay-cli</code>
+</div>
+
+<br/>
 
 ## Install
 
