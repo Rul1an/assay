@@ -393,8 +393,8 @@ async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
         kill_config = p.kill_switch;
     }
 
-    let ebpf_path = match args.ebpf {
-        Some(p) => p,
+    let ebpf_path = match args.ebpf.as_ref() {
+        Some(p) => p.clone(),
         None => {
             // Heuristic: default to the output location of `cargo xtask build-ebpf`
             // User can override with --ebpf
