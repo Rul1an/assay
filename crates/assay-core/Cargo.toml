@@ -83,7 +83,7 @@ path = "benches/store_write_heavy.rs"
 harness = false
 
 [dev-dependencies]
-tempfile = "3.23.0"
+tempfile = "3.25.0"
 serial_test = "3"
 criterion = "0.8"
 tracing-subscriber = { version = "0.3.22", features = ["json", "fmt", "env-filter"] }
