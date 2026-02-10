@@ -287,6 +287,22 @@
 - chore(core-e4a): clean stale comments in runner and diagnostics (#253) @Rul1an
 - refactor(registry-e3b): keep legacy DSSE helper test-local (#252) @Rul1an
 - test(registry-e3a): freeze legacy digest/signature contracts (#250) @Rul1an
+
+## [2026-02-10]
+
+- docs(governance): sweep structure, archive redundant, sync RFC/roadmap status (#282) @Rul1an
+- fix(monitor): avoid partial move of --ebpf args in linux monitor path (#281) @Rul1an
+- chore(ci): bump PyO3/maturin-action from 1.49.4 to 1.50.0 (#277) @app/dependabot
+- chore(ci): bump github/codeql-action from 3.32.1 to 3.32.2 (#276) @app/dependabot
+- chore(ci): bump peter-evans/create-pull-request from 7.0.5 to 7.0.11 (#275) @app/dependabot
+- refactor(rfc-004): close O3/O4/O5 (monitor split, typed hot-path, parity fence) (#274) @Rul1an
+- docs(rfc-004): converge O2 status evidence across RFC docs (#273) @Rul1an
+- refactor(generate-e5-g6): make generate.rs orchestrator-only (#271) @Rul1an
+- fix(generate): reject non-finite float CLI args (#270) @Rul1an
+- refactor(generate-e5-g5): extract diff subsystem (no behavior drift) (#268) @Rul1an
+- refactor(generate-e5-g4): extract profile/classification layer (no logic drift) (#266) @Rul1an
+- refactor(generate-e5-g3): extract ingest/aggregation layer (no behavior drift) (#264) @Rul1an
+- refactor(generate-e5-g2): extract args/model DTO layer (no logic move) (#262) @Rul1an
 ## [2026-02-09]
 
 - test(monitor): freeze CLI monitor failure-path contract (#227) @Rul1an
