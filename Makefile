@@ -17,18 +17,20 @@ demo: fail test ## Run the full break & fix demo
 
 test: ## Run a safe trace against policy (should PASS)
 	@echo "━━━ Safe trace (expect PASS) ━━━"
-	cd $(FIXTURES) && assay run --config eval.yaml --trace-file traces/safe.jsonl
+	@ls -d demo/fixtures > /dev/null 2>&1 || (echo "Error: demo/fixtures not found" && exit 1)
+	cd $(CURDIR)/demo/fixtures && assay run --config eval.yaml --trace-file traces/safe.jsonl
 
 fail: ## Run an unsafe trace against policy (should FAIL)
 	@echo "━━━ Unsafe trace (expect FAIL) ━━━"
-	-cd $(FIXTURES) && assay run --config eval.yaml --trace-file traces/unsafe.jsonl
+	@ls -d demo/fixtures > /dev/null 2>&1 || (echo "Error: demo/fixtures not found" && exit 1)
+	-cd $(CURDIR)/demo/fixtures && assay run --config eval.yaml --trace-file traces/unsafe.jsonl
 
 explore: ## Open the TUI evidence explorer
-	cd $(FIXTURES) && assay evidence explore --bundle bundle.tar.gz
+	cd $(CURDIR)/demo/fixtures && assay evidence explore --bundle bundle.tar.gz
 
 validate: ## Validate traces against policy
-	cd $(FIXTURES) && assay validate --config eval.yaml --trace-file traces/unsafe.jsonl
-	cd $(FIXTURES) && assay validate --config eval.yaml --trace-file traces/safe.jsonl
+	cd $(CURDIR)/demo/fixtures && assay validate --config eval.yaml --trace-file traces/unsafe.jsonl
+	cd $(CURDIR)/demo/fixtures && assay validate --config eval.yaml --trace-file traces/safe.jsonl
 
 init: ## Initialize a new Assay project in current directory
 	assay init --hello-trace --ci github
