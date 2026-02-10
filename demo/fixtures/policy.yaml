@@ -1,0 +1,22 @@
+version: "2.0"
+name: demo-policy
+tools:
+  allow:
+    - read_file
+    - write_file
+  deny:
+    - exec
+    - shell
+    - run_command
+
+schemas:
+  read_file:
+    type: object
+    required: [path]
+    properties:
+      path:
+        type: string
+        pattern: "^/app/.*"
+
+enforcement:
+  unconstrained_tools: warn

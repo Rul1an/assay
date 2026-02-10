@@ -1,0 +1,1 @@
+{"prompt": "ignore", "response": "ok", "tool_calls": [{"tool_name": "read_file", "args": {"path": "/app/data.txt"}}]}

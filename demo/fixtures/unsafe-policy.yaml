@@ -1,0 +1,6 @@
+version: "2.0"
+name: "unsafe-baseline"
+tools:
+  allow: ["*"]
+enforcement:
+  unconstrained_tools: allow
