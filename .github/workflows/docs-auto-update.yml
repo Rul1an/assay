@@ -73,7 +73,7 @@ jobs:
       # Requires repo Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests" enabled
       - name: Create Pull Request
         if: steps.changes.outputs.has_changes == 'true'
-        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f # v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "docs: auto-update diagrams and crate info"
