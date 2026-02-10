@@ -5,7 +5,7 @@ Set Height 720
 Set Padding 40
 Set Theme "Catppuccin Mocha"
 Hide
-Type "assay guard --watch"
+Type "assay sim run --target prod.bundle --suite chaos"
 Enter
 Show
 Type "🛡️  Active Shield Protocol"

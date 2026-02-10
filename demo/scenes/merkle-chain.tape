@@ -5,7 +5,7 @@ Set Height 720
 Set Padding 40
 Set Theme "Catppuccin Mocha"
 Hide
-Type "assay verify chain"
+Type "assay bundle verify --bundle output.bundle"
 Enter
 Show
 Type "Verifying evidence bundle..."
