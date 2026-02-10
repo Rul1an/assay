@@ -35,9 +35,9 @@ This RFC consolidates only those open items with explicit gates and merge order.
   - G3: `#264` merged
   - G4: `#266` merged
   - G5: `#268` merged
-  - Finite validation hardening: `#270` merged
+  - RFC-003 finite validate: `#270` merged
 
-### 2.3 Mechanical status table (source of truth)
+### 2.2 Mechanical status table (source of truth)
 
 | Item | Status | Reference | Merge SHA | Date |
 |------|--------|-----------|-----------|------|
@@ -59,7 +59,7 @@ This RFC consolidates only those open items with explicit gates and merge order.
 | RFC-003 G6 | Open | PR #271 | - | Open |
 | Docs auto-update | Open | PR #272 | - | Open |
 
-### 2.2 Open PRs
+### 2.3 Open PRs
 
 - `#271` `refactor(generate-e5-g6): make generate.rs orchestrator-only` (open)
 - `#272` `docs: auto-update diagrams and crate info` (open, docs-only)
@@ -227,7 +227,7 @@ This RFC consolidates only those open items with explicit gates and merge order.
 5. O5 parity fence completion.
 6. O6 docs auto-update merge/rebase as needed.
 
-## 4.1 CI/Check Discipline
+### 4.1 CI/Check Discipline
 
 - Required per item:
   - command gates listed in item scope
