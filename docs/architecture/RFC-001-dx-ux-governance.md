@@ -1,10 +1,18 @@
 # RFC-001: DX/UX & Governance - Core Invariants + Debt-Ranked Execution Plan
 
-> **Status**: Active (Wave A/B merged, Wave C in progress)
+> **Status**: Active (Wave A/B merged, Wave C in progress, evidence in RFC-004)
 > **Date**: 2026-02-07
 > **Owner**: DX/Governance track
 > **Motivation**: Keep Assay's state-of-the-art core (replay/evidence/enforcement) strong while preventing CLI/plumbing debt from eroding the product wedge.
 > **Constraint**: Refactor only where it directly reduces wedge friction (triage, determinism, onboarding).
+
+## 0. Status Evidence (mechanical)
+
+For merge/open proof (PR reference + SHA + date), use:
+
+- `docs/architecture/RFC-004-open-items-convergence-q1-2026.md`
+
+This RFC keeps normative design/governance content; implementation status is maintained in RFC-004 to avoid drift.
 
 ---
 
