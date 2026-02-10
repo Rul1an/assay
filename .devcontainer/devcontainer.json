@@ -1,0 +1,28 @@
+{
+    "name": "Assay Dev Environment",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-bullseye",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {}
+    },
+    "postCreateCommand": "cargo build --release && cp target/release/assay /usr/local/bin/ && cd /workspaces/assay && echo '✅ Assay installed. Try: assay init --hello-trace --ci github && assay run'",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "serayuzgur.crates"
+            ],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "rust-analyzer.cargo.features": "all"
+            }
+        },
+        "codespaces": {
+            "openFiles": [
+                "README.md"
+            ]
+        }
+    },
+    "forwardPorts": [],
+    "remoteUser": "vscode"
+}

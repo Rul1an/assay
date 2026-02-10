@@ -59,22 +59,36 @@ Elke scene is een apart GIF + samen vormen ze een volledige MP4 walkthrough. Str
 Output demo/output/hero.gif
 Output demo/output/hero.mp4
 Set FontSize 16
-Set Width 1000
-Set Height 600
+Set Width 1280
+Set Height 720
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set WindowBar Colorful
+Set Margin 20
+Set MarginFill "#1E1E2E"
+Set TypingSpeed 30ms
 
-Type "mkdir my-agent && cd my-agent"
+Type "export PS1='➜ '"
 Enter
-Sleep 500ms
+Type "export PATH=$PWD/target/debug:$PATH"
+Enter
+Type "cd demo/fixtures"
+Enter
+Type "clear"
+Enter
+Show
 
-Type "assay init --hello-trace --ci github"
+# 1. Unsafe Run -> FAIL (Tension)
+# "Developers trust tools that fail correctly"
+Type "assay run --config eval.yaml --trace-file traces/unsafe.jsonl"
 Enter
 Sleep 3s
 
-Type "assay run --config eval.yaml"
+# 2. Safe Run -> PASS (Resolution)
+Type "assay run --config eval.yaml --trace-file traces/safe.jsonl"
 Enter
 Sleep 3s
+
+Screenshot demo/output/hero-thumb.png
 ```
 
 **Wat de dev ziet:** Scaffolding met emoji-output (detectie, generatie, klaar) → test pass met exit code 0.
@@ -87,10 +101,13 @@ Sleep 3s
 # demo/break-fix.tape
 Output demo/output/break-fix.gif
 Set FontSize 16
-Set Width 1000
-Set Height 600
+Set Width 1280
+Set Height 720
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set WindowBar Colorful
+Set Margin 20
+Set MarginFill "#1E1E2E"
+Set TypingSpeed 30ms
 
 # Run met unsafe trace → FAIL
 Type "assay run --config eval.yaml --trace-file traces/unsafe.jsonl"
@@ -115,10 +132,13 @@ Sleep 3s
 # demo/evidence-lint.tape
 Output demo/output/evidence-lint.gif
 Set FontSize 16
-Set Width 1000
-Set Height 600
+Set Width 1280
+Set Height 720
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set WindowBar Colorful
+Set Margin 20
+Set MarginFill "#1E1E2E"
+Set TypingSpeed 30ms
 
 Type "assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline"
 Enter
@@ -135,10 +155,13 @@ Sleep 4s
 # demo/sim.tape
 Output demo/output/sim.gif
 Set FontSize 16
-Set Width 1000
-Set Height 600
+Set Width 1280
+Set Height 720
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set WindowBar Colorful
+Set Margin 20
+Set MarginFill "#1E1E2E"
+Set TypingSpeed 30ms
 
 Type "assay sim run --suite quick --target bundle.tar.gz --seed 42"
 Enter
@@ -155,9 +178,13 @@ Sleep 4s
 # demo/explore.tape
 Output demo/output/explore.gif
 Set FontSize 16
-Set Width 1000
-Set Height 700
+Set Width 1280
+Set Height 720
 Set Theme "Catppuccin Mocha"
+Set WindowBar Colorful
+Set Margin 20
+Set MarginFill "#1E1E2E"
+Set TypingSpeed 30ms
 
 Type "assay evidence explore bundle.tar.gz"
 Enter
@@ -280,7 +307,17 @@ Show HN: Assay – Policy-as-Code for AI agents (deterministic replay, evidence 
 
 ### Post body
 
-Eerste persoon, technisch, understated:
+Eerste persoon, technisch, understated. **Privacy-first focus**:
+
+```
+Show HN: Assay – Deterministic compliance testing for AI agents, written in Rust
+```
+
+### Positioning (Privacy First)
+
+"Runs offline. No telemetry. No vendor lock-in."
+
+This is the #1 trend in 2026. Emphasize that compliance data never leaves the machine.
 
 ```
 I've been building Assay to solve a problem I kept hitting:
@@ -380,9 +417,12 @@ Gebaseerd op Evil Martians studie (100 devtool landing pages, 2025):
 
 Self-hosted JS player component op docs-site. Per feature-sectie een mini-demo die afspeelt on click. `data-start-at` en `data-speed` attributen voor precieze controle.
 
-### "Try in Codespace" Button (lage effort, hoge conversie)
+### "Try in Codespace" Button (Implemented)
 
-GitHub Codespace met pre-installed Assay + voorbeelden. Dev klikt → terminal → `assay init --hello-trace && assay run`. Hoogste conversie maar kost Codespace minutes.
+GitHub Codespace met pre-installed Assay + voorbeelden. Dev klikt → terminal → `assay init --hello-trace && assay run`.
+- **Config:** `.devcontainer/devcontainer.json`
+- **Boot time:** ~30-60s
+- **Conversion:** Hoogste potentieel voor "Aha!" moment zonder installatie.
 
 ### Interactieve Browser Demo (toekomst)
 
