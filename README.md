@@ -20,13 +20,20 @@ Assay validates AI agent behavior against policies. Record traces, generate poli
 
 <!-- MP4 version available at demo/output/hero.mp4 for docs sites -->
 
-<div align="center">
-  <a href="https://codespaces.new/Rul1an/assay?quickstart=1">
-    <img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces" width="160" />
-  </a>
-  &nbsp;&nbsp;&nbsp;
-  <code>cargo install assay-cli</code>
-</div>
+## Try It Now
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Rul1an/assay?quickstart=1)
+
+No install required. Opens a browser-based terminal with Assay pre-compiled and demo fixtures ready.
+
+```bash
+# In the Codespace terminal:
+make demo        # See the full break & fix flow
+make test        # Run a safe trace (PASS)
+make fail        # Run an unsafe trace (FAIL)
+```
+
+Or install locally:
 
 <br/>
 

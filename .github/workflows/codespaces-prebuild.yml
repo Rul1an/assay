@@ -1,0 +1,23 @@
+name: Codespaces Prebuild
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - '.devcontainer/**'
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6:00 UTC
+  workflow_dispatch:
+
+# GitHub builds the prebuild image automatically based on
+# .devcontainer/devcontainer.json — you only need to configure the trigger.
+# Go to: Settings → Codespaces → Set up prebuild
+# This workflow is just to ensure we have a trigger event for updates.
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Triggering prebuild refresh via push/schedule"

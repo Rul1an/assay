@@ -1,28 +1,24 @@
 {
-    "name": "Assay Dev Environment",
-    "image": "mcr.microsoft.com/devcontainers/rust:1-bullseye",
+    "name": "Assay Policy Engine",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
     "features": {
-        "ghcr.io/devcontainers/features/common-utils:2": {}
+        "ghcr.io/devcontainers/features/github-cli:1": {}
     },
-    "postCreateCommand": "cargo build --release && cp target/release/assay /usr/local/bin/ && cd /workspaces/assay && echo '✅ Assay installed. Try: assay init --hello-trace --ci github && assay run'",
+    "onCreateCommand": "cargo install --path . --locked 2>/dev/null || cargo install assay --locked",
+    "postCreateCommand": "bash .devcontainer/welcome.sh",
     "customizations": {
         "vscode": {
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "terminal.integrated.fontSize": 14,
+                "workbench.colorTheme": "One Dark Pro"
+            },
             "extensions": [
                 "rust-lang.rust-analyzer",
                 "tamasfe.even-better-toml",
-                "serayuzgur.crates"
-            ],
-            "settings": {
-                "terminal.integrated.defaultProfile.linux": "bash",
-                "rust-analyzer.cargo.features": "all"
-            }
-        },
-        "codespaces": {
-            "openFiles": [
-                "README.md"
+                "redhat.vscode-yaml"
             ]
         }
     },
-    "forwardPorts": [],
     "remoteUser": "vscode"
 }
