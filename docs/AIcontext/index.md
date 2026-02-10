@@ -1,8 +1,8 @@
 # AI Context Documentation
 
-> **Version**: 2.15.0 (February 2026)
-> **Last Updated**: 2026-02
-> **SOTA Status**: Judge output (PR #159); SARIF limits (PR #160); Bleeding Edge (MCP Auth, OTel GenAI, Replay Bundle)
+> **Version**: 2.18.0 (February 2026, post-RFC-003)
+> **Last Updated**: 2026-02-10
+> **SOTA Status**: Generate decomposition complete (RFC-003); Code health complete (RFC-002); Judge output (PR #159); SARIF limits (PR #160)
 
 This directory contains comprehensive documentation designed specifically for AI agents (LLMs) to understand and work with the Assay codebase. These documents follow best practices for AI context management as of January 2026.
 
@@ -43,6 +43,8 @@ These documents provide:
 
 | Feature | Status | Description |
 |---------|--------|-------------|
+| **Generate Decomposition** | ✅ Complete (RFC-003) | G1-G6 all merged. `generate.rs` split into args/model/ingest/profile/diff modules. |
+| **Code Health** | ✅ Complete (RFC-002) | E1-E5 all delivered. Store, metrics, registry, comments cleaned up. |
 | **Judge Reliability** | ✅ Audit Grade (PR #159) | E_JUDGE_UNCERTAIN (exit 1), seeds (string\|null) in run/summary/console, judge_metrics (flip_rate, abstain_rate). Randomized order, 2-of-3, per-suite policies. |
 | **E2.3 SARIF limits** | ✅ PR #160 | Deterministic truncation (default 25k results); runs[0].properties.assay when truncated; sarif.omitted in run.json/summary.json. Consumers use summary/run for authoritative counts. |
 | **MCP Auth Hardening** | 🔄 P1 | RFC 8707, alg/typ/crit, JWKS rotation, DPoP (optional) |
@@ -118,4 +120,4 @@ These documents should be updated when:
 - [CLI Reference](../reference/cli/) - Detailed CLI command documentation
 - [Python SDK](../python-sdk/) - Python SDK documentation
 - [SPEC-PR-Gate-Outputs-v1](../architecture/SPEC-PR-Gate-Outputs-v1.md) - PR gate output spec
-- [DX Implementation Plan](../DX-IMPLEMENTATION-PLAN.md) - Current DX roadmap
+- [DX Roadmap](../DX-ROADMAP.md) - Current DX execution plan

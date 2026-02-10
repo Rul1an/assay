@@ -1,6 +1,10 @@
 # DX Roadmap: P0-P2 Implementation Plan
 
-**Last updated:** 2026-02-07
+> **Status sync (2026-02-10):** All P0/P1/P2 DX features are delivered.
+> Code health (RFC-002) and generate decomposition (RFC-003) are complete.
+> Remaining structural items tracked in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
+
+**Last updated:** 2026-02-10
 **Scope:** 6 features across 3 priority tiers + DX polish
 **EU AI Act phased dates:** 2025-02-02, 2025-08-02, 2026-08-02
 **Planning assumption:** no stop-clock; roadmap tracks current phased dates.
@@ -25,7 +29,7 @@
 | `watch` | P2-B | Done | #184 |
 | `watch` hardening (determinism/tests) | P1 | Done | #188 |
 | `watch` edge hardening (coarse mtime + parse fallback) | P1 | In progress | codex/p1-watch-edge-hardening |
-| P0/P1 DX integration to `main` | P0/P1 | In review | #191 |
+| P0/P1 DX integration to `main` | P0/P1 | Done | #191 |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
 ---

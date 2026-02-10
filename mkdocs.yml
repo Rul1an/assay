@@ -162,13 +162,13 @@ nav:
     - Self-Correcting Agents: mcp/self-correction.md
 
   - Configuration:
-    - config/index.md
-    - mcp-eval.yaml: config/eval-yaml.md
-    - Policy Files: config/policies.md
+    - reference/config/index.md
+    - mcp-eval.yaml: reference/config/eval-yaml.md
+    - Policy Files: reference/config/policies.md
     - Sandbox Policies: reference/sandbox-policies.md
     - Environment Filtering: reference/sandbox-env.md
-    - Sequence Rules DSL: config/sequences.md
-    - Migration Guide: config/migration.md
+    - Sequence Rules DSL: reference/config/sequences.md
+    - Migration Guide: reference/config/migration.md
 
   - CLI Reference:
     - reference/cli/index.md
@@ -217,5 +217,5 @@ nav:
     - Adding Metrics: contributing/metrics.md
     - Release Process: contributing/releases.md
 
-  - Troubleshooting: TROUBLESHOOTING.md
+  - Troubleshooting: guides/troubleshooting.md
   - Changelog: changelog.md

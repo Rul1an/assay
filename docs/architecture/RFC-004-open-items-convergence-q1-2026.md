@@ -56,36 +56,24 @@ This RFC consolidates only those open items with explicit gates and merge order.
 | RFC-003 G4 | Merged | PR #266 | `a661b911` | 2026-02-09 |
 | RFC-003 G5 | Merged | PR #268 | `b3d386bf` | 2026-02-09 |
 | RFC-003 finite validate | Merged | PR #270 | `7cc96a8a` | 2026-02-10 |
-| RFC-003 G6 | Open | PR #271 | - | Open |
+| RFC-003 G6 | Merged | PR #271 | `f21c85ef` | 2026-02-10 |
 | Docs auto-update | Open | PR #272 | - | Open |
 
 ### 2.3 Open PRs
 
-- `#271` `refactor(generate-e5-g6): make generate.rs orchestrator-only` (open)
 - `#272` `docs: auto-update diagrams and crate info` (open, docs-only)
 
 ## 3. Open Items (single source of truth)
 
-## O1 - RFC-003 G6 merge completion
+## O1 - RFC-003 G6 merge completion — ✅ Closed
 
 - Priority: P0
+- Status: **Done** — merged on `main` as `f21c85ef` (2026-02-10)
 - Source: RFC-003 G6
-- Scope:
-  - Merge `#271` after required checks.
-  - Keep extract-only semantics and G1 contract invariants.
-- Contract gates:
-  - `cargo test -p assay-cli --test contract_generate_g1 -- --nocapture`
-  - `cargo test -p assay-cli generate::tests -- --nocapture`
-  - `cargo check -p assay-cli`
-  - `cargo clippy -p assay-cli -- -D warnings`
-- Done when:
-  - `#271` is merged on `main`.
 - Evidence:
   - PR: `#271`
-  - Merge SHA: required in closure note
+  - Merge SHA: `f21c85ef`
   - CI: required checks green on Linux/macOS/Windows
-- Rollback:
-  - Revert merge commit of `#271` if G1 contracts regress.
 
 ## O2 - Documentation status convergence
 
