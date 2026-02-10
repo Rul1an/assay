@@ -17,18 +17,18 @@ demo: fail test ## Run the full break & fix demo
 
 test: ## Run a safe trace against policy (should PASS)
 	@echo "━━━ Safe trace (expect PASS) ━━━"
-	assay run --config $(CONFIG) --trace-file $(SAFE)
+	cd $(FIXTURES) && assay run --config eval.yaml --trace-file traces/safe.jsonl
 
 fail: ## Run an unsafe trace against policy (should FAIL)
 	@echo "━━━ Unsafe trace (expect FAIL) ━━━"
-	-assay run --config $(CONFIG) --trace-file $(UNSAFE)
+	-cd $(FIXTURES) && assay run --config eval.yaml --trace-file traces/unsafe.jsonl
 
 explore: ## Open the TUI evidence explorer
-	assay evidence explore --bundle $(FIXTURES)/bundle.tar.gz
+	cd $(FIXTURES) && assay evidence explore --bundle bundle.tar.gz
 
 validate: ## Validate traces against policy
-	assay validate --config $(CONFIG) --trace-file $(UNSAFE)
-	assay validate --config $(CONFIG) --trace-file $(SAFE)
+	cd $(FIXTURES) && assay validate --config eval.yaml --trace-file traces/unsafe.jsonl
+	cd $(FIXTURES) && assay validate --config eval.yaml --trace-file traces/safe.jsonl
 
 init: ## Initialize a new Assay project in current directory
 	assay init --hello-trace --ci github
