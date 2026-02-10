@@ -1,0 +1,67 @@
+name: Regenerate Demo Assets
+on:
+  push:
+    paths:
+      - 'demo/*.tape'
+      - 'crates/assay-cli/**'
+      - '.github/workflows/demo.yml'
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vhs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install vhs
+        uses: charmbracelet/vhs-action@v1
+        with:
+          path: 'demo/hero.tape'
+          install_only: true
+
+      # We run vhs manually to handle multiple files in one job more cleanly
+      # and ensure we have the latest assay binary built if needed (though tapes record terminal output,
+      # they ideally need the binary. The tapes currently use `cargo run` or expect `assay` in PATH.
+      # Let's check the tapes. They use `export PATH=$PWD/target/debug:$PATH`.
+      # So we need to build release first.
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Assay
+        run: cargo build --release
+
+      - name: Update PATH for Tapes
+        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+
+      # Run VHS for each tape
+      - name: Run VHS (Hero)
+        run: vhs demo/hero.tape
+
+      - name: Run VHS (Break-Fix)
+        run: vhs demo/break-fix.tape
+
+      - name: Run VHS (Evidence Lint)
+        run: vhs demo/evidence-lint.tape
+
+      - name: Run VHS (Sim)
+        run: vhs demo/sim.tape
+
+      - name: Run VHS (Explore)
+        # Note: explore.tape might be interactive/hard to automate perfectly in CI without TTY,
+        # but vhs handles it.
+        run: vhs demo/explore.tape
+
+      - name: Run VHS (Full Walkthrough)
+        run: vhs demo/full-walkthrough.tape
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: regenerate demo assets [skip ci]"
+          file_pattern: 'demo/output/*'
