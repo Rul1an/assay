@@ -1,8 +1,9 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-02-10):** Code health (RFC-002) is complete. Generate decomposition (RFC-003 G1–G6) is merged.
+> **Status sync (2026-02-10):** Q2 items verified against codebase — all P0/P1/P2 DX features delivered.
+> Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
+> Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
 > Remaining structural items tracked in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
-> Docs governance tracked in [RFC-005](architecture/RFC-005-docs-governance.md) (to be created).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -173,9 +174,9 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P2** | Mandate/Intent Evidence | Medium | High | ✅ Complete (v2.11.0) |
 | **P1** | Judge Reliability (SOTA E7) | High | High | ✅ Complete (Audit Grade) |
 | **P1** | Progress N/M (E4.3) | Low | High | ✅ Complete (PR #164) |
-| **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
-| **P1** | Golden path (<30 min first signal) | Medium | High | Planned |
-| **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | Planned |
+| **P2** | GitHub Action v2.1 | Low | Medium | ✅ Complete (PR #185) |
+| **P1** | Golden path (<30 min first signal) | Medium | High | ✅ Complete (PR #187, `init --hello-trace --ci`) |
+| **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
 | **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
@@ -302,7 +303,7 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 - [ ] **SOC2 Baseline/Pro**: Control mapping packs
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
 
-### E. GitHub Action v2.1 (Next)
+### E. GitHub Action v2.1 ✅ Complete
 
 Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
 

@@ -29,7 +29,7 @@
 | `watch` | P2-B | Done | #184 |
 | `watch` hardening (determinism/tests) | P1 | Done | #188 |
 | `watch` edge hardening (coarse mtime + parse fallback) | P1 | In progress | codex/p1-watch-edge-hardening |
-| P0/P1 DX integration to `main` | P0/P1 | In review | #191 |
+| P0/P1 DX integration to `main` | P0/P1 | Done | #191 |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
 ---
