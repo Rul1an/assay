@@ -1,9 +1,11 @@
 # Assay Roadmap 2026
 
+> **Status sync (2026-02-10):** Code health (RFC-002) is complete. Generate decomposition (RFC-003 G1–G6) is merged.
+> Remaining structural items tracked in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
+> Docs governance tracked in [RFC-005](architecture/RFC-005-docs-governance.md) (to be created).
+
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
-
----
 
 ## Executive Summary
 
@@ -174,14 +176,14 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P2** | GitHub Action v2.1 | Low | Medium | **Next** |
 | **P1** | Golden path (<30 min first signal) | Medium | High | Planned |
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | Planned |
-| **P1** | CLI debt reduction (Wave A: typed errors, set_var, config) | Medium | High | Planned |
+| **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
 
 See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md), [ADR-016 (Pack Taxonomy)](./architecture/ADR-016-Pack-Taxonomy.md)
 See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
-See Debt: [RFC-001 Debt Reduction](./architecture/RFC-001-debt-reduction.md) (Wave A: correctness, Wave B: maintainability, Wave C: performance)
+See Debt: [RFC-001 DX/UX Governance](./architecture/RFC-001-dx-ux-governance.md) (Wave A: correctness ✅, Wave B: maintainability ✅, Wave C: performance — gated)
 
 ### GitHub Action v2 ✅ Complete
 

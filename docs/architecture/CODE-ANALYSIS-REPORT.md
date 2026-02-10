@@ -6,20 +6,22 @@
 
 ---
 
-## Status Refresh (2026-02-09)
+## Status Refresh (2026-02-10)
 
 This report is the original finding snapshot. For the verified remediation status and
 next execution order, see:
 
 - `docs/architecture/RFC-002-code-health-remediation-q1-2026.md`
+- `docs/architecture/RFC-004-open-items-convergence-q1-2026.md` (canonical evidence table)
 
 High-level refresh:
 
-- P1s closed in recent merges: #1, #2, #3, #4, #5, #6, #7, #9, #10
+- All P1s closed: #1–#7, #9, #10 (merged).
+- #8 (`monitor.rs` monolith): addressed via PR #274 (O3/O4/O5 convergence).
 - P2/P3 batches from RFC-002 E1-E4 delivered (store consistency, metrics dedup, registry cleanup, comment cleanup).
-- P1 still open/in progress: #8 (`monitor.rs` monolith; helper extraction in progress).
-- Current next structural focus: `generate.rs` decomposition (tracked in RFC-003, G6 PR #271 open).
-- Canonical open/merged evidence table is maintained in `docs/architecture/RFC-004-open-items-convergence-q1-2026.md`.
+- `generate.rs` decomposition: **complete** — RFC-003 G1-G6 all merged (PR #271 = G6, `f21c85ef`).
+- RFC-002: **complete** (E1-E5 all delivered).
+- Remaining structural work tracked in RFC-004 (O6 docs auto-update pending).
 
 ---
 

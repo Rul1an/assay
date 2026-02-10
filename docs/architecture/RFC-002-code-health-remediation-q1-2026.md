@@ -1,6 +1,6 @@
 # RFC-002: Code Health Remediation Plan (Q1 2026)
 
-- Status: Active (E1-E4 delivered, E5 tracked in RFC-003)
+- Status: Complete (E1-E4 delivered, E5 delivered via RFC-003 G6)
 - Date: 2026-02-09
 - Owner: DX/Core
 - Scope: `assay-cli`, `assay-core`, `assay-evidence`, `assay-metrics`, `assay-sim`, `assay-registry`
@@ -21,7 +21,7 @@
 | E4 Comment cleanup B | Merged | PR #254 | `574d9316` | 2026-02-09 |
 | E4 Comment cleanup C | Merged | PR #255 | `c9f67b19` | 2026-02-09 |
 | E4 Comment cleanup D | Merged | PR #256 | `54dff1ee` | 2026-02-09 |
-| E5 Generate decomposition | Active | RFC-003 / PR #271 | - | Open |
+| E5 Generate decomposition | Merged | RFC-003 G6 / PR #271 | `f21c85ef` | 2026-02-10 |
 
 ## 1. Context
 

@@ -5,7 +5,7 @@ This document provides a detailed mapping of important files, modules, and their
 ## File Structure Overview
 
 ```
-assay/                         # Version 2.17.0
+assay/                         # Version 2.18.0 (post-RFC-003)
 ├── crates/                    # Rust crates
 │   ├── assay-core/            # Core evaluation engine
 │   ├── assay-cli/             # CLI interface
@@ -157,7 +157,12 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
 - **`init.rs`**: `assay init` command
 - **`import.rs`**: `assay import` command
 - **`trace.rs`**: `assay trace` command
-- **`generate.rs`**: `assay generate` command
+- **`generate/mod.rs`**: `assay generate` orchestrator (RFC-003 G6)
+  - **`generate/args.rs`**: `GenerateArgs` and validation (G2)
+  - **`generate/model.rs`**: `Policy`, `Meta`, `Section`, `Entry` DTOs (G2)
+  - **`generate/ingest.rs`**: `read_events`, `aggregate`, `Stats` (G3)
+  - **`generate/profile.rs`**: Profile classification (Wilson scoring) (G4)
+  - **`generate/diff.rs`**: Policy diffing and reporting (G5)
 - **`record.rs`**: `assay record` command
 - **`migrate.rs`**: `assay migrate` command
 - **`doctor.rs`**: `assay doctor` command
@@ -289,6 +294,10 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
 ### AI Context (`docs/AIcontext/`)
 - This directory: AI-focused documentation
 - Codebase overview, user flows, interdependencies, etc.
+
+### Archived Documentation (`docs/archive/`)
+- Legacy review materials and plans, superseded by active RFCs
+- Old ADR drafts from pre-consolidation
 
 ## Test Files
 
