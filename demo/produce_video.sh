@@ -45,18 +45,25 @@ echo "📸 Generating Shots..."
 echo "  Shot 1: Violation"
 ffmpeg -y -i "$OUTPUT_DIR/hero.mp4" -ss 0 -t 3 -c:v libx264 -pix_fmt yuv420p "$TEMP_DIR/shot01.mp4" -loglevel error
 
-# Shot 2: CI Blocks (VHS)
-generate_vhs_shot "CI BLOCKED (Red Glitch)" 2.0 "$TEMP_DIR/shot02.mp4"
+# Shot 2: CI Blocks (VHS Simulation)
+echo "  Shot 2: CI Blocks (Simulation)"
+vhs demo/scenes/ci-failure.tape
+# Copy generated file to temp
+cp demo/scenes/ci-failure.mp4 "$TEMP_DIR/shot02.mp4"
 
-# Shot 3: The Fix (VHS)
-generate_vhs_shot "DEVELOPER FIXING (Red -> Green)" 2.5 "$TEMP_DIR/shot03.mp4"
+# Shot 3: The Fix (VHS Simulation)
+echo "  Shot 3: The Fix (Simulation)"
+vhs demo/scenes/fix-policy.tape
+cp demo/scenes/fix-policy.mp4 "$TEMP_DIR/shot03.mp4"
 
 # Shot 4: Green Light (Terminal)
 echo "  Shot 4: Green Light"
 ffmpeg -y -i "$OUTPUT_DIR/hero.mp4" -ss 3.5 -t 2.5 -c:v libx264 -pix_fmt yuv420p "$TEMP_DIR/shot04.mp4" -loglevel error
 
-# Shot 5: Evidence Chain (VHS)
-generate_vhs_shot "MERKLE TREE (Adding Nodes)" 5.0 "$TEMP_DIR/shot05.mp4"
+# Shot 5: Evidence Chain (VHS Simulation)
+echo "  Shot 5: Evidence Chain (Simulation)"
+vhs demo/scenes/merkle-chain.tape
+cp demo/scenes/merkle-chain.mp4 "$TEMP_DIR/shot05.mp4"
 
 # Shot 6: Crypto Proof (Terminal)
 echo "  Shot 6: Crypto Proof"
@@ -66,8 +73,10 @@ ffmpeg -y -i "$OUTPUT_DIR/evidence-lint.mp4" -ss 0.5 -t 6 -c:v libx264 -pix_fmt 
 echo "  Shot 7: Attack Sim"
 ffmpeg -y -i "$OUTPUT_DIR/sim.mp4" -ss 0.5 -t 6 -c:v libx264 -pix_fmt yuv420p "$TEMP_DIR/shot07.mp4" -loglevel error
 
-# Shot 8: Shield (VHS)
-generate_vhs_shot "SHIELD BARRIER (Absorbing Attacks)" 3.0 "$TEMP_DIR/shot08.mp4"
+# Shot 8: Shield (VHS Simulation)
+echo "  Shot 8: Shield (Simulation)"
+vhs demo/scenes/shield.tape
+cp demo/scenes/shield.mp4 "$TEMP_DIR/shot08.mp4"
 
 # Shot 9: CTA Value Props (Special VHS)
 echo "  Shot 9: Value Props (VHS)"

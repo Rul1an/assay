@@ -394,6 +394,43 @@ ffmpeg -i assay_hero_final.mp4 \
   assay_hero_twitter.mp4
 ```
 
+
+---
+
+## Google Veo Strategy (Premier AI Video)
+
+Anno 2026 is **Google Veo** de gouden standaard voor developer marketing video's. Het model blinkt uit in "physics-aware" rendering van UI elementen en abstracte data structuren.
+
+### Hybride Workflow: Terminal + Veo
+Je kunt de standaard terminal-simulaties vervangen door Veo-generaties. Plaats MP4 bestanden in `demo/assets/overrides/shotXX.mp4`.
+
+#### Shot 2: CI Blocked (Image-to-Video)
+1. **Input**: Screenshot van GitHub Actions "failed" state (rood).
+2. **Prompt**: "Cinematic slow zoom into the red failure icon. Dark mode UI, slight chromatic aberration, digital noise in background. High tech, ominous atmosphere."
+3. **Motion**: Pan/Zoom specificatie (Veo controls).
+
+#### Shot 5: Evidence Chain (Text-to-Video)
+1. **Prompt**: "Glowing merkle tree nodes connecting vertically in a dark void. Cybernetic roots extending downwards. Nodes pulse with cyan light when connected. Unreal Engine 5 render style, 8k, macro lens."
+2. **Style**: "Technical, Abstract, Cyberpunk but clean".
+
+#### Shot 8: Shield (Text-to-Video)
+1. **Prompt**: "Abstract glass hexagonal shield deflecting digital particles. Particles dissolve upon impact. Slow motion, shallow depth of field, cool blue lighting. 3D render."
+
+---
+
+## SOTA Voice 2026
+
+Voor de "Understated Technical" tone of voice zijn dit de top keuzes:
+
+1. **ElevenLabs Turbo v3**:
+   - Voice: "Glitch" of "Marcus" (Deep, confident).
+   - Settings: Stability 0.5, Clarity 0.9.
+2. **Fish Audio S1 (Open Source)**:
+   - Voice: `en-US-calm-male` (meegeleverd in install script).
+   - Draait lokaal, geen kosten.
+3. **Google Veo Audio**:
+   - Kan ook *sound effects* genereren (glitches, typ-geluiden) gesynchroniseerd met video.
+
 ---
 
 ## AI B-Roll Prompting: Universele Regels
@@ -441,28 +478,12 @@ Je huidige `narrate.sh` gebruikt macOS `say` — prima voor prototyping, maar ni
 ### Fish Audio (Open Source, SOTA)
 
 ```bash
-#!/bin/bash
-# Generate narration with Fish Audio OpenAudio S1
-# Requires: pip install fish-audio-sdk
-
-SCRIPT="Your AI agent just called a tool it shouldn't have. \
-Assay catches it. Exit code one. CI blocks the deploy. \
-Fix the policy. Run it again. \
-Green. Deterministic. Same trace, same result, every time."
-
-# Generate with calm+confident emotion tags
-fish-audio tts \
-  --text "$SCRIPT" \
-  --voice "en-US-calm-male" \
-  --emotion "calm,confident" \
-  --speed 0.95 \
-  --output demo/output/voiceover.wav
-
-# Merge with video
-ffmpeg -y -i demo/output/hero.mp4 \
-  -i demo/output/voiceover.wav \
-  -c:v copy -c:a aac -b:a 192k \
-  -shortest demo/output/hero-narrated.mp4
+# Zie demo/install_voice.sh voor setup
+python3 -c "
+from fish_audio_sdk import Session
+session = Session('YOUR_API_KEY') # Of lokaal model
+# ... implementation details ...
+"
 ```
 
 ### ElevenLabs (Commercieel, Hoge Kwaliteit)
