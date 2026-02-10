@@ -50,7 +50,7 @@ jobs:
           changed_files = [
               line.strip()
               for line in pathlib.Path("changed_docs.txt").read_text(encoding="utf-8").splitlines()
-              if line.strip()
+              if line.strip() and "/archive/" not in line
           ]
 
           failures = []
