@@ -81,4 +81,5 @@ extend-exclude = [
     "**/RESEARCH-ci-cd-ai-agents-feb2026.md",
     "**/DEMO-STRATEGY.md",
     "**/CODE-ANALYSIS-REPORT.md",
+    "**/demo/output/**",
 ]
