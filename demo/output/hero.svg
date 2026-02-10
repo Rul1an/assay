@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="terminal" baseProfile="full" viewBox="0 0 1064 240" width="1064" version="1.1">
+    <defs>
+        <termtosvg:template_settings xmlns:termtosvg="https://github.com/nbedos/termtosvg">
+            <termtosvg:screen_geometry columns="133" rows="14"/>
+            <termtosvg:animation type="css"/>
+        </termtosvg:template_settings>
+        <style type="text/css" id="generated-style"><![CDATA[#screen {
+                font-family: 'DejaVu Sans Mono', monospace;
+                font-style: normal;
+                font-size: 14px;
+            }
+
+        text {
+            dominant-baseline: text-before-edge;
+            white-space: pre;
+        }
+
+            :root {
+                --animation-duration: 5691ms;
+            }
+
+            @keyframes roll {
+                0.000%{transform:translateY(0px)}
+11.351%{transform:translateY(-272px)}
+11.369%{transform:translateY(-544px)}
+11.966%{transform:translateY(-816px)}
+12.581%{transform:translateY(-1088px)}
+12.880%{transform:translateY(-1360px)}
+12.915%{transform:translateY(-1632px)}
+12.985%{transform:translateY(-1904px)}
+13.179%{transform:translateY(-2176px)}
+13.196%{transform:translateY(-2448px)}
+47.180%{transform:translateY(-2720px)}
+47.478%{transform:translateY(-2992px)}
+47.514%{transform:translateY(-3264px)}
+47.724%{transform:translateY(-3536px)}
+82.428%{transform:translateY(-3808px)}
+100.000%{transform:translateY(-3808px)}
+            }
+
+            #screen_view {
+                animation-duration: 5691ms;
+                animation-iteration-count:infinite;
+                animation-name:roll;
+                animation-timing-function: steps(1,end);
+                animation-fill-mode: forwards;
+            }
+        ]]></style>
+        <style type="text/css" id="user-style">
+            /* The colors defined below are the default 16 colors used for rendering text of the terminal. Adjust
+               them as needed.
+               PowerShell colors based on https://en.wikipedia.org/wiki/ANSI_escape_code#Colors */
+            .foreground {fill: #cccccc;}
+            .background {fill: #0c0c0c;}
+            .color0 {fill: #0c0c0c;}
+            .color1 {fill: #c50f1f;}
+            .color2 {fill: #13a10e;}
+            .color3 {fill: #c19c00;}
+            .color4 {fill: #0037da;}
+            .color5 {fill: #881798;}
+            .color6 {fill: #3a96dd;}
+            .color7 {fill: #cccccc;}
+            .color8 {fill: #767676;}
+            .color9 {fill: #e74856;}
+            .color10 {fill: #16c60c;}
+            .color11 {fill: #f9f1a5;}
+            .color12 {fill: #3b78ff;}
+            .color13 {fill: #b4009e;}
+            .color14 {fill: #61d6d6;}
+            .color15 {fill: #f2f2f2;}
+        </style>
+    </defs>
+    <svg id="screen" width="1064" height="238" viewBox="0 0 1064 238" preserveAspectRatio="xMidYMin slice">
+    <rect class="background" height="100%" width="100%" x="0" y="0"/><defs><g id="g1"><text x="0" textLength="8" class="background"> </text></g><g id="g2"><text x="0" textLength="1064" class="foreground">roelschuurkes@MacBook-Pro-van-beheer-4 assay % export PS1='&#10140; '                                                                       </text></g><g id="g3"><text x="0" textLength="1064" class="foreground">export PATH=$PWD/target/release:$PWD/target/debug:$PATH                                                                              </text></g><g id="g4"><text x="0" textLength="456" class="foreground">&#10140; export PATH=$PWD/target/release:$PWD/target/debug:$PATH</text><text x="456" textLength="8" class="background"> </text><text x="464" textLength="600" class="foreground">                                                                           </text></g><g id="g5"><text x="0" textLength="1064" class="foreground">&#10140; export PATH=$PWD/target/release:$PWD/target/debug:$PATH                                                                            </text></g><g id="g6"><text x="0" textLength="1064" class="foreground">&#10140; cd demo/fixtures                                                                                                                   </text></g><g id="g7"><text x="0" textLength="40" class="foreground">clear</text></g><g id="g8"><text x="0" textLength="1064" class="foreground">&#10140; clear                                                                                                                              </text></g><g id="g9"><text x="0" textLength="488" class="foreground">assay run --config eval.yaml --trace-file traces/unsafe.jsonl</text></g><g id="g10"><text x="0" textLength="1064" class="foreground">&#10140; assay run --config eval.yaml --trace-file traces/unsafe.jsonl                                                                      </text></g><g id="g11"><text x="0" textLength="8" class="background"> </text><text x="8" textLength="1056" class="foreground">                                                                                                                                    </text></g><g id="g12"><text x="0" textLength="1064" class="foreground">                                                                                                                                     </text></g><g id="g13"><text x="0" textLength="40" class="foreground">     </text></g><g id="g14"><text x="0" textLength="488" class="foreground">                                                             </text></g><g id="g15"><text x="0" textLength="1064" class="foreground">WARN: Deprecated policy file usage detected in version 1 config. Run 'assay migrate' to inline policies.                             </text></g><g id="g16"><text x="0" textLength="1064" class="foreground">Running 1 tests...                                                                                                                   </text></g><g id="g17"><text x="0" textLength="1064" class="foreground">Info: No seed provided. Using generated seed: 12182157879263585820                                                                   </text></g><g id="g18"><text x="0" textLength="8" class="background"> </text><text x="8" textLength="32" class="foreground">    </text></g><g id="g19"><text x="0" textLength="760" class="foreground">  [CACHE HIT] key=ccaf8c11e6462853c62368fb3328b2cc9b78260991013c1f83e5593150734395 prompt_len=6</text></g><g id="g20"><text x="0" textLength="1064" class="foreground">WARN: Deprecated policy file 'policy.yaml' detected. Please migrate to inline usage.                                                 </text></g><g id="g21"><text x="0" textLength="568" class="foreground">      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'.</text></g><g id="g22"><text x="0" textLength="288" class="foreground">&#9989; smoke                1.00  (0.0s)</text></g><g id="g23"><text x="0" textLength="320" class="foreground">&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;&#9473;</text></g><g id="g24"><text x="0" textLength="608" class="foreground">Summary: 1 passed, 0 failed, 0 skipped, 0 flaky, 0 unstable, 0 warn, 0 error</text></g><g id="g25"><text x="0" textLength="528" class="foreground">Seeds: seed_version=1 order_seed=12182157879263585820 judge_seed=&#8212;</text></g><g id="g26"><text x="0" textLength="16" class="foreground">&#10140; </text><text x="16" textLength="8" class="background"> </text><text x="24" textLength="1040" class="foreground">                                                                                                                                  </text></g><g id="g27"><text x="0" textLength="1064" class="foreground">&#10140; assay run --config eval.yaml --trace-file traces/safe.jsonl                                                                        </text></g><g id="g28"><text x="0" textLength="832" class="foreground">WARN: Deprecated policy file usage detected in version 1 config. Run 'assay migrate' to inline policies.</text></g><g id="g29"><text x="0" textLength="144" class="foreground">Running 1 tests...</text></g><g id="g30"><text x="0" textLength="520" class="foreground">Info: No seed provided. Using generated seed: 4752892138556104226</text></g><g id="g31"><text x="0" textLength="760" class="foreground">  [CACHE HIT] key=c6b36be0b8b964ab7252d68b9bec12e954182c2c3fa90f9eda7a6f2ad85817eb prompt_len=6</text></g><g id="g32"><text x="0" textLength="672" class="foreground">WARN: Deprecated policy file 'policy.yaml' detected. Please migrate to inline usage.</text></g><g id="g33"><text x="0" textLength="520" class="foreground">Seeds: seed_version=1 order_seed=4752892138556104226 judge_seed=&#8212;</text></g><g id="g34"><text x="0" textLength="1064" class="foreground">&#10140; exit                                                                                                                               </text></g></defs><g id="screen_view"><g><rect x="0" y="0" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="0"/></g><g><use xlink:href="#g2" y="272"/><use xlink:href="#g3" y="289"/><rect x="456" y="306" width="8" height="17" class="foreground"/><use xlink:href="#g4" y="306"/></g><g><use xlink:href="#g2" y="544"/><use xlink:href="#g3" y="561"/><use xlink:href="#g5" y="578"/><use xlink:href="#g6" y="595"/><use xlink:href="#g7" y="612"/><use xlink:href="#g8" y="629"/><use xlink:href="#g9" y="646"/><rect x="0" y="663" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="663"/></g><g><use xlink:href="#g10" y="816"/><rect x="0" y="833" width="8" height="17" class="foreground"/><use xlink:href="#g11" y="833"/><use xlink:href="#g12" y="850"/><use xlink:href="#g12" y="867"/><use xlink:href="#g13" y="884"/><use xlink:href="#g12" y="901"/><use xlink:href="#g14" y="918"/></g><g><use xlink:href="#g10" y="1088"/><use xlink:href="#g15" y="1105"/><rect x="0" y="1122" width="8" height="17" class="foreground"/><use xlink:href="#g11" y="1122"/><use xlink:href="#g12" y="1139"/><use xlink:href="#g13" y="1156"/><use xlink:href="#g12" y="1173"/><use xlink:href="#g14" y="1190"/></g><g><use xlink:href="#g10" y="1360"/><use xlink:href="#g15" y="1377"/><use xlink:href="#g16" y="1394"/><rect x="0" y="1411" width="8" height="17" class="foreground"/><use xlink:href="#g11" y="1411"/><use xlink:href="#g13" y="1428"/><use xlink:href="#g12" y="1445"/><use xlink:href="#g14" y="1462"/></g><g><use xlink:href="#g10" y="1632"/><use xlink:href="#g15" y="1649"/><use xlink:href="#g16" y="1666"/><use xlink:href="#g17" y="1683"/><rect x="0" y="1700" width="8" height="17" class="foreground"/><use xlink:href="#g18" y="1700"/><use xlink:href="#g12" y="1717"/><use xlink:href="#g14" y="1734"/></g><g><use xlink:href="#g10" y="1904"/><use xlink:href="#g15" y="1921"/><use xlink:href="#g16" y="1938"/><use xlink:href="#g17" y="1955"/><use xlink:href="#g19" y="1972"/><use xlink:href="#g20" y="1989"/><use xlink:href="#g21" y="2006"/><rect x="0" y="2023" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="2023"/></g><g><use xlink:href="#g10" y="2176"/><use xlink:href="#g15" y="2193"/><use xlink:href="#g16" y="2210"/><use xlink:href="#g17" y="2227"/><use xlink:href="#g19" y="2244"/><use xlink:href="#g20" y="2261"/><use xlink:href="#g21" y="2278"/><use xlink:href="#g22" y="2312"/><use xlink:href="#g23" y="2346"/><use xlink:href="#g24" y="2363"/><use xlink:href="#g25" y="2380"/><rect x="0" y="2397" width="8" height="17" class="foreground"/><use xlink:href="#g11" y="2397"/></g><g><use xlink:href="#g10" y="2448"/><use xlink:href="#g15" y="2465"/><use xlink:href="#g16" y="2482"/><use xlink:href="#g17" y="2499"/><use xlink:href="#g19" y="2516"/><use xlink:href="#g20" y="2533"/><use xlink:href="#g21" y="2550"/><use xlink:href="#g22" y="2584"/><use xlink:href="#g23" y="2618"/><use xlink:href="#g24" y="2635"/><use xlink:href="#g25" y="2652"/><rect x="16" y="2669" width="8" height="17" class="foreground"/><use xlink:href="#g26" y="2669"/></g><g><use xlink:href="#g15" y="2720"/><use xlink:href="#g16" y="2737"/><use xlink:href="#g17" y="2754"/><use xlink:href="#g19" y="2771"/><use xlink:href="#g20" y="2788"/><use xlink:href="#g21" y="2805"/><use xlink:href="#g22" y="2839"/><use xlink:href="#g23" y="2873"/><use xlink:href="#g24" y="2890"/><use xlink:href="#g25" y="2907"/><use xlink:href="#g27" y="2924"/><rect x="0" y="2941" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="2941"/></g><g><use xlink:href="#g17" y="2992"/><use xlink:href="#g19" y="3009"/><use xlink:href="#g20" y="3026"/><use xlink:href="#g21" y="3043"/><use xlink:href="#g22" y="3077"/><use xlink:href="#g23" y="3111"/><use xlink:href="#g24" y="3128"/><use xlink:href="#g25" y="3145"/><use xlink:href="#g27" y="3162"/><use xlink:href="#g28" y="3179"/><use xlink:href="#g29" y="3196"/><rect x="0" y="3213" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="3213"/></g><g><use xlink:href="#g22" y="3281"/><use xlink:href="#g23" y="3315"/><use xlink:href="#g24" y="3332"/><use xlink:href="#g25" y="3349"/><use xlink:href="#g27" y="3366"/><use xlink:href="#g28" y="3383"/><use xlink:href="#g29" y="3400"/><use xlink:href="#g30" y="3417"/><use xlink:href="#g31" y="3434"/><use xlink:href="#g32" y="3451"/><use xlink:href="#g21" y="3468"/><rect x="0" y="3485" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="3485"/></g><g><use xlink:href="#g27" y="3536"/><use xlink:href="#g28" y="3553"/><use xlink:href="#g29" y="3570"/><use xlink:href="#g30" y="3587"/><use xlink:href="#g31" y="3604"/><use xlink:href="#g32" y="3621"/><use xlink:href="#g21" y="3638"/><use xlink:href="#g22" y="3672"/><use xlink:href="#g23" y="3706"/><use xlink:href="#g24" y="3723"/><use xlink:href="#g33" y="3740"/><rect x="16" y="3757" width="8" height="17" class="foreground"/><use xlink:href="#g26" y="3757"/></g><g><use xlink:href="#g28" y="3808"/><use xlink:href="#g29" y="3825"/><use xlink:href="#g30" y="3842"/><use xlink:href="#g31" y="3859"/><use xlink:href="#g32" y="3876"/><use xlink:href="#g21" y="3893"/><use xlink:href="#g22" y="3927"/><use xlink:href="#g23" y="3961"/><use xlink:href="#g24" y="3978"/><use xlink:href="#g33" y="3995"/><use xlink:href="#g34" y="4012"/><rect x="0" y="4029" width="8" height="17" class="foreground"/><use xlink:href="#g1" y="4029"/></g></g></svg>
+</svg>
