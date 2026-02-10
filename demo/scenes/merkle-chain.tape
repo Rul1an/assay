@@ -5,26 +5,11 @@ Set Height 720
 Set Padding 40
 Set Theme "Catppuccin Mocha"
 Hide
+Type "clean"
+Type "alias assay='$PWD/demo/mocks/assay-mock.sh'"
+Enter
+Type "clear"
+Show
 Type "assay bundle verify --bundle output.bundle"
 Enter
-Show
-Type "Verifying evidence bundle..."
-Sleep 500ms
-Enter
-Type "Bundle ID: bafybeigdyrzt5sPp75Pozf"
-Sleep 200ms
-Enter
-Type "Merkle Root: 8f4b2e1c9d3a..."
-Sleep 200ms
-Enter
-Type "  Leaf 0 [INIT]: Valid (Sig: ed25519)"
-Sleep 100ms
-Enter
-Type "  Leaf 1 [EXEC]: Valid (Hash: sha256)"
-Sleep 100ms
-Enter
-Type "  Leaf 2 [EXIT]: Valid (Code: 0)"
-Sleep 500ms
-Enter
-Type "Chain verified. Integrity intact."
-Sleep 2s
+Sleep 5s
