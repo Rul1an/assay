@@ -29,6 +29,14 @@ pub struct RunError {
     pub legacy_classified: bool,
 }
 
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RunError {}
+
 impl RunError {
     pub fn new(kind: RunErrorKind, message: impl Into<String>) -> Self {
         Self {
