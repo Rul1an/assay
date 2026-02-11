@@ -425,6 +425,9 @@ pub enum PackValidationError {
         rule: String,
         reason: String,
     },
+
+    #[error("Pack safety check failed: {0}")]
+    Safety(String),
 }
 
 /// Check if a pack name is valid (lowercase alphanumeric + hyphens).

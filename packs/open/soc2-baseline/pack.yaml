@@ -1,0 +1,68 @@
+name: soc2-baseline
+version: 1.0.0
+kind: compliance
+description: "SOC2 Common Criteria (Security) - Evidence Invariants"
+author: Assay Project
+license: Apache-2.0
+disclaimer: |
+  This pack maps Assay evidence to SOC2 Trust Services Criteria (Security) invariants.
+  It checks for the PRESENCE of evidence that supports controls, not the effectiveness of controls themselves.
+  Compliance with this pack does not guarantee SOC2 compliance.
+
+requires:
+  assay_min_version: ">=0.4.0"
+
+rules:
+  # CC6.1: The entity implements logical access security software, infrastructure, and architectures
+  # over protected information assets to protect them from security events to meet the entity's objectives.
+  # Assay Invariant: Inventory Completeness
+  # Evidence that systems are registered in the bundle manifest/inventory.
+  - id: invariant.accountability
+    severity: warning
+    description: "CC6.1 - Evidence of system registration/inventory"
+    help_markdown: |
+      **CC6.1 Intent (Paraphrase)**: Logical access accountability.
+      **Assay Invariant**: System Accountability.
+
+      Ensures that the evidence bundle contains at least one `assay.profile.started`
+      event, which confirms the execution context and identity of the system under test.
+    article_ref: "CC6.1"
+    check:
+      type: event_type_exists
+      pattern: "assay.profile.started"
+
+  # CC7.2: The entity monitors system configuration changes...
+  # Assay Invariant: Change Lifecycle
+  # Evidence that a process started and finished (completeness).
+  - id: invariant.change_lifecycle
+    severity: warning
+    description: "CC7.2 - Evidence of change lifecycle completion"
+    help_markdown: |
+      **CC7.2 Intent (Paraphrase)**: Configuration change management.
+      **Assay Invariant**: Change Lifecycle Completeness.
+
+      Verifies that for every `assay.profile.started` event, there is a corresponding
+      `assay.profile.finished` event. This ensures no "dangling" or incomplete changes
+      are reported.
+    article_ref: "CC7.2"
+    check:
+      type: event_pairs
+      start_pattern: "assay.profile.started"
+      finish_pattern: "assay.profile.finished"
+
+  # CC8.1: The entity authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes...
+  # Assay Invariant: Decision Records
+  # Evidence that a policy decision was made (pass OR fail).
+  - id: invariant.decision_record
+    severity: error
+    description: "CC8.1 - Evidence of automated policy decision"
+    help_markdown: |
+      **CC8.1 Intent (Paraphrase)**: Change authorization and testing.
+      **Assay Invariant**: Decision Record Presence.
+
+      Ensures that an `assay.tool.decision` event exists. This proves that an
+      automated gate or decision process was executed and recorded its outcome.
+    article_ref: "CC8.1"
+    check:
+      type: event_type_exists
+      pattern: "assay.tool.decision"
