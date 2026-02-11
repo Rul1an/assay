@@ -21,56 +21,70 @@ Assay’s wedge is **portable, verifiable “evidence primitives”** + **policy
 ### Track 1 — Reliability Surface (pass^k + faults) as Evidence
 We introduce **Soak/Surface** as the primary simulation product:
 - `assay sim soak` executes N runs (seeded), collecting policy outcomes, infra errors, and summary metrics.
-- Report includes `pass_rate`, `pass_all_k`, `first_failure_at`, `violations_by_rule`, and `infra_errors`.
-- Optional in Iteration 2/3: "surface dimensions" like ε (semantic perturbations) and λ (fault injection profiles).
+- **Pass^k Semantics**: `pass_all` (AND over k runs) is the strict assurance bar. We also report `pass_rate` and `pass_probability_estimate` (beta posterior or CI95) for statistical confidence.
+- **Decision Policy**: User defines strictness via `decision_policy`: `{ stop_on_violation: bool, max_failures: u32, min_runs: u32 }`.
 
-**Normative**: `pass^k` and drift are first-class outputs, not just "a test result".
+**Normative**: `pass^k` and drift are first-class outputs. Soak reports must include a `decision_policy` used to reach the verdict.
 
 ### Track 2/3 — Evidence Completeness + Closure Score (audit + replay readiness)
-We introduce a **Completeness Matrix** and **Closure Score v1**:
-- **Completeness** = required signals (per pack) vs captured/redacted/unknown.
-- **Closure score** = deterministic score + confidence label + `captured[]`/`missing[]`.
+We distinguish between **Completeness** (Pack-Relative) and **Closure** (Replay-Relative):
 
-No "replay magic" promise; instead, a "closure contract" and explicit "what’s missing".
+1.  **Completeness** ("Did we capture what the Pack needs?"):
+    -   Defined relative to a *specific pack*.
+    -   Signals are defined in a canonical registry (e.g., `policy_decisions`, `tool_calls`).
+    -   State: `captured` (present), `redacted` (removed but committed with hash/metadata), `unknown` (missing/undetectable).
 
-### Track 4 — Enforcement points (prevent + prove)
-Assay packs remain "prove" (lint/verifier) in OSS. We design packs, however, so they can later verify "enforce" scenarios (MCP gateway) without pack authors needing a full programming language.
-- **OSS**: only "prove" + evidence requirements.
-- **Pro**: enforcement runtime + evidence emitter.
+2.  **Closure** ("Can we reconstruct the run?"):
+    -   Defined relative to *replayability*.
+    -   Score is deterministic (0.0-1.0) based on presence of replay-critical signals (inputs, model ID, tool outputs, RNG seeds).
+    -   **Normative**: Score must be calculated from the bundle contents alone (no heuristics).
+
+### Track 4 — Pack "Required Signals" Registry
+To prevent schema drift, we introduce a namespaced, additive field for packs:
+-   **Field**: `x-assay.requires_signals` (v0).
+-   **Registry**: Packs must select from a canonical list of signal types (e.g., `policy_decisions`, `tool_io_bodies`, `model_identity`, `prompt_lineage`, `human_approvals`).
+-   This avoids free-text requirements and enables automated completeness checks.
 
 ### Track 5 — Standard-first export (OTEL GenAI + MCP)
-We support a dual-format approach:
-1.  **Canonical Assay evidence bundle** (portable, audit artifact).
-2.  **OTEL export/bridge** (GenAI/MCP semconv) for adoption.
+We support a dual-format approach with a strict versioning policy:
+1.  **Target**: GenAI semconv (stable opt-in) + MCP semconv.
+2.  **Policy**: Best-effort translation.
+3.  **Transparency**: Reports must include a `mapping_loss` section detailing dropped attributes and unknown events.
 
-We productize semconv versioning: emit/translate multi-version without schema wars.
-
-### Track 6 — Portable verifiability via attestations + optional transparency
-We evolve the Evidence Bundle towards an "attestation bundle":
-- **DSSE envelope** (signed) with predicate(s): policy verdicts, closure report, mappings, digests.
-- **Optional**: receipt/transparency (SCITT-like) later, primarily for Pro.
-
-### Track 7 — Compliance packs as distribution
-Open packs remain "accelerators":
-- `cicd-starter`: adoption floor.
-- `eu-ai-act-baseline`: record-keeping mapping.
-- `soc2-baseline`: invariants (presence/integrity).
-Next "reference pack" for R&D: OWASP Agentic Top 10 subset (OSS or Pro depending on scope).
+### Track 6 — Attestation Envelope (Portable Verifiability)
+We evolve the Evidence Bundle towards an "attestation bundle" using **DSSE envelopes**.
+-   **Payload v1**:
+    -   Digests of bundle artifacts (manifest, events).
+    -   Pack versions + mapping references.
+    -   Closure report digest.
+-   **Verification**: OSS capability for offline verification (providing public key).
+-   **Threat Model**: Protects against tampering (integrity) and repudiation (provenance). Does *not* guarantee confidentiality (payload content).
 
 ## Data Contracts (Normative)
 
-### 1) Soak Report v1
+### 1) Soak Report v1 (Normative)
 ```json
 {
+  "schema_version": "v1",
   "mode": "soak",
-  "iterations": 100,
-  "seed": 42,
-  "limits": { "...": "..." },
-  "time_budget_secs": 60,
+  "config": {
+    "iterations": 100,
+    "seed": 42,
+    "limits": { "max_duration": "60s" },
+    "decision_policy": {
+      "stop_on_violation": false,
+      "max_failures": 0,
+      "min_runs": 100
+    }
+  },
   "results": {
+    "verdict": "pass",
+    "pass_all": false,
     "pass_rate": 0.97,
-    "pass_all_k": false,
+    "pass_rate_ci95": [0.92, 0.99],
     "first_failure_at": 73,
+    "failures": 3,
+    "runs": 100,
     "violations_by_rule": {
       "soc2-baseline@1.0.0:invariant.decision_record": 2
     },
@@ -79,68 +93,74 @@ Next "reference pack" for R&D: OWASP Agentic Top 10 subset (OSS or Pro depending
 }
 ```
 
-### 2) Completeness + Closure v1
+### 2) Completeness + Closure v1 (Normative)
 ```json
 {
+  "schema_version": "v1",
   "completeness": {
-    "required": ["policy_decisions","tool_calls","tool_outputs_cache"],
-    "captured": ["policy_decisions","tool_calls"],
+    "pack_scope": "soc2-baseline@1.0.0",
+    "required": ["policy_decisions", "tool_calls"],
+    "captured": ["policy_decisions"],
     "redacted": [],
-    "unknown": ["tool_outputs_cache"]
+    "unknown": ["tool_calls"]
   },
   "closure": {
     "score": 0.66,
     "confidence": "medium",
-    "captured": ["policy_decisions","tool_calls"],
-    "missing": ["tool_outputs_cache","retrieval_snapshot","model_version"]
+    "captured": ["policy_decisions", "tool_calls"],
+    "missing": ["tool_outputs_cache", "model_identity"]
   }
 }
 ```
 
-### 3) Manifest additions (additive)
-`manifest.json` adds:
+### 3) Manifest additions
+`manifest.json` attributes:
 - `x-assay.packs_applied[]`: `{name, version, digest, kind, source_url?}`
 - `x-assay.mappings[]`: `{rule, framework, ref}`
 
 ### UX/DX Requirements (Feb 2026)
-- **One-command first signal:** `assay evidence lint <bundle>` defaults to `cicd-starter` + next-step hint.
-- **Explainability:** every finding hints `assay evidence lint --explain <RULE_ID>`.
-- **Soak output:** 1-screen headline metrics + top violations; JSON via `--report`.
-- **Config:** file-first (`--limits-file`), debug via `--print-config`.
-- **Determinism:** seed in reports; fixed seed → reproducible aggregation.
+- **Unified Happy Path:**
+    - `assay evidence lint <bundle>` (default: lint with `cicd-starter`).
+    - `assay sim soak --iterations N --pack <pack> --target <bundle> --report out.json`.
+    - **Normative**: Soak must use the *same* pack loader/resolution as Lint.
+- **Explainability:**
+    - `assay evidence lint --explain closure.score`.
+    - `assay evidence lint --explain <pack>:<rule>` (shows missing signals if applicable).
+- **Machine-Readable Reports:** ALL commands supporting `--report` must output JSON with `schema_version`. Stdout remains human-readable summary.
 
-## Rollout Plan (Research-aligned)
+## Rollout Plan
 
-### Iteration 1 (MVP): pass^k + basic completeness/closure hooks
-- `assay sim soak` + report v1
-- Pack-provided "required signals" (minimal for closure/completeness)
-- Manifest `x-assay` metadata (packs applied + mappings)
+### Iteration 1 (MVP): Audit Kit Baseline & Soak MVP
+- `assay sim soak` + report v1 (with `decision_policy`, `pass_rate`).
+- `manifest.json` `x-assay.*` metadata.
+- Pack-provided `x-assay.requires_signals` (minimal registry).
 
-### Iteration 2: Reliability Surface dims + completeness matrix productization
-- ε perturbations + λ fault profiles (selective)
-- Completeness matrix + actionable gaps in `--explain`
+### Iteration 2: Closure Score & Explainability
+- Completeness Matrix (Pack-relative) + Closure Score (Replay-relative).
+- `redacted` vs `unknown` definitions in lint reporting.
+- Advanced `--explain` (closure gaps).
 
-### Iteration 3: Attestation envelope + OTEL bridge maturation
-- DSSE envelope + digest linking
-- OTEL GenAI/MCP export + mapping-loss report
-- (Pro) transparency receipts / key mgmt
+### Iteration 3: Attestation & OTEL
+- DSSE envelope generation (opt-in) + offline verify command.
+- OTEL export + `mapping_loss` report.
 
 ## Open-core Boundary
 
-- **OSS:** Soak MVP, closure/completeness v1, open packs, OTEL bridge (opt-in).
-- **Pro:** Signing/attestations key mgmt, enforcement gateway, transparency receipts, advanced OWASP/sector packs.
+- **OSS:** Soak MVP, Closure/Completeness v1, Open Packs, OTEL bridge (opt-in), Offline Verification.
+- **Pro:** Signing/Attestation Key Mgmt, Enforcement Gateway, Private/Advanced Packs.
 
-## Acceptance Criteria
+## Acceptance Criteria (Gates)
 
 ### I1:
-- `assay sim soak` + report v1.
-- `manifest.json` `x-assay.*` additive metadata.
-- "Required signals" concept in packs (minimal).
+- `assay sim soak` with `report.json` containing `schema_version` and valid `pass_rate`/`pass_all`.
+- Manifest `x-assay` fields populated correctly.
+- Packs in OSS repo define `requires_signals` from v0 registry; parser validates this.
 
 ### I2:
-- Completeness matrix + closure score v1 in JSON + explain guidance.
-- Surface dims (ε/λ) prototype behind flag.
+- Completeness matrix calculation is deterministic.
+- Closure score logic documented and tested with fixed fixtures.
+- `--explain` renders closure gaps.
 
 ### I3:
-- DSSE envelope (opt-in) + verification.
-- OTEL export + mapping-loss report.
+- DSSE envelope generation (feature-flagged).
+- OTEL export produces valid SemConv + `mapping_loss` section in report.
