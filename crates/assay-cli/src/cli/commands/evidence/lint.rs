@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions};
-use assay_evidence::lint::packs::load_packs;
+use assay_evidence::lint::packs::{load_packs, LoadedPack};
 use assay_evidence::lint::sarif::{to_sarif_with_options, SarifOptions};
 use assay_evidence::lint::Severity;
 use assay_evidence::VerifyLimits;
@@ -9,9 +9,9 @@ use std::fs::File;
 
 #[derive(Debug, Args, Clone)]
 pub struct LintArgs {
-    /// Bundle to lint
-    #[arg(value_name = "BUNDLE")]
-    pub bundle: std::path::PathBuf,
+    /// Bundle to lint (omit when using --explain)
+    #[arg(value_name = "BUNDLE", required_unless_present = "explain")]
+    pub bundle: Option<std::path::PathBuf>,
 
     /// Output format: json, sarif, or text
     #[arg(long, default_value = "text")]
@@ -25,14 +25,34 @@ pub struct LintArgs {
     #[arg(long, value_delimiter = ',')]
     pub pack: Option<Vec<String>>,
 
+    /// Explain a rule (print help_markdown and exit). Use short id (e.g. CICD-003) or canonical (e.g. cicd-starter@1.0.0:CICD-003)
+    #[arg(long, value_name = "RULE_ID")]
+    pub explain: Option<String>,
+
     /// Maximum results in output (for GitHub SARIF limits)
     #[arg(long, default_value = "500")]
     pub max_results: usize,
 }
 
 pub fn cmd_lint(args: LintArgs) -> Result<i32> {
-    let f = File::open(&args.bundle)
-        .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
+    // --explain: show rule help and exit (no bundle needed)
+    if let Some(rule_ref) = &args.explain {
+        let packs = match load_packs_for_lint(&args.pack) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Pack loading failed: {}", e);
+                return Ok(3);
+            }
+        };
+        return explain_rule(&packs, rule_ref);
+    }
+
+    let bundle = args
+        .bundle
+        .as_ref()
+        .expect("bundle required when not --explain");
+    let f = File::open(bundle)
+        .with_context(|| format!("failed to open bundle {}", bundle.display()))?;
 
     let limits = VerifyLimits::default();
 
@@ -59,7 +79,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     let options = LintOptions {
         packs,
         max_results: Some(args.max_results),
-        bundle_path: Some(args.bundle.display().to_string()),
+        bundle_path: Some(bundle.display().to_string()),
     };
 
     let result = match lint_bundle_with_options(f, limits, options) {
@@ -101,7 +121,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             #[allow(deprecated)]
             let sarif_options = SarifOptions {
                 pack_meta: pack_meta.clone(),
-                bundle_path: Some(args.bundle.display().to_string()),
+                bundle_path: Some(bundle.display().to_string()),
                 working_directory: None, // Deprecated: no longer included in output
             };
             let sarif = to_sarif_with_options(report, sarif_options);
@@ -132,7 +152,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                     .join(", ");
                 eprintln!("Packs: {}", pack_str);
                 if is_default_pack {
-                    eprintln!("(Use --pack eu-ai-act-baseline to add compliance mapping)");
+                    eprintln!("(Next: add compliance packs — --pack eu-ai-act-baseline or --pack soc2-baseline)");
                 }
 
                 // Print disclaimer for compliance packs
@@ -179,6 +199,10 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                             finding.severity, finding.rule_id, loc_str, finding.message
                         );
                     }
+                    eprintln!(
+                        "  Hint: run `assay evidence lint --explain {}`",
+                        finding.rule_id
+                    );
                 }
                 eprintln!();
                 eprintln!(
@@ -205,4 +229,76 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     } else {
         Ok(0)
     }
+}
+
+/// Load packs for lint (default or explicit).
+fn load_packs_for_lint(
+    pack_refs: &Option<Vec<String>>,
+) -> Result<Vec<LoadedPack>, assay_evidence::lint::packs::PackError> {
+    let refs: Vec<String> = pack_refs
+        .clone()
+        .unwrap_or_else(|| vec!["cicd-starter".to_string()]);
+    load_packs(&refs)
+}
+
+/// Print rule help and exit. Returns Ok(0) on success, Ok(1) if not found or ambiguous.
+fn explain_rule(packs: &[LoadedPack], rule_ref: &str) -> Result<i32> {
+    let want_canonical = rule_ref.contains('@') && rule_ref.contains(':');
+    let mut matches: Vec<(
+        &LoadedPack,
+        &assay_evidence::lint::packs::schema::PackRule,
+        String,
+    )> = Vec::new();
+
+    for p in packs {
+        for r in &p.definition.rules {
+            let canonical = p.canonical_rule_id(&r.id);
+            let ok = if want_canonical {
+                canonical == rule_ref
+            } else {
+                r.id == rule_ref || canonical == rule_ref
+            };
+            if ok {
+                matches.push((p, r, canonical));
+            }
+        }
+    }
+
+    if matches.is_empty() {
+        eprintln!("Rule '{}' not found in selected packs.", rule_ref);
+        return Ok(1);
+    }
+
+    if matches.len() > 1 && !want_canonical {
+        eprintln!("Rule '{}' is ambiguous. Specify canonical form:", rule_ref);
+        for (_, _, canonical) in &matches {
+            eprintln!("  --explain {}", canonical);
+        }
+        return Ok(1);
+    }
+
+    let (p, r, canonical) = &matches[0];
+
+    println!("{}", canonical);
+    println!("Pack: {}@{}", p.definition.name, p.definition.version);
+    println!("Severity: {:?}", r.severity);
+    println!();
+    println!("{}", r.description);
+
+    if let Some(article) = &r.article_ref {
+        println!();
+        println!("Reference: {}", article);
+    }
+
+    if let Some(help) = &r.help_markdown {
+        println!();
+        println!("---");
+        println!("{}", help.trim());
+        println!();
+    } else {
+        println!();
+        println!("(No additional help text provided.)");
+    }
+
+    Ok(0)
 }

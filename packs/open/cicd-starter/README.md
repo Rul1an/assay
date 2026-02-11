@@ -11,7 +11,7 @@ These checks verify evidence hygiene for CI pipelines. They do not constitute co
 |---------|-------|----------|-------------------|
 | CICD-001 | Event presence | error | ≥1 event |
 | CICD-002 | Lifecycle pair | warning | assay.profile.started + .finished |
-| CICD-003 | Correlation ID | warning | traceparent, tracestate, or run_id |
+| CICD-003 | Correlation ID | warning | assayrunid, traceparent, tracestate, or run_id |
 | CICD-004 | Build identity | info | data.build_id or data.version |
 
 ## Quickstart (copy/paste)

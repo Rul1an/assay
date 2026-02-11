@@ -46,25 +46,27 @@ rules:
 
   - id: CICD-003
     severity: warning
-    description: At least one event contains correlation ID (traceparent, tracestate, run_id)
+    description: At least one event contains correlation ID (traceparent, tracestate, run_id, assayrunid)
     help_markdown: |
       ## CICD-003: Correlation (W3C Trace Context)
-      Events should include traceparent, tracestate, or run_id to link evidence
-      to external observability (e.g. OpenTelemetry).
+      Events should include a correlation identifier—traceparent, tracestate,
+      run_id, or assayrunid—to link evidence to external observability.
 
       **How to fix:**
       - If using OpenTelemetry: propagate traceparent into the event envelope.
       - Otherwise: set run_id (UUID or deterministic ID) for each run in event data.
+      - Assay-native events include assayrunid by default.
       - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
     check:
       type: event_field_present
       paths_any_of:
+        - /assayrunid
+        - /run_id
         - /traceparent
         - /tracestate
-        - /run_id
+        - /data/run_id
         - /data/traceparent
         - /data/tracestate
-        - /data/run_id
 
   - id: CICD-004
     severity: info
