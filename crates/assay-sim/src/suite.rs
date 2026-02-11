@@ -189,6 +189,14 @@ fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
             message: Some("time budget exceeded before chaos phase".into()),
             duration_ms: budget.elapsed().as_millis() as u64,
         });
+        report.add_result(AttackResult {
+            name: "differential.parity".into(),
+            status: AttackStatus::Error,
+            error_class: None,
+            error_code: None,
+            message: Some("skipped due to time budget".into()),
+            duration_ms: 0,
+        });
         return;
     }
 

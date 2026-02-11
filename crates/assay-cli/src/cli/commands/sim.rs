@@ -105,10 +105,12 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
 
     // Exit 2 when time budget exceeded (ADR-024)
     if report.time_budget_exceeded {
-        eprintln!(
-            "\n⏱ Time budget exceeded. Skipped: {}",
+        let skipped = if report.skipped_phases.is_empty() {
+            "(none)".to_string()
+        } else {
             report.skipped_phases.join(", ")
-        );
+        };
+        eprintln!("\n⏱ Time budget exceeded. Skipped: {}", skipped);
         return Ok(2);
     }
 

@@ -15,13 +15,13 @@
 |---|-------|----------|------|
 | 1 | **limit_bundle_bytes alloc + cast** — `vec![0u8; (limits.max_bundle_bytes + 1) as usize]` can OOM (user-supplied 100MB+) or panic on u64→usize overflow | `integrity.rs` L135 | DoS in sim |
 | 2 | **Semantics niet gegarandeerd** — Raw zeros → GzDecoder faalt op gzip header vóórdat LimitReader limit bereikt → `IntegrityTar` i.p.v. `LimitBundleBytes` | Verifier flow | Flaky regression guard |
-| 3 | **Exit code mismatch** — ADR=3, impl=2 (`EXIT_CONFIG_ERROR`) | ADR vs `exit_codes.rs` | CI/UX confusion |
+| 3 | **Exit code mismatch (resolved)** — ADR en impl nu aligned op exit 2 (`EXIT_CONFIG_ERROR`) | ADR vs `exit_codes.rs` | Opgelost; ADR bijgewerkt |
 
 ### Aanbevolen fixes
 
 1. **limit_bundle_bytes**: streaming Read (geen grote alloc) + payload die LimitBundleBytes triggered (zie § Verifier Flow).
 2. **Tier defaults**: één source of truth (CLI of Suite), niet beide (`sim.rs` + `suite.rs`).
-3. **Exit codes**: ADR updaten of impl aanpassen.
+3. **Exit codes**: reeds opgelost; ADR en impl aligned op exit 2.
 
 ---
 

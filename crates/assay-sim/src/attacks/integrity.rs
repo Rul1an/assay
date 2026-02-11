@@ -178,9 +178,6 @@ where
     let reader = make_reader()?;
     let start = std::time::Instant::now();
     let res = verify_bundle_with_limits(reader, limits);
-    if budget.exceeded() {
-        return Err(IntegrityError::BudgetExceeded);
-    }
     let duration = start.elapsed().as_millis() as u64;
 
     match res {
@@ -196,6 +193,10 @@ where
                 );
             }
         }
+    }
+
+    if budget.exceeded() {
+        return Err(IntegrityError::BudgetExceeded);
     }
     Ok(())
 }

@@ -180,7 +180,7 @@ cargo run -p assay-cli -- sim run --suite quick --target tests/fixtures/evidence
 |-------|-------------|--------|
 | CLI §1 | --limits, --limits-file, --time-budget, --print-config | ✓ |
 | --limits @path | Value starts with @ → load from file | ✓ |
-| Parse rules | Invalid JSON → exit 3; ADR says 3, impl uses 2 (EXIT_CONFIG_ERROR) | ⚠ Align |
+| Parse rules | Invalid JSON → exit 2 (EXIT_CONFIG_ERROR); ADR en impl aligned | ✓ |
 | Unknown keys | deny_unknown_fields | ✓ (E1) |
 | Merge precedence | tier → --limits → --limits-file | ✓ |
 
@@ -202,7 +202,7 @@ cargo run -p assay-cli -- sim run --suite quick --target tests/fixtures/evidence
 - [ ] Alle E2 checklist items pass
 - [ ] Test plan items 2, 3, 4, 6, 8 executed
 - [ ] `cargo clippy -p assay-cli --features sim -- -D warnings` passes
-- [ ] Exit code: ADR=3 vs impl=2 gedocumenteerd of gealigned (E4 blocker)
+- [x] Exit code: ADR en impl aligned op 2 (EXIT_CONFIG_ERROR)
 
 ---
 
