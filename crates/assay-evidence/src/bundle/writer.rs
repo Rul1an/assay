@@ -509,7 +509,7 @@ impl From<serde_json::Error> for VerifyError {
 }
 
 /// Resource limits for bundle verification.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifyLimits {
     pub max_bundle_bytes: u64,
     pub max_decode_bytes: u64, // New: Limit uncompressed size
@@ -1234,6 +1234,42 @@ mod tests {
             "unknown field should fail: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_empty_roundtrip() {
+        let overrides: VerifyLimitsOverrides = serde_json::from_str("{}").unwrap();
+        let limits = VerifyLimits::default().apply(overrides);
+        assert_eq!(
+            limits,
+            VerifyLimits::default(),
+            "empty overrides = identity"
+        );
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_drift_guard() {
+        // Destructure both structs so adding a field to one without the other fails to compile.
+        let VerifyLimits {
+            max_bundle_bytes: _,
+            max_decode_bytes: _,
+            max_manifest_bytes: _,
+            max_events_bytes: _,
+            max_events: _,
+            max_line_bytes: _,
+            max_path_len: _,
+            max_json_depth: _,
+        } = VerifyLimits::default();
+        let VerifyLimitsOverrides {
+            max_bundle_bytes: _,
+            max_decode_bytes: _,
+            max_manifest_bytes: _,
+            max_events_bytes: _,
+            max_events: _,
+            max_line_bytes: _,
+            max_path_len: _,
+            max_json_depth: _,
+        } = VerifyLimitsOverrides::default();
     }
 
     #[test]
