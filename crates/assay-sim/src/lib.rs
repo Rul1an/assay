@@ -7,7 +7,7 @@ pub mod subprocess;
 pub mod suite;
 
 pub use report::{AttackResult, AttackStatus, SimReport};
-pub use suite::{run_suite, SuiteConfig, SuiteTier, TimeBudget};
+pub use suite::{run_suite, tier_default_limits, SuiteConfig, SuiteTier, TimeBudget};
 
 #[cfg(test)]
 mod tests {
@@ -18,9 +18,10 @@ mod tests {
     fn test_quick_suite() {
         let cfg = SuiteConfig {
             tier: SuiteTier::Quick,
-            target_bundle: PathBuf::from("placeholder"), // dynamic generation in suite for now
+            target_bundle: PathBuf::from("placeholder"),
             seed: 42,
             verify_limits: None,
+            time_budget_secs: 60,
         };
 
         let report = run_suite(cfg).expect("Suite failed to run");

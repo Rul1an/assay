@@ -1153,9 +1153,9 @@ pub struct SimRunArgs {
     #[arg(long)]
     pub attack: Option<String>,
 
-    /// Target bundle for simulation
-    #[arg(long, short)]
-    pub target: std::path::PathBuf,
+    /// Target bundle for simulation (not required with --print-config)
+    #[arg(long, short, required_unless_present = "print_config")]
+    pub target: Option<std::path::PathBuf>,
 
     /// Seed for reproducible mutations
     #[arg(long)]
@@ -1173,7 +1173,19 @@ pub struct SimRunArgs {
     #[arg(long, short)]
     pub output: Option<std::path::PathBuf>,
 
-    /// Verification limits (preset or JSON)
+    /// Verification limits as JSON, or @path to load from file
     #[arg(long)]
     pub limits: Option<String>,
+
+    /// Path to JSON file with limits (overrides --limits if both given)
+    #[arg(long)]
+    pub limits_file: Option<std::path::PathBuf>,
+
+    /// Suite time budget in seconds (default: 60). Must be > 0.
+    #[arg(long, default_value = "60")]
+    pub time_budget: u64,
+
+    /// Print effective limits and time budget, then exit
+    #[arg(long)]
+    pub print_config: bool,
 }

@@ -8,6 +8,12 @@ pub struct SimReport {
     pub seed: u64,
     pub summary: SimSummary,
     pub results: Vec<AttackResult>,
+    /// True when suite exited early due to time budget
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub time_budget_exceeded: bool,
+    /// Phases skipped when time budget exceeded
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_phases: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -46,7 +52,14 @@ impl SimReport {
             seed,
             summary: SimSummary::default(),
             results: Vec::new(),
+            time_budget_exceeded: false,
+            skipped_phases: Vec::new(),
         }
+    }
+
+    pub fn set_time_budget_exceeded(&mut self, skipped: Vec<String>) {
+        self.time_budget_exceeded = true;
+        self.skipped_phases = skipped;
     }
 
     pub fn add_attack(

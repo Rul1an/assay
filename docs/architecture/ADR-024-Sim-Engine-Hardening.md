@@ -30,15 +30,15 @@ Add to `assay sim run`:
 |------|------|-------------|
 | `--limits` | JSON string or `@path` | Partial limits overrides. If value starts with `@`, treat as file path and load from file (equivalent to `--limits-file`). Otherwise parse as JSON string. Shell escaping can be awkward; prefer `--limits-file` or `--limits @.assay/limits.json`. |
 | `--limits-file` | Path | Path to JSON file with limits. **Recommended** for CI. Overrides `--limits` if both given. |
-| `--time-budget` | Seconds | Suite time budget. Default: 60. Must be > 0; reject ≤0 with exit 3. |
+| `--time-budget` | Seconds | Suite time budget. Default: 60. Must be > 0; reject ≤0 with exit 2. |
 | `--print-config` | Flag | Print effective merged limits and time budget (debug / CI diagnostics). |
 
 **Parse rules:**
 
-- Invalid JSON → exit code 3 (config error)
-- Unknown keys in `--limits` / `--limits-file` JSON → reject with clear "unknown field" error (exit 3)
-- `--limits-file` path missing → exit 3
-- `--time-budget` ≤ 0 → exit 3
+- Invalid JSON → exit code 2 (config error; matches workspace `EXIT_CONFIG_ERROR`)
+- Unknown keys in `--limits` / `--limits-file` JSON → reject with clear "unknown field" error (exit 2)
+- `--limits-file` path missing → exit 2
+- `--time-budget` ≤ 0 → exit 2
 - Schema: `VerifyLimitsOverrides` with `deny_unknown_fields`; partial merge
 
 **Examples (prefer file-based config for CI):**
@@ -55,7 +55,7 @@ assay sim run --suite quick --print-config --target bundle.tar.gz  # effective l
 ### 2. Limits Model
 
 - **Source**: `assay_evidence::VerifyLimits` (existing struct)
-- **Parsing**: Use a `VerifyLimitsOverrides` struct with `Option<T>` fields + `#[serde(deny_unknown_fields)]`. Unknown keys in JSON → hard fail (exit 3) with clear "unknown field" error. Partial deserialize: only provided keys override; merge with `VerifyLimits::default()`.
+- **Parsing**: Use a `VerifyLimitsOverrides` struct with `Option<T>` fields + `#[serde(deny_unknown_fields)]`. Unknown keys in JSON → hard fail (exit 2) with clear "unknown field" error. Partial deserialize: only provided keys override; merge with `VerifyLimits::default()`.
 - **Merge precedence**: `VerifyLimits::default()` → apply `--limits` (if given) → apply `--limits-file` (overrides `--limits` if both given).
 - **Stable schema**: Document in ADR; breaking changes require version bump.
 
@@ -98,7 +98,9 @@ Add integrity attack:
 | Attack blocked by verify limits | `Blocked` | 0 |
 | Attack bypassed verification | `Bypassed` | 1 |
 | Time budget exceeded | `Error` | 2 |
-| Config/parse error | — | 3 |
+| Config/parse error | — | 2 |
+
+**Note:** Config errors use exit 2 (`EXIT_CONFIG_ERROR`), matching the workspace convention in `exit_codes.rs`.
 
 **Rationale**: "Blocked by limits" and "blocked by integrity" are both correct outcomes. No need to split `Blocked` into subtypes.
 
@@ -158,7 +160,7 @@ Budget checks before:
 | Epic | Scope | Deps |
 |------|-------|------|
 | **E1** | `VerifyLimitsOverrides` in assay-evidence; `apply()` merge with defaults; `deny_unknown_fields` | — |
-| **E2** | CLI: `--limits`, `--limits-file`, `--time-budget`, `--print-config`; `@path` parsing; merge precedence; exit 3 on parse error | E1 |
+| **E2** | CLI: `--limits`, `--limits-file`, `--time-budget`, `--print-config`; `@path` parsing; merge precedence; exit 2 on parse error | E1 |
 | **E3** | SuiteConfig: configurable `TimeBudget`; tier-default limits (Quick: 5MB); pass to integrity | E1 |
 | **E4** | Integrity attacks: `verify_bundle_with_limits`; budget check; `blocked_by` in results | E1, E3 |
 | **E5** | Dynamic `integrity.limit_bundle_bytes` attack | E4 |
@@ -198,11 +200,11 @@ struct VerifyLimitsOverrides {
 ### Test Plan
 
 1. `assay sim run --suite quick --limits '{"max_bundle_bytes": 1000}'` → zip bomb and limit_bundle_bytes blocked
-2. `assay sim run --suite quick --limits-file /nonexistent` → exit 3
-3. `assay sim run --suite quick --limits 'invalid'` → exit 3
-4. `assay sim run --suite quick --limits '{"max_bundle_bytess": 1}'` → exit 3 with "unknown field" (deny_unknown_fields)
+2. `assay sim run --suite quick --limits-file /nonexistent` → exit 2
+3. `assay sim run --suite quick --limits 'invalid'` → exit 2
+4. `assay sim run --suite quick --limits '{"max_bundle_bytess": 1}'` → exit 2 with "unknown field" (deny_unknown_fields)
 5. `assay sim run --suite quick --limits '{"max_bundle_bytes": 1000}' --limits-file .assay/stricter.json` → file wins; test merge precedence
-6. `assay sim run --suite quick --time-budget 0` → exit 3 (reject ≤0)
+6. `assay sim run --suite quick --time-budget 0` → exit 2 (reject ≤0)
 7. `assay sim run --suite quick --time-budget 1` → exit 2 with "budget exceeded" marker; assert output contains "skipped:" (regression: UX marker must not disappear)
 8. `assay sim run --suite quick --print-config --target bundle.tar.gz` → output includes effective limits keys and time budget; smoke test presence (not exact string match)
 9. Existing quick suite test: no regressions with tier defaults; limit_bundle_bytes generates ~5MB in quick (not 100MB+)
