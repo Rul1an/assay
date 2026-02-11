@@ -7,6 +7,9 @@ use assay_evidence::VerifyLimits;
 use clap::Args;
 use std::fs::File;
 
+/// Default pack when --pack is omitted (ADR-023).
+const DEFAULT_PACK: &str = "cicd-starter";
+
 #[derive(Debug, Args, Clone)]
 pub struct LintArgs {
     /// Bundle to lint (omit when using --explain)
@@ -56,7 +59,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 
     let limits = VerifyLimits::default();
 
-    // Load packs: explicit --pack or default cicd-starter (ADR-023)
+    // Load packs: explicit --pack or default (ADR-023)
     let (packs, is_default_pack) = if let Some(pack_refs) = &args.pack {
         match load_packs(pack_refs) {
             Ok(p) => (p, false),
@@ -66,7 +69,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             }
         }
     } else {
-        match load_packs(&["cicd-starter".to_string()]) {
+        match load_packs(&[DEFAULT_PACK.to_string()]) {
             Ok(p) => (p, true),
             Err(e) => {
                 eprintln!("Default pack loading failed: {}", e);
@@ -141,7 +144,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                     .packs
                     .iter()
                     .map(|p| {
-                        let suffix = if is_default_pack && p.name == "cicd-starter" {
+                        let suffix = if is_default_pack && p.name == DEFAULT_PACK {
                             " (default)"
                         } else {
                             ""
@@ -237,7 +240,7 @@ fn load_packs_for_lint(
 ) -> Result<Vec<LoadedPack>, assay_evidence::lint::packs::PackError> {
     let refs: Vec<String> = pack_refs
         .clone()
-        .unwrap_or_else(|| vec!["cicd-starter".to_string()]);
+        .unwrap_or_else(|| vec![DEFAULT_PACK.to_string()]);
     load_packs(&refs)
 }
 

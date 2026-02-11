@@ -1,9 +1,10 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-02-10):** Q2 items verified against codebase — all P0/P1/P2 DX features delivered.
+> **Status sync (2026-02):** Q2 items verified — all P0/P1/P2 DX features delivered.
 > Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
 > Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
-> Remaining structural items tracked in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
+> **Starter packs (ADR-023)** merged PR #289 — cicd-starter default pack, assayrunid fix, vendored drift CI, --explain UX.
+> Next: [Sim Engine Hardening (ADR-024)](architecture/ADR-024-Sim-Engine-Hardening.md). Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -326,9 +327,9 @@ Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
 
 See [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md) for full specification.
 
-### F. Starter Packs (OSS) (P1)
+### F. Starter Packs (OSS) (P1) ✅ Complete
 
-CICD-hygiene pack as compatibility floor for adoption—minimal traceability so teams get first value from `assay evidence lint` with minimal config. See [ADR-023](./architecture/ADR-023-CICD-Starter-Pack.md).
+CICD-hygiene pack as compatibility floor for adoption—minimal traceability so teams get first value from `assay evidence lint` with minimal config. See [ADR-023](./architecture/ADR-023-CICD-Starter-Pack.md). Merged PR #289.
 
 ```bash
 assay evidence lint --pack cicd-starter bundle.tar.gz
@@ -357,7 +358,7 @@ assay evidence lint --pack cicd-starter,eu-ai-act-baseline bundle.tar.gz
 
 ### G. Sim Engine Hardening (P2)
 
-Configurable verification limits and time budget enforcement for `assay sim`—resource-control best practices (OWASP-aligned, fail-fast under load).
+Configurable verification limits and time budget enforcement for `assay sim`—resource-control best practices (OWASP-aligned, fail-fast under load). See [ADR-024](./architecture/ADR-024-Sim-Engine-Hardening.md).
 
 ```bash
 assay sim run --suite quick --target bundle.tar.gz
