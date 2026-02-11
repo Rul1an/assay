@@ -103,17 +103,6 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
 
     let report = run_suite(config).context("Simulation suite failed")?;
 
-    // Exit 2 when time budget exceeded (ADR-024)
-    if report.time_budget_exceeded {
-        let skipped = if report.skipped_phases.is_empty() {
-            "(none)".to_string()
-        } else {
-            report.skipped_phases.join(", ")
-        };
-        eprintln!("\n⏱ Time budget exceeded. Skipped: {}", skipped);
-        return Ok(2);
-    }
-
     // Print Results Table
     println!(
         "{:<35} {:<10} {:<10} {:<15}",
@@ -136,19 +125,31 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
         report.summary.blocked, report.summary.passed, report.summary.bypassed
     );
 
-    // Save JSON report if requested
+    // Save JSON report if requested (before any early return so budget-exceeded runs still produce output)
     if let Some(path) = args.report {
         let json = serde_json::to_string_pretty(&report)?;
         std::fs::write(&path, json).context("failed to write report")?;
         println!("Report saved to {}", path.display());
     }
 
+    // Bypass (exit 1) takes precedence over time budget exceeded (exit 2)
     if report.summary.bypassed > 0 {
         eprintln!(
             "\n❌ SECURITY REGRESSION: {} attacks bypassed verification!",
             report.summary.bypassed
         );
         return Ok(1);
+    }
+
+    // Exit 2 when time budget exceeded (ADR-024)
+    if report.time_budget_exceeded {
+        let skipped = if report.skipped_phases.is_empty() {
+            "(none)".to_string()
+        } else {
+            report.skipped_phases.join(", ")
+        };
+        eprintln!("\n⏱ Time budget exceeded. Skipped: {}", skipped);
+        return Ok(2);
     }
 
     println!("\n✅ All attacks blocked.");

@@ -4,7 +4,7 @@
 > Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
 > Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
 > **Starter packs (ADR-023)** merged PR #289 — cicd-starter default pack, assayrunid fix, vendored drift CI, --explain UX.
-> Next: [Sim Engine Hardening (ADR-024)](architecture/ADR-024-Sim-Engine-Hardening.md). Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
+> Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -181,7 +181,10 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
 | **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
 | **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
-| **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Pending |
+| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | Pending (I1) |
+| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | Pending (I1) |
+| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | Pending (I2) |
+| **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
@@ -356,27 +359,33 @@ assay evidence lint --pack cicd-starter,eu-ai-act-baseline bundle.tar.gz
 - Light rules only—reuse existing check types: `event_count`, `event_pairs`, `event_field_present`
 - Composable with eu-ai-act-baseline for teams graduating to compliance
 
-### G. Sim Engine Hardening (P2)
+### G. Reliability Surface & Soak (P1) [ADR-025]
 
-Configurable verification limits and time budget enforcement for `assay sim`—resource-control best practices (OWASP-aligned, fail-fast under load). See [ADR-024](./architecture/ADR-024-Sim-Engine-Hardening.md).
+Pivot from generic "simulation" to **Policy Soak Testing** as a reliability product. See [ADR-025](./architecture/ADR-025-Evidence-as-a-Product.md).
 
 ```bash
-assay sim run --suite quick --target bundle.tar.gz
-assay sim run --limits '{"max_bundle_bytes": 10485760}' --target bundle.tar.gz
-assay sim run --limits-file limits.json --target bundle.tar.gz
+assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.json
 ```
 
-**Scope:**
-- [ ] **CLI**: Parse `--limits` (JSON string) and `--limits-file` into `Option<VerifyLimits>`
-- [ ] **Limits model**: Partial overrides merged with defaults; stable JSON schema; clear parse errors (invalid JSON → exit 3)
-- [ ] **Integrity attacks**: Pass limits and `TimeBudget`; use `verify_bundle_with_limits`; budget check before each verify/iteration
-- [ ] **Dynamic bundle_size**: Generate `limit + 1` bytes for `limits.bundle_size` attack (regression-proof)
-- [ ] **Exit codes**: "Blocked by verify limits" distinguishable from bypass; attack correctly blocked = test success
+**Scope (Iteration 1):**
+- [ ] **CLI**: `assay sim soak` subcommand with `pass^k` semantics (pass_all, pass_rate)
+- [ ] **Report**: `soak-report-v1` strict JSON schema (decision_policy, violations_by_rule)
+- [ ] **Determinism**: Seeded execution for reproducible reliability
+- [ ] **Limits**: Time budget and resource limits (inherited from ADR-024 work)
 
 **Design decisions:**
-- Global suite `TimeBudget` (single deadline, not per-attack) for predictable CI behavior
-- Budget-check points before every expensive operation (verify, decompress, loop iteration)
-- `--limits-file` or `--limits @path` for CI/shell-friendly config (avoid JSON escaping)
+- **Pass condition**: "Pass All K" is the gold standard for Agentic CI
+- **Evidence**: The *Soak Report* itself is an artifact in the evidence bundle
+
+### H. Audit Kit & Closure (P2) [ADR-025]
+
+Formalize "Evidence-as-a-Product" with provenance and replayability scores.
+
+**Scope (Iteration 1 & 2):**
+- [ ] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance
+- [ ] **Completeness**: Pack-relative signal gaps (`required` vs `captured`)
+- [ ] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness
+- [ ] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
 
 ---
 
