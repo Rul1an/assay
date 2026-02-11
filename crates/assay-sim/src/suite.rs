@@ -180,7 +180,7 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
 fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
     // Fail-fast: skip chaos if already over budget
     if budget.exceeded() {
-        report.set_time_budget_exceeded(vec![]);
+        report.set_time_budget_exceeded(vec!["chaos".into()]);
         report.add_result(AttackResult {
             name: "chaos.time_budget".into(),
             status: AttackStatus::Error,

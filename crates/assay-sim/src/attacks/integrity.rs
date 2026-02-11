@@ -235,15 +235,37 @@ fn create_zip_bomb(target_uncompressed: u64) -> AnyhowResult<Vec<u8>> {
     Ok(buf)
 }
 
+/// Run only the limit_bundle_bytes attack. Used by tests to avoid slow zip_bomb.
+#[cfg(test)]
+fn run_limit_bundle_bytes_only(
+    report: &mut SimReport,
+    limits: VerifyLimits,
+    budget: &TimeBudget,
+) -> Result<(), IntegrityError> {
+    run_attack_reader(
+        report,
+        "integrity.limit_bundle_bytes",
+        limits,
+        budget,
+        || {
+            let n = limits.max_bundle_bytes.saturating_add(1);
+            let src = io::repeat(0u8).take(n);
+            Ok(GzEncoder::new(src, Compression::none()))
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::report::AttackStatus;
     use crate::suite::TimeBudget;
     use assay_evidence::VerifyLimits;
+
     #[test]
     fn test_limit_bundle_bytes_blocked_with_limit_bundle_bytes() {
-        // Use limit 100: gzip from 1001 zeros is ~1024 bytes, so LimitReader must trigger.
+        // Use limit 100: gzip from 101 zeros is ~1024 bytes compressed, so LimitReader must trigger.
+        // Runs in isolation to avoid slow zip_bomb (1.1GB) in check_integrity_attacks.
         let limits = VerifyLimits {
             max_bundle_bytes: 100,
             ..Default::default()
@@ -252,7 +274,7 @@ mod tests {
         let mut report = SimReport::new("test", 0);
         let budget = TimeBudget::new(std::time::Duration::from_secs(60));
 
-        check_integrity_attacks(&mut report, 0, limits, &budget).unwrap();
+        run_limit_bundle_bytes_only(&mut report, limits, &budget).unwrap();
 
         let r = report
             .results
