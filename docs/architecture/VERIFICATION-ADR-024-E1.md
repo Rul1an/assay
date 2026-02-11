@@ -24,7 +24,7 @@
 | `test_verify_limits_overrides_merge` | Partial JSON → only provided fields override; defaults preserved |
 | `test_verify_limits_overrides_deny_unknown_fields` | `{"max_bundle_bytess": 1}` → deserialize fails |
 | `test_verify_limits_overrides_empty_roundtrip` | `{}` → all None → apply yields identity (equals default) |
-| `test_verify_limits_overrides_drift_guard` | Destructure both structs → compile fails if field count drifts |
+| `test_verify_limits_overrides_drift_guard` | Single macro lists fields once; compile fails if one struct gains a field without the other |
 
 ### ADR Alignment
 

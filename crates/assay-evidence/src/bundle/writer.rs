@@ -1249,27 +1249,23 @@ mod tests {
 
     #[test]
     fn test_verify_limits_overrides_drift_guard() {
-        // Destructure both structs so adding a field to one without the other fails to compile.
-        let VerifyLimits {
-            max_bundle_bytes: _,
-            max_decode_bytes: _,
-            max_manifest_bytes: _,
-            max_events_bytes: _,
-            max_events: _,
-            max_line_bytes: _,
-            max_path_len: _,
-            max_json_depth: _,
-        } = VerifyLimits::default();
-        let VerifyLimitsOverrides {
-            max_bundle_bytes: _,
-            max_decode_bytes: _,
-            max_manifest_bytes: _,
-            max_events_bytes: _,
-            max_events: _,
-            max_line_bytes: _,
-            max_path_len: _,
-            max_json_depth: _,
-        } = VerifyLimitsOverrides::default();
+        // Single field list: adding a field to one struct without the other fails to compile.
+        macro_rules! verify_limits_drift_guard {
+            ($($field:ident),+ $(,)?) => {{
+                let VerifyLimits { $($field: _,)+ } = VerifyLimits::default();
+                let VerifyLimitsOverrides { $($field: _,)+ } = VerifyLimitsOverrides::default();
+            }};
+        }
+        verify_limits_drift_guard!(
+            max_bundle_bytes,
+            max_decode_bytes,
+            max_manifest_bytes,
+            max_events_bytes,
+            max_events,
+            max_line_bytes,
+            max_path_len,
+            max_json_depth,
+        );
     }
 
     #[test]
