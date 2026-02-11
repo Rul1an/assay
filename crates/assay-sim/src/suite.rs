@@ -17,9 +17,11 @@ pub enum SuiteTier {
 #[derive(Debug, Clone)]
 pub struct SuiteConfig {
     pub tier: SuiteTier,
-    pub target_bundle: PathBuf, // Placeholder for future file-based targets
+    pub target_bundle: PathBuf,
     pub seed: u64,
     pub verify_limits: Option<VerifyLimits>,
+    /// Time budget in seconds (default 60). Used to create TimeBudget.
+    pub time_budget_secs: u64,
 }
 
 /// Time budget for an entire suite run.
@@ -30,6 +32,17 @@ pub struct SuiteConfig {
 pub struct TimeBudget {
     start: Instant,
     limit: Duration,
+}
+
+/// Tier-specific default limits (ADR-024: Quick 5MB to keep suite fast).
+/// Single source of truth for tier defaults; used by CLI and suite.
+/// Input is normalized (trim + lowercase) for case-insensitive matching.
+pub fn tier_default_limits(tier: &str) -> VerifyLimits {
+    let mut defaults = VerifyLimits::default();
+    if tier.trim().to_lowercase() == "quick" {
+        defaults.max_bundle_bytes = 5 * 1024 * 1024; // 5 MB
+    }
+    defaults
 }
 
 impl TimeBudget {
@@ -51,6 +64,10 @@ impl TimeBudget {
         self.start.elapsed() > self.limit
     }
 
+    pub fn elapsed(&self) -> Duration {
+        self.start.elapsed()
+    }
+
     pub fn remaining(&self) -> Duration {
         self.limit.saturating_sub(self.start.elapsed())
     }
@@ -58,7 +75,10 @@ impl TimeBudget {
 
 pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     let mut report = SimReport::new(&format!("{:?}", cfg.tier), cfg.seed);
-    let budget = TimeBudget::default_suite();
+    let budget = TimeBudget::new(Duration::from_secs(cfg.time_budget_secs));
+    let limits = cfg
+        .verify_limits
+        .unwrap_or_else(|| tier_default_limits(&format!("{:?}", cfg.tier).to_lowercase()));
 
     // 1. Integrity Attacks (all tiers)
     //
@@ -70,13 +90,29 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
         let seed = cfg.seed;
         let start = Instant::now();
         let mut inner_report = SimReport::new("integrity", seed);
-        match attacks::integrity::check_integrity_attacks(&mut inner_report, seed) {
+        match attacks::integrity::check_integrity_attacks(&mut inner_report, seed, limits, &budget)
+        {
             Ok(()) => {
                 for r in inner_report.results {
                     report.add_result(r);
                 }
             }
-            Err(e) => {
+            Err(attacks::integrity::IntegrityError::BudgetExceeded) => {
+                for r in inner_report.results {
+                    report.add_result(r);
+                }
+                report.set_time_budget_exceeded(vec!["differential".into(), "chaos".into()]);
+                report.add_result(AttackResult {
+                    name: "integrity.time_budget".into(),
+                    status: AttackStatus::Error,
+                    error_class: None,
+                    error_code: None,
+                    message: Some("time budget exceeded during integrity phase".into()),
+                    duration_ms: budget.elapsed().as_millis() as u64,
+                });
+                return Ok(report);
+            }
+            Err(attacks::integrity::IntegrityError::Other(e)) => {
                 for r in inner_report.results {
                     report.add_result(r);
                 }
@@ -93,13 +129,14 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     }
 
     if budget.exceeded() {
+        report.set_time_budget_exceeded(vec!["differential".into(), "chaos".into()]);
         report.add_result(AttackResult {
-            name: "time_budget".into(),
+            name: "integrity.time_budget".into(),
             status: AttackStatus::Error,
             error_class: None,
             error_code: None,
-            message: Some("time budget exceeded after integrity attacks".into()),
-            duration_ms: budget.start.elapsed().as_millis() as u64,
+            message: Some("time budget exceeded after integrity phase".into()),
+            duration_ms: budget.elapsed().as_millis() as u64,
         });
         return Ok(report);
     }
@@ -120,13 +157,14 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
     }
 
     if budget.exceeded() {
+        report.set_time_budget_exceeded(vec!["chaos".into()]);
         report.add_result(AttackResult {
-            name: "time_budget".into(),
+            name: "differential.time_budget".into(),
             status: AttackStatus::Error,
             error_class: None,
             error_code: None,
-            message: Some("time budget exceeded after differential tests".into()),
-            duration_ms: budget.start.elapsed().as_millis() as u64,
+            message: Some("time budget exceeded after differential phase".into()),
+            duration_ms: budget.elapsed().as_millis() as u64,
         });
         return Ok(report);
     }
@@ -140,6 +178,20 @@ pub fn run_suite(cfg: SuiteConfig) -> Result<SimReport> {
 }
 
 fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
+    // Fail-fast: skip chaos if already over budget
+    if budget.exceeded() {
+        report.set_time_budget_exceeded(vec![]);
+        report.add_result(AttackResult {
+            name: "chaos.time_budget".into(),
+            status: AttackStatus::Error,
+            error_class: None,
+            error_code: None,
+            message: Some("time budget exceeded before chaos phase".into()),
+            duration_ms: budget.elapsed().as_millis() as u64,
+        });
+        return;
+    }
+
     // IO chaos attacks (in-process — these inject IO errors, not panics)
     match attacks::chaos::check_chaos_attacks(seed) {
         Ok(results) => {
@@ -160,12 +212,22 @@ fn run_chaos_phase(report: &mut SimReport, seed: u64, budget: &TimeBudget) {
     }
 
     if budget.exceeded() {
+        report.set_time_budget_exceeded(vec![]);
         report.add_result(AttackResult {
-            name: "time_budget".into(),
+            name: "chaos.time_budget".into(),
             status: AttackStatus::Error,
             error_class: None,
             error_code: None,
             message: Some("time budget exceeded during chaos phase".into()),
+            duration_ms: budget.elapsed().as_millis() as u64,
+        });
+        // Optie C: make skipped work visible (parity was not run)
+        report.add_result(AttackResult {
+            name: "differential.parity".into(),
+            status: AttackStatus::Error,
+            error_class: None,
+            error_code: None,
+            message: Some("skipped due to time budget".into()),
             duration_ms: 0,
         });
         return;

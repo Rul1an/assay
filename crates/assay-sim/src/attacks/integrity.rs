@@ -2,19 +2,27 @@ use super::test_bundle::create_single_event_bundle;
 use crate::mutators::inject::InjectFile;
 use crate::mutators::Mutator;
 use crate::report::SimReport;
-use anyhow::Result;
+use crate::suite::TimeBudget;
+use anyhow::Result as AnyhowResult;
 use assay_evidence::types::EvidenceEvent;
-use assay_evidence::{verify_bundle, VerifyError};
+use assay_evidence::{verify_bundle_with_limits, VerifyError, VerifyLimits};
 use chrono::{TimeZone, Utc};
+use flate2::read::GzEncoder;
+use flate2::Compression;
 use rand::Rng;
 use rand::SeedableRng;
-use std::io::Cursor;
+use std::io::{self, Cursor, Read};
 
-pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> {
-    let valid_bundle = create_single_event_bundle()?;
+pub fn check_integrity_attacks(
+    report: &mut SimReport,
+    seed: u64,
+    limits: VerifyLimits,
+    budget: &TimeBudget,
+) -> Result<(), IntegrityError> {
+    let valid_bundle = create_single_event_bundle().map_err(IntegrityError::from)?;
 
     // 1. BitFlip (Harder)
-    run_attack(report, "integrity.bitflip", || {
+    run_attack(report, "integrity.bitflip", limits, budget, || {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut corrupted = valid_bundle.clone();
         for _ in 0..10 {
@@ -25,12 +33,12 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
     })?;
 
     // 2. Truncate
-    run_attack(report, "integrity.truncate", || {
+    run_attack(report, "integrity.truncate", limits, budget, || {
         Ok(valid_bundle[..valid_bundle.len() / 2].to_vec())
     })?;
 
     // 3. Inject File
-    run_attack(report, "integrity.inject_file", || {
+    run_attack(report, "integrity.inject_file", limits, budget, || {
         let injector = InjectFile {
             name: "malicious.sh".into(),
             content: b"echo 'bad'".to_vec(),
@@ -39,12 +47,12 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
     })?;
 
     // 4. Zip Bomb
-    run_attack(report, "security.zip_bomb", || {
+    run_attack(report, "security.zip_bomb", limits, budget, || {
         create_zip_bomb(1100 * 1024 * 1024)
     })?;
 
     // 5. [SOTA 2026] Tar Duplicate Entry
-    run_attack(report, "integrity.tar_duplicate", || {
+    run_attack(report, "integrity.tar_duplicate", limits, budget, || {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
         {
             let mut builder = tar::Builder::new(&mut encoder);
@@ -74,7 +82,7 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
     })?;
 
     // 6. [SOTA 2026] NDJSON Nasties: BOM
-    run_attack(report, "integrity.ndjson_bom", || {
+    run_attack(report, "integrity.ndjson_bom", limits, budget, || {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
         {
             let mut builder = tar::Builder::new(&mut encoder);
@@ -102,7 +110,7 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
     })?;
 
     // 7. [SOTA 2026] NDJSON Nasties: CRLF
-    run_attack(report, "integrity.ndjson_crlf", || {
+    run_attack(report, "integrity.ndjson_crlf", limits, budget, || {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
         {
             let mut builder = tar::Builder::new(&mut encoder);
@@ -120,12 +128,18 @@ pub fn check_integrity_attacks(report: &mut SimReport, seed: u64) -> Result<()> 
         Ok(encoder.finish()?)
     })?;
 
-    // 8. [SOTA 2026] Bundle Size Limit
-    run_attack(report, "limits.bundle_size", || {
-        // Create a bundle that is exactly 1 byte over the default limit (100MB) or just use a small limit.
-        // For simulation, we can just return a large buffer.
-        Ok(vec![0u8; 100 * 1024 * 1024 + 1])
-    })?;
+    // 8. limit_bundle_bytes (ADR-024): compressed size = limit + 1, streaming (no alloc)
+    run_attack_reader(
+        report,
+        "integrity.limit_bundle_bytes",
+        limits,
+        budget,
+        || {
+            let n = limits.max_bundle_bytes.saturating_add(1);
+            let src = io::repeat(0u8).take(n);
+            Ok(GzEncoder::new(src, Compression::none()))
+        },
+    )?;
 
     Ok(())
 }
@@ -136,13 +150,37 @@ fn create_event(seq: u64) -> EvidenceEvent {
     event
 }
 
-fn run_attack<F>(report: &mut SimReport, name: &str, mutator: F) -> Result<()>
+#[derive(Debug)]
+pub enum IntegrityError {
+    BudgetExceeded,
+    Other(anyhow::Error),
+}
+impl From<anyhow::Error> for IntegrityError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Other(e)
+    }
+}
+
+fn run_attack_reader<F, R>(
+    report: &mut SimReport,
+    name: &str,
+    limits: VerifyLimits,
+    budget: &TimeBudget,
+    make_reader: F,
+) -> Result<(), IntegrityError>
 where
-    F: FnOnce() -> Result<Vec<u8>>,
+    F: FnOnce() -> AnyhowResult<R>,
+    R: Read,
 {
-    let data = mutator()?;
+    if budget.exceeded() {
+        return Err(IntegrityError::BudgetExceeded);
+    }
+    let reader = make_reader()?;
     let start = std::time::Instant::now();
-    let res = verify_bundle(Cursor::new(data));
+    let res = verify_bundle_with_limits(reader, limits);
+    if budget.exceeded() {
+        return Err(IntegrityError::BudgetExceeded);
+    }
     let duration = start.elapsed().as_millis() as u64;
 
     match res {
@@ -162,7 +200,55 @@ where
     Ok(())
 }
 
-fn create_zip_bomb(target_uncompressed: u64) -> Result<Vec<u8>> {
+fn run_attack<F>(
+    report: &mut SimReport,
+    name: &str,
+    limits: VerifyLimits,
+    budget: &TimeBudget,
+    mutator: F,
+) -> Result<(), IntegrityError>
+where
+    F: FnOnce() -> AnyhowResult<Vec<u8>>,
+{
+    run_attack_reader(report, name, limits, budget, || {
+        let data = mutator()?;
+        Ok(Cursor::new(data))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::AttackStatus;
+    use crate::suite::TimeBudget;
+    use assay_evidence::VerifyLimits;
+    #[test]
+    fn test_limit_bundle_bytes_blocked_with_limit_bundle_bytes() {
+        // Use limit 100: gzip from 1001 zeros is ~1024 bytes, so LimitReader must trigger.
+        let mut limits = VerifyLimits::default();
+        limits.max_bundle_bytes = 100;
+
+        let mut report = SimReport::new("test", 0);
+        let budget = TimeBudget::new(std::time::Duration::from_secs(60));
+
+        check_integrity_attacks(&mut report, 0, limits, &budget).unwrap();
+
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.name == "integrity.limit_bundle_bytes")
+            .expect("limit_bundle_bytes result");
+        assert_eq!(r.status, AttackStatus::Blocked);
+        assert_eq!(
+            r.error_code.as_deref(),
+            Some("LimitBundleBytes"),
+            "expected LimitBundleBytes, got {:?}",
+            r.error_code
+        );
+    }
+}
+
+fn create_zip_bomb(target_uncompressed: u64) -> AnyhowResult<Vec<u8>> {
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
