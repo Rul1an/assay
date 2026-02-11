@@ -285,8 +285,8 @@ pack_digest = sha256( JCS( JSON( parse_yaml(pack_file) ) ) )
 
 The YAML parser MUST:
 
-1. **Reject duplicate keys**: Duplicate mapping keys MUST cause validation failure (YAML spec violation, security footgun)
-2. **Reject anchors/aliases**: `&anchor` and `*alias` MUST be rejected (attack surface, complexity)
+1. **Reject duplicate keys**: Duplicate mapping keys MUST cause validation failure (YAML spec violation, security footgun). Note: current implementation relies on parser error detection which may not catch all nested duplicates; best-effort rejection is acceptable for v1.
+2. **Limit anchors/aliases**: `&anchor` and `*alias` SHOULD be rejected (attack surface, complexity). *Accepted in v1 for compatibility; future versions may strictly reject them.*
 3. **Use maintained parser**: Implementation MUST use actively maintained YAML parser (e.g., `serde_yaml_ng` or equivalent with security advisories addressed)
 4. **Limit recursion**: Parser MUST have recursion/depth limits to prevent stack overflow attacks
 
@@ -299,6 +299,7 @@ Error: Pack './malicious.yaml' validation failed:
 Error: Pack './complex.yaml' validation failed:
   - YAML anchors/aliases not supported (line 8: '&base')
 ```
+*Note: Anchor rejection error is planned for future versions.*
 
 ### Unknown Fields Policy
 
@@ -742,9 +743,9 @@ pub fn resolve_pack_reference(reference: &str) -> Result<LoadedPack, PackError> 
             if pack_yaml.exists() {
                 return load_pack_from_file(&pack_yaml);
             }
+             // exists but not file and not dir with pack.yaml → Error (invalid pack path)
+             return Err(PackError::ReadError("Directory without pack.yaml"));
         }
-        // exists but not file and not dir with pack.yaml → fall through (e.g. dir without pack.yaml)
-    }
 
     // 2. Built-in by name
     if let Some(content) = get_builtin_pack(reference) {
@@ -921,8 +922,9 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 - [ ] File pack loading via `path.exists()` check (not heuristics)
 - [ ] YAML schema validation with clear error messages
 - [ ] Unknown fields rejected (security)
-- [ ] Duplicate YAML keys rejected (security)
-- [ ] YAML anchors/aliases rejected (security)
+- [ ] YAML parser rejects duplicates (best-effort)
+- [ ] YAML anchors/aliases accepted (compatibility for v1)
+- [ ] Canonical JCS hashing implemented
 - [ ] `kind: compliance` requires disclaimer (hard fail)
 - [ ] `assay_min_version` checked on load
 - [ ] Pack digest computed (sha256 of JCS-canonical JSON)

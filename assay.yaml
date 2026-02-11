@@ -1,0 +1,7 @@
+policy:
+  enforce: true
+  allow_unsafe: true
+version: 1
+suite: demo
+policy:
+  enforce: true

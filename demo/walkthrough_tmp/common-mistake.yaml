@@ -1,0 +1,13 @@
+version: "2.0"
+name: "day-one-config"
+
+tools:
+  allow:
+    - read_file
+    - write_file
+    - list_directory
+    - run_command     # <- realistische "oops" (RCE surface)
+
+# Geen schemas => dit voelt "handig", maar is riskant.
+enforcement:
+  unconstrained_tools: warn

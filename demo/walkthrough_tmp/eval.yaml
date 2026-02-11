@@ -1,0 +1,9 @@
+version: 1
+suite: demo-agent
+model: trace
+tests:
+  - id: smoke
+    input: ignore
+    expected:
+      type: args_valid
+      policy: policy.yaml

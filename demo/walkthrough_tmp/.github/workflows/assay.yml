@@ -1,0 +1,51 @@
+name: Assay Gate
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write   # Required for PR comment
+  security-events: write # Required for SARIF upload
+
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (Pinned for supply-chain security)
+
+      - name: Setup Assay
+        uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use a full commit SHA. Exact tags (e.g. v2.1.0) are less strict.
+
+      - name: Run Assay Tests
+        run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml --pr-comment .assay/reports/pr-comment.md
+
+      - name: Upload SARIF
+        # Skip on fork PRs to prevent permission errors, and ensure file exists
+        if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('.assay/reports/sarif.json') != ''
+        # Pin to SHA for supply-chain security (v3.28.10)
+        uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30
+        with:
+          sarif_file: .assay/reports/sarif.json
+          category: assay-gate
+
+      - name: Find existing PR comment
+        id: find-comment
+        if: github.event_name == 'pull_request' && hashFiles('.assay/reports/pr-comment.md') != ''
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        continue-on-error: true
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- assay-governance-report -->'
+
+      - name: Post governance summary
+        if: github.event_name == 'pull_request' && hashFiles('.assay/reports/pr-comment.md') != ''
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5.0.0
+        continue-on-error: true
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body-path: .assay/reports/pr-comment.md

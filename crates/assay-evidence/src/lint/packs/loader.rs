@@ -1,8 +1,9 @@
 //! Pack loader with YAML parsing, validation, and digest computation.
 //!
-//! Implements strict YAML parsing per SPEC-Pack-Engine-v1:
-//! - Rejects duplicate keys
-//! - Rejects unknown fields (via serde deny_unknown_fields)
+//! # YAML Parsing
+//! - Rejects unknown fields (`deny_unknown_fields`).
+//! - Duplicate keys: rejected when detected by the YAML parser (not guaranteed at all nesting levels).
+//! - Anchors/aliases: currently accepted; future versions may reject.
 //! - Computes deterministic digest: sha256(JCS(JSON(yaml)))
 
 use super::schema::{PackDefinition, PackValidationError};
@@ -91,8 +92,32 @@ pub enum PackError {
 pub fn load_pack(reference: &str) -> Result<LoadedPack, PackError> {
     let path = Path::new(reference);
 
-    // 1. If path exists on filesystem → load as file
+    // 1. If path exists on filesystem → load as file or dir
     if path.exists() {
+        if path.is_dir() {
+            let pack_yaml = path.join("pack.yaml");
+            if pack_yaml.exists() {
+                return load_pack_from_file(&pack_yaml);
+            }
+            // If dir exists but no pack.yaml, we fall through?
+            // User requested: "for directories: pack.yaml required".
+            // If the user explicitly passed a path, we should probably error if it's a dir without pack.yaml,
+            // UNLESS it also happens to match a built-in name?
+            // "Path step" accepts any existing path.
+            // Let's strict fail if it's a directory and explicit path was likely intended?
+            // But wait, if I run `assay lint --pack ./my-pack`, and `./my-pack` is a dir, I expect it to load `pack.yaml`.
+            // If `pack.yaml` is missing, should I fail or check built-ins?
+            // The requirement: "Precedence: Direct File Path > Built-in > Local".
+            // If `reference` resolves to a filesystem path, it wins.
+            // If it's a directory without `pack.yaml`, it's an invalid pack path.
+            return Err(PackError::ReadError {
+                path: pack_yaml,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Directory provided but 'pack.yaml' not found",
+                ),
+            });
+        }
         return load_pack_from_file(path);
     }
 
@@ -101,7 +126,16 @@ pub fn load_pack(reference: &str) -> Result<LoadedPack, PackError> {
         return load_pack_from_string(content, PackSource::BuiltIn(builtin_name));
     }
 
-    // 3. Not found
+    // 3. Local pack directory (valid name only; containment enforced in load)
+    if is_valid_pack_name(reference) {
+        if let Some(loaded) = try_load_from_config_dir(reference)? {
+            return Ok(loaded);
+        }
+    }
+
+    // 4. Registry / BYOS (future)
+
+    // 5. Not found
     Err(PackError::NotFound {
         reference: reference.to_string(),
         suggestion: suggest_similar_pack(reference),
@@ -114,6 +148,109 @@ fn get_builtin_pack_with_name(name: &str) -> Option<(&'static str, &'static str)
         .iter()
         .find(|(n, _)| *n == name)
         .map(|(n, c)| (*n, *c))
+}
+
+/// Try to load a pack from the local config directory.
+fn try_load_from_config_dir(name: &str) -> Result<Option<LoadedPack>, PackError> {
+    let config_dir = match get_config_pack_dir() {
+        Some(d) => d,
+        None => return Ok(None),
+    };
+
+    if !config_dir.exists() {
+        return Ok(None);
+    }
+
+    // Harden canonicalization: if dir exists, must canonicalize or error
+    let canonical_config =
+        std::fs::canonicalize(&config_dir).map_err(|e| PackError::ReadError {
+            path: config_dir.clone(),
+            source: e,
+        })?;
+
+    // Candidates:
+    // 1. {config_dir}/{name}.yaml
+    // 2. {config_dir}/{name}/pack.yaml
+    let candidates = vec![
+        config_dir.join(format!("{}.yaml", name)),
+        config_dir.join(name).join("pack.yaml"),
+    ];
+
+    for path in candidates {
+        if path.exists() {
+            // SECURITY: Path containment check
+            // Use canonicalize() to resolve symlinks and '..'
+            let canonical_path =
+                std::fs::canonicalize(&path).map_err(|e| PackError::ReadError {
+                    path: path.clone(),
+                    source: e,
+                })?;
+
+            if !canonical_path.starts_with(&canonical_config) {
+                // Determine if this is a symlink escape attempt
+                return Err(PackValidationError::Safety(format!(
+                    "Pack path '{}' resolves outside config directory '{}'",
+                    path.display(),
+                    config_dir.display()
+                ))
+                .into());
+            }
+
+            // Mitigate TOCTOU: load from the canonical path we just verified
+            return Ok(Some(load_pack_from_file(&canonical_path)?));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Determine the config pack directory per ADR-021.
+fn get_config_pack_dir() -> Option<PathBuf> {
+    // Unix: $XDG_CONFIG_HOME/assay/packs or ~/.config/assay/packs
+    // Windows: %APPDATA%\assay\packs
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            if !xdg.is_empty() {
+                return Some(PathBuf::from(xdg).join("assay").join("packs"));
+            }
+        }
+
+        // Fallback: ~/.config/assay/packs
+        if let Ok(home) = std::env::var("HOME") {
+            return Some(
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("assay")
+                    .join("packs"),
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return Some(PathBuf::from(appdata).join("assay").join("packs"));
+        }
+    }
+
+    None
+}
+
+/// Validate pack name grammar per ADR-021.
+///
+/// Chars: a-z, 0-9, -
+/// Must not start or end with hyphen.
+fn is_valid_pack_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Load multiple packs from references.
@@ -135,14 +272,14 @@ pub fn load_pack_from_file(path: &Path) -> Result<LoadedPack, PackError> {
     load_pack_from_string(&content, PackSource::File(path.to_path_buf()))
 }
 
-/// Load a pack from YAML string content.
+/// Load pack from string content.
 ///
-/// # YAML Security
+/// Implements strict YAML parsing for the Pack Engine v1 spec:
+/// - Rejects duplicate keys (partially via serde map handling)
+/// - Rejects unknown fields (`deny_unknown_fields`)
 ///
-/// Uses serde_yaml which handles anchors/aliases by expansion. Combined with
-/// `deny_unknown_fields` on all schema types, this prevents unknown field injection.
-/// For strict anchor rejection, a pre-scan would be needed, but expand-then-validate
-/// provides equivalent security for our schema-validated packs.
+/// Note: While the spec discourages anchors/aliases, the current implementation
+/// accepts them if they resolve to valid JSON. Future versions may enforce failing on anchors/aliases.
 fn load_pack_from_string(content: &str, source: PackSource) -> Result<LoadedPack, PackError> {
     // Parse YAML with strict settings (deny_unknown_fields on schema types)
     let definition: PackDefinition =
@@ -334,5 +471,323 @@ mod tests {
         assert_eq!(levenshtein_distance("eu-ai-act", "eu-ai-act"), 0);
         assert_eq!(levenshtein_distance("eu-ai-act", "eu-ai-act-baseline"), 9);
         assert_eq!(levenshtein_distance("euaiact", "eu-ai-act"), 2);
+    }
+
+    #[test]
+    fn test_is_valid_pack_name() {
+        // This test now uses the imported `is_valid_pack_name`
+        assert!(is_valid_pack_name("simple"));
+        assert!(is_valid_pack_name("eu-ai-act-baseline"));
+        assert!(is_valid_pack_name("pack-v1"));
+        assert!(is_valid_pack_name("123-pack"));
+
+        assert!(!is_valid_pack_name(""));
+        assert!(!is_valid_pack_name("-start"));
+        assert!(!is_valid_pack_name("end-"));
+        assert!(!is_valid_pack_name("Caps"));
+        assert!(!is_valid_pack_name("dot.name"));
+        assert!(!is_valid_pack_name("space name"));
+        assert!(!is_valid_pack_name("/slash"));
+    }
+
+    // Mutex to serialize tests that modify environment variables
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII Guard for test environment.
+    /// Sets XDG_CONFIG_HOME/APPDATA on creation, restores/clears on drop.
+    struct TestEnvGuard {
+        _mutex_guard: std::sync::MutexGuard<'static, ()>,
+        original_xdg: Option<String>,
+        #[cfg(windows)]
+        original_appdata: Option<String>,
+    }
+
+    impl TestEnvGuard {
+        fn new(temp_dir: &tempfile::TempDir) -> Self {
+            let guard = ENV_MUTEX.lock().unwrap();
+            let original_xdg = std::env::var("XDG_CONFIG_HOME").ok();
+            #[cfg(windows)]
+            let original_appdata = std::env::var("APPDATA").ok();
+
+            let path = temp_dir.path();
+            std::env::set_var("XDG_CONFIG_HOME", path);
+            #[cfg(windows)]
+            std::env::set_var("APPDATA", path);
+
+            Self {
+                _mutex_guard: guard,
+                original_xdg,
+                #[cfg(windows)]
+                original_appdata,
+            }
+        }
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            match &self.original_xdg {
+                Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+
+            #[cfg(windows)]
+            match &self.original_appdata {
+                Some(v) => std::env::set_var("APPDATA", v),
+                None => std::env::remove_var("APPDATA"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_local_pack_resolution() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        // Guard acquires lock and sets env; release/restore on drop
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        // Setup structure: $CONFIG/assay/packs/
+        let config_home = temp_dir.path();
+        let packs_dir = config_home.join("assay").join("packs");
+        std::fs::create_dir_all(&packs_dir).unwrap();
+
+        // 1. Create a local pack file: packs/local-pack.yaml
+        let pack_content = r#"
+name: local-pack
+version: 1.0.0
+kind: compliance
+description: Test Local Pack
+author: Me
+license: MIT
+disclaimer: Test disclaimer
+requires:
+  assay_min_version: "0.0.0"
+rules:
+  - id: LOC-001
+    severity: info
+    description: Local rule
+    check:
+      type: event_count
+      min: 1
+"#;
+        std::fs::write(packs_dir.join("local-pack.yaml"), pack_content).unwrap();
+
+        // 2. Create a local pack dir: packs/dir-pack/pack.yaml
+        let dir_pack_dir = packs_dir.join("dir-pack");
+        std::fs::create_dir_all(&dir_pack_dir).unwrap();
+        let dir_pack_content = pack_content.replace("local-pack", "dir-pack");
+        std::fs::write(dir_pack_dir.join("pack.yaml"), dir_pack_content).unwrap();
+
+        // Test resolution
+
+        // Resolve file-based local pack
+        let pack = load_pack("local-pack").expect("Should resolve local-pack");
+        assert_eq!(pack.definition.name, "local-pack");
+        assert!(matches!(pack.source, PackSource::File(_)));
+
+        // Resolve dir-based local pack
+        let pack = load_pack("dir-pack").expect("Should resolve dir-pack");
+        assert_eq!(pack.definition.name, "dir-pack");
+    }
+
+    #[test]
+    fn test_builtin_wins_over_local() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        // Guard acquires lock and sets env; release/restore on drop
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        // Create local pack with built-in name
+        let packs_dir = temp_dir.path().join("assay").join("packs");
+        std::fs::create_dir_all(&packs_dir).unwrap();
+
+        let local_content = r#"
+name: eu-ai-act-baseline
+version: 9.9.9
+kind: compliance
+description: LOCAL SPOOF
+author: Attacker
+license: MIT
+disclaimer: Spoof
+requires:
+  assay_min_version: "0.0.0"
+rules: []
+"#;
+        std::fs::write(packs_dir.join("eu-ai-act-baseline.yaml"), local_content).unwrap();
+
+        // Load by name
+        let pack = load_pack("eu-ai-act-baseline").expect("Should load");
+
+        // MUST be built-in
+        match pack.source {
+            PackSource::BuiltIn(_) => {}
+            _ => panic!("Expected BuiltIn source, got {:?}", pack.source),
+        }
+        assert_ne!(pack.definition.description, "LOCAL SPOOF");
+    }
+
+    #[test]
+    fn test_local_resolves_name_dir_pack_yaml() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        let packs_dir = temp_dir.path().join("assay").join("packs");
+
+        // Create packs/my-dir-pack/pack.yaml
+        let pack_dir = packs_dir.join("my-dir-pack");
+        std::fs::create_dir_all(&pack_dir).unwrap();
+
+        let content = r#"
+name: my-dir-pack
+version: 1.0.0
+kind: compliance
+description: Dir Pack
+author: Me
+license: MIT
+disclaimer: Test
+requires:
+  assay_min_version: "0.0.0"
+rules: []
+"#;
+        std::fs::write(pack_dir.join("pack.yaml"), content).unwrap();
+
+        let pack = load_pack("my-dir-pack").expect("Should resolve dir pack");
+        assert_eq!(pack.definition.name, "my-dir-pack");
+    }
+
+    #[test]
+    fn test_local_invalid_yaml_fails() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        let packs_dir = temp_dir.path().join("assay").join("packs");
+        std::fs::create_dir_all(&packs_dir).unwrap();
+
+        // Invalid YAML
+        std::fs::write(packs_dir.join("broken.yaml"), ":: INVALID YAML ::").unwrap();
+
+        let result = load_pack("broken");
+        match result {
+            Err(PackError::YamlParseError { .. }) => {} // Correct hard fail
+            Ok(_) => panic!("Should have failed parsing"),
+            Err(e) => panic!("Expected YamlParseError, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_resolution_order_mock() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        let packs_dir = temp_dir.path().join("assay").join("packs");
+        std::fs::create_dir_all(&packs_dir).unwrap();
+
+        // Create a local pack with same name as built-in (eu-ai-act-baseline)
+        let spoof_content = r#"
+name: eu-ai-act-baseline
+version: 9.9.9
+kind: compliance
+description: SPOOFED PACK
+author: Attacker
+license: MIT
+disclaimer: Spoof disclaimer
+requires:
+  assay_min_version: "0.0.0"
+rules: []
+"#;
+        std::fs::write(packs_dir.join("eu-ai-act-baseline.yaml"), spoof_content).unwrap();
+
+        // Load by name
+        let pack = load_pack("eu-ai-act-baseline").expect("Should load");
+
+        // Verify it is the BUILT-IN one (not spoofed)
+        match pack.source {
+            PackSource::BuiltIn(_) => {}
+            _ => panic!(
+                "Should have loaded built-in pack, but got {:?}",
+                pack.source
+            ),
+        }
+        assert_ne!(pack.definition.description, "SPOOFED PACK");
+    }
+
+    #[test]
+    fn test_path_wins_over_builtin() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+
+        // Create a local file with a built-in name
+        let pack_path = temp_dir.path().join("eu-ai-act-baseline.yaml");
+        let override_content = r#"
+name: eu-ai-act-baseline
+version: 0.0.0
+kind: compliance
+description: OVERRIDE
+author: Me
+license: MIT
+disclaimer: Override disclaimer
+requires:
+  assay_min_version: "0.0.0"
+rules: []
+"#;
+        std::fs::write(&pack_path, override_content).unwrap();
+
+        // Load by PATH
+        let pack = load_pack(pack_path.to_str().unwrap()).expect("Should load by path");
+        assert_eq!(pack.definition.description, "OVERRIDE");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_escape_rejected() {
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        // Reuse TestEnvGuard for hygiene
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        let config_home = temp_dir.path(); // TestEnvGuard sets this to XDG_CONFIG_HOME
+        let outside_dir = temp_dir.path().join("outside");
+
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        // Create standard packs dir checking logic relies on XDG_CONFIG_HOME/assay/packs
+        let packs_dir = config_home.join("assay").join("packs");
+        std::fs::create_dir_all(&packs_dir).unwrap();
+
+        // Create malicious pack OUTSIDE config dir
+        let malicious_content = r#"
+name: malicious
+version: 1.0.0
+kind: compliance
+description: Evil
+author: Hacker
+license: MIT
+disclaimer: Evil disclaimer
+requires:
+  assay_min_version: "0.0.0"
+rules: []
+"#;
+        std::fs::write(outside_dir.join("malicious.yaml"), malicious_content).unwrap();
+
+        // Create symlink INSIDE config dir -> pointing OUTSIDE
+        symlink(
+            outside_dir.join("malicious.yaml"),
+            packs_dir.join("malicious.yaml"),
+        )
+        .unwrap();
+
+        // Try to load
+        let result = load_pack("malicious");
+        match result {
+            Err(PackError::ValidationError(PackValidationError::Safety(msg))) => {
+                assert!(msg.contains("resolves outside config directory"));
+            }
+            Err(e) => panic!("Expected Safety error, got: {:?}", e),
+            Ok(_) => panic!("Should verified failed loading symlinked pack"),
+        }
     }
 }

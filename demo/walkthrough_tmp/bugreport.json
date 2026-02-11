@@ -1,0 +1,46 @@
+{
+  "run_id": 2,
+  "suite": "demo-agent",
+  "results": [
+    {
+      "test_id": "smoke",
+      "status": "error",
+      "score": null,
+      "cached": false,
+      "message": "Policy check error (fail-closed): ❌ [E_TRACE_MISS] Trace miss: prompt not found in loaded traces\n  source: trace\n  {\n    \"prompt\": \"ignore\",\n    \"closest_match\": null\n  }\n\nFix:\n  1. No similar prompts found in trace file\n  2. Regenerate the trace file: assay trace ingest ...\n",
+      "details": {
+        "error": "❌ [E_TRACE_MISS] Trace miss: prompt not found in loaded traces\n  source: trace\n  {\n    \"prompt\": \"ignore\",\n    \"closest_match\": null\n  }\n\nFix:\n  1. No similar prompts found in trace file\n  2. Regenerate the trace file: assay trace ingest ...\n",
+        "policy_applied": "block"
+      },
+      "duration_ms": null,
+      "fingerprint": null,
+      "skip_reason": null,
+      "attempts": [
+        {
+          "attempt_no": 1,
+          "status": "error",
+          "message": "Policy check error (fail-closed): ❌ [E_TRACE_MISS] Trace miss: prompt not found in loaded traces\n  source: trace\n  {\n    \"prompt\": \"ignore\",\n    \"closest_match\": null\n  }\n\nFix:\n  1. No similar prompts found in trace file\n  2. Regenerate the trace file: assay trace ingest ...\n",
+          "duration_ms": null,
+          "details": {
+            "error": "❌ [E_TRACE_MISS] Trace miss: prompt not found in loaded traces\n  source: trace\n  {\n    \"prompt\": \"ignore\",\n    \"closest_match\": null\n  }\n\nFix:\n  1. No similar prompts found in trace file\n  2. Regenerate the trace file: assay trace ingest ...\n",
+            "policy_applied": "block"
+          }
+        }
+      ],
+      "error_policy_applied": "block"
+    }
+  ],
+  "order_seed": "15607910353236329411",
+  "runner_clone_ms": 0,
+  "exit_code": 2,
+  "reason_code": "E_TRACE_NOT_FOUND",
+  "reason_code_version": 1,
+  "seed_version": 1,
+  "judge_seed": null,
+  "resolution": {
+    "exit_code": 2,
+    "reason_code": "E_TRACE_NOT_FOUND",
+    "message": "Policy check error (fail-closed): ❌ [E_TRACE_MISS] Trace miss: prompt not found in loaded traces\n  source: trace\n  {\n    \"prompt\": \"ignore\",\n    \"closest_match\": null\n  }\n\nFix:\n  1. No similar prompts found in trace file\n  2. Regenerate the trace file: assay trace ingest ...\n",
+    "next_step": "Check trace file exists: <trace.jsonl>"
+  }
+}

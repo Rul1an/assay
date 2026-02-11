@@ -28,6 +28,10 @@ pub static BUILTIN_PACKS: &[(&str, &str)] = &[
         "mandate-baseline",
         include_str!("../../../packs/mandate-baseline.yaml"),
     ),
+    (
+        "soc2-baseline",
+        include_str!("../../../packs/soc2-baseline.yaml"),
+    ),
 ];
 
 /// Look up a built-in pack by name.

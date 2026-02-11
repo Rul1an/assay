@@ -1,0 +1,1 @@
+{"prompt": "ignore", "response": "failed", "tool_calls": [{"tool_name": "exec", "args": {"command": "rm -rf /"}}]}

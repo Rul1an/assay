@@ -1,0 +1,11 @@
+version: 2
+name: demo-policy
+tools:
+  allow:
+    - Search
+    - Calculate
+  arg_constraints:
+    Search:
+      query: { pattern: "^[a-zA-Z0-9 ]+$" }
+    Calculate:
+      operation: { enum: ["add", "subtract"] }

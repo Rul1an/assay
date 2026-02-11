@@ -425,10 +425,14 @@ pub enum PackValidationError {
         rule: String,
         reason: String,
     },
+
+    #[error("Pack safety check failed: {0}")]
+    Safety(String),
 }
 
 /// Check if a pack name is valid (lowercase alphanumeric + hyphens).
-fn is_valid_pack_name(name: &str) -> bool {
+/// Validate pack name grammar per ADR-021.
+pub fn is_valid_pack_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .chars()
