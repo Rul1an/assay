@@ -3,10 +3,12 @@ pub mod corpus;
 pub mod differential;
 pub mod mutators;
 pub mod report;
+pub mod soak;
 pub mod subprocess;
 pub mod suite;
 
 pub use report::{AttackResult, AttackStatus, SimReport};
+pub use soak::{DecisionPolicy, PackRef, RunResult, SoakLimits, SoakReport, SoakResults};
 pub use suite::{run_suite, tier_default_limits, SuiteConfig, SuiteTier, TimeBudget};
 
 #[cfg(test)]
