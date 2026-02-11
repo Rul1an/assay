@@ -35,13 +35,13 @@ Only **existing** check types from [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.m
 |---------|-------|----------|-------------------|
 | CICD-001 | Bundle has ≥1 event | error | ≥1 event in bundle |
 | CICD-002 | Lifecycle pair present | warning | `assay.profile.started` + `assay.profile.finished` |
-| CICD-003 | Correlation ID present | warning | `traceparent`, `tracestate`, or `run_id` (top-level or in data) |
+| CICD-003 | Correlation ID present | warning | `assayrunid`, `traceparent`, `tracestate`, or `run_id` (top-level or in data) |
 | CICD-004 | Build identity present | info | `data.build_id` or `data.version` |
 
 **Rationale:**
 - CICD-001: Empty bundle = no evidence; fail fast.
 - CICD-002: Exact `assay.profile.started` / `assay.profile.finished` for beginners—avoids "mysterious pass" from unrelated `*.started` events. README explains how to customize patterns for custom lifecycle types.
-- CICD-003: Canonical top-level W3C fields (`traceparent`, `tracestate`, `run_id`) + `/data/*` fallback; semantically distinct from build metadata.
+- CICD-003: Canonical top-level W3C fields (`traceparent`, `tracestate`, `run_id`) plus Assay-native `assayrunid`, with `/data/*` fallback; semantically distinct from build metadata.
 - CICD-004: Build identity (build_id, version) supports provenance maturity; info severity as optional signal toward SLSA/attestation readiness.
 
 ### 3. Check definitions (normative)
@@ -96,25 +96,27 @@ rules:
 
   - id: CICD-003
     severity: warning
-    description: At least one event contains correlation ID (traceparent, tracestate, run_id)
+    description: At least one event contains correlation ID (traceparent, tracestate, run_id, assayrunid)
     help_markdown: |
       ## CICD-003: Correlation (W3C Trace Context)
-      Events should include traceparent, tracestate, or run_id to link evidence
+      Events should include traceparent, tracestate, run_id, or assayrunid to link evidence
       to external observability (e.g. OpenTelemetry).
 
       **How to fix:**
       - If using OpenTelemetry: propagate traceparent into the event envelope.
       - Otherwise: set run_id (UUID or deterministic ID) for each run in event data.
+      - Assay-native events include assayrunid by default.
       - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
     check:
       type: event_field_present
       paths_any_of:
+        - /assayrunid
+        - /run_id
         - /traceparent
         - /tracestate
-        - /run_id
+        - /data/run_id
         - /data/traceparent
         - /data/tracestate
-        - /data/run_id
 
   - id: CICD-004
     severity: info

@@ -68,5 +68,5 @@ Then: `assay evidence lint --pack cicd-starter,./custom-pack.yaml bundle.tar.gz`
 
 ## Reference
 
-- [ADR-023: CICD Starter Pack](../../docs/architecture/ADR-023-CICD-Starter-Pack.md)
-- [SPEC-Pack-Engine-v1](../../docs/architecture/SPEC-Pack-Engine-v1.md)
+- [ADR-023: CICD Starter Pack](../../../docs/architecture/ADR-023-CICD-Starter-Pack.md)
+- [SPEC-Pack-Engine-v1](../../../docs/architecture/SPEC-Pack-Engine-v1.md)
