@@ -216,6 +216,24 @@ where
     })
 }
 
+fn create_zip_bomb(target_uncompressed: u64) -> AnyhowResult<Vec<u8>> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    let mut buf = Vec::new();
+    let mut encoder = GzEncoder::new(&mut buf, Compression::best());
+    let chunk = vec![0u8; 1024 * 1024];
+    let mut remaining = target_uncompressed;
+    while remaining > 0 {
+        let to_write = remaining.min(chunk.len() as u64);
+        encoder.write_all(&chunk[..to_write as usize])?;
+        remaining -= to_write;
+    }
+    encoder.finish()?;
+    Ok(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,8 +243,10 @@ mod tests {
     #[test]
     fn test_limit_bundle_bytes_blocked_with_limit_bundle_bytes() {
         // Use limit 100: gzip from 1001 zeros is ~1024 bytes, so LimitReader must trigger.
-        let mut limits = VerifyLimits::default();
-        limits.max_bundle_bytes = 100;
+        let limits = VerifyLimits {
+            max_bundle_bytes: 100,
+            ..Default::default()
+        };
 
         let mut report = SimReport::new("test", 0);
         let budget = TimeBudget::new(std::time::Duration::from_secs(60));
@@ -246,22 +266,4 @@ mod tests {
             r.error_code
         );
     }
-}
-
-fn create_zip_bomb(target_uncompressed: u64) -> AnyhowResult<Vec<u8>> {
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-    use std::io::Write;
-
-    let mut buf = Vec::new();
-    let mut encoder = GzEncoder::new(&mut buf, Compression::best());
-    let chunk = vec![0u8; 1024 * 1024];
-    let mut remaining = target_uncompressed;
-    while remaining > 0 {
-        let to_write = remaining.min(chunk.len() as u64);
-        encoder.write_all(&chunk[..to_write as usize])?;
-        remaining -= to_write;
-    }
-    encoder.finish()?;
-    Ok(buf)
 }
