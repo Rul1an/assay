@@ -5,9 +5,13 @@ description: "SOC2 Common Criteria (Security) - Evidence Invariants"
 author: Assay Project
 license: Apache-2.0
 disclaimer: |
-  This pack maps Assay evidence to SOC2 Trust Services Criteria (Security) invariants.
-  It checks for the PRESENCE of evidence that supports controls, not the effectiveness of controls themselves.
-  Compliance with this pack does not guarantee SOC2 compliance.
+  This pack verifies evidence presence and integrity invariants (e.g. that bundles contain events,
+  correlation IDs, lifecycle pairs, or policy-decision events). It does NOT verify operating
+  effectiveness of controls or control design adequacy.
+
+  Passing these checks does not constitute SOC2 compliance and does not imply absence of control
+  issues. Failing does not by itself constitute an audit failure. Organizations remain responsible
+  for their control environment and audit readiness.
 
 requires:
   assay_min_version: ">=0.4.0"

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (design). Implementation pending (pack content not yet in repo; ROADMAP "Additional Packs" updated when PR-B merges).
+Accepted. Implemented (pack in `packs/open/soc2-baseline/`, built-in in assay-evidence).
 
 ## Context
 
@@ -53,7 +53,7 @@ The pack disclaimer SHALL explicitly state that:
 - SOC2 baseline remains clearly scoped (Common Criteria only in v1.0.0); A1/PI/C/P out of scope for rules in v1.0.0, avoiding ambiguity with Pro/Enterprise interpretations.
 - Legal and audit risk is limited by paraphrase + provenance + strong disclaimer; pack is fully functional offline (no external link resolution).
 - Baseline stays "direct mapping" only; disclaimer covers presence/integrity vs effectiveness, passing vs absence of issues, and failing vs audit outcome. Rule versioning (additive minor, meaning change = breaking/deprecate) prevents baseline drift.
-- **Implementation status:** Until PR-B (pack content) is merged, ROADMAP and docs should reflect "design accepted, implementation pending" to avoid status drift.
+- **Implementation status:** Pack content merged; built-in wiring complete. ROADMAP "Additional Packs" reflects soc2-baseline as delivered.
 
 ## References
 

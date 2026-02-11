@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, machine-readable audit trails that integrate with existing security/observability stacks.
+Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, machine-readable audit trails that integrate with existing security/observability stacks. Assay aims to become the **standard evidence lint runtime** for agentic CI, with open engine + baseline packs and strong CI/SARIF integration as the adoption motor.
 
 **Standards Alignment:**
 - **CloudEvents v1.0** envelope — lingua franca for event routers and SIEM pipelines
@@ -18,6 +18,7 @@ Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, ma
 - **SARIF 2.1.0** — GitHub Code Scanning integration (single run + `automationDetails.id` discipline)
 - **EU AI Act Article 12** — record-keeping requirements make "evidence" commercially relevant
 - **OTel GenAI Semantic Conventions** — vendor-agnostic observability for LLM/agent workloads
+- **ENISA / SBOM / SLSA** — Supply-chain assurance (SBOM, provenance, attestation) aligns with ENISA priorities; SLSA-aligned attestation per ADR-018
 
 ---
 
@@ -300,8 +301,9 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 #### Additional Packs (Future)
 
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
-- [ ] **SOC2 Baseline/Pro**: Control mapping packs
-- [ ] **Pack Registry**: Local packs in `~/.assay/packs/`
+- [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
+- [ ] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor for adoption
+- [ ] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021)
 
 ### E. GitHub Action v2.1 ✅ Complete
 
@@ -384,12 +386,16 @@ If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR
 - [ ] **Degradation Reports**: Evidence health score
 - [ ] **Env Strictness Score**: Compliance posture metrics
 
-### B. Advanced Signing & Attestation
+### B. Assurance & Audit Readiness (If Managed Store Exists)
+- [ ] **Policy Exceptions**: Waivers with expiry, owner, rationale; audit trail for compliance exceptions
+- [ ] **Auditor Portal**: Read-only export of packs + results + fingerprints; "audit-ready bundles" for external auditors
+
+### C. Advanced Signing & Attestation
 - [ ] **Sigstore Keyless**: Fulcio certificate + Rekor transparency log
 - [ ] **SCITT Integration**: Transparency log for signed statements (IETF draft)
 - [ ] **Org Trust Policies**: Managed identity verification
 
-### C. Identity & Authorization Stack
+### D. Identity & Authorization Stack
 
 Enterprise identity for agentic workloads:
 
@@ -400,7 +406,7 @@ Enterprise identity for agentic workloads:
 
 **Why:** AP2/UCP mandate flows require provable authorization. FAPI/OpenID4VP are the emerging standards.
 
-### C. Managed Isolation (Future)
+### E. Managed Isolation (Future)
 - [ ] **Managed Runners**: Cloud-hosted MicroVMs (Firecracker/gVisor)
 - [ ] **Zero-Infra**: `assay run --remote ...` transparent offloading
 
@@ -428,6 +434,9 @@ Enterprise identity for agentic workloads:
 ### HITL Implementation (Epic L)
 - [ ] Decision Variant + Receipts: Human-in-the-loop tracking
 - [ ] Guardrail Hooks: NeMo/Superagent integration
+
+### Pack Marketplace (Future)
+- [ ] **Partner packs**: Third-party packs via marketplace (rev share model)
 
 ---
 
@@ -507,8 +516,9 @@ Governance workflows and premium compliance for organizations:
 | Category | Components |
 |----------|------------|
 | **Identity & Access** | SSO/SAML/SCIM, RBAC, teams, approval workflows |
-| **Pro Compliance Packs** | `eu-ai-act-pro` (biometric rules, PDF reports), `soc2-pro`, industry packs |
-| **Managed Workflows** | Exception approvals, scheduled scans, compliance dashboards |
+| **Pro Compliance Packs** | `eu-ai-act-pro` (biometric rules, PDF reports), `soc2-pro`, industry packs — assurance depth + maintained mappings + auditor-friendly reporting |
+| **Managed Workflows** | Exception approvals, policy exceptions (waivers with expiry/owner/rationale), scheduled scans, compliance dashboards |
+| **Auditor Portal** | Read-only export, audit-ready bundles, packs + results + fingerprints (when Managed Store exists) |
 | **Advanced Signing** | Sigstore keyless, transparency log verification, org trust policies |
 | **Managed Storage** | WORM retention, legal hold, compliance attestation |
 | **Integrations** | SIEM connectors (Splunk/Sentinel), OTel pipeline templates |

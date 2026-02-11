@@ -60,7 +60,7 @@ Basic compliance checks that map directly to regulatory requirements:
 
 ### Pro Packs
 
-Advanced compliance rules requiring domain expertise:
+Advanced compliance rules requiring domain expertise. Pro packs provide **assurance depth** (not just extra rules): coverage, consistency, timeliness checks; maintained mappings to frameworks; auditor-friendly reporting. Rules alone are copyable; workflow, integrations, and maintained mappings are not.
 
 | Pack | Description | Rules |
 |------|-------------|-------|
@@ -73,8 +73,10 @@ Advanced compliance rules requiring domain expertise:
 Org-scale governance features:
 
 - Exception approval workflows
+- **Policy exceptions (waivers)**: Expiry, owner, rationale; audit trail for compliance deviations
 - Scheduled compliance scans
 - PDF audit report generation
+- **Auditor Portal**: Read-only export of packs + results + fingerprints; "audit-ready bundles" for external auditors (when Managed Store exists)
 - Managed pack registry (org namespaces)
 - Pack development services (SOW)
 - Compliance dashboards
