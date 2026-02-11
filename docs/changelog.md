@@ -312,6 +312,9 @@
 
 - feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
+- feat(evidence): ADR-024 E1 — VerifyLimitsOverrides (Sim Hardening foundation) (#291) @Rul1an
+- feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
+- feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
 ## [2026-02-11]
 
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
