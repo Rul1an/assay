@@ -83,4 +83,5 @@ extend-exclude = [
     "**/CODE-ANALYSIS-REPORT.md",
     "**/demo/output/**",
     "**/demo/AI-VIDEO-PLAYBOOK.md",
+    "**/demo/CODESPACES-PLAYBOOK.md",
 ]
