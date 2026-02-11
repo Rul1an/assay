@@ -1140,6 +1140,8 @@ pub struct SimArgs {
 pub enum SimSub {
     /// Run an attack simulation suite
     Run(SimRunArgs),
+    /// Policy soak testing — N runs, pass^k semantics (ADR-025)
+    Soak(SoakArgs),
 }
 
 #[cfg(feature = "sim")]
@@ -1188,4 +1190,73 @@ pub struct SimRunArgs {
     /// Print effective limits and time budget, then exit
     #[arg(long)]
     pub print_config: bool,
+}
+
+#[cfg(feature = "sim")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum SoakDecisionPolicy {
+    #[default]
+    Error,
+    #[value(alias = "warn")]
+    Warning,
+    Info,
+}
+
+#[cfg(feature = "sim")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum SoakMode {
+    /// N× lint on fixed bundle — measures policy determinism (not drift)
+    #[default]
+    Artifact,
+    /// N× run cmd → new bundle → lint — measures variance/drift (E1.2)
+    Run,
+}
+
+#[cfg(feature = "sim")]
+#[derive(clap::Args, Clone, Debug)]
+pub struct SoakArgs {
+    /// Mode: artifact = N× same bundle; run = N× new bundle (run-mode not yet implemented)
+    #[arg(long, default_value = "artifact", value_name = "MODE")]
+    pub mode: SoakMode,
+
+    /// Number of iterations (N runs)
+    #[arg(long, default_value = "10")]
+    pub iterations: u32,
+
+    /// Target bundle (required for artifact mode; conflicts with --run-cmd)
+    #[arg(
+        long,
+        short,
+        required_if_eq("mode", "artifact"),
+        conflicts_with = "run_cmd"
+    )]
+    pub target: Option<std::path::PathBuf>,
+
+    /// Run command that produces a bundle (required for run mode; conflicts with --target; not yet implemented)
+    #[arg(long, required_if_eq("mode", "run"), conflicts_with = "target")]
+    pub run_cmd: Option<String>,
+
+    /// Suppress artifact-mode warning (CI)
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Comma-separated pack references (same as lint; default: cicd-starter)
+    #[arg(long, value_delimiter = ',')]
+    pub pack: Option<Vec<String>>,
+
+    /// Pass threshold: error, warning, or info (fail if findings >= this severity)
+    #[arg(long, default_value = "error", value_name = "SEVERITY")]
+    pub decision_policy: SoakDecisionPolicy,
+
+    /// Seed for reproducibility
+    #[arg(long)]
+    pub seed: Option<u64>,
+
+    /// Time budget in seconds (0 = disabled)
+    #[arg(long, default_value = "300")]
+    pub time_budget: u64,
+
+    /// Path to write report (use - for stdout)
+    #[arg(long)]
+    pub report: Option<std::path::PathBuf>,
 }
