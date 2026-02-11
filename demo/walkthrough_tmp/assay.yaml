@@ -1,0 +1,3 @@
+version: 1
+suite: demo
+# Policy is inferred from policy.yaml in the same directory

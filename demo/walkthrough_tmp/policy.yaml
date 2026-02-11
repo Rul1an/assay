@@ -1,0 +1,15 @@
+version: 2
+name: demo-policy
+tools:
+  allow:
+    - read_file
+    - write_file
+  deny:
+    - exec
+    - shell
+    - run_command
+  arg_constraints:
+    read_file:
+      path: { pattern: "^/app/.*" }
+
+on_error: block

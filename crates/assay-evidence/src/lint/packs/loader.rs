@@ -196,7 +196,8 @@ fn try_load_from_config_dir(name: &str) -> Result<Option<LoadedPack>, PackError>
                 .into());
             }
 
-            return Ok(Some(load_pack_from_file(&path)?));
+            // Mitigate TOCTOU: load from the canonical path we just verified
+            return Ok(Some(load_pack_from_file(&canonical_path)?));
         }
     }
 
@@ -474,6 +475,7 @@ mod tests {
 
     #[test]
     fn test_is_valid_pack_name() {
+        // This test now uses the imported `is_valid_pack_name`
         assert!(is_valid_pack_name("simple"));
         assert!(is_valid_pack_name("eu-ai-act-baseline"));
         assert!(is_valid_pack_name("pack-v1"));
@@ -491,21 +493,60 @@ mod tests {
     // Mutex to serialize tests that modify environment variables
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// RAII Guard for test environment.
+    /// Sets XDG_CONFIG_HOME/APPDATA on creation, restores/clears on drop.
+    struct TestEnvGuard {
+        _mutex_guard: std::sync::MutexGuard<'static, ()>,
+        original_xdg: Option<String>,
+        #[cfg(windows)]
+        original_appdata: Option<String>,
+    }
+
+    impl TestEnvGuard {
+        fn new(temp_dir: &tempfile::TempDir) -> Self {
+            let guard = ENV_MUTEX.lock().unwrap();
+            let original_xdg = std::env::var("XDG_CONFIG_HOME").ok();
+            #[cfg(windows)]
+            let original_appdata = std::env::var("APPDATA").ok();
+
+            let path = temp_dir.path();
+            std::env::set_var("XDG_CONFIG_HOME", path);
+            #[cfg(windows)]
+            std::env::set_var("APPDATA", path);
+
+            Self {
+                _mutex_guard: guard,
+                original_xdg,
+                #[cfg(windows)]
+                original_appdata,
+            }
+        }
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            match &self.original_xdg {
+                Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+
+            #[cfg(windows)]
+            match &self.original_appdata {
+                Some(v) => std::env::set_var("APPDATA", v),
+                None => std::env::remove_var("APPDATA"),
+            }
+        }
+    }
+
     #[test]
     fn test_local_pack_resolution() {
-        // Acquire lock before modifying env
-        let _guard = ENV_MUTEX.lock().unwrap();
-
-        use std::env;
         use tempfile::tempdir;
-
-        // Mock XDG_CONFIG_HOME
         let temp_dir = tempdir().unwrap();
-        let config_home = temp_dir.path().to_path_buf();
-        env::set_var("XDG_CONFIG_HOME", &config_home);
-        // ... (rest of test logic) ...
+        // Guard acquires lock and sets env; release/restore on drop
+        let _env_guard = TestEnvGuard::new(&temp_dir);
 
-        // Setup structure: $XDG_CONFIG_HOME/assay/packs/
+        // Setup structure: $CONFIG/assay/packs/
+        let config_home = temp_dir.path();
         let packs_dir = config_home.join("assay").join("packs");
         std::fs::create_dir_all(&packs_dir).unwrap();
 
@@ -537,34 +578,23 @@ rules:
         std::fs::write(dir_pack_dir.join("pack.yaml"), dir_pack_content).unwrap();
 
         // Test resolution
-        // Safe to run in parallel integration tests? env var might be flaky if parallel.
-        // For unit tests usually run sequentially or use a mutex if needed.
-        // Rust test harness runs in parallel by default.
-        // We probably need a mutex for env manipulation if other tests rely on it,
-        // but currently only this test modifies XDG_CONFIG_HOME.
 
         // Resolve file-based local pack
         let pack = load_pack("local-pack").expect("Should resolve local-pack");
         assert_eq!(pack.definition.name, "local-pack");
-        matches!(pack.source, PackSource::File(_));
+        assert!(matches!(pack.source, PackSource::File(_)));
 
         // Resolve dir-based local pack
         let pack = load_pack("dir-pack").expect("Should resolve dir-pack");
         assert_eq!(pack.definition.name, "dir-pack");
-
-        // Cleanup
-        env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]
     fn test_builtin_wins_over_local() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        use std::env;
         use tempfile::tempdir;
-
-        // Mock XDG_CONFIG_HOME
         let temp_dir = tempdir().unwrap();
-        env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+        // Guard acquires lock and sets env; release/restore on drop
+        let _env_guard = TestEnvGuard::new(&temp_dir);
 
         // Create local pack with built-in name
         let packs_dir = temp_dir.path().join("assay").join("packs");
@@ -593,18 +623,14 @@ rules: []
             _ => panic!("Expected BuiltIn source, got {:?}", pack.source),
         }
         assert_ne!(pack.definition.description, "LOCAL SPOOF");
-
-        env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]
     fn test_local_resolves_name_dir_pack_yaml() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        use std::env;
         use tempfile::tempdir;
-
         let temp_dir = tempdir().unwrap();
-        env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
         let packs_dir = temp_dir.path().join("assay").join("packs");
 
         // Create packs/my-dir-pack/pack.yaml
@@ -627,18 +653,14 @@ rules: []
 
         let pack = load_pack("my-dir-pack").expect("Should resolve dir pack");
         assert_eq!(pack.definition.name, "my-dir-pack");
-
-        env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]
     fn test_local_invalid_yaml_fails() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        use std::env;
         use tempfile::tempdir;
-
         let temp_dir = tempdir().unwrap();
-        env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
         let packs_dir = temp_dir.path().join("assay").join("packs");
         std::fs::create_dir_all(&packs_dir).unwrap();
 
@@ -651,25 +673,18 @@ rules: []
             Ok(_) => panic!("Should have failed parsing"),
             Err(e) => panic!("Expected YamlParseError, got {:?}", e),
         }
-
-        env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]
     fn test_resolution_order_mock() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        // 1. Path > Builtin > Local
-        // We verify Builtin > Local here mostly.
-        use std::env;
         use tempfile::tempdir;
-
         let temp_dir = tempdir().unwrap();
-        env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
         let packs_dir = temp_dir.path().join("assay").join("packs");
         std::fs::create_dir_all(&packs_dir).unwrap();
 
         // Create a local pack with same name as built-in (eu-ai-act-baseline)
-        // But with different content/description
         let spoof_content = r#"
 name: eu-ai-act-baseline
 version: 9.9.9
@@ -696,8 +711,6 @@ rules: []
             ),
         }
         assert_ne!(pack.definition.description, "SPOOFED PACK");
-
-        env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]
@@ -729,22 +742,19 @@ rules: []
     #[test]
     #[cfg(unix)]
     fn test_symlink_escape_rejected() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        use std::env;
         use std::os::unix::fs::symlink;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
-        let config_home = temp_dir.path().join("config");
+        // Reuse TestEnvGuard for hygiene
+        let _env_guard = TestEnvGuard::new(&temp_dir);
+
+        let config_home = temp_dir.path(); // TestEnvGuard sets this to XDG_CONFIG_HOME
         let outside_dir = temp_dir.path().join("outside");
 
-        std::fs::create_dir_all(&config_home).unwrap();
         std::fs::create_dir_all(&outside_dir).unwrap();
 
-        env::set_var("XDG_CONFIG_HOME", &config_home);
-
         // Create standard packs dir checking logic relies on XDG_CONFIG_HOME/assay/packs
-        // Our get_config_pack_dir appends assay/packs
         let packs_dir = config_home.join("assay").join("packs");
         std::fs::create_dir_all(&packs_dir).unwrap();
 
@@ -779,7 +789,5 @@ rules: []
             Err(e) => panic!("Expected Safety error, got: {:?}", e),
             Ok(_) => panic!("Should verified failed loading symlinked pack"),
         }
-
-        env::remove_var("XDG_CONFIG_HOME");
     }
 }

@@ -1,0 +1,14 @@
+version: 2
+name: safe-demo
+tools:
+  allow:
+    - "*"
+  deny:
+    - exec
+    - shell
+    - spawn
+  arg_constraints:
+    read_file:
+      path: { pattern: "^/app/.*" }
+
+on_error: block

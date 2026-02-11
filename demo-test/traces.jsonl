@@ -1,0 +1,2 @@
+{"id": "demo_trace_1", "tool": "Search", "args": {"query": "assay rules"}, "prompt": "find assay rules", "response": "detecting 123"}
+{"tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "response": "3"}

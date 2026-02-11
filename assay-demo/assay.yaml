@@ -1,0 +1,9 @@
+version: 1
+suite: demo
+model: gpt-4o-mini
+tests:
+  - id: demo_trace_1
+    input: "find assay rules"
+    expected:
+      type: args_valid
+      policy: policy.yaml

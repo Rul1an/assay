@@ -30,7 +30,7 @@ pub static BUILTIN_PACKS: &[(&str, &str)] = &[
     ),
     (
         "soc2-baseline",
-        include_str!("../../../../../packs/open/soc2-baseline/pack.yaml"),
+        include_str!("../../../packs/soc2-baseline.yaml"),
     ),
 ];
 

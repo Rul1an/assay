@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Verify assay is available
+if ! command -v assay &> /dev/null; then
+    echo "  Assay binary not found. Building from source..."
+    cargo install --path . --locked 2>/dev/null || cargo install assay --locked
+fi
+
+VERSION=$(assay --version 2>/dev/null || echo "unknown")
+
+cat << 'EOF'
+
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                                                              ║
+  ║   ┌─┐┌─┐┌─┐┌─┐┬ ┬                                          ║
+  ║   ├─┤└─┐└─┐├─┤└┬┘   Policy-as-Code for AI Agents           ║
+  ║   ┴ ┴└─┘└─┘┴ ┴ ┴                                           ║
+  ║                                                              ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║                                                              ║
+  ║   Quick start:                                               ║
+  ║                                                              ║
+  ║     make demo        Run the full break & fix demo           ║
+  ║     make test        Test a safe trace against policy        ║
+  ║     make fail        Test an unsafe trace (expect failure)   ║
+  ║                                                              ║
+  ║   Or run directly:                                           ║
+  ║                                                              ║
+  ║     assay run --config demo/fixtures/eval.yaml \             ║
+  ║       --trace-file demo/fixtures/traces/safe.jsonl           ║
+  ║                                                              ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+EOF
+
+echo "  Assay $VERSION ready."
+echo ""

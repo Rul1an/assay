@@ -1,0 +1,27 @@
+{
+  "name": "Assay Policy Engine",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "onCreateCommand": "cargo install --path . --locked 2>/dev/null || cargo install assay --locked",
+  "postCreateCommand": "bash .devcontainer/welcome.sh",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.fontSize": 14
+      },
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+
+  "remoteUser": "vscode"
+}

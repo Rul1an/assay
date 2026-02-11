@@ -1,0 +1,6 @@
+version: 2
+name: "unsafe-baseline"
+tools:
+  allow: ["*"]
+
+on_error: allow

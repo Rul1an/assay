@@ -1,0 +1,48 @@
+1
+00:00:00,000 --> 00:00:03,000
+Your AI agent just called
+a tool it shouldn't have.
+
+2
+00:00:03,000 --> 00:00:05,000
+Assay catches it. Exit code one.
+CI blocks the deploy.
+
+3
+00:00:05,000 --> 00:00:07,500
+Fix the policy.
+Run it again.
+
+4
+00:00:07,500 --> 00:00:10,000
+Green. Deterministic.
+Same trace, same result, every time.
+
+5
+00:00:10,000 --> 00:00:15,000
+Every action your agent takes becomes a signed
+event in a content-addressed evidence bundle.
+
+6
+00:00:15,000 --> 00:00:17,000
+Explore everything interactively.
+See exactly what happened.
+
+7
+00:00:17,000 --> 00:00:23,000
+Merkle root, SHA-256, JCS canonicalization.
+Cryptographic proof of what your agent actually did.
+
+8
+00:00:23,000 --> 00:00:29,000
+Attack simulation tests your gates against known vectors.
+Bitflip, truncation, injection — blocked or bypassed, you'll know.
+
+9
+00:00:33,000 --> 00:00:36,000
+One install. No signup.
+Runs offline.
+
+10
+00:00:36,000 --> 00:00:38,000
+cargo install assay
