@@ -524,10 +524,10 @@ pub struct VerifyLimits {
 impl Default for VerifyLimits {
     fn default() -> Self {
         Self {
-            max_bundle_bytes: 100 * 1024 * 1024,  // 100 MB compressed
-            max_decode_bytes: 1024 * 1024 * 1024, // 1 GB uncompressed (10x ratio)
-            max_manifest_bytes: 10 * 1024 * 1024, // 10 MB
-            max_events_bytes: 500 * 1024 * 1024,  // 500 MB
+            max_bundle_bytes: 100_u64 * 1024 * 1024,  // 100 MB compressed
+            max_decode_bytes: 1024_u64 * 1024 * 1024, // 1 GB uncompressed (10x ratio)
+            max_manifest_bytes: 10_u64 * 1024 * 1024, // 10 MB
+            max_events_bytes: 500_u64 * 1024 * 1024,  // 500 MB
             max_events: 100_000,
             max_line_bytes: 1024 * 1024, // 1 MB
             max_path_len: 256,
@@ -554,8 +554,8 @@ pub struct VerifyLimitsOverrides {
 
 impl VerifyLimits {
     /// Apply overrides onto these defaults. Only `Some` values override.
-    pub fn apply(self, overrides: VerifyLimitsOverrides) -> VerifyLimits {
-        VerifyLimits {
+    pub fn apply(self, overrides: VerifyLimitsOverrides) -> Self {
+        Self {
             max_bundle_bytes: overrides.max_bundle_bytes.unwrap_or(self.max_bundle_bytes),
             max_decode_bytes: overrides.max_decode_bytes.unwrap_or(self.max_decode_bytes),
             max_manifest_bytes: overrides

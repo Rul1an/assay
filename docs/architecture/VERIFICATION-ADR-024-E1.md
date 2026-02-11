@@ -124,6 +124,40 @@ impl VerifyLimits {
 
 ---
 
+## Unit Tests (merge + deny_unknown_fields)
+
+```rust
+#[test]
+fn test_verify_limits_overrides_merge() {
+    let overrides: VerifyLimitsOverrides =
+        serde_json::from_str(r#"{"max_bundle_bytes": 1000}"#).unwrap();
+    let limits = VerifyLimits::default().apply(overrides);
+    assert_eq!(limits.max_bundle_bytes, 1000);
+    assert_eq!(
+        limits.max_decode_bytes,
+        1024 * 1024 * 1024,
+        "default preserved"
+    );
+}
+
+#[test]
+fn test_verify_limits_overrides_deny_unknown_fields() {
+    let err = serde_json::from_str::<VerifyLimitsOverrides>(r#"{"max_bundle_bytess": 1}"#)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unknown") || err.to_string().contains("bytess"),
+        "unknown field should fail: {}",
+        err
+    );
+}
+```
+
+**Assertion check:**
+- `merge`: verifies partial override (max_bundle_bytes=1000) and default preservation (max_decode_bytes unchanged).
+- `deny_unknown_fields`: asserts error message contains `"unknown"` or `"bytess"` (typo in field name)—not just `is_err()`, so we validate serde's actual error content.
+
+---
+
 ## Manual Smoke
 
 ```rust
