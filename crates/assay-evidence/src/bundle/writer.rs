@@ -509,7 +509,7 @@ impl From<serde_json::Error> for VerifyError {
 }
 
 /// Resource limits for bundle verification.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifyLimits {
     pub max_bundle_bytes: u64,
     pub max_decode_bytes: u64, // New: Limit uncompressed size
@@ -524,14 +524,48 @@ pub struct VerifyLimits {
 impl Default for VerifyLimits {
     fn default() -> Self {
         Self {
-            max_bundle_bytes: 100 * 1024 * 1024,  // 100 MB compressed
-            max_decode_bytes: 1024 * 1024 * 1024, // 1 GB uncompressed (10x ratio)
-            max_manifest_bytes: 10 * 1024 * 1024, // 10 MB
-            max_events_bytes: 500 * 1024 * 1024,  // 500 MB
+            max_bundle_bytes: 100_u64 * 1024 * 1024,  // 100 MB compressed
+            max_decode_bytes: 1024_u64 * 1024 * 1024, // 1 GB uncompressed (10x ratio)
+            max_manifest_bytes: 10_u64 * 1024 * 1024, // 10 MB
+            max_events_bytes: 500_u64 * 1024 * 1024,  // 500 MB
             max_events: 100_000,
             max_line_bytes: 1024 * 1024, // 1 MB
             max_path_len: 256,
             max_json_depth: 64,
+        }
+    }
+}
+
+/// Partial overrides for `VerifyLimits`. Used for CLI/config JSON parsing.
+/// Unknown keys cause deserialization to fail (deny_unknown_fields).
+/// Merge with `VerifyLimits::default().apply(overrides)`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyLimitsOverrides {
+    pub max_bundle_bytes: Option<u64>,
+    pub max_decode_bytes: Option<u64>,
+    pub max_manifest_bytes: Option<u64>,
+    pub max_events_bytes: Option<u64>,
+    pub max_events: Option<usize>,
+    pub max_line_bytes: Option<usize>,
+    pub max_path_len: Option<usize>,
+    pub max_json_depth: Option<usize>,
+}
+
+impl VerifyLimits {
+    /// Apply overrides onto these defaults. Only `Some` values override.
+    pub fn apply(self, overrides: VerifyLimitsOverrides) -> Self {
+        Self {
+            max_bundle_bytes: overrides.max_bundle_bytes.unwrap_or(self.max_bundle_bytes),
+            max_decode_bytes: overrides.max_decode_bytes.unwrap_or(self.max_decode_bytes),
+            max_manifest_bytes: overrides
+                .max_manifest_bytes
+                .unwrap_or(self.max_manifest_bytes),
+            max_events_bytes: overrides.max_events_bytes.unwrap_or(self.max_events_bytes),
+            max_events: overrides.max_events.unwrap_or(self.max_events),
+            max_line_bytes: overrides.max_line_bytes.unwrap_or(self.max_line_bytes),
+            max_path_len: overrides.max_path_len.unwrap_or(self.max_path_len),
+            max_json_depth: overrides.max_json_depth.unwrap_or(self.max_json_depth),
         }
     }
 }
@@ -1176,6 +1210,62 @@ mod tests {
         let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_size_limit);
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("exceeds limit"));
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_merge() {
+        let overrides: VerifyLimitsOverrides =
+            serde_json::from_str(r#"{"max_bundle_bytes": 1000}"#).unwrap();
+        let limits = VerifyLimits::default().apply(overrides);
+        assert_eq!(limits.max_bundle_bytes, 1000);
+        assert_eq!(
+            limits.max_decode_bytes,
+            1024 * 1024 * 1024,
+            "default preserved"
+        );
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_deny_unknown_fields() {
+        let err = serde_json::from_str::<VerifyLimitsOverrides>(r#"{"max_bundle_bytess": 1}"#)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown") || err.to_string().contains("bytess"),
+            "unknown field should fail: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_empty_roundtrip() {
+        let overrides: VerifyLimitsOverrides = serde_json::from_str("{}").unwrap();
+        let limits = VerifyLimits::default().apply(overrides);
+        assert_eq!(
+            limits,
+            VerifyLimits::default(),
+            "empty overrides = identity"
+        );
+    }
+
+    #[test]
+    fn test_verify_limits_overrides_drift_guard() {
+        // Single field list: adding a field to one struct without the other fails to compile.
+        macro_rules! verify_limits_drift_guard {
+            ($($field:ident),+ $(,)?) => {{
+                let VerifyLimits { $($field: _,)+ } = VerifyLimits::default();
+                let VerifyLimitsOverrides { $($field: _,)+ } = VerifyLimitsOverrides::default();
+            }};
+        }
+        verify_limits_drift_guard!(
+            max_bundle_bytes,
+            max_decode_bytes,
+            max_manifest_bytes,
+            max_events_bytes,
+            max_events,
+            max_line_bytes,
+            max_path_len,
+            max_json_depth,
+        );
     }
 
     #[test]
