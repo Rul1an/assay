@@ -5,5 +5,5 @@ pub mod writer;
 pub use reader::{BundleInfo, BundleReader};
 pub use writer::{
     verify_bundle, verify_bundle_with_limits, AlgorithmMeta, BundleWriter, ErrorClass, ErrorCode,
-    FileMeta, Manifest, VerifyError, VerifyLimits, VerifyResult,
+    FileMeta, Manifest, VerifyError, VerifyLimits, VerifyLimitsOverrides, VerifyResult,
 };
