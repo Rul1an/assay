@@ -267,6 +267,100 @@ fn test_sarif_output_with_pack_metadata() {
     }
 }
 
+#[test]
+fn test_cicd_starter_pack_loads_and_runs() {
+    // Bundle with events, profile lifecycle, traceparent, build_id — passes all CICD rules
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer);
+
+    let mut event = EvidenceEvent::new(
+        "assay.profile.started",
+        "urn:assay:test",
+        "run_cicd",
+        0,
+        serde_json::json!({
+            "run_id": "run-cicd-123",
+            "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            "build_id": "build-456",
+            "version": "1.0.0"
+        }),
+    );
+    event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+    writer.add_event(event);
+
+    let mut event = EvidenceEvent::new(
+        "assay.profile.finished",
+        "urn:assay:test",
+        "run_cicd",
+        1,
+        serde_json::json!({ "exit_code": 0 }),
+    );
+    event.time = Utc.timestamp_opt(1700000001, 0).unwrap();
+    writer.add_event(event);
+
+    writer.finish().unwrap();
+
+    let packs = load_packs(&["cicd-starter".to_string()]).expect("cicd-starter must be built-in");
+    let options = LintOptions {
+        packs,
+        max_results: Some(500),
+        bundle_path: Some("test_cicd.tar.gz".to_string()),
+    };
+
+    let result =
+        lint_bundle_with_options(Cursor::new(&buffer), VerifyLimits::default(), options).unwrap();
+
+    let cicd_findings: Vec<_> = result
+        .report
+        .findings
+        .iter()
+        .filter(|f| f.rule_id.starts_with("cicd-starter@"))
+        .collect();
+
+    assert!(
+        cicd_findings.is_empty(),
+        "Full CICD-compliant bundle should pass all cicd-starter rules, got: {:?}",
+        cicd_findings
+    );
+}
+
+#[test]
+fn test_cicd_starter_minimal_bundle_fails_cicd_002() {
+    // Single event without profile started/finished — fails CICD-002
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer);
+    let mut event = EvidenceEvent::new(
+        "assay.test.event",
+        "urn:assay:test",
+        "run_minimal",
+        0,
+        serde_json::json!({ "msg": "no lifecycle" }),
+    );
+    event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+    writer.add_event(event);
+    writer.finish().unwrap();
+
+    let packs = load_packs(&["cicd-starter".to_string()]).expect("cicd-starter must be built-in");
+    let options = LintOptions {
+        packs,
+        max_results: Some(500),
+        bundle_path: Some("minimal.tar.gz".to_string()),
+    };
+
+    let result =
+        lint_bundle_with_options(Cursor::new(&buffer), VerifyLimits::default(), options).unwrap();
+
+    let cicd_002 = result
+        .report
+        .findings
+        .iter()
+        .find(|f| f.rule_id.contains(":CICD-002"));
+    assert!(
+        cicd_002.is_some(),
+        "Bundle without profile lifecycle must fail CICD-002"
+    );
+}
+
 /// Generate a bundle file for manual CLI testing
 #[test]
 #[ignore] // Run manually with: cargo test -p assay-evidence --test pack_engine_manual_test generate_test_bundle -- --ignored --nocapture

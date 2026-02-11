@@ -68,6 +68,16 @@ jobs:
       - name: Check open core boundary
         run: ./scripts/ci/check-open-core-boundary.sh
 
+  vendored-packs:
+    name: Vendored Pack Sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check vendored pack files are in sync
+        run: ./scripts/check-vendored-packs.sh
+
   perf:
     name: Criterion benches (store + suite)
     runs-on: ubuntu-latest
@@ -444,6 +454,6 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [deps-security, clippy, open-core-boundary, perf, test, ebpf-smoke-ubuntu]
+    needs: [deps-security, clippy, open-core-boundary, vendored-packs, perf, test, ebpf-smoke-ubuntu]
     steps:
       - run: echo "All required CI jobs passed."

@@ -1,0 +1,87 @@
+# Vendored from packs/open/cicd-starter/pack.yaml (ADR-023)
+name: cicd-starter
+version: "1.0.0"
+kind: quality
+description: Minimal traceability for CI pipelines — compatibility floor for adoption
+author: Assay Team
+license: Apache-2.0
+
+requires:
+  assay_min_version: ">=2.10.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: CICD-001
+    severity: error
+    description: Evidence bundle contains at least one recorded event
+    help_markdown: |
+      ## CICD-001: Event Presence
+      The bundle must contain at least one event. An empty bundle indicates
+      no evidence was captured for this run.
+
+      **How to fix:**
+      - Ensure your CI runs `assay evidence export` (or equivalent) before lint.
+      - Verify the evidence pipeline emits at least one CloudEvents event.
+      - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
+    check:
+      type: event_count
+      min: 1
+
+  - id: CICD-002
+    severity: warning
+    description: Events include assay profile lifecycle (started/finished pair)
+    help_markdown: |
+      ## CICD-002: Lifecycle Traceability
+      At least one `assay.profile.started` and one `assay.profile.finished` event
+      should exist. These represent CI-run boundaries. If you use custom lifecycle
+      types, see the pack README for pattern customization.
+
+      **How to fix:**
+      - Ensure your evidence pipeline emits profile start/finish events.
+      - Assay's default export includes these when using `assay run` or trace replay.
+      - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
+    check:
+      type: event_pairs
+      start_pattern: "assay.profile.started"
+      finish_pattern: "assay.profile.finished"
+
+  - id: CICD-003
+    severity: warning
+    description: At least one event contains correlation ID (traceparent, tracestate, run_id, assayrunid)
+    help_markdown: |
+      ## CICD-003: Correlation (W3C Trace Context)
+      Events should include a correlation identifier—traceparent, tracestate,
+      run_id, or assayrunid—to link evidence to external observability.
+
+      **How to fix:**
+      - If using OpenTelemetry: propagate traceparent into the event envelope.
+      - Otherwise: set run_id (UUID or deterministic ID) for each run in event data.
+      - Assay-native events include assayrunid by default.
+      - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /assayrunid
+        - /run_id
+        - /traceparent
+        - /tracestate
+        - /data/run_id
+        - /data/traceparent
+        - /data/tracestate
+
+  - id: CICD-004
+    severity: info
+    description: At least one event contains build identity (build_id or version)
+    help_markdown: |
+      ## CICD-004: Build Identity
+      Build identity fields support provenance maturity and help you build
+      toward SLSA-style attestations.
+
+      **How to fix:**
+      - Add `build_id` or `version` to event data in your evidence pipeline.
+      - Re-run: `assay evidence lint bundle.tar.gz --pack cicd-starter`
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/build_id
+        - /data/version
