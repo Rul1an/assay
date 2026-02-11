@@ -21,6 +21,10 @@ pub use schema::{CheckDefinition, PackDefinition, PackKind, PackRequirements, Pa
 /// truth; sync changes manually or via build script.
 pub static BUILTIN_PACKS: &[(&str, &str)] = &[
     (
+        "cicd-starter",
+        include_str!("../../../packs/cicd-starter.yaml"),
+    ),
+    (
         "eu-ai-act-baseline",
         include_str!("../../../packs/eu-ai-act-baseline.yaml"),
     ),

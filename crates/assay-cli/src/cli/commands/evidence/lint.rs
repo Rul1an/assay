@@ -36,17 +36,23 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 
     let limits = VerifyLimits::default();
 
-    // Load packs if specified
-    let packs = if let Some(pack_refs) = &args.pack {
+    // Load packs: explicit --pack or default cicd-starter (ADR-023)
+    let (packs, is_default_pack) = if let Some(pack_refs) = &args.pack {
         match load_packs(pack_refs) {
-            Ok(p) => p,
+            Ok(p) => (p, false),
             Err(e) => {
                 eprintln!("Pack loading failed: {}", e);
                 return Ok(3); // Exit code 3 = pack error
             }
         }
     } else {
-        vec![]
+        match load_packs(&["cicd-starter".to_string()]) {
+            Ok(p) => (p, true),
+            Err(e) => {
+                eprintln!("Default pack loading failed: {}", e);
+                return Ok(3);
+            }
+        }
     };
 
     // Build lint options
@@ -111,14 +117,23 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 
             // Print pack info
             if let Some(meta) = pack_meta {
-                eprintln!(
-                    "Packs: {}",
-                    meta.packs
-                        .iter()
-                        .map(|p| format!("{}@{}", p.name, p.version))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+                let pack_str = meta
+                    .packs
+                    .iter()
+                    .map(|p| {
+                        let suffix = if is_default_pack && p.name == "cicd-starter" {
+                            " (default)"
+                        } else {
+                            ""
+                        };
+                        format!("{}@{}{}", p.name, p.version, suffix)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!("Packs: {}", pack_str);
+                if is_default_pack {
+                    eprintln!("(Use --pack eu-ai-act-baseline to add compliance mapping)");
+                }
 
                 // Print disclaimer for compliance packs
                 if let Some(disclaimer) = &meta.disclaimer {

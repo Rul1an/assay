@@ -179,6 +179,8 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Golden path (<30 min first signal) | Medium | High | ✅ Complete (PR #187, `init --hello-trace --ci`) |
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
 | **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
+| **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
+| **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Pending |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
 | **Defer** | Dashboard | High | Medium | Q3+ |
@@ -302,7 +304,7 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
 - [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
-- [ ] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor for adoption
+- [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
 - [ ] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021)
 
 ### E. GitHub Action v2.1 ✅ Complete
@@ -323,6 +325,57 @@ Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
 - EU AI Act timeline accurately documented (phased: Feb 2025, Aug 2025, Aug 2026)
 
 See [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md) for full specification.
+
+### F. Starter Packs (OSS) (P1)
+
+CICD-hygiene pack as compatibility floor for adoption—minimal traceability so teams get first value from `assay evidence lint` with minimal config. See [ADR-023](./architecture/ADR-023-CICD-Starter-Pack.md).
+
+```bash
+assay evidence lint --pack cicd-starter bundle.tar.gz
+assay evidence lint --pack cicd-starter,eu-ai-act-baseline bundle.tar.gz
+```
+
+**Status per step (codebase-check):**
+
+| Check | Status |
+|-------|--------|
+| `cicd-starter` or similar pack | ✅ Present (packs/open + vendored) |
+| Pack in `packs/open/` or `BUILTIN_PACKS` | ✅ cicd-starter in both |
+| CICD-hygiene rules | ✅ CICD-001..004 in pack |
+
+**Scope:**
+- [x] **Pack**: `cicd-starter` (kind: quality), in `packs/open/cicd-starter/`
+- [x] **Default**: cicd-starter when no `--pack` specified (PLG)
+- [x] **Rules**: CICD-001 (event count); CICD-002 (`assay.profile.started`/`.finished`); CICD-003 (traceparent/tracestate/run_id); CICD-004 (build_id/version, info)
+- [x] **BUILTIN_PACKS** + vendoring: packs/open vendored to crates/assay-evidence/packs/
+- [ ] **Docs**: README per ADR-023 Appendix A; pinned GH Action; `--fail-on warning`; Next steps (follow-up)
+
+**Design decisions:**
+- `kind: quality` (no disclaimer; distinct from compliance packs)
+- Light rules only—reuse existing check types: `event_count`, `event_pairs`, `event_field_present`
+- Composable with eu-ai-act-baseline for teams graduating to compliance
+
+### G. Sim Engine Hardening (P2)
+
+Configurable verification limits and time budget enforcement for `assay sim`—resource-control best practices (OWASP-aligned, fail-fast under load).
+
+```bash
+assay sim run --suite quick --target bundle.tar.gz
+assay sim run --limits '{"max_bundle_bytes": 10485760}' --target bundle.tar.gz
+assay sim run --limits-file limits.json --target bundle.tar.gz
+```
+
+**Scope:**
+- [ ] **CLI**: Parse `--limits` (JSON string) and `--limits-file` into `Option<VerifyLimits>`
+- [ ] **Limits model**: Partial overrides merged with defaults; stable JSON schema; clear parse errors (invalid JSON → exit 3)
+- [ ] **Integrity attacks**: Pass limits and `TimeBudget`; use `verify_bundle_with_limits`; budget check before each verify/iteration
+- [ ] **Dynamic bundle_size**: Generate `limit + 1` bytes for `limits.bundle_size` attack (regression-proof)
+- [ ] **Exit codes**: "Blocked by verify limits" distinguishable from bypass; attack correctly blocked = test success
+
+**Design decisions:**
+- Global suite `TimeBudget` (single deadline, not per-attack) for predictable CI behavior
+- Budget-check points before every expensive operation (verify, decompress, loop iteration)
+- `--limits-file` or `--limits @path` for CI/shell-friendly config (avoid JSON escaping)
 
 ---
 
