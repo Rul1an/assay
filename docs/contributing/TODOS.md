@@ -15,7 +15,7 @@ Tracked work items that are marked in code with `// TODO(tag):` and documented h
 
 ## Placement in roadmap and implementation plan
 
-Where each TODO should be fixed, with priority, value, urgency, and dependencies. Sources: [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [ADR-019 PR Gate 2026 SOTA](../architecture/ADR-019-PR-Gate-2026-SOTA.md).
+Where each TODO should be fixed, with priority, value, urgency, and dependencies. Sources: [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN (archive)](../archive/DX-IMPLEMENTATION-PLAN-legacy.md), [ADR-019 PR Gate 2026 SOTA](../architecture/ADR-019-PR-Gate-2026-SOTA.md).
 
 | Tag | Where to fix | Priority | Value | Urgency | Dependencies |
 |-----|--------------|----------|-------|---------|--------------|
