@@ -310,6 +310,8 @@
 - chore(ci): bump peter-evans/create-pull-request from 7.0.5 to 7.0.11 (#275) @app/dependabot
 - docs(rfc-004): converge O2 status evidence across RFC docs (#273) @Rul1an
 
+- feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
+- feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
 ## [2026-02-11]
 
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
