@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use assay_evidence::bundle::writer::BundleWriter;
+use assay_evidence::bundle::BundleWriter;
 use assay_evidence::types::EvidenceEvent;
 use assay_evidence::{verify_bundle_with_limits, VerifyLimits};
 use chrono::{TimeZone, Utc};

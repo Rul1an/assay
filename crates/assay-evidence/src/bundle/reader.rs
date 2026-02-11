@@ -14,7 +14,9 @@
 //! For very large bundles (>1GB), consider tempfile-based streaming
 //! or the `into_events()` consuming pattern in a future version.
 
-use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
+use crate::bundle::manifest::Manifest;
+use crate::bundle::verify::verify_bundle_with_limits;
+use crate::bundle::VerifyLimits;
 use crate::json_strict::validate_json_strict;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
@@ -205,7 +207,7 @@ impl BundleInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::writer::BundleWriter;
+    use crate::bundle::BundleWriter;
     use crate::types::EvidenceEvent;
     use chrono::{TimeZone, Utc};
 

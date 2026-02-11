@@ -2,7 +2,7 @@
 //!
 //! These tests ensure the verifier enforces all contract requirements.
 
-use assay_evidence::bundle::writer::{verify_bundle, BundleWriter};
+use assay_evidence::bundle::{verify_bundle, BundleWriter};
 use assay_evidence::crypto::id::compute_content_hash;
 use assay_evidence::types::EvidenceEvent;
 use chrono::{TimeZone, Utc};

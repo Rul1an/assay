@@ -2,7 +2,7 @@ use super::packs::executor::{PackExecutionMeta, PackExecutor};
 use super::packs::LoadedPack;
 use super::rules::{LintContext, RULES};
 use super::{LintFinding, LintReport, LintSummary, Severity};
-use crate::bundle::writer::{verify_bundle_with_limits, VerifyLimits};
+use crate::bundle::{verify_bundle_with_limits, VerifyLimits};
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};

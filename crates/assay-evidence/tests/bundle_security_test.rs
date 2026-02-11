@@ -3,7 +3,7 @@
 //! Tests that strict JSON validation propagates through the entire
 //! ingest pipeline (NDJSON reader used by bundle verification).
 
-use assay_evidence::bundle::writer::{ErrorClass, ErrorCode, VerifyError};
+use assay_evidence::bundle::{ErrorClass, ErrorCode, VerifyError};
 use assay_evidence::ndjson::NdjsonEvents;
 use std::io::{BufReader, Cursor};
 

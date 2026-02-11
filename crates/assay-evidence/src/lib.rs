@@ -11,9 +11,9 @@ pub mod types;
 
 // Convenience re-exports
 pub use bundle::{
-    verify_bundle, verify_bundle_with_limits, AlgorithmMeta, BundleInfo, BundleReader,
-    BundleWriter, ErrorClass, ErrorCode, FileMeta, Manifest, VerifyError, VerifyLimits,
-    VerifyLimitsOverrides, VerifyResult,
+    verify_bundle, verify_bundle_with_limits, AlgorithmMeta, BundleInfo, BundleProvenance,
+    BundleReader, BundleWriter, ErrorClass, ErrorCode, FileMeta, Manifest, ProvenanceInput,
+    VerifyError, VerifyLimits, VerifyLimitsOverrides, VerifyResult, XAssayExtension,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};

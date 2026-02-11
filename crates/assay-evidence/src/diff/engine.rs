@@ -1,6 +1,6 @@
 use super::{BundleSummary, DiffReport, DiffSet, DiffSummary};
 use crate::bundle::reader::BundleReader;
-use crate::bundle::writer::VerifyLimits;
+use crate::bundle::VerifyLimits;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;

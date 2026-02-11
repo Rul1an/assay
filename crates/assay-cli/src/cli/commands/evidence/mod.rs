@@ -114,7 +114,15 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
     let out_file = File::create(&out_path)
         .with_context(|| format!("failed to create output file {}", out_path.display()))?;
 
-    let mut bw = assay_evidence::bundle::BundleWriter::new(out_file);
+    let provenance = assay_evidence::ProvenanceInput {
+        producer_name: "assay-cli".into(),
+        producer_version: env!("CARGO_PKG_VERSION").into(),
+        git_commit: option_env!("ASSAY_GIT_SHA").map(String::from),
+        dirty: None,
+        run_id: run_id.clone(),
+        created_at: None, // use first event time (deterministic)
+    };
+    let mut bw = assay_evidence::bundle::BundleWriter::new(out_file).with_provenance(provenance);
     for ev in events {
         bw.add_event(ev);
     }

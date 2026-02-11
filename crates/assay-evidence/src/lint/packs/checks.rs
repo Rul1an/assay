@@ -3,7 +3,7 @@
 //! Each check type from SPEC-Pack-Engine-v1 has a corresponding implementation here.
 
 use super::schema::{CheckDefinition, PackRule, Severity};
-use crate::bundle::writer::Manifest;
+use crate::bundle::Manifest;
 use crate::lint::{EventLocation, LintFinding};
 use crate::types::EvidenceEvent;
 use globset::{Glob, GlobMatcher};

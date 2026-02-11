@@ -3,7 +3,7 @@ pub mod packs;
 pub mod rules;
 pub mod sarif;
 
-use crate::bundle::writer::Manifest;
+use crate::bundle::Manifest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
