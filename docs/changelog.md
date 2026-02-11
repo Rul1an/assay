@@ -309,6 +309,17 @@
 - chore(ci): bump github/codeql-action from 3.32.1 to 3.32.2 (#276) @app/dependabot
 - chore(ci): bump peter-evans/create-pull-request from 7.0.5 to 7.0.11 (#275) @app/dependabot
 - docs(rfc-004): converge O2 status evidence across RFC docs (#273) @Rul1an
+
+## [2026-02-11]
+
+- feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
+- feat(demo): upgrade demo strategy with privacy-first hero, 16:9 tapes, and devcontainer (#283) @Rul1an
+- docs(governance): sweep structure, archive redundant, sync RFC/roadmap status (#282) @Rul1an
+- fix(monitor): avoid partial move of --ebpf args in linux monitor path (#281) @Rul1an
+- chore(ci): bump PyO3/maturin-action from 1.49.4 to 1.50.0 (#277) @app/dependabot
+- chore(ci): bump github/codeql-action from 3.32.1 to 3.32.2 (#276) @app/dependabot
+- chore(ci): bump peter-evans/create-pull-request from 7.0.5 to 7.0.11 (#275) @app/dependabot
+- docs(rfc-004): converge O2 status evidence across RFC docs (#273) @Rul1an
 ## [2026-02-10]
 
 - docs(governance): sweep structure, archive redundant, sync RFC/roadmap status (#282) @Rul1an
