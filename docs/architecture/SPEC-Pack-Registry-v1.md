@@ -1,9 +1,9 @@
 # SPEC-Pack-Registry-v1
 
-**Version:** 1.0.3
+**Version:** 1.0.5
 **Status:** Draft
-**Date:** 2026-01-29
-**Related:** [ADR-016](./ADR-016-Pack-Taxonomy.md), [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md)
+**Date:** 2026-02-06
+**Related:** [ADR-016](./ADR-016-Pack-Taxonomy.md), [ADR-021](./ADR-021-Local-Pack-Discovery.md), [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md)
 
 ## Abstract
 
@@ -17,7 +17,7 @@ in the open source repository.
 
 ### 1.1 In Scope
 
-- Pack resolution order (local → bundled → registry)
+- Pack resolution order (normative order in [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md#pack-resolution-normative): path → built-in → local config dir → registry → BYOS)
 - Registry HTTP API contract
 - Authentication (OIDC token exchange, static token)
 - Integrity verification (digest + signature)
@@ -36,39 +36,49 @@ in the open source repository.
 
 | Version | Changes |
 |---------|---------|
-| 1.0.3 | **Sidecar signature endpoint** (§7.3) to avoid header size limits; detached DSSE envelope; signature now separate from pack body; backward-compatible with in-header signatures |
+| 1.0.5 | **Interop polish:** Content-Digest defined over decoded body (after content-coding); `X-Pack-Policy: commercial|open` header for signature requirement (client classifies from header, not body); canonical bytes = UTF-8, no BOM, no trailing newline; trust roots default = union, override only via explicit config; keys manifest payloadType MUST `application/vnd.assay.registry.keys.v1+json`, payload = raw JSON; pack_name grammar link to Engine spec; commercial schema evolution (additive = breaking unless schema version); BYOS `x-assay-sig` spelling; OCI = additional resolver class; media type `application/x-yaml` canonical; cache metadata `policy` |
+| 1.0.4 | **Normative and consistency fixes:** §2 informative; fail-fast (no match vs matched-but-failed); commercial signature required + sidecar 404; ETag/Content-Digest; trust hierarchy; keys manifest payloadType; cache path registry/namespace; duplicate-key reject; path_ref/BYOS pin; 410 CI; lockfile v2 Phase 1; §6.3.3 + sidecar path |
+| 1.0.3 | **Sidecar signature endpoint** (§6.3.3) to avoid header size limits; detached DSSE envelope; signature now separate from pack body; backward-compatible with in-header signatures |
 | 1.0.2 | OIDC token exchange endpoint, DSSE envelope format, Content-Digest (RFC 9530), Vary header, key trust manifest, number policy, HEAD endpoint, cache integrity verification, lockfile extensions, 410 handling |
 | 1.0.1 | Add signature verification (MUST for commercial), strict canonicalization, lockfile, ETag/304, pagination, rate limits, OCI future track |
 | 1.0.0 | Initial specification |
 
 ---
 
-## 2. Pack Resolution Order
+## 2. Pack Resolution Order (Informative Summary)
 
-When `--pack <ref>` is specified, the CLI resolves in this order:
+The **normative** pack resolution order is defined in [SPEC-Pack-Engine-v1 § Pack Resolution (Normative)](./SPEC-Pack-Engine-v1.md#pack-resolution-normative). This section is an informative summary only.
 
-```
-1. Local path     ./custom.yaml           → file exists? use it
-2. Bundled pack   eu-ai-act-baseline      → in packs/open/? use it
-3. Registry       eu-ai-act-pro@1.2.0     → fetch from registry
-4. BYOS           s3://bucket/packs/...   → fetch from user storage
-```
+1. **Path** — Existing file or directory (if dir: load `<dir>/pack.yaml`).
+2. **Built-in** — By name (e.g. `eu-ai-act-baseline`); built-in wins over local config dir.
+3. **Local pack directory** — Config dir (`~/.config/assay/packs` / `%APPDATA%\assay\packs`); `{name}.yaml` or `{name}/pack.yaml`.
+4. **Registry** — `name@version` or pinned `name@version#sha256:...` (this SPEC).
+5. **BYOS** — `s3://`, `gs://`, `az://`, etc.
+6. **NotFound** — Error with suggestion.
 
-**Fail-fast**: If resolution fails at any step, error immediately with clear message.
+**Resolution semantics (NORMATIVE; see SPEC-Pack-Engine-v1 for full wording):**
+
+- **No match** — If the reference does not match the current step (e.g. not a path, not a built-in name), the resolver MUST continue to the next step. No error at this step.
+- **Matched but failed** — If a step *does* match (e.g. registry ref, fetch succeeded) but verification fails (digest mismatch, signature missing/invalid for commercial, 410 revoked without opt-in), the client MUST fail immediately with a clear error. No fallback to a later step.
+- Example: `name@version#sha256:...` resolved via registry → fetch OK but digest mismatch → hard error (do not try BYOS). Example: path exists but file unreadable → error at path step (do not continue).
 
 ---
 
 ## 3. Pack Reference Format
 
 ```
-pack_ref := local_path | bundled_name | registry_ref | pinned_ref | byos_url
+pack_ref := path_ref | bundled_name | registry_ref | pinned_ref | byos_ref
 
-local_path    := "./" path ".yaml"
-bundled_name  := identifier                    # e.g., "eu-ai-act-baseline"
-registry_ref  := identifier "@" version        # e.g., "eu-ai-act-pro@1.2.0"
-pinned_ref    := identifier "@" version "#" digest  # e.g., "eu-ai-act-pro@1.2.0#sha256:abc..."
-byos_url      := scheme "://" path ".yaml"     # e.g., "s3://bucket/packs/custom.yaml"
+path_ref      := filesystem path (file or directory)
+                 # File: .yaml/.yml or arbitrary; directory: must contain pack.yaml (per SPEC-Pack-Engine-v1)
+                 # May be relative (./packs/foo.yaml, ../bar.yaml) or absolute (/path/to/pack.yaml, C:\...)
+bundled_name  := pack_name    # pack_name as in SPEC-Pack-Engine-v1 (lowercase letters, digits, hyphens only; no underscores/dots)
+registry_ref  := pack_name "@" version        # e.g., "eu-ai-act-pro@1.2.0"
+pinned_ref    := pack_name "@" version "#" digest  # digest = canonical sha256 (same as X-Pack-Digest / lockfile)
+byos_ref      := scheme "://" path [ "#" digest ]   # e.g., "s3://bucket/packs/custom.yaml" or "...custom.yaml#sha256:..."
 ```
+
+**Path references:** Resolution of path refs (file vs directory, containment) is normative in [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md#pack-resolution-normative). **Pack name** (`pack_name`) grammar is defined in [SPEC-Pack-Engine-v1 § Pack name grammar](./SPEC-Pack-Engine-v1.md#pack-name-grammar-normative) and used consistently for bundled names, local config dir names, and registry names; do not define a different grammar here.
 
 **Version requirement**: Registry refs MUST include version. `@latest` is NOT supported
 for reproducibility.
@@ -131,6 +141,7 @@ Content-Digest: sha-256=:base64digest...:
 X-Pack-Digest: sha256:abc123...
 X-Pack-Signature: <base64-encoded-DSSE-envelope>
 X-Pack-Key-Id: sha256:def456...
+X-Pack-Policy: commercial
 X-Pack-License: LicenseRef-Assay-Enterprise-1.0
 Cache-Control: private, max-age=86400
 Vary: Authorization, Accept-Encoding
@@ -154,22 +165,24 @@ ETag: "sha256:abc123..."
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `ETag` | MUST | Strong ETag = X-Pack-Digest value (for conditional requests) |
-| `Content-Digest` | MUST | RFC 9530 digest of wire bytes (may differ from canonical) |
-| `X-Pack-Digest` | MUST | SHA256 digest of **canonical** content (JCS) |
+| `ETag` | MUST | Strong ETag; value MUST equal `X-Pack-Digest` (canonical digest). Used for conditional requests; stable across re-formatting. |
+| `Content-Digest` | MUST | RFC 9530 digest of the HTTP message body **after content-coding is decoded** (i.e. the bytes presented to the application). Computed over the decoded body bytes, not over the raw wire bytes. Server MUST send when body is present. Enables clients to verify transport integrity without gzip-variant issues. |
+| `X-Pack-Digest` | MUST | SHA256 digest of **canonical** content (strict YAML parse → JSON → JCS). This is the pack integrity digest used in lockfile, pins, and verification. |
 | `X-Pack-Signature` | OPTIONAL | Base64-encoded DSSE envelope (see §6.3). For packs >4KB, use sidecar endpoint §6.3.3 |
-| `X-Pack-Signature-Endpoint` | SHOULD (if signed) | Relative path to signature sidecar (e.g., `/{name}/{version}.sig`) |
+| `X-Pack-Signature-Endpoint` | SHOULD (if signed) | Relative path to signature sidecar: `/packs/{name}/{version}.sig` (same path as GET sidecar) |
 | `X-Pack-Key-Id` | MUST (if signed) | SHA256 of SPKI public key |
+| `X-Pack-Policy` | MUST | `commercial` or `open`. Drives signature requirement: `commercial` = client MUST verify signature (missing/invalid = fail); `open` = signature optional. Client MUST NOT rely on pack body (e.g. license in YAML) to decide; use this header. |
 | `X-Pack-License` | MUST | SPDX identifier (use `LicenseRef-*` for custom) |
 | `Cache-Control` | MUST | `private` for authenticated, `public` for open |
-| `Vary` | MUST | `Authorization, Accept-Encoding` for authenticated responses |
+| `Vary` | MUST | `Authorization, Accept-Encoding`. If the server ever serves multiple representations (e.g. different Accept), add `Vary: Accept`; for v1 only YAML is served, so Accept is informational and ETag is stable. |
+
+**Media type:** Pack response body uses `Content-Type: application/x-yaml` as the canonical media type in this SPEC. Clients and servers SHOULD use `application/x-yaml` consistently (not `application/yaml` or `text/yaml`) for interoperability.
 
 > **Digest semantics (NORMATIVE):**
 >
-> - `Content-Digest` (RFC 9530): digest of the **wire representation** (what you received)
-> - `X-Pack-Digest`: digest of the **canonical form** (after strict YAML parse + JCS)
->
-> These MAY differ if the registry applies formatting. CLI MUST verify `X-Pack-Digest`.
+> - **ETag** = `X-Pack-Digest` value. Enables conditional GET; same digest in lockfile, pinned refs, and headers.
+> - **Content-Digest** (RFC 9530): digest of the message body **after content-coding is decoded** (bytes presented to the application). Used to detect transport tampering; MAY differ from canonical if server reformats.
+> - **X-Pack-Digest**: digest of the canonical form (strict YAML → JSON → JCS). CLI MUST verify this after fetch.
 
 **Error Responses:**
 
@@ -198,9 +211,9 @@ To proceed anyway (forensics only): --allow-revoked
 ```
 
 The `--allow-revoked` flag MUST:
-- Require explicit opt-in (no env var override)
+- Require explicit opt-in (flag set by user)
 - Log a warning to stderr
-- NOT be usable in CI without `ASSAY_ALLOW_REVOKED=forensics`
+- When the client detects a CI environment (e.g. `CI=true` or `GITHUB_ACTIONS=true`), the client MUST also require `ASSAY_ALLOW_REVOKED=forensics` to be set; otherwise treat use of `--allow-revoked` in CI as error. Outside CI, the flag alone is sufficient (with stderr warning).
 
 #### HEAD /packs/{name}/{version}
 
@@ -220,6 +233,7 @@ Authorization: Bearer <token>
 HTTP/1.1 200 OK
 ETag: "sha256:abc123..."
 X-Pack-Digest: sha256:abc123...
+X-Pack-Policy: commercial
 X-Pack-Key-Id: sha256:def456...
 X-Pack-License: LicenseRef-Assay-Enterprise-1.0
 Content-Length: 4096
@@ -461,41 +475,40 @@ GET /packs/eu-ai-act-baseline/1.0.0 HTTP/1.1
 YAML parsing is notoriously inconsistent. To ensure deterministic digests, packs MUST
 conform to a strict subset:
 
-**Allowed YAML features:**
+**Strict YAML subset (NORMATIVE):**
 
 | Feature | Status |
 |---------|--------|
 | Strings | ✅ Allowed |
-| Integers | ✅ Allowed (JSON-representable) |
+| Integers | ✅ Allowed (JSON-representable: magnitude ≤ 2^53; negatives allowed) |
 | Booleans, null | ✅ Allowed |
 | Arrays, objects | ✅ Allowed |
 | Floats | ⚠️ SHOULD avoid (see below) |
-| Duplicate keys | ❌ MUST error |
-| Anchors/aliases | ❌ MUST error |
-| Tags (!!timestamp, !!binary, etc.) | ❌ MUST error |
-| Multi-document | ❌ MUST error |
+| Duplicate keys (at any nesting level) | ❌ MUST reject — parsing MUST fail. Implementations MUST detect duplicate keys (e.g. pre-scan or parser that reports duplicates); "last key wins" is NOT compliant. |
+| Anchors/aliases | ❌ MUST reject |
+| Tags (!!timestamp, !!binary, etc.) | ❌ MUST reject |
+| Multi-document (---) | ❌ MUST reject |
 
 **Number semantics (NORMATIVE):**
 
-YAML → JSON number conversion is lossy for floats. To ensure determinism:
+- Integers MUST be representable as JSON numbers (magnitude ≤ 2^53; use string for larger values).
+- Floats SHOULD be avoided; use strings for precise decimals (e.g. `"0.95"`).
+- If floats are used, they MUST be finite and MUST survive `parse → JCS → parse` round-trip losslessly (per RFC 8785 number rules).
+- Leading zeros, exponent notation: normalize per JCS (RFC 8785 §3.2.4).
 
-- Integers MUST be representable in JSON (≤ 2^53)
-- Floats SHOULD be avoided; use strings for precise decimals (e.g., `"0.95"` not `0.95`)
-- If floats are used, they MUST survive `parse → JCS → parse` round-trip losslessly
-- Leading zeros, exponent notation: normalize per JCS (RFC 8785 §3.2.4)
+**Canonical bytes (NORMATIVE):** The output of the canonicalization step (JCS) used for digest and DSSE payload MUST be UTF-8 encoded, with no BOM and no trailing newline. This ensures interoperability across implementations (e.g. JCS libraries that append newlines are non-compliant unless they strip before use).
 
 **Canonicalization algorithm:**
 
 ```
-1. Parse YAML (strict mode: reject features above)
+1. Parse YAML in strict mode: reject duplicate keys, anchors/aliases, unknown tags, multi-document
 2. Convert to JSON value (strings, numbers, bools, null, arrays, objects)
-3. Apply JCS canonicalization (RFC 8785)
+3. Apply JCS canonicalization (RFC 8785); output = UTF-8, no BOM, no trailing newline
 4. Compute SHA-256 hash
 5. Format as "sha256:{hex_digest}"
 ```
 
-**Implementation note**: Use a YAML parser with strict mode. If using `serde_yaml`,
-disable anchors and reject unknown tags.
+**Implementation:** Use a parser or pre-pass that guarantees duplicate-key detection and rejection. Parser configurations that silently take "last key wins" are non-compliant. Conformance test: a pack with duplicate keys at any level MUST be rejected before digest computation.
 
 ### 6.2 Digest Verification (NORMATIVE)
 
@@ -520,13 +533,13 @@ if computed_digest != expected_digest {
 Digest alone provides **integrity** but not **authenticity**. A compromised registry
 could serve malicious content with matching digest.
 
-**Verification requirements:**
+**Verification requirements:** The client determines "signature required" from the **`X-Pack-Policy`** response header (§4.3), not from pack body content. When `X-Pack-Policy: commercial`, the client MUST verify signature; when `open`, signature is optional.
 
 | Pack Type | Signature Verification |
 |-----------|----------------------|
-| Commercial (registry) | MUST verify |
-| Open (registry) | SHOULD verify |
-| BYOS | SHOULD verify (if `x-assay-sig` present) |
+| Commercial (registry; `X-Pack-Policy: commercial`) | MUST verify |
+| Open (registry; `X-Pack-Policy: open`) | SHOULD verify |
+| BYOS | SHOULD verify (if signature present; see §9) |
 | Local file | MAY verify |
 
 #### 6.3.1 DSSE Envelope Format (NORMATIVE)
@@ -551,7 +564,7 @@ could serve malicious content with matching digest.
 | Field | Description |
 |-------|-------------|
 | `payloadType` | MUST be `application/vnd.assay.pack.v1+jcs` |
-| `payload` | Base64-encoded canonical JSON bytes (from §6.1) |
+| `payload` | Base64-encoded canonical bytes (from §6.1: UTF-8, no BOM, no trailing newline) |
 | `signatures[].keyid` | SHA256 of SPKI public key (matches `X-Pack-Key-Id`) |
 | `signatures[].sig` | Ed25519 signature over PAE(payloadType, payload) |
 
@@ -596,7 +609,7 @@ or reject oversized headers.
 
 **Solution**: Deliver signatures via a sidecar endpoint instead of headers.
 
-**Endpoint:**
+**Endpoint (NORMATIVE):**
 
 ```http
 GET /packs/{name}/{version}.sig
@@ -622,22 +635,23 @@ Content-Type: application/vnd.dsse.envelope+json
 | Status | Meaning |
 |--------|---------|
 | 200 | Signature available (DSSE envelope in body) |
-| 404 | Pack unsigned or signature not available |
+| 404 | Signature not available. For **commercial** packs: client MUST treat as failure (pack unsigned or registry misconfiguration). For **open** packs: client MAY proceed without signature. |
 | 401 | Authentication required |
+
+**Commercial packs (NORMATIVE):** Registry MUST provide a signature (either `X-Pack-Signature` header or sidecar GET `/packs/{name}/{version}.sig` returning 200). If the client resolves the pack as commercial and neither header nor sidecar yields a valid signature (e.g. sidecar returns 404), the client MUST reject the pack and MUST NOT use it. "Unsigned" is not allowed for commercial.
 
 **Client behavior (NORMATIVE):**
 
-1. Clients SHOULD first try `X-Pack-Signature` header (backward compatibility)
-2. If header absent or invalid, clients MUST fetch from sidecar endpoint
-3. For new implementations, sidecar is RECOMMENDED as primary
-4. `fetch_pack_with_signature()` fetches content and signature in parallel
+1. When `X-Pack-Signature-Endpoint` is present (e.g. `/packs/{name}/{version}.sig`), client SHOULD prefer fetching the signature from the sidecar (avoids header size limits); client MAY try `X-Pack-Signature` header first for backward compatibility.
+2. If header absent or invalid, client MUST fetch from sidecar endpoint when the pack is commercial or when signature is required.
+3. For commercial packs: missing signature (header absent and sidecar 404 or invalid) MUST result in hard failure.
+4. `fetch_pack_with_signature()` may fetch content and signature in parallel.
 
 **Registry behavior:**
 
-- Registries MUST support the sidecar endpoint for all signed packs
-- Registries MAY also include `X-Pack-Signature` header for small packs (<4KB)
-- Registries SHOULD set `X-Pack-Signature-Endpoint: /{name}/{version}.sig` header
-  to indicate sidecar availability
+- Registries MUST support the sidecar endpoint `GET /packs/{name}/{version}.sig` for all signed packs.
+- Registries MAY also include `X-Pack-Signature` header for small packs (<4KB).
+- Registries SHOULD set `X-Pack-Signature-Endpoint: /packs/{name}/{version}.sig` to indicate sidecar availability (path MUST match the GET endpoint above).
 
 **Header size guidance:**
 
@@ -654,17 +668,24 @@ endpoint. Signature must be verified against the content digest, not just presen
 
 TLS + registry allowlist is necessary but insufficient for enterprise trust.
 
-#### 6.4.1 Trust Roots
+#### 6.4.1 Trust Roots (NORMATIVE)
 
-CLI ships with **pinned root public keys**:
+**Hierarchy:**
+
+1. **Embedded roots (baseline)** — The CLI binary MAY ship with a set of pinned root public key IDs (e.g. Assay production signing keys). These are used to verify the registry keys manifest (§6.4.2). No TOFU: keys manifest MUST be signed by an embedded root (or by a key from config, see below).
+2. **Config roots (add/override)** — User or deployment can add roots via config (e.g. `~/.assay/config.toml` or `ASSAY_REGISTRY_TRUST_ROOTS`). **Default combine strategy (NORMATIVE):** embedded ∪ config (union). All listed roots are trusted. An optional **override** mode (config-only, ignoring embedded) is permitted only when explicitly set (e.g. `registry.trust.mode = "override"`); implementations MUST document this and SHOULD require explicit opt-in to avoid accidentally disabling embedded roots (e.g. in CI images).
+3. **Keys manifest** — Pack-signing keys in the `/keys` manifest are verified by (embedded or config) roots. Only keys that chain to a root are trusted for pack signature verification.
+
+**Example config (informative):**
 
 ```toml
-# ~/.assay/config.toml
+# ~/.assay/config.toml — optional; embedded roots suffice for default registry
 [registry.trust]
 roots = [
   "sha256:abc123...",  # Assay signing key 2026
   "sha256:def456...",  # Assay signing key 2025 (rotation)
 ]
+# Optional: mode = "override" to use only config roots (use with care)
 ```
 
 #### 6.4.2 Keys Manifest
@@ -693,6 +714,8 @@ Host: registry.getassay.dev
   "signature": "<DSSE envelope over this manifest>"
 }
 ```
+
+**Manifest signature (NORMATIVE):** The keys manifest DSSE envelope MUST use `payloadType` exactly `application/vnd.assay.registry.keys.v1+json`. The DSSE payload is the UTF-8 bytes of the JSON response body as served (no additional JCS canonicalization); authenticity is provided by the DSSE signature. The manifest MUST be signed by a key whose key id is listed in the client's trust roots (embedded or config). Implementations MUST verify the manifest signature against one of those roots before trusting any key in `keys[]`.
 
 **Verification:**
 
@@ -733,11 +756,15 @@ This is planned for v1.1 and aligns with the attestation positioning in ADR-018.
 
 ### 7.1 Local Cache
 
+Cache layout MUST avoid collisions when multiple registries or namespaces are used. Recommended structure:
+
 ```
-~/.assay/cache/packs/{name}/{version}/pack.yaml
-~/.assay/cache/packs/{name}/{version}/metadata.json
-~/.assay/cache/packs/{name}/{version}/signature.json
+~/.assay/cache/packs/{registry_id}/{namespace}/{name}/{version}/pack.yaml
+~/.assay/cache/packs/{registry_id}/{namespace}/{name}/{version}/metadata.json
+~/.assay/cache/packs/{registry_id}/{namespace}/{name}/{version}/signature.json
 ```
+
+Where `registry_id` is a stable identifier for the registry (e.g. hostname or hash of base URL) and `namespace` is the org path if present (e.g. `orgs/acme` or `_global`). For a single default registry and no namespace, implementations MAY use the shorter path `~/.assay/cache/packs/{name}/{version}/` for backward compatibility, but MUST document that adding a second registry or namespace requires the extended path to avoid privilege mixing.
 
 **metadata.json:**
 
@@ -748,9 +775,12 @@ This is planned for v1.1 and aligns with the attestation positioning in ADR-018.
   "etag": "\"sha256:abc123...\"",
   "expires_at": "2026-01-30T10:00:00Z",
   "registry_url": "https://registry.getassay.dev/v1",
+  "policy": "commercial",
   "key_id": "sha256:def456..."
 }
 ```
+
+`policy` MUST be the value of `X-Pack-Policy` from the response (used on cache read to decide signature requirement).
 
 **signature.json:**
 
@@ -775,14 +805,20 @@ fn load_cached_pack(name: &str, version: &str) -> Result<Pack> {
         return Err(CacheCorrupted { name, version });
     }
 
-    // 2. Verify signature if present (commercial packs)
-    if let Ok(envelope) = load_json::<DsseEnvelope>(cache_dir.join("signature.json")) {
+    // 2. Signature: for commercial packs, signature MUST be present and valid (see §6.3)
+    if pack_requires_signature(&metadata) {
+        let envelope = load_json::<DsseEnvelope>(cache_dir.join("signature.json"))
+            .map_err(|_| PackError::MissingSignature { name, version })?;
+        verify_dsse(&envelope, &canonical, &trust_store)?;
+    } else if let Ok(envelope) = load_json::<DsseEnvelope>(cache_dir.join("signature.json")) {
         verify_dsse(&envelope, &canonical, &trust_store)?;
     }
 
     parse_pack(&content)
 }
 ```
+
+**Commercial packs (NORMATIVE):** The client MUST record `X-Pack-Policy` (or equivalent) in cache metadata when storing a pack. On cache read, when metadata indicates `policy: commercial` (or signature required per §6.3), missing or invalid `signature.json` MUST result in failure: evict cache and re-fetch, or return error. The client MUST NOT use the pack without a valid signature.
 
 **Rationale**: Local disk is not trusted. Malware, disk errors, or user mistakes
 could modify cached packs.
@@ -947,8 +983,10 @@ assay evidence lint --pack az://container/packs/custom.yaml bundle.tar.gz
 
 **Authentication**: Uses same OIDC/credentials as BYOS evidence push.
 
-**Integrity**: BYOS packs SHOULD include `x-assay-sig` for verification since there's
-no registry-provided digest header.
+**Integrity**: BYOS packs SHOULD provide a signature when possible. Signature and digest semantics are implementation-defined for BYOS (e.g. object metadata, sidecar file, or a well-known YAML field such as `x-assay-sig` in the pack root for inline signature reference). The **canonical spelling** for a pack-root YAML field, if used, is `x-assay-sig` (lowercase, hyphen). The client MUST have an expected digest to verify against:
+either a **pinned ref** (e.g. `s3://bucket/packs/custom.yaml#sha256:...`) or an entry in
+`assay.packs.lock` with `source: byos` and `digest`. Use of BYOS without a pin or lockfile
+SHOULD trigger a warning; implementations MAY reject or allow with downgraded assurance.
 
 ---
 
@@ -1027,24 +1065,27 @@ assay pack verify eu-ai-act-pro@1.2.0
 ### 12.3 Supply Chain
 
 - Pack digests are computed from JCS-canonical content
-- Unknown YAML fields cause validation failure (no injection via ignored fields)
+- For **signed commercial packs**, unknown YAML fields MUST cause validation failure (no injection via ignored fields). For open packs or future schema evolution, implementations MAY treat unknown fields as lint warnings rather than hard failure if pack schema versioning allows additive extensions; normative behavior for commercial remains strict reject.
+- **Commercial pack schema evolution:** Adding new top-level or rule-level fields to the pack schema is **breaking** for commercial packs unless a pack schema version is introduced and clients opt-in. Commercial packs are versioned; additive schema changes require a bump of pack schema version and client support; otherwise existing commercial packs would break validation. This SPEC does not define pack schema versioning; it is stated here to avoid the assumption that "add a field, minor bump" is safe for commercial.
 - Signed packs provide author verification
 - Commercial packs MUST be signed (see §6.3)
 
 ### 12.4 YAML Parsing Security
 
-YAML parsers are vulnerable to DoS attacks via:
+YAML parsers are vulnerable to DoS attacks. The following limits are **implementation guidance**; implementations SHOULD enforce them to prevent resource exhaustion. For normative canonicalization rules, see §6.1.
 
 | Attack | Mitigation |
 |--------|------------|
-| Billion laughs (anchor expansion) | Reject anchors/aliases |
+| Billion laughs (anchor expansion) | Reject anchors/aliases (normative in §6.1) |
 | Deep nesting | Limit depth to 50 |
 | Huge strings | Limit string length to 1MB |
 | Many keys | Limit object keys to 10,000 |
 
-**Implementation**: Use `serde_yaml` with recursion limits or validate structure before parsing.
+**Implementation**: Use a parser with recursion/depth limits or validate structure before parsing; duplicate keys MUST be rejected (normative in §6.1).
 
 ### 12.5 Size Limits
+
+The following are **implementation guidance** (SHOULD) unless a future version makes them normative:
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
@@ -1132,7 +1173,7 @@ cosign verify ghcr.io/assay/packs/eu-ai-act-pro@sha256:abc123... \
 
 ### 13.5 Coexistence
 
-HTTP registry and OCI distribution will coexist:
+HTTP registry and OCI distribution will coexist. **OCI is an additional registry resolver class;** it does not change the resolution order of path → built-in → local config dir → registry → BYOS (per SPEC-Pack-Engine-v1). When OCI is supported, "registry" is interpreted to include both HTTP registry and OCI registry (order between them is implementation-defined, typically HTTP before OCI).
 
 ```bash
 # HTTP registry (default)
@@ -1142,7 +1183,7 @@ HTTP registry and OCI distribution will coexist:
 --pack oci://ghcr.io/assay/packs/eu-ai-act-pro:1.2.0
 ```
 
-Resolution order with OCI:
+Resolution order with OCI (informative):
 
 ```
 1. Local path      ./custom.yaml
@@ -1158,25 +1199,25 @@ Resolution order with OCI:
 
 ### Phase 1 (v1.0)
 
-- [ ] Pack resolution order in CLI
+- [ ] Pack resolution order in CLI (per SPEC-Pack-Engine-v1)
 - [ ] Registry client with token auth
 - [ ] OIDC token exchange endpoint (`POST /auth/oidc/exchange`)
-- [ ] Strict YAML parsing (reject anchors, duplicates, tags, floats)
+- [ ] Strict YAML parsing (reject anchors, duplicates, tags, floats; see §6.1)
 - [ ] Digest verification (JCS canonical)
-- [ ] DSSE envelope signature verification (MUST for commercial)
-- [ ] Pinned root keys + keys manifest fetch
-- [ ] Cache integrity verification on every read
-- [ ] Local caching with TTL + ETag/304 + Vary
+- [ ] DSSE envelope signature verification (MUST for commercial; missing signature = fail)
+- [ ] Pinned root keys (embedded + config hierarchy) + keys manifest fetch
+- [ ] Cache integrity verification on every read (commercial: signature required)
+- [ ] Local caching with TTL + ETag/304 + Vary (cache path includes registry/namespace when applicable)
+- [ ] Lockfile v2 support (`assay.packs.lock`) — format defined in §8
 - [ ] HEAD endpoint support
 - [ ] `assay config set registry.*` commands
-- [ ] BYOS pack fetch (S3/GCS/Azure)
+- [ ] BYOS pack fetch (S3/GCS/Azure); expected digest from pin suffix or lockfile
 - [ ] Error messages per §10
 - [ ] Rate limit handling (429 + Retry-After)
-- [ ] 410 revocation handling + `--allow-revoked`
+- [ ] 410 revocation handling + `--allow-revoked` (CI detection per §4.3)
 
 ### Phase 2 (v1.1)
 
-- [ ] Lockfile v2 support (`assay.packs.lock`)
 - [ ] Keyless signing (Sigstore/Fulcio)
 - [ ] OCI distribution support (ORAS)
 - [ ] cosign verification integration

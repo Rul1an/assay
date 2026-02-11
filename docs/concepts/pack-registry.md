@@ -4,12 +4,14 @@ Assay supports compliance packs from multiple sources: local files, bundled pack
 
 ## Resolution Order
 
-When `--pack <ref>` is provided, packs are resolved deterministically in this order:
+The **normative** pack resolution order is defined in [SPEC-Pack-Engine-v1](../architecture/SPEC-Pack-Engine-v1.md#pack-resolution-normative). Summary:
 
-1. **Local path** (`./custom.yaml`) - File exists on disk
-2. **Bundled pack** (`packs/open/<name>`) - Shipped with CLI
-3. **Registry** (`name@version` or pinned `name@version#sha256:...`)
-4. **BYOS** (`s3://`, `gs://`, `az://`) - Bring Your Own Storage
+1. **Path** — Existing filesystem path: if **file**, load as YAML; if **directory**, load `<dir>/pack.yaml` only. Override built-ins by using an explicit path.
+2. **Built-in** — By name (e.g. `eu-ai-act-baseline`). Built-in wins over a pack with the same name in the config directory.
+3. **Local pack directory** — Config dir (`~/.config/assay/packs` on Unix, `%APPDATA%\assay\packs` on Windows). Look for `{name}.yaml` or `{name}/pack.yaml`; reference must be a valid pack name (see SPEC).
+4. **Registry** — `name@version` or pinned `name@version#sha256:...`
+5. **BYOS** — `s3://`, `gs://`, `az://` (Bring Your Own Storage)
+6. **NotFound** — Error with suggestion (e.g. "Did you mean …?" or "Available built-in packs: …").
 
 This order is **fail-closed**: if a pack cannot be resolved or verified, the CLI errors immediately.
 

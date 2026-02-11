@@ -64,7 +64,7 @@ assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline --format sarif
 
 ```yaml
 # Required fields
-name: string          # Pack identifier, lowercase alphanumeric + hyphens
+name: string          # Pack identifier; MUST match pack name grammar (see Pack name grammar, normative)
 version: string       # Semver (e.g., "1.0.0")
 kind: enum            # compliance | security | quality
 description: string   # Human-readable description
@@ -715,23 +715,53 @@ pub fn get_builtin_pack(name: &str) -> Option<&'static str> {
 
 ### Pack Resolution (Normative)
 
-Resolution order is deterministic and avoids heuristics:
+The **canonical resolution order** is deterministic. Implementations MUST resolve in this order:
+
+1. **Path** — If `reference` is an existing filesystem path:
+   - If it is a **file**, load it as YAML.
+   - If it is a **directory**, load `<dir>/pack.yaml` only (no `*.yaml` glob).
+   - This is the **override mechanism**: to use a custom pack with the same logical name as a built-in, use `--pack ./path/to/pack.yaml` or `--pack ./path/to/pack-dir/` (directory must contain `pack.yaml`).
+2. **Built-in** — If `reference` matches a built-in pack name, load the embedded pack. **Built-in wins over local name**: a pack in the config directory with the same name as a built-in is *not* used when resolving by name.
+3. **Local pack directory** — If `reference` is a valid pack name (per [Pack name grammar](#pack-name-grammar-normative)), look in the [config pack directory](#config-directory-normative) for `{name}.yaml` or `{name}/pack.yaml`. If found, load from file subject to [local resolution security](#local-resolution-security-normative). If not found, continue.
+4. **Registry / BYOS** — (Existing or future) If `reference` is a registry reference (e.g. `name@version`) or BYOS URI, resolve accordingly. This SPEC does not define registry/BYOS behaviour; it only places this step before NotFound.
+5. **NotFound** — Return the existing NotFound error (suggestions optional; do not introduce a new error contract).
+
+**Override rule:** Names are not overridable by placing a pack in the local directory with the same name. To override a built-in, use an explicit path: `--pack ./my-eu-ai-act-baseline/pack.yaml`.
 
 ```rust
 pub fn resolve_pack_reference(reference: &str) -> Result<LoadedPack, PackError> {
     let path = Path::new(reference);
 
-    // 1. If path exists on filesystem → load as file
+    // 1. Path: file or directory
     if path.exists() {
-        return load_pack_from_file(path);
+        if path.is_file() {
+            return load_pack_from_file(path);
+        }
+        if path.is_dir() {
+            let pack_yaml = path.join("pack.yaml");
+            if pack_yaml.exists() {
+                return load_pack_from_file(&pack_yaml);
+            }
+        }
+        // exists but not file and not dir with pack.yaml → fall through (e.g. dir without pack.yaml)
     }
 
-    // 2. Check built-in packs by name
+    // 2. Built-in by name
     if let Some(content) = get_builtin_pack(reference) {
         return load_pack_from_string(content, PackSource::BuiltIn(reference));
     }
 
-    // 3. Not found
+    // 3. Local pack directory (valid name only; containment enforced in load)
+    if is_valid_pack_name(reference) {
+        if let Some(loaded) = try_load_from_config_dir(reference)? {
+            return Ok(loaded);
+        }
+    }
+
+    // 4. Registry / BYOS (not specified here)
+    // ...
+
+    // 5. Not found
     Err(PackError::NotFound {
         reference: reference.to_string(),
         suggestion: suggest_similar_pack(reference),
@@ -739,7 +769,37 @@ pub fn resolve_pack_reference(reference: &str) -> Result<LoadedPack, PackError> 
 }
 ```
 
-**Rationale**: Using `path.exists()` instead of heuristics (like checking for `.yaml` suffix) prevents surprising behavior when pack names happen to end in `.yaml`.
+**Rationale:** Using `path.exists()` and explicit file vs directory handling prevents surprising behavior when pack names happen to end in `.yaml`. Built-in winning over local by name avoids spoofing.
+
+### Config directory (Normative)
+
+When resolving from the **local pack directory** (step 3), the config pack directory is determined as follows. The loader MUST NOT create this directory; if missing, treat as "no local packs" (no error). The loader MUST NOT write to disk (read-only resolution).
+
+| Platform | Canonical | Fallback |
+|----------|-----------|----------|
+| Unix-like (Linux/macOS) | `$XDG_CONFIG_HOME/assay/packs` | If `XDG_CONFIG_HOME` unset or empty: `~/.config/assay/packs` |
+| Windows | `%APPDATA%\assay\packs` | If unset, use FOLDERID_RoamingAppData equivalent so resolution does not fail |
+
+Candidates for local resolution: `{config_dir}/{name}.yaml` or `{config_dir}/{name}/pack.yaml`. Only one level; no scanning of subdirectories beyond `{config_dir}/{name}/`.
+
+### Pack name grammar (Normative)
+
+Pack names (used in pack YAML `name` and in `--pack <ref>` when resolving by name) MUST match the following grammar:
+
+- **Characters:** lowercase ASCII letters (`a-z`), digits (`0-9`), hyphens (`-`).
+- **Constraints:** non-empty; MUST NOT start or end with a hyphen.
+
+This grammar is used for pack YAML validation and for local pack directory resolution: when resolving by name from the config directory, the implementation MUST validate `reference` with this grammar **before** any filesystem lookup. Reject invalid names (e.g. `../evil`, `Pack.Name`) without probing the filesystem.
+
+*Examples: `eu-ai-act-baseline`, `soc2-baseline`, `pack-v1` are valid; `../evil`, `Pack.Name`, `pack_name` are invalid.*
+
+### Local resolution security (Normative)
+
+When loading a pack from the config directory:
+
+- **Reference sanitization** — Only attempt local lookup when `reference` is valid per [Pack name grammar](#pack-name-grammar-normative). Reject invalid names before any filesystem access.
+- **Path containment** — Build the candidate path(s), then check existence. Only then **canonicalize** the resolved file path and enforce that it is **under** the config pack directory (no symlink escape, no `..`). If the canonical path is outside the pack directory, reject with a safe error (NotFound or InvalidPackPath/InvalidRef; implementations choose one and document it). Containment is enforced only after existence check.
+- **Canonicalization failures** (e.g. non-existent path, permission error) MUST result in a safe error (NotFound or InvalidPackPath), not in disclosure of filesystem layout.
 
 ## Error Messages
 
@@ -856,6 +916,8 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 
 - [ ] `--pack` CLI argument parses comma-separated references
 - [ ] Built-in pack resolution (`eu-ai-act-baseline`)
+- [ ] Path resolution: file → load as YAML; directory → load `<dir>/pack.yaml` only
+- [ ] Local pack directory resolution (config dir per platform; pack name grammar; containment)
 - [ ] File pack loading via `path.exists()` check (not heuristics)
 - [ ] YAML schema validation with clear error messages
 - [ ] Unknown fields rejected (security)
@@ -906,6 +968,7 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 ### Related ADRs
 - [ADR-013: EU AI Act Compliance Pack](./ADR-013-EU-AI-Act-Pack.md)
 - [ADR-016: Pack Taxonomy](./ADR-016-Pack-Taxonomy.md)
+- [ADR-021: Local Pack Discovery and Pack Resolution Order](./ADR-021-Local-Pack-Discovery.md)
 
 ### Standards
 - [RFC 8785: JSON Canonicalization Scheme](https://datatracker.ietf.org/doc/html/rfc8785)
