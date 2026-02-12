@@ -174,7 +174,7 @@ impl RegistryClient {
             None => return Ok(None),
         };
 
-        let signature = self.fetch_signature(name, version).await.ok().flatten();
+        let signature = self.fetch_signature(name, version).await?;
 
         Ok(Some((fetch, signature)))
     }
@@ -670,6 +670,74 @@ mod integration_tests {
             .expect("fetch signature should not error on 404");
 
         assert!(result.is_none(), "expected None for unsigned pack");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pack_with_signature_signature_500_error_bubbled() {
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: test-pack\nversion: \"1.0.0\"";
+        let expected_digest = compute_digest(pack_yaml);
+
+        Mock::given(method("GET"))
+            .and(path("/packs/sig-500-pack/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("x-pack-digest", expected_digest.as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/packs/sig-500-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal server error"))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_pack_with_signature("sig-500-pack", "1.0.0", None)
+            .await;
+
+        assert!(
+            matches!(result, Err(RegistryError::Network { .. })),
+            "signature 500 should bubble as Network error, not be swallowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pack_with_signature_invalid_json_error_bubbled() {
+        let mock_server = MockServer::start().await;
+
+        let pack_yaml = "name: test-pack\nversion: \"1.0.0\"";
+        let expected_digest = compute_digest(pack_yaml);
+
+        Mock::given(method("GET"))
+            .and(path("/packs/sig-invalid-pack/1.0.0"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(pack_yaml)
+                    .insert_header("x-pack-digest", expected_digest.as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/packs/sig-invalid-pack/1.0.0.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{not json"))
+            .mount(&mock_server)
+            .await;
+
+        let client = create_test_client(&mock_server).await;
+        let result = client
+            .fetch_pack_with_signature("sig-invalid-pack", "1.0.0", None)
+            .await;
+
+        assert!(
+            matches!(result, Err(RegistryError::InvalidResponse { .. })),
+            "invalid signature JSON should bubble as InvalidResponse, not be swallowed"
+        );
     }
 
     #[tokio::test]
