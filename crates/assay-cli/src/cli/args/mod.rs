@@ -1,6 +1,17 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+pub mod baseline;
+pub mod bundle;
+pub mod common;
+pub mod policy;
+pub mod run;
+pub use baseline::*;
+pub use bundle::*;
+pub use common::*;
+pub use policy::*;
+pub use run::*;
+
 #[derive(Parser)]
 #[command(
     name = "assay",
@@ -72,77 +83,6 @@ pub struct ToolArgs {
     pub cmd: super::commands::tool::ToolCmd,
 }
 
-#[derive(Parser, Debug)]
-pub struct BundleArgs {
-    #[command(subcommand)]
-    pub cmd: BundleSub,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum BundleSub {
-    /// Create replay bundle from run artifacts
-    Create(BundleCreateArgs),
-    /// Verify replay bundle integrity and safety
-    Verify(BundleVerifyArgs),
-}
-
-#[derive(clap::Args, Debug, Clone)]
-pub struct BundleCreateArgs {
-    /// Source run path (directory or run.json)
-    #[arg(long)]
-    pub from: Option<PathBuf>,
-
-    /// Source run id (used for selection and default output naming)
-    #[arg(long, conflicts_with = "from")]
-    pub run_id: Option<String>,
-
-    /// Output replay bundle path (default: .assay/bundles/<run_id>.tar.gz)
-    #[arg(long)]
-    pub output: Option<PathBuf>,
-
-    /// Optional config file to include in bundle
-    #[arg(long)]
-    pub config: Option<PathBuf>,
-
-    /// Optional trace file to include in bundle
-    #[arg(long)]
-    pub trace_file: Option<PathBuf>,
-}
-
-#[derive(clap::Args, Debug, Clone)]
-pub struct BundleVerifyArgs {
-    /// Replay bundle archive (.tar.gz)
-    #[arg(long)]
-    pub bundle: PathBuf,
-}
-
-#[derive(clap::Args, Debug, Clone)]
-pub struct ReplayArgs {
-    /// Replay bundle archive (.tar.gz)
-    #[arg(long)]
-    pub bundle: PathBuf,
-
-    /// Allow live provider calls during replay (default: offline hermetic)
-    #[arg(long)]
-    pub live: bool,
-
-    /// Override replay seed (order seed)
-    #[arg(long)]
-    pub seed: Option<u64>,
-
-    /// Exit code compatibility mode
-    #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
-    pub exit_codes: crate::exit_codes::ExitCodeVersion,
-}
-
-#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
-pub enum ValidateOutputFormat {
-    #[default]
-    Text,
-    Json,
-    Sarif,
-}
-
 #[derive(clap::Args, Debug, Clone)]
 pub struct ValidateArgs {
     #[arg(long, default_value = "assay.yaml")]
@@ -166,350 +106,6 @@ pub struct ValidateArgs {
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
     pub deny_deprecations: bool,
-}
-
-#[derive(Parser, Clone)]
-pub struct BaselineArgs {
-    #[command(subcommand)]
-    pub cmd: BaselineSub,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum BaselineSub {
-    //     /// Generate a hygiene report for a suite
-    Report(BaselineReportArgs),
-    /// Record the latest run as a baseline
-    Record(BaselineRecordArgs),
-    /// Check the latest run against a baseline
-    Check(BaselineCheckArgs),
-}
-
-#[derive(Parser, Clone)]
-pub struct BaselineRecordArgs {
-    #[arg(long, default_value = "eval.yaml")]
-    pub config: PathBuf,
-    #[arg(long, default_value = ".eval/eval.db")]
-    pub db: PathBuf,
-
-    /// Test suite name (if omitted, inferred from config)
-    #[arg(long)]
-    pub suite: Option<String>,
-
-    /// Run ID to record (default: latest for suite)
-    #[arg(long)]
-    pub run_id: Option<String>,
-
-    /// Output path
-    #[arg(long, default_value = "assay-baseline.json")]
-    pub out: PathBuf,
-}
-
-#[derive(Parser, Clone)]
-pub struct BaselineCheckArgs {
-    #[arg(long, default_value = "eval.yaml")]
-    pub config: PathBuf,
-    #[arg(long, default_value = ".eval/eval.db")]
-    pub db: PathBuf,
-
-    /// Test suite name (if omitted, inferred from config)
-    #[arg(long)]
-    pub suite: Option<String>,
-
-    /// Run ID to check (default: latest for suite)
-    #[arg(long)]
-    pub run_id: Option<String>,
-
-    /// Baseline path
-    #[arg(long, default_value = "assay-baseline.json")]
-    pub baseline: PathBuf,
-
-    /// Fail on regression
-    #[arg(long, default_value_t = true)]
-    pub fail_on_regression: bool,
-
-    /// Output format
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
-}
-
-#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
-pub enum OutputFormat {
-    #[default]
-    Text,
-    Json,
-}
-
-#[derive(Parser, Clone)]
-pub struct BaselineReportArgs {
-    #[arg(long, default_value = ".eval/eval.db")]
-    pub db: PathBuf,
-
-    /// Test suite name
-    #[arg(long)]
-    pub suite: String,
-
-    /// Number of recent runs to include
-    #[arg(long, default_value_t = 50)]
-    pub last: u32,
-
-    /// Output path (JSON or Markdown based on extension or format)
-    #[arg(long, default_value = "hygiene.json")]
-    pub out: PathBuf,
-
-    /// Output format: json | md
-    #[arg(long, default_value = "json")]
-    pub format: String,
-}
-
-#[derive(Parser, Clone)]
-pub struct RunArgs {
-    #[arg(long, default_value = "eval.yaml")]
-    pub config: PathBuf,
-    #[arg(long, default_value = ".eval/eval.db")]
-    pub db: PathBuf,
-
-    #[arg(long, default_value_t = 0)]
-    pub rerun_failures: u32,
-
-    /// quarantine mode: off|warn|strict (controls status of quarantined tests)
-    #[arg(long, default_value = "warn")]
-    pub quarantine_mode: String,
-
-    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
-    #[arg(long)]
-    pub trace_file: Option<PathBuf>,
-
-    #[arg(long)]
-    pub redact_prompts: bool,
-
-    #[arg(long)]
-    pub baseline: Option<PathBuf>,
-
-    #[arg(long)]
-    pub export_baseline: Option<PathBuf>,
-
-    /// strict mode (controls exit code policy: warn/flaky -> exit 1)
-    #[arg(long)]
-    pub strict: bool,
-
-    /// embedder provider (none|openai|fake)
-    #[arg(long, default_value = "none")]
-    pub embedder: String,
-
-    /// embedding model name
-    #[arg(long, default_value = "text-embedding-3-small")]
-    pub embedding_model: String,
-
-    /// force refresh of embeddings (ignore cache)
-    #[arg(long)]
-    pub refresh_embeddings: bool,
-
-    /// enable incremental execution (skip passing tests with same fingerprint)
-    #[arg(long)]
-    pub incremental: bool,
-
-    /// ignore incremental cache (force re-run)
-    #[arg(long)]
-    pub refresh_cache: bool,
-
-    /// Explicitly disable cache usage (alias for --refresh-cache)
-    #[arg(long)]
-    pub no_cache: bool,
-
-    /// show details for skipped tests
-    #[arg(long)]
-    pub explain_skip: bool,
-
-    #[command(flatten)]
-    pub judge: JudgeArgs,
-
-    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
-    #[arg(long)]
-    pub replay_strict: bool,
-
-    /// Fail if deprecated v1 policy format is detected
-    #[arg(long)]
-    pub deny_deprecations: bool,
-
-    /// Exit code compatibility mode: v1 (legacy) or v2 (standard)
-    /// defaults to v2 (trace not found = 2)
-    #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
-    pub exit_codes: crate::exit_codes::ExitCodeVersion,
-
-    /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
-    #[arg(long)]
-    pub no_verify: bool,
-}
-
-impl Default for RunArgs {
-    fn default() -> Self {
-        Self {
-            config: PathBuf::from("eval.yaml"),
-            db: PathBuf::from(".eval/eval.db"),
-            rerun_failures: 0,
-            quarantine_mode: "warn".to_string(),
-            trace_file: None,
-            redact_prompts: false,
-            baseline: None,
-            export_baseline: None,
-            strict: false,
-            embedder: "none".to_string(),
-            embedding_model: "text-embedding-3-small".to_string(),
-            refresh_embeddings: false,
-            incremental: false,
-            refresh_cache: false,
-            no_cache: false,
-            explain_skip: false,
-            judge: JudgeArgs::default(),
-            replay_strict: false,
-            deny_deprecations: false,
-            exit_codes: crate::exit_codes::ExitCodeVersion::default(),
-            no_verify: false,
-        }
-    }
-}
-
-#[derive(Parser, Clone)]
-pub struct CiArgs {
-    #[arg(long, default_value = "eval.yaml")]
-    pub config: PathBuf,
-    #[arg(long, default_value = ".eval/eval.db")]
-    pub db: PathBuf,
-    #[arg(long, default_value = "junit.xml")]
-    pub junit: PathBuf,
-    #[arg(long, default_value = "sarif.json")]
-    pub sarif: PathBuf,
-
-    #[arg(long, default_value_t = 2)]
-    pub rerun_failures: u32,
-    #[arg(long, default_value = "warn")]
-    pub quarantine_mode: String,
-
-    #[arg(long)]
-    pub otel_jsonl: Option<PathBuf>,
-
-    /// Trace file to use as Source of Truth for replay (auto-ingested in strict mode)
-    #[arg(long)]
-    pub trace_file: Option<PathBuf>,
-
-    #[arg(long)]
-    pub redact_prompts: bool,
-
-    #[arg(long)]
-    pub baseline: Option<PathBuf>,
-
-    #[arg(long)]
-    pub export_baseline: Option<PathBuf>,
-
-    /// strict mode (controls exit code policy: warn/flaky -> exit 1)
-    #[arg(long)]
-    pub strict: bool,
-
-    #[arg(long, default_value = "none")]
-    pub embedder: String,
-
-    #[arg(long, default_value = "text-embedding-3-small")]
-    pub embedding_model: String,
-
-    #[arg(long)]
-    pub refresh_embeddings: bool,
-
-    /// enable incremental execution (skip passing tests with same fingerprint)
-    #[arg(long)]
-    pub incremental: bool,
-
-    /// ignore incremental cache (force re-run)
-    #[arg(long)]
-    pub refresh_cache: bool,
-
-    /// Explicitly disable cache usage (alias for --refresh-cache)
-    #[arg(long)]
-    pub no_cache: bool,
-
-    /// show details for skipped tests
-    #[arg(long)]
-    pub explain_skip: bool,
-
-    #[command(flatten)]
-    pub judge: JudgeArgs,
-
-    /// strict replay mode: use trace-file as truth, forbid network, auto-ingest to DB
-    #[arg(long)]
-    pub replay_strict: bool,
-
-    /// Fail if deprecated v1 policy format is detected
-    #[arg(long)]
-    pub deny_deprecations: bool,
-
-    /// Exit code compatibility mode: v1 (legacy) or v2 (standard)
-    #[arg(long, value_enum, default_value_t, env = "ASSAY_EXIT_CODES")]
-    pub exit_codes: crate::exit_codes::ExitCodeVersion,
-
-    /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
-    #[arg(long)]
-    pub no_verify: bool,
-
-    /// Write PR comment body (markdown) to file for GitHub Actions
-    #[arg(long)]
-    pub pr_comment: Option<PathBuf>,
-}
-
-#[derive(clap::Args, Clone)]
-pub struct JudgeArgs {
-    /// Enable or disable LLM-as-judge evaluation
-    /// - none: judge calls disabled (replay/trace-only)
-    /// - openai: live judge calls via OpenAI
-    /// - fake: deterministic fake judge (tests/dev)
-    #[arg(long, default_value = "none", env = "VERDICT_JUDGE")]
-    pub judge: String,
-
-    /// Alias for --judge none
-    #[arg(long, conflicts_with = "judge")]
-    pub no_judge: bool,
-
-    /// Judge model identifier (provider-specific)
-    /// Example: gpt-4o-mini
-    #[arg(long, env = "VERDICT_JUDGE_MODEL")]
-    pub judge_model: Option<String>,
-
-    /// Number of judge samples per test (majority vote)
-    /// Default: 3
-    /// Tip: for critical production gates consider: --judge-samples 5
-    #[arg(long, default_value_t = 3, env = "VERDICT_JUDGE_SAMPLES")]
-    pub judge_samples: u32,
-
-    /// Ignore judge cache and re-run judge calls (live mode only)
-    #[arg(long)]
-    pub judge_refresh: bool,
-
-    /// Temperature used for judge calls (affects cache key)
-    /// Default: 0.0
-    #[arg(long, default_value_t = 0.0, env = "VERDICT_JUDGE_TEMPERATURE")]
-    pub judge_temperature: f32,
-
-    /// Max tokens for judge response (affects cache key)
-    /// Default: 800
-    #[arg(long, default_value_t = 800, env = "VERDICT_JUDGE_MAX_TOKENS")]
-    pub judge_max_tokens: u32,
-
-    /// Start with env (VERDICT_JUDGE_API_KEY could be supported but OPENAI_API_KEY is primary)
-    #[arg(long, hide = true)]
-    pub judge_api_key: Option<String>,
-}
-
-impl Default for JudgeArgs {
-    fn default() -> Self {
-        Self {
-            judge: "none".to_string(),
-            no_judge: false,
-            judge_model: None,
-            judge_samples: 3,
-            judge_refresh: false,
-            judge_temperature: 0.0,
-            judge_max_tokens: 800,
-            judge_api_key: None,
-        }
-    }
 }
 
 #[derive(Parser, Clone)]
@@ -971,68 +567,9 @@ pub struct FixArgs {
 }
 
 #[derive(clap::Args, Clone, Debug)]
-pub struct PolicyArgs {
-    #[command(subcommand)]
-    pub cmd: PolicyCommand,
-}
-
-#[derive(Subcommand, Clone, Debug)]
-pub enum PolicyCommand {
-    /// Validate policy syntax and (v2) JSON Schemas
-    Validate(PolicyValidateArgs),
-
-    /// Migrate v1.x constraints policy to v2.0 schemas
-    Migrate(PolicyMigrateArgs),
-
-    /// Format policy YAML (normalizes formatting)
-    Fmt(PolicyFmtArgs),
-}
-
-#[derive(clap::Args, Clone, Debug)]
-pub struct PolicyValidateArgs {
-    /// Policy file path (YAML)
-    #[arg(short, long)]
-    pub input: PathBuf,
-
-    /// Fail if deprecated v1 policy format is detected
-    #[arg(long)]
-    pub deny_deprecations: bool,
-}
-
-#[derive(clap::Args, Clone, Debug)]
-pub struct PolicyMigrateArgs {
-    /// Input policy file (v1.x or v2.0)
-    #[arg(short, long)]
-    pub input: PathBuf,
-
-    /// Output file (default: overwrite input)
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
-
-    /// Dry run (print to stdout instead of overwriting)
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Preview only (no write)
-    #[arg(long)]
-    pub check: bool,
-}
-
-#[derive(clap::Args, Clone, Debug)]
 pub struct EvidenceArgs {
     #[command(subcommand)]
     pub cmd: super::commands::evidence::EvidenceCmd,
-}
-
-#[derive(clap::Args, Clone, Debug)]
-pub struct PolicyFmtArgs {
-    /// Policy file path (YAML)
-    #[arg(short, long)]
-    pub input: PathBuf,
-
-    /// Output file (default: overwrite input)
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -1188,4 +725,15 @@ pub struct SimRunArgs {
     /// Print effective limits and time budget, then exit
     #[arg(long)]
     pub print_config: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_debug_assert() {
+        Cli::command().debug_assert();
+    }
 }
