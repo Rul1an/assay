@@ -20,7 +20,7 @@ mod http;
 use helpers::compute_digest;
 use http::{HttpBackend, PackOutcome, SignatureOutcome};
 
-const USER_AGENT_VALUE: &str = concat!("assay-registry/", env!("CARGO_PKG_VERSION"));
+use crate::REGISTRY_USER_AGENT;
 
 /// Registry client for fetching packs.
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ impl RegistryClient {
         token_provider: TokenProvider,
     ) -> RegistryResult<Self> {
         let mut default_headers = HeaderMap::new();
-        default_headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
+        default_headers.insert(USER_AGENT, HeaderValue::from_static(REGISTRY_USER_AGENT));
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
