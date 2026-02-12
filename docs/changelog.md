@@ -323,6 +323,17 @@
 - feat(evidence): ADR-024 E1 — VerifyLimitsOverrides (Sim Hardening foundation) (#291) @Rul1an
 - feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
+
+## [2026-02-12]
+
+- refactor(cli): args split Phase A+B — common, run, baseline, bundle, policy (#300) @Rul1an
+- feat(evidence): E2 Phase 3 verify --eval (evaluation sidecar verification) (#299) @Rul1an
+- feat(evidence): E2 writer split + façade polish (#298) @Rul1an
+- feat(sim): ADR-025 E1.1 Soak Two-Mode — artifact vs run, clap contract, stub (#297) @Rul1an
+- feat(adr-024): E2–E6 sim hardening — CLI flags, integrity attacks, report metadata (#293) @Rul1an
+- feat(evidence): ADR-024 E1 — VerifyLimitsOverrides (Sim Hardening foundation) (#291) @Rul1an
+- feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
+- feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
 ## [2026-02-11]
 
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
