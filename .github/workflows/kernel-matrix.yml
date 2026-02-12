@@ -197,12 +197,9 @@ jobs:
     name: Free disk (before matrix)
     needs: [lint, build-artifacts, check-ebpf-changes]
     # Skip for fork PRs OR when only dependencies changed (no eBPF code)
-    # TEMPORARY DISABLED alongside matrix-test (issue #130, self-hosted runner health).
-    # Re-enable when self-hosted runner is stable again by removing '&& false'.
     if: |
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
-      needs.check-ebpf-changes.outputs.ebpf_changed == 'true' &&
-      false
+      needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
     steps:
@@ -243,12 +240,9 @@ jobs:
       actions: write
     name: Kernel Matrix (${{ matrix.kernel }})
     needs: [lint, build-artifacts, cleanup-runner, check-ebpf-changes]
-    # TEMPORARY DISABLED: self-hosted runner has corrupted _actions cache (see issue #130).
-    # Re-enable when runner is fixed by removing '&& false' from the condition.
     if: |
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) &&
-      needs.check-ebpf-changes.outputs.ebpf_changed == 'true' &&
-      false
+      needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
