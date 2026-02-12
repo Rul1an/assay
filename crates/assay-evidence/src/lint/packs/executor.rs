@@ -6,7 +6,7 @@
 use super::checks::{execute_check, CheckContext};
 use super::loader::{LoadedPack, PackError};
 use super::schema::PackKind;
-use crate::bundle::writer::Manifest;
+use crate::bundle::Manifest;
 use crate::lint::LintFinding;
 use crate::types::EvidenceEvent;
 use std::collections::{HashMap, HashSet};

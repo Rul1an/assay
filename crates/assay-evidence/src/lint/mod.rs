@@ -3,7 +3,7 @@ pub mod packs;
 pub mod rules;
 pub mod sarif;
 
-use crate::bundle::writer::Manifest;
+use crate::bundle::Manifest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -103,7 +103,7 @@ impl LintFinding {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LintSummary {
     pub total: usize,
     pub errors: usize,

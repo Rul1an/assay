@@ -52,9 +52,29 @@ pub struct EvidenceExportArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct EvidenceVerifyArgs {
-    /// Bundle path, or "-" for stdin
+    /// Bundle path, or "-" for stdin. Required when using --eval.
     #[arg(value_name = "BUNDLE", default_value = "-")]
     pub bundle: std::path::PathBuf,
+
+    /// Evaluation sidecar to verify against bundle (ADR-025 E2 Phase 3)
+    #[arg(long, value_name = "PATH")]
+    pub eval: Option<std::path::PathBuf>,
+
+    /// Packs to resolve for digest verification (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub pack: Option<Vec<String>>,
+
+    /// Fail if pack digests cannot be verified
+    #[arg(long)]
+    pub strict: bool,
+
+    /// Machine-readable JSON output
+    #[arg(long)]
+    pub json: bool,
+
+    /// Only exit code, no output
+    #[arg(long, short = 'q')]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -114,7 +134,15 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
     let out_file = File::create(&out_path)
         .with_context(|| format!("failed to create output file {}", out_path.display()))?;
 
-    let mut bw = assay_evidence::bundle::BundleWriter::new(out_file);
+    let provenance = assay_evidence::ProvenanceInput {
+        producer_name: "assay-cli".into(),
+        producer_version: env!("CARGO_PKG_VERSION").into(),
+        git_commit: option_env!("ASSAY_GIT_SHA").map(String::from),
+        dirty: None,
+        run_id: run_id.clone(),
+        created_at: None, // use first event time (deterministic)
+    };
+    let mut bw = assay_evidence::bundle::BundleWriter::new(out_file).with_provenance(provenance);
     for ev in events {
         bw.add_event(ev);
     }
@@ -126,6 +154,11 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
 }
 
 fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
+    if let Some(eval_path) = &args.eval {
+        return cmd_verify_eval(&args, eval_path);
+    }
+
+    // Legacy: bundle-only verify
     if args.bundle.to_string_lossy() == "-" {
         let mut buf = Vec::new();
         io::stdin().read_to_end(&mut buf)?;
@@ -138,11 +171,116 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
-    // BundleReader::open verifies by default
     let _ = assay_evidence::bundle::BundleReader::open(f)?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle.display());
     Ok(0)
+}
+
+fn cmd_verify_eval(args: &EvidenceVerifyArgs, eval_path: &std::path::Path) -> Result<i32> {
+    use assay_evidence::evaluation::verify_evaluation;
+    use assay_evidence::lint::packs::load_packs;
+
+    if args.bundle.to_string_lossy() == "-" {
+        anyhow::bail!("--bundle is required when using --eval (cannot use stdin)");
+    }
+
+    let eval_json = std::fs::read_to_string(eval_path)
+        .with_context(|| format!("failed to read evaluation {}", eval_path.display()))?;
+    let evaluation: assay_evidence::evaluation::Evaluation =
+        serde_json::from_str(&eval_json).context("invalid evaluation JSON")?;
+
+    let f = File::open(&args.bundle)
+        .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
+    let verify_result =
+        assay_evidence::bundle::verify_bundle(f).context("bundle verification failed")?;
+    let manifest = verify_result.manifest;
+
+    let pack_digests = if let Some(ref pack_refs) = args.pack {
+        match load_packs(pack_refs) {
+            Ok(packs) => Some(
+                packs
+                    .iter()
+                    .map(|p| {
+                        (
+                            format!("{}@{}", p.definition.name, p.definition.version),
+                            p.digest.clone(),
+                        )
+                    })
+                    .collect(),
+            ),
+            Err(e) => {
+                if args.strict {
+                    anyhow::bail!("pack resolution failed: {}", e);
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let result = verify_evaluation(&evaluation, &manifest, pack_digests, args.strict)
+        .context("evaluation verification failed")?;
+
+    if args.quiet {
+        return Ok(if result.ok { 0 } else { 1 });
+    }
+
+    if args.json {
+        let out = serde_json::json!({
+            "ok": result.ok,
+            "bundle": {
+                "bundle_digest_match": result.bundle_digest_match,
+                "manifest_digest_match": result.manifest_digest_match,
+            },
+            "results": {
+                "results_digest_verified": result.results_digest_verified,
+                "results_digest_verifiable": result.results_digest_verifiable,
+            },
+            "packs": {
+                "verified": result.packs_verified,
+                "unverifiable": result.packs_unverifiable,
+                "mismatched": result.packs_mismatched,
+            },
+            "warnings": result.warnings,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(if result.ok { 0 } else { 1 });
+    }
+
+    if result.ok {
+        eprintln!("✅ Evaluation verified");
+        eprintln!("   bundle_digest: match");
+        eprintln!("   manifest_digest: match");
+        eprintln!(
+            "   results_digest: {}",
+            if result.results_digest_verified {
+                "verified"
+            } else if result.results_digest_verifiable {
+                "mismatch (see errors)"
+            } else {
+                "not verifiable (no report_inline)"
+            }
+        );
+        eprintln!(
+            "   packs: {} ok / {} unverifiable / {} mismatched",
+            result.packs_verified, result.packs_unverifiable, result.packs_mismatched
+        );
+        for w in &result.warnings {
+            eprintln!("   ⚠️  {}", w);
+        }
+        Ok(0)
+    } else {
+        eprintln!("❌ Evaluation verification failed");
+        for e in &result.errors {
+            eprintln!("   {}", e);
+        }
+        for w in &result.warnings {
+            eprintln!("   ⚠️  {}", w);
+        }
+        Ok(1)
+    }
 }
 
 fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {

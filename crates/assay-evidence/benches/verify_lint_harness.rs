@@ -1,4 +1,4 @@
-use assay_evidence::bundle::writer::{verify_bundle_with_limits, BundleWriter, VerifyLimits};
+use assay_evidence::bundle::{verify_bundle_with_limits, BundleWriter, VerifyLimits};
 use assay_evidence::lint::engine::lint_bundle;
 use assay_evidence::types::EvidenceEvent;
 use chrono::{TimeZone, Utc};

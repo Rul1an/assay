@@ -1,5 +1,5 @@
 use anyhow::Result;
-use assay_evidence::bundle::writer::{ErrorClass, ErrorCode};
+use assay_evidence::bundle::{ErrorClass, ErrorCode};
 use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]

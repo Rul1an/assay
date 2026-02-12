@@ -15,7 +15,7 @@ Tracked work items that are marked in code with `// TODO(tag):` and documented h
 
 ## Placement in roadmap and implementation plan
 
-Where each TODO should be fixed, with priority, value, urgency, and dependencies. Sources: [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [ADR-019 PR Gate 2026 SOTA](../architecture/ADR-019-PR-Gate-2026-SOTA.md).
+Where each TODO should be fixed, with priority, value, urgency, and dependencies. Sources: [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN (archive)](../archive/DX-IMPLEMENTATION-PLAN-legacy.md), [ADR-019 PR Gate 2026 SOTA](../architecture/ADR-019-PR-Gate-2026-SOTA.md).
 
 | Tag | Where to fix | Priority | Value | Urgency | Dependencies |
 |-----|--------------|----------|-------|---------|--------------|
@@ -30,7 +30,7 @@ Where each TODO should be fixed, with priority, value, urgency, and dependencies
 
 1. **Later / Backlog:** `sandbox-scrub` (after scrubbing), `sim-verify-limits`, `landlock-net`, `landlock-abi-v5`, `validate-v13`, `sequence-v11`.
 
-**Done:** `cli-verify` (P0); `monitor-strict-warn` (P1); `mcp-deny-code` (P1); `mcp-op-class` (P1); `init-provider-template` (P1); `runner-metric-override` (P1 — `Expected::thresholding_for_metric` + per-test max_drop in baseline regression).
+**Done:** `cli-verify` (P0); `monitor-strict-warn` (P1); `mcp-deny-code` (P1); `mcp-op-class` (P1); `init-provider-template` (P1); `runner-metric-override` (P1 — `Expected::thresholding_for_metric` + per-test max_drop in baseline regression); `writer-split` (E2 — assay-evidence bundle split: manifest, limits, verify, write; façade re-exports XAssayExtension, BundleProvenance; public_api_smoke test; ADR-025-E2 bundle_digest logical digest docs).
 
 ## Conventions
 

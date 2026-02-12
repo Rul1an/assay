@@ -3,7 +3,7 @@
 //! These tests verify that bundles are byte-for-byte reproducible
 //! and that all variable fields (mtime, uid, etc.) are fixed.
 
-use assay_evidence::bundle::writer::BundleWriter;
+use assay_evidence::bundle::BundleWriter;
 use assay_evidence::types::EvidenceEvent;
 use chrono::{TimeZone, Utc};
 use sha2::{Digest, Sha256};
