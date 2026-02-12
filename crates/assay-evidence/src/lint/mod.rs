@@ -103,7 +103,7 @@ impl LintFinding {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LintSummary {
     pub total: usize,
     pub errors: usize,
