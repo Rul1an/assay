@@ -33,7 +33,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
 
-      - uses: bencherdev/bencher@886fbed6aad69e12a7852b0fc9ce49c50516c578 # @main
+      - uses: bencherdev/bencher@a63d89001432c3e7dd86436d968d0e83b36aff00 # @main
 
       - name: Build release binary
         run: cargo build --release -p assay-cli
