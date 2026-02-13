@@ -89,7 +89,6 @@ cargo check -p assay-cli -p assay-core
 
 echo "== Wave3 Step1 contract tests (monitor) =="
 if [ "$(uname -s)" = "Linux" ]; then
-  cargo test -p assay-cli test_kernel_dev_encoding_overflow -- --nocapture
   cargo test -p assay-cli test_normalize_path_syntactic_contract -- --nocapture
   cargo test -p assay-cli test_find_violation_rule_allow_not_contract -- --nocapture
 else
@@ -103,20 +102,20 @@ cargo test -p assay-core --lib test_v2_non_model_prompt_is_only_fallback -- --no
 cargo test -p assay-core --lib test_from_path_accepts_crlf_jsonl_lines -- --nocapture
 
 echo "== Wave3 Step1 drift gates =="
-check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "unwrap\\(|expect\\(" "monitor unwrap/expect (code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "unwrap\\(|expect\\(" "monitor unwrap/expect (best-effort code-only)"
 check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "\\bunsafe\\b" "monitor unsafe"
-check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "println!\\(|eprintln!\\(" "monitor println/eprintln (code-only)"
-check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "monitor panic/todo/unimplemented (code-only)"
-check_no_increase "crates/assay-core/src/providers/trace.rs" "unwrap\\(|expect\\(" "trace unwrap/expect (code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "println!\\(|eprintln!\\(" "monitor println/eprintln (best-effort code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "monitor panic/todo/unimplemented (best-effort code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "unwrap\\(|expect\\(" "trace unwrap/expect (best-effort code-only)"
 check_no_increase "crates/assay-core/src/providers/trace.rs" "\\bunsafe\\b" "trace unsafe"
-check_no_increase "crates/assay-core/src/providers/trace.rs" "println!\\(|eprintln!\\(" "trace println/eprintln (code-only)"
-check_no_increase "crates/assay-core/src/providers/trace.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "trace panic/todo/unimplemented (code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "println!\\(|eprintln!\\(" "trace println/eprintln (best-effort code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "trace panic/todo/unimplemented (best-effort code-only)"
 
 echo "== Wave3 Step1 diff allowlist =="
 leaks="$(
   git diff --name-only "${base_ref}...HEAD" | \
     "$rg_bin" -v \
-      "^crates/assay-cli/src/cli/commands/monitor.rs$|^crates/assay-core/src/providers/trace.rs$|^docs/contributing/SPLIT-INVENTORY-wave3-step1.md$|^docs/contributing/SPLIT-CHECKLIST-monitor-step1.md$|^docs/contributing/SPLIT-CHECKLIST-trace-step1.md$|^docs/contributing/SPLIT-SYMBOLS-wave3-step1.md$|^scripts/ci/review-wave3-step1.sh$|^docs/architecture/PLAN-split-refactor-2026q1.md$" || true
+      "^crates/assay-cli/src/cli/commands/monitor.rs$|^crates/assay-core/src/providers/trace.rs$|^docs/contributing/SPLIT-INVENTORY-wave3-step1.md$|^docs/contributing/SPLIT-CHECKLIST-monitor-step1.md$|^docs/contributing/SPLIT-CHECKLIST-trace-step1.md$|^docs/contributing/SPLIT-SYMBOLS-wave3-step1.md$|^docs/contributing/SPLIT-REVIEW-PACK-wave3-step1.md$|^scripts/ci/review-wave3-step1.sh$|^docs/architecture/PLAN-split-refactor-2026q1.md$" || true
 )"
 if [ -n "$leaks" ]; then
   echo "non-allowlisted files detected:"

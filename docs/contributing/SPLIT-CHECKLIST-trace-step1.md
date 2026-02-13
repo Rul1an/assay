@@ -17,38 +17,11 @@ Scope lock:
 
 ```bash
 set -euo pipefail
-base_ref="${BASE_REF:-origin/codex/wave2-step2-runtime-split}"
-file="crates/assay-core/src/providers/trace.rs"
-rg_bin="$(command -v rg)"
-
-count_in_ref() {
-  local pattern="$1"
-  git show "${base_ref}:${file}" | awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
-}
-
-count_in_worktree() {
-  local pattern="$1"
-  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
-}
-
-check_no_increase() {
-  local pattern="$1"
-  local label="$2"
-  local before after
-  before="$(count_in_ref "$pattern" | wc -l | tr -d ' ')"
-  after="$(count_in_worktree "$pattern" | wc -l | tr -d ' ')"
-  echo "$label: before=$before after=$after"
-  if [ "$after" -gt "$before" ]; then
-    echo "drift gate failed: $label increased"
-    exit 1
-  fi
-}
-
-check_no_increase "unwrap\\(|expect\\(" "trace unwrap/expect (code-only)"
-check_no_increase "\\bunsafe\\b" "trace unsafe"
-check_no_increase "println!\\(|eprintln!\\(" "trace println/eprintln (code-only)"
-check_no_increase "panic!\\(|todo!\\(|unimplemented!\\(" "trace panic/todo/unimplemented (code-only)"
+BASE_REF="${BASE_REF:-origin/codex/wave2-step2-runtime-split}" bash scripts/ci/review-wave3-step1.sh
 ```
+
+Canonical gate implementation lives in:
+- `scripts/ci/review-wave3-step1.sh` (`strip_code_only`, drift counters, allowlist, and contract test selection).
 
 Known limitation:
 - The code-only filter in Step 1 is best-effort for `#[cfg(test)] mod tests { ... }` blocks.

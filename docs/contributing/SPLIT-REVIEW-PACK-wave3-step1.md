@@ -57,6 +57,7 @@ Script enforces:
 
 ## Probe results from latest run
 
+- Counters reflect the active filter rules in `scripts/ci/review-wave3-step1.sh` (best-effort test/comment exclusion).
 - monitor drift:
   - unwrap/expect `2 -> 2`
   - unsafe `7 -> 7`
