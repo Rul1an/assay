@@ -328,7 +328,10 @@ jobs:
 
       - name: Install Rust toolchain (rust-src)
         shell: bash
-        run: rustup component add rust-src
+        run: |
+          # Runner has rustup in /opt/rust/bin (setup.sh: RUSTUP_HOME=CARGO_HOME=/opt/rust)
+          export PATH="/opt/rust/bin:${HOME:-/home/github-runner}/.cargo/bin:${PATH}"
+          rustup component add rust-src
 
       - name: Install Dependencies
         shell: bash
