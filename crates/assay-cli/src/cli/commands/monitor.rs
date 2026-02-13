@@ -8,6 +8,9 @@ use assay_common::encode_kernel_dev;
 #[cfg(target_os = "linux")]
 use tokio_stream::StreamExt;
 
+#[path = "monitor_next/mod.rs"]
+mod monitor_next;
+
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Runtime eBPF monitor (Linux only, experimental)",

@@ -9,6 +9,9 @@ use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
 
+#[path = "trace_next/mod.rs"]
+mod trace_next;
+
 #[derive(Clone)]
 pub struct TraceClient {
     // prompts -> response
