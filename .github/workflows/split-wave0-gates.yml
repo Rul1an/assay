@@ -374,6 +374,8 @@ jobs:
             git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}" || git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:refs/temp/wave0-baseline"
             git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}"
           fi
+          # Cleanup fallback ref if created by the alternate fetch path.
+          git update-ref -d refs/temp/wave0-baseline || true
 
       - name: Run semver checks (allowlist)
         shell: bash
