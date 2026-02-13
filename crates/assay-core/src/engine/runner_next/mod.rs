@@ -1,7 +1,7 @@
-//! Step-2 split scaffold modules for `engine::runner`.
+//! Step-2 split implementation modules for `engine::runner`.
 //!
-//! `src/engine/runner.rs` remains the active implementation during Commit A.
-//! These files are placeholders for a later mechanical move in Commit B.
+//! `src/engine/runner.rs` remains the stable facade; implementation blocks are
+//! mechanically moved here.
 
 pub(crate) mod baseline;
 pub(crate) mod cache;

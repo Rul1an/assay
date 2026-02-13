@@ -1,7 +1,7 @@
-//! Step-2 split scaffold modules for `runtime::mandate_store`.
+//! Step-2 split implementation modules for `runtime::mandate_store`.
 //!
-//! `src/runtime/mandate_store.rs` remains the active implementation during
-//! Commit A. This layout is prepared for a later mechanical move in Commit B.
+//! `src/runtime/mandate_store.rs` remains the stable facade; implementation
+//! blocks are mechanically moved here.
 
 pub(crate) mod consume;
 pub(crate) mod revocation;

@@ -5,13 +5,14 @@
 //! - Nonce replay prevention
 //! - tool_call_id idempotency
 
-use super::schema::MANDATE_SCHEMA;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
+use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+
+#[path = "mandate_store_next/mod.rs"]
+mod mandate_store_next;
 
 /// Authorization receipt returned after successful consumption.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,151 +97,27 @@ pub struct MandateStore {
 impl MandateStore {
     /// Open a file-backed store.
     pub fn open(path: &Path) -> Result<Self, AuthzError> {
-        let conn = Connection::open(path)?;
-        Self::init_connection(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        mandate_store_next::schema::open_impl(path)
     }
 
     /// Create an in-memory store (for testing).
     pub fn memory() -> Result<Self, AuthzError> {
-        let conn = Connection::open_in_memory()?;
-        Self::init_connection(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        mandate_store_next::schema::memory_impl()
     }
 
     /// Create store from existing connection (for multi-connection tests).
     pub fn from_connection(conn: Connection) -> Result<Self, AuthzError> {
-        Self::init_connection(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
-    }
-
-    fn init_connection(conn: &Connection) -> Result<(), AuthzError> {
-        conn.execute("PRAGMA foreign_keys = ON", [])?;
-        // WAL mode for file-backed DBs (no-op for in-memory)
-        let _ = conn.execute("PRAGMA journal_mode = WAL", []);
-        // Busy timeout: wait up to 5s for locks (Windows needs this for concurrency)
-        // Use let _ = because PRAGMA returns a result set
-        let _ = conn.execute("PRAGMA busy_timeout = 5000", []);
-        conn.execute_batch(MANDATE_SCHEMA)?;
-        Ok(())
+        mandate_store_next::schema::from_connection_impl(conn)
     }
 
     /// Upsert mandate metadata. Idempotent for same content, errors on conflict.
     pub fn upsert_mandate(&self, meta: &MandateMetadata) -> Result<(), AuthzError> {
-        // Validate constraints: single_use implies max_uses == 1
-        if meta.single_use {
-            if let Some(max) = meta.max_uses {
-                if max != 1 {
-                    return Err(AuthzError::InvalidConstraints { max_uses: max });
-                }
-            }
-        }
-
-        let conn = self.conn.lock().unwrap();
-
-        // Insert with ON CONFLICT DO NOTHING
-        conn.execute(
-            r#"
-            INSERT INTO mandates (
-                mandate_id, mandate_kind, audience, issuer, expires_at,
-                single_use, max_uses, use_count, canonical_digest, key_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)
-            ON CONFLICT(mandate_id) DO NOTHING
-            "#,
-            params![
-                meta.mandate_id,
-                meta.mandate_kind,
-                meta.audience,
-                meta.issuer,
-                meta.expires_at.map(|t| t.to_rfc3339()),
-                meta.single_use as i32,
-                meta.max_uses.map(|m| m as i64),
-                meta.canonical_digest,
-                meta.key_id,
-            ],
-        )?;
-
-        // Verify consistency if already existed
-        let stored: Option<(String, String, String, String, String)> = conn
-            .query_row(
-                r#"
-                SELECT mandate_kind, audience, issuer, canonical_digest, key_id
-                FROM mandates WHERE mandate_id = ?
-                "#,
-                [&meta.mandate_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        if let Some((kind, aud, iss, digest, key)) = stored {
-            if kind != meta.mandate_kind {
-                return Err(AuthzError::MandateConflict {
-                    mandate_id: meta.mandate_id.clone(),
-                    field: "mandate_kind".to_string(),
-                });
-            }
-            if aud != meta.audience {
-                return Err(AuthzError::MandateConflict {
-                    mandate_id: meta.mandate_id.clone(),
-                    field: "audience".to_string(),
-                });
-            }
-            if iss != meta.issuer {
-                return Err(AuthzError::MandateConflict {
-                    mandate_id: meta.mandate_id.clone(),
-                    field: "issuer".to_string(),
-                });
-            }
-            if digest != meta.canonical_digest {
-                return Err(AuthzError::MandateConflict {
-                    mandate_id: meta.mandate_id.clone(),
-                    field: "canonical_digest".to_string(),
-                });
-            }
-            if key != meta.key_id {
-                return Err(AuthzError::MandateConflict {
-                    mandate_id: meta.mandate_id.clone(),
-                    field: "key_id".to_string(),
-                });
-            }
-        }
-
-        Ok(())
+        mandate_store_next::upsert::upsert_mandate_impl(self, meta)
     }
 
     /// Consume mandate atomically. Idempotent on tool_call_id.
     pub fn consume_mandate(&self, params: &ConsumeParams<'_>) -> Result<AuthzReceipt, AuthzError> {
-        let conn = self.conn.lock().unwrap();
-
-        // BEGIN IMMEDIATE acquires write lock immediately
-        conn.execute("BEGIN IMMEDIATE", [])?;
-
-        let result = self.consume_mandate_inner(&conn, params);
-
-        match &result {
-            Ok(_) => {
-                conn.execute("COMMIT", [])?;
-            }
-            Err(_) => {
-                let _ = conn.execute("ROLLBACK", []);
-            }
-        }
-
-        result
+        mandate_store_next::txn::consume_mandate_in_txn_impl(self, params)
     }
 
     fn consume_mandate_inner(
@@ -248,153 +125,17 @@ impl MandateStore {
         conn: &Connection,
         params: &ConsumeParams<'_>,
     ) -> Result<AuthzReceipt, AuthzError> {
-        let ConsumeParams {
-            mandate_id,
-            tool_call_id,
-            nonce,
-            audience,
-            issuer,
-            tool_name,
-            operation_class,
-            source_run_id,
-        } = params;
-        // Step 1: Idempotency check
-        let existing: Option<(String, i64, String)> = conn
-            .query_row(
-                "SELECT use_id, use_count, consumed_at FROM mandate_uses WHERE tool_call_id = ?",
-                [tool_call_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-
-        if let Some((use_id, use_count, consumed_at)) = existing {
-            // Return existing receipt (idempotent retry)
-            return Ok(AuthzReceipt {
-                mandate_id: mandate_id.to_string(),
-                use_id,
-                use_count: use_count as u32,
-                consumed_at: DateTime::parse_from_rfc3339(&consumed_at)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now()),
-                tool_call_id: tool_call_id.to_string(),
-                was_new: false, // Idempotent retry
-            });
-        }
-
-        // Step 2: Nonce replay check (atomic INSERT, not SELECT+INSERT)
-        if let Some(n) = nonce {
-            let insert_result = conn.execute(
-                "INSERT INTO nonces (audience, issuer, nonce, mandate_id) VALUES (?1, ?2, ?3, ?4)",
-                params![audience, issuer, n, mandate_id],
-            );
-
-            if let Err(e) = insert_result {
-                if e.to_string().contains("UNIQUE constraint failed") {
-                    return Err(AuthzError::NonceReplay {
-                        nonce: n.to_string(),
-                    });
-                }
-                return Err(e.into());
-            }
-        }
-
-        // Step 3: Get mandate metadata + current use count
-        let row: Option<(i64, i32, Option<i64>)> = conn
-            .query_row(
-                "SELECT use_count, single_use, max_uses FROM mandates WHERE mandate_id = ?",
-                [mandate_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-
-        let (current_count, single_use, max_uses) = match row {
-            Some(r) => r,
-            None => {
-                return Err(AuthzError::MandateNotFound {
-                    mandate_id: mandate_id.to_string(),
-                });
-            }
-        };
-
-        let new_count = current_count + 1;
-
-        // Step 4: Check constraints
-        if single_use != 0 && current_count > 0 {
-            return Err(AuthzError::AlreadyUsed);
-        }
-
-        if let Some(max) = max_uses {
-            if new_count > max {
-                return Err(AuthzError::MaxUsesExceeded {
-                    max: max as u32,
-                    current: new_count as u32,
-                });
-            }
-        }
-
-        // Step 5: Increment count + insert use record
-        conn.execute(
-            "UPDATE mandates SET use_count = ?1 WHERE mandate_id = ?2",
-            params![new_count, mandate_id],
-        )?;
-
-        // use_id is content-addressed (deterministic) per SPEC-Mandate-v1.0.4 §7.4
-        // use_id = sha256(mandate_id + ":" + tool_call_id + ":" + use_count)
-        let use_id = compute_use_id(mandate_id, tool_call_id, new_count as u32);
-        let consumed_at = Utc::now();
-
-        conn.execute(
-            r#"
-            INSERT INTO mandate_uses (
-                use_id, mandate_id, tool_call_id, use_count, consumed_at,
-                tool_name, operation_class, nonce, source_run_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            "#,
-            params![
-                use_id,
-                mandate_id,
-                tool_call_id,
-                new_count,
-                consumed_at.to_rfc3339(),
-                tool_name,
-                operation_class,
-                nonce,
-                source_run_id,
-            ],
-        )?;
-
-        Ok(AuthzReceipt {
-            mandate_id: mandate_id.to_string(),
-            use_id,
-            use_count: new_count as u32,
-            consumed_at,
-            tool_call_id: tool_call_id.to_string(),
-            was_new: true, // First consumption
-        })
+        mandate_store_next::consume::consume_mandate_inner_impl(conn, params)
     }
 
     /// Get current use count for a mandate (for testing/debugging).
     pub fn get_use_count(&self, mandate_id: &str) -> Result<Option<u32>, AuthzError> {
-        let conn = self.conn.lock().unwrap();
-        let count: Option<i64> = conn
-            .query_row(
-                "SELECT use_count FROM mandates WHERE mandate_id = ?",
-                [mandate_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(count.map(|c| c as u32))
+        mandate_store_next::stats::get_use_count_impl(self, mandate_id)
     }
 
     /// Count use records for a mandate (for testing).
     pub fn count_uses(&self, mandate_id: &str) -> Result<u32, AuthzError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM mandate_uses WHERE mandate_id = ?",
-            [mandate_id],
-            |row| row.get(0),
-        )?;
-        Ok(count as u32)
+        mandate_store_next::stats::count_uses_impl(self, mandate_id)
     }
 
     /// Check if nonce exists (for testing).
@@ -404,13 +145,7 @@ impl MandateStore {
         issuer: &str,
         nonce: &str,
     ) -> Result<bool, AuthzError> {
-        let conn = self.conn.lock().unwrap();
-        let exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM nonces WHERE audience = ? AND issuer = ? AND nonce = ?",
-            params![audience, issuer, nonce],
-            |row| row.get(0),
-        )?;
-        Ok(exists > 0)
+        mandate_store_next::stats::nonce_exists_impl(self, audience, issuer, nonce)
     }
 
     // =========================================================================
@@ -421,57 +156,17 @@ impl MandateStore {
     ///
     /// Idempotent: re-inserting with same mandate_id updates the record.
     pub fn upsert_revocation(&self, r: &RevocationRecord) -> Result<(), AuthzError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            r#"
-            INSERT INTO mandate_revocations (mandate_id, revoked_at, reason, revoked_by, source, event_id)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(mandate_id) DO UPDATE SET
-                revoked_at = excluded.revoked_at,
-                reason = excluded.reason,
-                revoked_by = excluded.revoked_by,
-                source = excluded.source,
-                event_id = excluded.event_id
-            "#,
-            params![
-                r.mandate_id,
-                r.revoked_at.to_rfc3339(),
-                r.reason,
-                r.revoked_by,
-                r.source,
-                r.event_id,
-            ],
-        )?;
-        Ok(())
+        mandate_store_next::revocation::upsert_revocation_impl(self, r)
     }
 
     /// Get revoked_at timestamp for a mandate (if revoked).
     pub fn get_revoked_at(&self, mandate_id: &str) -> Result<Option<DateTime<Utc>>, AuthzError> {
-        let conn = self.conn.lock().unwrap();
-        let s: Option<String> = conn
-            .query_row(
-                "SELECT revoked_at FROM mandate_revocations WHERE mandate_id = ?1",
-                [mandate_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-
-        match s {
-            Some(ts) => {
-                let dt = DateTime::parse_from_rfc3339(&ts)
-                    .map_err(|e| {
-                        AuthzError::Database(format!("Invalid revoked_at timestamp: {e}"))
-                    })?
-                    .with_timezone(&Utc);
-                Ok(Some(dt))
-            }
-            None => Ok(None),
-        }
+        mandate_store_next::revocation::get_revoked_at_impl(self, mandate_id)
     }
 
     /// Check if a mandate is revoked (convenience method).
     pub fn is_revoked(&self, mandate_id: &str) -> Result<bool, AuthzError> {
-        Ok(self.get_revoked_at(mandate_id)?.is_some())
+        mandate_store_next::revocation::is_revoked_impl(self, mandate_id)
     }
 }
 
@@ -492,9 +187,7 @@ pub struct RevocationRecord {
 /// use_id = "sha256:" + hex(SHA256(mandate_id + ":" + tool_call_id + ":" + use_count))
 /// ```
 pub fn compute_use_id(mandate_id: &str, tool_call_id: &str, use_count: u32) -> String {
-    let input = format!("{}:{}:{}", mandate_id, tool_call_id, use_count);
-    let hash = Sha256::digest(input.as_bytes());
-    format!("sha256:{}", hex::encode(hash))
+    mandate_store_next::stats::compute_use_id_impl(mandate_id, tool_call_id, use_count)
 }
 
 #[cfg(test)]
