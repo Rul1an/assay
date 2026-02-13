@@ -340,6 +340,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Self-hosted runner: Rust in /opt/rust; cloud-init may symlink to /usr/local/bin
+          export PATH="/opt/rust/bin:/usr/local/bin:${HOME:-/home/github-runner}/.cargo/bin:${PATH}"
 
           # Switch Ubuntu Ports mirror with robust failover
           set +e
