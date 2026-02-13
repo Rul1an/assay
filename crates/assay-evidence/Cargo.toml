@@ -26,7 +26,7 @@ ed25519-dalek = { version = "2.1", features = ["rand_core", "pkcs8"] }
 rand = "0.8"
 
 # Bundle formats
-flate2 = "1.0"
+flate2 = "1.1"
 tar = "0.4"
 
 # Error handling
