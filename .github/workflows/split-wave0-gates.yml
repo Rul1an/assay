@@ -371,7 +371,7 @@ jobs:
             echo "Baseline commit present: ${WAVE0_SEMVER_BASELINE_SHA}"
           else
             echo "Baseline commit missing locally, fetching explicitly..."
-            git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:${WAVE0_SEMVER_BASELINE_SHA}" || git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}"
+            git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}" || git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:refs/temp/wave0-baseline"
             git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}"
           fi
 
