@@ -1,0 +1,445 @@
+name: Split Wave 0 Gates
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      simulated_changed_files:
+        description: "Optional newline/comma separated changed files to simulate pull_request diff"
+        required: false
+        type: string
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  WAVE0_SEMVER_BASELINE_SHA: "b56610681f623394c14ec587cb7e3ed1921a2583"
+
+jobs:
+  detect-changes:
+    name: Detect touched crates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run_all: ${{ steps.detect.outputs.run_all }}
+      changed_file_count: ${{ steps.detect.outputs.changed_file_count }}
+      global_changed: ${{ steps.detect.outputs.global_changed }}
+      any_relevant: ${{ steps.detect.outputs.any_relevant }}
+      hotspot_changed: ${{ steps.detect.outputs.hotspot_changed }}
+      semver_relevant: ${{ steps.detect.outputs.semver_relevant }}
+      assay_core_changed: ${{ steps.detect.outputs.assay_core_changed }}
+      assay_cli_changed: ${{ steps.detect.outputs.assay_cli_changed }}
+      assay_registry_changed: ${{ steps.detect.outputs.assay_registry_changed }}
+      assay_evidence_changed: ${{ steps.detect.outputs.assay_evidence_changed }}
+      assay_common_changed: ${{ steps.detect.outputs.assay_common_changed }}
+      assay_policy_changed: ${{ steps.detect.outputs.assay_policy_changed }}
+      assay_metrics_changed: ${{ steps.detect.outputs.assay_metrics_changed }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed_file="$RUNNER_TEMP/changed_files.txt"
+          simulated="${{ inputs.simulated_changed_files }}"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ -n "${simulated}" ]]; then
+              printf '%s\n' "${simulated}" | tr ',' '\n' | sed '/^[[:space:]]*$/d' > "$changed_file"
+              run_all=false
+            else
+              : > "$changed_file"
+              run_all=true
+            fi
+          else
+            run_all=false
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.sha }}"
+            git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+          fi
+
+          if [[ "${run_all}" == "true" ]]; then
+            global_changed=true
+          elif grep -Eq '^(Cargo\.toml|Cargo\.lock|rust-toolchain|rust-toolchain\.toml|deny\.toml|clippy\.toml|\.cargo/)' "$changed_file"; then
+            global_changed=true
+          else
+            global_changed=false
+          fi
+
+          flag_from_prefix() {
+            local prefix="$1"
+            if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
+              echo true
+            elif grep -q "^${prefix}" "$changed_file"; then
+              echo true
+            else
+              echo false
+            fi
+          }
+
+          assay_core_changed="$(flag_from_prefix 'crates/assay-core/')"
+          assay_cli_changed="$(flag_from_prefix 'crates/assay-cli/')"
+          assay_registry_changed="$(flag_from_prefix 'crates/assay-registry/')"
+          assay_evidence_changed="$(flag_from_prefix 'crates/assay-evidence/')"
+          assay_common_changed="$(flag_from_prefix 'crates/assay-common/')"
+          assay_policy_changed="$(flag_from_prefix 'crates/assay-policy/')"
+          assay_metrics_changed="$(flag_from_prefix 'crates/assay-metrics/')"
+
+          if [[ "${assay_core_changed}" == "true" || "${assay_cli_changed}" == "true" || "${assay_registry_changed}" == "true" || "${assay_evidence_changed}" == "true" ]]; then
+            hotspot_changed=true
+          else
+            hotspot_changed=false
+          fi
+
+          if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" ]]; then
+            any_relevant=true
+            semver_relevant=true
+          else
+            any_relevant=false
+            semver_relevant=false
+          fi
+
+          {
+            echo "run_all=${run_all}"
+            echo "changed_file_count=$(wc -l < "$changed_file" | tr -d ' ')"
+            echo "global_changed=${global_changed}"
+            echo "any_relevant=${any_relevant}"
+            echo "hotspot_changed=${hotspot_changed}"
+            echo "semver_relevant=${semver_relevant}"
+            echo "assay_core_changed=${assay_core_changed}"
+            echo "assay_cli_changed=${assay_cli_changed}"
+            echo "assay_registry_changed=${assay_registry_changed}"
+            echo "assay_evidence_changed=${assay_evidence_changed}"
+            echo "assay_common_changed=${assay_common_changed}"
+            echo "assay_policy_changed=${assay_policy_changed}"
+            echo "assay_metrics_changed=${assay_metrics_changed}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Wave 0 change detection"
+            if [[ -n "${simulated}" ]]; then
+              echo "- mode: workflow_dispatch (simulated changed files)"
+            elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              echo "- mode: workflow_dispatch (run_all)"
+            else
+              echo "- mode: pull_request diff"
+            fi
+            echo "- run_all: ${run_all}"
+            echo "- changed_file_count: $(wc -l < "$changed_file" | tr -d ' ')"
+            echo "- global_changed: ${global_changed}"
+            echo "- hotspot_changed: ${hotspot_changed}"
+            echo "- any_relevant: ${any_relevant}"
+            echo "- semver_relevant: ${semver_relevant}"
+            if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
+              echo ""
+              echo "### Changed files"
+              if [[ -s "$changed_file" ]]; then
+                sed 's/^/- /' "$changed_file"
+              else
+                echo "- (none)"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  feature-matrix:
+    name: Wave 0 feature matrix
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_relevant == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Install cargo-nextest and cargo-hack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked cargo-nextest
+          cargo install --locked cargo-hack
+
+      - name: Run curated feature sets
+        shell: bash
+        env:
+          RUN_ALL: ${{ needs.detect-changes.outputs.run_all }}
+          CORE_CHANGED: ${{ needs.detect-changes.outputs.assay_core_changed }}
+          CLI_CHANGED: ${{ needs.detect-changes.outputs.assay_cli_changed }}
+          REGISTRY_CHANGED: ${{ needs.detect-changes.outputs.assay_registry_changed }}
+          EVIDENCE_CHANGED: ${{ needs.detect-changes.outputs.assay_evidence_changed }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Wave 0 feature sets"
+            echo "- run_all: ${RUN_ALL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${RUN_ALL}" == "true" || "${CORE_CHANGED}" == "true" ]]; then
+            {
+              echo ""
+              echo "### assay-core"
+              echo "- cargo check -p assay-core --no-default-features"
+              echo "- cargo check -p assay-core --no-default-features --features discovery"
+              echo "- cargo check -p assay-core --no-default-features --features kill-switch"
+              echo "- cargo check -p assay-core --no-default-features --features discovery,kill-switch-capture"
+              echo "- cargo check -p assay-core --all-features"
+              echo "- cargo nextest run -p assay-core --all-features"
+              echo "- cargo test -p assay-core --lib --no-default-features (sanity)"
+              echo "- cargo hack check -p assay-core --each-feature (touched crate)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            cargo check -p assay-core --no-default-features
+            cargo check -p assay-core --no-default-features --features discovery
+            cargo check -p assay-core --no-default-features --features kill-switch
+            cargo check -p assay-core --no-default-features --features discovery,kill-switch-capture
+            cargo check -p assay-core --all-features
+            cargo nextest run -p assay-core --all-features
+            cargo test -p assay-core --lib --no-default-features
+            cargo hack check -p assay-core --each-feature
+          fi
+
+          if [[ "${RUN_ALL}" == "true" || "${CLI_CHANGED}" == "true" ]]; then
+            {
+              echo ""
+              echo "### assay-cli"
+              echo "- cargo check -p assay-cli --no-default-features"
+              echo "- cargo check -p assay-cli --no-default-features --features sim"
+              echo "- cargo check -p assay-cli --no-default-features --features tui"
+              echo "- cargo check -p assay-cli --no-default-features --features sim,tui"
+              echo "- cargo check -p assay-cli --all-features"
+              echo "- cargo nextest run -p assay-cli --all-features"
+              echo "- cargo hack check -p assay-cli --each-feature --exclude-features experimental (touched crate)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            cargo check -p assay-cli --no-default-features
+            cargo check -p assay-cli --no-default-features --features sim
+            cargo check -p assay-cli --no-default-features --features tui
+            cargo check -p assay-cli --no-default-features --features sim,tui
+            cargo check -p assay-cli --all-features
+            cargo nextest run -p assay-cli --all-features
+            cargo hack check -p assay-cli --each-feature --exclude-features experimental
+          fi
+
+          if [[ "${RUN_ALL}" == "true" || "${REGISTRY_CHANGED}" == "true" ]]; then
+            {
+              echo ""
+              echo "### assay-registry"
+              echo "- cargo check -p assay-registry --no-default-features"
+              echo "- cargo check -p assay-registry --features oidc"
+              echo "- cargo check -p assay-registry --all-features"
+              echo "- cargo nextest run -p assay-registry --all-features"
+              echo "- cargo test -p assay-registry --lib --no-default-features (sanity)"
+              echo "- cargo hack test -p assay-registry --lib --each-feature (touched crate)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            cargo check -p assay-registry --no-default-features
+            cargo check -p assay-registry --features oidc
+            cargo check -p assay-registry --all-features
+            cargo nextest run -p assay-registry --all-features
+            cargo test -p assay-registry --lib --no-default-features
+            cargo hack test -p assay-registry --lib --each-feature
+          fi
+
+          if [[ "${RUN_ALL}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
+            {
+              echo ""
+              echo "### assay-evidence"
+              echo "- cargo check -p assay-evidence"
+              echo "- cargo check -p assay-evidence --no-default-features"
+              echo "- cargo check -p assay-evidence --all-features"
+              echo "- cargo nextest run -p assay-evidence --all-features"
+              echo "- cargo test -p assay-evidence --lib --no-default-features (sanity)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            cargo check -p assay-evidence
+            cargo check -p assay-evidence --no-default-features
+            cargo check -p assay-evidence --all-features
+            cargo nextest run -p assay-evidence --all-features
+            cargo test -p assay-evidence --lib --no-default-features
+          fi
+
+  quality-gates:
+    name: Wave 0 quality gates
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_relevant == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+        with:
+          components: clippy
+
+      - name: Clippy (deny placeholder paths)
+        run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::todo -D clippy::unimplemented
+
+      - name: Unsafe boundary preview (warn-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          all_unsafe="$(rg -n '\bunsafe\b' crates/assay-cli/src/cli/commands -g '*.rs' || true)"
+          outside_target="$(printf '%s\n' "$all_unsafe" | rg -v 'crates/assay-cli/src/cli/commands/monitor.rs' || true)"
+          {
+            echo "## Unsafe preview (warn-only)"
+            if [[ -z "$all_unsafe" ]]; then
+              echo "- No unsafe usage found under commands/"
+            else
+              echo "- Unsafe usage found under commands/:"
+              echo '```text'
+              printf '%s\n' "$all_unsafe"
+              echo '```'
+            fi
+            if [[ -n "$outside_target" ]]; then
+              echo "- Warning: unsafe outside monitor.rs detected (non-blocking in Wave 0):"
+              echo '```text'
+              printf '%s\n' "$outside_target"
+              echo '```'
+            else
+              echo "- Unsafe outside monitor.rs: none"
+            fi
+            echo ""
+            echo "### Wave 3 TODO"
+            echo "- Promote this preview to a blocking boundary gate: unsafe allowed only in the monitor syscall boundary module."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  semver-public:
+    name: Wave 0 semver checks (public crates)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.semver_relevant == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Install cargo-semver-checks
+        run: cargo install --locked cargo-semver-checks
+
+      - name: Ensure semver baseline commit is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}" 2>/dev/null; then
+            echo "Baseline commit present: ${WAVE0_SEMVER_BASELINE_SHA}"
+          else
+            echo "Baseline commit missing locally, fetching explicitly..."
+            git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}" || git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:refs/temp/wave0-baseline"
+            git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}"
+          fi
+          # Cleanup fallback ref if created by the alternate fetch path.
+          git update-ref -d refs/temp/wave0-baseline || true
+
+      - name: Run semver checks (allowlist)
+        shell: bash
+        env:
+          RUN_ALL: ${{ needs.detect-changes.outputs.run_all }}
+          GLOBAL_CHANGED: ${{ needs.detect-changes.outputs.global_changed }}
+          CORE_CHANGED: ${{ needs.detect-changes.outputs.assay_core_changed }}
+          REGISTRY_CHANGED: ${{ needs.detect-changes.outputs.assay_registry_changed }}
+          EVIDENCE_CHANGED: ${{ needs.detect-changes.outputs.assay_evidence_changed }}
+          COMMON_CHANGED: ${{ needs.detect-changes.outputs.assay_common_changed }}
+          POLICY_CHANGED: ${{ needs.detect-changes.outputs.assay_policy_changed }}
+          METRICS_CHANGED: ${{ needs.detect-changes.outputs.assay_metrics_changed }}
+        run: |
+          set -euo pipefail
+
+          run_semver_for() {
+            local crate="$1"
+            echo "- ${crate}" >> "$GITHUB_STEP_SUMMARY"
+            cargo semver-checks check-release -p "${crate}" --baseline-rev "${WAVE0_SEMVER_BASELINE_SHA}"
+          }
+
+          {
+            echo "## Semver checks"
+            echo "- Baseline SHA: ${WAVE0_SEMVER_BASELINE_SHA}"
+            echo "- Crates checked:"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${COMMON_CHANGED}" == "true" ]]; then
+            run_semver_for assay-common
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${POLICY_CHANGED}" == "true" ]]; then
+            run_semver_for assay-policy
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${METRICS_CHANGED}" == "true" ]]; then
+            run_semver_for assay-metrics
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${CORE_CHANGED}" == "true" ]]; then
+            run_semver_for assay-core
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${REGISTRY_CHANGED}" == "true" ]]; then
+            run_semver_for assay-registry
+          fi
+          if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
+            run_semver_for assay-evidence
+          fi
+
+  nightly-safety:
+    name: Wave 0.1 nightly safety (non-blocking stub)
+    needs: detect-changes
+    if: github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Wave 0.1 stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Wave 0.1 nightly safety"
+            echo "- Non-blocking stub job (continue-on-error: true)."
+            echo "- Planned next: focused Miri target(s), parser fuzz smoke with fixed time budget, and optional Kani lane."
+          } >> "$GITHUB_STEP_SUMMARY"
