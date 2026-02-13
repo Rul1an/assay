@@ -319,7 +319,7 @@ jobs:
     name: Publish to crates.io
     needs: release
     runs-on: ubuntu-latest
-    if: "!contains(github.ref, '-rc') && !contains(github.ref, '-beta')"
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')
     environment: crates
     permissions:
       id-token: write
@@ -389,7 +389,7 @@ jobs:
     name: Publish to PyPI
     needs: [release, wheels]
     runs-on: ubuntu-latest
-    if: "!contains(github.ref, '-rc') && !contains(github.ref, '-beta')"
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')
     environment: pypi
     permissions:
       id-token: write  # Required for PyPI trusted publishing

@@ -288,7 +288,7 @@ jobs:
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
     needs: [test]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    if: github.event_name != 'pull_request'
     runs-on: [self-hosted]
     timeout-minutes: 60
     concurrency:
@@ -322,8 +322,11 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
-          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" .
-          git fetch origin "${GH_SHA}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            clone --depth 1 "https://github.com/${GH_REPO}.git" .
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            fetch origin "${GH_SHA}"
           git checkout "${GH_SHA}"
 
       # rust-src: optional on host (eBPF build runs in Docker which has its own). Skip if rustup unavailable.

@@ -10,7 +10,7 @@ jobs:
       - name: Setup Assay
         uses: ./assay-action
         with:
-          version: latest
+          version: v2.12.0
 
       - name: Run Assay CI
         run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --strict
