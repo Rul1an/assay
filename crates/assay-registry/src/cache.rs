@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tracing::{debug, warn};
@@ -21,6 +21,9 @@ use tracing::{debug, warn};
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::{DsseEnvelope, FetchResult, PackHeaders};
 use crate::verify::compute_digest;
+
+#[path = "cache_next/mod.rs"]
+mod cache_next;
 
 /// Default cache TTL (24 hours).
 const DEFAULT_TTL_SECS: i64 = 24 * 60 * 60;
@@ -93,7 +96,7 @@ impl PackCache {
 
     /// Get the path for a pack's cache directory.
     fn pack_dir(&self, name: &str, version: &str) -> PathBuf {
-        self.cache_dir.join(name).join(version)
+        cache_next::keys::pack_dir_impl(&self.cache_dir, name, version)
     }
 
     /// Get a cached pack, verifying integrity on read.
@@ -352,69 +355,22 @@ impl Default for PackCache {
 
 /// Get the default cache directory.
 fn default_cache_dir() -> RegistryResult<PathBuf> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| RegistryError::Cache {
-            message: "could not determine cache directory".to_string(),
-        })?;
-
-    Ok(base.join("assay").join("cache").join("packs"))
+    cache_next::io::default_cache_dir_impl()
 }
 
 /// Parse Cache-Control header to determine expiry.
 fn parse_cache_control_expiry(headers: &PackHeaders) -> DateTime<Utc> {
-    let now = Utc::now();
-    let default_ttl = Duration::seconds(DEFAULT_TTL_SECS);
-
-    let ttl = headers
-        .cache_control
-        .as_ref()
-        .and_then(|cc| {
-            // Parse max-age=N
-            cc.split(',')
-                .find(|part| part.trim().starts_with("max-age="))
-                .and_then(|part| {
-                    part.trim()
-                        .strip_prefix("max-age=")
-                        .and_then(|v| v.parse::<i64>().ok())
-                })
-        })
-        .map(Duration::seconds)
-        .unwrap_or(default_ttl);
-
-    now + ttl
+    cache_next::policy::parse_cache_control_expiry_impl(headers, DEFAULT_TTL_SECS)
 }
 
 /// Parse signature from Base64.
 fn parse_signature(b64: &str) -> RegistryResult<DsseEnvelope> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    let bytes = BASE64.decode(b64).map_err(|e| RegistryError::Cache {
-        message: format!("invalid base64 signature: {}", e),
-    })?;
-
-    serde_json::from_slice(&bytes).map_err(|e| RegistryError::Cache {
-        message: format!("invalid DSSE envelope: {}", e),
-    })
+    cache_next::integrity::parse_signature_impl(b64)
 }
 
 /// Write content to file atomically.
 async fn write_atomic(path: &Path, content: &str) -> RegistryResult<()> {
-    let temp_path = path.with_extension("tmp");
-
-    fs::write(&temp_path, content)
-        .await
-        .map_err(|e| RegistryError::Cache {
-            message: format!("failed to write temp file: {}", e),
-        })?;
-
-    fs::rename(&temp_path, path)
-        .await
-        .map_err(|e| RegistryError::Cache {
-            message: format!("failed to rename temp file: {}", e),
-        })?;
-
-    Ok(())
+    cache_next::io::write_atomic_impl(path, content).await
 }
 
 #[cfg(test)]

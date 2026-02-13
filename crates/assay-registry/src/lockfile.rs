@@ -25,11 +25,13 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use crate::error::{RegistryError, RegistryResult};
-use crate::reference::PackRef;
-use crate::resolver::{PackResolver, ResolveSource};
+use crate::resolver::PackResolver;
+
+#[path = "lockfile_next/mod.rs"]
+mod lockfile_next;
 
 /// Default lockfile name.
 pub const LOCKFILE_NAME: &str = "assay.packs.lock";
@@ -176,22 +178,7 @@ impl Lockfile {
 
     /// Parse a lockfile from YAML content.
     pub fn parse(content: &str) -> RegistryResult<Self> {
-        let lockfile: Lockfile =
-            serde_yaml::from_str(content).map_err(|e| RegistryError::Lockfile {
-                message: format!("failed to parse lockfile: {}", e),
-            })?;
-
-        // Validate version
-        if lockfile.version > LOCKFILE_VERSION {
-            return Err(RegistryError::Lockfile {
-                message: format!(
-                    "lockfile version {} is newer than supported version {}",
-                    lockfile.version, LOCKFILE_VERSION
-                ),
-            });
-        }
-
-        Ok(lockfile)
+        lockfile_next::parse::parse_lockfile_impl(content)
     }
 
     /// Save the lockfile to a path.
@@ -211,22 +198,12 @@ impl Lockfile {
 
     /// Convert to YAML string.
     pub fn to_yaml(&self) -> RegistryResult<String> {
-        serde_yaml::to_string(self).map_err(|e| RegistryError::Lockfile {
-            message: format!("failed to serialize lockfile: {}", e),
-        })
+        lockfile_next::format::to_yaml_impl(self)
     }
 
     /// Add or update a pack in the lockfile.
     pub fn add_pack(&mut self, pack: LockedPack) {
-        // Remove existing entry with same name
-        self.packs.retain(|p| p.name != pack.name);
-        self.packs.push(pack);
-
-        // Keep sorted by name
-        self.packs.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // Update timestamp
-        self.generated_at = Utc::now();
+        lockfile_next::format::add_pack_impl(self, pack);
     }
 
     /// Remove a pack from the lockfile.
@@ -263,71 +240,7 @@ pub async fn generate_lockfile(
     references: &[String],
     resolver: &PackResolver,
 ) -> RegistryResult<Lockfile> {
-    let mut lockfile = Lockfile::new();
-
-    for reference in references {
-        debug!(reference, "locking pack");
-
-        let pack_ref = PackRef::parse(reference)?;
-        let resolved = resolver.resolve_ref(&pack_ref).await?;
-
-        let (name, version) = match &pack_ref {
-            PackRef::Bundled(name) => (name.clone(), "bundled".to_string()),
-            PackRef::Registry { name, version, .. } => (name.clone(), version.clone()),
-            PackRef::Byos(url) => {
-                // Extract name from URL
-                let name = url
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or("unknown")
-                    .trim_end_matches(".yaml")
-                    .trim_end_matches(".yml")
-                    .to_string();
-                (name, "byos".to_string())
-            }
-            PackRef::Local(path) => {
-                let name = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                warn!(
-                    path = %path.display(),
-                    "locking local file - consider using registry or bundled packs instead"
-                );
-                (name, "local".to_string())
-            }
-        };
-
-        let (source, registry_url, byos_url) = match &resolved.source {
-            ResolveSource::Local(_) => (LockSource::Local, None, None),
-            ResolveSource::Bundled(_) => (LockSource::Bundled, None, None),
-            ResolveSource::Cache => (LockSource::Registry, None, None),
-            ResolveSource::Registry(url) => (LockSource::Registry, Some(url.clone()), None),
-            ResolveSource::Byos(url) => (LockSource::Byos, None, Some(url.clone())),
-        };
-
-        let signature = resolved.verification.as_ref().and_then(|v| {
-            v.key_id.as_ref().map(|key_id| LockSignature {
-                algorithm: "Ed25519".to_string(),
-                key_id: key_id.clone(),
-            })
-        });
-
-        let locked = LockedPack {
-            name,
-            version,
-            digest: resolved.digest,
-            source,
-            registry_url,
-            byos_url,
-            signature,
-        };
-
-        lockfile.add_pack(locked);
-    }
-
-    Ok(lockfile)
+    lockfile_next::generate_lockfile_impl(references, resolver).await
 }
 
 /// Verify packs against a lockfile.
@@ -335,61 +248,7 @@ pub async fn verify_lockfile(
     lockfile: &Lockfile,
     resolver: &PackResolver,
 ) -> RegistryResult<VerifyLockResult> {
-    let mut matched = Vec::new();
-    let mut mismatched = Vec::new();
-    let mut missing = Vec::new();
-
-    for locked in &lockfile.packs {
-        debug!(name = %locked.name, version = %locked.version, "verifying locked pack");
-
-        // Build reference based on source
-        let reference = match locked.source {
-            LockSource::Bundled => locked.name.clone(),
-            LockSource::Registry => {
-                format!("{}@{}#{}", locked.name, locked.version, locked.digest)
-            }
-            LockSource::Byos => locked
-                .byos_url
-                .clone()
-                .unwrap_or_else(|| locked.name.clone()),
-            LockSource::Local => {
-                warn!(
-                    name = %locked.name,
-                    "cannot verify local pack - skipping"
-                );
-                continue;
-            }
-        };
-
-        match resolver.resolve(&reference).await {
-            Ok(resolved) => {
-                if resolved.digest == locked.digest {
-                    matched.push(locked.name.clone());
-                } else {
-                    mismatched.push(LockMismatch {
-                        name: locked.name.clone(),
-                        version: locked.version.clone(),
-                        expected: locked.digest.clone(),
-                        actual: resolved.digest,
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(name = %locked.name, error = %e, "failed to resolve locked pack");
-                missing.push(locked.name.clone());
-            }
-        }
-    }
-
-    let all_match = mismatched.is_empty() && missing.is_empty();
-
-    Ok(VerifyLockResult {
-        all_match,
-        matched,
-        mismatched,
-        missing,
-        extra: Vec::new(), // Would need resolved refs to compute
-    })
+    lockfile_next::digest::verify_lockfile_impl(lockfile, resolver).await
 }
 
 /// Check if lockfile is outdated (any pack has newer version available).
@@ -397,20 +256,7 @@ pub async fn check_lockfile(
     lockfile: &Lockfile,
     resolver: &PackResolver,
 ) -> RegistryResult<Vec<LockMismatch>> {
-    // For now, just verify digests match
-    let result = verify_lockfile(lockfile, resolver).await?;
-
-    if !result.all_match {
-        return Err(RegistryError::Lockfile {
-            message: format!(
-                "lockfile verification failed: {} mismatched, {} missing",
-                result.mismatched.len(),
-                result.missing.len()
-            ),
-        });
-    }
-
-    Ok(result.mismatched)
+    lockfile_next::digest::check_lockfile_impl(lockfile, resolver).await
 }
 
 /// Update a lockfile with latest versions.
@@ -418,43 +264,7 @@ pub async fn update_lockfile(
     lockfile: &mut Lockfile,
     resolver: &PackResolver,
 ) -> RegistryResult<Vec<String>> {
-    let mut updated = Vec::new();
-
-    for locked in &mut lockfile.packs {
-        if locked.source != LockSource::Registry {
-            continue;
-        }
-
-        debug!(name = %locked.name, version = %locked.version, "checking for updates");
-
-        // Build reference without pinned digest to get latest
-        let reference = format!("{}@{}", locked.name, locked.version);
-
-        match resolver.resolve(&reference).await {
-            Ok(resolved) => {
-                if resolved.digest != locked.digest {
-                    info!(
-                        name = %locked.name,
-                        old_digest = %locked.digest,
-                        new_digest = %resolved.digest,
-                        "updating locked digest"
-                    );
-
-                    locked.digest = resolved.digest;
-                    updated.push(locked.name.clone());
-                }
-            }
-            Err(e) => {
-                warn!(name = %locked.name, error = %e, "failed to update pack");
-            }
-        }
-    }
-
-    if !updated.is_empty() {
-        lockfile.generated_at = Utc::now();
-    }
-
-    Ok(updated)
+    lockfile_next::digest::update_lockfile_impl(lockfile, resolver).await
 }
 
 #[cfg(test)]
