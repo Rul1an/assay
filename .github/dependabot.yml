@@ -16,6 +16,10 @@ updates:
       # Major version bumps need manual review (breaking changes)
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # assay-dev/assay-action: custom action, Dependabot may fail to fetch metadata
+      - dependency-name: "assay-dev/assay-action"
+      # bencherdev/bencher: pinned to @main SHA, can cause update conflicts
+      - dependency-name: "bencherdev/bencher"
 
   # Cargo - weekly dependency updates
   - package-ecosystem: "cargo"
