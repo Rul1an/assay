@@ -54,9 +54,11 @@ pub(super) fn verify_pack_impl(
     }
 
     let canonical_bytes = wire_next::canonicalize_for_dsse_impl(&result.content)?;
-    let sig_b64 = signature
-        .as_ref()
-        .expect("signature presence already checked in policy");
+    let Some(sig_b64) = signature.as_ref() else {
+        // Defensive fallback: keep fail-closed behavior if a future edit
+        // breaks the earlier invariant check.
+        return Err(errors_next::unsigned_pack());
+    };
     let envelope = wire_next::parse_dsse_envelope_impl(sig_b64)?;
     dsse_next::verify_dsse_signature_bytes_impl(&canonical_bytes, &envelope, trust_store)?;
 

@@ -1,9 +1,9 @@
 //! Step-2 scaffold for verify module split.
 //!
-//! Commit A keeps `src/verify.rs` as the active implementation to guarantee
-//! zero behavior change while the new module layout is prepared.
+//! `src/verify.rs` remains the public facade and delegates into `verify_next/*`
+//! so symbol paths/signatures stay stable during the split rollout.
 //!
-//! This module is not wired into `lib.rs` yet.
+//! This module is intentionally not exposed via `lib.rs` as `pub mod verify_next`.
 //!
 //! Forbidden knowledge for this facade:
 //! - no direct crypto implementation details

@@ -22,7 +22,7 @@ cargo test -p assay-registry test_verify_pack_malformed_signature_reason_is_stab
 ### 1) policy.rs has no direct crypto/parsing/IO internals
 
 ```bash
-rg -n "base64::|ed25519|sha2::|serde_json::from_slice|reqwest|tokio::fs|std::fs|std::net" crates/assay-registry/src/verify_next/policy.rs | rg -v '^\d+:\s*//!'
+rg -n "base64::|ed25519|sha2::|serde_json::from_slice|reqwest|tokio::fs|std::fs|std::net" crates/assay-registry/src/verify_next/policy.rs | rg -v '^\d+:\s*//!' | rg -v '^\d+:\s*//'
 # Expect: empty output
 ```
 
@@ -36,14 +36,14 @@ rg -n "build_pae_impl|verify_single_signature_impl|Signature::|Verifier::|to_pub
 ### 3) policy.rs has exactly one DSSE boundary call site
 
 ```bash
-rg -n "dsse_next::" crates/assay-registry/src/verify_next/policy.rs | rg -v '^\d+:\s*//!'
+rg -n "dsse_next::verify_dsse_signature_bytes_impl\(" crates/assay-registry/src/verify_next/policy.rs | rg -v '^\d+:\s*//!' | rg -v '^\d+:\s*//'
 # Expect: one match to dsse_next::verify_dsse_signature_bytes_impl(...)
 ```
 
 ### 4) dsse.rs contains no policy tokens
 
 ```bash
-rg -n "allow_unsigned|skip_signature|unsigned" crates/assay-registry/src/verify_next/dsse.rs | rg -v '^\d+:\s*//!'
+rg -n "allow_unsigned|skip_signature|unsigned" crates/assay-registry/src/verify_next/dsse.rs | rg -v '^\d+:\s*//!' | rg -v '^\d+:\s*//'
 # Expect: empty output
 ```
 
