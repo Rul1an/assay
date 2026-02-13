@@ -12,7 +12,7 @@ Scope lock:
 
 ## HEAD snapshot
 
-- commit: `e0baca5e6bbc93d447979108739012e339aa28f6`
+- commit: `9e46b1ee7e4de00cd85378ef04cbc566435d5b45`
 - LOC:
   - `monitor.rs`: 895
   - `providers/trace.rs`: 881
@@ -36,7 +36,7 @@ Current counts:
   - `unwrap(`: 2
   - `expect(`: 0
   - `unsafe`: 7
-  - `println!/eprintln!`: 50
+  - `println!/eprintln!`: 49
 - `providers/trace.rs`
   - `unwrap(`: 0
   - `expect(`: 0
