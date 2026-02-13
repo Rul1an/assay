@@ -25,11 +25,26 @@
 #[path = "writer_next/mod.rs"]
 mod writer_next;
 
+use anyhow::Result;
+use std::io::Read;
+
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
 pub use writer_next::limits::{VerifyLimits, VerifyLimitsOverrides};
 pub use writer_next::manifest::{AlgorithmMeta, FileMeta, Manifest};
-pub use writer_next::verify::{verify_bundle, verify_bundle_with_limits, VerifyResult};
+pub use writer_next::verify::VerifyResult;
 pub use writer_next::write::BundleWriter;
+
+/// Default verification using standard limits.
+///
+/// See `verify_bundle_with_limits` for custom strictness.
+pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
+    writer_next::verify::verify_bundle(reader)
+}
+
+/// Verify a bundle with explicit resource limits.
+pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
+    writer_next::verify::verify_bundle_with_limits(reader, limits)
+}
 
 #[cfg(test)]
 mod tests {

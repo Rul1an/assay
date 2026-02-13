@@ -46,8 +46,8 @@ The following public symbols/signatures are the contract surface to preserve thr
 | `FileMeta` | `writer_next/manifest.rs` | Re-exported by `writer.rs` facade |
 | `BundleWriter<W: Write>` + methods | `writer_next/write.rs` | Re-exported by `writer.rs` facade |
 | `VerifyResult` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
-| `verify_bundle` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
-| `verify_bundle_with_limits` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
+| `verify_bundle` | `writer_next/verify.rs` | `writer.rs` facade wrapper delegates 1:1 |
+| `verify_bundle_with_limits` | `writer_next/verify.rs` | `writer.rs` facade wrapper delegates 1:1 |
 | `ErrorClass` | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
 | `ErrorCode` | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
 | `VerifyError` + methods | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
