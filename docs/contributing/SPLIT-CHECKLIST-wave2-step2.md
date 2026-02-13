@@ -129,7 +129,47 @@ check_only_file_matches() {
 
 strip_code_only() {
   local file="$1"
-  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file"
+  awk '
+    BEGIN {
+      pending_cfg_test = 0
+      skip_tests = 0
+      depth = 0
+    }
+    {
+      line = $0
+
+      if (skip_tests) {
+        opens = gsub(/\{/, "{", line)
+        closes = gsub(/\}/, "}", line)
+        depth += opens - closes
+        if (depth <= 0) {
+          skip_tests = 0
+          depth = 0
+        }
+        next
+      }
+
+      if (pending_cfg_test) {
+        if (line ~ /^[[:space:]]*#\[/ || line ~ /^[[:space:]]*$/) {
+          next
+        }
+        if (line ~ /^[[:space:]]*mod[[:space:]]+tests[[:space:]]*\{[[:space:]]*$/) {
+          skip_tests = 1
+          depth = 1
+          pending_cfg_test = 0
+          next
+        }
+        pending_cfg_test = 0
+      }
+
+      if (line ~ /^[[:space:]]*#\[cfg\(test\)\][[:space:]]*$/) {
+        pending_cfg_test = 1
+        next
+      }
+
+      print
+    }
+  ' "$file"
 }
 
 # Runner: attempt accounting is single-source in retry.rs
