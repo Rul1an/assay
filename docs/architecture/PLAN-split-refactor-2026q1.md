@@ -236,8 +236,8 @@ Security/correctness improvements:
 
 Step status:
 
-- Step 1 (behavior freeze + inventory + drift gates): in review via PR #337.
-- Step 2 (mechanical split): pending after Step 1 review/merge.
+- Step 1 (behavior freeze + inventory + drift gates): merged via PR #337.
+- Step 2 (mechanical split): merged via PR #338.
 
 ### A. `crates/assay-cli/src/cli/commands/monitor.rs`
 
@@ -295,6 +295,12 @@ Security improvements:
 - Parser corpus coverage increased; no panic paths on malformed inputs.
 
 ## Wave 4: Consolidation (`lockfile.rs`, `cache.rs`, `explain.rs`)
+
+Step status:
+
+- Step 1 (`lockfile.rs` + `cache.rs` behavior freeze/inventory/gates): in progress on `codex/wave4-step1-registry-freeze`.
+- Step 2 (`lockfile.rs` + `cache.rs` mechanical split): pending after Step 1 merge.
+- `explain.rs` follows as a separate slice to keep review size and blast radius small.
 
 ### Objectives
 
