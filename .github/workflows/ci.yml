@@ -326,12 +326,12 @@ jobs:
           git fetch origin "${GH_SHA}"
           git checkout "${GH_SHA}"
 
+      # rust-src: optional on host (eBPF build runs in Docker which has its own). Skip if rustup unavailable.
       - name: Install Rust toolchain (rust-src)
         shell: bash
         run: |
-          # Runner has rustup in /opt/rust/bin (setup.sh: RUSTUP_HOME=CARGO_HOME=/opt/rust)
           export PATH="/opt/rust/bin:${HOME:-/home/github-runner}/.cargo/bin:${PATH}"
-          rustup component add rust-src
+          rustup component add rust-src 2>/dev/null || echo "rustup not found, skipping (Docker build has rust-src)"
 
       - name: Install Dependencies
         shell: bash
