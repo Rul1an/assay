@@ -1043,4 +1043,13 @@ mod tests {
 
         assert!(store.is_revoked(&record.mandate_id).unwrap());
     }
+
+    #[test]
+    fn test_compute_use_id_contract_vector() {
+        let use_id = compute_use_id("sha256:m", "tc_1", 2);
+        assert_eq!(
+            use_id,
+            "sha256:333a7fdcb27b62d01a6a56e8c6c57f59782c93f547d4755ee0bcb11fe22fd15c"
+        );
+    }
 }

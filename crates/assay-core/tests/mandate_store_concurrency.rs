@@ -163,6 +163,62 @@ fn test_two_connections_same_tool_call_id_idempotent() {
     assert_eq!(store1.count_uses(&meta.mandate_id).unwrap(), 1);
 }
 
+/// Contract guard: same tool_call_id race keeps idempotency semantics:
+/// exactly one `was_new=true`, one replay receipt (`was_new=false`).
+#[test]
+fn test_two_connections_same_tool_call_id_has_single_new_receipt() {
+    let tmp = NamedTempFile::new().unwrap();
+    let path = tmp.path();
+
+    let store1 = MandateStore::open(path).unwrap();
+    let meta = test_metadata("idem_new_flag");
+    store1.upsert_mandate(&meta).unwrap();
+
+    let store2 = MandateStore::open(path).unwrap();
+
+    let store1 = Arc::new(store1);
+    let store2 = Arc::new(store2);
+    let meta_clone = meta.clone();
+
+    let s1 = store1.clone();
+    let m1 = meta_clone.clone();
+    let h1 = thread::spawn(move || {
+        s1.consume_mandate(&ConsumeParams {
+            mandate_id: &m1.mandate_id,
+            tool_call_id: "tc_same_new_flag",
+            nonce: None,
+            audience: &m1.audience,
+            issuer: &m1.issuer,
+            tool_name: "tool",
+            operation_class: "read",
+            source_run_id: None,
+        })
+    });
+
+    let s2 = store2.clone();
+    let m2 = meta_clone;
+    let h2 = thread::spawn(move || {
+        s2.consume_mandate(&ConsumeParams {
+            mandate_id: &m2.mandate_id,
+            tool_call_id: "tc_same_new_flag",
+            nonce: None,
+            audience: &m2.audience,
+            issuer: &m2.issuer,
+            tool_name: "tool",
+            operation_class: "read",
+            source_run_id: None,
+        })
+    });
+
+    let r1 = h1.join().unwrap().unwrap();
+    let r2 = h2.join().unwrap().unwrap();
+
+    let new_count = [r1.was_new, r2.was_new].iter().filter(|&&v| v).count();
+    assert_eq!(new_count, 1, "exactly one receipt must be marked new");
+    assert_eq!(store1.get_use_count(&meta.mandate_id).unwrap(), Some(1));
+    assert_eq!(store1.count_uses(&meta.mandate_id).unwrap(), 1);
+}
+
 /// Test: Two connections racing on single_use mandate → exactly one succeeds.
 #[test]
 fn test_two_connections_single_use_one_succeeds() {

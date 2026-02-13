@@ -842,6 +842,7 @@ mod tests {
     enum MetricMode {
         FailThenPass,
         AlwaysFail,
+        AlwaysPass,
     }
 
     struct ScriptedMetric {
@@ -860,6 +861,13 @@ mod tests {
         fn always_fail() -> Self {
             Self {
                 mode: MetricMode::AlwaysFail,
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn always_pass() -> Self {
+            Self {
+                mode: MetricMode::AlwaysPass,
                 calls: AtomicUsize::new(0),
             }
         }
@@ -887,6 +895,7 @@ mod tests {
                     }
                 }
                 MetricMode::AlwaysFail => Ok(MetricResult::fail(0.0, "scripted_fail")),
+                MetricMode::AlwaysPass => Ok(MetricResult::pass(1.0)),
             }
         }
     }
@@ -967,6 +976,40 @@ mod tests {
         }
     }
 
+    fn config_with_test_ids(ids: &[&str], on_error: ErrorPolicy) -> EvalConfig {
+        EvalConfig {
+            version: 1,
+            suite: "runner-contract".to_string(),
+            model: "fake-model".to_string(),
+            settings: Settings {
+                parallel: Some(1),
+                cache: Some(false),
+                seed: Some(1234),
+                on_error,
+                ..Default::default()
+            },
+            thresholds: Default::default(),
+            otel: Default::default(),
+            tests: ids
+                .iter()
+                .map(|id| TestCase {
+                    id: (*id).to_string(),
+                    input: TestInput {
+                        prompt: format!("prompt-{id}"),
+                        context: None,
+                    },
+                    expected: Expected::MustContain {
+                        must_contain: vec!["ok".to_string()],
+                    },
+                    assertions: None,
+                    on_error: None,
+                    tags: vec![],
+                    metadata: None,
+                })
+                .collect(),
+        }
+    }
+
     #[tokio::test]
     async fn runner_contract_flake_fail_then_pass_classified_flaky() -> anyhow::Result<()> {
         let cfg = single_test_config(ErrorPolicy::Block);
@@ -1037,6 +1080,92 @@ mod tests {
         let attempts = row.attempts.as_ref().expect("attempts");
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].status, TestStatus::AllowedOnError);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_contract_results_sorted_by_test_id() -> anyhow::Result<()> {
+        let mut cfg = config_with_test_ids(&["t3", "t1", "t2"], ErrorPolicy::Block);
+        cfg.settings.parallel = Some(3);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let metric = Arc::new(ScriptedMetric::always_pass());
+        let runner = runner_for_contract_tests(client, vec![metric], 0);
+
+        let artifacts = runner.run_suite(&cfg, None).await?;
+        let ids: Vec<_> = artifacts
+            .results
+            .iter()
+            .map(|r| r.test_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["t1", "t2", "t3"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_contract_progress_sink_reports_done_total() -> anyhow::Result<()> {
+        let cfg = config_with_test_ids(&["p1", "p2", "p3"], ErrorPolicy::Block);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let metric = Arc::new(ScriptedMetric::always_pass());
+        let runner = runner_for_contract_tests(client, vec![metric], 0);
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::<(usize, usize)>::new()));
+        let sink = {
+            let events = Arc::clone(&events);
+            Arc::new(move |ev: crate::report::progress::ProgressEvent| {
+                events
+                    .lock()
+                    .expect("progress lock")
+                    .push((ev.done, ev.total));
+            }) as crate::report::progress::ProgressSink
+        };
+
+        let artifacts = runner.run_suite(&cfg, Some(sink)).await?;
+        assert_eq!(artifacts.results.len(), 3);
+
+        let observed = events.lock().expect("progress lock");
+        assert_eq!(observed.len(), 3);
+        assert_eq!(observed.last(), Some(&(3, 3)));
+        assert!(observed.windows(2).all(|w| w[0].0 < w[1].0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_contract_relative_baseline_missing_warns_in_helper() -> anyhow::Result<()> {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.settings.thresholding = Some(crate::model::ThresholdingSettings {
+            mode: Some("relative".to_string()),
+            max_drop: Some(0.05),
+            min_floor: None,
+        });
+
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let metric = Arc::new(ScriptedMetric::always_pass());
+        let runner = runner_for_contract_tests(client, vec![], 0);
+        let baseline = crate::baseline::Baseline {
+            schema_version: 1,
+            suite: "runner-contract".to_string(),
+            assay_version: env!("CARGO_PKG_VERSION").to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            config_fingerprint: "md5:test".to_string(),
+            git_info: None,
+            entries: vec![],
+        };
+        let tc = cfg.tests.first().cloned().expect("single test case");
+        let details = serde_json::json!({
+            "metrics": {
+                "scripted": {
+                    "score": 1.0,
+                    "passed": true,
+                    "unstable": false,
+                    "details": {}
+                }
+            }
+        });
+
+        let verdict = runner.check_baseline_regressions(&tc, &cfg, &details, &[metric], &baseline);
+        let (status, message) = verdict.expect("relative baseline decision");
+        assert_eq!(status, TestStatus::Warn);
+        assert_eq!(message, "missing baseline for t1/scripted");
         Ok(())
     }
 }
