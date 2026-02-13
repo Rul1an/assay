@@ -4,6 +4,11 @@
 //! zero behavior change while the new module layout is prepared.
 //!
 //! This module is not wired into `lib.rs` yet.
+//!
+//! Forbidden knowledge for this facade:
+//! - no direct crypto implementation details
+//! - no DSSE parsing/verification internals
+//! - no policy branch logic beyond orchestration
 
 pub(crate) mod digest;
 pub(crate) mod dsse;
