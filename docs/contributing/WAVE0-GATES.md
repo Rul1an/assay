@@ -37,6 +37,27 @@ If budget is exceeded:
 - `assay-cli` excludes `experimental` in blocking lane:
   - `cargo hack check -p assay-cli --each-feature --exclude-features experimental`
 
+## Semver allowlist (public crates)
+
+Wave 0 semver gate runs on this allowlist:
+
+- `assay-common`
+- `assay-policy`
+- `assay-metrics`
+- `assay-core`
+- `assay-registry`
+- `assay-evidence`
+
+Checks are still conditional on touched/global change detection.
+
+## Nightly safety lane (Wave 0.1)
+
+- Current status: non-blocking stub job in Wave 0 workflow (`continue-on-error: true`).
+- Next increment (Wave 0.1):
+  - focused `cargo miri test` targets
+  - parser/crypto fuzz smoke with fixed runtime budget
+  - optional Kani lane (opt-in)
+
 ## Required checks recommendation
 
 Configure branch protection to require:

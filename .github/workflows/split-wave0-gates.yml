@@ -2,20 +2,12 @@ name: Split Wave 0 Gates
 
 on:
   pull_request:
-    paths:
-      - "crates/**"
-      - ".github/workflows/**"
-      - "scripts/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain"
-      - "rust-toolchain.toml"
-      - "deny.toml"
-      - "clippy.toml"
-      - ".cargo/**"
-      - "!docs/**"
-      - "!**/*.md"
   workflow_dispatch:
+    inputs:
+      simulated_changed_files:
+        description: "Optional newline/comma separated changed files to simulate pull_request diff"
+        required: false
+        type: string
 
 permissions: {}
 
@@ -52,10 +44,16 @@ jobs:
         run: |
           set -euo pipefail
           changed_file="$RUNNER_TEMP/changed_files.txt"
+          simulated="${{ inputs.simulated_changed_files }}"
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            : > "$changed_file"
-            run_all=true
+            if [[ -n "${simulated}" ]]; then
+              printf '%s\n' "${simulated}" | tr ',' '\n' | sed '/^[[:space:]]*$/d' > "$changed_file"
+              run_all=false
+            else
+              : > "$changed_file"
+              run_all=true
+            fi
           else
             run_all=false
             base_sha="${{ github.event.pull_request.base.sha }}"
@@ -121,12 +119,19 @@ jobs:
 
           {
             echo "## Wave 0 change detection"
+            if [[ -n "${simulated}" ]]; then
+              echo "- mode: workflow_dispatch (simulated changed files)"
+            elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              echo "- mode: workflow_dispatch (run_all)"
+            else
+              echo "- mode: pull_request diff"
+            fi
             echo "- run_all: ${run_all}"
             echo "- global_changed: ${global_changed}"
             echo "- hotspot_changed: ${hotspot_changed}"
             echo "- any_relevant: ${any_relevant}"
             echo "- semver_relevant: ${semver_relevant}"
-            if [[ "${run_all}" == "false" ]]; then
+            if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
               echo ""
               echo "### Changed files"
               if [[ -s "$changed_file" ]]; then
@@ -244,14 +249,14 @@ jobs:
               echo "- cargo check -p assay-registry --all-features"
               echo "- cargo nextest run -p assay-registry --all-features"
               echo "- cargo test -p assay-registry --lib --no-default-features (sanity)"
-              echo "- cargo hack check -p assay-registry --each-feature (touched crate)"
+              echo "- cargo hack test -p assay-registry --lib --each-feature (touched crate)"
             } >> "$GITHUB_STEP_SUMMARY"
             cargo check -p assay-registry --no-default-features
             cargo check -p assay-registry --features oidc
             cargo check -p assay-registry --all-features
             cargo nextest run -p assay-registry --all-features
             cargo test -p assay-registry --lib --no-default-features
-            cargo hack check -p assay-registry --each-feature
+            cargo hack test -p assay-registry --lib --each-feature
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
@@ -261,13 +266,13 @@ jobs:
               echo "- cargo check -p assay-evidence"
               echo "- cargo check -p assay-evidence --no-default-features"
               echo "- cargo check -p assay-evidence --all-features"
-              echo "- cargo nextest run -p assay-evidence"
+              echo "- cargo nextest run -p assay-evidence --all-features"
               echo "- cargo test -p assay-evidence --lib --no-default-features (sanity)"
             } >> "$GITHUB_STEP_SUMMARY"
             cargo check -p assay-evidence
             cargo check -p assay-evidence --no-default-features
             cargo check -p assay-evidence --all-features
-            cargo nextest run -p assay-evidence
+            cargo nextest run -p assay-evidence --all-features
             cargo test -p assay-evidence --lib --no-default-features
           fi
 
@@ -330,6 +335,9 @@ jobs:
             else
               echo "- Unsafe outside monitor.rs: none"
             fi
+            echo ""
+            echo "### Wave 3 TODO"
+            echo "- Promote this preview to a blocking boundary gate: unsafe allowed only in the monitor syscall boundary module."
           } >> "$GITHUB_STEP_SUMMARY"
 
   semver-public:
@@ -396,3 +404,25 @@ jobs:
           if [[ "${RUN_ALL}" == "true" || "${GLOBAL_CHANGED}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
             run_semver_for assay-evidence
           fi
+
+  nightly-safety:
+    name: Wave 0.1 nightly safety (non-blocking stub)
+    needs: detect-changes
+    if: github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Wave 0.1 stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Wave 0.1 nightly safety"
+            echo "- Non-blocking stub job (continue-on-error: true)."
+            echo "- Planned next: focused Miri target(s), parser fuzz smoke with fixed time budget, and optional Kani lane."
+          } >> "$GITHUB_STEP_SUMMARY"
