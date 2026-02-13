@@ -285,33 +285,9 @@ jobs:
           if-no-files-found: ignore
 
 
-  prep-self-hosted-actions-perms:
-    name: Fix self-hosted _actions (for eBPF job)
-    needs: [test]
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    runs-on: [self-hosted, linux, assay-bpf-runner]
-    timeout-minutes: 2
-    steps:
-      - name: Nuke _actions cache (force fresh download for next job)
-        shell: bash
-        run: |
-          set +e
-          # Files may be immutable (chattr +i) - remove that first, then delete.
-          echo "Removing immutable flags and _work/_actions..."
-          sudo chattr -R -i /opt/actions-runner/_work/_actions 2>/dev/null || true
-          sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
-          if [ -n "${RUNNER_WORKDIR:-}" ]; then
-            sudo chattr -R -i "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
-            sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
-          fi
-          # Recreate with correct ownership
-          sudo mkdir -p /opt/actions-runner/_work/_actions
-          sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions
-          echo "Done. _actions directory ready for fresh downloads."
-
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
-    needs: [test, prep-self-hosted-actions-perms]
+    needs: [test]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 60
@@ -334,12 +310,25 @@ jobs:
           sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
           sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" 2>/dev/null || true
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Workaround: self-hosted runner has root-owned _actions cache causing "Access denied"
+      # during "Prepare all required actions". Use manual git clone to avoid any actions.
+      - name: Checkout repository
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" .
+          git fetch origin "${GH_SHA}"
+          git checkout "${GH_SHA}"
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
-        with:
-          components: rust-src
+      - name: Install Rust toolchain (rust-src)
+        shell: bash
+        run: rustup component add rust-src
 
       - name: Install Dependencies
         shell: bash
@@ -435,15 +424,6 @@ jobs:
         run: |
           sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
           ls -l /tmp/assay-lsm-verify || true
-
-      - name: Upload verification logs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        continue-on-error: true
-        with:
-          name: ci-smoke-logs-self-hosted
-          path: /tmp/assay-lsm-verify/
-          if-no-files-found: ignore
 
   # Single job named "CI" so branch protection (required status check "CI") is satisfied.
   # Branch protection matches check run name; other jobs use descriptive names, this one reports "CI".
