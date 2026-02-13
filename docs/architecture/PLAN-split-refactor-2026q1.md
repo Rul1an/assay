@@ -7,19 +7,19 @@
 
 ## 1) Baseline (HEAD: 6ae1d340)
 
-Largest production hotspots (tests/generated excluded from priority):
+Largest production hotspots (tests/generated excluded from priority, sorted by LOC):
 
 | File | LOC | Functions | Test attrs | unwrap/expect | unsafe |
 |---|---:|---:|---:|---:|---:|
 | `crates/assay-evidence/src/bundle/writer.rs` | 1442 | 37 | 11 | 41 | 0 |
 | `crates/assay-registry/src/verify.rs` | 1065 | 44 | 26 | 55 | 0 |
+| `crates/assay-core/src/explain.rs` | 1057 | 21 | 4 | 2 | 0 |
 | `crates/assay-core/src/runtime/mandate_store.rs` | 1046 | 38 | 21 | 84 | 0 |
 | `crates/assay-core/src/engine/runner.rs` | 1042 | 31 | 3 | 8 | 0 |
 | `crates/assay-core/src/providers/trace.rs` | 881 | 30 | 18 | 1 | 0 |
 | `crates/assay-registry/src/lockfile.rs` | 863 | 31 | 16 | 12 | 0 |
 | `crates/assay-registry/src/cache.rs` | 844 | 35 | 16 | 39 | 0 |
 | `crates/assay-cli/src/cli/commands/monitor.rs` | 833 | 15 | 3 | 2 | 7 |
-| `crates/assay-core/src/explain.rs` | 1057 | 21 | 4 | 2 | 0 |
 
 ## 2) Prioritization
 
@@ -49,16 +49,32 @@ Execution order:
 ### Work
 
 - Add split-contract checks per module (grep-gates for forbidden imports/couplings).
-- Enforce matrix per touched crate:
+- Enforce feature matrix per touched crate:
   - `cargo test -p <crate> --no-default-features`
+  - `cargo test -p <crate> --features <curated_combo_1>`
+  - `cargo test -p <crate> --features <curated_combo_2>`
   - `cargo test -p <crate> --all-features`
-- Add semver gate for published library crates:
-  - `cargo semver-checks check-release -p <crate> --baseline-rev origin/main`
+- For hotspot crates only: run feature drift sweep with `cargo-hack` and execute via `cargo-nextest` where practical for runtime budget.
+  - Example: `cargo hack test -p <crate> --each-feature`
+  - Example: `cargo nextest run -p <crate> --all-features`
+- Add semver gate only for published/downstream-facing library crates:
+  - `cargo semver-checks check-release -p <crate> --baseline-rev <pinned_main_sha>`
+  - Pin `<pinned_main_sha>` at sprint start to avoid moving-baseline noise.
 - Add clippy anti-placeholder gate:
   - `-D clippy::todo -D clippy::unimplemented`
 - Add nightly security/stability lane (non-blocking initially):
-  - `cargo miri test` for selected crates/targets with supported tests.
+  - `cargo miri test` for selected target tests only (focused, low-flake subset).
   - fuzz smoke jobs for parser/crypto entry points.
+  - Kani lane as opt-in until proof burden and harness cost are justified.
+
+### Behavior freeze contracts (explicit per hotspot)
+
+- `verify.rs`: `VerifyError::Code` mapping, fail-closed decisions, digest normalization invariants.
+- `writer.rs`: deterministic bundle encoding invariants, manifest/events ordering, strict size-limit errors.
+- `runner.rs`: outcome status mapping, retry accounting, baseline comparison outputs.
+- `mandate_store.rs`: state transition invariants (`upsert -> consume -> revoke`), monotonic use-count behavior.
+- `monitor.rs`: syscall fallback behavior and event decision invariants.
+- `trace.rs`: parse/normalize error invariants and event shape guarantees.
 
 ### Exit criteria
 
@@ -74,6 +90,7 @@ Target structure:
 ```text
 verify/
   mod.rs        # public API only
+  wire.rs       # wire-format parsing: base64/JSON shape/header strictness
   digest.rs     # digest parsing + strict compare
   dsse.rs       # envelope parse/PAE/verify
   keys.rs       # key selection + key-id matching
@@ -81,6 +98,12 @@ verify/
   errors.rs
   tests/
 ```
+
+Trust boundary rules:
+
+- `policy.rs` is crypto-agnostic (decision logic only).
+- `dsse.rs` is policy-agnostic (verification/parsing only).
+- `mod.rs` exports API and orchestrates, but contains no crypto/wire internals.
 
 Performance improvements:
 
@@ -108,6 +131,12 @@ bundle/writer/
   errors.rs
   tests/
 ```
+
+Contract boundaries:
+
+- `tar_io.rs`: deterministic archive encoding only.
+- `limits.rs`: single source of truth for max sizes and bounded readers.
+- `events.rs`: NDJSON normalization/canonicalization rules only.
 
 Performance improvements:
 
@@ -176,7 +205,10 @@ Performance improvements:
 Security/correctness improvements:
 
 - Explicit transaction invariants for consume/revoke flows.
-- Add concurrency model checks for state transitions (loom-focused harness where feasible).
+- Add concurrency model checks for state transitions with pragmatic lanes:
+  - Loom only on small, purpose-built harnesses for race-sensitive state transitions.
+  - Miri on selected tests that exercise ownership/aliasing-sensitive paths.
+  - Kani as opt-in lane for critical invariants where harnessing cost is justified.
 
 ### Exit criteria (Wave 2)
 
@@ -208,6 +240,9 @@ Security improvements:
 
 - Reduce unsafe surface to one module with safe wrappers.
 - Add negative tests for syscall fallback behavior.
+- Add unsafe policy gate:
+  - `#![deny(unsafe_op_in_unsafe_fn)]`
+  - `rg "unsafe" crates/assay-cli/src/cli/commands/monitor.rs` must only match `syscall_linux.rs`.
 
 ### B. `crates/assay-core/src/providers/trace.rs`
 
@@ -266,7 +301,9 @@ Already strong today:
 
 Additions for this refactor program:
 
-1. Artifact attestation in release workflow (`attest-build-provenance`) and verification step in release validation.
+1. Artifact attestation as a required pair:
+   - produce provenance in release workflow (`attest-build-provenance`)
+   - verify attestation in CI/release validation; fail closed if missing/invalid
 2. Dedicated split-gate workflow for feature matrix + semver + anti-placeholder lints.
 3. Nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first, then required for touched paths).
 4. Fast test execution path with `cargo-nextest` for broader matrix coverage time budget.
@@ -290,6 +327,7 @@ Each split PR must include:
 ## 7) External SOTA references (reviewed Feb 2026)
 
 - [Rust 2024 edition guide](https://doc.rust-lang.org/edition-guide/rust-2024/index.html), with [Rust 1.85.0 release context](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
+- CI policy note: toolchain stays pinned to stable in workflows; release-note links above are compatibility context, not floating requirements.
 - [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
 - [Rust Performance Book](https://nnethercote.github.io/perf-book/)
 - [RustSec advisory database](https://github.com/RustSec/advisory-db), [cargo-audit](https://docs.rs/crate/cargo-audit/latest), [cargo-deny](https://embarkstudios.github.io/cargo-deny/)
