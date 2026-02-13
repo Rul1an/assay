@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 pub(crate) async fn kill_pid(
     pid: u32,
     mode: assay_core::mcp::runtime_features::KillMode,
