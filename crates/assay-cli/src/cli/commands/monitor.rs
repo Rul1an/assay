@@ -783,6 +783,8 @@ fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
 mod tests {
     #[cfg(target_os = "linux")]
     use assay_common::encode_kernel_dev;
+    #[cfg(target_os = "linux")]
+    use assay_common::{MonitorEvent, EVENT_OPENAT};
 
     #[test]
     #[cfg(target_os = "linux")]
@@ -829,5 +831,65 @@ mod tests {
         // We can't easily force libc::major to return 4096 from a u64 on all platforms.
         // So we just stick to the dummy assertion for now.
         assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_normalize_path_syntactic_contract() {
+        assert_eq!(
+            super::normalize_path_syntactic("/var//log/./app/../audit.log"),
+            "/var/log/audit.log"
+        );
+        assert_eq!(super::normalize_path_syntactic("tmp/./a/../b/c"), "tmp/b/c");
+        assert_eq!(super::normalize_path_syntactic("/../"), "/");
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_normalize_path_syntactic_contract_skip_non_linux() {
+        println!("Skipping Linux-only normalize_path_syntactic contract test");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_find_violation_rule_allow_not_contract() {
+        let allow = super::compile_globset(&["/tmp/secret/**".to_string()]).expect("allow");
+        let deny = super::compile_globset(&["/tmp/secret/allowed/**".to_string()]).expect("deny");
+        let rules = vec![super::ActiveRule {
+            id: "r1".to_string(),
+            action: assay_core::mcp::runtime_features::MonitorAction::TriggerKill,
+            allow,
+            deny: Some(deny),
+        }];
+
+        let mut blocked = MonitorEvent::zeroed();
+        blocked.pid = 42;
+        blocked.event_type = EVENT_OPENAT;
+        blocked.data[..b"/tmp/secret/blocked.txt\0".len()]
+            .copy_from_slice(b"/tmp/secret/blocked.txt\0");
+
+        let mut allowed = MonitorEvent::zeroed();
+        allowed.pid = 42;
+        allowed.event_type = EVENT_OPENAT;
+        allowed.data[..b"/tmp/secret/allowed/file.txt\0".len()]
+            .copy_from_slice(b"/tmp/secret/allowed/file.txt\0");
+
+        let r_blocked = super::find_violation_rule(&blocked, &rules);
+        let r_allowed = super::find_violation_rule(&allowed, &rules);
+
+        assert!(
+            r_blocked.is_some(),
+            "blocked path must match violation rule"
+        );
+        assert!(
+            r_allowed.is_none(),
+            "deny/not exception must suppress match"
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_find_violation_rule_allow_not_contract_skip_non_linux() {
+        println!("Skipping Linux-only find_violation_rule contract test");
     }
 }
