@@ -12,9 +12,9 @@ Scope lock:
 
 ## HEAD snapshot
 
-- commit: `9d642558ad06b9c5ec03598f6dfb5b13c3213e08`
+- commit: `e0baca5e6bbc93d447979108739012e339aa28f6`
 - LOC:
-  - `monitor.rs`: 892
+  - `monitor.rs`: 895
   - `providers/trace.rs`: 881
 
 ## Public entrypoints (current)
@@ -48,7 +48,7 @@ Current counts:
 ```bash
 set -euo pipefail
 
-base_ref="origin/main"
+base_ref="${BASE_REF:-origin/codex/wave2-step2-runtime-split}"
 rg_bin="$(command -v rg)"
 
 count_in_ref() {
@@ -80,6 +80,10 @@ check_no_increase() {
 
 check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "unwrap\(|expect\(" "monitor unwrap/expect (code-only)"
 check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "\bunsafe\b" "monitor unsafe"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "println!\(|eprintln!\(" "monitor println/eprintln (code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "panic!\(|todo!\(|unimplemented!\(" "monitor panic/todo/unimplemented (code-only)"
 check_no_increase "crates/assay-core/src/providers/trace.rs" "unwrap\(|expect\(" "trace unwrap/expect (code-only)"
 check_no_increase "crates/assay-core/src/providers/trace.rs" "\bunsafe\b" "trace unsafe"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "println!\(|eprintln!\(" "trace println/eprintln (code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "panic!\(|todo!\(|unimplemented!\(" "trace panic/todo/unimplemented (code-only)"
 ```

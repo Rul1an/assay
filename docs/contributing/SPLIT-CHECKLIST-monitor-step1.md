@@ -16,7 +16,7 @@ Scope lock:
 
 ```bash
 set -euo pipefail
-base_ref="origin/main"
+base_ref="${BASE_REF:-origin/codex/wave2-step2-runtime-split}"
 file="crates/assay-cli/src/cli/commands/monitor.rs"
 rg_bin="$(command -v rg)"
 
@@ -45,7 +45,13 @@ check_no_increase() {
 
 check_no_increase "unwrap\\(|expect\\(" "monitor unwrap/expect (code-only)"
 check_no_increase "\\bunsafe\\b" "monitor unsafe"
+check_no_increase "println!\\(|eprintln!\\(" "monitor println/eprintln (code-only)"
+check_no_increase "panic!\\(|todo!\\(|unimplemented!\\(" "monitor panic/todo/unimplemented (code-only)"
 ```
+
+Known limitation:
+- The code-only filter in Step 1 is best-effort for `#[cfg(test)] mod tests { ... }` blocks.
+- It will be replaced by stricter path/module-level filtering once tests are externalized in later wave steps.
 
 ## Required contract tests
 
@@ -58,6 +64,13 @@ cargo test -p assay-cli test_find_violation_rule_allow_not_contract -- --nocaptu
 # Non-Linux fallback checks
 cargo test -p assay-cli test_normalize_path_syntactic_contract_skip_non_linux -- --nocapture
 cargo test -p assay-cli test_find_violation_rule_allow_not_contract_skip_non_linux -- --nocapture
+```
+
+## Scope allowlist
+
+```bash
+BASE_REF="${BASE_REF:-origin/codex/wave2-step2-runtime-split}" bash scripts/ci/review-wave3-step1.sh
+# includes a fail-fast diff allowlist gate for Step 1 scope
 ```
 
 ## Definition of done

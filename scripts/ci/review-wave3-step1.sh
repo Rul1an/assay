@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_ref="${1:-origin/main}"
+base_ref="${BASE_REF:-${1:-origin/codex/wave2-step2-runtime-split}}"
 rg_bin="$(command -v rg)"
 
 strip_code_only() {
   local file="$1"
+  # Best-effort filter:
+  # skips `#[cfg(test)] mod tests { ... }` blocks, but does not parse arbitrary
+  # cfg-gated test item layouts outside a tests module.
   awk '
     BEGIN {
       pending_cfg_test = 0
@@ -99,7 +102,23 @@ cargo test -p assay-core --lib test_from_path_accepts_crlf_jsonl_lines -- --noca
 echo "== Wave3 Step1 drift gates =="
 check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "unwrap\\(|expect\\(" "monitor unwrap/expect (code-only)"
 check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "\\bunsafe\\b" "monitor unsafe"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "println!\\(|eprintln!\\(" "monitor println/eprintln (code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "monitor panic/todo/unimplemented (code-only)"
 check_no_increase "crates/assay-core/src/providers/trace.rs" "unwrap\\(|expect\\(" "trace unwrap/expect (code-only)"
 check_no_increase "crates/assay-core/src/providers/trace.rs" "\\bunsafe\\b" "trace unsafe"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "println!\\(|eprintln!\\(" "trace println/eprintln (code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "panic!\\(|todo!\\(|unimplemented!\\(" "trace panic/todo/unimplemented (code-only)"
+
+echo "== Wave3 Step1 diff allowlist =="
+leaks="$(
+  git diff --name-only "${base_ref}...HEAD" | \
+    "$rg_bin" -v \
+      "^crates/assay-cli/src/cli/commands/monitor.rs$|^crates/assay-core/src/providers/trace.rs$|^docs/contributing/SPLIT-INVENTORY-wave3-step1.md$|^docs/contributing/SPLIT-CHECKLIST-monitor-step1.md$|^docs/contributing/SPLIT-CHECKLIST-trace-step1.md$|^docs/contributing/SPLIT-SYMBOLS-wave3-step1.md$|^scripts/ci/review-wave3-step1.sh$|^docs/architecture/PLAN-split-refactor-2026q1.md$" || true
+)"
+if [ -n "$leaks" ]; then
+  echo "non-allowlisted files detected:"
+  echo "$leaks"
+  exit 1
+fi
 
 echo "Wave3 Step1 reviewer script: PASS"
