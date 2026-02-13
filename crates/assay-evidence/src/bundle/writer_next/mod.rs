@@ -1,10 +1,9 @@
-//! Step-3 scaffold for writer split.
+//! Step-3 split implementation modules for `bundle::writer`.
 //!
-//! `src/bundle/writer.rs` remains the active public implementation in this
-//! commit. `writer_next/*` is intentionally not wired yet to keep behavior
-//! unchanged while preparing mechanical moves.
+//! `src/bundle/writer.rs` is the stable public facade.
+//! Implementations live here and are re-exported by that facade.
 //!
-//! Facade boundary intent for the target layout:
+//! Boundary intent:
 //! - `write.rs`: write orchestration
 //! - `verify.rs`: verify orchestration
 //! - `manifest.rs`: manifest structs/serialization helpers

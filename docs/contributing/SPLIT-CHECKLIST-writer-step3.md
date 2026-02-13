@@ -35,7 +35,7 @@ Public symbols/signatures in `writer.rs` must remain stable for Step 3.
 
 ## Boundary gates (copy/paste)
 
-Run with `set -euo pipefail`. These checks must fail when a forbidden match is present.
+Run with `bash` + `set -euo pipefail`. These checks must fail when a forbidden match is present.
 
 ```bash
 check_no_match() {
@@ -61,8 +61,8 @@ check_no_match "verify_bundle|verify_bundle_with_limits|VerifyLimits|ErrorCode::
 check_no_match "tar::|flate2::|std::fs|tokio::fs|PathBuf" \
   crates/assay-evidence/src/bundle/writer_next/errors.rs
 
-# 4) limits are single-source; no MAX_ constants outside limits.rs
-check_no_match "const\s+MAX_|max_(bundle|decode|manifest|events|line|path|json)_" \
+# 4) limits are single-source; no MAX_* constants outside limits.rs
+check_no_match "const\s+MAX_" \
   crates/assay-evidence/src/bundle/writer_next/{write.rs,verify.rs,manifest.rs,events.rs,tar_write.rs,tar_read.rs,errors.rs,mod.rs}
 
 # 5) tar write/read split discipline
@@ -102,7 +102,7 @@ cargo test -p assay-evidence test_size_integrity_mismatch -- --nocapture
 check_no_match "BundleWriter|write_entry|tar_write|append\(|GzEncoder|tar::Builder|HeaderMode::Deterministic" crates/assay-evidence/src/bundle/writer_next/verify.rs
 check_no_match "verify_bundle|verify_bundle_with_limits|VerifyLimits|ErrorCode::(Security|Contract|Integrity|Limit)" crates/assay-evidence/src/bundle/writer_next/write.rs
 check_no_match "tar::|flate2::|std::fs|tokio::fs|PathBuf" crates/assay-evidence/src/bundle/writer_next/errors.rs
-check_no_match "const\s+MAX_|max_(bundle|decode|manifest|events|line|path|json)_" crates/assay-evidence/src/bundle/writer_next/{write.rs,verify.rs,manifest.rs,events.rs,tar_write.rs,tar_read.rs,errors.rs,mod.rs}
+check_no_match "const\s+MAX_" crates/assay-evidence/src/bundle/writer_next/{write.rs,verify.rs,manifest.rs,events.rs,tar_write.rs,tar_read.rs,errors.rs,mod.rs}
 check_no_match "set_mtime|set_uid|set_gid|set_username|set_groupname|HeaderMode::Deterministic|GzBuilder|Compression|tar::Builder" crates/assay-evidence/src/bundle/writer_next/tar_read.rs
 check_no_match "tar::Archive|entries\(|components\(|strip_prefix\(|starts_with\(" crates/assay-evidence/src/bundle/writer_next/tar_write.rs
 ```

@@ -4,7 +4,7 @@ Scope: `crates/assay-evidence/src/bundle/writer.rs` -> `crates/assay-evidence/sr
 
 Status:
 - Commit A: scaffold only, no function moves.
-- Commit B: populate this map with exact 1:1 moves.
+- Commit B: mechanical function/type moves completed behind stable facade.
 
 ## Public surface freeze (must remain stable)
 
@@ -41,4 +41,20 @@ The following public symbols/signatures are the contract surface to preserve thr
 
 | Old symbol (writer.rs) | New file | Notes |
 |---|---|---|
-| _TBD in Commit B_ | _TBD_ | _Mechanical 1:1 move only_ |
+| `Manifest` | `writer_next/manifest.rs` | Re-exported by `writer.rs` facade |
+| `AlgorithmMeta` | `writer_next/manifest.rs` | Re-exported by `writer.rs` facade |
+| `FileMeta` | `writer_next/manifest.rs` | Re-exported by `writer.rs` facade |
+| `BundleWriter<W: Write>` + methods | `writer_next/write.rs` | Re-exported by `writer.rs` facade |
+| `VerifyResult` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
+| `verify_bundle` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
+| `verify_bundle_with_limits` | `writer_next/verify.rs` | Re-exported by `writer.rs` facade |
+| `ErrorClass` | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
+| `ErrorCode` | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
+| `VerifyError` + methods | `writer_next/errors.rs` | Re-exported by `writer.rs` facade |
+| `VerifyLimits` + `Default` | `writer_next/limits.rs` | Re-exported by `writer.rs` facade |
+| `VerifyLimitsOverrides` | `writer_next/limits.rs` | Re-exported by `writer.rs` facade |
+| `VerifyLimits::apply` | `writer_next/limits.rs` | Re-exported type method |
+| `BundleWriter` tar entry writing helper | `writer_next/tar_write.rs` | Called from `writer_next/write.rs` |
+| `BundleWriter` deterministic tar builder setup | `writer_next/tar_write.rs` | Called from `writer_next/write.rs` |
+| `verify` EINTR reader + bounded line reader | `writer_next/tar_read.rs` | Called from `writer_next/verify.rs` |
+| `normalize_hash` | `writer_next/events.rs` | Called from `writer_next/verify.rs` |
