@@ -5,7 +5,9 @@
 
 use std::time::Duration;
 
-use assay_registry::{compute_digest, RegistryClient, RegistryConfig, RegistryError};
+use assay_registry::{
+    compute_digest, RegistryClient, RegistryConfig, RegistryError, REGISTRY_USER_AGENT,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -14,10 +16,6 @@ async fn create_test_client(mock_server: &MockServer) -> RegistryClient {
         .with_url(mock_server.uri())
         .with_token("test-token");
     RegistryClient::new(config).expect("failed to create client")
-}
-
-fn user_agent_value() -> String {
-    format!("assay-registry/{}", env!("CARGO_PKG_VERSION"))
 }
 
 #[tokio::test]
@@ -335,7 +333,7 @@ async fn test_user_agent_header() {
 
     Mock::given(method("GET"))
         .and(path("/packs/test/1.0.0"))
-        .and(header("user-agent", user_agent_value()))
+        .and(header("user-agent", REGISTRY_USER_AGENT))
         .respond_with(ResponseTemplate::new(200).set_body_string("content"))
         .expect(1)
         .mount(&mock_server)

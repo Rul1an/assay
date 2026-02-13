@@ -58,6 +58,9 @@ pub mod trust;
 pub mod types;
 pub mod verify;
 
+/// User-Agent string sent by the registry client. Single source for client and tests.
+pub const REGISTRY_USER_AGENT: &str = concat!("assay-registry/", env!("CARGO_PKG_VERSION"));
+
 // Re-export main types
 pub use auth::TokenProvider;
 pub use cache::{CacheEntry, CacheMeta, PackCache};
