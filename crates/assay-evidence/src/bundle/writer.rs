@@ -1195,21 +1195,20 @@ mod tests {
             max_events: 0, // Should fail (bundle has 1 event)
             ..VerifyLimits::default()
         };
-        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_count_limit);
-        assert!(err.is_err());
-        assert!(err
-            .unwrap_err()
-            .to_string()
-            .contains("Event count exceeds limit"));
+        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_count_limit).unwrap_err();
+        let ve = err.downcast::<VerifyError>().unwrap();
+        assert_eq!(ve.class, ErrorClass::Limits);
+        assert_eq!(ve.code, ErrorCode::LimitTotalEvents);
 
         // 2. Test File Size Limit
         let strict_size_limit = VerifyLimits {
             max_events_bytes: 10, // Should fail (events are larger)
             ..VerifyLimits::default()
         };
-        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_size_limit);
-        assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("exceeds limit"));
+        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_size_limit).unwrap_err();
+        let ve = err.downcast::<VerifyError>().unwrap();
+        assert_eq!(ve.class, ErrorClass::Limits);
+        assert_eq!(ve.code, ErrorCode::LimitFileSize);
     }
 
     #[test]
@@ -1424,6 +1423,139 @@ mod tests {
             // (Simplified: just reuse the logic above but insert BOM at start of events_content)
             // I'll skip re-implementing the whole tar builder here and just trust the unit tests.
         }
+    }
+
+    #[test]
+    fn test_bundle_bytes_are_deterministic_for_same_input() {
+        let mut buffer_a = Vec::new();
+        {
+            let mut writer = BundleWriter::new(&mut buffer_a);
+            writer.add_event(create_event(0));
+            writer.add_event(create_event(1));
+            writer.finish().unwrap();
+        }
+
+        let mut buffer_b = Vec::new();
+        {
+            let mut writer = BundleWriter::new(&mut buffer_b);
+            writer.add_event(create_event(0));
+            writer.add_event(create_event(1));
+            writer.finish().unwrap();
+        }
+
+        assert_eq!(
+            buffer_a, buffer_b,
+            "bundle bytes must be identical for identical normalized events"
+        );
+    }
+
+    #[test]
+    fn test_verify_unexpected_file_has_stable_contract_code() {
+        let manifest = Manifest {
+            schema_version: 1,
+            bundle_id: "bundle-test".to_string(),
+            producer: ProducerMeta::new("test", "1.0.0"),
+            run_id: "run_test".to_string(),
+            event_count: 0,
+            run_root: "sha256:dummy".to_string(),
+            algorithms: AlgorithmMeta::default(),
+            files: BTreeMap::new(),
+        };
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        let mut bundle = Vec::new();
+        {
+            let enc = GzBuilder::new()
+                .mtime(0)
+                .write(&mut bundle, Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            tar.mode(tar::HeaderMode::Deterministic);
+
+            let mut header = tar::Header::new_gnu();
+            header.set_size(manifest_json.len() as u64);
+            header.set_path("manifest.json").unwrap();
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            tar.append(&header, manifest_json.as_slice()).unwrap();
+
+            let payload = b"oops";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(payload.len() as u64);
+            header.set_path("unexpected.txt").unwrap();
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            tar.append(&header, payload.as_slice()).unwrap();
+
+            tar.finish().unwrap();
+        }
+
+        let err = verify_bundle(Cursor::new(&bundle)).unwrap_err();
+        let ve = err.downcast::<VerifyError>().unwrap();
+        assert_eq!(ve.class, ErrorClass::Contract);
+        assert_eq!(ve.code, ErrorCode::ContractUnexpectedFile);
+    }
+
+    #[test]
+    fn test_verify_path_traversal_has_stable_security_code() {
+        let manifest = Manifest {
+            schema_version: 1,
+            bundle_id: "bundle-test".to_string(),
+            producer: ProducerMeta::new("test", "1.0.0"),
+            run_id: "run_test".to_string(),
+            event_count: 0,
+            run_root: "sha256:dummy".to_string(),
+            algorithms: AlgorithmMeta::default(),
+            files: BTreeMap::new(),
+        };
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        let mut bundle = Vec::new();
+        {
+            let enc = GzBuilder::new()
+                .mtime(0)
+                .write(&mut bundle, Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            tar.mode(tar::HeaderMode::Deterministic);
+
+            let mut header = tar::Header::new_gnu();
+            header.set_size(manifest_json.len() as u64);
+            header.set_path("manifest.json").unwrap();
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            tar.append(&header, manifest_json.as_slice()).unwrap();
+
+            let payload = b"evil";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(payload.len() as u64);
+            header.set_path("events.ndjson").unwrap();
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            // Bypass set_path validation to simulate a crafted tar header with "..".
+            let name = &mut header.as_old_mut().name;
+            name.fill(0);
+            let evil = b"../events.ndjson";
+            name[..evil.len()].copy_from_slice(evil);
+            header.set_cksum();
+            tar.append(&header, payload.as_slice()).unwrap();
+
+            tar.finish().unwrap();
+        }
+
+        let err = verify_bundle(Cursor::new(&bundle)).unwrap_err();
+        let ve = err.downcast::<VerifyError>().unwrap();
+        assert_eq!(ve.class, ErrorClass::Security);
+        assert_eq!(ve.code, ErrorCode::SecurityPathTraversal);
     }
 
     fn create_event(seq: u64) -> EvidenceEvent {

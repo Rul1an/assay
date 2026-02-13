@@ -103,6 +103,7 @@ Trust boundary rules:
 
 - `policy.rs` is crypto-agnostic (decision logic only).
 - `dsse.rs` is policy-agnostic (verification/parsing only).
+- `wire.rs` is parsing-only (`serde` shapes + pure helpers), with no policy logic, no crypto verification, and no base64 flow control.
 - `mod.rs` exports API and orchestrates, but contains no crypto/wire internals.
 
 Performance improvements:
@@ -153,6 +154,14 @@ Security improvements:
 - No contract drift in existing integration tests.
 - Parser/crypto fuzz smoke + property tests green.
 - No measurable regression >5% median for existing verify/lint benchmarks.
+
+### Wave 1 commit slicing rule
+
+- Commit 1: checklists + behavior-freeze tests + boundary grep-gates.
+- Commit 2: `verify.rs` mechanical split only.
+- Commit 3: `bundle/writer.rs` mechanical split only.
+- Commit 4: review-pack update and evidence capture.
+- Commit 5: optional follow-up for perf/no-regret cleanup (separate from mechanical split review).
 
 ## Wave 2: Runtime decomposition (`runner.rs`, `mandate_store.rs`)
 

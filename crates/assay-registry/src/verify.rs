@@ -353,6 +353,22 @@ mod tests {
         verify_dsse_signature_bytes(&canonical_bytes, envelope, trust_store)
     }
 
+    fn base_fetch_result(content: &str) -> FetchResult {
+        let digest = compute_digest(content);
+        FetchResult {
+            content: content.to_string(),
+            headers: crate::types::PackHeaders {
+                digest: Some(digest.clone()),
+                signature: None,
+                key_id: None,
+                etag: None,
+                cache_control: None,
+                content_length: None,
+            },
+            computed_digest: digest,
+        }
+    }
+
     #[test]
     fn test_compute_digest_canonical() {
         // Valid YAML should use canonical JCS digest
@@ -1061,5 +1077,139 @@ mod tests {
             "bytes API should keep mismatch classification: {:?}",
             bytes_err
         );
+    }
+
+    #[test]
+    fn test_verify_pack_fail_closed_matrix_contract() {
+        #[derive(Clone, Copy)]
+        enum Expected {
+            UnsignedErr,
+            SignatureInvalidErr,
+            DigestMismatchErr,
+            UnsignedAllowedOk,
+            SkipSignatureOk,
+        }
+
+        struct Case {
+            name: &'static str,
+            options: VerifyOptions,
+            expected: Expected,
+            setup: fn(&mut FetchResult),
+        }
+
+        fn setup_none(_: &mut FetchResult) {}
+        fn setup_bad_signature(fetch: &mut FetchResult) {
+            fetch.headers.signature = Some("not-base64-envelope".to_string());
+            fetch.headers.key_id = Some("sha256:testkey".to_string());
+        }
+        fn setup_bad_digest(fetch: &mut FetchResult) {
+            fetch.headers.digest = Some(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            );
+        }
+
+        let content = "name: contract-case\nversion: \"1.0.0\"";
+        let trust_store = TrustStore::new();
+        let cases = [
+            Case {
+                name: "unsigned strict -> fail closed",
+                options: VerifyOptions::default(),
+                expected: Expected::UnsignedErr,
+                setup: setup_none,
+            },
+            Case {
+                name: "malformed signature -> signature invalid",
+                options: VerifyOptions::default(),
+                expected: Expected::SignatureInvalidErr,
+                setup: setup_bad_signature,
+            },
+            Case {
+                name: "digest mismatch dominates options",
+                options: VerifyOptions {
+                    allow_unsigned: true,
+                    skip_signature: true,
+                },
+                expected: Expected::DigestMismatchErr,
+                setup: setup_bad_digest,
+            },
+            Case {
+                name: "allow unsigned -> success",
+                options: VerifyOptions {
+                    allow_unsigned: true,
+                    skip_signature: false,
+                },
+                expected: Expected::UnsignedAllowedOk,
+                setup: setup_none,
+            },
+            Case {
+                name: "skip signature -> success despite malformed signature header",
+                options: VerifyOptions {
+                    allow_unsigned: false,
+                    skip_signature: true,
+                },
+                expected: Expected::SkipSignatureOk,
+                setup: setup_bad_signature,
+            },
+        ];
+
+        for case in cases {
+            let mut fetch = base_fetch_result(content);
+            (case.setup)(&mut fetch);
+
+            let result = verify_pack(&fetch, &trust_store, &case.options);
+            match (result, case.expected) {
+                (Err(RegistryError::Unsigned { .. }), Expected::UnsignedErr) => {}
+                (Err(RegistryError::SignatureInvalid { .. }), Expected::SignatureInvalidErr) => {}
+                (Err(RegistryError::DigestMismatch { .. }), Expected::DigestMismatchErr) => {}
+                (Ok(v), Expected::UnsignedAllowedOk) => {
+                    assert!(!v.signed, "{}: expected unsigned result", case.name);
+                }
+                (Ok(v), Expected::SkipSignatureOk) => {
+                    assert!(
+                        v.signed,
+                        "{}: expected signed=true on skip_signature",
+                        case.name
+                    );
+                }
+                (other, _) => panic!("{}: unexpected result {:?}", case.name, other),
+            }
+
+            if let Err(err) = verify_pack(&fetch, &trust_store, &case.options) {
+                assert_eq!(
+                    err.exit_code(),
+                    4,
+                    "{}: security-relevant failures must map to exit code 4",
+                    case.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_verify_pack_malformed_signature_reason_is_stable() {
+        let content = "name: bad-sig\nversion: \"1.0.0\"";
+        let mut fetch = base_fetch_result(content);
+        fetch.headers.signature = Some("%%%definitely-not-base64%%%".to_string());
+        let trust_store = TrustStore::new();
+        let options = VerifyOptions::default();
+
+        let err1 = verify_pack(&fetch, &trust_store, &options).unwrap_err();
+        let err2 = verify_pack(&fetch, &trust_store, &options).unwrap_err();
+
+        match (err1, err2) {
+            (
+                RegistryError::SignatureInvalid { reason: r1 },
+                RegistryError::SignatureInvalid { reason: r2 },
+            ) => {
+                assert_eq!(r1, r2, "same malformed input must yield stable reason");
+                assert!(
+                    r1.starts_with("invalid base64 envelope:"),
+                    "reason prefix must stay contract-stable, got: {}",
+                    r1
+                );
+            }
+            (left, right) => panic!("expected SignatureInvalid pair, got {left:?} and {right:?}"),
+        }
     }
 }
