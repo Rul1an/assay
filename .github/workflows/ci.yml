@@ -328,7 +328,9 @@ jobs:
 
       - name: Install Rust toolchain (rust-src)
         shell: bash
-        run: rustup component add rust-src
+        run: |
+          export PATH="/opt/rust/bin:${HOME}/.cargo/bin:${PATH}"
+          rustup component add rust-src
 
       - name: Install Dependencies
         shell: bash
