@@ -55,3 +55,5 @@ Trace split (`trace_next/*`):
 
 - Commit `63d96d74` restored trace diagnostic wording parity after the mechanical move.
   This is intentional and should remain stable for Step1 freeze assertions.
+- Diagnostics wording parity: restored the pre-split parse-error prefix/formatting in trace
+  so assertions keep matching with no semantic behavior drift.

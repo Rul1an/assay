@@ -162,15 +162,15 @@ check_no_match "globset|nix::|libc|syscall|\\bbpf\\b|MonitorEvent|kill_pid|decod
 check_no_match "println!\\(|eprintln!\\(|tracing::(info|warn|error)!" "${tmp_dir}/monitor_facade.rs"
 
 # Unsafe containment: only syscall_linux.rs may use unsafe.
-check_only_file_matches "unsafe[[:space:]]*\\{|unsafe[[:space:]]+fn" \
+check_only_file_matches "\\bunsafe\\b" \
   crates/assay-cli/src/cli/commands/monitor_next \
   "monitor_next/syscall_linux.rs"
 
-# Output containment: printing must be routed to output.rs.
-check_no_match_in_dir_excluding "println!\\(|eprintln!\\(" \
+# Output containment: printing/debug output must be routed to output.rs.
+check_no_match_in_dir_excluding "println!\\(|eprintln!\\(|print!\\(|dbg!\\(" \
   crates/assay-cli/src/cli/commands/monitor_next \
   "output.rs"
-check_no_match "println!\\(|eprintln!\\(" crates/assay-cli/src/cli/commands/monitor_next/syscall_linux.rs
+check_no_match "println!\\(|eprintln!\\(|print!\\(|dbg!\\(" crates/assay-cli/src/cli/commands/monitor_next/syscall_linux.rs
 
 # Trace facade stays thin and serde/io work remains in trace_next/*.
 check_no_match "serde_json::|simd_json::|BufRead|read_line|lines\\(|fs::|File|OpenOptions" "${tmp_dir}/trace_facade.rs"
