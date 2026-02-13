@@ -325,6 +325,9 @@
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
 
 
+- fix(ci): work around self-hosted _actions permission error in eBPF job (#309) @Rul1an
+- refactor(evidence): split json_strict into module (#307) @Rul1an
+- refactor(registry): centralize REGISTRY_USER_AGENT constant (#306) @Rul1an
 ## [2026-02-13]
 
 - refactor(evidence): split json_strict into module (#307) @Rul1an
