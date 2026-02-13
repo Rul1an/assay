@@ -345,6 +345,12 @@
 - fix(ci): ensure cargo in PATH for eBPF self-hosted Install Dependencies step (#328) @Rul1an
 - hardening(ci): pin actions and tighten workflow security (#312) @Rul1an
 - fix(ci): work around self-hosted _actions permission error in eBPF job (#309) @Rul1an
+- chore(release): sync workspace to v2.18.0 (#334) @Rul1an
+- refactor(writer-step3): split writer behind stable facade (#332) @Rul1an
+- refactor(verify-step2): mechanical split behind stable verify facade (#331) @Rul1an
+- ci(wave0): land split guardrails + robust semver baseline fetch (#329) @Rul1an
+- fix(ci): ensure cargo in PATH for eBPF self-hosted Install Dependencies step (#328) @Rul1an
+- hardening(ci): pin actions and tighten workflow security (#312) @Rul1an
 ## [2026-02-13]
 
 - refactor(evidence): split json_strict into module (#307) @Rul1an
