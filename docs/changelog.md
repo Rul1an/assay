@@ -324,6 +324,17 @@
 - feat(evidence): CICD Starter Pack + merge-gates (ADR-023) (#289) @Rul1an
 - feat(pack-engine): implement local discovery (ADR-021) and SOC2 baseline (ADR-022) (#287) @Rul1an
 
+
+## [2026-02-13]
+
+- refactor(evidence): split json_strict into module (#307) @Rul1an
+- refactor(registry): centralize REGISTRY_USER_AGENT constant (#306) @Rul1an
+- refactor(registry): extract integration tests to tests/registry_client.rs (Step 0) (#305) @Rul1an
+- fix(ci): re-enable self-hosted runner jobs after _actions cache cleanup (#304) @Rul1an
+- refactor(registry): split client.rs into mod, http, helpers (#302) @Rul1an
+- refactor(cli): args split Phase A+B — common, run, baseline, bundle, policy (#300) @Rul1an
+- feat(evidence): E2 Phase 3 verify --eval (evaluation sidecar verification) (#299) @Rul1an
+- feat(evidence): E2 writer split + façade polish (#298) @Rul1an
 ## [2026-02-12]
 
 - refactor(cli): args split Phase A+B — common, run, baseline, bundle, policy (#300) @Rul1an
