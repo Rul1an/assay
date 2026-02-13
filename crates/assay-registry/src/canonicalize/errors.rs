@@ -105,7 +105,10 @@ pub type CanonicalizeResult<T> = Result<T, CanonicalizeError>;
 impl From<CanonicalizeError> for RegistryError {
     fn from(err: CanonicalizeError) -> Self {
         RegistryError::InvalidResponse {
-            message: format!("canonicalization failed: {}", err),
+            message: format!(
+                "canonicalization failed (pack invalid/unsupported): {}",
+                err
+            ),
         }
     }
 }

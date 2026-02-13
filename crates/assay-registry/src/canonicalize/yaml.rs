@@ -65,27 +65,10 @@ fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
             return Err(CanonicalizeError::MultiDocumentFound);
         }
 
-        // Check for anchors: &name at start of value (line-based, more conservative)
-        // Pattern: key: &anchor or just &anchor as value
-        if let Some(colon_pos) = trimmed.find(':') {
-            let value_part = trimmed[colon_pos + 1..].trim_start();
-            if value_part.starts_with('&') && value_part.len() > 1 {
-                let next_char = value_part.chars().nth(1).unwrap_or(' ');
-                if next_char.is_alphanumeric() || next_char == '_' {
-                    return Err(CanonicalizeError::AnchorFound {
-                        position: format!("line {}", line_num + 1),
-                    });
-                }
-            }
-            // Check for aliases: *name as value
-            if value_part.starts_with('*') && value_part.len() > 1 {
-                let next_char = value_part.chars().nth(1).unwrap_or(' ');
-                if next_char.is_alphanumeric() || next_char == '_' {
-                    return Err(CanonicalizeError::AliasFound {
-                        position: format!("line {}", line_num + 1),
-                    });
-                }
-            }
+        // Check for anchors/aliases anywhere on the line, outside quoted strings.
+        // Catches: key: &a 1, - &a 1, - *a, *a, etc.
+        if let Some(err) = find_anchor_or_alias_outside_quotes(trimmed, line_num + 1) {
+            return Err(err);
         }
 
         // Check for tags: !! or !<
@@ -138,6 +121,13 @@ fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
 
         // Extract and check keys
         if let Some(key) = extract_yaml_key(key_source) {
+            // Reject YAML merge keys (<<) — can cause duplicate-key-by-construction
+            if key == "<<" {
+                return Err(CanonicalizeError::ParseError {
+                    message: "reason=merge_key_not_allowed: merge keys (<<) not allowed"
+                        .to_string(),
+                });
+            }
             if !is_list_item {
                 // Normal key: pop scopes that are strictly deeper than current indent
                 while key_stack.len() > 1
@@ -161,6 +151,50 @@ fn pre_scan_yaml(content: &str) -> CanonicalizeResult<()> {
     }
 
     Ok(())
+}
+
+/// Find anchor (&name) or alias (*name) outside quoted strings.
+/// Returns the error to return if found.
+fn find_anchor_or_alias_outside_quotes(line: &str, line_num: usize) -> Option<CanonicalizeError> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '&' | '*' if !in_single && !in_double => {
+                if let Some(&next) = chars.peek() {
+                    if next.is_alphanumeric() || next == '_' {
+                        let position = format!("line {}", line_num);
+                        return Some(match ch {
+                            '&' => CanonicalizeError::AnchorFound { position },
+                            _ => CanonicalizeError::AliasFound { position },
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the index of the closing double-quote in a string that starts after the opening quote.
+/// Handles \" escapes: the closing quote must not be preceded by an unescaped backslash.
+fn find_closing_double_quote(s: &str) -> Option<usize> {
+    let mut chars = s.char_indices();
+    while let Some((pos, c)) = chars.next() {
+        match c {
+            '\\' => {
+                // Skip escaped char (e.g. \", \\)
+                chars.next();
+            }
+            '"' => return Some(pos),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Check if a pattern appears inside quotes in a line.
@@ -195,8 +229,8 @@ fn extract_yaml_key(line: &str) -> Option<String> {
     // Find the colon that separates key from value
     // Handle quoted keys: "key": value or 'key': value
     if let Some(after_dquote) = trimmed.strip_prefix('"') {
-        // Double-quoted key
-        if let Some(end_quote) = after_dquote.find('"') {
+        // Double-quoted key: find closing quote, respecting \" escapes
+        if let Some(end_quote) = find_closing_double_quote(after_dquote) {
             let key = &after_dquote[..end_quote];
             // Check there's a colon after the closing quote
             let after_key = &after_dquote[end_quote + 1..];
@@ -313,6 +347,14 @@ fn yaml_to_json(yaml: &serde_yaml::Value, depth: usize) -> CanonicalizeResult<Js
                         })
                     }
                 };
+
+                // Reject YAML merge keys (<<) — can cause duplicate-key-by-construction
+                if key_str == "<<" {
+                    return Err(CanonicalizeError::ParseError {
+                        message: "reason=merge_key_not_allowed: merge keys (<<) not allowed"
+                            .to_string(),
+                    });
+                }
 
                 // Check for duplicate keys
                 if !seen_keys.insert(key_str.clone()) {
