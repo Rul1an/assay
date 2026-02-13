@@ -38,7 +38,7 @@ pub(crate) fn log_violation(pid: u32, rule_id: &str, quiet: bool) {
 #[cfg(target_os = "linux")]
 pub(crate) fn log_kill(
     pid: u32,
-    mode: assay_core::mcp::runtime_features::KillMode,
+    mode: &assay_core::mcp::runtime_features::KillMode,
     grace: u64,
     quiet: bool,
 ) {

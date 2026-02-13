@@ -30,7 +30,7 @@ async fn maybe_enforce_violation(
     };
 
     if enabled {
-        output::log_kill(event.pid, mode, grace, quiet);
+        output::log_kill(event.pid, &mode, grace, quiet);
         syscall_linux::kill_pid(event.pid, mode, grace).await;
     }
 }
