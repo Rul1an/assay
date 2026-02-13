@@ -1,0 +1,85 @@
+# Wave 3 Step 1 inventory (behavior freeze)
+
+Scope:
+- `crates/assay-cli/src/cli/commands/monitor.rs`
+- `crates/assay-core/src/providers/trace.rs`
+
+Scope lock:
+- tests + docs + gates only
+- no split/mechanical moves yet
+- no perf tuning
+- `demo/` untouched
+
+## HEAD snapshot
+
+- commit: `9d642558ad06b9c5ec03598f6dfb5b13c3213e08`
+- LOC:
+  - `monitor.rs`: 892
+  - `providers/trace.rs`: 881
+
+## Public entrypoints (current)
+
+`monitor.rs`
+- `pub struct MonitorArgs`
+- `pub async fn run(...)`
+
+`providers/trace.rs`
+- `pub struct TraceClient`
+- `impl TraceClient { pub fn from_path(...) }`
+
+## Baseline drift counters (Step 1, code-only)
+
+Counters below exclude the `#[cfg(test)]` block in each file.
+
+Current counts:
+- `monitor.rs`
+  - `unwrap(`: 2
+  - `expect(`: 0
+  - `unsafe`: 7
+  - `println!/eprintln!`: 50
+- `providers/trace.rs`
+  - `unwrap(`: 0
+  - `expect(`: 0
+  - `unsafe`: 0
+  - `println!/eprintln!`: 1
+
+## Drift gates (copy/paste)
+
+```bash
+set -euo pipefail
+
+base_ref="origin/main"
+rg_bin="$(command -v rg)"
+
+count_in_ref() {
+  local ref="$1"
+  local file="$2"
+  local pattern="$3"
+  git show "${ref}:${file}" | awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' | "$rg_bin" -n "$pattern" || true
+}
+
+count_in_worktree() {
+  local file="$1"
+  local pattern="$2"
+  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -n "$pattern" || true
+}
+
+check_no_increase() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  local before after
+  before="$(count_in_ref "$base_ref" "$file" "$pattern" | wc -l | tr -d ' ')"
+  after="$(count_in_worktree "$file" "$pattern" | wc -l | tr -d ' ')"
+  echo "$label: before=$before after=$after"
+  if [ "$after" -gt "$before" ]; then
+    echo "drift gate failed: $label increased"
+    exit 1
+  fi
+}
+
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "unwrap\(|expect\(" "monitor unwrap/expect (code-only)"
+check_no_increase "crates/assay-cli/src/cli/commands/monitor.rs" "\bunsafe\b" "monitor unsafe"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "unwrap\(|expect\(" "trace unwrap/expect (code-only)"
+check_no_increase "crates/assay-core/src/providers/trace.rs" "\bunsafe\b" "trace unsafe"
+```

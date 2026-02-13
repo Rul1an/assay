@@ -234,6 +234,11 @@ Security/correctness improvements:
 
 ## Wave 3: Unsafe and parser boundary hardening (`monitor.rs`, `trace.rs`)
 
+Step status:
+
+- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave3-step1-behavior-freeze-v2`.
+- Step 2 (mechanical split): pending after Step 1 review/merge.
+
 ### A. `crates/assay-cli/src/cli/commands/monitor.rs`
 
 Target structure:
