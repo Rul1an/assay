@@ -289,7 +289,7 @@ jobs:
     name: eBPF monitor smoke (Linux - Self-Hosted)
     needs: [test]
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 60
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
