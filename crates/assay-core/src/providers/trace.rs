@@ -45,7 +45,7 @@ impl LlmClient for TraceClient {
 
             if let Some(match_) = closest {
                 diag = diag.with_fix_step(format!(
-                    "Did you mean '{}' (similarity: {:.2})",
+                    "Did you mean '{}'? (similarity: {:.2})",
                     match_.prompt, match_.similarity
                 ));
                 diag = diag.with_fix_step("Update your input prompt to match the trace exactly");
