@@ -23,6 +23,7 @@ jobs:
       contents: read
     outputs:
       run_all: ${{ steps.detect.outputs.run_all }}
+      changed_file_count: ${{ steps.detect.outputs.changed_file_count }}
       global_changed: ${{ steps.detect.outputs.global_changed }}
       any_relevant: ${{ steps.detect.outputs.any_relevant }}
       hotspot_changed: ${{ steps.detect.outputs.hotspot_changed }}
@@ -104,6 +105,7 @@ jobs:
 
           {
             echo "run_all=${run_all}"
+            echo "changed_file_count=$(wc -l < "$changed_file" | tr -d ' ')"
             echo "global_changed=${global_changed}"
             echo "any_relevant=${any_relevant}"
             echo "hotspot_changed=${hotspot_changed}"
@@ -127,6 +129,7 @@ jobs:
               echo "- mode: pull_request diff"
             fi
             echo "- run_all: ${run_all}"
+            echo "- changed_file_count: $(wc -l < "$changed_file" | tr -d ' ')"
             echo "- global_changed: ${global_changed}"
             echo "- hotspot_changed: ${hotspot_changed}"
             echo "- any_relevant: ${any_relevant}"
@@ -359,6 +362,18 @@ jobs:
 
       - name: Install cargo-semver-checks
         run: cargo install --locked cargo-semver-checks
+
+      - name: Ensure semver baseline commit is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}" 2>/dev/null; then
+            echo "Baseline commit present: ${WAVE0_SEMVER_BASELINE_SHA}"
+          else
+            echo "Baseline commit missing locally, fetching explicitly..."
+            git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:${WAVE0_SEMVER_BASELINE_SHA}" || git fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}"
+            git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}"
+          fi
 
       - name: Run semver checks (allowlist)
         shell: bash

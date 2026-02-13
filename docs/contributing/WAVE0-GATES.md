@@ -66,6 +66,8 @@ Configure branch protection to require:
 - `Wave 0 quality gates`
 - `Wave 0 semver checks (public crates)`
 
+Wave 0 workflow always triggers on `pull_request`; heavy jobs are conditional to avoid docs-only blocking.
+
 ## Stabilization acceptance
 
 Before declaring Wave 0 stable:
