@@ -15,12 +15,12 @@ jobs:
   vhs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Install vhs
-        uses: charmbracelet/vhs-action@v1
+        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1
         with:
           path: 'demo/hero.tape'
           install_only: true
@@ -32,7 +32,7 @@ jobs:
       # So we need to build release first.
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
 
       - name: Build Assay
         run: cargo build --release
@@ -61,7 +61,17 @@ jobs:
       - name: Run VHS (Full Walkthrough)
         run: vhs demo/full-walkthrough.tape
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: regenerate demo assets [skip ci]"
-          file_pattern: 'demo/output/*'
+      - name: Commit regenerated assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A demo/output
+          if git diff --cached --quiet; then
+            echo "No demo asset changes detected."
+            exit 0
+          fi
+          git commit -m "chore: regenerate demo assets [skip ci]"
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          git push origin "HEAD:${BRANCH}"
