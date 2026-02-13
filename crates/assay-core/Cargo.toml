@@ -60,7 +60,7 @@ flate2 = "1.0"
 sysinfo = { version = "0.30", optional = true }
 dirs = { version = "6", optional = true }
 nix = { version = "0.27", features = ["signal", "process"], optional = true }
-schemars = "1.2.0"
+schemars = "1.2.1"
 
 # SQLite: always use bundled to avoid cross-platform/cross-compilation issues
 rusqlite = { version = "0.31", features = ["bundled"] }
