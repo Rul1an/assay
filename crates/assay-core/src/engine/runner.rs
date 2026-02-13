@@ -1,20 +1,16 @@
-use crate::attempts::{classify_attempts, FailureClass};
 use crate::cache::key::cache_key;
 use crate::cache::vcr::VcrCache;
-use crate::errors::{try_map_error, RunError, RunErrorKind};
 use crate::metrics_api::Metric;
-use crate::model::{AttemptRow, EvalConfig, LlmResponse, TestCase, TestResultRow, TestStatus};
-use crate::on_error::{ErrorPolicy, ErrorPolicyResult};
+use crate::model::{EvalConfig, LlmResponse, TestCase, TestResultRow, TestStatus};
 use crate::providers::llm::LlmClient;
-use crate::quarantine::{QuarantineMode, QuarantineService};
-use crate::report::progress::{ProgressEvent, ProgressSink};
+use crate::quarantine::QuarantineMode;
+use crate::report::progress::ProgressSink;
 use crate::report::RunArtifacts;
 use crate::storage::store::Store;
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
-use tokio::time::{timeout, Duration};
+
+#[path = "runner_next/mod.rs"]
+mod runner_next;
 
 #[derive(Debug, Clone)]
 pub struct RunPolicy {
@@ -57,325 +53,7 @@ impl Runner {
         cfg: &EvalConfig,
         progress: Option<ProgressSink>,
     ) -> anyhow::Result<RunArtifacts> {
-        let run_id = self.store.create_run(cfg)?;
-
-        let parallel = cfg.settings.parallel.unwrap_or(4).max(1);
-        let sem = Arc::new(Semaphore::new(parallel));
-        let mut join_set = JoinSet::new();
-
-        // E7.2: Randomized Order default (derived seed)
-        // If seed is missing, generate one to ensure deterministic replay capability if logged
-        // and to enforce default randomization.
-        let mut cfg = cfg.clone();
-        if cfg.settings.seed.is_none() {
-            let s = rand::random();
-            cfg.settings.seed = Some(s);
-            // This ensures we always have a seed for 'run' artifacts and judge logic.
-            eprintln!("Info: No seed provided. Using generated seed: {}", s);
-        }
-
-        let mut tests = cfg.tests.clone();
-        if let Some(seed) = cfg.settings.seed {
-            use rand::seq::SliceRandom;
-            use rand::SeedableRng;
-            // Use StdRng for reproducibility
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            tests.shuffle(&mut rng);
-        }
-
-        let total = tests.len();
-        let mut clone_overhead_ms: u128 = 0;
-        for tc in tests.iter() {
-            let permit = sem.clone().acquire_owned().await?;
-            let clone_started = Instant::now();
-            let this = self.clone_for_task();
-            clone_overhead_ms =
-                clone_overhead_ms.saturating_add(clone_started.elapsed().as_millis());
-            let cfg = cfg.clone();
-            let tc = tc.clone();
-            join_set.spawn(async move {
-                let _permit = permit;
-                this.run_test_with_policy(&cfg, &tc, run_id).await
-            });
-        }
-
-        let mut rows = Vec::new();
-        let mut any_fail = false;
-        while let Some(res) = join_set.join_next().await {
-            let row = match res {
-                Ok(Ok(row)) => row,
-                Ok(Err(e)) => TestResultRow {
-                    test_id: "unknown".into(),
-                    status: TestStatus::Error,
-                    score: None,
-                    cached: false,
-                    message: format!("task error: {}", e),
-                    details: serde_json::json!({}),
-                    duration_ms: None,
-                    fingerprint: None,
-                    skip_reason: None,
-                    attempts: None,
-                    error_policy_applied: None,
-                },
-                Err(e) => TestResultRow {
-                    test_id: "unknown".into(),
-                    status: TestStatus::Error,
-                    score: None,
-                    cached: false,
-                    message: format!("join error: {}", e),
-                    details: serde_json::json!({}),
-                    duration_ms: None,
-                    fingerprint: None,
-                    skip_reason: None,
-                    attempts: None,
-                    error_policy_applied: None,
-                },
-            };
-            any_fail = any_fail || matches!(row.status, TestStatus::Fail | TestStatus::Error);
-            rows.push(row);
-            if total > 0 {
-                if let Some(ref sink) = progress {
-                    sink(ProgressEvent {
-                        done: rows.len(),
-                        total,
-                    });
-                }
-            }
-        }
-
-        // Deterministic order for artifacts (replay, golden tests).
-        rows.sort_by(|a, b| a.test_id.cmp(&b.test_id));
-
-        self.store
-            .finalize_run(run_id, if any_fail { "failed" } else { "passed" })?;
-        Ok(RunArtifacts {
-            run_id,
-            suite: cfg.suite.clone(),
-            results: rows,
-            order_seed: cfg.settings.seed,
-            runner_clone_ms: Some(clone_overhead_ms.min(u128::from(u64::MAX)) as u64),
-        })
-    }
-
-    async fn run_test_with_policy(
-        &self,
-        cfg: &EvalConfig,
-        tc: &TestCase,
-        run_id: i64,
-    ) -> anyhow::Result<TestResultRow> {
-        let quarantine = QuarantineService::new(self.store.clone());
-        let q_reason = quarantine.is_quarantined(&cfg.suite, &tc.id)?;
-        let error_policy = cfg.effective_error_policy(tc);
-
-        let max_attempts = 1 + self.policy.rerun_failures;
-        let mut attempts: Vec<AttemptRow> = Vec::new();
-        let mut last_row: Option<TestResultRow> = None;
-        let mut last_output: Option<LlmResponse> = None;
-
-        for i in 0..max_attempts {
-            let (row, output) = self.run_attempt_with_policy(cfg, tc, error_policy).await;
-            Self::record_attempt(&mut attempts, i + 1, &row);
-            last_row = Some(row.clone());
-            last_output = Some(output.clone());
-
-            if Self::should_stop_retries(row.status) {
-                break;
-            }
-        }
-
-        let class = classify_attempts(&attempts);
-        let mut final_row = last_row.unwrap_or_else(|| Self::no_attempts_row(tc));
-        self.apply_quarantine_overlay(&mut final_row, q_reason.as_deref());
-        Self::apply_failure_classification(&mut final_row, class, attempts.len());
-
-        let output = last_output.unwrap_or_else(|| self.empty_output_for_model(cfg));
-
-        final_row.attempts = Some(attempts.clone());
-        self.apply_agent_assertions(run_id, tc, &mut final_row)?;
-
-        self.store
-            .insert_result_embedded(run_id, &final_row, &attempts, &output)?;
-
-        Ok(final_row)
-    }
-
-    async fn run_attempt_with_policy(
-        &self,
-        cfg: &EvalConfig,
-        tc: &TestCase,
-        error_policy: ErrorPolicy,
-    ) -> (TestResultRow, LlmResponse) {
-        match self.run_test_once(cfg, tc).await {
-            Ok(res) => res,
-            Err(e) => Self::error_row_and_output(cfg, tc, e, error_policy),
-        }
-    }
-
-    fn error_row_and_output(
-        cfg: &EvalConfig,
-        tc: &TestCase,
-        e: anyhow::Error,
-        error_policy: ErrorPolicy,
-    ) -> (TestResultRow, LlmResponse) {
-        let msg = if let Some(diag) = try_map_error(&e) {
-            diag.to_string()
-        } else {
-            e.to_string()
-        };
-
-        let policy_result = error_policy.apply_to_error(&e);
-        let (status, final_msg, applied_policy) = match policy_result {
-            ErrorPolicyResult::Blocked { reason } => {
-                (TestStatus::Error, reason, ErrorPolicy::Block)
-            }
-            ErrorPolicyResult::Allowed { warning } => {
-                crate::on_error::log_fail_safe(&warning, None);
-                (TestStatus::AllowedOnError, warning, ErrorPolicy::Allow)
-            }
-        };
-        let run_error = e
-            .downcast_ref::<RunError>()
-            .cloned()
-            .unwrap_or_else(|| RunError::from_anyhow(&e));
-        let run_error_kind = match &run_error.kind {
-            RunErrorKind::TraceNotFound => "trace_not_found",
-            RunErrorKind::MissingConfig => "missing_config",
-            RunErrorKind::ConfigParse => "config_parse",
-            RunErrorKind::InvalidArgs => "invalid_args",
-            RunErrorKind::ProviderRateLimit => "provider_rate_limit",
-            RunErrorKind::ProviderTimeout => "provider_timeout",
-            RunErrorKind::ProviderServer => "provider_server",
-            RunErrorKind::Network => "network",
-            RunErrorKind::JudgeUnavailable => "judge_unavailable",
-            RunErrorKind::Other => "other",
-        };
-
-        (
-            TestResultRow {
-                test_id: tc.id.clone(),
-                status,
-                score: None,
-                cached: false,
-                message: final_msg,
-                details: serde_json::json!({
-                    "error": msg,
-                    "policy_applied": applied_policy,
-                    "run_error_kind": run_error_kind,
-                    "run_error_legacy": run_error.legacy_classified,
-                    "run_error": {
-                        "path": run_error.path,
-                        "status": run_error.status,
-                        "provider": run_error.provider,
-                        "detail": run_error.detail
-                    }
-                }),
-                duration_ms: None,
-                fingerprint: None,
-                skip_reason: None,
-                attempts: None,
-                error_policy_applied: Some(applied_policy),
-            },
-            LlmResponse {
-                text: "".into(),
-                provider: "error".into(),
-                model: cfg.model.clone(),
-                cached: false,
-                meta: serde_json::json!({}),
-            },
-        )
-    }
-
-    fn record_attempt(attempts: &mut Vec<AttemptRow>, attempt_no: u32, row: &TestResultRow) {
-        attempts.push(AttemptRow {
-            attempt_no,
-            status: row.status,
-            message: row.message.clone(),
-            duration_ms: row.duration_ms,
-            details: row.details.clone(),
-        });
-    }
-
-    fn should_stop_retries(status: TestStatus) -> bool {
-        matches!(
-            status,
-            TestStatus::Pass | TestStatus::Warn | TestStatus::AllowedOnError | TestStatus::Skipped
-        )
-    }
-
-    fn no_attempts_row(tc: &TestCase) -> TestResultRow {
-        TestResultRow {
-            test_id: tc.id.clone(),
-            status: TestStatus::Error,
-            score: None,
-            cached: false,
-            message: "no attempts".into(),
-            details: serde_json::json!({}),
-            duration_ms: None,
-            fingerprint: None,
-            skip_reason: None,
-            attempts: None,
-            error_policy_applied: None,
-        }
-    }
-
-    fn apply_quarantine_overlay(&self, final_row: &mut TestResultRow, q_reason: Option<&str>) {
-        if let Some(reason) = q_reason {
-            match self.policy.quarantine_mode {
-                QuarantineMode::Off => {}
-                QuarantineMode::Warn => {
-                    final_row.status = TestStatus::Warn;
-                    final_row.message = format!("quarantined: {}", reason);
-                }
-                QuarantineMode::Strict => {
-                    final_row.status = TestStatus::Fail;
-                    final_row.message = format!("quarantined (strict): {}", reason);
-                }
-            }
-        }
-    }
-
-    fn apply_failure_classification(
-        final_row: &mut TestResultRow,
-        class: FailureClass,
-        attempt_len: usize,
-    ) {
-        match class {
-            FailureClass::Skipped => {
-                final_row.status = TestStatus::Skipped;
-                // message usually set by run_test_once
-            }
-            FailureClass::Flaky => {
-                final_row.status = TestStatus::Flaky;
-                final_row.message = "flake detected (rerun passed)".into();
-                final_row.details["flake"] = serde_json::json!({ "attempts": attempt_len });
-            }
-            FailureClass::Unstable => {
-                final_row.status = TestStatus::Unstable;
-                final_row.message = "unstable outcomes detected".into();
-                final_row.details["unstable"] = serde_json::json!({ "attempts": attempt_len });
-            }
-            FailureClass::Error => final_row.status = TestStatus::Error,
-            FailureClass::DeterministicFail => {
-                // Ensures if last attempt was fail, we keep fail status
-                final_row.status = TestStatus::Fail;
-            }
-            FailureClass::DeterministicPass => {
-                // Preserve explicit fail-open semantics instead of collapsing into plain pass.
-                if final_row.status != TestStatus::AllowedOnError {
-                    final_row.status = TestStatus::Pass;
-                }
-            }
-        }
-    }
-
-    fn empty_output_for_model(&self, cfg: &EvalConfig) -> LlmResponse {
-        LlmResponse {
-            text: "".into(),
-            provider: self.client.provider_name().to_string(),
-            model: cfg.model.clone(),
-            cached: false,
-            meta: serde_json::json!({}),
-        }
+        runner_next::execute::run_suite_impl(self, cfg, progress).await
     }
 
     fn apply_agent_assertions(
@@ -594,29 +272,7 @@ impl Runner {
     }
 
     async fn call_llm(&self, cfg: &EvalConfig, tc: &TestCase) -> anyhow::Result<LlmResponse> {
-        let t = cfg.settings.timeout_seconds.unwrap_or(30);
-        let fut = self
-            .client
-            .complete(&tc.input.prompt, tc.input.context.as_deref());
-        let resp = timeout(Duration::from_secs(t), fut).await??;
-        Ok(resp)
-    }
-
-    fn clone_for_task(&self) -> Runner {
-        Runner {
-            store: self.store.clone(),
-            cache: self.cache.clone(),
-            client: self.client.clone(),
-            metrics: self.metrics.clone(),
-            policy: self.policy.clone(),
-            _network_guard: None,
-            embedder: self.embedder.clone(),
-            refresh_embeddings: self.refresh_embeddings,
-            incremental: self.incremental,
-            refresh_cache: self.refresh_cache,
-            judge: self.judge.clone(),
-            baseline: self.baseline.clone(),
-        }
+        runner_next::execute::call_llm_impl(self, cfg, tc).await
     }
 
     fn check_baseline_regressions(
@@ -627,69 +283,9 @@ impl Runner {
         metrics: &[Arc<dyn Metric>],
         baseline: &crate::baseline::Baseline,
     ) -> Option<(TestStatus, String)> {
-        // Check suite-level defaults
-        let suite_defaults = cfg.settings.thresholding.as_ref();
-
-        for m in metrics {
-            let metric_name = m.name();
-            // Only numeric metrics supported right now
-            let score = details["metrics"][metric_name]["score"].as_f64()?;
-
-            // Determine thresholding config
-            // 1. Metric override (from expected enum - tricky as Metric trait hides this)
-            // Use suite defaults unless specific metric logic overrides
-
-            let (mode, max_drop) = self.resolve_threshold_config(tc, metric_name, suite_defaults);
-
-            if mode == "relative" {
-                if let Some(base_score) = baseline.get_score(&tc.id, metric_name) {
-                    let delta = score - base_score;
-                    if let Some(drop_limit) = max_drop {
-                        if delta < -drop_limit {
-                            return Some((
-                                TestStatus::Fail,
-                                format!(
-                                    "regression: {} dropped {:.3} (limit: {:.3})",
-                                    metric_name, -delta, drop_limit
-                                ),
-                            ));
-                        }
-                    }
-                } else {
-                    // Missing baseline
-                    return Some((
-                        TestStatus::Warn,
-                        format!("missing baseline for {}/{}", tc.id, metric_name),
-                    ));
-                }
-            }
-        }
-        None
-    }
-
-    fn resolve_threshold_config(
-        &self,
-        tc: &TestCase,
-        metric_name: &str,
-        suite_defaults: Option<&crate::model::ThresholdingSettings>,
-    ) -> (String, Option<f64>) {
-        let mut mode = "absolute".to_string();
-        let mut max_drop = None;
-
-        if let Some(s) = suite_defaults {
-            if let Some(m) = &s.mode {
-                mode = m.clone();
-            }
-            max_drop = s.max_drop;
-        }
-
-        if let Some(t) = tc.expected.thresholding_for_metric(metric_name) {
-            if t.max_drop.is_some() {
-                max_drop = t.max_drop;
-            }
-        }
-
-        (mode, max_drop)
+        runner_next::baseline::check_baseline_regressions_impl(
+            self, tc, cfg, details, metrics, baseline,
+        )
     }
 
     // Embeddings logic
@@ -699,54 +295,7 @@ impl Runner {
         tc: &TestCase,
         resp: &mut LlmResponse,
     ) -> anyhow::Result<()> {
-        use crate::model::Expected;
-
-        let Expected::SemanticSimilarityTo {
-            semantic_similarity_to,
-            ..
-        } = &tc.expected
-        else {
-            return Ok(());
-        };
-
-        if resp.meta.pointer("/assay/embeddings/response").is_some()
-            && resp.meta.pointer("/assay/embeddings/reference").is_some()
-        {
-            return Ok(());
-        }
-
-        if self.policy.replay_strict {
-            anyhow::bail!("config error: --replay-strict is on, but embeddings are missing in trace. Run 'assay trace precompute-embeddings' or disable strict mode.");
-        }
-
-        let embedder = self.embedder.as_ref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "config error: semantic_similarity_to requires an embedder (--embedder) or trace meta embeddings"
-            )
-        })?;
-
-        let model_id = embedder.model_id();
-
-        let (resp_vec, src_resp) = self
-            .embed_text(&model_id, embedder.as_ref(), &resp.text)
-            .await?;
-        let (ref_vec, src_ref) = self
-            .embed_text(&model_id, embedder.as_ref(), semantic_similarity_to)
-            .await?;
-
-        // write into meta.assay.embeddings
-        if !resp.meta.get("assay").is_some_and(|v| v.is_object()) {
-            resp.meta["assay"] = serde_json::json!({});
-        }
-        resp.meta["assay"]["embeddings"] = serde_json::json!({
-            "model": model_id,
-            "response": resp_vec,
-            "reference": ref_vec,
-            "source_response": src_resp,
-            "source_reference": src_ref
-        });
-
-        Ok(())
+        runner_next::scoring::enrich_semantic_impl(self, _cfg, tc, resp).await
     }
 
     pub async fn embed_text(
@@ -755,19 +304,7 @@ impl Runner {
         embedder: &dyn crate::providers::embedder::Embedder,
         text: &str,
     ) -> anyhow::Result<(Vec<f32>, &'static str)> {
-        use crate::embeddings::util::embed_cache_key;
-
-        let key = embed_cache_key(model_id, text);
-
-        if !self.refresh_embeddings {
-            if let Some((_m, vec)) = self.store.get_embedding(&key)? {
-                return Ok((vec, "cache"));
-            }
-        }
-
-        let vec = embedder.embed(text).await?;
-        self.store.put_embedding(&key, model_id, &vec)?;
-        Ok((vec, "live"))
+        runner_next::cache::embed_text_impl(self, model_id, embedder, text).await
     }
 
     async fn enrich_judge(
@@ -776,54 +313,7 @@ impl Runner {
         tc: &TestCase,
         resp: &mut LlmResponse,
     ) -> anyhow::Result<()> {
-        use crate::model::Expected;
-
-        let (rubric_id, rubric_version) = match &tc.expected {
-            Expected::Faithfulness { rubric_version, .. } => {
-                ("faithfulness", rubric_version.as_deref())
-            }
-            Expected::Relevance { rubric_version, .. } => ("relevance", rubric_version.as_deref()),
-            _ => return Ok(()),
-        };
-
-        // Check if judge result exists in meta is handled by JudgeService::evaluate
-        // BUT for a better error message in strict mode we can check here too or rely on the StrictLlmClient failure.
-        // User requested: "judge guard ... missing judge result in trace meta ... run precompute-judge"
-
-        let has_trace = resp
-            .meta
-            .pointer(&format!("/assay/judge/{}", rubric_id))
-            .is_some();
-        if self.policy.replay_strict && !has_trace {
-            anyhow::bail!("config error: --replay-strict is on, but judge results are missing in trace for '{}'. Run 'assay trace precompute-judge' or disable strict mode.", rubric_id);
-        }
-
-        let judge = self.judge.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("config error: judge required but service not initialized")
-        })?;
-
-        // E7.2: Derive stable per-test seed from suite seed + test ID
-        let test_seed = cfg.settings.seed.map(|s: u64| {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            s.hash(&mut hasher);
-            tc.id.hash(&mut hasher);
-            hasher.finish()
-        });
-
-        judge
-            .evaluate(
-                &tc.id,
-                rubric_id,
-                &tc.input,
-                &resp.text,
-                rubric_version,
-                &mut resp.meta,
-                test_seed,
-            )
-            .await?;
-
-        Ok(())
+        runner_next::scoring::enrich_judge_impl(self, cfg, tc, resp).await
     }
 }
 
