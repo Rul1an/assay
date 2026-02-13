@@ -56,13 +56,13 @@ count_in_ref() {
   local ref="$1"
   local file="$2"
   local pattern="$3"
-  git show "${ref}:${file}" | strip_code_only /dev/stdin | "$rg_bin" -n "$pattern" || true
+  git show "${ref}:${file}" | strip_code_only /dev/stdin | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
 }
 
 count_in_worktree() {
   local file="$1"
   local pattern="$2"
-  strip_code_only "$file" | "$rg_bin" -n "$pattern" || true
+  strip_code_only "$file" | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
 }
 
 check_no_increase() {

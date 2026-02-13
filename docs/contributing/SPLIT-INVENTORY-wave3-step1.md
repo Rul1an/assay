@@ -55,13 +55,13 @@ count_in_ref() {
   local ref="$1"
   local file="$2"
   local pattern="$3"
-  git show "${ref}:${file}" | awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' | "$rg_bin" -n "$pattern" || true
+  git show "${ref}:${file}" | awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
 }
 
 count_in_worktree() {
   local file="$1"
   local pattern="$2"
-  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -n "$pattern" || true
+  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -v '^[[:space:]]*//' | "$rg_bin" -n "$pattern" || true
 }
 
 check_no_increase() {
