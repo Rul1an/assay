@@ -52,6 +52,10 @@ check_no_increase "panic!\\(|todo!\\(|unimplemented!\\(" "monitor panic/todo/uni
 Known limitation:
 - The code-only filter in Step 1 is best-effort for `#[cfg(test)] mod tests { ... }` blocks.
 - It will be replaced by stricter path/module-level filtering once tests are externalized in later wave steps.
+- Drift gates are conservative: false positives are acceptable, false negatives are possible until tests are externalized.
+
+Logging note:
+- Step 1 intentionally enforces no-increase only for `println!/eprintln!`; log cleanup/reduction is out of scope for this step.
 
 ## Required contract tests
 

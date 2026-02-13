@@ -80,6 +80,9 @@ check_no_increase() {
 }
 
 echo "== Wave3 Step1 quality checks =="
+echo "using base_ref=${base_ref}"
+# Drift gates are conservative: false positives are acceptable, false negatives
+# are possible until tests are externalized from hotspot files.
 cargo fmt --check
 cargo clippy -p assay-cli -p assay-core --all-targets -- -D warnings
 cargo check -p assay-cli -p assay-core
