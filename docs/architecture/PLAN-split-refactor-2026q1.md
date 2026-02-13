@@ -121,22 +121,34 @@ Security improvements:
 Target structure:
 
 ```text
-bundle/writer/
+bundle/writer_next/
   mod.rs
+  write.rs
+  verify.rs
   manifest.rs
   events.rs
-  tar_io.rs
+  tar_write.rs
+  tar_read.rs
   limits.rs
-  verify.rs
   errors.rs
-  tests/
+  tests.rs
 ```
 
 Contract boundaries:
 
-- `tar_io.rs`: deterministic archive encoding only.
+- `write.rs`: BundleWriter write orchestration only (no verify-path decisions).
+- `verify.rs`: verify orchestration only (no write-path orchestration).
+- `tar_write.rs`: deterministic archive encoding only.
+- `tar_read.rs`: tar/gzip read + safe iteration helpers only.
 - `limits.rs`: single source of truth for max sizes and bounded readers.
 - `events.rs`: NDJSON normalization/canonicalization rules only.
+- `errors.rs`: typed errors/codes and mapping helpers only (no parsing/IO ownership).
+
+Execution discipline:
+
+- Step 3 Commit A/B/C are mechanical split + docs/gates only.
+- No perf tuning or behavior changes in mechanical commits.
+- Perf work lands only in a follow-up step after mechanical split is merged.
 
 Performance improvements:
 
