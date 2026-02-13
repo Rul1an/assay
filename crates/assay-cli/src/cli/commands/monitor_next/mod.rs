@@ -19,7 +19,6 @@ pub(crate) mod errors;
 pub(crate) mod events;
 #[cfg(target_os = "linux")]
 pub(crate) mod normalize;
-#[cfg(target_os = "linux")]
 pub(crate) mod output;
 #[cfg(target_os = "linux")]
 pub(crate) mod rules;
@@ -27,11 +26,24 @@ pub(crate) mod rules;
 pub(crate) mod syscall_linux;
 pub(crate) mod tests;
 
+#[cfg(target_os = "linux")]
+macro_rules! emit_out {
+    ($($arg:tt)*) => {
+        output::out(format!($($arg)*))
+    };
+}
+
+macro_rules! emit_err {
+    ($($arg:tt)*) => {
+        output::err(format!($($arg)*))
+    };
+}
+
 pub(crate) async fn run(args: super::MonitorArgs) -> anyhow::Result<i32> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = args;
-        eprintln!("Error: 'assay monitor' is only supported on Linux.");
+        emit_err!("Error: 'assay monitor' is only supported on Linux.");
         Ok(40)
     }
 
@@ -53,7 +65,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         if let Some(rm) = p.runtime_monitor {
             if !rm.enabled {
                 if !args.quiet {
-                    eprintln!("Runtime monitor disabled by policy.");
+                    emit_err!("Runtime monitor disabled by policy.");
                 }
                 return Ok(0);
             }
@@ -68,32 +80,32 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     };
 
     if !ebpf_path.exists() {
-        eprintln!("Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>", ebpf_path.display());
+        emit_err!("Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>", ebpf_path.display());
         return Ok(40);
     }
 
     let mut monitor = match Monitor::load_file(&ebpf_path) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("Failed to load eBPF: {}", e);
+            emit_err!("Failed to load eBPF: {}", e);
             return Ok(40);
         }
     };
 
     if args.monitor_all {
         if !args.quiet {
-            println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
+            emit_out!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
         }
         monitor.set_monitor_all(true)?;
 
         let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
-        println!(
+        emit_out!(
             "DEBUG: CONFIG[{}]={} confirmed",
             assay_common::KEY_MONITOR_ALL,
             v
         );
         if v != 1 {
-            eprintln!(
+            emit_err!(
                 "❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)",
                 assay_common::KEY_MONITOR_ALL
             );
@@ -103,39 +115,39 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     if !args.pid.is_empty() {
         if let Err(e) = monitor.set_monitored_pids(&args.pid) {
-            eprintln!("Warning: Failed to populate PID map: {}", e);
+            emit_err!("Warning: Failed to populate PID map: {}", e);
         }
 
         let mut cgroups = Vec::new();
         for &pid in &args.pid {
             match normalize::resolve_cgroup_id(pid) {
                 Ok(id) => cgroups.push(id),
-                Err(e) => eprintln!("Warning: Failed to resolve cgroup for PID {}: {}", pid, e),
+                Err(e) => emit_err!("Warning: Failed to resolve cgroup for PID {}: {}", pid, e),
             }
         }
 
         if !cgroups.is_empty() {
             if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
-                eprintln!("Error: Failed to populate Cgroup map: {}", e);
+                emit_err!("Error: Failed to populate Cgroup map: {}", e);
                 return Ok(40);
             }
             if !args.quiet {
-                eprintln!("Monitored Cgroups: {:?}", cgroups);
+                emit_err!("Monitored Cgroups: {:?}", cgroups);
             }
         } else {
-            eprintln!("Warning: No valid cgroups resolved. Rules will not match.");
+            emit_err!("Warning: No valid cgroups resolved. Rules will not match.");
         }
     }
 
     if let Err(e) = monitor.attach() {
-        eprintln!("Failed to attach probes: {}", e);
+        emit_err!("Failed to attach probes: {}", e);
         return Ok(40);
     }
 
     if !args.quiet {
-        eprintln!("Assay Monitor running. Press Ctrl-C to stop.");
+        emit_err!("Assay Monitor running. Press Ctrl-C to stop.");
         if !args.pid.is_empty() {
-            eprintln!("Monitoring PIDs: {:?}", args.pid);
+            emit_err!("Monitoring PIDs: {:?}", args.pid);
         }
     }
 
@@ -200,7 +212,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
+                    emit_err!("Warning: Invalid path encoding {} ({})", rule.path, e);
                     continue;
                 }
             };
@@ -212,16 +224,17 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     if e.kind() == std::io::ErrorKind::Unsupported
                         || e.raw_os_error() == Some(libc::ENOSYS)
                     {
-                        eprintln!(
+                        emit_err!(
                             "Warning: Strict open (openat2) unavailable on this system, using O_PATH fallback for {}",
                             rule.path
                         );
                         match syscall_linux::open_path_no_symlink(&c_path) {
                             Ok(fd) => fd,
                             Err(err) => {
-                                eprintln!(
+                                emit_err!(
                                     "Warning: Fallback open failed for {}: {}",
-                                    rule.path, err
+                                    rule.path,
+                                    err
                                 );
                                 continue;
                             }
@@ -229,10 +242,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     } else if e.raw_os_error() == Some(libc::ELOOP)
                         || e.raw_os_error() == Some(libc::EXDEV)
                     {
-                        eprintln!("Warning: Strict open blocked access to {} (Symlink/Breakout detected): {}", rule.path, e);
+                        emit_err!("Warning: Strict open blocked access to {} (Symlink/Breakout detected): {}", rule.path, e);
                         continue;
                     } else {
-                        eprintln!("Warning: Failed to open denied path {}: {}", rule.path, e);
+                        emit_err!("Warning: Failed to open denied path {}: {}", rule.path, e);
                         continue;
                     }
                 }
@@ -242,9 +255,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 Ok(stat) => stat,
                 Err(e) => {
                     syscall_linux::close_fd(guard_fd);
-                    eprintln!(
+                    emit_err!(
                         "Warning: Could not fstat denied path {} (skipping): {}",
-                        rule.path, e
+                        rule.path,
+                        e
                     );
                     continue;
                 }
@@ -257,9 +271,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     if eno == libc::ENOTTY || eno == libc::EINVAL {
                         0
                     } else {
-                        eprintln!(
+                        emit_err!(
                             "Warning: Could not get inode generation for {} (using gen=0): {}",
-                            rule.path, e
+                            rule.path,
+                            e
                         );
                         0
                     }
@@ -275,9 +290,15 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             if !args.quiet {
                 let maj = libc::major(stat.st_dev);
                 let min = libc::minor(stat.st_dev);
-                eprintln!(
+                emit_err!(
                     "Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={} gen={}",
-                    rule.path, dev, maj, min, kernel_dev, ino, gen
+                    rule.path,
+                    dev,
+                    maj,
+                    min,
+                    kernel_dev,
+                    ino,
+                    gen
                 );
             }
 
@@ -292,18 +313,18 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         compiled.tier1.inode_deny_exact.extend(inode_rules);
 
         if !args.quiet {
-            eprintln!("Locked & Loaded Assurance Policy 🛡️");
-            eprintln!("  • Tier 1 (Kernel): {} rules", compiled.stats.tier1_rules);
-            eprintln!("  • Tier 2 (User):   {} rules", compiled.stats.tier2_rules);
+            emit_err!("Locked & Loaded Assurance Policy 🛡️");
+            emit_err!("  • Tier 1 (Kernel): {} rules", compiled.stats.tier1_rules);
+            emit_err!("  • Tier 2 (User):   {} rules", compiled.stats.tier2_rules);
             if !compiled.stats.warnings.is_empty() {
                 for w in &compiled.stats.warnings {
-                    eprintln!("    ⚠️  {}", w);
+                    emit_err!("    ⚠️  {}", w);
                 }
             }
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
-            eprintln!(
+            emit_err!(
                 "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
                 e
             );
@@ -320,11 +341,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                if !args.quiet { eprintln!("\nStopping monitor..."); }
+                if !args.quiet { emit_err!("\nStopping monitor..."); }
                 break;
             }
             _ = &mut timeout => {
-                if !args.quiet { eprintln!("\nDuration expired."); }
+                if !args.quiet { emit_err!("\nDuration expired."); }
                 break;
             }
             event_res = stream.next() => {
@@ -333,10 +354,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                         events::handle_event(&event, &args, &rules, kill_config.as_ref()).await;
                     }
                     Some(Err(e)) => {
-                        eprintln!("Monitor stream error: {}", e);
+                        emit_err!("Monitor stream error: {}", e);
                     }
                     None => {
-                        eprintln!("Stream channel closed.");
+                        emit_err!("Stream channel closed.");
                         break;
                     }
                 }

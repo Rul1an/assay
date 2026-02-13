@@ -55,7 +55,10 @@ pub(crate) fn compile_active_rules(
                     });
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
+                    output::err(format!(
+                        "Warning: Failed to compile glob for rule {}: {}",
+                        r.id, e
+                    ));
                 }
             }
         }

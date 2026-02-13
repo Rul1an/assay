@@ -2,6 +2,15 @@
 use crate::cli::commands::monitor::MonitorArgs;
 
 #[cfg(target_os = "linux")]
+pub(crate) fn out(message: impl AsRef<str>) {
+    println!("{}", message.as_ref());
+}
+
+pub(crate) fn err(message: impl AsRef<str>) {
+    eprintln!("{}", message.as_ref());
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn decode_utf8_cstr(data: &[u8]) -> String {
     let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
     String::from_utf8_lossy(&data[..end]).to_string()
