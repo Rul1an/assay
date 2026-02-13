@@ -12,10 +12,10 @@ Scope lock:
 
 ## HEAD snapshot
 
-- commit: `9587f5e9f10260a08099e91657b2ceb17b0dcc6c`
+- commit: `6948bcbd930c604cd9e3619e09e8cf04826d1255`
 - LOC:
-  - `runner.rs`: 1042
-  - `mandate_store.rs`: 1046
+  - `runner.rs`: 1171
+  - `mandate_store.rs`: 1055
 
 ## Public entrypoints (current)
 
@@ -45,18 +45,20 @@ Scope lock:
 - `pub struct MandateStore`
 - `pub struct RevocationRecord`
 
-## Baseline drift counters (Step 1)
+## Baseline drift counters (Step 1, code-only)
+
+Counters below exclude the `#[cfg(test)]` block in each file.
 
 Current counts:
 - `runner.rs`
   - `unwrap(`: 0
-  - `expect(`: 8
+  - `expect(`: 0
   - `unsafe`: 0
   - `println!/eprintln!`: 2
   - `std::process::Command`: 0
   - `tokio::spawn`: 0
 - `mandate_store.rs`
-  - `unwrap(`: 84
+  - `unwrap(`: 7
   - `expect(`: 0
   - `unsafe`: 0
   - `println!/eprintln!`: 0
@@ -69,18 +71,19 @@ Current counts:
 set -euo pipefail
 
 base_ref="origin/main"
+rg_bin="$(command -v rg)"
 
 count_in_ref() {
   local ref="$1"
   local file="$2"
   local pattern="$3"
-  git show "${ref}:${file}" | $(command -v rg) -n "$pattern" | wc -l | tr -d ' '
+  git show "${ref}:${file}" | awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' | "$rg_bin" -n "$pattern" || true
 }
 
 count_in_worktree() {
   local file="$1"
   local pattern="$2"
-  $(command -v rg) -n "$pattern" "$file" | wc -l | tr -d ' '
+  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -n "$pattern" || true
 }
 
 check_no_increase() {
@@ -88,8 +91,8 @@ check_no_increase() {
   local pattern="$2"
   local label="$3"
   local before after
-  before="$(count_in_ref "$base_ref" "$file" "$pattern")"
-  after="$(count_in_worktree "$file" "$pattern")"
+  before="$(count_in_ref "$base_ref" "$file" "$pattern" | wc -l | tr -d ' ')"
+  after="$(count_in_worktree "$file" "$pattern" | wc -l | tr -d ' ')"
   echo "$label: before=$before after=$after"
   if [ "$after" -gt "$before" ]; then
     echo "drift gate failed: $label increased"

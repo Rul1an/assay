@@ -170,7 +170,7 @@ Security improvements:
 
 Step status:
 
-- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave2-step1-behavior-freeze`.
+- Step 1 (behavior freeze + inventory + drift gates): implemented on `codex/wave2-step1-behavior-freeze` (inventory, contract tests, checklists, reviewer script).
 - Step 2 (mechanical split): pending after Step 1 review/merge.
 
 ### A. `crates/assay-core/src/engine/runner.rs`
