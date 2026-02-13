@@ -298,8 +298,8 @@ Security improvements:
 
 Step status:
 
-- Step 1 (`lockfile.rs` + `cache.rs` behavior freeze/inventory/gates): in progress on `codex/wave4-step1-registry-freeze`.
-- Step 2 (`lockfile.rs` + `cache.rs` mechanical split): pending after Step 1 merge.
+- Step 1 (`lockfile.rs` + `cache.rs` behavior freeze/inventory/gates): merged via PR #339.
+- Step 2 (`lockfile.rs` + `cache.rs` mechanical split): in progress on `codex/wave4-step2-lockfile-cache-split`.
 - `explain.rs` follows as a separate slice to keep review size and blast radius small.
 
 ### Objectives
