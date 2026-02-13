@@ -168,6 +168,11 @@ Security improvements:
 
 ## Wave 2: Runtime decomposition (`runner.rs`, `mandate_store.rs`)
 
+Step status:
+
+- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave2-step1-behavior-freeze`.
+- Step 2 (mechanical split): pending after Step 1 review/merge.
+
 ### A. `crates/assay-core/src/engine/runner.rs`
 
 Target structure:
