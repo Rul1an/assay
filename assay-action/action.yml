@@ -283,12 +283,48 @@ runs:
         fi
 
         DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
+        CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
         echo "Downloading Assay ${VERSION} for ${TARGET}..."
 
-        # Download to temp dir first to handle variable archive structure
+        # Download and verify checksum before extraction.
         TEMP_DIR=$(mktemp -d)
-        if ! curl -fsSL "$DOWNLOAD_URL" | tar xz -C "$TEMP_DIR"; then
-          echo "::error::Failed to download/extract Assay from $DOWNLOAD_URL"
+        ARCHIVE_PATH="${TEMP_DIR}/assay.tar.gz"
+        CHECKSUM_PATH="${TEMP_DIR}/assay.tar.gz.sha256"
+
+        if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"; then
+          echo "::error::Failed to download Assay archive from $DOWNLOAD_URL"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        fi
+        if ! curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
+          echo "::error::Failed to download checksum from $CHECKSUM_URL"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        fi
+
+        EXPECTED_HASH=$(awk '{print $1}' "$CHECKSUM_PATH" | head -n 1 | tr -d '\r\n')
+        if [ -z "$EXPECTED_HASH" ]; then
+          echo "::error::Checksum file is empty or invalid: $CHECKSUM_URL"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        fi
+
+        if command -v sha256sum >/dev/null 2>&1; then
+          ACTUAL_HASH=$(sha256sum "$ARCHIVE_PATH" | awk '{print $1}')
+        else
+          ACTUAL_HASH=$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')
+        fi
+
+        if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+          echo "::error::Checksum mismatch for $DOWNLOAD_URL"
+          echo "Expected: $EXPECTED_HASH"
+          echo "Actual:   $ACTUAL_HASH"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        fi
+
+        if ! tar xzf "$ARCHIVE_PATH" -C "$TEMP_DIR"; then
+          echo "::error::Failed to extract Assay archive from $DOWNLOAD_URL"
           rm -rf "$TEMP_DIR"
           exit 1
         fi
