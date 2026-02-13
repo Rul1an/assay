@@ -138,7 +138,7 @@ check_only_file_matches "attempts\\.push\\(" \
   "runner_next/retry.rs"
 
 # Mandate store: transaction control is single-source in txn.rs
-check_only_file_matches "BEGIN IMMEDIATE|\\bCOMMIT\\b|\\bROLLBACK\\b|transaction\\(" \
+check_only_file_matches "BEGIN IMMEDIATE|\\bCOMMIT\\b|\\bROLLBACK\\b|transaction\\(|\\bTransaction\\b" \
   crates/assay-core/src/runtime/mandate_store_next \
   "mandate_store_next/txn.rs"
 

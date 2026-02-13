@@ -53,7 +53,7 @@ check_only_file_matches "attempts\\.push\\(" \
   crates/assay-core/src/engine/runner_next \
   "runner_next/retry.rs"
 
-check_only_file_matches "BEGIN IMMEDIATE|\\bCOMMIT\\b|\\bROLLBACK\\b|transaction\\(" \
+check_only_file_matches "BEGIN IMMEDIATE|\\bCOMMIT\\b|\\bROLLBACK\\b|transaction\\(|\\bTransaction\\b" \
   crates/assay-core/src/runtime/mandate_store_next \
   "mandate_store_next/txn.rs"
 
