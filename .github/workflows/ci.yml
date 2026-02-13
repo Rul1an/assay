@@ -289,7 +289,7 @@ jobs:
     name: Fix self-hosted _actions (for eBPF job)
     needs: [test]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 2
     steps:
       - name: Nuke _actions cache (force fresh download for next job)
@@ -313,7 +313,7 @@ jobs:
     name: eBPF monitor smoke (Linux - Self-Hosted)
     needs: [test, prep-self-hosted-actions-perms]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 60
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-self-hosted
