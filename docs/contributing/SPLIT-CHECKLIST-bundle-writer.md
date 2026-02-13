@@ -34,6 +34,7 @@ rg -n "pub struct BundleWriter|verify_bundle" crates/assay-evidence/src/bundle -
   - path traversal => `ErrorClass::Security` + `ErrorCode::SecurityPathTraversal`
   - max events exceeded => `ErrorClass::Limits` + `ErrorCode::LimitTotalEvents`
   - file size limit exceeded => `ErrorClass::Limits` + `ErrorCode::LimitFileSize`
+- `ErrorClass`/`ErrorCode` are the compatibility contract; message strings are non-contract.
 - Manifest/events order is strict (`manifest.json` first, then `events.ndjson`).
 
 ## Boundary contract for split target

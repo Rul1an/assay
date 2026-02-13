@@ -1450,6 +1450,35 @@ mod tests {
     }
 
     #[test]
+    fn test_bundle_bytes_change_when_event_payload_changes() {
+        let mut baseline = Vec::new();
+        {
+            let mut writer = BundleWriter::new(&mut baseline);
+            writer.add_event(create_event(0));
+            writer.add_event(create_event(1));
+            writer.finish().unwrap();
+        }
+
+        let mut variant = Vec::new();
+        {
+            let mut writer = BundleWriter::new(&mut variant);
+            writer.add_event(create_event(0));
+
+            let mut changed = create_event(1);
+            changed.payload = serde_json::json!({"seq": 1, "variant": "changed"});
+            changed.content_hash = None;
+            writer.add_event(changed);
+
+            writer.finish().unwrap();
+        }
+
+        assert_ne!(
+            baseline, variant,
+            "changing event payload must change deterministic bundle bytes"
+        );
+    }
+
+    #[test]
     fn test_verify_unexpected_file_has_stable_contract_code() {
         let manifest = Manifest {
             schema_version: 1,

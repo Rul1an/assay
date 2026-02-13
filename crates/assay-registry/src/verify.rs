@@ -1194,6 +1194,18 @@ mod tests {
         let trust_store = TrustStore::new();
         let options = VerifyOptions::default();
 
+        let reason_bucket = |reason: &str| -> &'static str {
+            if reason.starts_with("invalid base64 envelope:") {
+                "invalid_base64_envelope"
+            } else if reason.starts_with("invalid DSSE envelope:") {
+                "invalid_dsse_envelope"
+            } else if reason.starts_with("invalid base64 payload:") {
+                "invalid_base64_payload"
+            } else {
+                "other_signature_invalid"
+            }
+        };
+
         let err1 = verify_pack(&fetch, &trust_store, &options).unwrap_err();
         let err2 = verify_pack(&fetch, &trust_store, &options).unwrap_err();
 
@@ -1202,11 +1214,20 @@ mod tests {
                 RegistryError::SignatureInvalid { reason: r1 },
                 RegistryError::SignatureInvalid { reason: r2 },
             ) => {
-                assert_eq!(r1, r2, "same malformed input must yield stable reason");
+                assert_eq!(
+                    reason_bucket(&r1),
+                    reason_bucket(&r2),
+                    "same malformed input must map to same reason bucket"
+                );
                 assert!(
                     r1.starts_with("invalid base64 envelope:"),
                     "reason prefix must stay contract-stable, got: {}",
                     r1
+                );
+                assert!(
+                    r2.starts_with("invalid base64 envelope:"),
+                    "reason prefix must stay contract-stable, got: {}",
+                    r2
                 );
             }
             (left, right) => panic!("expected SignatureInvalid pair, got {left:?} and {right:?}"),

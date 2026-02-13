@@ -37,6 +37,7 @@ rg -n "pub struct BundleWriter|verify_bundle" crates/assay-evidence/src/bundle -
   - `allow_unsigned=true` => success with `signed=false`
   - `skip_signature=true` => success path without DSSE parse/verify
 - malformed signature reason remains deterministic for identical input.
+- assertions are contract-first on variant/exit-code; message text is non-contract except stable prefix buckets.
 
 ## Boundary contract for split target
 
