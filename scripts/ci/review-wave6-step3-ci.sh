@@ -18,6 +18,7 @@ echo "BASE_REF=${base_ref} sha=$(git rev-parse "${base_ref}")"
 echo "HEAD sha=$(git rev-parse HEAD)"
 
 rg_bin="$(command -v rg)"
+wf_file=".github/workflows/wave6-nightly-safety.yml"
 
 check_has_match() {
   local pattern="$1"
@@ -32,18 +33,20 @@ check_has_match() {
   fi
 }
 
-echo "== Wave6 Step1 baseline anchor checks =="
-check_has_match 'attestation_conditional:' .github/workflows/action-tests.yml
-check_has_match 'name:[[:space:]]+Wave 0 feature matrix' .github/workflows/split-wave0-gates.yml
-check_has_match 'cargo nextest run -p assay-registry --all-features' .github/workflows/split-wave0-gates.yml
-check_has_match 'cargo hack' .github/workflows/split-wave0-gates.yml
-check_has_match 'cargo install --locked cargo-semver-checks' .github/workflows/split-wave0-gates.yml
-check_has_match '-D clippy::todo -D clippy::unimplemented' .github/workflows/split-wave0-gates.yml
-check_has_match 'id-token:[[:space:]]+write' .github/workflows/release.yml
+echo "== Wave6 Step3 nightly lane checks =="
+check_has_match '^name:[[:space:]]+Wave6 Nightly Safety' "$wf_file"
+check_has_match '^on:' "$wf_file"
+check_has_match 'schedule:' "$wf_file"
+check_has_match 'workflow_dispatch:' "$wf_file"
+check_has_match 'miri-registry-smoke:' "$wf_file"
+check_has_match 'proptest-cli-smoke:' "$wf_file"
+check_has_match 'continue-on-error:[[:space:]]+true' "$wf_file"
+check_has_match 'cargo miri test -p assay-registry test_verify_pack_fail_closed_matrix_contract' "$wf_file"
+check_has_match 'cargo test -p assay-cli test_roundtrip_property' "$wf_file"
 
-echo "== Wave6 Step1 diff allowlist =="
+echo "== Wave6 Step3 diff allowlist =="
 leaks="$($rg_bin -v \
-  '^docs/contributing/SPLIT-(INVENTORY|CHECKLIST|REVIEW-PACK)-wave6-step1-ci\.md$|^scripts/ci/review-wave6-step1-ci\.sh$|^docs/architecture/PLAN-split-refactor-2026q1\.md$' \
+  '^\.github/workflows/wave6-nightly-safety\.yml$|^docs/contributing/SPLIT-(INVENTORY|CHECKLIST|REVIEW-PACK)-wave6-step3-nightly\.md$|^scripts/ci/review-wave6-step3-ci\.sh$|^docs/architecture/PLAN-split-refactor-2026q1\.md$' \
   < <(git diff --name-only "${base_ref}...HEAD") || true)"
 if [ -n "${leaks}" ]; then
   echo "non-allowlisted files detected:"
@@ -51,4 +54,4 @@ if [ -n "${leaks}" ]; then
   exit 1
 fi
 
-echo "Wave6 Step1 reviewer script: PASS"
+echo "Wave6 Step3 reviewer script: PASS"
