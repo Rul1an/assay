@@ -10,7 +10,7 @@ use crate::trust::TrustStore;
 use crate::types::FetchResult;
 
 use super::super::{VerifyOptions, VerifyResult};
-use super::dsse::{canonicalize_for_dsse_impl, verify_dsse_signature_bytes_impl};
+use super::dsse::verify_dsse_signature_impl;
 use super::wire::parse_dsse_envelope_impl;
 
 pub(crate) fn verify_pack_impl(
@@ -52,12 +52,11 @@ pub(crate) fn verify_pack_impl(
         });
     }
 
-    let canonical_bytes = canonicalize_for_dsse_impl(&result.content)?;
     let sig_b64 = signature
         .as_ref()
         .expect("signature presence already checked in policy");
     let envelope = parse_dsse_envelope_impl(sig_b64)?;
-    verify_dsse_signature_bytes_impl(&canonical_bytes, &envelope, trust_store)?;
+    verify_dsse_signature_impl(&result.content, &envelope, trust_store)?;
 
     Ok(VerifyResult {
         signed: true,
