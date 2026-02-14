@@ -643,6 +643,26 @@ mod tests {
         (envelope, key_id)
     }
 
+    fn make_fetch_result(
+        content: &str,
+        digest: Option<String>,
+        signature: Option<String>,
+        key_id: Option<String>,
+    ) -> FetchResult {
+        FetchResult {
+            content: content.to_string(),
+            headers: crate::types::PackHeaders {
+                digest,
+                signature,
+                key_id,
+                etag: None,
+                cache_control: None,
+                content_length: None,
+            },
+            computed_digest: compute_digest(content),
+        }
+    }
+
     #[test]
     fn test_dsse_valid_signature_real_ed25519() {
         // SPEC §6.3.4: Valid DSSE with real Ed25519 signature
@@ -862,6 +882,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_verify_pack_fail_closed_matrix_contract() {
+        let trust_store = TrustStore::new();
+        let content = "name: test-pack\nversion: \"1.0.0\"\nrules: []";
+        let digest = compute_digest(content);
+
+        let unsigned = make_fetch_result(content, Some(digest.clone()), None, None);
+
+        // Unsigned is rejected by default.
+        let err_unsigned_default = verify_pack(&unsigned, &trust_store, &VerifyOptions::default())
+            .expect_err("unsigned pack must fail closed by default");
+        assert!(matches!(
+            err_unsigned_default,
+            RegistryError::Unsigned { .. }
+        ));
+
+        // Unsigned may pass only when explicitly allowed.
+        let allowed = verify_pack(
+            &unsigned,
+            &trust_store,
+            &VerifyOptions::default().allow_unsigned(),
+        )
+        .expect("allow_unsigned should permit unsigned input");
+        assert!(!allowed.signed);
+        assert!(allowed.key_id.is_none());
+        assert_eq!(allowed.digest, digest);
+
+        // Digest mismatch must still fail closed even when allow_unsigned is enabled.
+        let mismatch = make_fetch_result(
+            content,
+            Some(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            ),
+            None,
+            None,
+        );
+        let err_mismatch = verify_pack(
+            &mismatch,
+            &trust_store,
+            &VerifyOptions::default().allow_unsigned(),
+        )
+        .expect_err("digest mismatch must fail closed before signature policy");
+        assert!(matches!(err_mismatch, RegistryError::DigestMismatch { .. }));
+    }
+
+    #[test]
+    fn test_verify_pack_malformed_signature_reason_is_stable() {
+        let trust_store = TrustStore::new();
+        let content = "name: malformed-signature\nversion: \"1.0.0\"";
+        let digest = compute_digest(content);
+        let malformed = make_fetch_result(
+            content,
+            Some(digest),
+            Some("not base64 envelope".to_string()),
+            None,
+        );
+
+        let err = verify_pack(&malformed, &trust_store, &VerifyOptions::default())
+            .expect_err("malformed signature header must fail closed");
+        match err {
+            RegistryError::SignatureInvalid { reason } => {
+                assert!(
+                    reason.starts_with("invalid base64 envelope:"),
+                    "reason prefix drifted: {reason}"
+                );
+            }
+            other => panic!("expected SignatureInvalid for malformed signature, got {other:?}"),
+        }
+    }
+
     // ==================== P0 Fix: Canonical Bytes Verification Tests ====================
 
     #[test]
@@ -916,6 +1007,56 @@ mod tests {
         assert!(
             result.is_ok(),
             "verify_pack should canonicalize content before DSSE verification: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_verify_pack_canonicalization_equivalent_yaml_variants_contract() {
+        // Equivalent YAML representations must verify identically after canonicalization.
+        let seed: [u8; 32] = [0x90; 32];
+        let signing_key = keypair_from_seed(seed);
+
+        let source_yaml = "z: 3\na: 1\nm: 2";
+        let variant_yaml = "a: 1\nm: 2\nz: 3\n";
+        assert_eq!(compute_digest(source_yaml), compute_digest(variant_yaml));
+
+        let source_canonical = canonicalize_for_dsse(source_yaml).unwrap();
+        let variant_canonical = canonicalize_for_dsse(variant_yaml).unwrap();
+        assert_eq!(source_canonical, variant_canonical);
+
+        let (envelope, key_id) = create_signed_envelope(&signing_key, source_yaml);
+
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        let fetch_result = make_fetch_result(
+            variant_yaml,
+            Some(compute_digest(variant_yaml)),
+            Some(BASE64.encode(serde_json::to_vec(&envelope).unwrap())),
+            envelope.signatures.first().map(|s| s.key_id.clone()),
+        );
+
+        let result = verify_pack(&fetch_result, &trust_store, &VerifyOptions::default());
+        assert!(
+            result.is_ok(),
+            "canonical-equivalent YAML variant should verify: {:?}",
             result
         );
     }
