@@ -1,12 +1,8 @@
-#[cfg(target_os = "linux")]
-use crate::exit_codes;
 use clap::Args;
 use std::path::PathBuf;
 
-#[cfg(target_os = "linux")]
-use assay_common::encode_kernel_dev;
-#[cfg(target_os = "linux")]
-use tokio_stream::StreamExt;
+#[path = "monitor_next/mod.rs"]
+mod monitor_next;
 
 #[derive(Args, Debug, Clone)]
 #[command(
@@ -65,718 +61,7 @@ pub struct MonitorArgs {
 }
 
 pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = args;
-        eprintln!("Error: 'assay monitor' is only supported on Linux.");
-        Ok(40) // MONITOR_NOT_SUPPORTED code
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        run_linux(args).await
-    }
-}
-
-#[cfg(target_os = "linux")]
-#[derive(Debug)]
-struct ActiveRule {
-    id: String,
-    action: assay_core::mcp::runtime_features::MonitorAction,
-
-    // NOTE: Despite the name, `allow` represents the set of glob patterns whose
-    // matches cause this rule to fire (i.e., be treated as a violation). A path
-    // that matches `allow` and is *not* matched by `deny` will trigger the rule.
-    allow: globset::GlobSet,
-    deny: Option<globset::GlobSet>, // for match.not
-}
-
-#[cfg(target_os = "linux")]
-fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobSet> {
-    let mut b = globset::GlobSetBuilder::new();
-    for g in globs {
-        b.add(globset::Glob::new(g)?);
-    }
-    Ok(b.build()?)
-}
-
-#[cfg(target_os = "linux")]
-fn normalize_path_syntactic(input: &str) -> String {
-    // Syntactic normalization (no filesystem canonicalize -> less TOCTOU)
-    // - collapse '//' -> '/'
-    // - remove '/./'
-    // - resolve '/../' in-place
-    let is_absolute = input.starts_with('/');
-    let mut parts = Vec::new();
-    for part in input.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            x => parts.push(x),
-        }
-    }
-    if is_absolute {
-        if parts.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{}", parts.join("/"))
-        }
-    } else {
-        parts.join("/")
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn kill_pid(pid: u32, mode: assay_core::mcp::runtime_features::KillMode, grace_ms: u64) {
-    unsafe {
-        libc::kill(
-            pid as i32,
-            if mode == assay_core::mcp::runtime_features::KillMode::Immediate {
-                libc::SIGKILL
-            } else {
-                libc::SIGTERM
-            },
-        );
-    }
-    if mode == assay_core::mcp::runtime_features::KillMode::Graceful {
-        tokio::time::sleep(std::time::Duration::from_millis(grace_ms)).await;
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn compile_active_rules(
-    runtime_config: Option<&assay_core::mcp::runtime_features::RuntimeMonitorConfig>,
-) -> Vec<ActiveRule> {
-    let mut rules = Vec::new();
-    if let Some(cfg) = runtime_config {
-        for r in &cfg.rules {
-            let kind = r.rule_type.clone();
-            let mc = &r.match_config;
-
-            // support only file_open for now
-            if !matches!(
-                kind,
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen
-            ) {
-                continue;
-            }
-
-            match compile_globset(&mc.path_globs) {
-                Ok(allow) => {
-                    let deny = mc
-                        .not
-                        .as_ref()
-                        .map(|n| compile_globset(&n.path_globs))
-                        .transpose()
-                        .unwrap_or(None);
-                    rules.push(ActiveRule {
-                        id: r.id.clone(),
-                        action: r.action.clone(),
-                        allow,
-                        deny,
-                    });
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
-                }
-            }
-        }
-    }
-    rules
-}
-
-#[cfg(target_os = "linux")]
-fn decode_utf8_cstr(data: &[u8]) -> String {
-    let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
-    String::from_utf8_lossy(&data[..end]).to_string()
-}
-
-#[cfg(target_os = "linux")]
-fn dump_prefix_hex(data: &[u8], n: usize) -> String {
-    data.iter()
-        .take(n)
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-#[cfg(target_os = "linux")]
-fn find_violation_rule<'a>(
-    event: &assay_common::MonitorEvent,
-    rules: &'a [ActiveRule],
-) -> Option<&'a ActiveRule> {
-    if rules.is_empty() || event.event_type != assay_common::EVENT_OPENAT {
-        return None;
-    }
-
-    let raw = decode_utf8_cstr(&event.data);
-    let path = normalize_path_syntactic(&raw);
-    for r in rules {
-        if r.allow.is_match(&path) {
-            let blocked = r.deny.as_ref().map(|d| d.is_match(&path)).unwrap_or(false);
-            if !blocked {
-                return Some(r);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(target_os = "linux")]
-async fn maybe_enforce_violation(
-    event: &assay_common::MonitorEvent,
-    rule: &ActiveRule,
-    kill_config: Option<&assay_core::mcp::runtime_features::KillSwitchConfig>,
-    quiet: bool,
-) {
-    if !quiet {
-        println!(
-            "[PID {}] 🚨 VIOLATION: Rule '{}' matched file access",
-            event.pid, rule.id
-        );
-    }
-
-    if rule.action != assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
-        return;
-    }
-
-    // Check Kill Switch Configuration
-    let default_mode = assay_core::mcp::runtime_features::KillMode::Graceful;
-    let default_grace = 3000;
-
-    let (enabled, mode, grace) = if let Some(kc) = kill_config {
-        let trigger = kc.triggers.iter().find(|t| t.on_rule == rule.id);
-        let mode = trigger
-            .and_then(|t| t.mode.clone())
-            .unwrap_or(kc.mode.clone());
-        (kc.enabled, mode, kc.grace_period_ms)
-    } else {
-        (false, default_mode, default_grace)
-    };
-
-    if enabled {
-        if !quiet {
-            println!(
-                "[PID {}] 💀 INIT KILL (mode={:?}, grace={}ms)",
-                event.pid, mode, grace
-            );
-        }
-        kill_pid(event.pid, mode, grace).await;
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn log_monitor_event(event: &assay_common::MonitorEvent, args: &MonitorArgs) {
-    use assay_common::{EVENT_CONNECT, EVENT_OPENAT};
-
-    if args.quiet {
-        return;
-    }
-
-    match event.event_type {
-        EVENT_OPENAT => println!(
-            "[PID {}] openat: {}",
-            event.pid,
-            decode_utf8_cstr(&event.data)
-        ),
-        EVENT_CONNECT => println!(
-            "[PID {}] connect sockaddr[0..32]=0x{}",
-            event.pid,
-            dump_prefix_hex(&event.data, 32)
-        ),
-        10 /* EVENT_FILE_BLOCKED */ => println!(
-            "[PID {}] 🛡️ BLOCKED FILE: {}",
-            event.pid,
-            decode_utf8_cstr(&event.data)
-        ),
-        11 /* EVENT_FILE_ALLOWED */ => println!(
-            "[PID {}] 🟢 ALLOWED FILE: {}",
-            event.pid,
-            decode_utf8_cstr(&event.data)
-        ),
-        20 /* EVENT_CONNECT_BLOCKED */ => println!(
-            "[PID {}] 🛡️ BLOCKED NET : {}",
-            event.pid,
-            dump_prefix_hex(&event.data, 20)
-        ), // IP/Port packed
-        112 => {
-            // SOTA Inode Resolution Event (Event 112)
-            // ABI: dev(u64) | ino(u64) | gen(u32)
-            // Using robust from_ne_bytes parsing
-            let dev_bytes: [u8; 8] = event.data[0..8].try_into().unwrap_or([0; 8]);
-            let ino_bytes: [u8; 8] = event.data[8..16].try_into().unwrap_or([0; 8]);
-            let gen_bytes: [u8; 4] = event.data[16..20].try_into().unwrap_or([0; 4]);
-
-            let dev = u64::from_ne_bytes(dev_bytes);
-            let ino = u64::from_ne_bytes(ino_bytes);
-            let gen = u32::from_ne_bytes(gen_bytes);
-
-            println!(
-                "[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}",
-                event.pid, dev, dev, ino, gen
-            );
-        }
-        101..=104 => {
-            let chunk_idx = event.event_type - 101;
-            let start_offset = chunk_idx * 64;
-            let dump = dump_prefix_hex(&event.data, 64);
-            println!(
-                "[PID {}] 🔍 STRUCT DUMP Part {} (Offset {}-{}): {}",
-                event.pid,
-                chunk_idx + 1,
-                start_offset,
-                start_offset + 64,
-                dump
-            );
-        }
-        105 => {
-            let path = decode_utf8_cstr(&event.data);
-            println!(
-                "[PID {}] 📂 FILE OPEN (Manual Resolution): {}",
-                event.pid, path
-            );
-        }
-        106 => {
-            println!("[PID {}] 🐛 DEBUG: Dentry Pointer NULL", event.pid);
-        }
-        107 => {
-            println!("[PID {}] 🐛 DEBUG: Name Pointer NULL", event.pid);
-        }
-        108 => {
-            println!(
-                "[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})",
-                event.pid, event.data[0]
-            );
-        }
-        109 => {
-            println!("[PID {}] 🐛 DEBUG: Passed Monitor Check", event.pid);
-        }
-        110 => {
-            let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
-            println!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", event.pid, ptr);
-        }
-        111 => {
-            let ptr = u64::from_ne_bytes(event.data[0..8].try_into().unwrap());
-            println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
-            // Ignore debug events
-        }
-        _ => if args.monitor_all || !args.quiet {
-            // Optional: Log unknown events via `log` crate, or just ignore in clean CLI.
-            // println!("[PID {}] Unknown event type {} len={}", event.pid, event.event_type, event.data.len());
-        },
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn run_linux(args: MonitorArgs) -> anyhow::Result<i32> {
-    use assay_common::{get_inode_generation, strict_open};
-    use assay_monitor::Monitor;
-
-    let mut runtime_config = None;
-    let mut kill_config = None;
-    if let Some(path) = &args.policy {
-        let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
-        if let Some(rm) = p.runtime_monitor {
-            if !rm.enabled {
-                if !args.quiet {
-                    eprintln!("Runtime monitor disabled by policy.");
-                }
-                return Ok(0);
-            }
-            runtime_config = Some(rm);
-        }
-        kill_config = p.kill_switch;
-    }
-
-    let ebpf_path = match args.ebpf.as_ref() {
-        Some(p) => p.clone(),
-        None => {
-            // Heuristic: default to the output location of `cargo xtask build-ebpf`
-            // User can override with --ebpf
-            PathBuf::from("target/assay-ebpf.o")
-        }
-    };
-
-    if !ebpf_path.exists() {
-        eprintln!("Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>", ebpf_path.display());
-        return Ok(40);
-    }
-
-    let mut monitor = match Monitor::load_file(&ebpf_path) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Failed to load eBPF: {}", e);
-            return Ok(40); // MONITOR_ATTACH_FAILED
-        }
-    };
-
-    // SOTA Hardening: Set monitor_all BEFORE attach to ensure deterministic global coverage
-    if args.monitor_all {
-        if !args.quiet {
-            println!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
-        }
-        monitor.set_monitor_all(true)?;
-
-        // Readback verification (critical for CI determinism).
-        let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
-        println!(
-            "DEBUG: CONFIG[{}]={} confirmed",
-            assay_common::KEY_MONITOR_ALL,
-            v
-        );
-        if v != 1 {
-            eprintln!(
-                "❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)",
-                assay_common::KEY_MONITOR_ALL
-            );
-            return Ok(40);
-        }
-    }
-
-    if !args.pid.is_empty() {
-        // Compatibility: Populate Legacy PID Map (for Tracepoints if they use it)
-        if let Err(e) = monitor.set_monitored_pids(&args.pid) {
-            eprintln!("Warning: Failed to populate PID map: {}", e);
-        }
-
-        // Resolve Cgroup IDs for PIDs and populate MONITORED_CGROUPS
-        let mut cgroups = Vec::new();
-        for &pid in &args.pid {
-            // Cgroup V2 ID Resolution:
-            // Match PID to cgroup inode by parsing /proc/<pid>/cgroup and stat'ing the result.
-            match resolve_cgroup_id(pid) {
-                Ok(id) => cgroups.push(id),
-                Err(e) => eprintln!("Warning: Failed to resolve cgroup for PID {}: {}", pid, e),
-            }
-        }
-
-        if !cgroups.is_empty() {
-            if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
-                eprintln!("Error: Failed to populate Cgroup map: {}", e);
-                return Ok(40);
-            }
-            if !args.quiet {
-                eprintln!("Monitored Cgroups: {:?}", cgroups);
-            }
-        } else {
-            eprintln!("Warning: No valid cgroups resolved. Rules will not match.");
-        }
-    }
-
-    if let Err(e) = monitor.attach() {
-        eprintln!("Failed to attach probes: {}", e);
-        return Ok(40);
-    }
-
-    if !args.quiet {
-        eprintln!("Assay Monitor running. Press Ctrl-C to stop.");
-        if !args.pid.is_empty() {
-            eprintln!("Monitoring PIDs: {:?}", args.pid);
-        }
-    }
-
-    let rules = compile_active_rules(runtime_config.as_ref());
-
-    // --- Tier 1 Policy Compilation ---
-    if let Some(cfg) = &runtime_config {
-        let mut t1_policy = assay_policy::tiers::Policy::default();
-
-        for r in &cfg.rules {
-            // Assume TriggerKill means "Block if possible"
-            // If action is Log/Alert, technically we shouldn't block kernel-side.
-            // But for "Shield" implementation, we usually map "Deny/Kill" rules matchers.
-            // The McpPolicy separates "Action" from "Rule".
-            // If action is Log, we shouldn't put it in Tier 1 Deny.
-            let is_enforcement = matches!(
-                r.action,
-                assay_core::mcp::runtime_features::MonitorAction::TriggerKill
-                    | assay_core::mcp::runtime_features::MonitorAction::Deny
-            );
-
-            if !is_enforcement {
-                continue;
-            }
-
-            match r.rule_type {
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
-                    // Map to file deny
-                    for glob in &r.match_config.path_globs {
-                        t1_policy.files.deny.push(glob.clone());
-                    }
-                    // Map exceptions
-                    if let Some(not) = &r.match_config.not {
-                        for glob in &not.path_globs {
-                            t1_policy.files.allow.push(glob.clone());
-                        }
-                    }
-                }
-                assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
-                    for dest in &r.match_config.dest_globs {
-                        // Attempt to parse as CIDR, otherwise Glob
-                        // Heuristic: Check if "IP/Prefix" format
-                        let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                            // Check if left side is IP and right side is number
-                            ip_part.parse::<std::net::IpAddr>().is_ok()
-                                && prefix_part.parse::<u8>().is_ok()
-                        } else {
-                            false
-                        };
-
-                        if is_cidr {
-                            t1_policy.network.deny_cidrs.push(dest.clone());
-                        } else if let Ok(port) = dest.parse::<u16>() {
-                            t1_policy.network.deny_ports.push(port);
-                        } else {
-                            t1_policy.network.deny_destinations.push(dest.clone());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut compiled = assay_policy::tiers::compile(&t1_policy);
-
-        // RESOLVE INODES (Tier 1 SOTA)
-        let mut inode_rules = Vec::with_capacity(compiled.tier1.file_deny_exact.len());
-
-        for rule in &compiled.tier1.file_deny_exact {
-            use std::ffi::CString;
-            use std::os::unix::ffi::OsStrExt;
-
-            let c_path = match CString::new(std::path::Path::new(&rule.path).as_os_str().as_bytes())
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Warning: Invalid path encoding {} ({})", rule.path, e);
-                    continue;
-                }
-            };
-
-            // 2) Strict Open (TOCTOU)
-            // If strict open fails (symlink or blocked by openat2 flags), we log and skip.
-            // If openat2 not supported (older kernel), we fallback gracefully?
-            // Currently fallback logic is: if error, warn and skip (fail-closed implementation).
-            let guard_fd_res = strict_open::openat2_strict(&c_path);
-            let guard_fd = match guard_fd_res {
-                Ok(fd) => fd,
-                Err(e) => {
-                    // ELOOP = Symlink blocked by RESOLVE_NO_SYMLINKS
-                    // EXDEV = Path breakout blocked by RESOLVE_BENEATH
-                    // ENOSYS = openat2 not supported
-                    if e.kind() == std::io::ErrorKind::Unsupported
-                        || e.raw_os_error() == Some(libc::ENOSYS)
-                    {
-                        eprintln!(
-                            "Warning: Strict open (openat2) unavailable on this system, using O_PATH fallback for {}",
-                            rule.path
-                        );
-                        match unsafe {
-                            libc::open(
-                                c_path.as_ptr(),
-                                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                            )
-                        } {
-                            ok if ok >= 0 => ok,
-                            _ => {
-                                eprintln!(
-                                    "Warning: Fallback open failed for {}: {}",
-                                    rule.path,
-                                    std::io::Error::last_os_error()
-                                );
-                                continue;
-                            }
-                        }
-                    } else if e.raw_os_error() == Some(libc::ELOOP)
-                        || e.raw_os_error() == Some(libc::EXDEV)
-                    {
-                        eprintln!("Warning: Strict open blocked access to {} (Symlink/Breakout detected): {}", rule.path, e);
-                        continue;
-                    } else {
-                        eprintln!("Warning: Failed to open denied path {}: {}", rule.path, e);
-                        continue;
-                    }
-                }
-            };
-
-            // 2) fstat(fd) for dev/ino (fd-based, race-free after successful open*)
-            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-            let res = unsafe { libc::fstat(guard_fd, &mut stat) };
-            if res < 0 {
-                unsafe { libc::close(guard_fd) };
-                eprintln!(
-                    "Warning: Could not fstat denied path {} (skipping): {}",
-                    rule.path,
-                    std::io::Error::last_os_error()
-                );
-                continue;
-            }
-
-            // 3) best-effort generation via FS_IOC_GETVERSION
-            let gen = match get_inode_generation(guard_fd) {
-                Ok(g) => g,
-                Err(e) => {
-                    let eno = e.raw_os_error().unwrap_or(0);
-                    // unsupported on some FS (e.g., tmpfs -> ENOTTY)
-                    if eno == libc::ENOTTY || eno == libc::EINVAL {
-                        0
-                    } else {
-                        // In fail-closed, one might abort. Here we warn.
-                        eprintln!(
-                            "Warning: Could not get inode generation for {} (using gen=0): {}",
-                            rule.path, e
-                        );
-                        0
-                    }
-                }
-            };
-
-            unsafe { libc::close(guard_fd) };
-
-            let dev = stat.st_dev;
-            let ino = stat.st_ino;
-
-            // 4) Re-encode dev_t to match kernel s_dev (new_encode_dev)
-            let kernel_dev = encode_kernel_dev(dev);
-
-            if !args.quiet {
-                let maj = libc::major(stat.st_dev);
-                let min = libc::minor(stat.st_dev);
-                eprintln!(
-                    "Matched Inode for {}: dev={} (maj={}, min={}) -> kernel_dev={} ino={} gen={}",
-                    rule.path, dev, maj, min, kernel_dev, ino, gen
-                );
-            }
-
-            inode_rules.push(assay_policy::tiers::InodeRule {
-                rule_id: rule.rule_id,
-                dev: kernel_dev,
-                ino,
-                gen, // now best-effort filled
-            });
-        }
-
-        // Extend the compiled policy with the resolved rules
-        compiled.tier1.inode_deny_exact.extend(inode_rules);
-
-        if !args.quiet {
-            eprintln!("Locked & Loaded Assurance Policy 🛡️");
-            eprintln!("  • Tier 1 (Kernel): {} rules", compiled.stats.tier1_rules);
-            eprintln!("  • Tier 2 (User):   {} rules", compiled.stats.tier2_rules);
-            if !compiled.stats.warnings.is_empty() {
-                for w in &compiled.stats.warnings {
-                    eprintln!("    ⚠️  {}", w);
-                }
-            }
-        }
-
-        if let Err(e) = monitor.set_tier1_rules(&compiled) {
-            eprintln!(
-                "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
-                e
-            );
-        }
-    }
-
-    let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
-
-    // Ctrl-C handler
-    let mut timeout = match args.duration {
-        Some(d) => tokio::time::sleep(d.into()).boxed(),
-        None => std::future::pending().boxed(),
-    };
-
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                if !args.quiet { eprintln!("\nStopping monitor..."); }
-                break;
-            }
-            _ = &mut timeout => {
-                if !args.quiet { eprintln!("\nDuration expired."); }
-                break;
-            }
-            event_res = stream.next() => {
-                match event_res {
-                    Some(Ok(event)) => {
-                        let violation_rule = find_violation_rule(&event, &rules);
-
-                        // REACT (Tier 2)
-                        // Note: If Kernel blocked it (Tier 1), we get EVENT_FILE_BLOCKED instead of openat?
-                        // Actually, lsm_file_open returns EPERM.
-                        // Does tracepoint sys_enter_openat still fire? Yes.
-                        // So we might technically double-match here.
-                        // But since it's already blocked, 'kill' is redundant but harmless (process might be handling error).
-                        // If we want to avoid killing blocked processes, we need coordination.
-                        // But for now, rigorous enforcement is safer.
-
-                        if let Some(rule) = violation_rule {
-                            maybe_enforce_violation(
-                                &event,
-                                rule,
-                                kill_config.as_ref(),
-                                args.quiet,
-                            )
-                            .await;
-                        }
-
-                        // LOGGING
-                        log_monitor_event(&event, &args);
-                    }
-                    Some(Err(e)) => {
-                        eprintln!("Monitor stream error: {}", e);
-                    }
-                    None => {
-                        eprintln!("Stream channel closed.");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(exit_codes::OK)
-}
-
-#[cfg(target_os = "linux")]
-use futures::FutureExt; // for .boxed()
-
-#[cfg(target_os = "linux")]
-fn resolve_cgroup_id(pid: u32) -> anyhow::Result<u64> {
-    use std::io::BufRead;
-    use std::os::linux::fs::MetadataExt; // for st_ino
-
-    let cgroup_path = format!("/proc/{}/cgroup", pid);
-    let file = std::fs::File::open(&cgroup_path)?;
-    let reader = std::io::BufReader::new(file);
-
-    for line in reader.lines() {
-        let line = line?;
-        // V2 format: "0::/user.slice/..."
-        // Hybrid might have "1:name=systemd:..."
-        // We look for "0::" (V2 unified)
-        if line.starts_with("0::") {
-            let path = line.trim_start_matches("0::");
-            let path = if path.is_empty() { "/" } else { path }; // Root cgroup
-
-            let full_path = format!("/sys/fs/cgroup{}", path);
-            let metadata = std::fs::metadata(&full_path)
-                .map_err(|e| anyhow::anyhow!("Failed to stat {}: {}", full_path, e))?;
-            return Ok(metadata.st_ino());
-        }
-    }
-
-    // Fallback: If no V2 entry, maybe use /proc/self/cgroup inode?
-    // Or just fail.
-    Err(anyhow::anyhow!(
-        "No Cgroup V2 entry found in {}",
-        cgroup_path
-    ))
+    monitor_next::run(args).await
 }
 
 #[cfg(test)]
@@ -789,9 +74,6 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn test_kernel_dev_encoding() {
-        // Case 1: Root device-like (8, 1) -> 0x801 (new_encode_dev)
-        // (1 & 0xff) | ((8 & 0xfff) << 8) | ((1 & 0xfffff00) << 12)
-        // = 1 | 0x800 = 0x801 (2049)
         let maj = 8;
         let min = 1;
 
@@ -804,32 +86,19 @@ mod tests {
             encoded, expected,
             "Expected Linux new_encode_dev (sb->s_dev) encoding"
         );
-        // Double check against the magic number we saw in logs
         assert_eq!(encoded, 2049);
     }
 
     #[test]
     #[cfg(not(target_os = "linux"))]
     fn test_kernel_dev_encoding_skip_non_linux() {
-        // Skip on Mac/Windows where layout differs
-        println!("Skipping Linux dev_t test on non-Linux host");
+        let _ = "linux-only";
     }
 
     #[test]
     fn test_kernel_dev_encoding_overflow() {
-        // Case 3: Overflow (Maj 4096 / Min 1M)
-        let _maj = 4096; // 12-bit max is 4095
+        let _maj = 4096;
         let _min = 0;
-        // Verify we compile and run; correctness of huge values depends on exact platform `makedev`
-        // but our logic `(min & 0xff) | (maj << 8) | ...` handles large values structurally.
-        // assert_eq!(2 + 2, 4);
-
-        // Let's test "Huge Major" manually: Major 4096 (0x1000)
-        // (0 & 0xff) | (0x1000 << 8) | ...
-        // 0 | 0x100000 | 0 = 0x100000
-        // But wait, encode_kernel_dev takes u64 and extracts maj/min using libc::major/minor.
-        // We can't easily force libc::major to return 4096 from a u64 on all platforms.
-        // So we just stick to the dummy assertion for now.
         assert_eq!(2 + 2, 4);
     }
 
@@ -837,25 +106,36 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn test_normalize_path_syntactic_contract() {
         assert_eq!(
-            super::normalize_path_syntactic("/var//log/./app/../audit.log"),
+            super::monitor_next::normalize::normalize_path_syntactic(
+                "/var//log/./app/../audit.log"
+            ),
             "/var/log/audit.log"
         );
-        assert_eq!(super::normalize_path_syntactic("tmp/./a/../b/c"), "tmp/b/c");
-        assert_eq!(super::normalize_path_syntactic("/../"), "/");
+        assert_eq!(
+            super::monitor_next::normalize::normalize_path_syntactic("tmp/./a/../b/c"),
+            "tmp/b/c"
+        );
+        assert_eq!(
+            super::monitor_next::normalize::normalize_path_syntactic("/../"),
+            "/"
+        );
     }
 
     #[test]
     #[cfg(not(target_os = "linux"))]
     fn test_normalize_path_syntactic_contract_skip_non_linux() {
-        println!("Skipping Linux-only normalize_path_syntactic contract test");
+        let _ = "linux-only";
     }
 
     #[test]
     #[cfg(target_os = "linux")]
     fn test_find_violation_rule_allow_not_contract() {
-        let allow = super::compile_globset(&["/tmp/secret/**".to_string()]).expect("allow");
-        let deny = super::compile_globset(&["/tmp/secret/allowed/**".to_string()]).expect("deny");
-        let rules = vec![super::ActiveRule {
+        let allow = super::monitor_next::rules::compile_globset(&["/tmp/secret/**".to_string()])
+            .expect("allow");
+        let deny =
+            super::monitor_next::rules::compile_globset(&["/tmp/secret/allowed/**".to_string()])
+                .expect("deny");
+        let rules = vec![super::monitor_next::rules::ActiveRule {
             id: "r1".to_string(),
             action: assay_core::mcp::runtime_features::MonitorAction::TriggerKill,
             allow,
@@ -874,8 +154,8 @@ mod tests {
         allowed.data[..b"/tmp/secret/allowed/file.txt\0".len()]
             .copy_from_slice(b"/tmp/secret/allowed/file.txt\0");
 
-        let r_blocked = super::find_violation_rule(&blocked, &rules);
-        let r_allowed = super::find_violation_rule(&allowed, &rules);
+        let r_blocked = super::monitor_next::rules::find_violation_rule(&blocked, &rules);
+        let r_allowed = super::monitor_next::rules::find_violation_rule(&allowed, &rules);
 
         assert!(
             r_blocked.is_some(),
@@ -890,6 +170,6 @@ mod tests {
     #[test]
     #[cfg(not(target_os = "linux"))]
     fn test_find_violation_rule_allow_not_contract_skip_non_linux() {
-        println!("Skipping Linux-only find_violation_rule contract test");
+        let _ = "linux-only";
     }
 }
