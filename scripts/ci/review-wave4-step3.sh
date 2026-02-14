@@ -34,6 +34,17 @@ if "$rg_bin" -n 'SequenceRule|check_end_of_trace|to_terminal\(|to_markdown\(|to_
   echo "explain.rs facade contains implementation logic"
   exit 1
 fi
+# explain facade must not own heavy deps.
+if "$rg_bin" -n 'serde_json::|tokio::fs|std::fs|reqwest|regex|globset|pulldown_cmark' crates/assay-core/src/explain.rs; then
+  echo "explain.rs facade contains heavy imports/deps"
+  exit 1
+fi
+# smoke alarm for accidental facade growth.
+explain_loc="$(wc -l < crates/assay-core/src/explain.rs | tr -d ' ')"
+if [ "${explain_loc}" -gt 50 ]; then
+  echo "explain.rs facade exceeded 50 LOC (${explain_loc})"
+  exit 1
+fi
 
 # render methods should only live in render.rs.
 render_outside="$($rg_bin -n 'fn to_terminal\(|fn to_markdown\(|fn to_html\(' crates/assay-core/src/explain_next -g'*.rs' -g'!render.rs' || true)"

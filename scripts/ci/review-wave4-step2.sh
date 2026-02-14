@@ -99,6 +99,17 @@ fi
 check_no_match_code_only 'tokio::fs|tracing::info|fs::read_to_string|fs::write' crates/assay-registry/src/lockfile.rs
 # Cache facade should delegate all moved read/write/evict logic into cache_next.
 check_no_match_code_only 'tokio::fs|serde_json::|compute_digest|tracing::(debug|warn|info|error)|fs::read_to_string|fs::write|create_dir_all|remove_dir_all|read_dir' crates/assay-registry/src/cache.rs
+# smoke alarms for accidental facade growth.
+lockfile_loc="$(wc -l < crates/assay-registry/src/lockfile.rs | tr -d ' ')"
+cache_loc="$(wc -l < crates/assay-registry/src/cache.rs | tr -d ' ')"
+if [ "${lockfile_loc}" -gt 700 ]; then
+  echo "lockfile.rs facade exceeded 700 LOC (${lockfile_loc})"
+  exit 1
+fi
+if [ "${cache_loc}" -gt 650 ]; then
+  echo "cache.rs facade exceeded 650 LOC (${cache_loc})"
+  exit 1
+fi
 
 echo "== Wave4 Step2 single-source gates =="
 check_no_match_in_dir_excluding 'fs::rename\(' crates/assay-registry/src/cache_next io.rs

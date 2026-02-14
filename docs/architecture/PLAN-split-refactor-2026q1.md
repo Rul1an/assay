@@ -304,6 +304,15 @@ Step status:
 - Step 3 (`explain.rs` mechanical split behind stable facade): merged via PR #344.
 - Promotion to `main` (Wave4 closure): merged via PR #345.
 
+### Wave 4 outcome (merged on `main`)
+
+- PR chain: `#339` -> `#340` -> `#343` -> `#344` -> `#345`.
+- Facade hotspots reduced from 2764 LOC to 1252 LOC (~54.7% reduction).
+- `explain.rs` reduced from 1057 LOC to 11 LOC (thin facade).
+- Boundaries are enforced by reviewer scripts:
+  - `scripts/ci/review-wave4-step2.sh`
+  - `scripts/ci/review-wave4-step3.sh`
+
 ### Objectives
 
 - Improve maintainability without churn in public UX.
