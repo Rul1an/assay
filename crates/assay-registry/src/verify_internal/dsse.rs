@@ -7,22 +7,12 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier};
 
-use crate::canonicalize::{parse_yaml_strict, to_canonical_jcs_bytes};
 use crate::error::{RegistryError, RegistryResult};
 use crate::trust::TrustStore;
 use crate::types::DsseEnvelope;
 
 use super::super::PAYLOAD_TYPE_PACK_V1;
-
-pub(crate) fn canonicalize_for_dsse_impl(content: &str) -> RegistryResult<Vec<u8>> {
-    let json_value = parse_yaml_strict(content).map_err(|e| RegistryError::InvalidResponse {
-        message: format!("failed to parse YAML for signature verification: {}", e),
-    })?;
-
-    to_canonical_jcs_bytes(&json_value).map_err(|e| RegistryError::InvalidResponse {
-        message: format!("failed to canonicalize for signature verification: {}", e),
-    })
-}
+use super::digest::canonicalize_for_dsse_impl;
 
 pub(crate) fn build_pae_impl(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let type_len = payload_type.len().to_string();
@@ -91,6 +81,15 @@ pub(crate) fn verify_dsse_signature_bytes_impl(
             reason: "no valid signatures".to_string(),
         }),
     )
+}
+
+pub(crate) fn verify_dsse_signature_impl(
+    content: &str,
+    envelope: &DsseEnvelope,
+    trust_store: &TrustStore,
+) -> RegistryResult<()> {
+    let canonical_bytes = canonicalize_for_dsse_impl(content)?;
+    verify_dsse_signature_bytes_impl(&canonical_bytes, envelope, trust_store)
 }
 
 pub(crate) fn verify_single_signature_impl(
