@@ -300,8 +300,9 @@ Step status:
 
 - Step 1 (`lockfile.rs` + `cache.rs` behavior freeze/inventory/gates): merged via PR #339.
 - Step 2 (`lockfile.rs` + `cache.rs` mechanical split): merged via PR #340.
-- Step 2.x (`cache.rs` facade thinness follow-up for read/evict/list/get_metadata): in progress on `codex/wave4-step2x-cache-thinness`.
-- Step 3 (`explain.rs` mechanical split behind stable facade): in progress on `codex/wave4-step3-explain-split`.
+- Step 2.x (`cache.rs` facade thinness follow-up for read/evict/list/get_metadata): merged via PR #343.
+- Step 3 (`explain.rs` mechanical split behind stable facade): merged via PR #344.
+- Promotion to `main` (Wave4 closure): merged via PR #345.
 
 ### Objectives
 
