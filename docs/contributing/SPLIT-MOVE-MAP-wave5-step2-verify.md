@@ -29,9 +29,16 @@ Caller chains (top flows):
 - Digest compare flow:
   - `verify_digest` -> `verify_next::digest::verify_digest_impl`
   - `verify_digest_impl` -> `compute_digest_impl`
+- Digest compute flow:
+  - `compute_digest` -> `verify_next::digest::compute_digest_impl`
+  - `compute_digest_strict` -> `verify_next::digest::compute_digest_strict_impl`
+  - `compute_digest_raw` -> `verify_next::digest::compute_digest_raw_impl`
 - DSSE envelope flow:
   - `verify_pack_impl` -> `parse_dsse_envelope_impl` (wire)
   - `verify_dsse_signature_bytes_impl` (dsse) -> `build_pae_impl` -> `verify_single_signature_impl`
+- Key-id flow:
+  - `compute_key_id` -> `verify_next::keys::compute_key_id_impl`
+  - `compute_key_id_from_key` -> `verify_next::keys::compute_key_id_from_key_impl`
 
 Mechanics contract:
 - Step2 is mechanical move only.

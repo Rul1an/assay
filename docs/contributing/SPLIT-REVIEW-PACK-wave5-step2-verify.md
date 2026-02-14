@@ -24,6 +24,8 @@ Gates enforced by `review-wave5-step2.sh`:
 - `policy.rs` low-level crypto-ban + exact one DSSE boundary call.
 - `dsse.rs` policy-token ban.
 - canonicalization helpers banned in `policy.rs`, `wire.rs`, `keys.rs`.
+- `VerifyResult { ... }` constructor single-source gate in `verify_next/policy.rs`.
+- canonicalization single-source gates (`canonicalize_for_dsse` + YAML/JCS parse in `verify_next/dsse.rs`; canonical digest hash in `verify_next/digest.rs`).
 - DSSE crypto helper single-source gate in `verify_next/dsse.rs` (`build_pae_impl`, `verify_single_signature_impl`, `Signature::from_slice`, `key.verify`).
 - Diff allowlist gate.
 

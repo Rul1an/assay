@@ -166,6 +166,22 @@ check_only_file_matches \
   crates/assay-registry/src/verify_next \
   'verify_next/dsse.rs'
 
+# VerifyResult construction stays single-source in policy orchestration.
+check_only_file_matches \
+  'VerifyResult[[:space:]]*\{' \
+  crates/assay-registry/src/verify_next \
+  'verify_next/policy.rs'
+
+# Canonicalization single-source boundaries.
+check_only_file_matches \
+  'pub\(crate\)[[:space:]]+fn[[:space:]]+canonicalize_for_dsse_impl\(|parse_yaml_strict|to_canonical_jcs_bytes' \
+  crates/assay-registry/src/verify_next \
+  'verify_next/dsse.rs'
+check_only_file_matches \
+  'compute_canonical_digest' \
+  crates/assay-registry/src/verify_next \
+  'verify_next/digest.rs'
+
 policy_boundary_calls="$(rg -n 'verify_dsse_signature_bytes_impl\(' crates/assay-registry/src/verify_next/policy.rs || true)"
 policy_boundary_count="$(echo "$policy_boundary_calls" | sed '/^$/d' | wc -l | tr -d ' ')"
 if [ "$policy_boundary_count" -ne 1 ]; then
