@@ -24,6 +24,11 @@ No public symbol path changes intended (`crate::lockfile::*`, `crate::cache::*` 
 
 - `PackCache::pack_dir` -> `cache_next/keys.rs::pack_dir_impl`
 - `PackCache::put` -> `cache_next/put.rs::put_impl`
+- `PackCache::get` -> `cache_next/read.rs::get_impl`
+- `PackCache::get_metadata` -> `cache_next/read.rs::get_metadata_impl`
+- `PackCache::list` -> `cache_next/read.rs::list_impl`
+- `PackCache::evict` -> `cache_next/evict.rs::evict_impl`
+- `PackCache::clear` -> `cache_next/evict.rs::clear_impl`
 - `default_cache_dir` -> `cache_next/io.rs::default_cache_dir_impl`
 - `parse_cache_control_expiry` -> `cache_next/policy.rs::parse_cache_control_expiry_impl`
 - `parse_signature` -> `cache_next/integrity.rs::parse_signature_impl`

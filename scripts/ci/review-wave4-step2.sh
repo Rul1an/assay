@@ -11,11 +11,25 @@ fi
 
 rg_bin="$(command -v rg)"
 
+strip_code_only() {
+  local file="$1"
+  awk 'BEGIN{in_tests=0} /^#\[cfg\(test\)\]/{in_tests=1} {if(!in_tests) print}' "$file" | "$rg_bin" -v '^[[:space:]]*//'
+}
+
 check_has_match() {
   local pattern="$1"
   local file="$2"
   if ! "$rg_bin" -n "$pattern" "$file" >/dev/null; then
     echo "missing expected delegation pattern in ${file}: ${pattern}"
+    exit 1
+  fi
+}
+
+check_no_match_code_only() {
+  local pattern="$1"
+  local file="$2"
+  if strip_code_only "$file" | "$rg_bin" -n "$pattern" >/dev/null; then
+    echo "forbidden code-only match in ${file}: ${pattern}"
     exit 1
   fi
 }
@@ -66,6 +80,11 @@ check_has_match 'lockfile_next::digest::check_lockfile_impl' crates/assay-regist
 check_has_match 'lockfile_next::digest::update_lockfile_impl' crates/assay-registry/src/lockfile.rs
 
 check_has_match 'cache_next::put::put_impl' crates/assay-registry/src/cache.rs
+check_has_match 'cache_next::read::get_impl' crates/assay-registry/src/cache.rs
+check_has_match 'cache_next::read::get_metadata_impl' crates/assay-registry/src/cache.rs
+check_has_match 'cache_next::read::list_impl' crates/assay-registry/src/cache.rs
+check_has_match 'cache_next::evict::evict_impl' crates/assay-registry/src/cache.rs
+check_has_match 'cache_next::evict::clear_impl' crates/assay-registry/src/cache.rs
 check_has_match 'cache_next::keys::pack_dir_impl' crates/assay-registry/src/cache.rs
 check_has_match 'cache_next::io::default_cache_dir_impl' crates/assay-registry/src/cache.rs
 check_has_match 'policy::parse_cache_control_expiry_impl' crates/assay-registry/src/cache_next/put.rs
@@ -77,16 +96,17 @@ if "$rg_bin" -n 'super::super::(parse_cache_control_expiry|parse_signature|write
 fi
 
 # Lockfile facade should no longer own direct fs/logging paths for load/save.
-if "$rg_bin" -n 'tokio::fs|tracing::info|fs::read_to_string|fs::write' crates/assay-registry/src/lockfile.rs; then
-  echo "lockfile facade still contains direct IO/logging ownership"
-  exit 1
-fi
+check_no_match_code_only 'tokio::fs|tracing::info|fs::read_to_string|fs::write' crates/assay-registry/src/lockfile.rs
+# Cache facade should delegate all moved read/write/evict logic into cache_next.
+check_no_match_code_only 'tokio::fs|serde_json::|compute_digest|tracing::(debug|warn|info|error)|fs::read_to_string|fs::write|create_dir_all|remove_dir_all|read_dir' crates/assay-registry/src/cache.rs
 
 echo "== Wave4 Step2 single-source gates =="
 check_no_match_in_dir_excluding 'fs::rename\(' crates/assay-registry/src/cache_next io.rs
 check_no_match_in_dir_excluding 'create_dir_all\(' crates/assay-registry/src/cache_next put.rs
 check_no_match_in_dir_excluding 'max-age=' crates/assay-registry/src/cache_next policy.rs
 check_no_match_in_dir_excluding 'sort_by\(' crates/assay-registry/src/lockfile_next format.rs
+check_no_match_in_dir_excluding 'fs::read_to_string\(' crates/assay-registry/src/cache_next read.rs
+check_no_match_in_dir_excluding 'remove_dir_all\(' crates/assay-registry/src/cache_next evict.rs
 
 echo "== Wave4 Step2 diff allowlist =="
 leaks="$(
