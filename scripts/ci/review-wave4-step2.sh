@@ -6,7 +6,7 @@ if [ -z "${base_ref}" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
   base_ref="origin/${GITHUB_BASE_REF}"
 fi
 if [ -z "${base_ref}" ]; then
-  base_ref="origin/codex/wave3-step1-behavior-freeze-v2"
+  base_ref="origin/main"
 fi
 
 rg_bin="$(command -v rg)"

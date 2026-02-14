@@ -6,7 +6,7 @@ Scope:
 
 Snapshot:
 - HEAD: `91dffdbb`
-- Base for Step1 drift checks: `origin/codex/wave3-step1-behavior-freeze-v2`
+- Base for Step1 drift checks: `origin/main`
 
 LOC:
 - `crates/assay-registry/src/lockfile.rs`: `863`
