@@ -68,9 +68,13 @@ check_has_match 'lockfile_next::digest::update_lockfile_impl' crates/assay-regis
 check_has_match 'cache_next::put::put_impl' crates/assay-registry/src/cache.rs
 check_has_match 'cache_next::keys::pack_dir_impl' crates/assay-registry/src/cache.rs
 check_has_match 'cache_next::io::default_cache_dir_impl' crates/assay-registry/src/cache.rs
-check_has_match 'cache_next::policy::parse_cache_control_expiry_impl' crates/assay-registry/src/cache.rs
-check_has_match 'cache_next::integrity::parse_signature_impl' crates/assay-registry/src/cache.rs
-check_has_match 'cache_next::io::write_atomic_impl' crates/assay-registry/src/cache.rs
+check_has_match 'policy::parse_cache_control_expiry_impl' crates/assay-registry/src/cache_next/put.rs
+check_has_match 'integrity::parse_signature_impl' crates/assay-registry/src/cache_next/put.rs
+check_has_match 'io::write_atomic_impl' crates/assay-registry/src/cache_next/put.rs
+if "$rg_bin" -n 'super::super::(parse_cache_control_expiry|parse_signature|write_atomic)' crates/assay-registry/src/cache_next/put.rs; then
+  echo "cache put path still depends on facade helper wrappers"
+  exit 1
+fi
 
 # Lockfile facade should no longer own direct fs/logging paths for load/save.
 if "$rg_bin" -n 'tokio::fs|tracing::info|fs::read_to_string|fs::write' crates/assay-registry/src/lockfile.rs; then

@@ -29,6 +29,9 @@ No public symbol path changes intended (`crate::lockfile::*`, `crate::cache::*` 
 - `parse_signature` -> `cache_next/integrity.rs::parse_signature_impl`
 - `write_atomic` -> `cache_next/io.rs::write_atomic_impl`
 
+`put_impl` now calls `policy::parse_cache_control_expiry_impl`,
+`integrity::parse_signature_impl`, and `io::write_atomic_impl` directly (no facade helper indirection).
+
 ## Drift-sensitive paths
 
 - Lockfile stable ordering remains in one path: `lockfile_next/format.rs::add_pack_impl`.

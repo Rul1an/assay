@@ -28,6 +28,7 @@ Executed and passing:
 - Facade-thinness tightening:
   - `Lockfile::load/save` now delegate to `lockfile_next/io.rs`
   - `PackCache::put` now delegates to `cache_next/put.rs`
+  - `put_impl` directly calls `cache_next::{policy,integrity,io}` helpers (no facade helper dependency)
 - Single-source gates:
   - ordering path only in `lockfile_next/format.rs`
   - atomic write/rename path only in `cache_next/io.rs`

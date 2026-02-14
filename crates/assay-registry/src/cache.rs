@@ -19,7 +19,9 @@ use tokio::fs;
 use tracing::{debug, warn};
 
 use crate::error::{RegistryError, RegistryResult};
-use crate::types::{DsseEnvelope, FetchResult, PackHeaders};
+#[cfg(test)]
+use crate::types::PackHeaders;
+use crate::types::{DsseEnvelope, FetchResult};
 use crate::verify::compute_digest;
 
 #[path = "cache_next/mod.rs"]
@@ -78,7 +80,7 @@ impl PackCache {
     ///
     /// Default: `~/.assay/cache/packs`
     pub fn new() -> RegistryResult<Self> {
-        let cache_dir = default_cache_dir()?;
+        let cache_dir = cache_next::io::default_cache_dir_impl()?;
         Ok(Self { cache_dir })
     }
 
@@ -303,26 +305,6 @@ impl Default for PackCache {
     }
 }
 
-/// Get the default cache directory.
-fn default_cache_dir() -> RegistryResult<PathBuf> {
-    cache_next::io::default_cache_dir_impl()
-}
-
-/// Parse Cache-Control header to determine expiry.
-fn parse_cache_control_expiry(headers: &PackHeaders) -> DateTime<Utc> {
-    cache_next::policy::parse_cache_control_expiry_impl(headers, DEFAULT_TTL_SECS)
-}
-
-/// Parse signature from Base64.
-fn parse_signature(b64: &str) -> RegistryResult<DsseEnvelope> {
-    cache_next::integrity::parse_signature_impl(b64)
-}
-
-/// Write content to file atomically.
-async fn write_atomic(path: &Path, content: &str) -> RegistryResult<()> {
-    cache_next::io::write_atomic_impl(path, content).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,7 +490,8 @@ mod tests {
             content_length: None,
         };
 
-        let expires = parse_cache_control_expiry(&headers);
+        let expires =
+            cache_next::policy::parse_cache_control_expiry_impl(&headers, DEFAULT_TTL_SECS);
         let now = Utc::now();
 
         // Should be approximately 2 hours in the future
@@ -527,7 +510,8 @@ mod tests {
             content_length: None,
         };
 
-        let expires = parse_cache_control_expiry(&headers);
+        let expires =
+            cache_next::policy::parse_cache_control_expiry_impl(&headers, DEFAULT_TTL_SECS);
         let now = Utc::now();
 
         // Should be approximately 24 hours in the future

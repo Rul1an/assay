@@ -7,9 +7,8 @@ use tracing::debug;
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::FetchResult;
 
-use super::super::{
-    parse_cache_control_expiry, parse_signature, write_atomic, CacheMeta, PackCache,
-};
+use super::super::{CacheMeta, PackCache, DEFAULT_TTL_SECS};
+use super::{integrity, io, policy};
 
 pub(crate) async fn put_impl(
     cache: &PackCache,
@@ -26,7 +25,7 @@ pub(crate) async fn put_impl(
             message: format!("failed to create cache directory: {}", e),
         })?;
 
-    let expires_at = parse_cache_control_expiry(&result.headers);
+    let expires_at = policy::parse_cache_control_expiry_impl(&result.headers, DEFAULT_TTL_SECS);
 
     let metadata = CacheMeta {
         fetched_at: Utc::now(),
@@ -40,21 +39,21 @@ pub(crate) async fn put_impl(
     let pack_path = pack_dir.join("pack.yaml");
     let meta_path = pack_dir.join("metadata.json");
 
-    write_atomic(&pack_path, &result.content).await?;
+    io::write_atomic_impl(&pack_path, &result.content).await?;
 
     let meta_json = serde_json::to_string_pretty(&metadata).map_err(|e| RegistryError::Cache {
         message: format!("failed to serialize metadata: {}", e),
     })?;
-    write_atomic(&meta_path, &meta_json).await?;
+    io::write_atomic_impl(&meta_path, &meta_json).await?;
 
     if let Some(sig_b64) = &result.headers.signature {
-        if let Ok(envelope) = parse_signature(sig_b64) {
+        if let Ok(envelope) = integrity::parse_signature_impl(sig_b64) {
             let sig_path = pack_dir.join("signature.json");
             let sig_json =
                 serde_json::to_string_pretty(&envelope).map_err(|e| RegistryError::Cache {
                     message: format!("failed to serialize signature: {}", e),
                 })?;
-            write_atomic(&sig_path, &sig_json).await?;
+            io::write_atomic_impl(&sig_path, &sig_json).await?;
         }
     }
 
