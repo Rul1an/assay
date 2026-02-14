@@ -342,24 +342,24 @@ Step status:
 
 - Step 1 (behavior freeze + inventory + drift gates): merged via PR #348.
 - Step 2 (mechanical split behind stable facade): merged via PR #349.
-- Step 3 (planned): thin-facade and final module-layout cleanup.
+- Step 3 (verify closure): merged via PR #351.
 
-Step 3 scope (planned):
+Wave 5 closure (implemented):
 
 - Keep public API/signatures in `verify.rs` unchanged.
 - Move contract tests out of `verify.rs` so facade stays implementation-thin.
-- Transition from temporary `verify_next/*` naming to final `verify/*` layout in a mechanical pass.
+- Transition from temporary `verify_next/*` naming to final `verify_internal/*` layout in a mechanical pass.
 - Preserve existing hard-fail reviewer gates and allowlist discipline.
 - Keep single-source boundaries enforced:
   - DSSE crypto helpers in DSSE module only.
-  - canonicalization internals in DSSE/digest boundaries only.
+  - canonicalization internals in digest boundary only.
   - `VerifyResult` construction in policy orchestration only.
 
 Exit criteria (Wave 5):
 
 - `verify.rs` contains only public types/functions + delegation.
-- Step1 contract anchors remain green.
-- Step2 boundary scripts remain green with no allowlist leakage.
+- Step1 contract anchors remain green (via Step3 reviewer script).
+- Step3 boundary scripts remain green with no allowlist leakage.
 
 ## 4) CI/CD improvements linked to this plan
 
