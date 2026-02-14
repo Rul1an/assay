@@ -16,7 +16,7 @@ Critical boundaries:
 - Atomic write/rename logic is single-source in `cache_next/io.rs`.
 - Facades delegate to `*_next` impl paths for moved logic.
 - Lockfile IO (`load`/`save`) delegates to `lockfile_next/io.rs`.
-- Cache write path (`put`) delegates to `cache_next/put.rs`.
+- Cache write/read/evict paths delegate to `cache_next/{put,read,evict}.rs`.
 
 Reviewer command:
 ```bash

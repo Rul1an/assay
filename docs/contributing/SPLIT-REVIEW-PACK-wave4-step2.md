@@ -27,7 +27,7 @@ Executed and passing:
 - Delegation gates (facade -> `*_next` impl paths)
 - Facade-thinness tightening:
   - `Lockfile::load/save` now delegate to `lockfile_next/io.rs`
-  - `PackCache::put` now delegates to `cache_next/put.rs`
+  - `PackCache::{put,get,get_metadata,list,evict,clear}` now delegate to `cache_next/{put,read,evict}.rs`
   - `put_impl` directly calls `cache_next::{policy,integrity,io}` helpers (no facade helper dependency)
 - Single-source gates:
   - ordering path only in `lockfile_next/format.rs`
