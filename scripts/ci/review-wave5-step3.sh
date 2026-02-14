@@ -13,6 +13,7 @@ if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
   exit 1
 fi
 echo "BASE_REF=${base_ref} sha=$(git rev-parse "${base_ref}")"
+echo "HEAD sha=$(git rev-parse HEAD)"
 
 rg_bin="$(command -v rg)"
 verify_facade="crates/assay-registry/src/verify.rs"
@@ -22,7 +23,7 @@ verify_root="crates/assay-registry/src/verify_internal"
 # Until Commit B performs the mechanical rename/move, this is expected to fail.
 if [ ! -d "${verify_root}" ]; then
   echo "Step3 precondition not met: missing ${verify_root}"
-  echo "Expected in Commit A; should pass after Commit B mechanical rename/move."
+  echo "NOTE: expected to fail on Commit A; should pass after Commit B."
   exit 1
 fi
 
@@ -126,7 +127,9 @@ for test_name in \
 done
 
 echo "== Wave5 Step3 facade gates =="
-check_no_match_code_only '^\s*#\[cfg\(test\)\]|^\s*mod\s+tests\s*\{' "${verify_facade}"
+check_no_match_code_only \
+  '^\s*#\[cfg\(test\)\]|^\s*mod\s+tests\s*[{;]|^\s*#\[cfg\(test\)\]\s*mod\s+tests\s*;' \
+  "${verify_facade}"
 check_no_match_code_only \
   'base64::|ed25519_dalek|serde_json::from_(slice|str)|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest|build_pae_impl\(|verify_single_signature_impl\(|verify_dsse_signature_bytes_impl\(' \
   "${verify_facade}"
@@ -155,6 +158,16 @@ check_only_file_matches \
   "${verify_root}" \
   'verify_internal/digest.rs|verify_internal/tests.rs'
 
+check_no_match_code_only \
+  'canonicalize_for_dsse_impl\(|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  "${verify_root}/policy.rs"
+check_no_match_code_only \
+  'canonicalize_for_dsse_impl\(|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  "${verify_root}/wire.rs"
+check_no_match_code_only \
+  'canonicalize_for_dsse_impl\(|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  "${verify_root}/keys.rs"
+
 echo "== Wave5 Step3 policy/dsse boundary gates =="
 check_no_match_code_only \
   'base64::|ed25519_dalek|serde_json::from_(slice|str)|Signature::from_slice|Verifier|build_pae_impl\(|verify_single_signature_impl\(' \
@@ -175,7 +188,7 @@ echo "== Wave5 Step3 diff allowlist =="
 leaks="$(
   git diff --name-only "${base_ref}...HEAD" | \
     "$rg_bin" -v \
-      '^crates/assay-registry/src/verify.rs$|^crates/assay-registry/src/verify_internal/|^docs/contributing/SPLIT-MOVE-MAP-wave5-step3-verify.md$|^docs/contributing/SPLIT-CHECKLIST-wave5-step3-verify.md$|^docs/contributing/SPLIT-REVIEW-PACK-wave5-step3-verify.md$|^scripts/ci/review-wave5-step3.sh$|^docs/architecture/PLAN-split-refactor-2026q1.md$' || true
+      '^crates/assay-registry/src/verify.rs$|^crates/assay-registry/src/verify_internal/|^docs/contributing/SPLIT-(CHECKLIST|MOVE-MAP|REVIEW-PACK)-wave5-step3-verify\.md$|^scripts/ci/review-wave5-step3.sh$|^docs/architecture/PLAN-split-refactor-2026q1.md$' || true
 )"
 if [ -n "$leaks" ]; then
   echo "non-allowlisted files detected:"
