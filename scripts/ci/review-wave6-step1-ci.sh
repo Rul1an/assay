@@ -22,6 +22,10 @@ rg_bin="$(command -v rg)"
 check_has_match() {
   local pattern="$1"
   local file="$2"
+  if [ ! -f "$file" ]; then
+    echo "missing expected file: ${file}"
+    exit 1
+  fi
   if ! "$rg_bin" -n -- "$pattern" "$file" >/dev/null; then
     echo "missing expected pattern in ${file}: ${pattern}"
     exit 1

@@ -1,6 +1,7 @@
 # Wave6 Step1 inventory: CI/CD hardening baseline
 
-Snapshot commit (this PR): `5a72f04b`
+Snapshot baseline (`origin/main` at time of Step1 freeze): `5a72f04b`
+PR head (Step1 change set): `40acafd4`
 
 Scope baseline (workflows):
 - `.github/workflows/split-wave0-gates.yml`
