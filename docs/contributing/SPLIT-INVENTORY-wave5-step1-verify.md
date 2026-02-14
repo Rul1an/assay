@@ -4,7 +4,7 @@ Scope:
 - `crates/assay-registry/src/verify.rs`
 
 Snapshot:
-- HEAD: `f64390b4`
+- Snapshot commit (at inventory capture): `f64390b4`
 - Base for Step1 drift checks: `origin/main`
 
 LOC:
