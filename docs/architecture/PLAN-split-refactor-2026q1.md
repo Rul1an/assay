@@ -367,7 +367,7 @@ Step status:
 
 - Step 1 (behavior freeze + inventory + drift gates): merged via PR #353.
 - Step 2 (attestation pair): in progress on `codex/wave6-step2-attestation-pair`.
-- Step 3 (nightly fuzz/model lane): planned.
+- Step 3 (nightly fuzz/model lane): in progress on `codex/wave6-step3-nightly-safety`.
 
 Step 1 scope (freeze only):
 
