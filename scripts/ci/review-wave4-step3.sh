@@ -6,8 +6,13 @@ if [ -z "${base_ref}" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
   base_ref="origin/${GITHUB_BASE_REF}"
 fi
 if [ -z "${base_ref}" ]; then
-  base_ref="origin/codex/wave4-step2x-cache-thinness"
+  base_ref="origin/main"
 fi
+if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+  echo "BASE_REF not found: ${base_ref}"
+  exit 1
+fi
+echo "BASE_REF=${base_ref} sha=$(git rev-parse "${base_ref}")"
 
 rg_bin="$(command -v rg)"
 
@@ -32,6 +37,17 @@ echo "== Wave4 Step3 facade gates =="
 # explain facade must stay thin: only explain_next wiring + re-exports.
 if "$rg_bin" -n 'SequenceRule|check_end_of_trace|to_terminal\(|to_markdown\(|to_html\(|summarize_args\(|evaluate_rule\(' crates/assay-core/src/explain.rs; then
   echo "explain.rs facade contains implementation logic"
+  exit 1
+fi
+# explain facade must not own heavy deps.
+if "$rg_bin" -n 'serde_json::|tokio::fs|std::fs|reqwest|regex|globset|pulldown_cmark' crates/assay-core/src/explain.rs; then
+  echo "explain.rs facade contains heavy imports/deps"
+  exit 1
+fi
+# smoke alarm for accidental facade growth.
+explain_loc="$(wc -l < crates/assay-core/src/explain.rs | tr -d ' ')"
+if [ "${explain_loc}" -gt 50 ]; then
+  echo "explain.rs facade exceeded 50 LOC (${explain_loc})"
   exit 1
 fi
 

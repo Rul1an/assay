@@ -21,7 +21,7 @@ Policy knobs:
 
 Verification command:
 ```bash
-BASE_REF=origin/codex/wave3-step1-behavior-freeze-v2 bash scripts/ci/review-wave4-step1.sh
+BASE_REF=origin/main bash scripts/ci/review-wave4-step1.sh
 ```
 
 Executed commands and outcomes:

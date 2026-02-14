@@ -27,7 +27,12 @@ Drift gates (best-effort code-only):
 
 Runbook:
 ```bash
-BASE_REF=origin/codex/wave3-step1-behavior-freeze-v2 bash scripts/ci/review-wave4-step1.sh
+BASE_REF=origin/main bash scripts/ci/review-wave4-step1.sh
+```
+
+Optional (stacked/local override):
+```bash
+BASE_REF=<your-base-ref> bash scripts/ci/review-wave4-step1.sh
 ```
 
 Definition of done:

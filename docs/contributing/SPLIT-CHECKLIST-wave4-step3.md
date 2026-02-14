@@ -18,7 +18,7 @@ Critical boundaries:
 
 Reviewer command:
 ```bash
-BASE_REF=origin/codex/wave4-step2x-cache-thinness bash scripts/ci/review-wave4-step3.sh
+BASE_REF=origin/main bash scripts/ci/review-wave4-step3.sh
 ```
 
 Definition of done:
