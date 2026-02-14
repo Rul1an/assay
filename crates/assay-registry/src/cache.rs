@@ -188,57 +188,7 @@ impl PackCache {
         result: &FetchResult,
         registry_url: Option<&str>,
     ) -> RegistryResult<()> {
-        let pack_dir = self.pack_dir(name, version);
-
-        // Create directory
-        fs::create_dir_all(&pack_dir)
-            .await
-            .map_err(|e| RegistryError::Cache {
-                message: format!("failed to create cache directory: {}", e),
-            })?;
-
-        // Calculate expiry from Cache-Control header
-        let expires_at = parse_cache_control_expiry(&result.headers);
-
-        // Build metadata
-        let metadata = CacheMeta {
-            fetched_at: Utc::now(),
-            digest: result.computed_digest.clone(),
-            etag: result.headers.etag.clone(),
-            expires_at,
-            key_id: result.headers.key_id.clone(),
-            registry_url: registry_url.map(String::from),
-        };
-
-        // Write files atomically (write to temp, then rename)
-        let pack_path = pack_dir.join("pack.yaml");
-        let meta_path = pack_dir.join("metadata.json");
-
-        // Write content
-        write_atomic(&pack_path, &result.content).await?;
-
-        // Write metadata
-        let meta_json =
-            serde_json::to_string_pretty(&metadata).map_err(|e| RegistryError::Cache {
-                message: format!("failed to serialize metadata: {}", e),
-            })?;
-        write_atomic(&meta_path, &meta_json).await?;
-
-        // Write signature if present
-        if let Some(sig_b64) = &result.headers.signature {
-            // Try to parse as DSSE envelope
-            if let Ok(envelope) = parse_signature(sig_b64) {
-                let sig_path = pack_dir.join("signature.json");
-                let sig_json =
-                    serde_json::to_string_pretty(&envelope).map_err(|e| RegistryError::Cache {
-                        message: format!("failed to serialize signature: {}", e),
-                    })?;
-                write_atomic(&sig_path, &sig_json).await?;
-            }
-        }
-
-        debug!(name, version, "cached pack");
-        Ok(())
+        cache_next::put::put_impl(self, name, version, result, registry_url).await
     }
 
     /// Get cached metadata without loading content.

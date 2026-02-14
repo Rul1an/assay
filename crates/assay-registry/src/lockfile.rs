@@ -24,10 +24,10 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::fs;
-use tracing::info;
 
-use crate::error::{RegistryError, RegistryResult};
+#[cfg(test)]
+use crate::error::RegistryError;
+use crate::error::RegistryResult;
 use crate::resolver::PackResolver;
 
 #[path = "lockfile_next/mod.rs"]
@@ -159,21 +159,7 @@ impl Lockfile {
 
     /// Load a lockfile from a path.
     pub async fn load(path: impl AsRef<Path>) -> RegistryResult<Self> {
-        let path = path.as_ref();
-
-        if !path.exists() {
-            return Err(RegistryError::Lockfile {
-                message: format!("lockfile not found: {}", path.display()),
-            });
-        }
-
-        let content = fs::read_to_string(path)
-            .await
-            .map_err(|e| RegistryError::Lockfile {
-                message: format!("failed to read lockfile: {}", e),
-            })?;
-
-        Self::parse(&content)
+        lockfile_next::io::load_impl(path).await
     }
 
     /// Parse a lockfile from YAML content.
@@ -183,17 +169,7 @@ impl Lockfile {
 
     /// Save the lockfile to a path.
     pub async fn save(&self, path: impl AsRef<Path>) -> RegistryResult<()> {
-        let path = path.as_ref();
-        let content = self.to_yaml()?;
-
-        fs::write(path, content)
-            .await
-            .map_err(|e| RegistryError::Lockfile {
-                message: format!("failed to write lockfile: {}", e),
-            })?;
-
-        info!(path = %path.display(), "saved lockfile");
-        Ok(())
+        lockfile_next::io::save_impl(self, path).await
     }
 
     /// Convert to YAML string.

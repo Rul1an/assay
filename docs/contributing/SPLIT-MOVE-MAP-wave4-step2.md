@@ -10,6 +10,8 @@ No public symbol path changes intended (`crate::lockfile::*`, `crate::cache::*` 
 
 ## Lockfile moves
 
+- `Lockfile::load` -> `lockfile_next/io.rs::load_impl`
+- `Lockfile::save` -> `lockfile_next/io.rs::save_impl`
 - `Lockfile::parse` -> `lockfile_next/parse.rs::parse_lockfile_impl`
 - `Lockfile::to_yaml` -> `lockfile_next/format.rs::to_yaml_impl`
 - `Lockfile::add_pack` -> `lockfile_next/format.rs::add_pack_impl`
@@ -21,6 +23,7 @@ No public symbol path changes intended (`crate::lockfile::*`, `crate::cache::*` 
 ## Cache moves
 
 - `PackCache::pack_dir` -> `cache_next/keys.rs::pack_dir_impl`
+- `PackCache::put` -> `cache_next/put.rs::put_impl`
 - `default_cache_dir` -> `cache_next/io.rs::default_cache_dir_impl`
 - `parse_cache_control_expiry` -> `cache_next/policy.rs::parse_cache_control_expiry_impl`
 - `parse_signature` -> `cache_next/integrity.rs::parse_signature_impl`

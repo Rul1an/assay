@@ -15,6 +15,8 @@ Critical boundaries:
 - Stable ordering logic is single-source in `lockfile_next/format.rs`.
 - Atomic write/rename logic is single-source in `cache_next/io.rs`.
 - Facades delegate to `*_next` impl paths for moved logic.
+- Lockfile IO (`load`/`save`) delegates to `lockfile_next/io.rs`.
+- Cache write path (`put`) delegates to `cache_next/put.rs`.
 
 Reviewer command:
 ```bash

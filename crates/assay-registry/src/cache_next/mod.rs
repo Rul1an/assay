@@ -10,4 +10,5 @@ pub(crate) mod integrity;
 pub(crate) mod io;
 pub(crate) mod keys;
 pub(crate) mod policy;
+pub(crate) mod put;
 pub(crate) mod tests;

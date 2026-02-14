@@ -8,6 +8,7 @@
 pub(crate) mod digest;
 pub(crate) mod errors;
 pub(crate) mod format;
+pub(crate) mod io;
 pub(crate) mod parse;
 pub(crate) mod tests;
 pub(crate) mod types;
