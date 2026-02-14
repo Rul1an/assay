@@ -8,6 +8,11 @@ fi
 if [ -z "${base_ref}" ]; then
   base_ref="origin/main"
 fi
+if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+  echo "BASE_REF not found: ${base_ref}"
+  exit 1
+fi
+echo "BASE_REF=${base_ref} sha=$(git rev-parse "${base_ref}")"
 
 rg_bin="$(command -v rg)"
 
