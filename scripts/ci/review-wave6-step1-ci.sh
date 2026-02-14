@@ -36,6 +36,7 @@ echo "== Wave6 Step1 baseline anchor checks =="
 check_has_match 'attestation_conditional:' .github/workflows/action-tests.yml
 check_has_match 'name:[[:space:]]+Wave 0 feature matrix' .github/workflows/split-wave0-gates.yml
 check_has_match 'cargo nextest run -p assay-registry --all-features' .github/workflows/split-wave0-gates.yml
+check_has_match 'cargo hack' .github/workflows/split-wave0-gates.yml
 check_has_match 'cargo install --locked cargo-semver-checks' .github/workflows/split-wave0-gates.yml
 check_has_match '-D clippy::todo -D clippy::unimplemented' .github/workflows/split-wave0-gates.yml
 check_has_match 'id-token:[[:space:]]+write' .github/workflows/release.yml
