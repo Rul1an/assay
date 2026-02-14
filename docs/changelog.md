@@ -351,6 +351,23 @@
 - ci(wave0): land split guardrails + robust semver baseline fetch (#329) @Rul1an
 - fix(ci): ensure cargo in PATH for eBPF self-hosted Install Dependencies step (#328) @Rul1an
 - hardening(ci): pin actions and tighten workflow security (#312) @Rul1an
+
+## [2026-02-14]
+
+- refactor(wave4): finalize cache thinness + explain split on main (#345) @Rul1an
+- refactor(wave4-step3): split explain behind stable facade (#344) @Rul1an
+- refactor(wave4-step2x): thin cache facade behind cache_next boundaries (#343) @Rul1an
+- chore(stack): promote wave3/wave4 integration branch to main (#341) @Rul1an
+- refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
+- docs(ci/wave4-step1): freeze lockfile/cache contracts before split (#339) @Rul1an
+- refactor(wave3-step2): scaffold monitor/trace split behind stable facades (#338) @Rul1an
+- test/docs(wave3-step1): behavior freeze for monitor + trace hotspots (#337) @Rul1an
+- refactor(core): split runner + mandate_store behind stable facades (Wave2 Step2) (#336) @Rul1an
+- chore(release): sync workspace to v2.18.0 (#334) @Rul1an
+- refactor(writer-step3): split writer behind stable facade (#332) @Rul1an
+- refactor(verify-step2): mechanical split behind stable verify facade (#331) @Rul1an
+- ci(wave0): land split guardrails + robust semver baseline fetch (#329) @Rul1an
+- fix(ci): ensure cargo in PATH for eBPF self-hosted Install Dependencies step (#328) @Rul1an
 ## [2026-02-13]
 
 - refactor(evidence): split json_strict into module (#307) @Rul1an
