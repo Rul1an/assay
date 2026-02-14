@@ -2,413 +2,22 @@ use crate::errors::{diagnostic::codes, similarity::closest_prompt, Diagnostic};
 use crate::model::LlmResponse;
 use crate::providers::llm::LlmClient;
 use async_trait::async_trait;
-use sha2::Digest;
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::BufRead;
-use std::path::Path;
+use serde_json as sj;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+#[path = "trace_next/mod.rs"]
+mod trace_next;
 
 #[derive(Clone)]
 pub struct TraceClient {
-    // prompts -> response
     traces: Arc<HashMap<String, LlmResponse>>,
     fingerprint: String,
 }
-struct EpisodeState {
-    input: Option<String>,
-    output: Option<String>,
-    model: Option<String>,
-    meta: serde_json::Value,
-    input_is_model: bool,
-    tool_calls: Vec<crate::model::ToolCallRecord>,
-}
-
-struct ParsedTraceRecord {
-    prompt: Option<String>,
-    response: Option<String>,
-    model: String,
-    meta: serde_json::Value,
-    request_id: Option<String>,
-}
-
-impl ParsedTraceRecord {
-    fn new() -> Self {
-        Self {
-            prompt: None,
-            response: None,
-            model: "trace".to_string(),
-            meta: serde_json::json!({}),
-            request_id: None,
-        }
-    }
-}
-
-enum LineDisposition {
-    Continue,
-    MaybeInsert,
-    ParseLegacy,
-}
-
-fn parse_trace_line_json(line: &str, line_no: usize) -> anyhow::Result<serde_json::Value> {
-    serde_json::from_str(line).map_err(|e| {
-        anyhow::anyhow!(
-            "line {}: Invalid trace format. Expected JSONL object.\n  Error: {}\n  Content: {}",
-            line_no,
-            e,
-            line.chars().take(50).collect::<String>()
-        )
-    })
-}
-
-fn handle_typed_event(
-    v: &serde_json::Value,
-    active_episodes: &mut HashMap<String, EpisodeState>,
-    parsed: &mut ParsedTraceRecord,
-) -> LineDisposition {
-    let Some(t) = v.get("type").and_then(|t| t.as_str()) else {
-        return LineDisposition::ParseLegacy;
-    };
-
-    match t {
-        "assay.trace" => {
-            parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
-            parsed.response = v
-                .get("response")
-                .or(v.get("text"))
-                .and_then(|s| s.as_str())
-                .map(String::from);
-            if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
-                parsed.model = m.to_string();
-            }
-            if let Some(m) = v.get("meta") {
-                parsed.meta = m.clone();
-            }
-            if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
-                parsed.request_id = Some(r.to_string());
-            }
-            LineDisposition::MaybeInsert
-        }
-        "episode_start" => {
-            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::EpisodeStart>(v.clone())
-            {
-                let input_prompt = ev
-                    .input
-                    .get("prompt")
-                    .and_then(|s| s.as_str())
-                    .map(String::from);
-                let has_input = input_prompt.is_some();
-                let state = EpisodeState {
-                    input: input_prompt,
-                    output: None,
-                    model: None,
-                    meta: ev.meta,
-                    input_is_model: has_input,
-                    tool_calls: Vec::new(),
-                };
-                active_episodes.insert(ev.episode_id, state);
-            }
-            LineDisposition::Continue
-        }
-        "tool_call" => {
-            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::ToolCallEntry>(v.clone())
-            {
-                if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
-                    state.tool_calls.push(crate::model::ToolCallRecord {
-                        id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
-                        tool_name: ev.tool_name,
-                        args: ev.args,
-                        result: ev.result,
-                        error: ev.error.map(serde_json::Value::String),
-                        index: state.tool_calls.len(),
-                        ts_ms: ev.timestamp,
-                    });
-                }
-            }
-            LineDisposition::Continue
-        }
-        "episode_end" => {
-            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::EpisodeEnd>(v.clone()) {
-                if let Some(mut state) = active_episodes.remove(&ev.episode_id) {
-                    if let Some(out) = ev.final_output {
-                        state.output = Some(out);
-                    }
-                    if let Some(p) = state.input {
-                        parsed.prompt = Some(p);
-                        parsed.response = state.output;
-                        merge_tool_calls_into_meta(&mut state.meta, &state.tool_calls);
-                        parsed.meta = state.meta;
-                        if let Some(model) = state.model {
-                            parsed.model = model;
-                        }
-                    }
-                }
-            }
-            LineDisposition::MaybeInsert
-        }
-        "step" => {
-            if let Ok(ev) = serde_json::from_value::<crate::trace::schema::StepEntry>(v.clone()) {
-                if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
-                    let is_model = ev.kind == "model";
-                    let can_extract_prompt = if is_model {
-                        !state.input_is_model
-                    } else {
-                        state.input.is_none()
-                    };
-
-                    if can_extract_prompt {
-                        let mut found_prompt = None;
-                        if let Some(c) = &ev.content {
-                            if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c) {
-                                if let Some(p) = c_json.get("prompt").and_then(|s| s.as_str()) {
-                                    found_prompt = Some(p.to_string());
-                                }
-                            }
-                        }
-                        if found_prompt.is_none() {
-                            if let Some(p) = ev.meta.get("gen_ai.prompt").and_then(|s| s.as_str()) {
-                                found_prompt = Some(p.to_string());
-                            }
-                        }
-                        if let Some(p) = found_prompt {
-                            state.input = Some(p);
-                            if is_model {
-                                state.input_is_model = true;
-                            }
-                        }
-                    }
-
-                    if let Some(c) = &ev.content {
-                        let mut extracted = None;
-                        if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c) {
-                            if let Some(resp) = c_json.get("completion").and_then(|s| s.as_str()) {
-                                extracted = Some(resp.to_string());
-                                if let Some(m) = c_json.get("model").and_then(|s| s.as_str()) {
-                                    state.model = Some(m.to_string());
-                                }
-                            }
-                        }
-                        if let Some(out) = extracted {
-                            state.output = Some(out);
-                        } else {
-                            state.output = Some(c.clone());
-                        }
-                    }
-
-                    if let Some(resp) = ev.meta.get("gen_ai.completion").and_then(|s| s.as_str()) {
-                        state.output = Some(resp.to_string());
-                    }
-                    if let Some(m) = ev
-                        .meta
-                        .get("gen_ai.request.model")
-                        .or(ev.meta.get("gen_ai.response.model"))
-                        .and_then(|s| s.as_str())
-                    {
-                        state.model = Some(m.to_string());
-                    }
-                }
-            }
-            LineDisposition::Continue
-        }
-        _ => LineDisposition::Continue,
-    }
-}
-
-fn merge_tool_calls_into_meta(
-    meta: &mut serde_json::Value,
-    tool_calls: &[crate::model::ToolCallRecord],
-) {
-    if tool_calls.is_empty() {
-        return;
-    }
-
-    let tool_calls_value = serde_json::to_value(tool_calls).unwrap_or_default();
-    match meta {
-        serde_json::Value::Object(map) => {
-            map.insert("tool_calls".to_string(), tool_calls_value);
-        }
-        _ => {
-            let mut map = serde_json::Map::new();
-            map.insert("tool_calls".to_string(), tool_calls_value);
-            *meta = serde_json::Value::Object(map);
-        }
-    }
-}
-
-fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
-    parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
-    parsed.response = v
-        .get("response")
-        .or(v.get("text"))
-        .and_then(|s| s.as_str())
-        .map(String::from);
-    if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
-        parsed.model = m.to_string();
-    }
-    if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
-        parsed.request_id = Some(r.to_string());
-    }
-
-    let tool_name = v.get("tool").and_then(|s| s.as_str()).map(String::from);
-    let tool_args = v.get("args").cloned();
-    let has_tool_calls = v.get("tool_calls").and_then(|v| v.as_array()).is_some();
-    let has_tool_signal = tool_name.is_some() || has_tool_calls;
-    if let Some(tool) = tool_name {
-        let record = crate::model::ToolCallRecord {
-            id: "legacy-v1".to_string(),
-            tool_name: tool,
-            args: tool_args.unwrap_or(serde_json::json!({})),
-            result: None,
-            error: None,
-            index: 0,
-            ts_ms: 0,
-        };
-        parsed.meta["tool_calls"] = serde_json::json!([record]);
-    } else if let Some(calls) = v.get("tool_calls").and_then(|v| v.as_array()) {
-        parsed.meta["tool_calls"] = serde_json::Value::Array(calls.clone());
-    }
-
-    // Legacy tool-only fixtures (tool/args/result without prompt/response) are common
-    // in policy demos. Canonicalize to a deterministic fallback lookup key so
-    // `input: "ignore"` works out of the box.
-    if has_tool_signal && parsed.prompt.is_none() {
-        parsed.prompt = Some("ignore".to_string());
-    }
-
-    if has_tool_signal && parsed.response.is_none() {
-        let response = match v.get("result") {
-            Some(result) => result
-                .as_str()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| result.to_string()),
-            None => String::new(),
-        };
-        parsed.response = Some(response);
-    }
-}
-
-fn insert_trace_record(
-    traces: &mut HashMap<String, LlmResponse>,
-    request_ids: &mut HashSet<String>,
-    parsed: ParsedTraceRecord,
-    line_no: usize,
-) -> anyhow::Result<()> {
-    let (Some(prompt), Some(response)) = (parsed.prompt, parsed.response) else {
-        return Ok(());
-    };
-
-    if let Some(rid) = &parsed.request_id {
-        if request_ids.contains(rid) {
-            return Err(anyhow::anyhow!(
-                "line {}: Duplicate request_id {}",
-                line_no,
-                rid
-            ));
-        }
-        request_ids.insert(rid.clone());
-    }
-
-    if traces.contains_key(&prompt) {
-        return Err(anyhow::anyhow!(
-            "Duplicate prompt found in trace file: {}",
-            prompt
-        ));
-    }
-
-    traces.insert(
-        prompt,
-        LlmResponse {
-            text: response,
-            meta: parsed.meta,
-            model: parsed.model,
-            provider: "trace".to_string(),
-            ..Default::default()
-        },
-    );
-
-    Ok(())
-}
-
-fn flush_active_episodes(
-    traces: &mut HashMap<String, LlmResponse>,
-    active_episodes: HashMap<String, EpisodeState>,
-) {
-    for (id, mut state) in active_episodes {
-        if let (Some(p), Some(r)) = (state.input.clone(), state.output.clone()) {
-            if traces.contains_key(&p) {
-                eprintln!("Warning: Duplicate prompt skipped at EOF for id {}", id);
-                continue;
-            }
-            merge_tool_calls_into_meta(&mut state.meta, &state.tool_calls);
-            traces.insert(
-                p,
-                LlmResponse {
-                    text: r,
-                    meta: state.meta,
-                    model: state.model.unwrap_or_else(|| "trace".to_string()),
-                    provider: "trace".to_string(),
-                    ..Default::default()
-                },
-            );
-        }
-    }
-}
-
-fn compute_trace_fingerprint(traces: &HashMap<String, LlmResponse>) -> String {
-    let mut keys: Vec<&String> = traces.keys().collect();
-    keys.sort();
-    let mut hasher = sha2::Sha256::new();
-    for k in keys {
-        hasher.update(k.as_bytes());
-        if let Some(v) = traces.get(k) {
-            hasher.update(v.text.as_bytes());
-            hasher.update(v.model.as_bytes());
-        }
-    }
-    hex::encode(hasher.finalize())
-}
 
 impl TraceClient {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let file = File::open(path.as_ref()).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to open trace file '{}': {}",
-                path.as_ref().display(),
-                e
-            )
-        })?;
-        let reader = std::io::BufReader::new(file);
-
-        let mut traces = HashMap::new();
-        let mut request_ids = HashSet::new();
-        let mut active_episodes: HashMap<String, EpisodeState> = HashMap::new();
-
-        for (i, line_res) in reader.lines().enumerate() {
-            let line_no = i + 1;
-            let line = line_res?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let v = parse_trace_line_json(&line, line_no)?;
-            let mut parsed = ParsedTraceRecord::new();
-
-            match handle_typed_event(&v, &mut active_episodes, &mut parsed) {
-                LineDisposition::Continue => continue,
-                LineDisposition::MaybeInsert => {}
-                LineDisposition::ParseLegacy => parse_legacy_record(&v, &mut parsed),
-            }
-
-            insert_trace_record(&mut traces, &mut request_ids, parsed, line_no)?;
-        }
-
-        flush_active_episodes(&mut traces, active_episodes);
-        let fingerprint = compute_trace_fingerprint(&traces);
-
-        Ok(Self {
-            traces: Arc::new(traces),
-            fingerprint,
-        })
+    pub fn from_path<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
+        trace_next::from_path_impl(path)
     }
 }
 
@@ -422,7 +31,6 @@ impl LlmClient for TraceClient {
         if let Some(resp) = self.traces.get(prompt) {
             Ok(resp.clone())
         } else {
-            // Find closest match for hint
             let closest = closest_prompt(prompt, self.traces.keys());
 
             let mut diag = Diagnostic::new(
@@ -430,7 +38,7 @@ impl LlmClient for TraceClient {
                 "Trace miss: prompt not found in loaded traces".to_string(),
             )
             .with_source("trace")
-            .with_context(serde_json::json!({
+            .with_context(sj::json!({
                 "prompt": prompt,
                 "closest_match": closest
             }));
@@ -459,7 +67,6 @@ impl LlmClient for TraceClient {
         Some(self.fingerprint.clone())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

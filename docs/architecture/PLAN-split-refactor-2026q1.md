@@ -168,6 +168,11 @@ Security improvements:
 
 ## Wave 2: Runtime decomposition (`runner.rs`, `mandate_store.rs`)
 
+Step status:
+
+- Step 1 (behavior freeze + inventory + drift gates): implemented on `codex/wave2-step1-behavior-freeze` (inventory, contract tests, checklists, reviewer script).
+- Step 2 (mechanical split): merged via PR #336 (Commit A scaffolds + Commit B mechanical function moves behind stable facades).
+
 ### A. `crates/assay-core/src/engine/runner.rs`
 
 Target structure:
@@ -229,6 +234,11 @@ Security/correctness improvements:
 
 ## Wave 3: Unsafe and parser boundary hardening (`monitor.rs`, `trace.rs`)
 
+Step status:
+
+- Step 1 (behavior freeze + inventory + drift gates): merged via PR #337.
+- Step 2 (mechanical split): merged via PR #338.
+
 ### A. `crates/assay-cli/src/cli/commands/monitor.rs`
 
 Target structure:
@@ -285,6 +295,12 @@ Security improvements:
 - Parser corpus coverage increased; no panic paths on malformed inputs.
 
 ## Wave 4: Consolidation (`lockfile.rs`, `cache.rs`, `explain.rs`)
+
+Step status:
+
+- Step 1 (`lockfile.rs` + `cache.rs` behavior freeze/inventory/gates): merged via PR #339.
+- Step 2 (`lockfile.rs` + `cache.rs` mechanical split): in progress on `codex/wave4-step2-lockfile-cache-split`.
+- `explain.rs` follows as a separate slice to keep review size and blast radius small.
 
 ### Objectives
 

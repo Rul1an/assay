@@ -13,14 +13,19 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tracing::{debug, warn};
 
 use crate::error::{RegistryError, RegistryResult};
-use crate::types::{DsseEnvelope, FetchResult, PackHeaders};
+#[cfg(test)]
+use crate::types::PackHeaders;
+use crate::types::{DsseEnvelope, FetchResult};
 use crate::verify::compute_digest;
+
+#[path = "cache_next/mod.rs"]
+mod cache_next;
 
 /// Default cache TTL (24 hours).
 const DEFAULT_TTL_SECS: i64 = 24 * 60 * 60;
@@ -75,7 +80,7 @@ impl PackCache {
     ///
     /// Default: `~/.assay/cache/packs`
     pub fn new() -> RegistryResult<Self> {
-        let cache_dir = default_cache_dir()?;
+        let cache_dir = cache_next::io::default_cache_dir_impl()?;
         Ok(Self { cache_dir })
     }
 
@@ -93,7 +98,7 @@ impl PackCache {
 
     /// Get the path for a pack's cache directory.
     fn pack_dir(&self, name: &str, version: &str) -> PathBuf {
-        self.cache_dir.join(name).join(version)
+        cache_next::keys::pack_dir_impl(&self.cache_dir, name, version)
     }
 
     /// Get a cached pack, verifying integrity on read.
@@ -185,57 +190,7 @@ impl PackCache {
         result: &FetchResult,
         registry_url: Option<&str>,
     ) -> RegistryResult<()> {
-        let pack_dir = self.pack_dir(name, version);
-
-        // Create directory
-        fs::create_dir_all(&pack_dir)
-            .await
-            .map_err(|e| RegistryError::Cache {
-                message: format!("failed to create cache directory: {}", e),
-            })?;
-
-        // Calculate expiry from Cache-Control header
-        let expires_at = parse_cache_control_expiry(&result.headers);
-
-        // Build metadata
-        let metadata = CacheMeta {
-            fetched_at: Utc::now(),
-            digest: result.computed_digest.clone(),
-            etag: result.headers.etag.clone(),
-            expires_at,
-            key_id: result.headers.key_id.clone(),
-            registry_url: registry_url.map(String::from),
-        };
-
-        // Write files atomically (write to temp, then rename)
-        let pack_path = pack_dir.join("pack.yaml");
-        let meta_path = pack_dir.join("metadata.json");
-
-        // Write content
-        write_atomic(&pack_path, &result.content).await?;
-
-        // Write metadata
-        let meta_json =
-            serde_json::to_string_pretty(&metadata).map_err(|e| RegistryError::Cache {
-                message: format!("failed to serialize metadata: {}", e),
-            })?;
-        write_atomic(&meta_path, &meta_json).await?;
-
-        // Write signature if present
-        if let Some(sig_b64) = &result.headers.signature {
-            // Try to parse as DSSE envelope
-            if let Ok(envelope) = parse_signature(sig_b64) {
-                let sig_path = pack_dir.join("signature.json");
-                let sig_json =
-                    serde_json::to_string_pretty(&envelope).map_err(|e| RegistryError::Cache {
-                        message: format!("failed to serialize signature: {}", e),
-                    })?;
-                write_atomic(&sig_path, &sig_json).await?;
-            }
-        }
-
-        debug!(name, version, "cached pack");
-        Ok(())
+        cache_next::put::put_impl(self, name, version, result, registry_url).await
     }
 
     /// Get cached metadata without loading content.
@@ -348,73 +303,6 @@ impl Default for PackCache {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self::with_dir("/tmp/assay-cache/packs"))
     }
-}
-
-/// Get the default cache directory.
-fn default_cache_dir() -> RegistryResult<PathBuf> {
-    let base = dirs::cache_dir()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| RegistryError::Cache {
-            message: "could not determine cache directory".to_string(),
-        })?;
-
-    Ok(base.join("assay").join("cache").join("packs"))
-}
-
-/// Parse Cache-Control header to determine expiry.
-fn parse_cache_control_expiry(headers: &PackHeaders) -> DateTime<Utc> {
-    let now = Utc::now();
-    let default_ttl = Duration::seconds(DEFAULT_TTL_SECS);
-
-    let ttl = headers
-        .cache_control
-        .as_ref()
-        .and_then(|cc| {
-            // Parse max-age=N
-            cc.split(',')
-                .find(|part| part.trim().starts_with("max-age="))
-                .and_then(|part| {
-                    part.trim()
-                        .strip_prefix("max-age=")
-                        .and_then(|v| v.parse::<i64>().ok())
-                })
-        })
-        .map(Duration::seconds)
-        .unwrap_or(default_ttl);
-
-    now + ttl
-}
-
-/// Parse signature from Base64.
-fn parse_signature(b64: &str) -> RegistryResult<DsseEnvelope> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    let bytes = BASE64.decode(b64).map_err(|e| RegistryError::Cache {
-        message: format!("invalid base64 signature: {}", e),
-    })?;
-
-    serde_json::from_slice(&bytes).map_err(|e| RegistryError::Cache {
-        message: format!("invalid DSSE envelope: {}", e),
-    })
-}
-
-/// Write content to file atomically.
-async fn write_atomic(path: &Path, content: &str) -> RegistryResult<()> {
-    let temp_path = path.with_extension("tmp");
-
-    fs::write(&temp_path, content)
-        .await
-        .map_err(|e| RegistryError::Cache {
-            message: format!("failed to write temp file: {}", e),
-        })?;
-
-    fs::rename(&temp_path, path)
-        .await
-        .map_err(|e| RegistryError::Cache {
-            message: format!("failed to rename temp file: {}", e),
-        })?;
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -602,7 +490,8 @@ mod tests {
             content_length: None,
         };
 
-        let expires = parse_cache_control_expiry(&headers);
+        let expires =
+            cache_next::policy::parse_cache_control_expiry_impl(&headers, DEFAULT_TTL_SECS);
         let now = Utc::now();
 
         // Should be approximately 2 hours in the future
@@ -621,7 +510,8 @@ mod tests {
             content_length: None,
         };
 
-        let expires = parse_cache_control_expiry(&headers);
+        let expires =
+            cache_next::policy::parse_cache_control_expiry_impl(&headers, DEFAULT_TTL_SECS);
         let now = Utc::now();
 
         // Should be approximately 24 hours in the future
