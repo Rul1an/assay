@@ -365,8 +365,8 @@ Exit criteria (Wave 5):
 
 Step status:
 
-- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave6-step1-ci-hardening-freeze`.
-- Step 2 (attestation pair): planned.
+- Step 1 (behavior freeze + inventory + drift gates): merged via PR #353.
+- Step 2 (attestation pair): in progress on `codex/wave6-step2-attestation-pair`.
 - Step 3 (nightly fuzz/model lane): planned.
 
 Step 1 scope (freeze only):
