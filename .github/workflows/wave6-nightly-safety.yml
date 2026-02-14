@@ -1,0 +1,108 @@
+name: Wave6 Nightly Safety
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  miri-registry-smoke:
+    name: Nightly Miri (assay-registry smoke)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+        with:
+          toolchain: nightly
+          components: miri
+
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Miri smoke test (verify fail-closed anchor)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo miri setup
+          cargo miri test -p assay-registry test_verify_pack_fail_closed_matrix_contract -- --exact --nocapture
+
+  proptest-cli-smoke:
+    name: Nightly property smoke (assay-cli)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Proptest smoke anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p assay-cli test_roundtrip_property -- --nocapture
+
+  nightly-summary:
+    name: Nightly safety summary
+    needs: [miri-registry-smoke, proptest-cli-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "## Wave6 nightly safety summary"
+            echo "- miri-registry-smoke: ${{ needs.miri-registry-smoke.result }}"
+            echo "- proptest-cli-smoke: ${{ needs.proptest-cli-smoke.result }}"
+            echo "- Non-blocking lane (continue-on-error=true on smoke jobs)."
+          } >> "$GITHUB_STEP_SUMMARY"
