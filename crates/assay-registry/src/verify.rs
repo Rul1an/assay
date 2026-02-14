@@ -4,6 +4,9 @@
 //! - Digest verification (SHA-256 of JCS-canonical content)
 //! - DSSE signature verification (Ed25519 over PAE)
 
+#[path = "verify_next/mod.rs"]
+mod verify_next;
+
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
