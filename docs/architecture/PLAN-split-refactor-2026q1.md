@@ -1,6 +1,6 @@
 # Plan: Refactor Hotspots (Q1-Q2 2026)
 
-> Status: Proposed
+> Status: In progress (Waves 1-5 merged; Wave 6 active)
 > Date: 2026-02-13
 > Scope: Largest handwritten Rust production files and related CI/CD gates
 > Constraint: No behavior drift in CLI/public contracts; incremental mergeable PRs
@@ -361,7 +361,33 @@ Exit criteria (Wave 5):
 - Step1 contract anchors remain green (via Step3 reviewer script).
 - Step3 boundary scripts remain green with no allowlist leakage.
 
-## 4) CI/CD improvements linked to this plan
+## Wave 6: CI/CD hardening closure
+
+Step status:
+
+- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave6-step1-ci-hardening-freeze`.
+- Step 2 (attestation pair): planned.
+- Step 3 (nightly fuzz/model lane): planned.
+
+Step 1 scope (freeze only):
+
+- Baseline inventory for existing CI/release guardrails.
+- Reviewer script with hard-fail allowlist and baseline anchor checks.
+- No workflow semantic changes in Step1.
+
+Step 2 scope (planned):
+
+- Artifact attestation as a required pair:
+  - produce provenance in release workflow (`attest-build-provenance`)
+  - verify attestation in CI/release validation; fail closed if missing/invalid
+- Keep existing Wave0 feature/semver/placeholder gates intact.
+
+Step 3 scope (planned):
+
+- Add nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first).
+- Introduce promotion policy for escalating nightly checks to required status when stable.
+
+Current baseline strengths:
 
 Already strong today:
 
@@ -370,7 +396,7 @@ Already strong today:
 - `cargo-audit` + `cargo-deny`.
 - Criterion + Bencher lanes.
 
-Additions for this refactor program:
+Program additions tracked in Wave 6:
 
 1. Artifact attestation as a required pair:
    - produce provenance in release workflow (`attest-build-provenance`)
