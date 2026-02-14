@@ -131,7 +131,7 @@ check_no_match_code_only \
   '^\s*#\[cfg\(test\)\]|^\s*mod\s+tests\s*[{;]|^\s*#\[cfg\(test\)\]\s*mod\s+tests\s*;' \
   "${verify_facade}"
 check_no_match_code_only \
-  'base64::|ed25519_dalek|serde_json::from_(slice|str)|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest|build_pae_impl\(|verify_single_signature_impl\(|verify_dsse_signature_bytes_impl\(' \
+  'base64::|serde_json::from_(slice|str)|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest|build_pae_impl\(|verify_single_signature_impl\(|verify_dsse_signature_bytes_impl\(|Signature::from_slice|key\.verify\(' \
   "${verify_facade}"
 
 check_has_match 'verify_internal::policy::verify_pack_impl' "${verify_facade}"
@@ -151,10 +151,10 @@ check_only_file_matches \
 check_only_file_matches \
   'build_pae_impl\(|verify_single_signature_impl\(|Signature::from_slice|key\.verify\(' \
   "${verify_root}" \
-  'verify_internal/dsse.rs'
+  'verify_internal/dsse.rs|verify_internal/tests.rs'
 
 check_only_file_matches \
-  'canonicalize_for_dsse_impl\(|parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  'parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
   "${verify_root}" \
   'verify_internal/digest.rs|verify_internal/tests.rs'
 
@@ -176,7 +176,7 @@ check_no_match_code_only \
   'allow_unsigned|skip_signature|Unsigned|VerifyOptions|policy' \
   "${verify_root}/dsse.rs"
 
-policy_boundary_calls="$(rg -n 'verify_dsse_signature_bytes_impl\(' "${verify_root}/policy.rs" || true)"
+policy_boundary_calls="$(rg -n 'verify_dsse_signature_impl\(' "${verify_root}/policy.rs" || true)"
 policy_boundary_count="$(echo "$policy_boundary_calls" | sed '/^$/d' | wc -l | tr -d ' ')"
 if [ "$policy_boundary_count" -ne 1 ]; then
   echo "expected exactly one DSSE boundary call in policy.rs, got ${policy_boundary_count}"

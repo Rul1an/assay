@@ -18,6 +18,7 @@ Entry-point call chains (final target):
   - `verify.rs::verify_pack`
   - -> `verify_internal::policy::verify_pack_impl`
   - -> `verify_internal::wire::parse_dsse_envelope_impl`
+  - -> `verify_internal::dsse::verify_dsse_signature_impl`
   - -> `verify_internal::digest::canonicalize_for_dsse_impl`
   - -> `verify_internal::dsse::verify_dsse_signature_bytes_impl`
 - `verify_digest`
