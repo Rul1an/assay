@@ -352,6 +352,12 @@
 - fix(ci): ensure cargo in PATH for eBPF self-hosted Install Dependencies step (#328) @Rul1an
 - hardening(ci): pin actions and tighten workflow security (#312) @Rul1an
 
+- docs(ci/wave4): default review BASE_REF to origin/main (#346) @Rul1an
+- refactor(wave4): finalize cache thinness + explain split on main (#345) @Rul1an
+- refactor(wave4-step3): split explain behind stable facade (#344) @Rul1an
+- refactor(wave4-step2x): thin cache facade behind cache_next boundaries (#343) @Rul1an
+- chore(stack): promote wave3/wave4 integration branch to main (#341) @Rul1an
+- refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
 ## [2026-02-14]
 
 - refactor(wave4): finalize cache thinness + explain split on main (#345) @Rul1an
