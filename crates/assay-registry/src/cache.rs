@@ -15,13 +15,16 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use tokio::fs;
-use tracing::{debug, warn};
 
-use crate::error::{RegistryError, RegistryResult};
+#[cfg(test)]
+use crate::error::RegistryError;
+use crate::error::RegistryResult;
 #[cfg(test)]
 use crate::types::PackHeaders;
 use crate::types::{DsseEnvelope, FetchResult};
+#[cfg(test)]
 use crate::verify::compute_digest;
 
 #[path = "cache_next/mod.rs"]
@@ -106,80 +109,7 @@ impl PackCache {
     /// Returns `None` if not cached or expired.
     /// Returns `Err` if integrity verification fails (caller should evict and re-fetch).
     pub async fn get(&self, name: &str, version: &str) -> RegistryResult<Option<CacheEntry>> {
-        let pack_dir = self.pack_dir(name, version);
-
-        // Check if pack exists
-        let pack_path = pack_dir.join("pack.yaml");
-        let meta_path = pack_dir.join("metadata.json");
-
-        if !pack_path.exists() || !meta_path.exists() {
-            debug!(name, version, "pack not in cache");
-            return Ok(None);
-        }
-
-        // Read metadata first
-        let meta_content =
-            fs::read_to_string(&meta_path)
-                .await
-                .map_err(|e| RegistryError::Cache {
-                    message: format!("failed to read cache metadata: {}", e),
-                })?;
-        let metadata: CacheMeta =
-            serde_json::from_str(&meta_content).map_err(|e| RegistryError::Cache {
-                message: format!("failed to parse cache metadata: {}", e),
-            })?;
-
-        // Check expiry
-        if metadata.expires_at < Utc::now() {
-            debug!(
-                name,
-                version,
-                expires_at = %metadata.expires_at,
-                "cache entry expired"
-            );
-            return Ok(None);
-        }
-
-        // Read content
-        let content = fs::read_to_string(&pack_path)
-            .await
-            .map_err(|e| RegistryError::Cache {
-                message: format!("failed to read cached pack: {}", e),
-            })?;
-
-        // CRITICAL: Verify digest BEFORE returning (TOCTOU protection)
-        let computed_digest = compute_digest(&content);
-        if computed_digest != metadata.digest {
-            warn!(
-                name,
-                version,
-                expected = %metadata.digest,
-                actual = %computed_digest,
-                "cache integrity check failed"
-            );
-            return Err(RegistryError::DigestMismatch {
-                name: name.to_string(),
-                version: version.to_string(),
-                expected: metadata.digest,
-                actual: computed_digest,
-            });
-        }
-
-        // Read signature if present
-        let sig_path = pack_dir.join("signature.json");
-        let signature = if sig_path.exists() {
-            let sig_content = fs::read_to_string(&sig_path).await.ok();
-            sig_content.and_then(|s| serde_json::from_str(&s).ok())
-        } else {
-            None
-        };
-
-        debug!(name, version, "cache hit");
-        Ok(Some(CacheEntry {
-            content,
-            metadata,
-            signature,
-        }))
+        cache_next::read::get_impl(self, name, version).await
     }
 
     /// Store a pack in the cache.
@@ -195,10 +125,7 @@ impl PackCache {
 
     /// Get cached metadata without loading content.
     pub async fn get_metadata(&self, name: &str, version: &str) -> Option<CacheMeta> {
-        let meta_path = self.pack_dir(name, version).join("metadata.json");
-
-        let content = fs::read_to_string(&meta_path).await.ok()?;
-        serde_json::from_str(&content).ok()
+        cache_next::read::get_metadata_impl(self, name, version).await
     }
 
     /// Get the ETag for conditional requests.
@@ -216,86 +143,17 @@ impl PackCache {
 
     /// Evict a pack from the cache.
     pub async fn evict(&self, name: &str, version: &str) -> RegistryResult<()> {
-        let pack_dir = self.pack_dir(name, version);
-
-        if pack_dir.exists() {
-            fs::remove_dir_all(&pack_dir)
-                .await
-                .map_err(|e| RegistryError::Cache {
-                    message: format!("failed to evict cache entry: {}", e),
-                })?;
-            debug!(name, version, "evicted from cache");
-        }
-
-        Ok(())
+        cache_next::evict::evict_impl(self, name, version).await
     }
 
     /// Clear all cached packs.
     pub async fn clear(&self) -> RegistryResult<()> {
-        if self.cache_dir.exists() {
-            fs::remove_dir_all(&self.cache_dir)
-                .await
-                .map_err(|e| RegistryError::Cache {
-                    message: format!("failed to clear cache: {}", e),
-                })?;
-            debug!("cleared pack cache");
-        }
-        Ok(())
+        cache_next::evict::clear_impl(self).await
     }
 
     /// List all cached packs.
     pub async fn list(&self) -> RegistryResult<Vec<(String, String, CacheMeta)>> {
-        let mut result = Vec::new();
-
-        if !self.cache_dir.exists() {
-            return Ok(result);
-        }
-
-        let mut names = fs::read_dir(&self.cache_dir)
-            .await
-            .map_err(|e| RegistryError::Cache {
-                message: format!("failed to read cache directory: {}", e),
-            })?;
-
-        while let Some(name_entry) = names.next_entry().await.map_err(|e| RegistryError::Cache {
-            message: format!("failed to read directory entry: {}", e),
-        })? {
-            let name_path = name_entry.path();
-            if !name_path.is_dir() {
-                continue;
-            }
-
-            let name = name_entry.file_name().to_string_lossy().to_string();
-
-            let mut versions =
-                fs::read_dir(&name_path)
-                    .await
-                    .map_err(|e| RegistryError::Cache {
-                        message: format!("failed to read version directory: {}", e),
-                    })?;
-
-            while let Some(version_entry) =
-                versions
-                    .next_entry()
-                    .await
-                    .map_err(|e| RegistryError::Cache {
-                        message: format!("failed to read directory entry: {}", e),
-                    })?
-            {
-                let version_path = version_entry.path();
-                if !version_path.is_dir() {
-                    continue;
-                }
-
-                let version = version_entry.file_name().to_string_lossy().to_string();
-
-                if let Some(meta) = self.get_metadata(&name, &version).await {
-                    result.push((name.clone(), version, meta));
-                }
-            }
-        }
-
-        Ok(result)
+        cache_next::read::list_impl(self).await
     }
 }
 
