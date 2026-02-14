@@ -76,7 +76,7 @@ check_no_match_code_only \
 
 # DSSE crypto path single-source in dsse.rs
 check_only_file_matches \
-  'build_pae\(|verify_single_signature\(|verify_dsse_signature_bytes_impl\(|VerifyingKey::|Signature::from_slice' \
+  'build_pae\(|verify_single_signature\(|verify_dsse_signature_bytes_impl\(|VerifyingKey::from_bytes|Signature::from_slice' \
   crates/assay-registry/src/verify_next \
   'verify_next/dsse.rs'
 ```

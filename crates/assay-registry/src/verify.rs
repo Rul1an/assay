@@ -1025,6 +1025,14 @@ mod tests {
         let variant_canonical = canonicalize_for_dsse(variant_yaml).unwrap();
         assert_eq!(source_canonical, variant_canonical);
 
+        // Non-equivalent content must not collapse to the same digest/canonical bytes.
+        let changed_yaml = "a: 1\nm: 2\nz: 4\n";
+        assert_ne!(compute_digest(source_yaml), compute_digest(changed_yaml));
+        assert_ne!(
+            source_canonical,
+            canonicalize_for_dsse(changed_yaml).unwrap()
+        );
+
         let (envelope, key_id) = create_signed_envelope(&signing_key, source_yaml);
 
         use pkcs8::EncodePublicKey;
