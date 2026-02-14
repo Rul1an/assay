@@ -128,7 +128,9 @@ check_has_match 'verify_next::wire::parse_dsse_envelope_impl' crates/assay-regis
 check_has_match 'verify_next::dsse::build_pae_impl' crates/assay-registry/src/verify.rs
 check_has_match 'verify_next::dsse::verify_dsse_signature_bytes_impl' crates/assay-registry/src/verify.rs
 
-leaked_refs="$(rg -n 'verify_next::' crates/assay-registry/src | rg -v 'crates/assay-registry/src/verify.rs' || true)"
+leaked_refs="$(
+  rg -n 'verify_next::' crates/assay-registry/src -g'*.rs' -g'!verify.rs' -g'!*/tests.rs' || true
+)"
 if [ -n "$leaked_refs" ]; then
   echo "verify_next path usage leaked outside verify facade:"
   echo "$leaked_refs"
@@ -148,8 +150,19 @@ check_no_match_code_only \
   'allow_unsigned|skip_signature|Unsigned|VerifyOptions|policy' \
   crates/assay-registry/src/verify_next/dsse.rs
 
+# Canonicalization helpers must stay out of policy/wire/keys.
+check_no_match_code_only \
+  'parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  crates/assay-registry/src/verify_next/policy.rs
+check_no_match_code_only \
+  'parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  crates/assay-registry/src/verify_next/wire.rs
+check_no_match_code_only \
+  'parse_yaml_strict|to_canonical_jcs_bytes|compute_canonical_digest' \
+  crates/assay-registry/src/verify_next/keys.rs
+
 check_only_file_matches \
-  'build_pae_impl\(|verify_single_signature_impl\(|Signature::from_slice' \
+  'build_pae_impl\(|verify_single_signature_impl\(|Signature::from_slice|key\.verify\(' \
   crates/assay-registry/src/verify_next \
   'verify_next/dsse.rs'
 

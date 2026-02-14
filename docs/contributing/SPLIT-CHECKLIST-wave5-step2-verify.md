@@ -27,6 +27,7 @@ Hard gates:
 - `verify.rs` code-only has no heavy parsing/crypto internals
 - `policy.rs` has no low-level DSSE crypto primitives
 - `dsse.rs` has no policy tokens
+- canonicalization helpers stay out of `policy.rs`, `wire.rs`, `keys.rs`
 - DSSE crypto helper calls are single-source in `verify_next/dsse.rs`
 - `policy.rs` has exactly one DSSE boundary call (`verify_dsse_signature_bytes_impl`)
 - diff stays within Step2 allowlist
