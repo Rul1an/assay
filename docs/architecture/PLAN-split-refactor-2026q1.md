@@ -83,6 +83,13 @@ Execution order:
 
 ## Wave 1: Security-first split (`verify.rs`, `writer.rs`)
 
+Step status:
+
+- Writer split: merged via PR #332.
+- Verify split: pending completion.
+- Verify Step1 behavior freeze (tests/docs/gates): in review on `codex/wave5-step1-verify-freeze` (PR #348).
+- Verify Step2 mechanical split: in progress on `codex/wave5-step2-verify-split` (PR #349).
+
 ### A. `crates/assay-registry/src/verify.rs`
 
 Target structure:

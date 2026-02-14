@@ -4,16 +4,17 @@
 //! - Digest verification (SHA-256 of JCS-canonical content)
 //! - DSSE signature verification (Ed25519 over PAE)
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+#[path = "verify_next/mod.rs"]
+mod verify_next;
 
-use crate::canonicalize::{
-    compute_canonical_digest, parse_yaml_strict, to_canonical_jcs_bytes, CanonicalizeError,
-};
-use crate::digest::{compute_canonical_or_raw_digest, sha256_hex_bytes};
-use crate::error::{RegistryError, RegistryResult};
+use ed25519_dalek::VerifyingKey;
+
+use crate::canonicalize::CanonicalizeError;
+use crate::error::RegistryResult;
 use crate::trust::TrustStore;
-use crate::types::{DsseEnvelope, FetchResult};
+#[cfg(test)]
+use crate::types::DsseEnvelope;
+use crate::types::FetchResult;
 
 /// Payload type for pack definitions (DSSE-style binding).
 pub const PAYLOAD_TYPE_PACK_V1: &str = "application/vnd.assay.pack+yaml;v=1";
@@ -74,87 +75,22 @@ pub fn verify_pack(
     trust_store: &TrustStore,
     options: &VerifyOptions,
 ) -> RegistryResult<VerifyResult> {
-    // 1. Verify digest
-    if let Some(claimed_digest) = &result.headers.digest {
-        if claimed_digest != &result.computed_digest {
-            return Err(RegistryError::DigestMismatch {
-                name: "pack".to_string(),
-                version: "unknown".to_string(),
-                expected: claimed_digest.clone(),
-                actual: result.computed_digest.clone(),
-            });
-        }
-    }
-
-    // 2. Check for signature
-    let signature = &result.headers.signature;
-    if signature.is_none() {
-        if options.allow_unsigned {
-            return Ok(VerifyResult {
-                signed: false,
-                key_id: None,
-                digest: result.computed_digest.clone(),
-            });
-        } else {
-            return Err(RegistryError::Unsigned {
-                name: "pack".to_string(),
-                version: "unknown".to_string(),
-            });
-        }
-    }
-
-    // 3. Skip signature if requested
-    if options.skip_signature {
-        return Ok(VerifyResult {
-            signed: true,
-            key_id: result.headers.key_id.clone(),
-            digest: result.computed_digest.clone(),
-        });
-    }
-
-    // 4. Canonicalize content for DSSE verification
-    // CRITICAL: DSSE payload is canonical JCS bytes, not raw YAML
-    let canonical_bytes = canonicalize_for_dsse(&result.content)?;
-
-    // 5. Parse and verify DSSE signature
-    let sig_b64 = signature.as_ref().unwrap();
-    let envelope = parse_dsse_envelope(sig_b64)?;
-    verify_dsse_signature_bytes(&canonical_bytes, &envelope, trust_store)?;
-
-    Ok(VerifyResult {
-        signed: true,
-        key_id: envelope.signatures.first().map(|s| s.key_id.clone()),
-        digest: result.computed_digest.clone(),
-    })
+    verify_next::policy::verify_pack_impl(result, trust_store, options)
 }
 
 /// Canonicalize YAML content to JCS bytes for DSSE verification.
 ///
 /// Per SPEC §6.3: DSSE payload is the JCS canonical form of the pack content.
+#[cfg(test)]
 fn canonicalize_for_dsse(content: &str) -> RegistryResult<Vec<u8>> {
-    let json_value = parse_yaml_strict(content).map_err(|e| RegistryError::InvalidResponse {
-        message: format!("failed to parse YAML for signature verification: {}", e),
-    })?;
-
-    to_canonical_jcs_bytes(&json_value).map_err(|e| RegistryError::InvalidResponse {
-        message: format!("failed to canonicalize for signature verification: {}", e),
-    })
+    verify_next::dsse::canonicalize_for_dsse_impl(content)
 }
 
 /// Verify content digest matches expected.
 ///
 /// Uses canonical JCS digest per SPEC §6.2.
 pub fn verify_digest(content: &str, expected: &str) -> RegistryResult<()> {
-    let computed = compute_digest(content);
-    if computed != expected {
-        return Err(RegistryError::DigestMismatch {
-            name: "pack".to_string(),
-            version: "unknown".to_string(),
-            expected: expected.to_string(),
-            actual: computed,
-        });
-    }
-    Ok(())
+    verify_next::digest::verify_digest_impl(content, expected)
 }
 
 /// Compute canonical digest of content per SPEC §6.2.
@@ -167,19 +103,14 @@ pub fn verify_digest(content: &str, expected: &str) -> RegistryResult<()> {
 ///
 /// For content that may not be valid YAML, falls back to raw SHA-256.
 pub fn compute_digest(content: &str) -> String {
-    compute_canonical_or_raw_digest(content, |e| {
-        tracing::warn!(
-            error = %e,
-            "canonical digest failed, falling back to raw digest"
-        );
-    })
+    verify_next::digest::compute_digest_impl(content)
 }
 
 /// Compute canonical digest, returning error on invalid YAML.
 ///
 /// Use this when you need strict validation.
 pub fn compute_digest_strict(content: &str) -> Result<String, CanonicalizeError> {
-    compute_canonical_digest(content)
+    verify_next::digest::compute_digest_strict_impl(content)
 }
 
 /// Compute raw SHA-256 digest of content bytes.
@@ -188,20 +119,13 @@ pub fn compute_digest_strict(content: &str) -> Result<String, CanonicalizeError>
 /// This function is only for backward compatibility with pre-v1.0.2 digests.
 #[deprecated(since = "2.11.0", note = "use compute_digest for canonical JCS digest")]
 pub fn compute_digest_raw(content: &str) -> String {
-    sha256_hex_bytes(content.as_bytes())
+    verify_next::digest::compute_digest_raw_impl(content)
 }
 
 /// Parse DSSE envelope from Base64.
+#[cfg(test)]
 fn parse_dsse_envelope(b64: &str) -> RegistryResult<DsseEnvelope> {
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|e| RegistryError::SignatureInvalid {
-            reason: format!("invalid base64 envelope: {}", e),
-        })?;
-
-    serde_json::from_slice(&bytes).map_err(|e| RegistryError::SignatureInvalid {
-        reason: format!("invalid DSSE envelope: {}", e),
-    })
+    verify_next::wire::parse_dsse_envelope_impl(b64)
 }
 
 /// Build DSSE Pre-Authentication Encoding (PAE).
@@ -209,133 +133,39 @@ fn parse_dsse_envelope(b64: &str) -> RegistryResult<DsseEnvelope> {
 /// ```text
 /// PAE(type, payload) = "DSSEv1" SP LEN(type) SP type SP LEN(payload) SP payload
 /// ```
+#[cfg(test)]
 fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    let type_len = payload_type.len().to_string();
-    let payload_len = payload.len().to_string();
-
-    let mut pae = Vec::new();
-    pae.extend_from_slice(b"DSSEv1 ");
-    pae.extend_from_slice(type_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_type.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload);
-    pae
+    verify_next::dsse::build_pae_impl(payload_type, payload)
 }
 
 /// Verify DSSE signature over canonical content bytes.
 ///
 /// Per SPEC §6.3: The DSSE payload MUST be the JCS canonical form of the content.
 /// This function compares canonical bytes, not raw YAML strings.
+#[cfg(test)]
 fn verify_dsse_signature_bytes(
     canonical_bytes: &[u8],
     envelope: &DsseEnvelope,
     trust_store: &TrustStore,
 ) -> RegistryResult<()> {
-    // 1. Check payload type
-    if envelope.payload_type != PAYLOAD_TYPE_PACK_V1 {
-        return Err(RegistryError::SignatureInvalid {
-            reason: format!(
-                "payload type mismatch: expected {}, got {}",
-                PAYLOAD_TYPE_PACK_V1, envelope.payload_type
-            ),
-        });
-    }
-
-    // 2. Decode payload from envelope
-    let payload_bytes =
-        BASE64
-            .decode(&envelope.payload)
-            .map_err(|e| RegistryError::SignatureInvalid {
-                reason: format!("invalid base64 payload: {}", e),
-            })?;
-
-    // 3. CRITICAL: Compare canonical bytes directly (not as strings)
-    // This ensures we're comparing apples to apples: canonical form to canonical form
-    if payload_bytes != canonical_bytes {
-        return Err(RegistryError::DigestMismatch {
-            name: "pack".to_string(),
-            version: "unknown".to_string(),
-            expected: format!("canonical payload ({} bytes)", payload_bytes.len()),
-            actual: format!("canonical content ({} bytes)", canonical_bytes.len()),
-        });
-    }
-
-    // 4. Verify at least one signature
-    if envelope.signatures.is_empty() {
-        return Err(RegistryError::SignatureInvalid {
-            reason: "no signatures in envelope".to_string(),
-        });
-    }
-
-    // 5. Build PAE over the canonical payload bytes
-    let pae = build_pae(&envelope.payload_type, &payload_bytes);
-
-    // 6. Verify each signature until one succeeds
-    let mut last_error = None;
-    for sig in &envelope.signatures {
-        match verify_single_signature(&pae, &sig.key_id, &sig.signature, trust_store) {
-            Ok(()) => return Ok(()),
-            Err(e) => last_error = Some(e),
-        }
-    }
-
-    Err(
-        last_error.unwrap_or_else(|| RegistryError::SignatureInvalid {
-            reason: "no valid signatures".to_string(),
-        }),
-    )
-}
-
-/// Verify a single signature.
-fn verify_single_signature(
-    pae: &[u8],
-    key_id: &str,
-    signature_b64: &str,
-    trust_store: &TrustStore,
-) -> RegistryResult<()> {
-    // 1. Get key from trust store
-    let key = trust_store.get_key(key_id)?;
-
-    // 2. Decode signature
-    let signature_bytes =
-        BASE64
-            .decode(signature_b64)
-            .map_err(|e| RegistryError::SignatureInvalid {
-                reason: format!("invalid base64 signature: {}", e),
-            })?;
-
-    let signature =
-        Signature::from_slice(&signature_bytes).map_err(|e| RegistryError::SignatureInvalid {
-            reason: format!("invalid signature bytes: {}", e),
-        })?;
-
-    // 3. Verify
-    key.verify(pae, &signature)
-        .map_err(|_| RegistryError::SignatureInvalid {
-            reason: "ed25519 verification failed".to_string(),
-        })
+    verify_next::dsse::verify_dsse_signature_bytes_impl(canonical_bytes, envelope, trust_store)
 }
 
 /// Compute key ID from public key bytes (SPKI DER).
 pub fn compute_key_id(spki_bytes: &[u8]) -> String {
-    sha256_hex_bytes(spki_bytes)
+    verify_next::keys::compute_key_id_impl(spki_bytes)
 }
 
 /// Compute key ID from a VerifyingKey.
 pub fn compute_key_id_from_key(key: &VerifyingKey) -> RegistryResult<String> {
-    use pkcs8::EncodePublicKey;
-    let doc = key.to_public_key_der().map_err(|e| RegistryError::Config {
-        message: format!("failed to encode public key: {}", e),
-    })?;
-    Ok(compute_key_id(doc.as_bytes()))
+    verify_next::keys::compute_key_id_from_key_impl(key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::RegistryError;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use ed25519_dalek::SigningKey;
 
     fn generate_keypair() -> SigningKey {
@@ -643,6 +473,26 @@ mod tests {
         (envelope, key_id)
     }
 
+    fn make_fetch_result(
+        content: &str,
+        digest: Option<String>,
+        signature: Option<String>,
+        key_id: Option<String>,
+    ) -> FetchResult {
+        FetchResult {
+            content: content.to_string(),
+            headers: crate::types::PackHeaders {
+                digest,
+                signature,
+                key_id,
+                etag: None,
+                cache_control: None,
+                content_length: None,
+            },
+            computed_digest: compute_digest(content),
+        }
+    }
+
     #[test]
     fn test_dsse_valid_signature_real_ed25519() {
         // SPEC §6.3.4: Valid DSSE with real Ed25519 signature
@@ -862,6 +712,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_verify_pack_fail_closed_matrix_contract() {
+        let trust_store = TrustStore::new();
+        let content = "name: test-pack\nversion: \"1.0.0\"\nrules: []";
+        let digest = compute_digest(content);
+
+        let unsigned = make_fetch_result(content, Some(digest.clone()), None, None);
+
+        // Unsigned is rejected by default.
+        let err_unsigned_default = verify_pack(&unsigned, &trust_store, &VerifyOptions::default())
+            .expect_err("unsigned pack must fail closed by default");
+        assert!(matches!(
+            err_unsigned_default,
+            RegistryError::Unsigned { .. }
+        ));
+
+        // Unsigned may pass only when explicitly allowed.
+        let allowed = verify_pack(
+            &unsigned,
+            &trust_store,
+            &VerifyOptions::default().allow_unsigned(),
+        )
+        .expect("allow_unsigned should permit unsigned input");
+        assert!(!allowed.signed);
+        assert!(allowed.key_id.is_none());
+        assert_eq!(allowed.digest, digest);
+
+        // Digest mismatch must still fail closed even when allow_unsigned is enabled.
+        let mismatch = make_fetch_result(
+            content,
+            Some(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+            ),
+            None,
+            None,
+        );
+        let err_mismatch = verify_pack(
+            &mismatch,
+            &trust_store,
+            &VerifyOptions::default().allow_unsigned(),
+        )
+        .expect_err("digest mismatch must fail closed before signature policy");
+        assert!(matches!(err_mismatch, RegistryError::DigestMismatch { .. }));
+    }
+
+    #[test]
+    fn test_verify_pack_malformed_signature_reason_is_stable() {
+        let trust_store = TrustStore::new();
+        let content = "name: malformed-signature\nversion: \"1.0.0\"";
+        let digest = compute_digest(content);
+        let malformed = make_fetch_result(
+            content,
+            Some(digest),
+            Some("not base64 envelope".to_string()),
+            None,
+        );
+
+        let err = verify_pack(&malformed, &trust_store, &VerifyOptions::default())
+            .expect_err("malformed signature header must fail closed");
+        match err {
+            RegistryError::SignatureInvalid { reason } => {
+                assert!(
+                    reason.starts_with("invalid base64 envelope:"),
+                    "reason prefix drifted: {reason}"
+                );
+            }
+            other => panic!("expected SignatureInvalid for malformed signature, got {other:?}"),
+        }
+    }
+
     // ==================== P0 Fix: Canonical Bytes Verification Tests ====================
 
     #[test]
@@ -916,6 +837,64 @@ mod tests {
         assert!(
             result.is_ok(),
             "verify_pack should canonicalize content before DSSE verification: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_verify_pack_canonicalization_equivalent_yaml_variants_contract() {
+        // Equivalent YAML representations must verify identically after canonicalization.
+        let seed: [u8; 32] = [0x90; 32];
+        let signing_key = keypair_from_seed(seed);
+
+        let source_yaml = "z: 3\na: 1\nm: 2";
+        let variant_yaml = "a: 1\nm: 2\nz: 3\n";
+        assert_eq!(compute_digest(source_yaml), compute_digest(variant_yaml));
+
+        let source_canonical = canonicalize_for_dsse(source_yaml).unwrap();
+        let variant_canonical = canonicalize_for_dsse(variant_yaml).unwrap();
+        assert_eq!(source_canonical, variant_canonical);
+
+        // Non-equivalent content must not collapse to the same digest/canonical bytes.
+        let changed_yaml = "a: 1\nm: 2\nz: 4\n";
+        assert_ne!(compute_digest(source_yaml), compute_digest(changed_yaml));
+        assert_ne!(
+            source_canonical,
+            canonicalize_for_dsse(changed_yaml).unwrap()
+        );
+
+        let (envelope, key_id) = create_signed_envelope(&signing_key, source_yaml);
+
+        use pkcs8::EncodePublicKey;
+        let verifying_key = signing_key.verifying_key();
+        let spki_der = verifying_key.to_public_key_der().unwrap();
+        let trusted_key = crate::types::TrustedKey {
+            key_id,
+            algorithm: "Ed25519".to_string(),
+            public_key: BASE64.encode(spki_der.as_bytes()),
+            description: None,
+            added_at: None,
+            expires_at: None,
+            revoked: false,
+        };
+
+        let trust_store = TrustStore::new();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(trust_store.add_pinned_key(&trusted_key))
+            .unwrap();
+
+        let fetch_result = make_fetch_result(
+            variant_yaml,
+            Some(compute_digest(variant_yaml)),
+            Some(BASE64.encode(serde_json::to_vec(&envelope).unwrap())),
+            envelope.signatures.first().map(|s| s.key_id.clone()),
+        );
+
+        let result = verify_pack(&fetch_result, &trust_store, &VerifyOptions::default());
+        assert!(
+            result.is_ok(),
+            "canonical-equivalent YAML variant should verify: {:?}",
             result
         );
     }
