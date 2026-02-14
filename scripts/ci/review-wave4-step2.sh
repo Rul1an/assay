@@ -6,8 +6,13 @@ if [ -z "${base_ref}" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
   base_ref="origin/${GITHUB_BASE_REF}"
 fi
 if [ -z "${base_ref}" ]; then
-  base_ref="origin/codex/wave3-step1-behavior-freeze-v2"
+  base_ref="origin/main"
 fi
+if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+  echo "BASE_REF not found: ${base_ref}"
+  exit 1
+fi
+echo "BASE_REF=${base_ref} sha=$(git rev-parse "${base_ref}")"
 
 rg_bin="$(command -v rg)"
 
@@ -99,6 +104,17 @@ fi
 check_no_match_code_only 'tokio::fs|tracing::info|fs::read_to_string|fs::write' crates/assay-registry/src/lockfile.rs
 # Cache facade should delegate all moved read/write/evict logic into cache_next.
 check_no_match_code_only 'tokio::fs|serde_json::|compute_digest|tracing::(debug|warn|info|error)|fs::read_to_string|fs::write|create_dir_all|remove_dir_all|read_dir' crates/assay-registry/src/cache.rs
+# smoke alarms for accidental facade growth.
+lockfile_loc="$(wc -l < crates/assay-registry/src/lockfile.rs | tr -d ' ')"
+cache_loc="$(wc -l < crates/assay-registry/src/cache.rs | tr -d ' ')"
+if [ "${lockfile_loc}" -gt 700 ]; then
+  echo "lockfile.rs facade exceeded 700 LOC (${lockfile_loc})"
+  exit 1
+fi
+if [ "${cache_loc}" -gt 650 ]; then
+  echo "cache.rs facade exceeded 650 LOC (${cache_loc})"
+  exit 1
+fi
 
 echo "== Wave4 Step2 single-source gates =="
 check_no_match_in_dir_excluding 'fs::rename\(' crates/assay-registry/src/cache_next io.rs
