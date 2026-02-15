@@ -1,0 +1,50 @@
+name: Wave6 Nightly Promotion Readiness
+
+on:
+  schedule:
+    - cron: '43 4 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  readiness-report:
+    name: Nightly promotion readiness (informational)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate readiness report
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/wave6-nightly-readiness-report.sh \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow-file "wave6-nightly-safety.yml" \
+            --window 20 \
+            --min-runs 14 \
+            --min-days 14 \
+            --output-json nightly_readiness_report.json \
+            --output-md nightly_readiness_report.md
+
+      - name: Upload readiness report artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-readiness-report
+          path: |
+            nightly_readiness_report.json
+            nightly_readiness_report.md
+          retention-days: 14
+
+      - name: Publish readiness summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat nightly_readiness_report.md >> "$GITHUB_STEP_SUMMARY"
