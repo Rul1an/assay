@@ -201,6 +201,8 @@ jobs:
     environment: release
     permissions:
       contents: write
+      attestations: write
+      id-token: write
 
     steps:
       - name: Checkout
@@ -226,6 +228,56 @@ jobs:
           mkdir -p release
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
           ls -la release/
+
+      - name: Generate build provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*
+
+      - name: Verify release attestations (fail closed)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/release.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          assets=(release/*.tar.gz release/*.zip)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release archives found for attestation verification"
+            exit 1
+          fi
+
+          verify_with_retry() {
+            local file="$1"
+            local attempts=8
+            local sleep_seconds=4
+            local i
+
+            for i in $(seq 1 "${attempts}"); do
+              if gh attestation verify "$file" \
+                --repo "${REPO}" \
+                --signer-workflow "${SIGNER_WORKFLOW}" \
+                --cert-oidc-issuer "https://token.actions.githubusercontent.com"; then
+                echo "Attestation verified: ${file}"
+                return 0
+              fi
+
+              if [ "${i}" -lt "${attempts}" ]; then
+                echo "Attestation not available/valid yet for ${file} (attempt ${i}/${attempts}); retrying..."
+                sleep "${sleep_seconds}"
+              fi
+            done
+
+            echo "Attestation verification failed for ${file} after ${attempts} attempts"
+            return 1
+          }
+
+          for asset in "${assets[@]}"; do
+            verify_with_retry "${asset}"
+          done
 
       - name: Generate release notes
         id: notes
