@@ -378,6 +378,19 @@
 - refactor(wave4-step2x): thin cache facade behind cache_next boundaries (#343) @Rul1an
 - chore(stack): promote wave3/wave4 integration branch to main (#341) @Rul1an
 - refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
+- ci(wave6-step3): add non-blocking nightly safety lane + reviewer gates (#356) @Rul1an
+- ci(wave6-step2): add release attestation producer+verify pair (#355) @Rul1an
+- docs(ci/wave6-step1): freeze CI hardening baseline and reviewer gates (#353) @Rul1an
+- docs(plan): sync wave5 status and verify_internal wording (#352) @Rul1an
+- refactor(wave5-step3): close verify split behind stable facade (#351) @Rul1an
+- refactor(verify-step2): scaffold split behind stable facade (#349) @Rul1an
+- test/docs(wave5-step1): freeze verify contracts before split (#348) @Rul1an
+- docs(ci/wave4): default review BASE_REF to origin/main (#346) @Rul1an
+- refactor(wave4): finalize cache thinness + explain split on main (#345) @Rul1an
+- refactor(wave4-step3): split explain behind stable facade (#344) @Rul1an
+- refactor(wave4-step2x): thin cache facade behind cache_next boundaries (#343) @Rul1an
+- chore(stack): promote wave3/wave4 integration branch to main (#341) @Rul1an
+- refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
 ## [2026-02-14]
 
 - refactor(wave4): finalize cache thinness + explain split on main (#345) @Rul1an
