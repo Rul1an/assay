@@ -20,6 +20,8 @@ Target files (Step4):
 
 Instrumentation choice:
 - Option A: centralized API aggregator in `nightly-summary` job writes one `nightly_status.json`.
+- The classifier lives inline in `.github/workflows/wave6-nightly-safety.yml` (jq mapping in `nightly-summary`).
+- Step4 does not introduce a separate `wave6-nightly-readiness.yml`; readiness data is produced by the safety workflow artifact.
 
 Readiness reporting choice (Commit C):
 - separate informative workflow (`wave6-nightly-readiness.yml`)
@@ -42,4 +44,4 @@ Artifact contract:
 Non-goals:
 - no required-check changes
 - no branch-protection edits
-- no pull_request trigger on readiness workflow
+- no `pull_request` trigger for this lane (schedule/dispatch only)

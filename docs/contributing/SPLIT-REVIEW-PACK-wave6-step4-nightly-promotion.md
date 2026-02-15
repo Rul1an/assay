@@ -23,6 +23,7 @@ Policy highlights (frozen):
 
 Commit B implementation details:
 - Option A aggregator in `nightly-summary` job (GitHub Actions API).
+- Classifier mapping is inline in `.github/workflows/wave6-nightly-safety.yml` (no separate readiness workflow/script in Step4).
 - One artifact per run:
   - artifact: `nightly-status`
   - file: `nightly_status.json`
@@ -33,6 +34,7 @@ Commit B implementation details:
   - per-job `job_id` + raw `conclusion` + normalized `category`
 - job permissions for aggregator: `actions: read`, `contents: read` only.
 - nightly workflow remains non-blocking (`continue-on-error: true` on smoke jobs).
+- schedule/dispatch-only trigger model keeps this lane out of PR required-check paths by design.
 
 Commit C implementation details:
 - add `wave6-nightly-readiness.yml` as a separate **informational** workflow.
