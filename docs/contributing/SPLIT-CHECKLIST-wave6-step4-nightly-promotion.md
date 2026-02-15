@@ -10,6 +10,10 @@ Artifacts:
 - `.github/workflows/wave6-nightly-readiness.yml`
 - `docs/architecture/PLAN-split-refactor-2026q1.md`
 
+Topology note:
+- Producer + classifier are both in `.github/workflows/wave6-nightly-safety.yml` (`nightly-summary` jq mapping).
+- Step4 has no separate `wave6-nightly-readiness.yml`.
+
 Runbook:
 ```bash
 BASE_REF=origin/main bash scripts/ci/review-wave6-step4-ci.sh
@@ -76,6 +80,7 @@ Hard gates (Step4 reviewer script):
 - no `id-token: write` in nightly lane.
 - artifact upload for `nightly_status.json` is present.
 - strict diff allowlist for Step4 files.
+- schedule/dispatch-only design keeps this lane non-blocking for PR required checks.
 
 Commit C readiness checks (informational lane):
 - readiness workflow trigger is `schedule` + `workflow_dispatch` only.
