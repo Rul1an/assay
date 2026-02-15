@@ -368,6 +368,7 @@ Step status:
 - Step 1 (behavior freeze + inventory + drift gates): merged via PR #353.
 - Step 2 (attestation pair): merged via PR #355.
 - Step 3 (nightly safety lane): merged in stacked flow via PR #356 and promoted to `main` via PR #355.
+- Step 4 (nightly promotion policy freeze): in progress on `codex/wave6-step4-nightly-promotion-freeze`.
 
 Step 1 scope (freeze only):
 
@@ -386,6 +387,13 @@ Step 3 scope (implemented):
 
 - Add nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first).
 - Introduce promotion policy for escalating nightly checks to required status when stable.
+
+Step 4 scope (in progress):
+
+- Freeze measurable promotion criteria (window, formulas, thresholds, category rules).
+- Add Step4 reviewer script with hard-fail allowlist and baseline invariants.
+- Commit B: emit `nightly_status.json` (`schema_version` + `classifier_version`) from a single summary aggregator.
+- Policy guarantee: no required-check/branch-protection changes in Step4.
 
 Current baseline strengths:
 
