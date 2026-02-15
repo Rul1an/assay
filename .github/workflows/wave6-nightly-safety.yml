@@ -95,14 +95,126 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     steps:
+      - name: "Generate nightly status artifact (Option A: API aggregator)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            api_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+            jobs_json="$(curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api_url}")"
+
+            run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
+            generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+            jq -n \
+              --arg repo "${GITHUB_REPOSITORY}" \
+              --arg workflow_file "wave6-nightly-safety.yml" \
+              --argjson run_id "${GITHUB_RUN_ID}" \
+              --argjson run_attempt "${run_attempt}" \
+              --arg ref "${GITHUB_REF}" \
+              --arg sha "${GITHUB_SHA}" \
+              --arg event "${GITHUB_EVENT_NAME}" \
+              --arg generated_at "${generated_at}" \
+              --argjson payload "${jobs_json}" \
+              '
+              def classify($c; $attempt):
+                if ($c == "success") and ($attempt > 1) then "flake"
+                elif $c == "success" then "success"
+                elif ($c == "cancelled" or $c == "timed_out") then "infra"
+                elif $c == "failure" then "test"
+                else "infra"
+                end;
+
+              def duration_seconds($s; $e):
+                if (($s | type) == "string") and (($e | type) == "string") then
+                  ((($e | fromdateiso8601) - ($s | fromdateiso8601)) | floor)
+                else
+                  0
+                end;
+
+              def smoke_name($n):
+                ($n == "Nightly Miri (assay-registry smoke)")
+                or ($n == "Nightly property smoke (assay-cli)");
+
+              def normalize_job($j):
+                ($j.conclusion // "unknown") as $c
+                | {
+                    job_id: $j.id,
+                    name: $j.name,
+                    conclusion: $c,
+                    outcome: (if $c == "success" then "pass" else "fail" end),
+                    category: classify($c; $run_attempt),
+                    duration_seconds: duration_seconds($j.started_at; $j.completed_at),
+                    notes: []
+                  };
+
+              def workflow_category($jobs):
+                if ($jobs | map(select(.category == "test")) | length) > 0 then "test"
+                elif ($jobs | map(select(.category == "infra")) | length) > 0 then "infra"
+                elif ($jobs | map(select(.category == "flake")) | length) > 0 then "flake"
+                elif (($jobs | length) > 0) and (($jobs | map(select(.category == "success")) | length) == ($jobs | length)) then "success"
+                else "infra"
+                end;
+
+              def workflow_conclusion($category):
+                if ($category == "success") or ($category == "flake") then "success"
+                elif $category == "test" then "failure"
+                else "cancelled"
+                end;
+
+              (($payload.jobs // []) | map(select(smoke_name(.name))) | map(normalize_job(.))) as $jobs
+              | (workflow_category($jobs)) as $wf_category
+              | {
+                  schema_version: 1,
+                  classifier_version: 1,
+                  repo: $repo,
+                  workflow_file: $workflow_file,
+                  run_id: $run_id,
+                  run_attempt: $run_attempt,
+                  ref: $ref,
+                  sha: $sha,
+                  event: $event,
+                  generated_at_utc: $generated_at,
+                  workflow_conclusion: workflow_conclusion($wf_category),
+                  workflow_category: $wf_category,
+                  jobs: $jobs,
+                  summary: {
+                    total_jobs: ($jobs | length),
+                    success_jobs: ($jobs | map(select(.category == "success")) | length),
+                    flake_jobs: ($jobs | map(select(.category == "flake")) | length),
+                    infra_fail_jobs: ($jobs | map(select(.category == "infra")) | length),
+                    test_fail_jobs: ($jobs | map(select(.category == "test")) | length),
+                    workflow_duration_seconds: (($jobs | map(.duration_seconds) | add) // 0)
+                  }
+                }
+              ' > nightly_status.json
+          }
+
+      - name: Upload nightly status artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-status
+          path: nightly_status.json
+          retention-days: 14
+
       - name: Publish summary
         shell: bash
         run: |
+          set -euo pipefail
           {
             echo "## Wave6 nightly safety summary"
             echo "- miri-registry-smoke: ${{ needs.miri-registry-smoke.result }}"
             echo "- proptest-cli-smoke: ${{ needs.proptest-cli-smoke.result }}"
+            echo "- run_attempt: ${GITHUB_RUN_ATTEMPT:-1}"
+            echo "- workflow_category: $(jq -r '.workflow_category' nightly_status.json)"
+            echo "- schema_version: $(jq -r '.schema_version' nightly_status.json)"
+            echo "- classifier_version: $(jq -r '.classifier_version' nightly_status.json)"
+            echo "- artifact: nightly-status (nightly_status.json)"
             echo "- Non-blocking lane (continue-on-error=true on smoke jobs)."
           } >> "$GITHUB_STEP_SUMMARY"

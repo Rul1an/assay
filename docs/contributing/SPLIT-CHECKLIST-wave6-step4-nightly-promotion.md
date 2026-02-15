@@ -1,15 +1,11 @@
-# Wave6 Step4 checklist: nightly promotion policy
-
-Scope lock (Commit A):
-- docs + reviewer gates only
-- no workflow semantic changes
-- no required-check/branch-protection changes
+# Wave6 Step4 checklist: nightly promotion policy + metrics
 
 Artifacts:
 - `docs/contributing/SPLIT-INVENTORY-wave6-step4-nightly-promotion.md`
 - `docs/contributing/SPLIT-CHECKLIST-wave6-step4-nightly-promotion.md`
 - `docs/contributing/SPLIT-REVIEW-PACK-wave6-step4-nightly-promotion.md`
 - `scripts/ci/review-wave6-step4-ci.sh`
+- `.github/workflows/wave6-nightly-safety.yml`
 - `docs/architecture/PLAN-split-refactor-2026q1.md`
 
 Runbook:
@@ -17,7 +13,11 @@ Runbook:
 BASE_REF=origin/main bash scripts/ci/review-wave6-step4-ci.sh
 ```
 
-Metric criteria (policy freeze for Step4):
+Scope lock:
+- no production crate code changes
+- no required-check/branch-protection changes
+
+Metric criteria (frozen in Step4):
 
 | Metric | Window | Threshold | How measured | Category rule |
 |---|---|---|---|---|
@@ -37,23 +37,45 @@ Classification notes (Step4):
 - `test`: deterministic assertion/test failure.
 - `flake`: retry-attempt signal only (`run_attempt > 1`) with eventual success.
 
-Commit B requirement (schema freeze now, implementation later):
-- nightly workflow uploads `nightly_status.json` artifact.
-- schema must include:
+Commit B implementation choice:
+- **Option A**: centralized generator in `nightly-summary` job fetches job data via GitHub Actions API and writes one JSON artifact.
+
+Conclusion -> category mapping (Commit B contract):
+
+| Raw conclusion | Category |
+|---|---|
+| `success` and `run_attempt == 1` | `success` |
+| `success` and `run_attempt > 1` | `flake` |
+| `failure` | `test` |
+| `cancelled` or `timed_out` | `infra` |
+| any other conclusion | `infra` |
+
+Artifact contract (Commit B):
+- artifact name: `nightly-status`
+- file path: `nightly_status.json`
+- retention: `14` days
+- one artifact per workflow run (generated in `nightly-summary` only)
+
+`nightly_status.json` schema contract:
+- top-level:
   - `schema_version` (integer)
   - `classifier_version` (integer)
   - `repo`, `workflow_file`, `run_id`, `run_attempt`, `sha`
-  - per-job `job_id`, `conclusion`, `outcome`, `category`, `duration_seconds`
-  - workflow-level `workflow_conclusion`, `workflow_category`, aggregate counters
+  - `workflow_conclusion`, `workflow_category`
+- jobs:
+  - `job_id`, `name`, `conclusion`, `outcome`, `category`, `duration_seconds`
+- summary:
+  - aggregate counters and `workflow_duration_seconds`
 
-Hard gates (Commit A script):
+Hard gates (Step4 reviewer script):
 - nightly workflow still has `schedule` + `workflow_dispatch`.
 - smoke jobs remain `continue-on-error: true`.
-- permissions remain minimal (`permissions: {}` and no `id-token: write` in nightly lane).
-- baseline currently has no workflow `concurrency` or `timeout-minutes`; Commit A keeps this unchanged.
-- strict diff allowlist for Step4 Commit A files.
+ - `nightly-summary` permissions include only `actions: read` + `contents: read`.
+- no `id-token: write` in nightly lane.
+- artifact upload for `nightly_status.json` is present.
+- strict diff allowlist for Step4 files.
 
-Definition of done (Commit A):
+Definition of done (Commit B):
 - reviewer script passes against `origin/main`.
-- policy criteria and formulas are frozen and audit-ready.
-- no workflow behavior changes landed in Commit A.
+- metrics artifact is emitted with stable schema.
+- nightly lane remains non-blocking and does not become required.

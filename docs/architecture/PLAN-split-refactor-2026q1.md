@@ -392,7 +392,7 @@ Step 4 scope (in progress):
 
 - Freeze measurable promotion criteria (window, formulas, thresholds, category rules).
 - Add Step4 reviewer script with hard-fail allowlist and baseline invariants.
-- Keep workflow behavior unchanged in Commit A (policy/gates/docs only).
+- Commit B: emit `nightly_status.json` (`schema_version` + `classifier_version`) from a single summary aggregator.
 - Policy guarantee: no required-check/branch-protection changes in Step4.
 
 Current baseline strengths:

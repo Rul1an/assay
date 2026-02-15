@@ -46,24 +46,36 @@ check_no_match() {
   fi
 }
 
-echo "== Wave6 Step4 baseline policy checks =="
+echo "== Wave6 Step4 policy + workflow checks =="
 check_has_match '^name:[[:space:]]+Wave6 Nightly Safety' "$wf_file"
 check_has_match '^on:' "$wf_file"
 check_has_match 'schedule:' "$wf_file"
 check_has_match 'workflow_dispatch:' "$wf_file"
 check_has_match 'miri-registry-smoke:' "$wf_file"
 check_has_match 'proptest-cli-smoke:' "$wf_file"
+check_has_match 'nightly-summary:' "$wf_file"
 check_has_match 'continue-on-error:[[:space:]]+true' "$wf_file"
 check_has_match '^permissions:[[:space:]]*\{\}' "$wf_file"
+check_has_match 'actions:[[:space:]]+read' "$wf_file"
 check_no_match 'id-token:[[:space:]]+write' "$wf_file"
 
-echo "== Wave6 Step4 baseline shape (pre-Commit B) =="
-check_no_match '^concurrency:' "$wf_file"
-check_no_match 'timeout-minutes:' "$wf_file"
+echo "== Wave6 Step4 artifact + classifier contract =="
+check_has_match 'Generate nightly status artifact \(Option A: API aggregator\)' "$wf_file"
+check_has_match 'api_url=\"https://api\.github\.com/repos/\$\{GITHUB_REPOSITORY\}/actions/runs/\$\{GITHUB_RUN_ID\}/jobs\?per_page=100\"' "$wf_file"
+check_has_match 'name:[[:space:]]+nightly-status' "$wf_file"
+check_has_match 'path:[[:space:]]+nightly_status\.json' "$wf_file"
+check_has_match 'retention-days:[[:space:]]+14' "$wf_file"
+check_has_match 'schema_version:[[:space:]]+1' "$wf_file"
+check_has_match 'classifier_version:[[:space:]]+1' "$wf_file"
+check_has_match '\$attempt[[:space:]]*>[[:space:]]*1' "$wf_file"
+check_has_match '\(\$c == \"cancelled\" or \$c == \"timed_out\"\)' "$wf_file"
+check_has_match '\$c == \"failure\"' "$wf_file"
+check_has_match 'workflow_conclusion' "$wf_file"
+check_has_match 'workflow_category' "$wf_file"
 
-echo "== Wave6 Step4 diff allowlist (Commit A) =="
+echo "== Wave6 Step4 diff allowlist =="
 leaks="$($rg_bin -v \
-  '^docs/contributing/SPLIT-(INVENTORY|CHECKLIST|REVIEW-PACK)-wave6-step4-nightly-promotion\.md$|^scripts/ci/review-wave6-step4-ci\.sh$|^docs/architecture/PLAN-split-refactor-2026q1\.md$' \
+  '^\.github/workflows/wave6-nightly-safety\.yml$|^docs/contributing/SPLIT-(INVENTORY|CHECKLIST|REVIEW-PACK)-wave6-step4-nightly-promotion\.md$|^scripts/ci/review-wave6-step4-ci\.sh$|^docs/architecture/PLAN-split-refactor-2026q1\.md$' \
   < <(git diff --name-only "${base_ref}...HEAD") || true)"
 if [ -n "${leaks}" ]; then
   echo "non-allowlisted files detected:"
