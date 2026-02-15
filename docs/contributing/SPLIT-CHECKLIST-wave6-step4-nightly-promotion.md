@@ -5,7 +5,9 @@ Artifacts:
 - `docs/contributing/SPLIT-CHECKLIST-wave6-step4-nightly-promotion.md`
 - `docs/contributing/SPLIT-REVIEW-PACK-wave6-step4-nightly-promotion.md`
 - `scripts/ci/review-wave6-step4-ci.sh`
+- `scripts/ci/wave6-nightly-readiness-report.sh`
 - `.github/workflows/wave6-nightly-safety.yml`
+- `.github/workflows/wave6-nightly-readiness.yml`
 - `docs/architecture/PLAN-split-refactor-2026q1.md`
 
 Runbook:
@@ -75,7 +77,22 @@ Hard gates (Step4 reviewer script):
 - artifact upload for `nightly_status.json` is present.
 - strict diff allowlist for Step4 files.
 
+Commit C readiness checks (informational lane):
+- readiness workflow trigger is `schedule` + `workflow_dispatch` only.
+- readiness workflow must not define `pull_request`.
+- readiness workflow permissions stay minimal (`permissions: {}` + job `actions: read`, `contents: read`).
+- readiness workflow uses `scripts/ci/wave6-nightly-readiness-report.sh`.
+- readiness artifact contract:
+  - name: `nightly-readiness-report`
+  - files: `nightly_readiness_report.json`, `nightly_readiness_report.md`
+  - retention: `14` days
+
 Definition of done (Commit B):
 - reviewer script passes against `origin/main`.
 - metrics artifact is emitted with stable schema.
 - nightly lane remains non-blocking and does not become required.
+
+Definition of done (Commit C):
+- readiness workflow lands as informational reporting only.
+- readiness report computes policy metrics from GitHub Actions API.
+- no required-check/branch-protection changes.
