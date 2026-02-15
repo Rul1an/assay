@@ -1,0 +1,63 @@
+flowchart TB
+    subgraph workspace["Assay Workspace"]
+        direction TB
+        assay_cli["assay-cli"]
+        assay_common["assay-common"]
+        assay_core["assay-core"]
+        assay_ebpf["assay-ebpf"]
+        assay_evidence["assay-evidence"]
+        assay_it["assay-it"]
+        assay_mcp_server["assay-mcp-server"]
+        assay_metrics["assay-metrics"]
+        assay_monitor["assay-monitor"]
+        assay_policy["assay-policy"]
+        assay_registry["assay-registry"]
+        assay_sim["assay-sim"]
+        assay_xtask["assay-xtask"]
+    end
+
+    assay_cli --> assay_common
+    assay_cli --> assay_core
+    assay_cli --> assay_evidence
+    assay_cli --> assay_mcp_server
+    assay_cli --> assay_metrics
+    assay_cli --> assay_monitor
+    assay_cli --> assay_policy
+    assay_cli --> assay_sim
+    assay_core --> assay_common
+    assay_ebpf --> assay_common
+    assay_it --> assay_core
+    assay_mcp_server --> assay_common
+    assay_mcp_server --> assay_core
+    assay_mcp_server --> assay_metrics
+    assay_metrics --> assay_common
+    assay_metrics --> assay_core
+    assay_monitor --> assay_common
+    assay_monitor --> assay_policy
+    assay_sim --> assay_core
+    assay_sim --> assay_evidence
+
+    %% Logical groupings for readability
+    subgraph core["Core"]
+        assay_core
+        assay_metrics
+        assay_policy
+        assay_evidence
+        assay_common
+    end
+
+    subgraph interface["Interface"]
+        assay_cli
+        assay_mcp_server
+    end
+
+    subgraph runtime["Runtime"]
+        assay_monitor
+        assay_ebpf
+    end
+
+    subgraph support["Support"]
+        assay_sim
+        assay_xtask
+        assay_registry
+    end
