@@ -1,6 +1,6 @@
 # Plan: Refactor Hotspots (Q1-Q2 2026)
 
-> Status: In progress (Waves 1-5 merged; Wave 6 active)
+> Status: In progress (Waves 1-6 merged; follow-up hardening waves optional)
 > Date: 2026-02-13
 > Scope: Largest handwritten Rust production files and related CI/CD gates
 > Constraint: No behavior drift in CLI/public contracts; incremental mergeable PRs
@@ -365,9 +365,9 @@ Exit criteria (Wave 5):
 
 Step status:
 
-- Step 1 (behavior freeze + inventory + drift gates): in progress on `codex/wave6-step1-ci-hardening-freeze`.
-- Step 2 (attestation pair): planned.
-- Step 3 (nightly fuzz/model lane): planned.
+- Step 1 (behavior freeze + inventory + drift gates): merged via PR #353.
+- Step 2 (attestation pair): merged via PR #355.
+- Step 3 (nightly safety lane): merged in stacked flow via PR #356 and promoted to `main` via PR #355.
 
 Step 1 scope (freeze only):
 
@@ -375,14 +375,14 @@ Step 1 scope (freeze only):
 - Reviewer script with hard-fail allowlist and baseline anchor checks.
 - No workflow semantic changes in Step1.
 
-Step 2 scope (planned):
+Step 2 scope (implemented):
 
 - Artifact attestation as a required pair:
   - produce provenance in release workflow (`attest-build-provenance`)
   - verify attestation in CI/release validation; fail closed if missing/invalid
 - Keep existing Wave0 feature/semver/placeholder gates intact.
 
-Step 3 scope (planned):
+Step 3 scope (implemented):
 
 - Add nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first).
 - Introduce promotion policy for escalating nightly checks to required status when stable.
