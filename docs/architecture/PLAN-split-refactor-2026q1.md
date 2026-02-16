@@ -414,6 +414,24 @@ Program additions tracked in Wave 6:
 3. Nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first, then required for touched paths).
 4. Fast test execution path with `cargo-nextest` for broader matrix coverage time budget.
 
+## Wave 7: Runtime/domain continuation
+
+Step status:
+
+- Wave7A Step3 (authorizer closure): merged via PR #363.
+- Wave7B Step1 (loader/store freeze): merged via PR #364.
+- Wave7B Step2 (loader/store mechanical split): merged via PR #366.
+- Wave7B Step3 (loader/store closure): merged via PR #368.
+- Wave7C Step1 (judge + json_strict freeze): in progress on `codex/wave7c-step1-judge-json-strict-freeze`.
+
+Wave7C Step1 scope (freeze only):
+
+- Freeze anchors and reviewer gates for:
+  - `crates/assay-core/src/judge/mod.rs`
+  - `crates/assay-evidence/src/json_strict/mod.rs`
+- tests/docs/gates only.
+- no mechanical moves and no behavior/perf/API change in Step1.
+
 ## 5) Definition of Done per split PR
 
 Each split PR must include:
