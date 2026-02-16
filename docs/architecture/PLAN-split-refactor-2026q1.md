@@ -1,6 +1,6 @@
 # Plan: Refactor Hotspots (Q1-Q2 2026)
 
-> Status: In progress (Waves 1-6 merged; follow-up hardening waves optional)
+> Status: In progress (Waves 1-7 active; Wave7C Step3 in progress, follow-up hardening waves optional)
 > Date: 2026-02-13
 > Scope: Largest handwritten Rust production files and related CI/CD gates
 > Constraint: No behavior drift in CLI/public contracts; incremental mergeable PRs
