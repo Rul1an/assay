@@ -198,20 +198,24 @@ check_only_file_matches \
   "${judge_root}" \
   'judge_internal/client.rs'
 check_only_file_matches \
-  '\basync\s+fn\s+evaluate_impl\b|\btriggers_rerun\s*\(|\binject_result_impl\s*\(|\bgenerate_cache_key_impl\s*\(' \
+  '\basync\s+fn\s+evaluate_impl\b|\btriggers_rerun\s*\(' \
   "${judge_root}" \
   'judge_internal/run.rs'
+check_only_file_matches \
+  '\bfn\s+inject_result_impl\b|\bfn\s+generate_cache_key_impl\b' \
+  "${judge_root}" \
+  'judge_internal/cache.rs'
 
 check_only_file_matches \
   '\bimpl\s+JsonValidator\b|\bfn\s+validate_(value|object|array)\b' \
   "${json_root}" \
   'json_strict_internal/validate.rs'
 check_only_file_matches \
-  '\bfn\s+(parse_json_string|decode_.*|unescape_.*)\b|\bsurrogate\b' \
+  '\bfn\s+(parse_json_string_impl|parse_json_string|decode_.*|unescape_.*)\b|\bsurrogate\b' \
   "${json_root}" \
   'json_strict_internal/decode.rs'
 check_only_file_matches \
-  '\b(MAX_NESTING_DEPTH|MAX_KEYS_PER_OBJECT|MAX_STRING_LENGTH)\b' \
+  '\bpub\(crate\)\s+use\s+crate::json_strict::errors::' \
   "${json_root}" \
   'json_strict_internal/limits.rs'
 
