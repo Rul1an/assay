@@ -423,8 +423,8 @@ Step status:
 - Wave7B Step2 (loader/store mechanical split): merged via PR #366.
 - Wave7B Step3 (loader/store closure): merged via PR #368.
 - Wave7C Step1 (judge + json_strict freeze): merged via PR #369.
-- Wave7C Step2 (judge + json_strict mechanical split): in progress on PR #371 (`codex/wave7c-step2-judge-json-strict-split`, Commit A/B/C landed).
-- Wave7C Step3 (judge + json_strict closure): pending (facade thinness + test relocation + final boundary hardening).
+- Wave7C Step2 (judge + json_strict mechanical split): merged via PR #371.
+- Wave7C Step3 (judge + json_strict closure): in progress on `codex/wave7c-step3-judge-json-strict-closure`.
 
 Wave7C Step1 scope (freeze only):
 
