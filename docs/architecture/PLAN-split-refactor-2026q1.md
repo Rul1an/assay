@@ -422,7 +422,17 @@ Step status:
 - Wave7B Step1 (loader/store freeze): merged via PR #364.
 - Wave7B Step2 (loader/store mechanical split): merged via PR #366.
 - Wave7B Step3 (loader/store closure): merged via PR #368.
-- Wave7C Step1 (judge + json_strict freeze): in progress on `codex/wave7c-step1-judge-json-strict-freeze`.
+- Wave7C Step1 (judge + json_strict freeze): merged via PR #369.
+
+Program status update (Wave 7):
+
+- Wave7B is closed loop:
+  - Step1 freeze merged via PR #364.
+  - Step2 mechanical split merged via PR #366.
+  - Step3 closure merged stacked via PR #367 and promoted to `main` via PR #368.
+- Wave7B guardrails remain enforced in `scripts/ci/review-wave7b-step3.sh` (facade testless + containment gates).
+- Wave7C Step1 merged via PR #369.
+- Current open PR queue has no Wave7 promotion work; only docs auto-update PR #365 remains open.
 
 Wave7C Step1 scope (freeze only):
 
