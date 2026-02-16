@@ -6,6 +6,7 @@ pub(crate) mod compat;
 pub(crate) mod digest;
 pub(crate) mod parse;
 pub(crate) mod resolve;
+pub(crate) mod run;
 
 #[cfg(test)]
 pub(crate) mod tests;
