@@ -57,6 +57,7 @@
 
 mod dupkeys;
 mod errors;
+mod json_strict_internal;
 mod scan;
 
 use serde::de::DeserializeOwned;

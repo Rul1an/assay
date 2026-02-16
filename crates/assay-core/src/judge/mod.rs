@@ -1,3 +1,4 @@
+mod judge_internal;
 pub mod reliability;
 use crate::model::TestInput;
 use crate::providers::llm::LlmClient;
