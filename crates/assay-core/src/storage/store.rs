@@ -607,37 +607,11 @@ impl Store {
 }
 
 fn status_to_outcome(s: &TestStatus) -> &'static str {
-    match s {
-        TestStatus::Pass => "pass",
-        TestStatus::Fail => "fail",
-        TestStatus::Flaky => "flaky",
-        TestStatus::Warn => "warn",
-        TestStatus::Error => "error",
-        TestStatus::Skipped => "skipped",
-        TestStatus::Unstable => "unstable",
-        TestStatus::AllowedOnError => "allowed_on_error",
-    }
+    store_internal::results::status_to_outcome_impl(s)
 }
 
 fn migrate_v030(conn: &Connection) -> anyhow::Result<()> {
-    let cols = get_columns(conn, "results")?;
-    add_column_if_missing(conn, &cols, "results", "fingerprint", "TEXT")?;
-    add_column_if_missing(conn, &cols, "results", "skip_reason", "TEXT")?;
-    add_column_if_missing(conn, &cols, "results", "attempts_json", "TEXT")?;
-    Ok(())
-}
-
-fn get_columns(
-    conn: &Connection,
-    table: &str,
-) -> anyhow::Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    let mut out = std::collections::HashSet::new();
-    for r in rows {
-        out.insert(r?);
-    }
-    Ok(out)
+    store_internal::schema::migrate_v030_impl(conn)
 }
 
 impl Store {
@@ -662,53 +636,8 @@ impl Store {
     }
 }
 
-// Keep helper functions separate
-fn add_column_if_missing(
-    conn: &Connection,
-    cols: &std::collections::HashSet<String>,
-    table: &str,
-    col: &str,
-    ty: &str,
-) -> anyhow::Result<()> {
-    if !cols.contains(col) {
-        let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, col, ty);
-        conn.execute(&sql, [])?;
-    }
-    Ok(())
-}
-
-fn parse_attempts(attempts_str: Option<String>) -> Option<Vec<AttemptRow>> {
-    attempts_str
-        .filter(|s| !s.trim().is_empty())
-        .and_then(|s| serde_json::from_str(&s).ok())
-}
-
-fn message_and_details_from_attempts(
-    attempts: Option<&[AttemptRow]>,
-) -> (String, serde_json::Value) {
-    attempts
-        .and_then(|v| v.last())
-        .map(|a| (a.message.clone(), a.details.clone()))
-        .unwrap_or_else(|| (String::new(), serde_json::json!({})))
-}
-
 fn row_to_test_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestResultRow> {
-    let attempts = parse_attempts(row.get(4)?);
-    let (message, details) = message_and_details_from_attempts(attempts.as_deref());
-
-    Ok(TestResultRow {
-        test_id: row.get(0)?,
-        status: TestStatus::parse(&row.get::<_, String>(1)?),
-        message,
-        duration_ms: row.get(2)?,
-        details,
-        score: row.get(3)?,
-        cached: false,
-        fingerprint: row.get(5)?,
-        skip_reason: row.get(6)?,
-        attempts,
-        error_policy_applied: None,
-    })
+    store_internal::results::row_to_test_result_impl(row)
 }
 
 fn insert_run_row(
@@ -718,60 +647,12 @@ fn insert_run_row(
     status: &str,
     config_json: Option<&str>,
 ) -> anyhow::Result<i64> {
-    conn.execute(
-        "INSERT INTO runs(suite, started_at, status, config_json) VALUES (?1, ?2, ?3, ?4)",
-        params![suite, started_at, status, config_json],
-    )?;
-    Ok(conn.last_insert_rowid())
+    store_internal::results::insert_run_row_impl(conn, suite, started_at, status, config_json)
 }
 
 fn load_episode_graph_for_episode_id(
     conn: &Connection,
     episode_id: &str,
 ) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
-    let mut stmt_steps = conn.prepare(
-        "SELECT id, episode_id, idx, kind, name, content
-         FROM steps
-         WHERE episode_id = ?1
-         ORDER BY idx ASC",
-    )?;
-    let step_rows = stmt_steps
-        .query_map(params![episode_id], |row| {
-            Ok(crate::storage::rows::StepRow {
-                id: row.get(0)?,
-                episode_id: row.get(1)?,
-                idx: row.get(2)?,
-                kind: row.get(3)?,
-                name: row.get(4)?,
-                content: row.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut stmt_tools = conn.prepare(
-        "SELECT tc.id, tc.step_id, tc.episode_id, tc.tool_name, tc.call_index, tc.args, tc.result
-         FROM tool_calls tc
-         JOIN steps s ON tc.step_id = s.id
-         WHERE tc.episode_id = ?1
-         ORDER BY s.idx ASC, tc.call_index ASC",
-    )?;
-    let tool_rows = stmt_tools
-        .query_map(params![episode_id], |row| {
-            Ok(crate::storage::rows::ToolCallRow {
-                id: row.get(0)?,
-                step_id: row.get(1)?,
-                episode_id: row.get(2)?,
-                tool_name: row.get(3)?,
-                call_index: row.get(4)?,
-                args: row.get(5)?,
-                result: row.get(6)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(crate::agent_assertions::EpisodeGraph {
-        episode_id: episode_id.to_string(),
-        steps: step_rows,
-        tool_calls: tool_rows,
-    })
+    store_internal::episodes::load_episode_graph_for_episode_id_impl(conn, episode_id)
 }
