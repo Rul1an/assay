@@ -6,6 +6,9 @@ use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[path = "store_internal/mod.rs"]
+mod store_internal;
+
 #[derive(Clone)]
 pub struct Store {
     pub conn: Arc<Mutex<Connection>>,

@@ -11,6 +11,9 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+#[path = "loader_internal/mod.rs"]
+mod loader_internal;
+
 /// Source of a loaded pack.
 #[derive(Debug, Clone)]
 pub enum PackSource {
