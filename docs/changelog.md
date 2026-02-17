@@ -392,6 +392,24 @@
 - chore(stack): promote wave3/wave4 integration branch to main (#341) @Rul1an
 - refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
 
+
+## [2026-02-17]
+
+- docs(ci/split): sync roadmap + closure docs and fix nightly token (#378) @Rul1an
+- refactor(wave7c-step3): close judge/json_strict split behind thin facades (#377) @Rul1an
+- chore(ci): bump github/codeql-action from 3.32.2 to 3.32.3 (#372) @app/dependabot
+- refactor(wave7c-step2): mechanically split judge/json_strict behind stable facades (#371) @Rul1an
+- docs(plan): sync Wave7 closed-loop status and queue snapshot (#370) @Rul1an
+- docs(ci/wave7c-step1): freeze judge/json_strict contracts before split (#369) @Rul1an
+- refactor(wave7b-step3): promote loader/store closure to main (#368) @Rul1an
+- refactor(wave7b-step3): close loader/store split with thin testless facade (#367) @Rul1an
+- refactor(wave7b-step2): mechanically split loader/store behind stable facades (#366) @Rul1an
+- docs(ci): freeze loader/store contracts before split (Wave7B Step1) (#364) @Rul1an
+- refactor(core): close authorizer split behind thin facade (Wave7A Step3) (#363) @Rul1an
+- ci(wave6-step4): add informational nightly readiness reporting lane (#362) @Rul1an
+- ci(wave6-step4): add nightly_status artifact + deterministic classification mapping (#360) @Rul1an
+- docs/ci(wave6-step4): freeze nightly promotion policy criteria + reviewer gates (#359) @Rul1an
+- docs(plan): close out Wave6 status after merged CI hardening (#358) @Rul1an
 ## [2026-02-15]
 
 - ci(wave6-step4): add informational nightly readiness reporting lane (#362) @Rul1an
