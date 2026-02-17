@@ -1,15 +1,15 @@
 # Wave7C Step3 checklist: judge/json_strict closure
 
 Scope lock:
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs` unchanged.
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs` unchanged.
+- Keep public signatures in `crates/assay-core/src/judge/mod.rs` unchanged.
+- Keep public signatures in `crates/assay-evidence/src/json_strict/mod.rs` unchanged.
 - Close the split by making both facades testless and delegation-only.
 
 Artifacts:
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-CHECKLIST-wave7c-step3-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-MOVE-MAP-wave7c-step3-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-REVIEW-PACK-wave7c-step3-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/scripts/ci/review-wave7c-step3.sh`
+- `docs/contributing/SPLIT-CHECKLIST-wave7c-step3-judge-json-strict.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave7c-step3-judge-json-strict.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave7c-step3-judge-json-strict.md`
+- `scripts/ci/review-wave7c-step3.sh`
 
 Runbook:
 ```bash

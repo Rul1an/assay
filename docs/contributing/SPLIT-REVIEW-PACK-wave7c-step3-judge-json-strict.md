@@ -28,14 +28,14 @@ cargo test -p assay-evidence --lib json_strict::json_strict_internal::tests::tes
 
 Facade closure proof snippets:
 ```rust
-// /Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs
+// crates/assay-core/src/judge/mod.rs
 pub async fn evaluate(...) -> anyhow::Result<()> {
     judge_internal::run::evaluate_impl(...).await
 }
 ```
 
 ```rust
-// /Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs
+// crates/assay-evidence/src/json_strict/mod.rs
 pub fn from_str_strict<T: DeserializeOwned>(s: &str) -> Result<T, StrictJsonError> {
     json_strict_internal::run::from_str_strict_impl(s)
 }
@@ -52,8 +52,8 @@ rg -n '^pub use ' crates/assay-evidence/src/json_strict/mod.rs
 ```
 
 LOC snapshot:
-- `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`: `408 -> 71` (-337)
-- `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`: `493 -> 81` (-412)
+- `crates/assay-core/src/judge/mod.rs`: `408 -> 71` (-337)
+- `crates/assay-evidence/src/json_strict/mod.rs`: `493 -> 81` (-412)
 
 Risk:
 - Low: closure-only change; no public API/signature changes; boundary and allowlist gates remain strict.
