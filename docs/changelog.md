@@ -393,6 +393,9 @@
 - refactor(wave4-step2): split lockfile/cache behind stable facades (#340) @Rul1an
 
 
+- ci(ebpf): fix cargo resolution in self-hosted verify script (#379) @Rul1an
+- docs(ci/split): sync roadmap + closure docs and fix nightly token (#378) @Rul1an
+- chore(ci): bump github/codeql-action from 3.32.2 to 3.32.3 (#372) @app/dependabot
 ## [2026-02-17]
 
 - docs(ci/split): sync roadmap + closure docs and fix nightly token (#378) @Rul1an
