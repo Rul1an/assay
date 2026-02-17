@@ -1,11 +1,11 @@
 # Plan: Refactor Hotspots (Q1-Q2 2026)
 
-> Status: In progress (Waves 1-7 active; Wave7C Step3 in progress, follow-up hardening waves optional)
-> Date: 2026-02-13
+> Status: Closed loop through Wave7C Step3 on `main` (follow-up hardening optional; non-wave operational PRs may still be open)
+> Date: 2026-02-17
 > Scope: Largest handwritten Rust production files and related CI/CD gates
 > Constraint: No behavior drift in CLI/public contracts; incremental mergeable PRs
 
-## 1) Baseline (HEAD: 6ae1d340)
+## 1) Initial Baseline (2026-02-13, HEAD: 6ae1d340)
 
 Largest production hotspots (tests/generated excluded from priority, sorted by LOC):
 
@@ -20,6 +20,29 @@ Largest production hotspots (tests/generated excluded from priority, sorted by L
 | `crates/assay-registry/src/lockfile.rs` | 863 | 31 | 16 | 12 | 0 |
 | `crates/assay-registry/src/cache.rs` | 844 | 35 | 16 | 39 | 0 |
 | `crates/assay-cli/src/cli/commands/monitor.rs` | 833 | 15 | 3 | 2 | 7 |
+
+## 1b) Verified Snapshot (2026-02-17, `main` @ 51dd45d5)
+
+LOC verification for major split hotspots (baseline -> current on `main`):
+
+| File | Baseline LOC | Current LOC | Delta |
+|---|---:|---:|---:|
+| `crates/assay-evidence/src/bundle/writer.rs` | 1442 | 379 | -73.7% |
+| `crates/assay-registry/src/verify.rs` | 1065 | 123 | -88.5% |
+| `crates/assay-core/src/explain.rs` | 1057 | 11 | -99.0% |
+| `crates/assay-core/src/runtime/mandate_store.rs` | 1046 | 748 | -28.5% |
+| `crates/assay-core/src/engine/runner.rs` | 1042 | 661 | -36.6% |
+| `crates/assay-core/src/providers/trace.rs` | 881 | 488 | -44.6% |
+| `crates/assay-registry/src/lockfile.rs` | 863 | 649 | -24.8% |
+| `crates/assay-registry/src/cache.rs` | 844 | 592 | -29.9% |
+| `crates/assay-cli/src/cli/commands/monitor.rs` | 833 | 175 | -79.0% |
+| `crates/assay-core/src/runtime/authorizer.rs` | 794 | 201 | -74.7% |
+| `crates/assay-evidence/src/lint/packs/loader.rs` | 793 | 106 | -86.6% |
+| `crates/assay-core/src/storage/store.rs` | 774 | 658 | -15.0% |
+| `crates/assay-core/src/judge/mod.rs` | 712 | 71 | -90.0% |
+| `crates/assay-evidence/src/json_strict/mod.rs` | 759 | 81 | -89.3% |
+
+Observed after waves landed: no production Rust file in this inventory remains above 800 LOC.
 
 ## 2) Prioritization
 
@@ -86,9 +109,10 @@ Execution order:
 Step status:
 
 - Writer split: merged via PR #332.
-- Verify Step1 behavior freeze (tests/docs/gates): merged via PR #348.
-- Verify Step2 mechanical split (stable facade): merged via PR #349.
-- Verify split is functionally complete on `main`; remaining cleanup is Step3 facade-thinness/module-layout finalization.
+- Historical verify milestones are tracked under Wave 5 to avoid double counting:
+  - Step1 behavior freeze (tests/docs/gates): PR #348.
+  - Step2 mechanical split (stable facade): PR #349.
+  - Step3 closure (thin, testless facade + internal layout finalization): PR #351.
 
 ### A. `crates/assay-registry/src/verify.rs`
 
@@ -367,8 +391,8 @@ Step status:
 
 - Step 1 (behavior freeze + inventory + drift gates): merged via PR #353.
 - Step 2 (attestation pair): merged via PR #355.
-- Step 3 (nightly safety lane): merged in stacked flow via PR #356 and promoted to `main` via PR #355.
-- Step 4 (nightly promotion policy freeze): in progress on `codex/wave6-step4-nightly-promotion-freeze`.
+- Step 3 (nightly safety lane): merged in stacked flow via PR #356 and subsequently promoted to `main`.
+- Step 4 (nightly promotion policy + deterministic readiness reporting): merged via PR #359, PR #360, and PR #362.
 
 Step 1 scope (freeze only):
 
@@ -388,13 +412,13 @@ Step 3 scope (implemented):
 - Add nightly fuzz/model lane for parser/crypto/concurrency hotspots (non-blocking first).
 - Introduce promotion policy for escalating nightly checks to required status when stable.
 
-Step 4 scope (in progress):
+Step 4 scope (implemented):
 
 - Freeze measurable promotion criteria (window, formulas, thresholds, category rules).
 - Add Step4 reviewer script with hard-fail allowlist and baseline invariants.
-- Commit B: emit `nightly_status.json` (`schema_version` + `classifier_version`) from a single summary aggregator.
-- Commit C: add separate informational readiness workflow (`schedule` + `workflow_dispatch`, no `pull_request`) with JSON/MD report artifacts.
-- Policy guarantee: no required-check/branch-protection changes in Step4.
+- Emit `nightly_status.json` (`schema_version` + `classifier_version`) from a single summary aggregator.
+- Add informational readiness reporting lane (`schedule` + `workflow_dispatch`, no `pull_request`) with JSON/MD report artifacts.
+- Policy guarantee preserved: no required-check/branch-protection changes in Step4.
 
 Current baseline strengths:
 
@@ -424,7 +448,7 @@ Step status:
 - Wave7B Step3 (loader/store closure): merged via PR #368.
 - Wave7C Step1 (judge + json_strict freeze): merged via PR #369.
 - Wave7C Step2 (judge + json_strict mechanical split): merged via PR #371.
-- Wave7C Step3 (judge + json_strict closure): in progress on `codex/wave7c-step3-judge-json-strict-closure`.
+- Wave7C Step3 (judge + json_strict closure): merged via PR #377.
 
 Wave7C Step1 scope (freeze only):
 

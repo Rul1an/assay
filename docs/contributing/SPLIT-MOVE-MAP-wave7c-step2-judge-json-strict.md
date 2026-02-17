@@ -27,4 +27,4 @@ Facade call chains (current):
 - `validate_json_strict` -> `json_strict_internal::run::validate_json_strict_impl` -> `validate::JsonValidator::validate`
 
 Step2 note:
-- Tests intentionally remain in `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs` and `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`; relocation is deferred to Step3 closure.
+- Tests intentionally remain in `crates/assay-core/src/judge/mod.rs` and `crates/assay-evidence/src/json_strict/mod.rs`; relocation is deferred to Step3 closure.

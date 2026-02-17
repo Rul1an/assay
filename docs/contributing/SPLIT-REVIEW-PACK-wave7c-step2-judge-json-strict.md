@@ -2,8 +2,8 @@
 
 Intent:
 - Mechanically split large helper/orchestration blocks from:
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`
+  - `crates/assay-core/src/judge/mod.rs`
+  - `crates/assay-evidence/src/json_strict/mod.rs`
 - Keep public behavior/signatures stable behind existing facades.
 
 Executed validation:
@@ -65,8 +65,8 @@ rg -n 'fn parse_json_string_impl|surrogate' crates/assay-evidence/src/json_stric
 ```
 
 LOC snapshot:
-- `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`: `712 -> 408` (-304)
-- `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`: `759 -> 493` (-266)
+- `crates/assay-core/src/judge/mod.rs`: `712 -> 408` (-304)
+- `crates/assay-evidence/src/json_strict/mod.rs`: `759 -> 493` (-266)
 
 Risk:
 - Medium-low: mechanical extraction only; public signatures stable; Step1 anchors + boundary gates enforce parity.

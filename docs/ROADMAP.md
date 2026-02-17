@@ -1,9 +1,10 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-02):** Q2 items verified — all P0/P1/P2 DX features delivered.
+> **Status sync (2026-02-17):** Q2 items verified — all P0/P1/P2 DX features delivered.
 > Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
 > Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
 > **Starter packs (ADR-023)** merged PR #289 — cicd-starter default pack, assayrunid fix, vendored drift CI, --explain UX.
+> Split refactor program closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
 > Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.

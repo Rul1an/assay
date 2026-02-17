@@ -3,8 +3,8 @@
 Scope lock:
 - docs + reviewer gates + tests only.
 - no production-path code edits in:
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`
+  - `crates/assay-core/src/judge/mod.rs`
+  - `crates/assay-evidence/src/json_strict/mod.rs`
 
 Freeze anchors:
 - Judge:
