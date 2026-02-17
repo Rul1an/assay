@@ -17,14 +17,16 @@ Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, ma
 **Standards Alignment:**
 - **CloudEvents v1.0** envelope — lingua franca for event routers and SIEM pipelines
 - **W3C Trace Context** (`traceparent`) — correlation with existing distributed tracing
-- **SARIF 2.1.0** — GitHub Code Scanning integration (single run + `automationDetails.id` discipline)
-- **EU AI Act Article 12** — record-keeping requirements make "evidence" commercially relevant
-- **OTel GenAI Semantic Conventions** — vendor-agnostic observability for LLM/agent workloads
+- **SARIF 2.1.0** — GitHub Code Scanning integration with explicit `automationDetails.id` uniqueness/stability contract
+- **EU AI Act Article 12** — record-keeping requirements make "evidence" commercially relevant; pack mappings are pinned to EUR-Lex text, and phased dates are treated as guidance
+- **OTel GenAI Semantic Conventions** — vendor-agnostic observability bridge for LLM/agent workloads; conventions are evolving, so integrations are version-pinned with mapping tests
 - **ENISA / SBOM / SLSA** — Supply-chain assurance (SBOM, provenance, attestation) aligns with ENISA priorities; SLSA-aligned attestation per ADR-018
 
 ---
 
 ## Strategic Positioning: Protocol-Agnostic Governance
+
+The protocol landscape table below is a planning snapshot (hypothesis-driven) and is revisited as specs/programs evolve.
 
 The agentic commerce/interop space is fragmenting (Jan 2026):
 
@@ -54,8 +56,8 @@ See [Protocol Landscape Analysis](.private/docs/strategy/PROTOCOL-LANDSCAPE-2026
 
 The CI/CD-for-agents market is validating Assay's core assumptions:
 
-- **AAIF (Agentic AI Foundation)**: MCP, goose and AGENTS.md are now under Linux Foundation governance (Dec 2025). MCP as a vendor-neutral standard reduces protocol fragmentation risk and validates Assay's MCP-first bet.
-- **GitHub "Continuous AI"** (Feb 2026): repo-agents with read-only default + "Safe Outputs" — explicit contracts defining what agents may produce. This is Assay's policy-as-code model, validated by the largest development platform.
+- **AAIF (Agentic AI Foundation)**: MCP, goose and AGENTS.md are under Linux Foundation governance (Dec 2025). MCP as a vendor-neutral standard reduces protocol fragmentation risk and supports Assay's MCP-first bet.
+- **GitHub "Continuous AI"** (Feb 2026, evolving/preview signal): repo-agents with read-only default + "Safe Outputs" — explicit contracts defining what agents may produce. This aligns with Assay's policy-as-code model.
 - **Policy-as-code as best practice**: Multiple sources (V2Solutions, Skywork, Gartner) now list policy-as-code, least privilege, auditability and kill switches as enterprise requirements for agent deployment. Not a niche compliance need anymore.
 - **Fleet-of-small-agents pattern**: The dominant deployment pattern is many small specialized agents, not one generalist. More agents = more policies = more Assay usage per repo.
 - **Gartner risk signal**: >40% of agentic AI projects will be cancelled by end 2027 due to costs, unclear value, or inadequate risk controls. Governance tooling is a prerequisite, not a nice-to-have.
@@ -142,6 +144,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 
 ### Evidence DX (Lint/Diff/Explore)
 - [x] **Linting**: Rule registry, SARIF output with `partialFingerprints`, `--fail-on` threshold
+- [x] **SARIF identity contract**: stable, unique `automationDetails.id` per tool/run lineage for deterministic dedupe and traceability
 - [x] **Diff**: Semantic comparison (hosts, file access), baseline support
 - [x] **Explore**: TUI viewer with ANSI/control char sanitization (`tui` feature flag)
 
@@ -327,7 +330,8 @@ Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
 - Write operations (push, attest, badge) only on `push` to main (fork PR threat model)
 - OIDC authentication per provider (explicit, not auto-detect)
 - Attestations provide "SLSA-aligned provenance" (no specific level claims)
-- EU AI Act timeline accurately documented (phased: Feb 2025, Aug 2025, Aug 2026)
+- Attestation lifecycle is staged: produce on push-to-main, verify in release/promote lanes, and keep fail-closed semantics scoped to release artifacts until stability is proven
+- EU AI Act timeline is treated as phased guidance (legal mapping source remains EUR-Lex text and versioned pack mappings)
 
 See [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md) for full specification.
 

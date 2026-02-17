@@ -25,11 +25,11 @@
 | Golden path (`init --hello-trace`) | P1 | Done | #187 |
 | `generate --diff` (feature) | P1-A | Done | #177 |
 | `explain` + compliance hints (feature) | P1-B | Done | #179 |
-| P1-A/P1-B docs+help parity hardening | P1 | In review | #189 |
+| P1-A/P1-B docs+help parity hardening | P1 | Done | #189 |
 | `doctor --fix` | P2-A | Done | #184 |
 | `watch` | P2-B | Done | #184 |
 | `watch` hardening (determinism/tests) | P1 | Done | #188 |
-| `watch` edge hardening (coarse mtime + parse fallback) | P1 | In progress | codex/p1-watch-edge-hardening |
+| `watch` edge hardening (coarse mtime + parse fallback) | P1 | Partial (core on main; branch delta remains) | codex/p1-watch-edge-hardening |
 | P0/P1 DX integration to `main` | P0/P1 | Done | #191 |
 | Docs alignment + link guard | DX polish | Done | #184 |
 
@@ -47,7 +47,7 @@ This roadmap tracks developer experience on five dimensions that reflect how Ass
 | Quality-of-feedback | Exit/reason codes, `run.json`/`summary.json`, doctor/explain flows are in place | Add copy-paste rerun hints and explicit "next best action" snippets in failure paths |
 | Workflow fit | GitHub Action v2.1, SARIF, PR comments, docs link guard are in place | Continue docs/help parity checks for key CLI entry points |
 | Trust & auditability | Deterministic run contracts and evidence outputs exist | Continue replay bundle hardening as cross-team reproducibility surface |
-| Change resilience | `watch` path diffing is deterministic; `generate --diff` and compliance explain are implemented | Close remaining watch edge hardening (coarse mtime + parse-error fallback coverage) |
+| Change resilience | `watch` path diffing is deterministic; `generate --diff` and compliance explain are implemented | Promote or retire remaining `codex/p1-watch-edge-hardening` delta after minimal-scope review |
 
 ---
 
@@ -330,17 +330,18 @@ P2-A (doctor --fix)                  P2-B (watch)
 
 P0-A and P0-B are independent. P1-A builds on generate module (same as P0-A). P1-B is independent. P2-A and P2-B are independent.
 
-Current state: P0/P1/P2 DX slices are integrated on `codex/p0-dx-magnets-clean`; integration to `main` is tracked in PR `#196`.
+Current state: P0/P1/P2 DX slices are integrated on `main` (integration PR `#196` merged on 2026-02-07).
 
-Recommended order from here: merge integration PR `#196` -> keep contract/onboarding gates green -> execute only deferred items when explicitly prioritized.
+Recommended order from here: keep contract/onboarding gates green on `main` -> resolve remaining `codex/p1-watch-edge-hardening` delta with minimal-scope promotion (or close as superseded) -> execute only deferred items when explicitly prioritized.
 
 ---
 
 ## Next Steps (Roadmap-Aligned)
 
-1. **Merge integration PR to `main`**
-   - `#196`: merge accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
-2. **Confirmed completed in this integration branch**
+1. **Track and resolve remaining watch-edge branch delta**
+   - `codex/p1-watch-edge-hardening` remains ahead of `main`; either promote the minimal missing hardening commits or close as superseded after equivalence review.
+2. **Confirmed completed on `main`**
+   - `#196`: merged accumulated P0/P1 DX slices from `codex/p0-dx-magnets-clean`.
    - `#193`: `init --hello-trace` colocation with `--config` parent.
    - `#194`: `doctor --fix --dry-run` exit behavior aligned with diagnostics contract.
    - `#195`: watch/replay `RunArgs` default-drift reduction + regression coverage.

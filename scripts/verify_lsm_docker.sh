@@ -31,6 +31,43 @@ echo "🚀 Starting Assay Verification..."
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR"
 
+# Resolve cargo early because this script may run under sudo with a minimal PATH.
+# Prefer current PATH, then known self-hosted runner locations.
+# shellcheck disable=SC1090
+if [ -n "${SUDO_USER:-}" ] && [ -f "/home/${SUDO_USER}/.cargo/env" ]; then
+    source "/home/${SUDO_USER}/.cargo/env"
+fi
+# shellcheck disable=SC1090
+if [ -n "${SUDO_USER:-}" ] && [ -f "/Users/${SUDO_USER}/.cargo/env" ]; then
+    source "/Users/${SUDO_USER}/.cargo/env"
+fi
+# shellcheck disable=SC1091
+if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
+fi
+
+CARGO_BIN=""
+for candidate in \
+    "$(command -v cargo 2>/dev/null || true)" \
+    "/opt/rust/bin/cargo" \
+    "/usr/local/bin/cargo" \
+    "/home/${SUDO_USER:-}/.cargo/bin/cargo" \
+    "/Users/${SUDO_USER:-}/.cargo/bin/cargo" \
+    "$HOME/.cargo/bin/cargo"
+do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        CARGO_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -z "$CARGO_BIN" ]; then
+    echo "❌ cargo not found (checked PATH, /opt/rust/bin, /usr/local/bin, and cargo homes)"
+    echo "💡 Ensure Rust toolchain is available on this runner before running verify_lsm_docker.sh"
+    exit 127
+fi
+echo "🦀 Using cargo at: $CARGO_BIN"
+
 # Test path for LSM block: use ASSAY_TEST_DIR if set (e.g. workspace on restricted /tmp runners)
 export ASSAY_TEST_DIR="${ASSAY_TEST_DIR:-/tmp/assay-test}"
 ASSAY_TEST_PATH="${ASSAY_TEST_DIR}/secret.txt"
@@ -47,13 +84,13 @@ sudo rm -rf /tmp/assay-lsm-verify || true
 echo "----------------------------------------------------------------"
 echo " [0/3] Preparing Docker Builder Image..."
 echo "----------------------------------------------------------------"
-cargo xtask build-image
+"$CARGO_BIN" xtask build-image
 
 echo "----------------------------------------------------------------"
 echo "🛠️  [1/3] Building eBPF bytecode (assay-ebpf)..."
 echo "----------------------------------------------------------------"
-cargo clean -p assay-ebpf
-cargo xtask build-ebpf --docker
+"$CARGO_BIN" clean -p assay-ebpf
+"$CARGO_BIN" xtask build-ebpf --docker
 if [ ! -f target/assay-ebpf.o ]; then
     echo "❌ Build failed: target/assay-ebpf.o not found"
     exit 1
@@ -94,13 +131,6 @@ else
   echo "----------------------------------------------------------------"
   echo "🛠️  [2/3] Building assay-cli (userspace)..."
   echo "----------------------------------------------------------------"
-
-  # Robustly find cargo
-# shellcheck disable=SC1091
-if [ -f "$HOME/.cargo/env" ]; then
-    source "$HOME/.cargo/env"
-fi
-CARGO_BIN=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
 
 if [ "$(uname -s)" == "Linux" ] && [ -x "$CARGO_BIN" ]; then
       echo "🐧 Linux detected with Cargo at $CARGO_BIN. Using Native Build (Skip Docker)..."
