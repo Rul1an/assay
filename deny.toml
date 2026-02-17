@@ -74,6 +74,7 @@ allow = [
     "MPL-2.0",
     "BSL-1.0",
     "CDLA-Permissive-2.0",
+    "OpenSSL",
 ]
 
 # Private/workspace crates that don't need a license field (not published)
