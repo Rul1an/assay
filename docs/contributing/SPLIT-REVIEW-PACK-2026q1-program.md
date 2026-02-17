@@ -1,7 +1,7 @@
 # Review Pack: Split Refactor Program (Q1 2026)
 
 Date: 2026-02-17
-Mainline reference: `2e7c9758`
+Mainline reference: `51dd45d5`
 Baseline snapshot reference (pre-program): `6ae1d340`
 
 ## Intent
@@ -19,9 +19,11 @@ Provide a single reviewer-ready checkpoint for the full split-plan execution thr
 
 ```bash
 # Open/merged PR state
-cd /Users/roelschuurkes/assay
-gh pr list --state open --search 'wave in:title OR Wave in:title' --json number,title,headRefName,baseRefName,mergeStateStatus,url
-gh pr list --state merged --limit 200 --json number,title,mergedAt,baseRefName,url
+cd "$(git rev-parse --show-toplevel)"
+gh pr list --repo Rul1an/assay --state open --json number,title,headRefName,baseRefName,mergeStateStatus,url
+# Optional filter to verify "no open Wave PRs" explicitly:
+gh pr list --repo Rul1an/assay --state open --json number,title | jq '.[] | select(.title|test("wave"; "i"))'
+gh pr list --repo Rul1an/assay --state merged --limit 200 --json number,title,mergedAt,baseRefName,url
 gh pr view 377 --json number,state,mergedAt,baseRefName,headRefName,url
 
 # Plan status scan
@@ -71,7 +73,7 @@ find crates -name '*.rs' -type f \
 
 ## LOC evidence summary
 
-Baseline values below are from pre-program snapshot `6ae1d340`; current values are from `main` at `2e7c9758`.
+Baseline values below are from pre-program snapshot `6ae1d340`; current values are from `main` at `51dd45d5`.
 
 | File | Baseline | Current | Delta |
 |---|---:|---:|---:|
@@ -93,5 +95,5 @@ Baseline values below are from pre-program snapshot `6ae1d340`; current values a
 ## Merge readiness statement (program-level)
 
 - Split program through Wave7C Step3: **complete on main**.
-- Remaining open PRs are operational/maintenance (`#365`, `#376`) and not split-plan blockers.
+- Remaining open PRs are operational/maintenance (`#365`) and not split-plan blockers.
 - Largest-file scan is best-effort: excludes `*/tests/*` and `*tests.rs`, but may include `#[cfg(test)]` blocks inside production files.

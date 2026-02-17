@@ -2,8 +2,8 @@
 
 Intent:
 - Finalize closure after Step2 split:
-  - make `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader.rs` testless and delegation-only.
-  - move loader unit tests to `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader_internal/tests.rs`.
+  - make `crates/assay-evidence/src/lint/packs/loader.rs` testless and delegation-only.
+  - move loader unit tests to `crates/assay-evidence/src/lint/packs/loader_internal/tests.rs`.
   - keep store Step2 boundaries enforced.
 
 Executed validation:
@@ -33,8 +33,8 @@ Anchor execution fix:
 - This avoids false green from `--exact` with incomplete test names.
 
 LOC snapshot:
-- `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader.rs`: `793 -> 106`
-- `/Users/roelschuurkes/assay/crates/assay-core/src/storage/store.rs`: `774 -> 658` (unchanged in Step3)
+- `crates/assay-evidence/src/lint/packs/loader.rs`: `793 -> 106`
+- `crates/assay-core/src/storage/store.rs`: `774 -> 658` (unchanged in Step3)
 
 Risk:
 - Low: test relocation + facade-thinness closure only; no public API changes.

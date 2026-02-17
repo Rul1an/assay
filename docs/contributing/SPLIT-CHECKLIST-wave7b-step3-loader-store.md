@@ -1,18 +1,18 @@
 # Wave7B Step3 checklist: loader/store closure
 
 Scope lock:
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader.rs` unchanged.
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-core/src/storage/store.rs` unchanged.
+- Keep public signatures in `crates/assay-evidence/src/lint/packs/loader.rs` unchanged.
+- Keep public signatures in `crates/assay-core/src/storage/store.rs` unchanged.
 - Finalize closure boundaries:
   - `loader.rs` becomes testless thin facade.
   - loader unit tests move to `loader_internal/tests.rs`.
   - store Step2 helper boundaries remain enforced.
 
 Artifacts:
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-CHECKLIST-wave7b-step3-loader-store.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-MOVE-MAP-wave7b-step3-loader-store.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-REVIEW-PACK-wave7b-step3-loader-store.md`
-- `/Users/roelschuurkes/assay/scripts/ci/review-wave7b-step3.sh`
+- `docs/contributing/SPLIT-CHECKLIST-wave7b-step3-loader-store.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave7b-step3-loader-store.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave7b-step3-loader-store.md`
+- `scripts/ci/review-wave7b-step3.sh`
 
 Runbook:
 ```bash

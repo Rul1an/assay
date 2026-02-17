@@ -21,7 +21,7 @@ Largest production hotspots (tests/generated excluded from priority, sorted by L
 | `crates/assay-registry/src/cache.rs` | 844 | 35 | 16 | 39 | 0 |
 | `crates/assay-cli/src/cli/commands/monitor.rs` | 833 | 15 | 3 | 2 | 7 |
 
-## 1b) Verified Snapshot (2026-02-17, `main` @ 2e7c9758)
+## 1b) Verified Snapshot (2026-02-17, `main` @ 51dd45d5)
 
 LOC verification for major split hotspots (baseline -> current on `main`):
 

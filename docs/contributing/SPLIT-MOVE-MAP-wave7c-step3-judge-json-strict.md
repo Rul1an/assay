@@ -2,11 +2,11 @@
 
 Closure changes:
 - Removed `#[cfg(test)] mod tests` from:
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`
+  - `crates/assay-core/src/judge/mod.rs`
+  - `crates/assay-evidence/src/json_strict/mod.rs`
 - Relocated those test bodies into:
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/judge/judge_internal/tests.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/json_strict_internal/tests.rs`
+  - `crates/assay-core/src/judge/judge_internal/tests.rs`
+  - `crates/assay-evidence/src/json_strict/json_strict_internal/tests.rs`
 
 Stable facade call chains:
 - `JudgeService::evaluate` -> `judge_internal::run::evaluate_impl`

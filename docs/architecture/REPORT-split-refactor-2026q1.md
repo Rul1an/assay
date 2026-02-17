@@ -2,7 +2,7 @@
 
 Date: 2026-02-17
 Verification basis:
-- Mainline commit: `2e7c9758`
+- Mainline commit: `51dd45d5`
 - Baseline snapshot commit (pre-program): `6ae1d340`
 - Plan source: `docs/architecture/PLAN-split-refactor-2026q1.md`
 - PR metadata source: `gh pr list` / `gh pr view`
@@ -25,7 +25,6 @@ Completed waves:
 
 Open non-program work at report time:
 - PR #365 (docs auto-update)
-- PR #376 (Dependabot uuid bump; checks in progress)
 
 ## Wave closure map
 
@@ -40,7 +39,7 @@ Open non-program work at report time:
 ## LOC outcomes (verified on main)
 
 Baseline LOC in the table below is measured from the pre-program snapshot (`6ae1d340`).
-Current LOC is measured on `main` at `2e7c9758`.
+Current LOC is measured on `main` at `51dd45d5`.
 
 | File | Baseline LOC | Current LOC | Delta |
 |---|---:|---:|---:|
@@ -81,5 +80,5 @@ No production file in this set is above 800 LOC.
 
 - Program closure is complete for waves 1-7C; remaining work is maintenance and optional hardening waves.
 - Plan file had stale status text and has been synchronized.
-- Some older wave docs still contain absolute local paths in reviewer artifacts; this is cosmetic but should be normalized if touched again.
+- Wave7 split artifacts were normalized to repository-relative paths to avoid machine-specific reviewer noise.
 - Follow-up hygiene suggestion: add a lightweight docs check that rejects new absolute `/Users/...` paths in reviewer artifacts.

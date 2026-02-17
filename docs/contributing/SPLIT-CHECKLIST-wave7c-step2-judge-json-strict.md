@@ -1,16 +1,16 @@
 # Wave7C Step2 checklist: judge/json_strict mechanical split
 
 Scope lock:
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs` unchanged.
-- Keep public signatures in `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs` unchanged.
+- Keep public signatures in `crates/assay-core/src/judge/mod.rs` unchanged.
+- Keep public signatures in `crates/assay-evidence/src/json_strict/mod.rs` unchanged.
 - Mechanical moves only: helper/orchestration extraction + facade delegation.
 - No tests relocation in Step2 (tests remain in facades until Step3 closure).
 
 Artifacts:
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-CHECKLIST-wave7c-step2-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-MOVE-MAP-wave7c-step2-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/docs/contributing/SPLIT-REVIEW-PACK-wave7c-step2-judge-json-strict.md`
-- `/Users/roelschuurkes/assay/scripts/ci/review-wave7c-step2.sh`
+- `docs/contributing/SPLIT-CHECKLIST-wave7c-step2-judge-json-strict.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave7c-step2-judge-json-strict.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave7c-step2-judge-json-strict.md`
+- `scripts/ci/review-wave7c-step2.sh`
 
 Runbook:
 ```bash

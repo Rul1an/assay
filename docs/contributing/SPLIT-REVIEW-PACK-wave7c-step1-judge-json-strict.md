@@ -3,8 +3,8 @@
 Intent:
 - Freeze behavior/contracts and reviewer gates before Wave7C mechanical split.
 - Preserve public surface and production-path semantics for:
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/judge/mod.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/json_strict/mod.rs`
+  - `crates/assay-core/src/judge/mod.rs`
+  - `crates/assay-evidence/src/json_strict/mod.rs`
 
 Executed validation:
 ```bash

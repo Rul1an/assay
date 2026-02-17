@@ -2,8 +2,8 @@
 
 Intent:
 - Mechanically split large helper/orchestration blocks from:
-  - `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader.rs`
-  - `/Users/roelschuurkes/assay/crates/assay-core/src/storage/store.rs`
+  - `crates/assay-evidence/src/lint/packs/loader.rs`
+  - `crates/assay-core/src/storage/store.rs`
 - Keep public behavior and signatures stable behind existing facades.
 
 Executed validation:
@@ -44,8 +44,8 @@ fn migrate_v030(conn: &Connection) -> anyhow::Result<()> {
 ```
 
 LOC snapshot:
-- `/Users/roelschuurkes/assay/crates/assay-evidence/src/lint/packs/loader.rs`: `793 -> 467`
-- `/Users/roelschuurkes/assay/crates/assay-core/src/storage/store.rs`: `774 -> 658`
+- `crates/assay-evidence/src/lint/packs/loader.rs`: `793 -> 467`
+- `crates/assay-core/src/storage/store.rs`: `774 -> 658`
 
 Risk:
 - Medium-low: mechanical internal extraction only; no public API changes; anchors and boundary gates enforce parity.
