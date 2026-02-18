@@ -1,13 +1,16 @@
-use crate::cli::args::{SimArgs, SimRunArgs, SimSub};
+use crate::cli::args::{SimArgs, SimRunArgs, SimSoakArgs, SimSub};
 use crate::exit_codes::EXIT_CONFIG_ERROR;
 use anyhow::{Context, Result};
 use assay_evidence::{VerifyLimits, VerifyLimitsOverrides};
 use assay_sim::{run_suite, tier_default_limits, SuiteConfig, SuiteTier};
 use std::fs;
 
+mod soak;
+
 pub fn run(args: SimArgs) -> Result<i32> {
     match args.cmd {
         SimSub::Run(a) => cmd_run(a),
+        SimSub::Soak(a) => cmd_soak(a),
     }
 }
 
@@ -154,4 +157,8 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
 
     println!("\n✅ All attacks blocked.");
     Ok(0)
+}
+
+fn cmd_soak(args: SimSoakArgs) -> Result<i32> {
+    soak::run(args)
 }
