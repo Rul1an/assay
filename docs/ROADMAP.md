@@ -381,6 +381,7 @@ assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.j
 **Design decisions:**
 - **Pass condition**: "Pass All K" is the gold standard for Agentic CI
 - **Evidence**: The *Soak Report* itself is an artifact in the evidence bundle
+- **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; enforcement is explicitly deferred to Step4 (no PR required-check impact in Step3)
 
 ### H. Audit Kit & Closure (P2) [ADR-025]
 
