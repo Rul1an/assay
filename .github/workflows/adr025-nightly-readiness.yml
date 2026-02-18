@@ -1,0 +1,68 @@
+name: ADR-025 Nightly Readiness (informational)
+
+on:
+  schedule:
+    - cron: "29 2 * * *"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Number of recent soak runs to summarize"
+        required: false
+        default: "20"
+
+concurrency:
+  group: adr025-nightly-readiness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  readiness:
+    name: aggregate soak readiness (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Prepare dirs
+        run: |
+          set -euo pipefail
+          mkdir -p input/reports input/meta artifacts
+
+      - name: Download recent soak artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs || '20' }}
+        run: |
+          set -euo pipefail
+
+          gh run list \
+            --workflow "adr025-nightly-soak.yml" \
+            --limit "${RUNS}" \
+            --json databaseId,conclusion,createdAt \
+            > input/meta/runs.json
+
+          python3 -c 'import json; [print(r.get("databaseId")) for r in json.load(open("input/meta/runs.json", "r", encoding="utf-8")) if r.get("databaseId") is not None]' \
+            | while read -r rid; do
+                mkdir -p "input/reports/${rid}"
+                gh run download "$rid" -n "adr025-soak-report" -D "input/reports/${rid}" || true
+              done
+
+      - name: Build readiness report
+        run: |
+          set -euo pipefail
+          bash scripts/ci/adr025-soak-readiness-report.sh input artifacts
+
+      - name: Upload readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adr025-nightly-readiness
+          path: artifacts/*
+          if-no-files-found: warn
+          retention-days: 14
