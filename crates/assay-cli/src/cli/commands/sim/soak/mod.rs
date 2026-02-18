@@ -2,6 +2,9 @@ use crate::cli::args::SimSoakArgs;
 use crate::exit_codes::EXIT_CONFIG_ERROR;
 use anyhow::Result;
 
+mod report;
+mod schema;
+
 pub fn run(args: SimSoakArgs) -> Result<i32> {
     if args.time_budget == 0 {
         eprintln!("Config error: --time-budget must be > 0");
