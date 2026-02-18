@@ -117,6 +117,17 @@ Workflow/gating rollout:
 2. release/promote fail-closed verify path
 3. env switch: `ASSAY_SOAK_GATE=off|warn|enforce`
 
+Step3 rollout status:
+
+1. C1 merged: informational nightly soak workflow (`adr025-nightly-soak.yml`).
+2. C2 merged/planned: informational readiness aggregation workflow (`adr025-nightly-readiness.yml`) and report script (`scripts/ci/adr025-soak-readiness-report.sh`).
+3. C3 (this closure slice): checklist/review-pack/reviewer gates and promotion criteria freeze.
+
+Step3 policy guarantee:
+
+- No PR required-check behavior change is introduced in Step3.
+- PR blast radius remains constrained by `schedule` + `workflow_dispatch` only and `continue-on-error: true` on ADR-025 nightly lanes.
+
 ## 6) Promotion criteria (I1)
 
 Promotion-ready is true only if all are true:
