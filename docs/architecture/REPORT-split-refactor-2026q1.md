@@ -26,6 +26,9 @@ Completed waves:
 Open non-program work at report time:
 - PR #365 (docs auto-update)
 
+Post-closure remediation plan:
+- Wave8A-D verified-findings hardening is planned in `docs/architecture/PLAN-wave8-verified-findings-remediation-2026q1.md`.
+
 ## Wave closure map
 
 - Wave1 closure: PR #332 (writer split; verify closure tracked under Wave5)
@@ -82,3 +85,4 @@ No production file in this set is above 800 LOC.
 - Plan file had stale status text and has been synchronized.
 - Wave7 split artifacts were normalized to repository-relative paths to avoid machine-specific reviewer noise.
 - Follow-up hygiene suggestion: add a lightweight docs check that rejects new absolute `/Users/...` paths in reviewer artifacts.
+- Follow-up execution track for verified technical findings is defined as Wave8A-D (socket telemetry correctness, policy hot-path compile elimination, async I/O hygiene, eBPF stats/drop resiliency).

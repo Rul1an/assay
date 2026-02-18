@@ -1,7 +1,7 @@
 # Plan: Refactor Hotspots (Q1-Q2 2026)
 
-> Status: Closed loop through Wave7C Step3 on `main` (follow-up hardening optional; non-wave operational PRs may still be open)
-> Date: 2026-02-17
+> Status: Closed loop through Wave7C Step3 on `main`; Wave8 verified-findings remediation proposed
+> Date: 2026-02-18
 > Scope: Largest handwritten Rust production files and related CI/CD gates
 > Constraint: No behavior drift in CLI/public contracts; incremental mergeable PRs
 
@@ -457,6 +457,26 @@ Wave7C Step1 scope (freeze only):
   - `crates/assay-evidence/src/json_strict/mod.rs`
 - tests/docs/gates only.
 - no mechanical moves and no behavior/perf/API change in Step1.
+
+## Wave 8: Verified-findings remediation
+
+Step status:
+
+- Wave8A (socket telemetry correctness): planned.
+- Wave8B (policy hot-path compile elimination): planned.
+- Wave8C (async runner I/O hygiene): planned.
+- Wave8D (eBPF stats/drop resiliency): planned.
+
+Execution order:
+
+1. Wave8A
+2. Wave8B
+3. Wave8C
+4. Wave8D
+
+Wave8 source of truth:
+
+- `docs/architecture/PLAN-wave8-verified-findings-remediation-2026q1.md`
 
 ## 5) Definition of Done per split PR
 

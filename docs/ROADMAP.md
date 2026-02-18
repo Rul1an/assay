@@ -1,10 +1,11 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-02-17):** Q2 items verified — all P0/P1/P2 DX features delivered.
+> **Status sync (2026-02-18):** Q2 items verified — all P0/P1/P2 DX features delivered.
 > Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
 > Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
 > **Starter packs (ADR-023)** merged PR #289 — cicd-starter default pack, assayrunid fix, vendored drift CI, --explain UX.
 > Split refactor program closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
+> Verified-findings hardening follow-up is planned as Wave8A-D (see [Wave8 plan](architecture/PLAN-wave8-verified-findings-remediation-2026q1.md)).
 > Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
@@ -187,6 +188,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
 | **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | Pending (I1) |
 | **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | Pending (I1) |
+| **P1** | Verified Findings Remediation (Wave8A-D) | Medium | High | Planned |
 | **P2** | Closure Score & Completeness (ADR-025) | Medium | High | Pending (I2) |
 | **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
