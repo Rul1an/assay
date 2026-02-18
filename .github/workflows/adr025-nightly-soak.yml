@@ -1,0 +1,60 @@
+name: ADR-025 Nightly Soak (informational)
+
+on:
+  schedule:
+    # Nightly at 02:17 UTC
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: adr025-nightly-soak
+  cancel-in-progress: false
+
+# Minimal permissions:
+# - contents:read for checkout
+# - actions:write for artifact upload
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  soak:
+    name: sim soak (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Informational lane: never blocks anything
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Build (assay-cli)
+        run: cargo build -p assay-cli
+
+      - name: Run soak (informational)
+        env:
+          # Gate mode placeholder (kept off for Step3 C1)
+          ASSAY_SOAK_GATE: "off"
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cargo run -p assay-cli -- sim soak \
+            --target nightly \
+            --report artifacts/soak_report.json \
+            --seed 1 \
+            --iterations 50 \
+            --time-budget 60
+
+      - name: Upload soak report artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adr025-soak-report
+          path: artifacts/soak_report.json
+          if-no-files-found: warn
+          retention-days: 14
