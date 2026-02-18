@@ -30,4 +30,14 @@ rg -n "^permissions:" "$WF" >/dev/null || { echo "FAIL: missing permissions bloc
 rg -n "contents:\s*read" "$WF" >/dev/null || { echo "FAIL: missing contents: read"; exit 1; }
 rg -n "actions:\s*write" "$WF" >/dev/null || { echo "FAIL: missing actions: write (needed for artifacts)"; exit 1; }
 
+echo "[review] ensure actions are pinned to commit SHAs"
+if rg -n 'uses:\s+\S+@(v[0-9]+|stable|main|master|nightly)\b' "$WF" >/dev/null; then
+  echo "FAIL: actions must be pinned to a commit SHA (no @vN/@stable/@main/@master/@nightly)"
+  exit 1
+fi
+rg -n 'uses:\s+\S+@[0-9a-f]{40}\b' "$WF" >/dev/null || {
+  echo "FAIL: workflow must contain SHA-pinned actions"
+  exit 1
+}
+
 echo "[review] done"
