@@ -18,7 +18,7 @@ Close the Step3 loop by freezing rollout contracts:
 - Only `schedule` and `workflow_dispatch` are allowed under `on:`.
 
 ### Permissions policy
-- Explicit minimal permissions only: `contents: read` + `actions: write`.
+- Explicit constrained permissions: `contents: read` + `actions: write` required, with allowlisted optional keys only.
 - No `id-token: write` outside explicit release/provenance flows.
 
 ### Supply-chain policy

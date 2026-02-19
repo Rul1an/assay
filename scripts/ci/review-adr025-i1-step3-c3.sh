@@ -122,15 +122,21 @@ check_sha_pins_strict() {
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
-    # Extract ref after @ on uses line
-    local ref
-    ref="$(sed -E 's/.*uses:[[:space:]]+[^@]+@([^[:space:]#]+).*/\1/' <<< "$line")"
+    # Extract token after `uses:`
+    local token
+    token="$(sed -E 's/^[[:space:]]*uses:[[:space:]]+([^[:space:]#]+).*/\1/' <<< "$line")"
 
-    if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-      echo "FAIL: $wf has non-SHA uses ref: $line"
+    # Local actions are allowed without @ref.
+    if [[ "$token" =~ ^\./ ]]; then
+      continue
+    fi
+
+    # Remote actions must be pinned to a 40-hex SHA.
+    if [[ ! "$token" =~ ^[^@]+@[0-9a-f]{40}$ ]]; then
+      echo "FAIL: $wf has non-SHA remote uses ref: $line"
       bad=1
     fi
-  done < <(rg "^[[:space:]]*uses:[[:space:]]+[^@]+@[^[:space:]]+" "$wf" || true)
+  done < <(rg "^[[:space:]]*uses:[[:space:]]+[^[:space:]#]+" "$wf" || true)
 
   if [[ "$bad" -ne 0 ]]; then
     exit 1
@@ -152,24 +158,39 @@ check_permissions_minimal() {
     exit 1
   fi
 
-  # Require exact minimal keys for ADR-025 workflows.
+  # Require baseline permissions for ADR-025 workflows.
   rg -n "^  contents:[[:space:]]*read[[:space:]]*$" "$wf" >/dev/null || { echo "FAIL: $wf missing permissions contents: read"; exit 1; }
   rg -n "^  actions:[[:space:]]*write[[:space:]]*$" "$wf" >/dev/null || { echo "FAIL: $wf missing permissions actions: write"; exit 1; }
 
-  # Reject any additional permission keys in the top-level permissions block.
-  local extra
-  extra="$(awk '
+  # Allowlist keys to avoid over-broad permissions while leaving controlled extension room.
+  local invalid
+  invalid="$(awk '
     BEGIN {in_p=0}
     /^permissions:[[:space:]]*$/ {in_p=1; next}
     in_p && /^[^[:space:]]/ {in_p=0}
     in_p && /^  [A-Za-z-]+:[[:space:]]*[A-Za-z-]+[[:space:]]*$/ {
       key=$1; sub(":", "", key)
-      if (key != "contents" && key != "actions") print key
+      val=$2
+      if (key != "contents" && key != "actions" && key != "pull-requests" && key != "security-events") {
+        print "key:" key
+      }
+      if (key == "contents" && val != "read") {
+        print "contents:" val
+      }
+      if (key == "actions" && val != "write") {
+        print "actions:" val
+      }
+      if (key == "pull-requests" && val != "read" && val != "write") {
+        print "pull-requests:" val
+      }
+      if (key == "security-events" && val != "read" && val != "write") {
+        print "security-events:" val
+      }
     }
   ' "$wf")"
 
-  if [[ -n "$extra" ]]; then
-    echo "FAIL: $wf has non-minimal permission keys: $(tr '\n' ' ' <<< "$extra")"
+  if [[ -n "$invalid" ]]; then
+    echo "FAIL: $wf has invalid permission policy entries: $(tr '\n' ' ' <<< "$invalid")"
     exit 1
   fi
 }

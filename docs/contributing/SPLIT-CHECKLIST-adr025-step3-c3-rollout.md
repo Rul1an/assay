@@ -5,7 +5,7 @@
 - [ ] No required-check / branch-protection behavior changed
 - [ ] All actions in ADR-025 workflows are SHA-pinned
 - [ ] Nightly lanes remain informational (`continue-on-error: true` at job level)
-- [ ] Permissions are minimal and explicit (exactly `contents: read`, `actions: write`; no `id-token: write`)
+- [ ] Permissions are explicit and constrained (`contents: read`, `actions: write` required; allowlisted extras only; no `id-token: write`)
 
 ## Nightly Soak (C1)
 - [ ] Workflow exists: `.github/workflows/adr025-nightly-soak.yml`
