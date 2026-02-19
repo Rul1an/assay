@@ -402,6 +402,19 @@
 - ADR-025 I1: promote Step1+Step2(B1) to main (#384) @Rul1an
 - feat(sim): add ADR-025 soak CLI parse and stub dispatch (B1) (#382) @Rul1an
 - ADR-025 I1 Step1: freeze plan + soak report v1 schema (#381) @Rul1an
+
+## [2026-02-19]
+
+- ci(adr025): relax C3 gate fragility with local-action + permission allowlist (C3.2) (#393) @Rul1an
+- ci(adr025): harden Step3 C3 reviewer gate contracts (C3.1) (#391) @Rul1an
+- docs(adr025): promote Step3 C3 closure to main (#390) @Rul1an
+- docs(adr025): Step3 closure (promotion criteria + reviewer gates) (C3) (#389) @Rul1an
+- ci(adr025): add nightly readiness aggregation workflow + report script (Step3 C2) (#388) @Rul1an
+- ci(adr025): add SHA-pinned nightly soak workflow + reviewer gate (Step3 C1) (#387) @Rul1an
+- feat(sim): implement ADR-025 soak report v1 generation + schema validation + determinism (B2) (#386) @Rul1an
+- ADR-025 I1: promote Step1+Step2(B1) to main (#384) @Rul1an
+- feat(sim): add ADR-025 soak CLI parse and stub dispatch (B1) (#382) @Rul1an
+- ADR-025 I1 Step1: freeze plan + soak report v1 schema (#381) @Rul1an
 ## [2026-02-18]
 
 - ADR-025 I1 Step1: freeze plan + soak report v1 schema (#381) @Rul1an
