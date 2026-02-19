@@ -1,0 +1,19 @@
+{
+  "policy_version": "soak_readiness_policy_v1",
+  "classifier_version": "1",
+  "window": {
+    "runs_observed_target": 20,
+    "runs_observed_minimum": 14
+  },
+  "thresholds": {
+    "success_rate_min": 0.90,
+    "contract_fail_rate_max": 0.05,
+    "infra_fail_rate_max": 0.01,
+    "unknown_rate_max": 0.05
+  },
+  "exit_contract": {
+    "pass": 0,
+    "policy_fail": 1,
+    "measurement_fail": 2
+  }
+}
