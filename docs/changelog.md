@@ -403,6 +403,13 @@
 - feat(sim): add ADR-025 soak CLI parse and stub dispatch (B1) (#382) @Rul1an
 - ADR-025 I1 Step1: freeze plan + soak report v1 schema (#381) @Rul1an
 
+- docs(adr025): promote Step4C closure artifacts to main (#399) @Rul1an
+- docs(adr025): Step4C closure (runbook + reviewer gates + roadmap sync) (#398) @Rul1an
+- ci(adr025): promote Step4B release-lane readiness enforcement to main (#397) @Rul1an
+- ci(adr025): enforce soak readiness policy in release lane (Step4B) (#396) @Rul1an
+- docs(adr025): freeze Step4 soak enforcement policy v1 (Step4A) (#394) @Rul1an
+- ci(adr025): relax C3 gate fragility with local-action + permission allowlist (C3.2) (#393) @Rul1an
+- ci(adr025): harden Step3 C3 reviewer gate contracts (C3.1) (#391) @Rul1an
 ## [2026-02-19]
 
 - ci(adr025): relax C3 gate fragility with local-action + permission allowlist (C3.2) (#393) @Rul1an
