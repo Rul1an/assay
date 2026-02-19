@@ -373,15 +373,16 @@ assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.j
 ```
 
 **Scope (Iteration 1):**
-- [ ] **CLI**: `assay sim soak` subcommand with `pass^k` semantics (pass_all, pass_rate)
-- [ ] **Report**: `soak-report-v1` strict JSON schema (decision_policy, violations_by_rule)
-- [ ] **Determinism**: Seeded execution for reproducible reliability
-- [ ] **Limits**: Time budget and resource limits (inherited from ADR-024 work)
+- [x] **CLI**: `assay sim soak` subcommand with `pass^k` semantics (pass_all, pass_rate)
+- [x] **Report**: `soak-report-v1` strict JSON schema (decision_policy, violations_by_rule)
+- [x] **Determinism**: Seeded execution for reproducible reliability
+- [x] **Limits**: Time budget and resource limits (inherited from ADR-024 work)
 
 **Design decisions:**
 - **Pass condition**: "Pass All K" is the gold standard for Agentic CI
 - **Evidence**: The *Soak Report* itself is an artifact in the evidence bundle
-- **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; enforcement is explicitly deferred to Step4 (no PR required-check impact in Step3)
+- **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; no PR required-check impact in Step3
+- **Step4 rollout status**: fail-closed enforcement is active in release lane only (policy v1 + readiness enforcement script); PR lanes remain unchanged
 
 ### H. Audit Kit & Closure (P2) [ADR-025]
 
