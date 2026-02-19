@@ -4,8 +4,8 @@
 - [ ] No `pull_request` triggers added to ADR-025 workflows
 - [ ] No required-check / branch-protection behavior changed
 - [ ] All actions in ADR-025 workflows are SHA-pinned
-- [ ] Nightly lanes remain informational (`continue-on-error: true`)
-- [ ] Permissions are minimal and explicit (no `id-token: write`)
+- [ ] Nightly lanes remain informational (`continue-on-error: true` at job level)
+- [ ] Permissions are minimal and explicit (exactly `contents: read`, `actions: write`; no `id-token: write`)
 
 ## Nightly Soak (C1)
 - [ ] Workflow exists: `.github/workflows/adr025-nightly-soak.yml`
@@ -27,4 +27,4 @@
 
 ## Reviewer gates
 - [ ] Reviewer script exists: `scripts/ci/review-adr025-i1-step3-c3.sh`
-- [ ] Script enforces allowlist + policy checks
+- [ ] Script enforces diff allowlist + workflow content policy checks for ADR-025 workflows

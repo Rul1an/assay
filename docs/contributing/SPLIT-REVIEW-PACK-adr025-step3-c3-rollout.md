@@ -14,20 +14,24 @@ Close the Step3 loop by freezing rollout contracts:
 
 ## Hard contracts
 ### Trigger policy
-- ADR-025 workflows must not include `pull_request`.
-- Only `schedule` and `workflow_dispatch` are allowed.
+- ADR-025 workflows must not include `pull_request`/`pull_request_target`.
+- Only `schedule` and `workflow_dispatch` are allowed under `on:`.
 
 ### Permissions policy
-- Explicit minimal permissions.
+- Explicit minimal permissions only: `contents: read` + `actions: write`.
 - No `id-token: write` outside explicit release/provenance flows.
 
 ### Supply-chain policy
-- All actions must be SHA-pinned.
+- All actions must be SHA-pinned (strict: every `uses:` ref is 40-hex SHA).
 
 ### Artifact contracts
 - Soak artifact: `adr025-soak-report` (retention 14 days)
 - Readiness artifact: `adr025-nightly-readiness` (retention 14 days)
 - Readiness outputs: `nightly_readiness.json` + `nightly_readiness.md`
+
+### Scope allowlist policy
+- C3 closure reviewer gate validates diff scope against `BASE_REF` (default `origin/main`).
+- Only C3 closure artifacts are allowed in this slice.
 
 ## Promotion criteria (informational in Step3)
 Window (default):
@@ -44,7 +48,7 @@ Classifier rules (deterministic):
 - Treat non-success workflow conclusions conservatively as contract failures unless refined in Step4.
 
 ## Verification
-- Run: `bash scripts/ci/review-adr025-i1-step3-c3.sh`
+- Run: `BASE_REF=origin/main bash scripts/ci/review-adr025-i1-step3-c3.sh`
 - Local lint sanity:
   - `cargo fmt --check`
   - `cargo clippy -p assay-cli -- -D warnings`
@@ -52,6 +56,8 @@ Classifier rules (deterministic):
 
 ## Reviewer checklist
 - [ ] No PR triggers introduced
-- [ ] SHA pinning enforced
+- [ ] Trigger set is schedule/dispatch-only
+- [ ] SHA pinning enforced on every `uses:` ref
 - [ ] Minimal permissions enforced
+- [ ] Diff allowlist enforced for C3 closure slice
 - [ ] Promotion criteria are explicit and measurable
