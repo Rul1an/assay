@@ -201,6 +201,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      actions: read
       attestations: write
       id-token: write
 
@@ -228,6 +229,29 @@ jobs:
           mkdir -p release
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
           ls -la release/
+
+      - name: ADR-025 enforce readiness (fail-closed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p input/readiness
+
+          rid="$(gh run list --workflow "adr025-nightly-readiness.yml" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          if [ -z "${rid}" ] || [ "${rid}" = "null" ]; then
+            echo "No successful adr025-nightly-readiness run found"
+            exit 2
+          fi
+          echo "Using readiness run id: ${rid}"
+
+          gh run download "${rid}" -n "adr025-nightly-readiness" -D input/readiness
+
+          test -f input/readiness/nightly_readiness.json
+
+          bash scripts/ci/adr025-soak-enforce.sh \
+            --policy schemas/soak_readiness_policy_v1.json \
+            --readiness input/readiness/nightly_readiness.json
 
       - name: Generate build provenance attestations
         uses: actions/attest-build-provenance@v2
