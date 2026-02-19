@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/closure_report_v1.schema.json",
+  "title": "Assay ADR-025 Closure Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_version",
+    "assay_version",
+    "inputs",
+    "policy",
+    "dimensions",
+    "summary",
+    "score"
+  ],
+  "properties": {
+    "schema_version": { "const": "closure_report_v1" },
+    "report_version": { "type": "string", "minLength": 1 },
+    "assay_version": { "type": "string", "minLength": 1 },
+
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["soak_report", "readiness"],
+      "properties": {
+        "soak_report": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version"],
+          "properties": {
+            "schema_version": { "type": "string" },
+            "digest": { "type": "string" },
+            "path": { "type": "string" }
+          }
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "classifier_version"],
+          "properties": {
+            "schema_version": { "type": "string" },
+            "classifier_version": { "type": "string" },
+            "digest": { "type": "string" },
+            "path": { "type": "string" }
+          }
+        },
+        "manifest": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "digest": { "type": "string" },
+            "path": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "score_threshold"],
+      "properties": {
+        "policy_version": { "type": "string" },
+        "score_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    },
+
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completeness", "provenance", "consistency", "readiness"],
+      "properties": {
+        "completeness": { "$ref": "#/$defs/dimension" },
+        "provenance": { "$ref": "#/$defs/dimension" },
+        "consistency": { "$ref": "#/$defs/dimension" },
+        "readiness": { "$ref": "#/$defs/dimension" }
+      }
+    },
+
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_signals", "captured_signals", "gaps"],
+      "properties": {
+        "required_signals": { "type": "array", "items": { "type": "string" } },
+        "captured_signals": { "type": "array", "items": { "type": "string" } },
+        "gaps": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "violations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/violation" }
+    },
+
+    "score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  },
+
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "weight", "signals"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "weight": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "signals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/signal" }
+        }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["present", "missing", "mismatch", "unknown"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["info", "warn", "error"] }
+      }
+    }
+  }
+}
