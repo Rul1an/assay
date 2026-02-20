@@ -1,0 +1,86 @@
+name: ADR-025 Nightly Closure (informational)
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Readiness runs to consider (informational only)"
+        required: false
+        default: "20"
+
+concurrency:
+  group: adr025-nightly-closure
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  closure:
+    name: closure evaluate (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Prepare inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs || '20' }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs artifacts
+
+          # 1) Produce a fresh soak report (self-contained informational lane)
+          cargo build -p assay-cli
+          cargo run -p assay-cli -- sim soak \
+            --target nightly \
+            --report inputs/soak_report.json \
+            --seed 1 \
+            --iterations 50 \
+            --time-budget 60
+
+          # 2) Download latest readiness artifact from I1 Step3 C2 lane
+          rid="$(gh run list --workflow "adr025-nightly-readiness.yml" --limit "${RUNS}" --json databaseId --jq '.[0].databaseId')"
+          echo "Using readiness run id: ${rid}"
+          gh run download "${rid}" -n "adr025-nightly-readiness" -D inputs
+
+          if [[ ! -f inputs/nightly_readiness.json ]]; then
+            candidate="$(find inputs -name nightly_readiness.json -print -quit)"
+            if [[ -n "${candidate}" ]]; then
+              cp "${candidate}" inputs/nightly_readiness.json
+            fi
+          fi
+          test -f inputs/nightly_readiness.json
+
+          # 3) Manifest input: v1 informational fixture
+          cp scripts/ci/fixtures/adr025-i2/manifest_good.json inputs/manifest.json
+
+      - name: Evaluate closure
+        run: |
+          set -euo pipefail
+          bash scripts/ci/adr025-closure-evaluate.sh \
+            --soak inputs/soak_report.json \
+            --readiness inputs/nightly_readiness.json \
+            --manifest inputs/manifest.json \
+            --policy schemas/closure_policy_v1.json \
+            --out-json artifacts/closure_report_v1.json \
+            --out-md artifacts/closure_report_v1.md
+
+      - name: Upload closure artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adr025-closure-report
+          path: artifacts/*
+          if-no-files-found: warn
+          retention-days: 14
