@@ -1,0 +1,10 @@
+{
+  "schema_version": "closure_report_v1",
+  "score": 0.95,
+  "inputs": {
+    "readiness": {
+      "classifier_version": "1"
+    }
+  },
+  "violations": []
+}
