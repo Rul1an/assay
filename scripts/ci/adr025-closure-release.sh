@@ -6,6 +6,13 @@ POLICY="${POLICY:-schemas/closure_release_policy_v1.json}"
 OUT_DIR="${OUT_DIR:-artifacts/adr025-closure}"
 CLOSURE_JSON=""
 
+WORKFLOW_NAME="adr025-nightly-closure.yml"
+ARTIFACT_NAME="adr025-closure-report"
+
+TEST_MODE="${ASSAY_CLOSURE_RELEASE_TEST_MODE:-0}"
+TEST_LOCAL_JSON="${ASSAY_CLOSURE_RELEASE_LOCAL_JSON:-}"
+TEST_SIMULATE_MISSING_ARTIFACT="${ASSAY_CLOSURE_RELEASE_SIMULATE_MISSING_ARTIFACT:-0}"
+
 usage() {
   echo "Usage: $0 [--mode off|attach|warn|enforce] [--policy <path>] [--out-dir <dir>] [--closure-json <path>]"
   exit 2
@@ -49,14 +56,28 @@ esac
 
 mkdir -p "$OUT_DIR"
 
-warn_or_fail_measurement() {
+echo "ADR-025 closure: mode=$MODE policy=$POLICY out_dir=$OUT_DIR workflow=$WORKFLOW_NAME test_mode=$TEST_MODE"
+
+measurement_issue() {
   local msg="$1"
-  if [[ "$MODE" == "warn" ]]; then
-    echo "WARN: ${msg} (mode=warn, continuing)"
-    return 0
-  fi
-  echo "Measurement error: ${msg}"
-  return 2
+  case "$MODE" in
+    enforce)
+      echo "Measurement error: ${msg}"
+      return 2
+      ;;
+    warn)
+      echo "WARN: Measurement issue: ${msg} (mode=warn, continuing)"
+      return 0
+      ;;
+    attach)
+      echo "ADR-025 closure: mode=attach measurement issue: ${msg} (non-blocking attach)"
+      return 0
+      ;;
+    *)
+      echo "Measurement error: ${msg}"
+      return 2
+      ;;
+  esac
 }
 
 if [[ "$MODE" == "off" ]]; then
@@ -65,32 +86,68 @@ if [[ "$MODE" == "off" ]]; then
 fi
 
 if [[ ! -f "$POLICY" ]]; then
-  warn_or_fail_measurement "policy not found: $POLICY"
+  measurement_issue "policy not found: $POLICY"
   exit $?
 fi
 
 if [[ -z "$CLOSURE_JSON" ]]; then
-  : "${GH_TOKEN:?Missing GH_TOKEN}"
+  if [[ "$TEST_MODE" == "1" ]]; then
+    if [[ "$TEST_SIMULATE_MISSING_ARTIFACT" == "1" ]]; then
+      measurement_issue "simulated missing closure artifact"
+      exit $?
+    fi
 
-  rid="$(gh run list --workflow "adr025-nightly-closure.yml" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
-  if [[ -z "$rid" || "$rid" == "null" ]]; then
-    warn_or_fail_measurement "could not find successful adr025-nightly-closure run"
-    exit $?
+    if [[ -z "$TEST_LOCAL_JSON" ]]; then
+      measurement_issue "test mode enabled but ASSAY_CLOSURE_RELEASE_LOCAL_JSON is unset"
+      exit $?
+    fi
+
+    CLOSURE_JSON="$TEST_LOCAL_JSON"
+    echo "ADR-025 closure: using local test json: $CLOSURE_JSON"
+  else
+    if [[ -z "${GH_TOKEN:-}" ]]; then
+      measurement_issue "missing GH_TOKEN"
+      exit $?
+    fi
+
+    run_list_err="$OUT_DIR/adr025-closure-run-list.err"
+    rid=""
+    if ! rid="$(gh run list --workflow "$WORKFLOW_NAME" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>"$run_list_err")"; then
+      err_out="$(tail -n 20 "$run_list_err" 2>/dev/null || true)"
+      measurement_issue "failed to list nightly closure runs: ${err_out}"
+      exit $?
+    fi
+
+    if [[ -z "$rid" || "$rid" == "null" ]]; then
+      measurement_issue "could not find successful ${WORKFLOW_NAME} run"
+      exit $?
+    fi
+
+    echo "ADR-025 closure: using run id: $rid"
+    dl_log="$OUT_DIR/adr025-closure-download.log"
+    download_failed=0
+    if ! gh run download "$rid" -n "$ARTIFACT_NAME" -D "$OUT_DIR" >"$dl_log" 2>&1; then
+      download_failed=1
+    fi
+
+    found_json="$(find "$OUT_DIR" -name 'closure_report_v1.json' -print -quit || true)"
+    if [[ -z "$found_json" ]]; then
+      dl_tail="$(tail -n 20 "$dl_log" 2>/dev/null || true)"
+      if [[ "$download_failed" -eq 1 && -n "$dl_tail" ]]; then
+        measurement_issue "missing closure_report_v1.json in downloaded artifact; gh run download output: ${dl_tail}"
+      else
+        measurement_issue "missing closure_report_v1.json in downloaded artifact"
+      fi
+      exit $?
+    fi
+
+    CLOSURE_JSON="$found_json"
+    echo "ADR-025 closure: found closure report at $CLOSURE_JSON"
   fi
-
-  echo "ADR-025 closure: using run id: $rid"
-  gh run download "$rid" -n "adr025-closure-report" -D "$OUT_DIR" || true
-
-  found_json="$(find "$OUT_DIR" -name 'closure_report_v1.json' -print -quit)"
-  if [[ -z "$found_json" ]]; then
-    warn_or_fail_measurement "missing closure_report_v1.json in downloaded artifact"
-    exit $?
-  fi
-  CLOSURE_JSON="$found_json"
 fi
 
 if [[ ! -f "$CLOSURE_JSON" ]]; then
-  warn_or_fail_measurement "closure report JSON not found: $CLOSURE_JSON"
+  measurement_issue "closure report JSON not found: $CLOSURE_JSON"
   exit $?
 fi
 
@@ -143,7 +200,12 @@ if classifier_expected is not None:
     if str(classifier_found) != str(classifier_expected):
         die(1, f"Policy fail: classifier_version mismatch (report={classifier_found}, policy={classifier_expected})")
 
-violations = report.get("violations") or []
+violations = report.get("violations")
+if violations is None:
+    violations = []
+elif not isinstance(violations, list):
+    die(2, "Measurement error: closure report violations must be a list if present")
+
 hard_error = any(isinstance(v, dict) and v.get("severity") == "error" for v in violations)
 
 if mode == "enforce":
@@ -173,6 +235,11 @@ set -e
 
 if [[ "$MODE" == "warn" && "$eval_code" -ne 0 ]]; then
   echo "WARN: ADR-025 closure evaluation returned code ${eval_code} (mode=warn, continuing)"
+  eval_code=0
+fi
+
+if [[ "$MODE" == "attach" && "$eval_code" -ne 0 ]]; then
+  echo "ADR-025 closure: mode=attach evaluation returned code ${eval_code} (non-blocking attach)"
   eval_code=0
 fi
 
