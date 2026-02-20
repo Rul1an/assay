@@ -1,0 +1,7 @@
+{
+  "schema_version": "adr025-nightly-readiness-v1",
+  "classifier_version": "1",
+  "window": {
+    "runs_observed": 20
+  }
+}
