@@ -20,6 +20,8 @@
 - [ ] Missing artifact flow
 - [ ] Classifier/schema mismatch flow
 - [ ] Score below threshold flow
+- [ ] Violations type contract is explicit (`null/missing` vs wrong type)
+- [ ] Test-mode env knobs are documented as test-only
 - [ ] Break-glass override rules + audit trail
 
 ## Reviewer gates
