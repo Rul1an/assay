@@ -1,0 +1,22 @@
+{
+  "policy_version": "closure_release_policy_v1",
+  "default_mode": "attach",
+  "supported_modes": [
+    "off",
+    "attach",
+    "warn",
+    "enforce"
+  ],
+  "classifier_version": "1",
+  "score_threshold": 0.85,
+  "minimum_readiness_runs": 14,
+  "required_artifacts": [
+    "closure_report_v1.json",
+    "closure_report_v1.md"
+  ],
+  "exit_contract": {
+    "pass": 0,
+    "policy_fail": 1,
+    "measurement_fail": 2
+  }
+}
