@@ -28,6 +28,31 @@ The release step's decision is determined by `scripts/ci/adr025-closure-release.
 - `1` policy/closure fail (only blocks in `enforce`)
 - `2` measurement/contract fail (missing artifact/json, parse errors, schema mismatch)
 
+## Stabilization hardening notes (Stab B)
+- Script now emits startup diagnostics:
+  - `mode`, `policy`, `out_dir`, `workflow`, `test_mode`
+- `violations` type contract:
+  - missing or `null` => treated as empty list
+  - non-list value (for example string/object) => measurement/contract failure
+- Test-only knobs (must not be used in production release wiring):
+  - `ASSAY_CLOSURE_RELEASE_TEST_MODE=1`
+  - `ASSAY_CLOSURE_RELEASE_LOCAL_JSON=/path/to/closure_report_v1.json`
+  - `ASSAY_CLOSURE_RELEASE_SIMULATE_MISSING_ARTIFACT=1`
+
+## Triage snippets (log-first)
+Expected startup line:
+- `ADR-025 closure: mode=<mode> policy=<path> out_dir=<path> workflow=adr025-nightly-closure.yml test_mode=<0|1>`
+
+Common signals:
+- Missing token:
+  - `Measurement error: missing GH_TOKEN`
+- No successful nightly closure run:
+  - `Measurement error: could not find successful adr025-nightly-closure.yml run`
+- Download failure with debug tail:
+  - `missing closure_report_v1.json in downloaded artifact; gh run download output: ...`
+- Type mismatch in report:
+  - `Measurement error: closure report violations must be a list if present`
+
 ## Common incidents & response
 
 ### A) Missing closure artifact / missing closure_report_v1.json
@@ -42,6 +67,7 @@ Actions:
 1) Check nightly closure workflow health and latest run outcome.
 2) Confirm artifact name is `adr025-closure-report`.
 3) Re-run nightly closure via workflow_dispatch if needed.
+4) If log contains `gh run download output:`, use that tail to triage auth/artifact name issues first.
 
 ### B) Classifier mismatch / schema mismatch / invalid JSON
 Symptoms:
@@ -54,6 +80,18 @@ Actions:
 1) Verify `closure_report_v1.json` was produced by current `adr025-closure-evaluate.sh`.
 2) Verify policy file version aligns (`schemas/closure_release_policy_v1.json`).
 3) If mismatch is due to a planned contract change: update policy/contracts first (new freeze slice).
+
+### D) Violations field wrong type
+Symptoms:
+- Script prints `closure report violations must be a list if present`
+- Exit:
+  - `attach`/`warn`: non-blocking continuation with measurement warning
+  - `enforce`: exit `2` (blocks release)
+
+Actions:
+1) Inspect generating source for `violations`; ensure array or null/missing.
+2) Re-run closure evaluator fixture tests locally.
+3) Only adjust schema/contract via freeze slice PR if the type contract must change.
 
 ### C) Score below threshold
 Symptoms:

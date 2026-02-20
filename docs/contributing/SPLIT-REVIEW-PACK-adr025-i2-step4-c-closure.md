@@ -4,6 +4,7 @@
 Close ADR-025 I2 Step4 by:
 - Adding operational runbook for closure release integration
 - Capturing Step4A/4B contracts as reviewer checklist
+- Syncing Stab B hardening semantics (debug output, violations type contract, test-mode notes)
 - Syncing PLAN/ROADMAP with what is on `main`
 - Adding a strict reviewer gate for this closure slice
 
