@@ -1,0 +1,16 @@
+{
+  "schema_version": "closure_report_v1",
+  "score": 0.93,
+  "inputs": {
+    "readiness": {
+      "classifier_version": "1"
+    }
+  },
+  "violations": [
+    {
+      "code": "CLSR-CONSISTENCY-MISMATCH",
+      "message": "classifier mismatch",
+      "severity": "error"
+    }
+  ]
+}
