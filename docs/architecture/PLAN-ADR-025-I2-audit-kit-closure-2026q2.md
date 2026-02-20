@@ -67,3 +67,8 @@ Additions to manifest (conceptual contract):
 ## Step3 rollout plan (preview)
 - Informational nightly closure artifact lane (no PR required-check impact)
 - Release/promote may attach closure artifact as evidence (non-blocking unless explicitly enabled later)
+
+## Step4 status (2026-02-20)
+- Step4A merged on `main`: release integration contract freeze (`off|attach|warn|enforce`, default `attach`).
+- Step4B merged on `main`: release-lane closure attach wiring via `scripts/ci/adr025-closure-release.sh`.
+- Step4C closes the rollout loop: runbook, reviewer closure artifacts, and Step4C allowlist/invariant gate.
