@@ -27,13 +27,22 @@ is_allowlisted() {
 
 echo "[review] diff allowlist + no workflow changes"
 changed="$(git diff --name-only "$BASE_REF"...HEAD)"
-untracked="$(git ls-files --others --exclude-standard)"
+allowlisted_untracked=""
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  if is_allowlisted "$f" || [[ "$f" == .github/workflows/* ]]; then
+    if [[ -n "$allowlisted_untracked" ]]; then
+      allowlisted_untracked+=$'\n'
+    fi
+    allowlisted_untracked+="$f"
+  fi
+done < <(git ls-files --others --exclude-standard)
 
-if [[ -n "$untracked" ]]; then
+if [[ -n "$allowlisted_untracked" ]]; then
   if [[ -n "$changed" ]]; then
-    changed="$(printf "%s\n%s\n" "$changed" "$untracked")"
+    changed="$(printf "%s\n%s\n" "$changed" "$allowlisted_untracked")"
   else
-    changed="$untracked"
+    changed="$allowlisted_untracked"
   fi
 fi
 
