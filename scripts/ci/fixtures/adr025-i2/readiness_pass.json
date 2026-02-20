@@ -1,0 +1,13 @@
+{
+  "schema_version": "adr025-nightly-readiness-v1",
+  "classifier_version": "1",
+  "window": { "runs_observed": 20, "reports_ingested": 20, "trial_samples": 1000 },
+  "rates": {
+    "success_rate": 0.95,
+    "policy_fail_rate": 0.0,
+    "contract_fail_rate": 0.03,
+    "infra_fail_rate": 0.0,
+    "unknown_rate": 0.02
+  },
+  "latency_ms": { "p50": 1, "p95": 2 }
+}

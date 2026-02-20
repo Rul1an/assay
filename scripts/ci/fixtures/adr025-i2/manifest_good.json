@@ -1,0 +1,14 @@
+{
+  "x-assay": {
+    "packs_applied": [
+      { "id": "baseline", "version": "1.0.0", "source": "registry" }
+    ],
+    "mappings_applied": [
+      { "id": "eu-ai-act", "version": "0.1.0", "source": "registry" }
+    ],
+    "provenance": {
+      "tool_version": "0.0.0-test",
+      "classifier_version": "1"
+    }
+  }
+}
