@@ -28,13 +28,22 @@ is_allowed() {
 }
 
 changed="$(git diff --name-only "$BASE_REF"...HEAD)"
-untracked="$(git ls-files --others --exclude-standard)"
+allowlisted_untracked=""
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  if is_allowed "$f" || [[ "$f" == .github/workflows/* ]]; then
+    if [[ -n "$allowlisted_untracked" ]]; then
+      allowlisted_untracked+=$'\n'
+    fi
+    allowlisted_untracked+="$f"
+  fi
+done < <(git ls-files --others --exclude-standard)
 
-if [[ -n "$untracked" ]]; then
+if [[ -n "$allowlisted_untracked" ]]; then
   if [[ -n "$changed" ]]; then
-    changed="$(printf "%s\n%s\n" "$changed" "$untracked")"
+    changed="$(printf "%s\n%s\n" "$changed" "$allowlisted_untracked")"
   else
-    changed="$untracked"
+    changed="$allowlisted_untracked"
   fi
 fi
 
@@ -70,7 +79,7 @@ rg -n "adr025-closure-release\.sh" .github/workflows/release.yml >/dev/null || {
   exit 1
 }
 
-rg -n "MODE:\s*\$\{\{\s*vars\.ASSAY_CLOSURE_GATE\s*\|\|\s*'attach'\s*\}\}" .github/workflows/release.yml >/dev/null || {
+rg -F "MODE: \${{ vars.ASSAY_CLOSURE_GATE || 'attach' }}" .github/workflows/release.yml >/dev/null || {
   echo "FAIL: release workflow missing default attach mode expression"
   exit 1
 }

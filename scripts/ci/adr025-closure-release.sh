@@ -94,6 +94,7 @@ if [[ ! -f "$CLOSURE_JSON" ]]; then
   exit $?
 fi
 
+set +e
 python3 - <<'PY' "$MODE" "$POLICY" "$CLOSURE_JSON"
 import json
 import sys
@@ -167,6 +168,17 @@ else:
     print(f"ADR-025 closure: mode=warn pass score={score:.3f}, threshold={threshold:.3f}")
 raise SystemExit(0)
 PY
+eval_code=$?
+set -e
+
+if [[ "$MODE" == "warn" && "$eval_code" -ne 0 ]]; then
+  echo "WARN: ADR-025 closure evaluation returned code ${eval_code} (mode=warn, continuing)"
+  eval_code=0
+fi
+
+if [[ "$eval_code" -ne 0 ]]; then
+  exit "$eval_code"
+fi
 
 found_md="$(find "$OUT_DIR" -name 'closure_report_v1.md' -print -quit || true)"
 if [[ -z "$found_md" ]]; then
