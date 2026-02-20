@@ -1,0 +1,22 @@
+{
+  "policy_version": "closure_policy_v1",
+  "classifier_version": "1",
+  "score_threshold": 0.85,
+  "weights": {
+    "completeness": 0.40,
+    "provenance": 0.20,
+    "consistency": 0.20,
+    "readiness": 0.20
+  },
+  "required_signals": [
+    "soak.report_present",
+    "readiness.report_present",
+    "manifest.packs_applied_present",
+    "manifest.mappings_applied_present"
+  ],
+  "hard_violations": [
+    "classifier_version_mismatch",
+    "invalid_json",
+    "missing_required_input"
+  ]
+}
