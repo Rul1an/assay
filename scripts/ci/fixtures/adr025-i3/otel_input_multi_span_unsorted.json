@@ -1,0 +1,30 @@
+{
+  "traces": [
+    {
+      "trace_id": "0123456789abcdef0123456789abcdef",
+      "spans": [
+        {
+          "span_id": "ffffffffffffffff",
+          "parent_span_id": "AAAAAAAAAAAAAAAA",
+          "name": "child",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": 10,
+          "end_time_unix_nano": 11,
+          "attributes": { "k2": "v2", "k1": "v1" },
+          "events": [],
+          "links": []
+        },
+        {
+          "span_id": "0000000000000001",
+          "name": "root",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": 1,
+          "end_time_unix_nano": 2,
+          "attributes": { "b": "2", "a": "1" },
+          "events": [],
+          "links": []
+        }
+      ]
+    }
+  ]
+}

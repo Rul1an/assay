@@ -1,0 +1,23 @@
+{
+  "traces": [
+    {
+      "trace_id": "0123456789abcdef0123456789abcdef",
+      "spans": [
+        {
+          "span_id": "0011223344556677",
+          "name": "agent.run",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": 1,
+          "end_time_unix_nano": 2,
+          "attributes": {},
+          "events": [
+            { "name": "b", "time_unix_nano": 5, "attributes": { "z": 1, "a": 2 } },
+            { "name": "a", "time_unix_nano": 5, "attributes": { "b": 1 } },
+            { "name": "c", "time_unix_nano": 4, "attributes": {} }
+          ],
+          "links": []
+        }
+      ]
+    }
+  ]
+}

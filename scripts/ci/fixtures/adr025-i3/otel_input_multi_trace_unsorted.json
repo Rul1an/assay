@@ -1,0 +1,34 @@
+{
+  "traces": [
+    {
+      "trace_id": "ffffffffffffffffffffffffffffffff",
+      "spans": [
+        {
+          "span_id": "bbbbbbbbbbbbbbbb",
+          "name": "z-span",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": 2,
+          "end_time_unix_nano": "3",
+          "attributes": { "b": 2, "a": 1 },
+          "events": [],
+          "links": []
+        }
+      ]
+    },
+    {
+      "trace_id": "00000000000000000000000000000000",
+      "spans": [
+        {
+          "span_id": "aaaaaaaaaaaaaaaa",
+          "name": "a-span",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": "1",
+          "end_time_unix_nano": 2,
+          "attributes": { "z": "last", "m": "mid" },
+          "events": [],
+          "links": []
+        }
+      ]
+    }
+  ]
+}
