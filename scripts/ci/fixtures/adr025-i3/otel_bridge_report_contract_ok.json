@@ -1,0 +1,39 @@
+{
+  "schema_version": "otel_bridge_report_v1",
+  "report_version": "1",
+  "assay_version": "0.0.0-test",
+  "source": {
+    "kind": "otel"
+  },
+  "summary": {
+    "trace_count": 1,
+    "span_count": 1
+  },
+  "traces": [
+    {
+      "trace_id": "0123456789abcdef0123456789abcdef",
+      "spans": [
+        {
+          "span_id": "0011223344556677",
+          "name": "agent.run",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": "1700000000000000000",
+          "end_time_unix_nano": "1700000000100000000",
+          "attributes": [
+            {
+              "key": "gen_ai.operation.name",
+              "value": "chat"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "extensions": {
+    "non_attribute_metadata": {
+      "resource": {
+        "service.name": "demo"
+      }
+    }
+  }
+}
