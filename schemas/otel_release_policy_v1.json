@@ -1,0 +1,22 @@
+{
+  "policy_version": "otel_release_policy_v1",
+  "default_mode": "attach",
+  "artifact": {
+    "workflow": "adr025-nightly-otel-bridge.yml",
+    "name": "adr025-otel-bridge-report",
+    "files": [
+      "otel_bridge_report_v1.json",
+      "otel_bridge_report_v1.md"
+    ],
+    "retention_days": 14
+  },
+  "enforce_semantics": {
+    "mode": "contract_only",
+    "policy_rules_enabled": false
+  },
+  "exit_contract": {
+    "pass": 0,
+    "policy_fail": 1,
+    "measurement_fail": 2
+  }
+}
