@@ -5,6 +5,7 @@ MODE="${MODE:-attach}"
 POLICY="${POLICY:-schemas/closure_release_policy_v1.json}"
 OUT_DIR="${OUT_DIR:-artifacts/adr025-closure}"
 CLOSURE_JSON=""
+RUN_ID=""
 
 WORKFLOW_NAME="adr025-nightly-closure.yml"
 ARTIFACT_NAME="adr025-closure-report"
@@ -58,6 +59,120 @@ mkdir -p "$OUT_DIR"
 
 echo "ADR-025 closure: mode=$MODE policy=$POLICY out_dir=$OUT_DIR workflow=$WORKFLOW_NAME test_mode=$TEST_MODE"
 
+emit_decision_json() {
+  local mode="$1"
+  local score="${2:-null}"
+  local threshold="${3:-null}"
+  local decision="$4"
+  local exit_code="$5"
+  local policy_path="${6:-}"
+  local report_path="${7:-}"
+  local run_id="${8:-}"
+
+  python3 - <<'PY' "$mode" "$score" "$threshold" "$decision" "$exit_code" "$policy_path" "$report_path" "$run_id"
+import json
+import sys
+
+mode, score, threshold, decision, exit_code, policy_path, report_path, run_id = sys.argv[1:]
+
+
+def num_or_null(raw):
+    if raw in ("", "null"):
+        return None
+    try:
+        return float(raw)
+    except Exception:
+        return None
+
+
+def text_or_null(raw):
+    return raw if raw else None
+
+
+obj = {
+    "event": "adr025.closure_release_decision",
+    "mode": mode,
+    "score": num_or_null(score),
+    "threshold": num_or_null(threshold),
+    "decision": decision,
+    "exit_code": int(exit_code),
+    "policy_path": text_or_null(policy_path),
+    "report_path": text_or_null(report_path),
+    "run_id": text_or_null(run_id),
+}
+print(json.dumps(obj, separators=(",", ":")))
+PY
+}
+
+extract_score_threshold() {
+  local policy_path="$1"
+  local report_path="$2"
+
+  python3 - <<'PY' "$policy_path" "$report_path"
+import json
+import sys
+
+policy_path, report_path = sys.argv[1:]
+
+score = None
+threshold = None
+
+try:
+    report = json.load(open(report_path, "r", encoding="utf-8"))
+    value = report.get("score")
+    if isinstance(value, (int, float)):
+        score = float(value)
+except Exception:
+    pass
+
+try:
+    policy = json.load(open(policy_path, "r", encoding="utf-8"))
+    value = policy.get("score_threshold")
+    if isinstance(value, (int, float)):
+        threshold = float(value)
+except Exception:
+    pass
+
+def out(v):
+    return "null" if v is None else str(v)
+
+print(f"{out(score)} {out(threshold)}")
+PY
+}
+
+decision_exit() {
+  local decision="$1"
+  local exit_code="$2"
+  local score="${3:-null}"
+  local threshold="${4:-null}"
+  emit_decision_json "$MODE" "$score" "$threshold" "$decision" "$exit_code" "$POLICY" "$CLOSURE_JSON" "$RUN_ID"
+  exit "$exit_code"
+}
+
+measurement_exit() {
+  local msg="$1"
+  local score="null"
+  local threshold="null"
+  local decision="measurement_fail"
+  local exit_code=2
+  local status=0
+
+  measurement_issue "$msg" || status=$?
+  exit_code="$status"
+
+  if [[ -n "$CLOSURE_JSON" && -f "$CLOSURE_JSON" && -f "$POLICY" ]]; then
+    read -r score threshold < <(extract_score_threshold "$POLICY" "$CLOSURE_JSON")
+  fi
+
+  if [[ "$MODE" == "attach" ]]; then
+    decision="attach"
+  elif [[ "$MODE" == "warn" ]]; then
+    decision="warn"
+  fi
+
+  decision_exit "$decision" "$exit_code" "$score" "$threshold"
+}
+
 measurement_issue() {
   local msg="$1"
   case "$MODE" in
@@ -82,47 +197,42 @@ measurement_issue() {
 
 if [[ "$MODE" == "off" ]]; then
   echo "ADR-025 closure: mode=off (skipping)"
-  exit 0
+  decision_exit "skip" 0 "null" "null"
 fi
 
 if [[ ! -f "$POLICY" ]]; then
-  measurement_issue "policy not found: $POLICY"
-  exit $?
+  measurement_exit "policy not found: $POLICY"
 fi
 
 if [[ -z "$CLOSURE_JSON" ]]; then
   if [[ "$TEST_MODE" == "1" ]]; then
     if [[ "$TEST_SIMULATE_MISSING_ARTIFACT" == "1" ]]; then
-      measurement_issue "simulated missing closure artifact"
-      exit $?
+      measurement_exit "simulated missing closure artifact"
     fi
 
     if [[ -z "$TEST_LOCAL_JSON" ]]; then
-      measurement_issue "test mode enabled but ASSAY_CLOSURE_RELEASE_LOCAL_JSON is unset"
-      exit $?
+      measurement_exit "test mode enabled but ASSAY_CLOSURE_RELEASE_LOCAL_JSON is unset"
     fi
 
     CLOSURE_JSON="$TEST_LOCAL_JSON"
     echo "ADR-025 closure: using local test json: $CLOSURE_JSON"
   else
     if [[ -z "${GH_TOKEN:-}" ]]; then
-      measurement_issue "missing GH_TOKEN"
-      exit $?
+      measurement_exit "missing GH_TOKEN"
     fi
 
     run_list_err="$OUT_DIR/adr025-closure-run-list.err"
     rid=""
     if ! rid="$(gh run list --workflow "$WORKFLOW_NAME" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>"$run_list_err")"; then
       err_out="$(tail -n 20 "$run_list_err" 2>/dev/null || true)"
-      measurement_issue "failed to list nightly closure runs: ${err_out}"
-      exit $?
+      measurement_exit "failed to list nightly closure runs: ${err_out}"
     fi
 
     if [[ -z "$rid" || "$rid" == "null" ]]; then
-      measurement_issue "could not find successful ${WORKFLOW_NAME} run"
-      exit $?
+      measurement_exit "could not find successful ${WORKFLOW_NAME} run"
     fi
 
+    RUN_ID="$rid"
     echo "ADR-025 closure: using run id: $rid"
     dl_log="$OUT_DIR/adr025-closure-download.log"
     download_failed=0
@@ -134,11 +244,10 @@ if [[ -z "$CLOSURE_JSON" ]]; then
     if [[ -z "$found_json" ]]; then
       dl_tail="$(tail -n 20 "$dl_log" 2>/dev/null || true)"
       if [[ "$download_failed" -eq 1 && -n "$dl_tail" ]]; then
-        measurement_issue "missing closure_report_v1.json in downloaded artifact; gh run download output: ${dl_tail}"
+        measurement_exit "missing closure_report_v1.json in downloaded artifact; gh run download output: ${dl_tail}"
       else
-        measurement_issue "missing closure_report_v1.json in downloaded artifact"
+        measurement_exit "missing closure_report_v1.json in downloaded artifact"
       fi
-      exit $?
     fi
 
     CLOSURE_JSON="$found_json"
@@ -147,8 +256,7 @@ if [[ -z "$CLOSURE_JSON" ]]; then
 fi
 
 if [[ ! -f "$CLOSURE_JSON" ]]; then
-  measurement_issue "closure report JSON not found: $CLOSURE_JSON"
-  exit $?
+  measurement_exit "closure report JSON not found: $CLOSURE_JSON"
 fi
 
 set +e
@@ -243,8 +351,23 @@ if [[ "$MODE" == "attach" && "$eval_code" -ne 0 ]]; then
   eval_code=0
 fi
 
-if [[ "$eval_code" -ne 0 ]]; then
-  exit "$eval_code"
+score="null"
+threshold="null"
+if [[ -f "$POLICY" && -f "$CLOSURE_JSON" ]]; then
+  read -r score threshold < <(extract_score_threshold "$POLICY" "$CLOSURE_JSON")
+fi
+
+decision="pass"
+if [[ "$MODE" == "attach" ]]; then
+  decision="attach"
+elif [[ "$MODE" == "warn" ]]; then
+  decision="warn"
+elif [[ "$MODE" == "enforce" ]]; then
+  if [[ "$eval_code" -eq 1 ]]; then
+    decision="policy_fail"
+  elif [[ "$eval_code" -eq 2 ]]; then
+    decision="measurement_fail"
+  fi
 fi
 
 found_md="$(find "$OUT_DIR" -name 'closure_report_v1.md' -print -quit || true)"
@@ -253,4 +376,4 @@ if [[ -z "$found_md" ]]; then
 fi
 
 echo "ADR-025 closure: ready in $OUT_DIR"
-exit 0
+decision_exit "$decision" "$eval_code" "$score" "$threshold"
