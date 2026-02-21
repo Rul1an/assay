@@ -1,0 +1,13 @@
+{
+  "schema_version": "otel_bridge_report_v0",
+  "report_version": "1",
+  "assay_version": "0.0.0-test",
+  "source": {
+    "kind": "otel"
+  },
+  "summary": {
+    "trace_count": 1,
+    "span_count": 1
+  },
+  "traces": []
+}

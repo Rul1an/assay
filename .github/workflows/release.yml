@@ -273,6 +273,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: ADR-025 OTel release integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ vars.ASSAY_OTEL_GATE || 'attach' }}
+          POLICY: schemas/otel_release_policy_v1.json
+          OUT_DIR: artifacts/adr025-otel
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/adr025-otel-release.sh
+
+      - name: Upload ADR-025 OTel release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adr025-otel-bridge-release-evidence
+          path: artifacts/adr025-otel/*
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Generate build provenance attestations
         uses: actions/attest-build-provenance@v2
         with:
