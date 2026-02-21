@@ -17,6 +17,13 @@
 - [ ] Contains `otel_bridge_report_v1.json` and `otel_bridge_report_v1.md`
 - [ ] Retention is 14 days
 
+## Stabilization coverage (I3 Stab B)
+- [ ] Multi-trace ordering covered by fixture tests
+- [ ] Multi-span ordering + parent ID lowercase normalization covered
+- [ ] Attribute/event/link sorting invariants covered
+- [ ] unix_nano int vs digit-string inputs normalize to digit-strings
+- [ ] Contract failures still map to exit code `2`
+
 ## Safety
 - [ ] Informational-only lane (no PR required-check impact)
 - [ ] No changes outside Step3 allowlist
