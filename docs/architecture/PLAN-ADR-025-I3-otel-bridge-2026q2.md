@@ -28,12 +28,15 @@ Out-of-scope (Step1):
 
 ### Export format (bridge artifact)
 - Primary output: `otel_bridge_report_v1.json` (schema in `schemas/otel_bridge_report_v1.schema.json`)
-- Optional: raw OTel export payload(s) referenced by digest/path (not embedded by default)
+- Optional auxiliary artifacts: raw OTel export payload file(s) stored separately; digest/path references belong in higher-level manifests or system metadata, not in `otel_bridge_report_v1` core fields.
 
 ### Envelope requirements (determinism)
 - Stable ordering:
   - spans ordered by `(trace_id, span_id)` lexicographically
   - attributes and events sorted deterministically
+- Identifier normalization:
+  - `trace_id` and `span_id` must be lowercase hexadecimal in persisted bridge reports and match schema patterns (`trace_id`: 32 hex, `span_id`: 16 hex).
+  - Exporters that receive mixed/uppercase IDs must normalize to lowercase before emitting `otel_bridge_report_v1.json`.
 - Numeric safety:
   - large integers that may exceed JS safe-int must be represented as strings in bridge report (explicit list in schema)
 - Redaction:
@@ -43,7 +46,8 @@ Out-of-scope (Step1):
 
 ### Compatibility guarantees
 - Bridge report is valid without proprietary vendor fields.
-- Unknown OTel attributes are preserved under a namespaced extension object, but bridge schema remains strict for core fields.
+- Unknown OTel attributes on spans/events/links are preserved in their corresponding `attributes[]` collections.
+- The top-level `extensions` object is reserved for non-attribute vendor/platform metadata; core bridge fields remain strict.
 
 ## Part B — Mapping contract: OTel -> Assay evidence (frozen)
 
