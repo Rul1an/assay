@@ -6,6 +6,10 @@ Adds an informational nightly OTel bridge lane that generates `otel_bridge_repor
 - input fixture: `scripts/ci/fixtures/adr025-i3/otel_input_minimal.json`
 - output artifact: `adr025-otel-bridge-report`
 
+Stabilization status:
+- I3 Stab A: hardening contract frozen
+- I3 Stab B: edge-case determinism fixtures + invariant assertions landed
+
 ## Safety contracts
 - Schedule + dispatch only (no PR triggers)
 - Job-level `continue-on-error: true`
@@ -15,6 +19,7 @@ Adds an informational nightly OTel bridge lane that generates `otel_bridge_repor
 
 ## Verification
 - `BASE_REF=origin/main bash scripts/ci/review-adr025-i3-step3.sh`
+- `bash scripts/ci/test-adr025-otel-bridge.sh`
 - Workflow contains generator invocation: `scripts/ci/adr025-otel-bridge.sh`
 - Artifact contract:
   - `otel_bridge_report_v1.json`
