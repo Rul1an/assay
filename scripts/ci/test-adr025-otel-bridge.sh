@@ -53,4 +53,68 @@ code=$?
 set -e
 test "$code" -eq 2
 
+echo "[test] multi-trace ordering"
+run_ok "scripts/ci/fixtures/adr025-i3/otel_input_multi_trace_unsorted.json" "$OUTDIR/r4.json" "$OUTDIR/r4.md"
+python3 - <<'PY' "$OUTDIR/r4.json"
+import json
+import sys
+
+d = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+tids = [t["trace_id"] for t in d["traces"]]
+assert tids == sorted(tids), tids
+PY
+
+echo "[test] multi-span ordering + parent normalization + time strings + attribute sorting"
+run_ok "scripts/ci/fixtures/adr025-i3/otel_input_multi_span_unsorted.json" "$OUTDIR/r5.json" "$OUTDIR/r5.md"
+python3 - <<'PY' "$OUTDIR/r5.json"
+import json
+import sys
+
+d = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+spans = d["traces"][0]["spans"]
+ids = [s["span_id"] for s in spans]
+assert ids == sorted(ids), ids
+
+child = [s for s in spans if s["name"] == "child"][0]
+assert child["parent_span_id"] == child["parent_span_id"].lower()
+
+for s in spans:
+    assert isinstance(s["start_time_unix_nano"], str) and s["start_time_unix_nano"].isdigit()
+    assert isinstance(s["end_time_unix_nano"], str) and s["end_time_unix_nano"].isdigit()
+    keys = [kv["key"] for kv in s["attributes"]]
+    assert keys == sorted(keys), keys
+PY
+
+echo "[test] event ordering"
+run_ok "scripts/ci/fixtures/adr025-i3/otel_input_events_unsorted.json" "$OUTDIR/r6.json" "$OUTDIR/r6.md"
+python3 - <<'PY' "$OUTDIR/r6.json"
+import json
+import sys
+
+d = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+events = d["traces"][0]["spans"][0]["events"]
+pairs = [(e["time_unix_nano"], e["name"]) for e in events]
+assert pairs == sorted(pairs), pairs
+
+for e in events:
+    keys = [kv["key"] for kv in e["attributes"]]
+    assert keys == sorted(keys), keys
+PY
+
+echo "[test] link ordering"
+run_ok "scripts/ci/fixtures/adr025-i3/otel_input_links_unsorted.json" "$OUTDIR/r7.json" "$OUTDIR/r7.md"
+python3 - <<'PY' "$OUTDIR/r7.json"
+import json
+import sys
+
+d = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+links = d["traces"][0]["spans"][0]["links"]
+pairs = [(l["trace_id"], l["span_id"]) for l in links]
+assert pairs == sorted(pairs), pairs
+
+for l in links:
+    keys = [kv["key"] for kv in l.get("attributes", [])]
+    assert keys == sorted(keys), keys
+PY
+
 echo "[test] done"
