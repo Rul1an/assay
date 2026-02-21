@@ -84,3 +84,11 @@ Reserved for later (no implementation in Step1):
 - Plan + schema define the bridge artifact contract and determinism constraints
 - Mapping contract is explicit, testable, and has clear non-goals
 - Reviewer gate enforces allowlist-only and workflow-ban
+
+## Status sync (2026-02-21)
+- Step1: contract + schema freeze complete on `main`
+- Step2: script-first OTel bridge generator + deterministic fixtures/tests complete on `main`
+- Step3: informational nightly OTel bridge workflow + artifact contract complete on `main`
+- Step4A: release integration contract/policy freeze complete on `main`
+- Step4B: release-lane OTel evidence attach wiring complete on `main` (default `attach`, enforce `contract_only`)
+- Step4C: runbook + review artifacts + closure gate (this slice)
