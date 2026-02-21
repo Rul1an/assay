@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/otel_bridge_report_v1.schema.json",
+  "title": "Assay OTel Bridge Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_version",
+    "assay_version",
+    "source",
+    "summary",
+    "traces"
+  ],
+  "properties": {
+    "schema_version": { "const": "otel_bridge_report_v1" },
+    "report_version": { "type": "string", "minLength": 1 },
+    "assay_version": { "type": "string", "minLength": 1 },
+
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "otel" },
+        "exporter": { "type": "string" },
+        "collector": { "type": "string" }
+      }
+    },
+
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_count", "span_count"],
+      "properties": {
+        "trace_count": { "type": "integer", "minimum": 0 },
+        "span_count": { "type": "integer", "minimum": 0 },
+        "redaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["applied"],
+          "properties": {
+            "applied": { "type": "boolean" },
+            "rules": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+
+    "traces": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trace" }
+    },
+
+    "extensions": {
+      "type": "object",
+      "description": "Namespace for vendor- or environment-specific fields not required for validation.",
+      "additionalProperties": true
+    }
+  },
+
+  "$defs": {
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "spans"],
+      "properties": {
+        "trace_id": { "$ref": "#/$defs/hex_id" },
+        "spans": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/span" }
+        }
+      }
+    },
+
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["span_id", "name", "kind", "start_time_unix_nano", "end_time_unix_nano", "attributes"],
+      "properties": {
+        "span_id": { "$ref": "#/$defs/hex_span_id" },
+        "parent_span_id": { "$ref": "#/$defs/hex_span_id" },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["INTERNAL", "SERVER", "CLIENT", "PRODUCER", "CONSUMER"] },
+
+        "start_time_unix_nano": {
+          "description": "May exceed JS safe-int; encoded as string.",
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "end_time_unix_nano": {
+          "description": "May exceed JS safe-int; encoded as string.",
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+
+        "attributes": {
+          "type": "array",
+          "description": "Deterministically sorted list of key/value attributes.",
+          "items": { "$ref": "#/$defs/kv" }
+        },
+
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/event" }
+        },
+
+        "links": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/link" }
+        },
+
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code"],
+          "properties": {
+            "code": { "type": "string", "enum": ["UNSET", "OK", "ERROR"] },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "kv": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "value": { "$ref": "#/$defs/any_value" }
+      }
+    },
+
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "time_unix_nano", "attributes"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "time_unix_nano": { "type": "string", "pattern": "^[0-9]+$" },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/kv" } }
+      }
+    },
+
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "span_id"],
+      "properties": {
+        "trace_id": { "$ref": "#/$defs/hex_id" },
+        "span_id": { "$ref": "#/$defs/hex_span_id" },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/kv" } }
+      }
+    },
+
+    "any_value": {
+      "description": "OTel AnyValue-like; restricted to JSON-friendly subset for bridge report.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" },
+        { "type": "array", "items": { "$ref": "#/$defs/any_value" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/any_value" } }
+      ]
+    },
+
+    "hex_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "hex_span_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    }
+  }
+}
