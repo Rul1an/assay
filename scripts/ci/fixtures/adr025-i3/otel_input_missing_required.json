@@ -1,0 +1,14 @@
+{
+  "traces": [
+    {
+      "trace_id": "0123456789abcdef0123456789abcdef",
+      "spans": [
+        {
+          "name": "missing span_id + times",
+          "kind": "INTERNAL",
+          "attributes": {}
+        }
+      ]
+    }
+  ]
+}

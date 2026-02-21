@@ -1,0 +1,19 @@
+{
+  "traces": [
+    {
+      "trace_id": "0123456789ABCDEF0123456789ABCDEF",
+      "spans": [
+        {
+          "span_id": "0011223344556677",
+          "name": "agent.run",
+          "kind": "INTERNAL",
+          "start_time_unix_nano": "1700000000000000000",
+          "end_time_unix_nano": "1700000000100000000",
+          "attributes": { "k": "v" },
+          "events": [],
+          "links": []
+        }
+      ]
+    }
+  ]
+}
