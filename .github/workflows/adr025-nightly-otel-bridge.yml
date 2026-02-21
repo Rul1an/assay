@@ -1,0 +1,47 @@
+name: ADR-025 Nightly OTel Bridge (informational)
+
+on:
+  schedule:
+    - cron: "53 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: adr025-nightly-otel-bridge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  otel_bridge:
+    name: otel bridge (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Prepare artifacts dir
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+      - name: Generate OTel bridge report (fixture)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/adr025-otel-bridge.sh \
+            --in scripts/ci/fixtures/adr025-i3/otel_input_minimal.json \
+            --out-json artifacts/otel_bridge_report_v1.json \
+            --out-md artifacts/otel_bridge_report_v1.md
+
+      - name: Upload OTel bridge artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: adr025-otel-bridge-report
+          path: artifacts/*
+          if-no-files-found: warn
+          retention-days: 14
