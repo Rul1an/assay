@@ -1,0 +1,794 @@
+<!doctype html><html lang=en class=no-js> <head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=description content="The purity test for AI — Zero-flake CI for AI agents"><meta name=author content="Assay Team"><link href=https://docs.assay.dev/AIcontext/architecture-diagrams/ rel=canonical><link rel=icon href=../../assets/logo.svg><meta name=generator content="mkdocs-1.6.1, mkdocs-material-9.5.28"><title>Architecture Diagrams - Assay</title><link rel=stylesheet href=../../assets/stylesheets/main.6543a935.min.css><link rel=stylesheet href=../../assets/stylesheets/palette.06af60db.min.css><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link rel=stylesheet href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback"><style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style><link rel=stylesheet href=../../stylesheets/extra.css><script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script><script id=__analytics>function __md_analytics(){function n(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],n("js",new Date),n("config","G-XXXXXXXXXX"),document.addEventListener("DOMContentLoaded",function(){document.forms.search&&document.forms.search.query.addEventListener("blur",function(){this.value&&n("event","search",{search_term:this.value})}),document$.subscribe(function(){var a=document.forms.feedback;if(void 0!==a)for(var e of a.querySelectorAll("[type=submit]"))e.addEventListener("click",function(e){e.preventDefault();var t=document.location.pathname,e=this.getAttribute("data-md-value");n("event","feedback",{page:t,data:e}),a.firstElementChild.disabled=!0;e=a.querySelector(".md-feedback__note [data-md-value='"+e+"']");e&&(e.hidden=!1)}),a.hidden=!1}),location$.subscribe(function(e){n("config","G-XXXXXXXXXX",{page_path:e.pathname})})});var e=document.createElement("script");e.async=!0,e.src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX",document.getElementById("__analytics").insertAdjacentElement("afterEnd",e)}</script><script>"undefined"!=typeof __md_analytics&&__md_analytics()</script></head> <body dir=ltr data-md-color-scheme=default data-md-color-primary=deep-purple data-md-color-accent=green> <input class=md-toggle data-md-toggle=drawer type=checkbox id=__drawer autocomplete=off> <input class=md-toggle data-md-toggle=search type=checkbox id=__search autocomplete=off> <label class=md-overlay for=__drawer></label> <div data-md-component=skip> <a href=#architecture-diagrams class=md-skip> Skip to content </a> </div> <div data-md-component=announce> </div> <div data-md-color-scheme=default data-md-component=outdated hidden> </div> <header class="md-header md-header--shadow md-header--lifted" data-md-component=header> <nav class="md-header__inner md-grid" aria-label=Header> <a href=../.. title=Assay class="md-header__button md-logo" aria-label=Assay data-md-component=logo> <img src=../../assets/logo.svg alt=logo> </a> <label class="md-header__button md-icon" for=__drawer> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg> </label> <div class=md-header__title data-md-component=header-title> <div class=md-header__ellipsis> <div class=md-header__topic> <span class=md-ellipsis> Assay </span> </div> <div class=md-header__topic data-md-component=header-topic> <span class=md-ellipsis> Architecture Diagrams </span> </div> </div> </div> <form class=md-header__option data-md-component=palette> <input class=md-option data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme=default data-md-color-primary=deep-purple data-md-color-accent=green aria-label="Switch to dark mode" type=radio name=__palette id=__palette_0> <label class="md-header__button md-icon" title="Switch to dark mode" for=__palette_1 hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg> </label> <input class=md-option data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme=slate data-md-color-primary=deep-purple data-md-color-accent=green aria-label="Switch to light mode" type=radio name=__palette id=__palette_1> <label class="md-header__button md-icon" title="Switch to light mode" for=__palette_0 hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg> </label> </form> <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script> <label class="md-header__button md-icon" for=__search> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg> </label> <div class=md-search data-md-component=search role=dialog> <label class=md-search__overlay for=__search></label> <div class=md-search__inner role=search> <form class=md-search__form name=search> <input type=text class=md-search__input name=query aria-label=Search placeholder=Search autocapitalize=off autocorrect=off autocomplete=off spellcheck=false data-md-component=search-query required> <label class="md-search__icon md-icon" for=__search> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg> </label> <nav class=md-search__options aria-label=Search> <a href=javascript:void(0) class="md-search__icon md-icon" title=Share aria-label=Share data-clipboard data-clipboard-text data-md-component=search-share tabindex=-1> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg> </a> <button type=reset class="md-search__icon md-icon" title=Clear aria-label=Clear tabindex=-1> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg> </button> </nav> <div class=md-search__suggest data-md-component=search-suggest></div> </form> <div class=md-search__output> <div class=md-search__scrollwrap tabindex=0 data-md-scrollfix> <div class=md-search-result data-md-component=search-result> <div class=md-search-result__meta> Initializing search </div> <ol class=md-search-result__list role=presentation></ol> </div> </div> </div> </div> </div> <div class=md-header__source> <a href=https://github.com/Rul1an/assay title="Go to repository" class=md-source data-md-component=source> <div class="md-source__icon md-icon"> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 496 512"><!-- Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg> </div> <div class=md-source__repository> Rul1an/assay </div> </a> </div> </nav> <nav class=md-tabs aria-label=Tabs data-md-component=tabs> <div class=md-grid> <ul class=md-tabs__list> <li class=md-tabs__item> <a href=../.. class=md-tabs__link> Home </a> </li> <li class=md-tabs__item> <a href=../../getting-started/ class=md-tabs__link> Getting Started </a> </li> <li class=md-tabs__item> <a href=../../concepts/ class=md-tabs__link> Core Concepts </a> </li> <li class=md-tabs__item> <a href=../../python-sdk/ class=md-tabs__link> Python SDK </a> </li> <li class=md-tabs__item> <a href=../../mcp/ class=md-tabs__link> MCP Integration </a> </li> <li class=md-tabs__item> <a href=../../reference/config/ class=md-tabs__link> Configuration </a> </li> <li class=md-tabs__item> <a href=../../reference/cli/ class=md-tabs__link> CLI Reference </a> </li> <li class=md-tabs__item> <a href=../../metrics/ class=md-tabs__link> Metrics Reference </a> </li> <li class=md-tabs__item> <a href=../../use-cases/ class=md-tabs__link> Use Cases </a> </li> <li class=md-tabs__item> <a href=../../guides/ class=md-tabs__link> Guides </a> </li> <li class=md-tabs__item> <a href=../../architecture/ class=md-tabs__link> Architecture </a> </li> <li class=md-tabs__item> <a href=../../contributing/ class=md-tabs__link> Contributing </a> </li> <li class=md-tabs__item> <a href=../../guides/troubleshooting/ class=md-tabs__link> Troubleshooting </a> </li> <li class=md-tabs__item> <a href=../../changelog/ class=md-tabs__link> Changelog </a> </li> </ul> </div> </nav> </header> <div class=md-container data-md-component=container> <main class=md-main data-md-component=main> <div class="md-main__inner md-grid"> <div class="md-sidebar md-sidebar--primary" data-md-component=sidebar data-md-type=navigation> <div class=md-sidebar__scrollwrap> <div class=md-sidebar__inner> <nav class="md-nav md-nav--primary md-nav--lifted" aria-label=Navigation data-md-level=0> <label class=md-nav__title for=__drawer> <a href=../.. title=Assay class="md-nav__button md-logo" aria-label=Assay data-md-component=logo> <img src=../../assets/logo.svg alt=logo> </a> Assay </label> <div class=md-nav__source> <a href=https://github.com/Rul1an/assay title="Go to repository" class=md-source data-md-component=source> <div class="md-source__icon md-icon"> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 496 512"><!-- Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg> </div> <div class=md-source__repository> Rul1an/assay </div> </a> </div> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../.. class=md-nav__link> <span class=md-ellipsis> Home </span> </a> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_2> <label class=md-nav__link for=__nav_2 id=__nav_2_label tabindex=0> <span class=md-ellipsis> Getting Started </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_2_label aria-expanded=false> <label class=md-nav__title for=__nav_2> <span class="md-nav__icon md-icon"></span> Getting Started </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../getting-started/ class=md-nav__link> <span class=md-ellipsis> Getting Started </span> </a> </li> <li class=md-nav__item> <a href=../../getting-started/installation/ class=md-nav__link> <span class=md-ellipsis> Installation </span> </a> </li> <li class=md-nav__item> <a href=../../getting-started/quickstart/ class=md-nav__link> <span class=md-ellipsis> Quick Start </span> </a> </li> <li class=md-nav__item> <a href=../../getting-started/first-test/ class=md-nav__link> <span class=md-ellipsis> Your First Test </span> </a> </li> <li class=md-nav__item> <a href=../../getting-started/ci-integration/ class=md-nav__link> <span class=md-ellipsis> CI Integration </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_3> <label class=md-nav__link for=__nav_3 id=__nav_3_label tabindex=0> <span class=md-ellipsis> Core Concepts </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_3_label aria-expanded=false> <label class=md-nav__title for=__nav_3> <span class="md-nav__icon md-icon"></span> Core Concepts </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../concepts/ class=md-nav__link> <span class=md-ellipsis> Core Concepts </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/traces/ class=md-nav__link> <span class=md-ellipsis> Traces </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/policies/ class=md-nav__link> <span class=md-ellipsis> Policies </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/metrics/ class=md-nav__link> <span class=md-ellipsis> Metrics </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/replay/ class=md-nav__link> <span class=md-ellipsis> Replay Engine </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/cache/ class=md-nav__link> <span class=md-ellipsis> Cache & Fingerprints </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/scope/ class=md-nav__link> <span class=md-ellipsis> Scope & Boundaries </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/fail-safe/ class=md-nav__link> <span class=md-ellipsis> Fail-Safe Config </span> </a> </li> <li class=md-nav__item> <a href=../../concepts/pack-registry/ class=md-nav__link> <span class=md-ellipsis> Pack Registry </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_4> <label class=md-nav__link for=__nav_4 id=__nav_4_label tabindex=0> <span class=md-ellipsis> Python SDK </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_4_label aria-expanded=false> <label class=md-nav__title for=__nav_4> <span class="md-nav__icon md-icon"></span> Python SDK </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../python-sdk/ class=md-nav__link> <span class=md-ellipsis> Python SDK </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_5> <label class=md-nav__link for=__nav_5 id=__nav_5_label tabindex=0> <span class=md-ellipsis> MCP Integration </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_5_label aria-expanded=false> <label class=md-nav__title for=__nav_5> <span class="md-nav__icon md-icon"></span> MCP Integration </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../mcp/ class=md-nav__link> <span class=md-ellipsis> MCP Integration </span> </a> </li> <li class=md-nav__item> <a href=../../mcp/quickstart/ class=md-nav__link> <span class=md-ellipsis> Quick Start </span> </a> </li> <li class=md-nav__item> <a href=../../mcp/import-formats/ class=md-nav__link> <span class=md-ellipsis> Import Formats </span> </a> </li> <li class=md-nav__item> <a href=../../mcp/server/ class=md-nav__link> <span class=md-ellipsis> Assay MCP Server </span> </a> </li> <li class=md-nav__item> <a href=../../mcp/self-correction/ class=md-nav__link> <span class=md-ellipsis> Self-Correcting Agents </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_6> <label class=md-nav__link for=__nav_6 id=__nav_6_label tabindex=0> <span class=md-ellipsis> Configuration </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_6_label aria-expanded=false> <label class=md-nav__title for=__nav_6> <span class="md-nav__icon md-icon"></span> Configuration </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../reference/config/ class=md-nav__link> <span class=md-ellipsis> Configuration </span> </a> </li> <li class=md-nav__item> <a href=../../reference/config/eval-yaml/ class=md-nav__link> <span class=md-ellipsis> mcp-eval.yaml </span> </a> </li> <li class=md-nav__item> <a href=../../reference/config/policies/ class=md-nav__link> <span class=md-ellipsis> Policy Files </span> </a> </li> <li class=md-nav__item> <a href=../../reference/sandbox-policies/ class=md-nav__link> <span class=md-ellipsis> Sandbox Policies </span> </a> </li> <li class=md-nav__item> <a href=../../reference/sandbox-env/ class=md-nav__link> <span class=md-ellipsis> Environment Filtering </span> </a> </li> <li class=md-nav__item> <a href=../../reference/config/sequences/ class=md-nav__link> <span class=md-ellipsis> Sequence Rules DSL </span> </a> </li> <li class=md-nav__item> <a href=../../reference/config/migration/ class=md-nav__link> <span class=md-ellipsis> Migration Guide </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_7> <label class=md-nav__link for=__nav_7 id=__nav_7_label tabindex=0> <span class=md-ellipsis> CLI Reference </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_7_label aria-expanded=false> <label class=md-nav__title for=__nav_7> <span class="md-nav__icon md-icon"></span> CLI Reference </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../reference/cli/ class=md-nav__link> <span class=md-ellipsis> CLI Reference </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/init/ class=md-nav__link> <span class=md-ellipsis> assay init </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/validate/ class=md-nav__link> <span class=md-ellipsis> assay validate </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/run/ class=md-nav__link> <span class=md-ellipsis> assay run </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/generate/ class=md-nav__link> <span class=md-ellipsis> assay generate </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/explain/ class=md-nav__link> <span class=md-ellipsis> assay explain </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/doctor/ class=md-nav__link> <span class=md-ellipsis> assay doctor </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/watch/ class=md-nav__link> <span class=md-ellipsis> assay watch </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/sandbox/ class=md-nav__link> <span class=md-ellipsis> assay sandbox </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/import/ class=md-nav__link> <span class=md-ellipsis> assay import </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/migrate/ class=md-nav__link> <span class=md-ellipsis> assay migrate </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/replay/ class=md-nav__link> <span class=md-ellipsis> assay replay </span> </a> </li> <li class=md-nav__item> <a href=../../reference/cli/mcp-server/ class=md-nav__link> <span class=md-ellipsis> assay mcp-server </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_8> <label class=md-nav__link for=__nav_8 id=__nav_8_label tabindex=0> <span class=md-ellipsis> Metrics Reference </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_8_label aria-expanded=false> <label class=md-nav__title for=__nav_8> <span class="md-nav__icon md-icon"></span> Metrics Reference </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../metrics/ class=md-nav__link> <span class=md-ellipsis> Assertion Types (V1) </span> </a> </li> <li class=md-nav__item> <a href=../../metrics/args-valid/ class=md-nav__link> <span class=md-ellipsis> args_valid </span> </a> </li> <li class=md-nav__item> <a href=../../metrics/sequence-valid/ class=md-nav__link> <span class=md-ellipsis> sequence_valid </span> </a> </li> <li class=md-nav__item> <a href=../../metrics/tool-blocklist/ class=md-nav__link> <span class=md-ellipsis> tool_blocklist </span> </a> </li> <li class=md-nav__item> <a href=../../metrics/custom/ class=md-nav__link> <span class=md-ellipsis> Custom Metrics </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_9> <label class=md-nav__link for=__nav_9 id=__nav_9_label tabindex=0> <span class=md-ellipsis> Use Cases </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_9_label aria-expanded=false> <label class=md-nav__title for=__nav_9> <span class="md-nav__icon md-icon"></span> Use Cases </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../use-cases/ class=md-nav__link> <span class=md-ellipsis> Use Cases </span> </a> </li> <li class=md-nav__item> <a href=../../use-cases/ci-gate/ class=md-nav__link> <span class=md-ellipsis> CI Regression Gate </span> </a> </li> <li class=md-nav__item> <a href=../../use-cases/debugging/ class=md-nav__link> <span class=md-ellipsis> Trace-Driven Debugging </span> </a> </li> <li class=md-nav__item> <a href=../../use-cases/air-gapped/ class=md-nav__link> <span class=md-ellipsis> Air-Gapped Enterprise </span> </a> </li> <li class=md-nav__item> <a href=../../use-cases/self-correction/ class=md-nav__link> <span class=md-ellipsis> Agent Self-Correction </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_10> <label class=md-nav__link for=__nav_10 id=__nav_10_label tabindex=0> <span class=md-ellipsis> Guides </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_10_label aria-expanded=false> <label class=md-nav__title for=__nav_10> <span class="md-nav__icon md-icon"></span> Guides </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../guides/ class=md-nav__link> <span class=md-ellipsis> Guides </span> </a> </li> <li class=md-nav__item> <a href=../../guides/sandbox-security/ class=md-nav__link> <span class=md-ellipsis> Sandbox Security </span> </a> </li> <li class=md-nav__item> <a href=../../guides/gateway-pattern/ class=md-nav__link> <span class=md-ellipsis> Gateway Pattern </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_11> <label class=md-nav__link for=__nav_11 id=__nav_11_label tabindex=0> <span class=md-ellipsis> Architecture </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_11_label aria-expanded=false> <label class=md-nav__title for=__nav_11> <span class="md-nav__icon md-icon"></span> Architecture </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../architecture/ class=md-nav__link> <span class=md-ellipsis> Architecture </span> </a> </li> <li class=md-nav__item> <a href=../../architecture/crates/ class=md-nav__link> <span class=md-ellipsis> Crate Structure </span> </a> </li> <li class=md-nav__item> <a href=../../architecture/data-flow/ class=md-nav__link> <span class=md-ellipsis> Data Flow </span> </a> </li> <li class=md-nav__item> <a href=../../PERFORMANCE-BUDGETS/ class=md-nav__link> <span class=md-ellipsis> Performance Budgets </span> </a> </li> <li class=md-nav__item> <a href=../../architecture/adrs/ class=md-nav__link> <span class=md-ellipsis> ADRs </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type=checkbox id=__nav_12> <label class=md-nav__link for=__nav_12 id=__nav_12_label tabindex=0> <span class=md-ellipsis> Contributing </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_12_label aria-expanded=false> <label class=md-nav__title for=__nav_12> <span class="md-nav__icon md-icon"></span> Contributing </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../contributing/ class=md-nav__link> <span class=md-ellipsis> Contributing </span> </a> </li> <li class=md-nav__item> <a href=../../contributing/setup/ class=md-nav__link> <span class=md-ellipsis> Development Setup </span> </a> </li> <li class=md-nav__item> <a href=../../contributing/metrics/ class=md-nav__link> <span class=md-ellipsis> Adding Metrics </span> </a> </li> <li class=md-nav__item> <a href=../../contributing/releases/ class=md-nav__link> <span class=md-ellipsis> Release Process </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=../../guides/troubleshooting/ class=md-nav__link> <span class=md-ellipsis> Troubleshooting </span> </a> </li> <li class=md-nav__item> <a href=../../changelog/ class=md-nav__link> <span class=md-ellipsis> Changelog </span> </a> </li> </ul> </nav> </div> </div> </div> <div class="md-sidebar md-sidebar--secondary" data-md-component=sidebar data-md-type=toc> <div class=md-sidebar__scrollwrap> <div class=md-sidebar__inner> <nav class="md-nav md-nav--secondary" aria-label="Table of contents"> <label class=md-nav__title for=__toc> <span class="md-nav__icon md-icon"></span> Table of contents </label> <ul class=md-nav__list data-md-component=toc data-md-scrollfix> <li class=md-nav__item> <a href=#system-overview class=md-nav__link> <span class=md-ellipsis> System Overview </span> </a> </li> <li class=md-nav__item> <a href=#component-architecture class=md-nav__link> <span class=md-ellipsis> Component Architecture </span> </a> </li> <li class=md-nav__item> <a href=#data-flow-test-execution class=md-nav__link> <span class=md-ellipsis> Data Flow: Test Execution </span> </a> </li> <li class=md-nav__item> <a href=#policy-enforcement-flow class=md-nav__link> <span class=md-ellipsis> Policy Enforcement Flow </span> </a> </li> <li class=md-nav__item> <a href=#trace-lifecycle class=md-nav__link> <span class=md-ellipsis> Trace Lifecycle </span> </a> </li> <li class=md-nav__item> <a href=#evidence-pipeline class=md-nav__link> <span class=md-ellipsis> Evidence Pipeline </span> </a> </li> <li class=md-nav__item> <a href=#mcp-integration-architecture class=md-nav__link> <span class=md-ellipsis> MCP Integration Architecture </span> </a> </li> <li class=md-nav__item> <a href=#runtime-security-architecture class=md-nav__link> <span class=md-ellipsis> Runtime Security Architecture </span> </a> </li> <li class=md-nav__item> <a href=#storage-schema class=md-nav__link> <span class=md-ellipsis> Storage Schema </span> </a> </li> <li class=md-nav__item> <a href=#metrics-evaluation-flow class=md-nav__link> <span class=md-ellipsis> Metrics Evaluation Flow </span> </a> </li> <li class=md-nav__item> <a href=#cicd-integration-flow class=md-nav__link> <span class=md-ellipsis> CI/CD Integration Flow </span> </a> <nav class=md-nav aria-label="CI/CD Integration Flow"> <ul class=md-nav__list> <li class=md-nav__item> <a href=#using-github-action-recommended class=md-nav__link> <span class=md-ellipsis> Using GitHub Action (Recommended) </span> </a> </li> <li class=md-nav__item> <a href=#using-cli-directly class=md-nav__link> <span class=md-ellipsis> Using CLI Directly </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=#run-output-pr-gate-seeds-judge_metrics-reason_code-sarifomitted-pr-159-160 class=md-nav__link> <span class=md-ellipsis> Run Output (PR Gate) — seeds, judge_metrics, reason_code, sarif.omitted (PR #159, #160) </span> </a> </li> <li class=md-nav__item> <a href=#sarif-truncation-flow-pr-160 class=md-nav__link> <span class=md-ellipsis> SARIF Truncation Flow (PR #160) </span> </a> </li> <li class=md-nav__item> <a href=#policy-compilation-flow class=md-nav__link> <span class=md-ellipsis> Policy Compilation Flow </span> </a> </li> <li class=md-nav__item> <a href=#python-sdk-architecture class=md-nav__link> <span class=md-ellipsis> Python SDK Architecture </span> </a> </li> <li class=md-nav__item> <a href=#error-handling-flow class=md-nav__link> <span class=md-ellipsis> Error Handling Flow </span> </a> </li> <li class=md-nav__item> <a href=#mandate-runtime-flow class=md-nav__link> <span class=md-ellipsis> Mandate Runtime Flow </span> </a> <nav class=md-nav aria-label="Mandate Runtime Flow"> <ul class=md-nav__list> <li class=md-nav__item> <a href=#key-invariants class=md-nav__link> <span class=md-ellipsis> Key Invariants </span> </a> </li> <li class=md-nav__item> <a href=#revocation-check-no-skew class=md-nav__link> <span class=md-ellipsis> Revocation Check (No Skew) </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=#pack-registry-architecture class=md-nav__link> <span class=md-ellipsis> Pack Registry Architecture </span> </a> <nav class=md-nav aria-label="Pack Registry Architecture"> <ul class=md-nav__list> <li class=md-nav__item> <a href=#pack-resolution-flow-basic-path class=md-nav__link> <span class=md-ellipsis> Pack Resolution Flow (Basic Path) </span> </a> </li> <li class=md-nav__item> <a href=#pack-resolution-flow-auth-required class=md-nav__link> <span class=md-ellipsis> Pack Resolution Flow (Auth Required) </span> </a> </li> <li class=md-nav__item> <a href=#pack-registry-trust-chain class=md-nav__link> <span class=md-ellipsis> Pack Registry Trust Chain </span> </a> </li> <li class=md-nav__item> <a href=#key-invariants_1 class=md-nav__link> <span class=md-ellipsis> Key Invariants </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=#generated-diagrams class=md-nav__link> <span class=md-ellipsis> Generated Diagrams </span> </a> <nav class=md-nav aria-label="Generated Diagrams"> <ul class=md-nav__list> <li class=md-nav__item> <a href=#crate-dependencies-auto-generated class=md-nav__link> <span class=md-ellipsis> Crate Dependencies (Auto-Generated) </span> </a> </li> <li class=md-nav__item> <a href=#module-structure-auto-generated class=md-nav__link> <span class=md-ellipsis> Module Structure (Auto-Generated) </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=#related-documentation class=md-nav__link> <span class=md-ellipsis> Related Documentation </span> </a> </li> </ul> </nav> </div> </div> </div> <div class=md-content data-md-component=content> <article class="md-content__inner md-typeset"> <h1 id=architecture-diagrams>Architecture Diagrams<a class=headerlink href=#architecture-diagrams title="Permanent link">&para;</a></h1> <p>This document contains visual representations of the Assay architecture using Mermaid diagrams.</p> <h2 id=system-overview>System Overview<a class=headerlink href=#system-overview title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TB
+    subgraph UserLayer[User Layer]
+        Dev[Developer]
+        CI[CI/CD Pipeline]
+        Agent[AI Agent]
+    end
+
+    subgraph InterfaceLayer[Interface Layer]
+        CLI[assay-cli]
+        PySDK[Python SDK]
+        MCPServer[assay-mcp-server]
+    end
+
+    subgraph CoreLayer[Core Layer]
+        Core[assay-core]
+        Metrics[assay-metrics]
+        Policy[assay-policy]
+    end
+
+    subgraph RuntimeLayer[Runtime Layer]
+        Monitor[assay-monitor]
+        eBPF[assay-ebpf]
+        Kernel[Linux Kernel]
+    end
+
+    subgraph DataLayer[Data Layer]
+        Store[(SQLite Store)]
+        Traces[Trace Files]
+        Policies[Policy Files]
+    end
+
+    Dev --&gt; CLI
+    Dev --&gt; PySDK
+    CI --&gt; CLI
+    Agent --&gt; MCPServer
+
+    CLI --&gt; Core
+    PySDK --&gt; Core
+    MCPServer --&gt; Core
+
+    Core --&gt; Metrics
+    Core --&gt; Policy
+    Core --&gt; Store
+
+    MCPServer --&gt; Policy
+    Monitor --&gt; Policy
+    Monitor --&gt; eBPF
+    eBPF --&gt; Kernel
+
+    CLI --&gt; Traces
+    CLI --&gt; Policies
+    Core --&gt; Traces</code></pre> <h2 id=component-architecture>Component Architecture<a class=headerlink href=#component-architecture title="Permanent link">&para;</a></h2> <pre class=mermaid><code>graph TB
+    subgraph Core[assay-core]
+        Engine[engine::Runner]
+        Storage[storage::Store]
+        MCP[mcp::]
+        Trace[trace::]
+        Report[report::]
+        Providers[providers::]
+        MetricsAPI[metrics_api::]
+    end
+
+    subgraph CLI[assay-cli]
+        Main[main.rs]
+        Dispatch[dispatch]
+        Commands[commands::]
+        BuildRunner[build_runner]
+    end
+
+    subgraph Metrics[assay-metrics]
+        MustContain[MustContain]
+        Semantic[SemanticSimilarity]
+        Regex[RegexMatch]
+        JsonSchema[JsonSchema]
+        ArgsValid[ArgsValid]
+        SequenceValid[SequenceValid]
+    end
+
+    subgraph MCP[assay-mcp-server]
+        Server[MCP Server]
+        Proxy[Proxy Handler]
+    end
+
+    subgraph Monitor[assay-monitor]
+        MonitorCore[Monitor Core]
+        EventStream[Event Stream]
+    end
+
+    Main --&gt; Dispatch
+    Dispatch --&gt; Commands
+    Commands --&gt; BuildRunner
+    BuildRunner --&gt; Engine
+    Engine --&gt; Storage
+    Engine --&gt; Providers
+    Engine --&gt; MetricsAPI
+    MetricsAPI --&gt; Metrics
+    Engine --&gt; Report
+
+    Server --&gt; Proxy
+    Proxy --&gt; MCP
+    MCP --&gt; Policy
+
+    MonitorCore --&gt; EventStream
+    MonitorCore --&gt; eBPF
+
+    style Core fill:#fff4e1
+    style CLI fill:#e1f5ff
+    style Metrics fill:#e8f5e9
+    style MCP fill:#f3e5f5
+    style Monitor fill:#ffebee</code></pre> <h2 id=data-flow-test-execution>Data Flow: Test Execution<a class=headerlink href=#data-flow-test-execution title="Permanent link">&para;</a></h2> <pre class=mermaid><code>sequenceDiagram
+    participant User
+    participant CLI as assay-cli
+    participant Runner as Runner
+    participant Store as Store
+    participant Cache as VcrCache
+    participant LLM as LLM Client
+    participant Metrics as Metrics
+    participant Report as Report
+
+    User-&gt;&gt;CLI: assay run --config eval.yaml
+    CLI-&gt;&gt;CLI: load_config()
+    CLI-&gt;&gt;Store: Store::open()
+    CLI-&gt;&gt;CLI: build_runner()
+    CLI-&gt;&gt;Runner: Runner::new()
+    CLI-&gt;&gt;Runner: run_suite()
+
+    loop For each test
+        Runner-&gt;&gt;Store: create_run()
+        Runner-&gt;&gt;Cache: lookup()
+        alt Cache hit
+            Cache--&gt;&gt;Runner: Cached result
+        else Cache miss
+            Runner-&gt;&gt;LLM: complete()
+            LLM--&gt;&gt;Runner: Response
+            Runner-&gt;&gt;Metrics: evaluate()
+            Metrics--&gt;&gt;Runner: Score
+            Runner-&gt;&gt;Cache: store()
+        end
+        Runner-&gt;&gt;Store: insert_result()
+    end
+
+    Runner-&gt;&gt;Report: format()
+    Report--&gt;&gt;CLI: Output
+    CLI--&gt;&gt;User: Results</code></pre> <h2 id=policy-enforcement-flow>Policy Enforcement Flow<a class=headerlink href=#policy-enforcement-flow title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TD
+    ToolCall[Tool Call Request] --&gt; MCP[MCP Server]
+    MCP --&gt; Parse[Parse JSON-RPC]
+    Parse --&gt; Policy[Load Policy]
+    Policy --&gt; Tier1{Tier 1 Check?}
+    Tier1 --&gt;|Yes| Kernel[Kernel/LSM Check]
+    Tier1 --&gt;|No| Tier2[Tier 2 Check]
+    Kernel --&gt;|Block| Reject[Reject]
+    Kernel --&gt;|Allow| Tier2
+    Tier2 --&gt;|Block| Reject
+    Tier2 --&gt;|Allow| Forward[Forward to Tool]
+    Forward --&gt; Execute[Execute Tool]
+    Execute --&gt; Response[Return Response]
+    Reject --&gt; Error[Return Error]
+    Response --&gt; Audit[Audit Log]
+    Error --&gt; Audit</code></pre> <h2 id=trace-lifecycle>Trace Lifecycle<a class=headerlink href=#trace-lifecycle title="Permanent link">&para;</a></h2> <pre class=mermaid><code>stateDiagram-v2
+    [*] --&gt; Record: Agent executes
+    Record --&gt; JSONL: Write trace
+    JSONL --&gt; Import: assay import
+    Import --&gt; Ingest: Trace ingest
+    Ingest --&gt; Store: Store in DB
+    Store --&gt; Precompute: Precompute embeddings
+    Precompute --&gt; Ready: Ready for replay
+    Ready --&gt; Replay: assay run
+    Replay --&gt; Evaluate: Evaluate metrics
+    Evaluate --&gt; Report: Generate report
+    Report --&gt; [*]
+
+    Ready --&gt; Upgrade: Schema upgrade
+    Upgrade --&gt; Store</code></pre> <h2 id=evidence-pipeline>Evidence Pipeline<a class=headerlink href=#evidence-pipeline title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TD
+    subgraph Capture[Capture Phase]
+        Profile[Profile Collector]
+        Events[Native Events]
+    end
+
+    subgraph Transform[Transform Phase]
+        Mapper[EvidenceMapper]
+        CloudEvents[CloudEvents v1.0]
+    end
+
+    subgraph Bundle[Bundle Phase]
+        Writer[BundleWriter]
+        JCS[JCS Canonicalization]
+        Hash[SHA-256 Content ID]
+    end
+
+    subgraph Verify[Verification Phase]
+        Reader[BundleReader]
+        Integrity[Integrity Check]
+        Lint[Lint Rules]
+    end
+
+    Profile --&gt; Events
+    Events --&gt; Mapper
+    Mapper --&gt; CloudEvents
+    CloudEvents --&gt; Writer
+    Writer --&gt; JCS
+    JCS --&gt; Hash
+    Hash --&gt; TarGz[bundle.tar.gz]
+
+    TarGz --&gt; Reader
+    Reader --&gt; Integrity
+    Integrity --&gt; Lint
+    Lint --&gt; SARIF[SARIF Report]
+
+    style Capture fill:#e1f5ff
+    style Transform fill:#fff4e1
+    style Bundle fill:#e8f5e9
+    style Verify fill:#f3e5f5</code></pre> <h2 id=mcp-integration-architecture>MCP Integration Architecture<a class=headerlink href=#mcp-integration-architecture title="Permanent link">&para;</a></h2> <pre class=mermaid><code>graph LR
+    subgraph Agent[AI Agent]
+        AgentCode[Agent Code]
+    end
+
+    subgraph Assay[Assay MCP Server]
+        MCPProxy[MCP Proxy]
+        PolicyEngine[Policy Engine]
+        AuditLog[Audit Logger]
+    end
+
+    subgraph Tools[Tool Servers]
+        Tool1[Tool Server 1]
+        Tool2[Tool Server 2]
+        ToolN[Tool Server N]
+    end
+
+    AgentCode --&gt;|JSON-RPC| MCPProxy
+    MCPProxy --&gt; PolicyEngine
+    PolicyEngine --&gt;|Allow| MCPProxy
+    PolicyEngine --&gt;|Deny| AgentCode
+    MCPProxy --&gt;|Forward| Tool1
+    MCPProxy --&gt;|Forward| Tool2
+    MCPProxy --&gt;|Forward| ToolN
+    Tool1 --&gt;|Response| MCPProxy
+    Tool2 --&gt;|Response| MCPProxy
+    ToolN --&gt;|Response| MCPProxy
+    MCPProxy --&gt;|Response| AgentCode
+    MCPProxy --&gt; AuditLog</code></pre> <h2 id=runtime-security-architecture>Runtime Security Architecture<a class=headerlink href=#runtime-security-architecture title="Permanent link">&para;</a></h2> <pre class=mermaid><code>graph TB
+    subgraph Userspace[Userspace]
+        Monitor[assay-monitor]
+        Policy[assay-policy]
+        Config[Policy Config]
+    end
+
+    subgraph Kernel[Linux Kernel]
+        eBPF[assay-ebpf Program]
+        LSM[LSM Hooks]
+        Tracepoints[Tracepoints]
+    end
+
+    subgraph Process[Monitored Process]
+        Agent[AI Agent Process]
+        Syscalls[System Calls]
+    end
+
+    Config --&gt; Policy
+    Policy --&gt; Monitor
+    Monitor --&gt; eBPF
+    eBPF --&gt; LSM
+    eBPF --&gt; Tracepoints
+    Agent --&gt; Syscalls
+    Syscalls --&gt; Tracepoints
+    Tracepoints --&gt; eBPF
+    eBPF --&gt;|Block/Allow| Syscalls
+    eBPF --&gt; Monitor
+    Monitor --&gt;|Log| Audit</code></pre> <h2 id=storage-schema>Storage Schema<a class=headerlink href=#storage-schema title="Permanent link">&para;</a></h2> <pre class=mermaid><code>erDiagram
+    RUNS ||--o{ RESULTS : has
+    RUNS {
+        int run_id PK
+        string suite
+        string status
+        timestamp created_at
+    }
+    RESULTS ||--o{ ATTEMPTS : has
+    RESULTS {
+        int result_id PK
+        int run_id FK
+        string test_id
+        string status
+        float score
+        string fingerprint
+        json details
+    }
+    ATTEMPTS {
+        int attempt_id PK
+        int result_id FK
+        int attempt_num
+        string status
+        json response
+    }
+    EMBEDDINGS {
+        int embedding_id PK
+        string fingerprint
+        vector embedding
+    }
+    JUDGE_CACHE {
+        string cache_key PK
+        json result
+    }</code></pre> <h2 id=metrics-evaluation-flow>Metrics Evaluation Flow<a class=headerlink href=#metrics-evaluation-flow title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TD
+    TestCase[TestCase] --&gt; LoadMetrics[Load Metrics]
+    LoadMetrics --&gt; ForEach[For Each Metric]
+    ForEach --&gt; GetResponse[Get LLM Response]
+    GetResponse --&gt; GetExpected[Get Expected Value]
+    GetExpected --&gt; Evaluate[Evaluate Metric]
+    Evaluate --&gt; Content{Content Metric?}
+    Evaluate --&gt; Semantic{Semantic Metric?}
+    Evaluate --&gt; Structure{Structure Metric?}
+    Content --&gt; MustContain[MustContain]
+    Content --&gt; Regex[RegexMatch]
+    Semantic --&gt; Embed[Generate Embedding]
+    Embed --&gt; Similarity[Calculate Similarity]
+    Structure --&gt; JsonSchema[JSON Schema Validate]
+    Structure --&gt; ArgsValid[Args Valid]
+    MustContain --&gt; Score[Calculate Score]
+    Regex --&gt; Score
+    Similarity --&gt; Score
+    JsonSchema --&gt; Score
+    ArgsValid --&gt; Score
+    Score --&gt; Aggregate[Aggregate Scores]
+    Aggregate --&gt; Result[Test Result]</code></pre> <h2 id=cicd-integration-flow>CI/CD Integration Flow<a class=headerlink href=#cicd-integration-flow title="Permanent link">&para;</a></h2> <h3 id=using-github-action-recommended>Using GitHub Action (Recommended)<a class=headerlink href=#using-github-action-recommended title="Permanent link">&para;</a></h3> <pre class=mermaid><code>flowchart LR
+    PR[Pull Request] --&gt; Trigger[CI Trigger]
+    Trigger --&gt; Checkout[Checkout Code]
+    Checkout --&gt; Tests[Run Tests]
+    Tests --&gt; Bundles[Evidence Bundles]
+    Bundles --&gt; Action["assay-action@v2"]
+    Action --&gt; Cache{Cache Hit?}
+    Cache --&gt;|Yes| CLI[Use Cached CLI]
+    Cache --&gt;|No| Download[Download CLI]
+    Download --&gt; CLI
+    CLI --&gt; Discover[Auto-Discover Bundles]
+    Discover --&gt; Verify[Verify Bundles]
+    Verify --&gt; Lint[Lint Bundles]
+    Lint --&gt; SARIF[Generate SARIF]
+    SARIF --&gt; Upload[Upload to Security Tab]
+    Upload --&gt; Summary[Job Summary]
+    Summary --&gt; Comment{Findings?}
+    Comment --&gt;|Yes| PRComment[PR Comment]
+    Comment --&gt;|No| Pass[Pass]
+    PRComment --&gt; ExitCode{Threshold?}
+    Pass --&gt; Merge[Allow Merge]
+    ExitCode --&gt;|Exceeded| Fail[Block PR]
+    ExitCode --&gt;|OK| Merge</code></pre> <h3 id=using-cli-directly>Using CLI Directly<a class=headerlink href=#using-cli-directly title="Permanent link">&para;</a></h3> <pre class=mermaid><code>flowchart LR
+    PR[Pull Request] --&gt; Trigger[CI Trigger]
+    Trigger --&gt; Checkout[Checkout Code]
+    Checkout --&gt; Install[Install Assay]
+    Install --&gt; Load[Load Config + Traces]
+    Load --&gt; Run[assay run]
+    Run --&gt; Runner[Runner Executes]
+    Runner --&gt; Results[Test Results]
+    Results --&gt; Format[Format Output]
+    Format --&gt; SARIF[SARIF Report]
+    Format --&gt; JUnit[JUnit Report]
+    SARIF --&gt; Upload[Upload to GitHub]
+    JUnit --&gt; TestReport[Test Reporting]
+    Results --&gt; ExitCode{Exit Code}
+    ExitCode --&gt;|0| Pass[Pass: Allow Merge]
+    ExitCode --&gt;|1| Fail[Fail: Block PR]
+    Fail --&gt; Comment[PR Comment]</code></pre> <h2 id=run-output-pr-gate-seeds-judge_metrics-reason_code-sarifomitted-pr-159-160>Run Output (PR Gate) — seeds, judge_metrics, reason_code, sarif.omitted (PR <a class="magiclink magiclink-github magiclink-issue" href=https://github.com/Rul1an/assay/issues/159 title="GitHub Issue: Rul1an/assay #159">#159</a>, <a class="magiclink magiclink-github magiclink-issue" href=https://github.com/Rul1an/assay/issues/160 title="GitHub Issue: Rul1an/assay #160">#160</a>)<a class=headerlink href=#run-output-pr-gate-seeds-judge_metrics-reason_code-sarifomitted-pr-159-160 title="Permanent link">&para;</a></h2> <p>After <code>assay run</code> or <code>assay ci</code>, the CLI writes run.json, summary.json, and a console footer. This diagram shows the contract (SPEC-PR-Gate-Outputs-v1).</p> <pre class=mermaid><code>flowchart LR
+    subgraph Runner[Runner]
+        Artifacts[RunArtifacts]
+        Outcome[RunOutcome]
+    end
+
+    subgraph Outputs[Outputs]
+        RunJSON[run.json]
+        SummaryJSON[summary.json]
+        Console[Console stderr]
+    end
+
+    subgraph RunJSONFields[run.json fields]
+        R_exit[exit_code]
+        R_reason[reason_code]
+        R_rcv[reason_code_version]
+        R_sv[seed_version]
+        R_oseed[order_seed string|null]
+        R_jseed[judge_seed string|null]
+        R_jm[judge_metrics]
+        R_sarif[sarif.omitted when truncated]
+    end
+
+    subgraph SummaryFields[summary.json fields]
+        S_seeds[seeds object]
+        S_jm[judge_metrics]
+        S_schema[schema_version]
+        S_rcv[reason_code_version]
+        S_sarif[sarif.omitted when truncated]
+    end
+
+    subgraph ConsoleFooter[Console footer]
+        Line1["Seeds: seed_version=1 order_seed=… judge_seed=…"]
+        Line2[Judge metrics line]
+    end
+
+    Artifacts --&gt; Outcome
+    Outcome --&gt; RunJSON
+    Outcome --&gt; SummaryJSON
+    Outcome --&gt; Console
+    RunJSON --&gt; R_exit
+    RunJSON --&gt; R_reason
+    RunJSON --&gt; R_sv
+    RunJSON --&gt; R_oseed
+    RunJSON --&gt; R_jseed
+    RunJSON --&gt; R_jm
+    RunJSON --&gt; R_sarif
+    SummaryJSON --&gt; S_seeds
+    SummaryJSON --&gt; S_jm
+    SummaryJSON --&gt; S_sarif
+    Console --&gt; Line1
+    Console --&gt; Line2</code></pre> <p><strong>Invariants:</strong> Seeds are decimal <strong>strings or null</strong> (no JSON number) for JS/TS u64 safety. On early-exit (e.g. trace not found), seeds may be null; <code>seed_version</code> is always present. Judge uncertain (abstain) → exit 1, <code>reason_code</code> <code>E_JUDGE_UNCERTAIN</code>. <strong>SARIF (PR <a class="magiclink magiclink-github magiclink-issue" href=https://github.com/Rul1an/assay/issues/160 title="GitHub Issue: Rul1an/assay #160">#160</a>):</strong> When SARIF was truncated (e.g. &gt;25k eligible results), <code>sarif.omitted</code> appears in run.json and summary.json; use these for authoritative counts (SARIF file may be truncated).</p> <h2 id=sarif-truncation-flow-pr-160>SARIF Truncation Flow (PR <a class="magiclink magiclink-github magiclink-issue" href=https://github.com/Rul1an/assay/issues/160 title="GitHub Issue: Rul1an/assay #160">#160</a>)<a class=headerlink href=#sarif-truncation-flow-pr-160 title="Permanent link">&para;</a></h2> <p>When <code>assay ci</code> (or <code>assay run --sarif</code>) writes SARIF, results are filtered to eligible statuses (Fail, Error, Warn, Flaky, Unstable), sorted deterministically (blocking first, then severity, then test_id), and limited to <code>max_results</code> (default 25_000). If truncation occurs, run-level metadata and run/summary fields are set.</p> <pre class=mermaid><code>flowchart TD
+    subgraph Input[Input]
+        Results[Test results]
+    end
+
+    subgraph Truncation[assay-core report/sarif]
+        Filter[Filter: is_sarif_eligible]
+        Sort[Sort: BlockingRank, SeverityRank, test_id]
+        Take[Take first max_results]
+        Build[Build SARIF results]
+        Props{omitted_count &gt; 0?}
+        RunWithProps[runs[0].properties.assay: truncated, omitted_count]
+        RunNoProps[runs[0].results only]
+    end
+
+    subgraph Output[Output]
+        SARIFFile[sarif.json]
+        Outcome[SarifWriteOutcome]
+    end
+
+    subgraph Downstream[CLI: run.json / summary.json]
+        RunJSON[sarif.omitted in run.json]
+        SummaryJSON[sarif.omitted in summary.json]
+    end
+
+    Results --&gt; Filter
+    Filter --&gt; Sort
+    Sort --&gt; Take
+    Take --&gt; Build
+    Build --&gt; Props
+    Props --&gt;|Yes| RunWithProps
+    Props --&gt;|No| RunNoProps
+    RunWithProps --&gt; SARIFFile
+    RunNoProps --&gt; SARIFFile
+    Take --&gt; Outcome
+    Outcome --&gt;|omitted_count &gt; 0| RunJSON
+    Outcome --&gt;|omitted_count &gt; 0| SummaryJSON</code></pre> <p><strong>Contract:</strong> Consumers MUST use summary/run for authoritative result counts when <code>sarif.omitted</code> is present; the SARIF file is truncated.</p> <h2 id=policy-compilation-flow>Policy Compilation Flow<a class=headerlink href=#policy-compilation-flow title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TD
+    PolicyYAML[policy.yaml] --&gt; Parse[Parse YAML]
+    Parse --&gt; Validate[Validate Schema]
+    Validate --&gt; Compile[Compile Policy]
+    Compile --&gt; Split[Split into Tiers]
+    Split --&gt; Tier1[Tier 1: Kernel Rules]
+    Split --&gt; Tier2[Tier 2: Userspace Rules]
+    Tier1 --&gt; Exact[Exact Paths]
+    Tier1 --&gt; CIDR[CIDR Blocks]
+    Tier1 --&gt; Ports[Port Numbers]
+    Tier2 --&gt; Glob[Glob Patterns]
+    Tier2 --&gt; Regex[Regex Patterns]
+    Tier2 --&gt; Complex[Complex Constraints]
+    Exact --&gt; Compiled[CompiledPolicy]
+    CIDR --&gt; Compiled
+    Ports --&gt; Compiled
+    Glob --&gt; Compiled
+    Regex --&gt; Compiled
+    Complex --&gt; Compiled
+    Compiled --&gt; Deploy[Deploy to Runtime]</code></pre> <h2 id=python-sdk-architecture>Python SDK Architecture<a class=headerlink href=#python-sdk-architecture title="Permanent link">&para;</a></h2> <pre class=mermaid><code>graph TB
+    subgraph Python[Python Layer]
+        Client[AssayClient]
+        Coverage[Coverage]
+        Explainer[Explainer]
+        Pytest[Pytest Plugin]
+    end
+
+    subgraph Rust[Rust Layer]
+        PyO3[PyO3 Bindings]
+        Core[assay-core]
+    end
+
+    subgraph Native[Native Layer]
+        TraceIngest[trace::ingest]
+        CoverageAnalyze[coverage::analyze]
+        Explain[explain::explain]
+    end
+
+    Client --&gt; PyO3
+    Coverage --&gt; PyO3
+    Explainer --&gt; PyO3
+    Pytest --&gt; Client
+    PyO3 --&gt; Core
+    Core --&gt; TraceIngest
+    Core --&gt; CoverageAnalyze
+    Core --&gt; Explain</code></pre> <h2 id=error-handling-flow>Error Handling Flow<a class=headerlink href=#error-handling-flow title="Permanent link">&para;</a></h2> <pre class=mermaid><code>flowchart TD
+    Error[Error Occurs] --&gt; Classify[Classify Error]
+    Classify --&gt; ConfigError[Config Error]
+    Classify --&gt; TestError[Test Error]
+    Classify --&gt; JudgeUncertain[Judge Uncertain / Abstain]
+    Classify --&gt; PolicyError[Policy Error]
+    Classify --&gt; SystemError[System Error]
+
+    ConfigError --&gt; Diagnostic[Generate Diagnostic]
+    TestError --&gt; ErrorPolicy{Error Policy?}
+    JudgeUncertain --&gt; Exit1Judge[Exit 1, E_JUDGE_UNCERTAIN]
+    PolicyError --&gt; Violation[Policy Violation]
+    SystemError --&gt; Log[Log Error]
+
+    ErrorPolicy --&gt;|Block| Fail[Fail Test]
+    ErrorPolicy --&gt;|Allow| Warn[Warn + Continue]
+    ErrorPolicy --&gt;|Retry| Retry[Retry Test]
+
+    Diagnostic --&gt; ExitCode2[Exit Code 2]
+    Violation --&gt; ExitCode1[Exit Code 1]
+    Fail --&gt; ExitCode1
+    Warn --&gt; Continue[Continue]
+    Retry --&gt; Test[Re-run Test]
+    Log --&gt; ExitCode2</code></pre> <h2 id=mandate-runtime-flow>Mandate Runtime Flow<a class=headerlink href=#mandate-runtime-flow title="Permanent link">&para;</a></h2> <p>This diagram shows the mandate authorization flow when a tool call is processed:</p> <pre class=mermaid><code>sequenceDiagram
+    participant Agent
+    participant Proxy as MCP Proxy
+    participant Handler as ToolCallHandler
+    participant Auth as Authorizer
+    participant Store as MandateStore
+    participant AuditLog as Audit Log
+    participant DecisionLog as Decision Log
+
+    Agent-&gt;&gt;Proxy: tools/call request
+    Proxy-&gt;&gt;Handler: handle_tool_call
+
+    Note over Handler: Policy evaluation
+    Handler-&gt;&gt;Handler: Check policy allow/deny
+
+    alt Mandate required
+        Handler-&gt;&gt;Auth: authorize_and_consume
+        Auth-&gt;&gt;Store: get_revoked_at
+        Store--&gt;&gt;Auth: not revoked
+        Auth-&gt;&gt;Auth: Check validity window with skew
+        Auth-&gt;&gt;Auth: Check scope and kind
+        Auth-&gt;&gt;Store: consume_mandate atomic
+        Store--&gt;&gt;Auth: AuthzReceipt was_new=true
+        Auth--&gt;&gt;Handler: receipt
+
+        Note over Handler: Emit lifecycle event
+        Handler-&gt;&gt;AuditLog: mandate.used CloudEvent
+    end
+
+    Note over Handler: Always emit decision
+    Handler-&gt;&gt;DecisionLog: tool.decision CloudEvent
+    Handler--&gt;&gt;Proxy: HandleResult
+
+    alt Allow
+        Proxy--&gt;&gt;Agent: Forward to tool
+    else Deny
+        Proxy--&gt;&gt;Agent: Error response
+    end</code></pre> <h3 id=key-invariants>Key Invariants<a class=headerlink href=#key-invariants title="Permanent link">&para;</a></h3> <table> <thead> <tr> <th>Invariant</th> <th>Description</th> </tr> </thead> <tbody> <tr> <td>I1: Always Emit</td> <td>Exactly 1 tool.decision per tool_call_id</td> </tr> <tr> <td>I2: Consume Before Exec</td> <td>mandate.used only after SQLite commit</td> </tr> <tr> <td>I3: Fixed Source</td> <td>event_source from config, not dynamic</td> </tr> <tr> <td>I4: Idempotent</td> <td>Same tool_call_id returns same receipt</td> </tr> </tbody> </table> <h3 id=revocation-check-no-skew>Revocation Check (No Skew)<a class=headerlink href=#revocation-check-no-skew title="Permanent link">&para;</a></h3> <pre class=mermaid><code>flowchart TD
+    REQ[Tool Request] --&gt; VAL{Validity Check}
+    VAL --&gt;|with skew| REV{Revocation Check}
+    REV --&gt;|no skew| CONSUME[Consume Mandate]
+
+    VAL --&gt;|expired/not_yet| DENY1[Deny M_EXPIRED]
+    REV --&gt;|revoked| DENY2[Deny M_REVOKED]
+    CONSUME --&gt; ALLOW[Allow]</code></pre> <h2 id=pack-registry-architecture>Pack Registry Architecture<a class=headerlink href=#pack-registry-architecture title="Permanent link">&para;</a></h2> <h3 id=pack-resolution-flow-basic-path>Pack Resolution Flow (Basic Path)<a class=headerlink href=#pack-resolution-flow-basic-path title="Permanent link">&para;</a></h3> <p>This diagram shows the basic flow when resolving, fetching, and verifying packs:</p> <pre class=mermaid><code>sequenceDiagram
+  autonumber
+  actor User as CLI/CI
+  participant CLI as assay-cli
+  participant RES as PackResolver
+  participant CACHE as Local Cache
+  participant REG as RegistryClient
+  participant SIG as .sig endpoint
+  participant KEYS as /keys manifest
+  participant LOCK as assay.packs.lock
+
+  User-&gt;&gt;CLI: assay evidence lint --pack &lt;ref&gt;
+  CLI-&gt;&gt;RES: resolve(&lt;ref&gt;)
+
+  RES-&gt;&gt;CACHE: get(name, version)
+  alt Cache hit (not expired)
+    CACHE--&gt;&gt;RES: pack + metadata + signature
+    RES-&gt;&gt;CLI: verify cached
+    CLI-&gt;&gt;CLI: strict YAML -&gt; JCS -&gt; digest
+    CLI-&gt;&gt;CLI: verify signature if required
+  else Cache miss/expired
+    RES-&gt;&gt;REG: GET /packs/{name}/{version}
+    REG--&gt;&gt;RES: 200 (pack, X-Pack-Digest, ETag)
+    RES-&gt;&gt;REG: GET /packs/{name}/{version}.sig
+    REG--&gt;&gt;RES: 200 (DSSE envelope or 404 if unsigned)
+    RES-&gt;&gt;CLI: verify downloaded
+    CLI-&gt;&gt;CLI: strict YAML -&gt; JCS -&gt; digest == X-Pack-Digest
+    CLI-&gt;&gt;KEYS: GET /keys (if needed)
+    KEYS--&gt;&gt;CLI: DSSE-signed manifest
+    CLI-&gt;&gt;CLI: verify /keys via pinned roots
+    CLI-&gt;&gt;CLI: verify DSSE via manifest key
+    CLI-&gt;&gt;CACHE: write_atomic(pack+metadata+signature)
+  end
+
+  alt Lockfile present
+    CLI-&gt;&gt;LOCK: enforce digest/signature metadata
+    LOCK--&gt;&gt;CLI: ok / mismatch error
+  end
+
+  CLI--&gt;&gt;User: proceed / verified</code></pre> <h3 id=pack-resolution-flow-auth-required>Pack Resolution Flow (Auth Required)<a class=headerlink href=#pack-resolution-flow-auth-required title="Permanent link">&para;</a></h3> <p>This diagram shows the OIDC token exchange flow for authenticated pack fetching:</p> <pre class=mermaid><code>sequenceDiagram
+  autonumber
+  actor CI as GitHub Actions / CI
+  participant CLI as assay-cli
+  participant REG as Registry
+  participant GH as GitHub OIDC
+  participant EX as /auth/oidc/exchange
+  participant SIG as .sig endpoint
+  participant KEYS as /keys manifest
+
+  CI-&gt;&gt;CLI: assay evidence lint --pack commercial@1.2.0
+  CLI-&gt;&gt;GH: request OIDC ID token (aud=registry)
+  GH--&gt;&gt;CLI: id_token (JWT)
+
+  CLI-&gt;&gt;EX: POST /auth/oidc/exchange {id_token, scope}
+  EX--&gt;&gt;CLI: access_token ast_... (expires_in)
+
+  CLI-&gt;&gt;REG: GET /packs/name/version (Bearer ast_...)
+  REG--&gt;&gt;CLI: 200 (pack, X-Pack-Digest, ETag, Vary)
+  CLI-&gt;&gt;SIG: GET /packs/name/version.sig (Bearer ast_...)
+  SIG--&gt;&gt;CLI: 200 (DSSE envelope)
+
+  CLI-&gt;&gt;KEYS: GET /keys (Bearer ast_... or public)
+  KEYS--&gt;&gt;CLI: DSSE-signed keys manifest
+  CLI-&gt;&gt;CLI: verify manifest via pinned roots
+  CLI-&gt;&gt;CLI: verify pack DSSE via manifest key
+  CLI--&gt;&gt;CI: verified</code></pre> <h3 id=pack-registry-trust-chain>Pack Registry Trust Chain<a class=headerlink href=#pack-registry-trust-chain title="Permanent link">&para;</a></h3> <p>This diagram shows how trust is established from pinned roots through the keys manifest to pack signatures:</p> <pre class=mermaid><code>flowchart TB
+  subgraph CLI["assay-cli (client)"]
+    PR["Pinned Root Key IDs&lt;br/&gt;(shipped with CLI)"]
+    TS["TrustStore"]
+    PR --&gt; TS
+  end
+
+  subgraph Registry["Assay Registry"]
+    KM["/keys manifest&lt;br/&gt;(keys + validity + revocation)&lt;br/&gt;DSSE-signed"]
+    PK["Pack YAML&lt;br/&gt;canonical digest header"]
+    SG["Pack signature sidecar&lt;br/&gt;/packs/{name}/{version}.sig&lt;br/&gt;DSSE envelope"]
+  end
+
+  PR --&gt;|verifies DSSE| KM
+  KM --&gt;|provides pack-signing keys| TS
+  PK --&gt;|canonicalize + compute digest| CLI
+  SG --&gt;|DSSE verify with manifest key| CLI
+
+  note1["No-TOFU: keys manifest is verified against pinned roots&lt;br/&gt;Revocation/expiry enforced&lt;br/&gt;Pinned roots cannot be remotely revoked"]:::note
+  TS --&gt; note1
+
+  classDef note fill:#f8f8f8,stroke:#999,color:#333</code></pre> <h3 id=key-invariants_1>Key Invariants<a class=headerlink href=#key-invariants_1 title="Permanent link">&para;</a></h3> <table> <thead> <tr> <th>Invariant</th> <th>Description</th> </tr> </thead> <tbody> <tr> <td><strong>No-TOFU</strong></td> <td>Keys manifest must be verified against pinned roots on first use</td> </tr> <tr> <td><strong>Sidecar-First</strong></td> <td>Client always fetches <code>.sig</code> sidecar instead of relying on headers</td> </tr> <tr> <td><strong>Canonical Digest</strong></td> <td>Pack integrity uses strict YAML → JCS → SHA-256, not raw bytes</td> </tr> <tr> <td><strong>Cache Untrusted</strong></td> <td>Digest (and signature if required) verified on every cache read</td> </tr> <tr> <td><strong>Lockfile Hard Fail</strong></td> <td>Digest mismatches with lockfile are always hard errors</td> </tr> </tbody> </table> <h2 id=generated-diagrams>Generated Diagrams<a class=headerlink href=#generated-diagrams title="Permanent link">&para;</a></h2> <p>The following diagrams are automatically generated from the codebase by the <a href=../../.github/workflows/docs-auto-update.yml>docs-auto-update workflow</a>.</p> <h3 id=crate-dependencies-auto-generated>Crate Dependencies (Auto-Generated)<a class=headerlink href=#crate-dependencies-auto-generated title="Permanent link">&para;</a></h3> <!-- BEGIN:CRATE_DEPS --> <pre class=mermaid><code>flowchart TB
+    subgraph workspace["Assay Workspace"]
+        direction TB
+        assay_cli["assay-cli"]
+        assay_common["assay-common"]
+        assay_core["assay-core"]
+        assay_ebpf["assay-ebpf"]
+        assay_evidence["assay-evidence"]
+        assay_it["assay-it"]
+        assay_mcp_server["assay-mcp-server"]
+        assay_metrics["assay-metrics"]
+        assay_monitor["assay-monitor"]
+        assay_policy["assay-policy"]
+        assay_registry["assay-registry"]
+        assay_sim["assay-sim"]
+        assay_xtask["assay-xtask"]
+    end
+
+    assay_cli --&gt; assay_common
+    assay_cli --&gt; assay_core
+    assay_cli --&gt; assay_evidence
+    assay_cli --&gt; assay_mcp_server
+    assay_cli --&gt; assay_metrics
+    assay_cli --&gt; assay_monitor
+    assay_cli --&gt; assay_policy
+    assay_cli --&gt; assay_sim
+    assay_core --&gt; assay_common
+    assay_ebpf --&gt; assay_common
+    assay_it --&gt; assay_core
+    assay_mcp_server --&gt; assay_common
+    assay_mcp_server --&gt; assay_core
+    assay_mcp_server --&gt; assay_metrics
+    assay_metrics --&gt; assay_common
+    assay_metrics --&gt; assay_core
+    assay_monitor --&gt; assay_common
+    assay_monitor --&gt; assay_policy
+    assay_sim --&gt; assay_core
+    assay_sim --&gt; assay_evidence
+
+    %% Logical groupings for readability
+    subgraph core["Core"]
+        assay_core
+        assay_metrics
+        assay_policy
+        assay_evidence
+        assay_common
+    end
+
+    subgraph interface["Interface"]
+        assay_cli
+        assay_mcp_server
+    end
+
+    subgraph runtime["Runtime"]
+        assay_monitor
+        assay_ebpf
+    end
+
+    subgraph support["Support"]
+        assay_sim
+        assay_xtask
+        assay_registry
+    end
+</code></pre> <!-- END:CRATE_DEPS --> <h3 id=module-structure-auto-generated>Module Structure (Auto-Generated)<a class=headerlink href=#module-structure-auto-generated title="Permanent link">&para;</a></h3> <!-- BEGIN:MODULE_MAP --> <pre class=mermaid><code>flowchart TB
+    subgraph assay_cli["assay-cli"]
+        direction TB
+        cli_main["main.rs"]
+        cli_dispatch["dispatch"]
+        cli_commands["commands/"]
+        cli_args["args.rs"]
+        cli_main --&gt; cli_dispatch
+        cli_dispatch --&gt; cli_commands
+        cli_dispatch --&gt; cli_args
+    end
+
+    subgraph assay_core["assay-core"]
+        direction TB
+        core_lib["lib.rs"]
+        core_engine["engine/"]
+        core_storage["storage/"]
+        core_trace["trace/"]
+        core_mcp["mcp/"]
+        core_report["report/"]
+        core_providers["providers/"]
+        core_lib --&gt; core_engine
+        core_lib --&gt; core_storage
+        core_lib --&gt; core_trace
+        core_lib --&gt; core_mcp
+        core_lib --&gt; core_report
+        core_lib --&gt; core_providers
+    end
+
+    subgraph assay_metrics["assay-metrics"]
+        direction TB
+        metrics_lib["lib.rs"]
+        metrics_must_contain["must_contain"]
+        metrics_semantic["semantic"]
+        metrics_regex["regex_match"]
+        metrics_schema["json_schema"]
+        metrics_args["args_valid"]
+        metrics_sequence["sequence_valid"]
+        metrics_lib --&gt; metrics_must_contain
+        metrics_lib --&gt; metrics_semantic
+        metrics_lib --&gt; metrics_regex
+        metrics_lib --&gt; metrics_schema
+        metrics_lib --&gt; metrics_args
+        metrics_lib --&gt; metrics_sequence
+    end
+
+    subgraph assay_mcp_server["assay-mcp-server"]
+        direction TB
+        mcp_main["main.rs"]
+        mcp_server["server"]
+        mcp_proxy["proxy"]
+        mcp_policy["policy"]
+        mcp_main --&gt; mcp_server
+        mcp_server --&gt; mcp_proxy
+        mcp_proxy --&gt; mcp_policy
+    end
+
+    subgraph assay_monitor["assay-monitor"]
+        direction TB
+        mon_lib["lib.rs"]
+        mon_events["events"]
+        mon_ebpf["ebpf_loader"]
+        mon_lib --&gt; mon_events
+        mon_lib --&gt; mon_ebpf
+    end
+
+    subgraph assay_evidence["assay-evidence"]
+        direction TB
+        ev_lib["lib.rs"]
+        ev_bundle["bundle"]
+        ev_events["cloud_events"]
+        ev_jcs["jcs"]
+        ev_lib --&gt; ev_bundle
+        ev_lib --&gt; ev_events
+        ev_lib --&gt; ev_jcs
+    end
+
+    %% Cross-crate dependencies
+    assay_cli --&gt; assay_core
+    assay_cli --&gt; assay_metrics
+    assay_cli --&gt; assay_evidence
+    assay_mcp_server --&gt; assay_core
+    assay_mcp_server --&gt; assay_policy
+    assay_monitor --&gt; assay_ebpf
+    core_engine --&gt; metrics_lib
+    core_mcp --&gt; assay_policy
+</code></pre> <!-- END:MODULE_MAP --> <h2 id=related-documentation>Related Documentation<a class=headerlink href=#related-documentation title="Permanent link">&para;</a></h2> <ul> <li><a href=../codebase-overview/ >Codebase Overview</a> - Detailed component descriptions</li> <li><a href=../interdependencies/ >Interdependencies</a> - Dependency relationships</li> <li><a href=../user-flows/ >User Flows</a> - User journey mappings</li> <li><a href=../../architecture/SPEC-Mandate-v1/ >SPEC-Mandate-v1</a> - Mandate specification</li> <li><a href=../../architecture/SPEC-Pack-Registry-v1/ >SPEC-Pack-Registry-v1</a> - Pack Registry protocol specification</li> </ul> </article> </div> <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script> <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script> </div> <button type=button class="md-top md-icon" data-md-component=top hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg> Back to top </button> </main> <footer class=md-footer> <div class="md-footer-meta md-typeset"> <div class="md-footer-meta__inner md-grid"> <div class=md-copyright> <div class=md-copyright__highlight> Copyright &copy; 2025 Assay </div> Made with <a href=https://squidfunk.github.io/mkdocs-material/ target=_blank rel=noopener> Material for MkDocs </a> </div> <div class=md-social> <a href=https://github.com/Rul1an/assay target=_blank rel=noopener title=github.com class=md-social__link> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 496 512"><!-- Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg> </a> <a href=https://twitter.com/assay_dev target=_blank rel=noopener title=twitter.com class=md-social__link> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 512 512"><!-- Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M459.37 151.716c.325 4.548.325 9.097.325 13.645 0 138.72-105.583 298.558-298.558 298.558-59.452 0-114.68-17.219-161.137-47.106 8.447.974 16.568 1.299 25.34 1.299 49.055 0 94.213-16.568 130.274-44.832-46.132-.975-84.792-31.188-98.112-72.772 6.498.974 12.995 1.624 19.818 1.624 9.421 0 18.843-1.3 27.614-3.573-48.081-9.747-84.143-51.98-84.143-102.985v-1.299c13.969 7.797 30.214 12.67 47.431 13.319-28.264-18.843-46.781-51.005-46.781-87.391 0-19.492 5.197-37.36 14.294-52.954 51.655 63.675 129.3 105.258 216.365 109.807-1.624-7.797-2.599-15.918-2.599-24.04 0-57.828 46.782-104.934 104.934-104.934 30.213 0 57.502 12.67 76.67 33.137 23.715-4.548 46.456-13.32 66.599-25.34-7.798 24.366-24.366 44.833-46.132 57.827 21.117-2.273 41.584-8.122 60.426-16.243-14.292 20.791-32.161 39.308-52.628 54.253z"/></svg> </a> <a href=https://discord.gg/assay target=_blank rel=noopener title=discord.gg class=md-social__link> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 640 512"><!-- Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M524.531 69.836a1.5 1.5 0 0 0-.764-.7A485.065 485.065 0 0 0 404.081 32.03a1.816 1.816 0 0 0-1.923.91 337.461 337.461 0 0 0-14.9 30.6 447.848 447.848 0 0 0-134.426 0 309.541 309.541 0 0 0-15.135-30.6 1.89 1.89 0 0 0-1.924-.91 483.689 483.689 0 0 0-119.688 37.107 1.712 1.712 0 0 0-.788.676C39.068 183.651 18.186 294.69 28.43 404.354a2.016 2.016 0 0 0 .765 1.375 487.666 487.666 0 0 0 146.825 74.189 1.9 1.9 0 0 0 2.063-.676A348.2 348.2 0 0 0 208.12 430.4a1.86 1.86 0 0 0-1.019-2.588 321.173 321.173 0 0 1-45.868-21.853 1.885 1.885 0 0 1-.185-3.126 251.047 251.047 0 0 0 9.109-7.137 1.819 1.819 0 0 1 1.9-.256c96.229 43.917 200.41 43.917 295.5 0a1.812 1.812 0 0 1 1.924.233 234.533 234.533 0 0 0 9.132 7.16 1.884 1.884 0 0 1-.162 3.126 301.407 301.407 0 0 1-45.89 21.83 1.875 1.875 0 0 0-1 2.611 391.055 391.055 0 0 0 30.014 48.815 1.864 1.864 0 0 0 2.063.7A486.048 486.048 0 0 0 610.7 405.729a1.882 1.882 0 0 0 .765-1.352c12.264-126.783-20.532-236.912-86.934-334.541ZM222.491 337.58c-28.972 0-52.844-26.587-52.844-59.239s23.409-59.241 52.844-59.241c29.665 0 53.306 26.82 52.843 59.239 0 32.654-23.41 59.241-52.843 59.241Zm195.38 0c-28.971 0-52.843-26.587-52.843-59.239s23.409-59.241 52.843-59.241c29.667 0 53.307 26.82 52.844 59.239 0 32.654-23.177 59.241-52.844 59.241Z"/></svg> </a> <a href=https://getassay.dev target=_blank rel=noopener title=getassay.dev class=md-social__link> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M5 20h14v-2H5m14-9h-4V3H9v6H5l7 7 7-7Z"/></svg> </a> </div> </div> </div> </footer> </div> <div class=md-dialog data-md-component=dialog> <div class="md-dialog__inner md-typeset"></div> </div> <script id=__config type=application/json>{"base": "../..", "features": ["navigation.instant", "navigation.instant.prefetch", "navigation.tracking", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script> <script src=../../assets/javascripts/bundle.fe8b6f2b.min.js></script> </body> </html>
