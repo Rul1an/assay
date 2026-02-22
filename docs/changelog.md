@@ -410,6 +410,29 @@
 - docs(adr025): freeze Step4 soak enforcement policy v1 (Step4A) (#394) @Rul1an
 - ci(adr025): relax C3 gate fragility with local-action + permission allowlist (C3.2) (#393) @Rul1an
 - ci(adr025): harden Step3 C3 reviewer gate contracts (C3.1) (#391) @Rul1an
+
+## [2026-02-22]
+
+- docs(adr025): populate ADR-025 index with links and artifact map (P3 B) (#425) @Rul1an
+- docs(adr025): freeze P3 ADR-025 index contract + reviewer gate (P3 A) (#424) @Rul1an
+- docs(adr025): close I3 Step4 rollout with runbook + reviewer gate (Step4C) (#423) @Rul1an
+- ci(adr025): wire I3 Step4B OTel release integration (attach default) (#422) @Rul1an
+- docs(adr025): freeze I3 OTel release integration contract + policy v1 (I3 Step4A) (#421) @Rul1an
+- docs(adr025): close I3 stabilization loop with ops/docs sync + gate (I3 Stab C) (#420) @Rul1an
+- tests(adr025): harden I3 OTel bridge determinism with edge-case fixtures (I3 Stab B) (#419) @Rul1an
+- docs(adr025): freeze I3 stabilization policy + reviewer gate (I3 Stab A) (#418) @Rul1an
+- ci(adr025): add informational nightly OTel bridge workflow + reviewer gate (I3 Step3) (#417) @Rul1an
+- ci(adr025): implement I3 OTel bridge report generator + deterministic tests (I3 Step2) (#416) @Rul1an
+- docs(adr025): freeze I3 OTel bridge contract + schema v1 (I3 Step1) (#415) @Rul1an
+- ci(adr025): add closure release decision JSON log + tests (Stab D) (#414) @Rul1an
+- docs(adr025): sync I2 stabilization ops docs + reviewer gate (Stab C) (#413) @Rul1an
+- ci(adr025): harden closure release attach script + deterministic tests (Stab B) (#412) @Rul1an
+- docs(adr025): freeze I2 stabilization policy + reviewer gate (Stab A) (#411) @Rul1an
+- docs(adr025): close I2 Step4 rollout with runbook + reviewer gate (Step4C) (#410) @Rul1an
+- ci(adr025): attach closure artifact in release lane (I2 Step4B) (#409) @Rul1an
+- ci(adr025): wire I2 Step4B closure release integration (attach default) (#408) @Rul1an
+- ci(adr025): wire I2 Step4B closure release integration (attach default) (#407) @Rul1an
+- ci(adr025): wire I2 Step4B closure release integration (attach default) (#406) @Rul1an
 ## [2026-02-19]
 
 - ci(adr025): relax C3 gate fragility with local-action + permission allowlist (C3.2) (#393) @Rul1an
