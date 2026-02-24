@@ -7,6 +7,11 @@ Single entry point for ADR-025 deliverables across I1/I2/I3:
 - how to validate locally
 - what is informational vs release-lane evidence
 
+## Status sync (2026-02-24)
+- P3-A merged: index structure/contract freeze.
+- P3-B merged: index populated with canonical I1/I2/I3 links and artifact map.
+- P3-C closure: checklist/review-pack + reviewer gate finalize the consolidation loop.
+
 ## Quick Start (Where to look first)
 1. Product-level ADR:
    - `docs/architecture/ADR-025-Evidence-as-a-Product.md`

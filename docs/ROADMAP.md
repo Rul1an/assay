@@ -8,6 +8,7 @@
 > Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 > ADR-025 I2 Step4 status (2026-02-20): release-lane closure evidence integration merged on `main` (default `attach`), `enforce` remains opt-in.
 > ADR-025 I3 Step4 status (2026-02-21): release-lane OTel bridge evidence integration merged on `main` (default `attach`, `enforce` is contract-only under policy v1).
+> ADR-025 P3 status (2026-02-24): index consolidation A/B/C complete on `main` (single entrypoint + reviewer gates).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.

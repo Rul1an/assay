@@ -91,4 +91,4 @@ Reserved for later (no implementation in Step1):
 - Step3: informational nightly OTel bridge workflow + artifact contract complete on `main`
 - Step4A: release integration contract/policy freeze complete on `main`
 - Step4B: release-lane OTel evidence attach wiring complete on `main` (default `attach`, enforce `contract_only`)
-- Step4C: runbook + review artifacts + closure gate (this slice)
+- Step4C: runbook + review artifacts + closure gate complete on `main`
