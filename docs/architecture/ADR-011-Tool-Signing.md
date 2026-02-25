@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed (January 2026)
+Proposed (January 2026; boundary sync February 2026)
+
+Open-core boundary note (current `main`):
+- Open-core delivered: local-key signing and verification via `x-assay-sig` (`assay tool sign --key`, `assay tool verify`).
+- Enterprise pending: Sigstore keyless + transparency-log verification (Fulcio/Rekor).
 
 ## Context
 
@@ -30,7 +34,7 @@ We need to extend this with cryptographic signatures for:
 
 ## Decision
 
-We will implement **Sigstore-based keyless signing** with an `x-assay-sig` extension field in MCP tool definitions.
+We will implement **Sigstore-based keyless signing** as an enterprise extension on top of `x-assay-sig`.
 
 ### Signature Format
 
