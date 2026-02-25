@@ -1,5 +1,11 @@
 # ADR-025 I2 Stabilization Policy (v1)
 
+## Status Sync (2026-02-25)
+- Stab A merged: policy freeze + reviewer gate (`scripts/ci/review-adr025-i2-stab-a.sh`).
+- Stab B merged: script hardening + fixtures/tests + reviewer gate (`scripts/ci/review-adr025-i2-stab-b.sh`).
+- Stab C merged: ops/docs sync + reviewer gate (`scripts/ci/review-adr025-i2-stab-c.sh`).
+- Stab D merged: observability-only decision JSON log + tests + reviewer gate (`scripts/ci/review-adr025-i2-stab-d.sh`).
+
 ## Intent
 Harden the ADR-025 I2 closure/release integration with minimal blast radius:
 - Improve diagnosability and contract enforcement in scripts
@@ -11,7 +17,7 @@ In-scope:
 - `scripts/ci/adr025-closure-release.sh` hardening (debug output, stricter parsing)
 - Additive tests and fixtures
 - Docs/runbook updates to match actual behavior
-- Reviewer gates for A/B/C stabilization slices
+- Reviewer gates for A/B/C/D stabilization slices
 
 Out-of-scope:
 - Any `.github/workflows/*` edits

@@ -1,5 +1,10 @@
 # ADR-025 I3 Stabilization Policy (v1)
 
+## Status Sync (2026-02-25)
+- Stab A merged: policy freeze + reviewer gate (`scripts/ci/review-adr025-i3-stab-a.sh`).
+- Stab B merged: determinism edge-case fixtures/tests + reviewer gate (`scripts/ci/review-adr025-i3-stab-b.sh`).
+- Stab C merged: ops/docs sync + reviewer gate (`scripts/ci/review-adr025-i3-stab-c.sh`).
+
 ## Intent
 Harden the I3 OTel bridge generator with minimal blast radius:
 - Add deterministic edge-case fixtures and tests

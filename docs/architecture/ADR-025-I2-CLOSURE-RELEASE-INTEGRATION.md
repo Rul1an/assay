@@ -1,11 +1,13 @@
-# ADR-025 I2 Closure Release Integration (Step4A Freeze)
+# ADR-025 I2 Closure Release Integration (Step4 Closed-Loop)
 
 ## Intent
 Integrate ADR-025 I2 closure evidence into release/promote flows with an explicit mode contract.
 
-This Step4A slice freezes policy and integration semantics only.
-- No workflow changes in this slice.
-- No PR required-check behavior changes in this slice.
+## Status Sync (2026-02-25)
+- Step4A merged: contract/policy freeze (`schemas/closure_release_policy_v1.json`) + reviewer gate.
+- Step4B merged: release wiring + helper script (`scripts/ci/adr025-closure-release.sh`) + deterministic tests.
+- Step4C merged: runbook + checklist/review-pack + closure reviewer gate.
+- Stabilization merged: Stab A/B/C/D (`scripts/ci/review-adr025-i2-stab-*.sh`) including decision JSON logging coverage.
 
 ## Scope
 Release integration consumes the nightly closure artifact:
@@ -46,14 +48,5 @@ Mode handling:
 
 ## Safety
 - No silent bypass: mode is explicit and logged.
-- No PR trigger impact.
-- No workflow permission expansion in this Step4A freeze.
-
-## Step4B Preview
-Step4B wires release workflow implementation:
-1. download latest `adr025-closure-report`
-2. apply mode contract (`off|attach|warn|enforce`)
-3. attach evidence and optionally enforce
-
-## Step4C Preview
-Step4C closes rollout with runbook + promotion criteria for moving from `attach/warn` to `enforce`.
+- No PR trigger impact (release-lane only integration).
+- No workflow permission expansion required by the closure helper path.
