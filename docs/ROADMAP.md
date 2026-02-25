@@ -188,9 +188,9 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
 | **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
 | **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
-| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | Pending (I1) |
-| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | Pending (I1) |
-| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | Pending (I2) |
+| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | ✅ Complete (I1 closed-loop) |
+| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | ✅ Complete (I1 closed-loop) |
+| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | ✅ Complete (I2/I3 closed-loop) |
 | **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
