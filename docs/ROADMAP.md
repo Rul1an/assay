@@ -314,7 +314,8 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 #### Additional Packs (Future)
 
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
-- [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
+- [x] **SOC2 Baseline (OSS)**: Common Criteria mapping delivered (see ADR-022, pack in `packs/open/soc2-baseline/`)
+- [ ] **SOC2 Pro (Enterprise)**: assurance-depth mappings and workflow integrations
 - [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
 - [x] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021, implemented in PR #287)
 
@@ -574,7 +575,7 @@ Everything needed to create, verify, and analyze evidence locally:
 | **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
 | **Basic Signing** | Ed25519 local key signing and verification (v2.9.0) |
 | **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification (v2.10.0) |
-| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping, v2.10.0), future `soc2-baseline` |
+| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping, v2.10.0), `soc2-baseline` (Common Criteria baseline, ADR-022) |
 | **Mandate Evidence** | Mandate types, signing, runtime enforcement, CloudEvents lifecycle (v2.11.0) |
 | **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor, mandate authorization |
 | **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
