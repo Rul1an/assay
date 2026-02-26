@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed (February 2026)
+Superseded (February 2026, by ADR-025 Reliability Surface / I1 soak rollout)
+
+## Status Sync (2026-02-26)
+- The implementation track for this ADR was absorbed by ADR-025 I1 (Soak + readiness + release-lane enforcement).
+- ROADMAP reflects this as "Sim Engine Hardening (limits + budget) — Superseded by ADR-025 Soak".
+- This ADR remains as historical design context; active evolution happens under ADR-025 slices.
 
 ## Context
 

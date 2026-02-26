@@ -1,7 +1,13 @@
 # ADR-025: Evidence-as-a-Product — Reliability Surfaces, Completeness/Closure, and Portable Verifiability
 
 ## Status
-Proposed (Feb 2026)
+Proposed (Feb 2026; rollout slices I1/I2/I3 implemented on `main`)
+
+## Status Sync (2026-02-26)
+- I1 closed-loop on `main`: soak/reliability surface + readiness + release-lane enforcement.
+- I2 closed-loop on `main`: closure/completeness contracts + release-lane attach/enforce modes + stabilization.
+- I3 closed-loop on `main`: OTel bridge contracts + generator/tests + informational nightly lane + release integration.
+- Remaining work for ADR-025 is status/governance convergence and future roadmap increments, not missing I1/I2/I3 implementation.
 
 ## Context
 The agent engineering market (2026) has commoditized "eval CI" and "observability". Differentiation now comes from:
