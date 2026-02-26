@@ -387,15 +387,15 @@ assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.j
 - **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; no PR required-check impact in Step3
 - **Step4 rollout status**: fail-closed enforcement is active in release lane only (policy v1 + readiness enforcement script); PR lanes remain unchanged
 
-### H. Audit Kit & Closure (P2) [ADR-025]
+### H. Audit Kit & Closure (P2) [ADR-025] ✅ Complete
 
 Formalize "Evidence-as-a-Product" with provenance and replayability scores.
 
-**Scope (Iteration 1 & 2):**
-- [ ] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance
-- [ ] **Completeness**: Pack-relative signal gaps (`required` vs `captured`)
-- [ ] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness
-- [ ] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
+**Scope (Iteration 1, 2, 3):**
+- [x] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance (I2)
+- [x] **Completeness**: Pack-relative signal gaps (`required` vs `captured`) (I2)
+- [x] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness (I2)
+- [x] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
 
 ---
 
