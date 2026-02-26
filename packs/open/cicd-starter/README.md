@@ -17,7 +17,7 @@ These checks verify evidence hygiene for CI pipelines. They do not constitute co
 ## Quickstart (copy/paste)
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2   # Pin to commit SHA in production
+- uses: Rul1an/assay/assay-action@9cc23b4c684be7cfd81f170c4f66d59903dd76eb # v2.18.0 (pinned SHA)
   with:
     pack: cicd-starter
     fail_on: error   # Use 'warning' to enforce CICD-002/003 in CI
