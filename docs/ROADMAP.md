@@ -8,6 +8,7 @@
 > Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
 > ADR-025 I2 Step4 status (2026-02-20): release-lane closure evidence integration merged on `main` (default `attach`), `enforce` remains opt-in.
 > ADR-025 I3 Step4 status (2026-02-21): release-lane OTel bridge evidence integration merged on `main` (default `attach`, `enforce` is contract-only under policy v1).
+> ADR-025 P3 status (2026-02-24): index consolidation A/B/C complete on `main` (single entrypoint + reviewer gates).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -187,9 +188,9 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
 | **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
 | **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
-| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | Pending (I1) |
-| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | Pending (I1) |
-| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | Pending (I2) |
+| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | ✅ Complete (I1 closed-loop) |
+| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | ✅ Complete (I1 closed-loop) |
+| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | ✅ Complete (I2/I3 closed-loop) |
 | **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
@@ -315,7 +316,7 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
 - [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
 - [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
-- [ ] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021)
+- [x] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021, implemented in PR #287)
 
 ### E. GitHub Action v2.1 ✅ Complete
 
