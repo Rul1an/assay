@@ -6,15 +6,20 @@ Attach OTel bridge evidence to the **release lane only**, with minimal risk:
 - Enforcement (if enabled) is **contract validation first**
 - PR lanes remain unchanged (no required-check impact)
 
-## Scope
-In-scope (Step4A):
-- Contract + policy freeze (docs + policy JSON + reviewer gate)
-- No workflow changes
-- No runtime script changes
+## Status Sync (2026-02-25)
+- Step4A merged: contract/policy freeze (`schemas/otel_release_policy_v1.json`) + reviewer gate.
+- Step4B merged: release wiring + helper script (`scripts/ci/adr025-otel-release.sh`) + deterministic tests.
+- Step4C merged: runbook + checklist/review-pack + closure reviewer gate.
+- Stabilization merged: Stab A/B/C (`scripts/ci/review-adr025-i3-stab-*.sh`) with determinism edge-case coverage.
 
-Out-of-scope (Step4A):
-- Release workflow wiring (Step4B)
-- Any enforcement expansion beyond contract validation
+## Scope
+In-scope (Step4):
+- Contract + policy freeze (docs + policy JSON + reviewer gate)
+- Release-lane wiring + helper script + deterministic tests
+- Runbook/checklist/review-pack closure sync
+
+Out-of-scope (Step4):
+- Any enforcement expansion beyond contract validation without a new freeze slice
 - OTel SDK wiring / live capture
 
 ## Inputs
@@ -50,5 +55,5 @@ Contract validation checks (v1):
 
 ## Non-goals
 - No PR required-check changes
-- No workflow trigger changes in Step4A
+- No workflow trigger expansion to PR lanes
 - No score-based enforcement (bridge report is not a scoring artifact)
