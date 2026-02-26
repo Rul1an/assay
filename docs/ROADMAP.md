@@ -314,7 +314,8 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 #### Additional Packs (Future)
 
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
-- [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
+- [x] **SOC2 Baseline (OSS)**: Control mapping pack for Common Criteria (implemented in PR #287)
+- [ ] **SOC2 Pro (Enterprise)**: Assurance-depth pack content and workflows
 - [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
 - [x] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021, implemented in PR #287)
 
