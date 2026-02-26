@@ -360,7 +360,7 @@ assay evidence lint --pack cicd-starter,eu-ai-act-baseline bundle.tar.gz
 - [x] **Default**: cicd-starter when no `--pack` specified (PLG)
 - [x] **Rules**: CICD-001 (event count); CICD-002 (`assay.profile.started`/`.finished`); CICD-003 (traceparent/tracestate/run_id); CICD-004 (build_id/version, info)
 - [x] **BUILTIN_PACKS** + vendoring: packs/open vendored to crates/assay-evidence/packs/
-- [ ] **Docs**: README per ADR-023 Appendix A; pinned GH Action; `--fail-on warning`; Next steps (follow-up)
+- [x] **Docs**: README per ADR-023 Appendix A; pinned GH Action; `--fail-on warning`; Next steps (follow-up)
 
 **Design decisions:**
 - `kind: quality` (no disclaimer; distinct from compliance packs)
