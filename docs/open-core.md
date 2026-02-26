@@ -12,7 +12,7 @@ Everything needed to create, verify, lint, and analyze evidence locally.
 | **CLI** | `export`, `verify`, `lint`, `diff`, `explore`, `show` | MIT |
 | **Evidence Contract** | Schema v1, JCS canonicalization, content-addressed IDs | MIT |
 | **Pack Engine** | Pack loader, composition, SARIF output, digest verification | MIT |
-| **Baseline Packs** | `eu-ai-act-baseline`, `soc2-baseline` (coming soon) | Apache-2.0 |
+| **Baseline Packs** | `eu-ai-act-baseline`, `soc2-baseline` | Apache-2.0 |
 | **BYOS Storage** | `push`, `pull`, `list` to S3/Azure/GCS/local | MIT |
 | **Tool Signing** | Ed25519 local key signing and verification | MIT |
 | **Mandate Evidence** | Mandate types, signing, runtime enforcement | MIT |

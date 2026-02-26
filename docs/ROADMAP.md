@@ -314,7 +314,8 @@ See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and
 #### Additional Packs (Future)
 
 - [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
-- [ ] **SOC2 Baseline/Pro**: Control mapping packs (baseline = Common Criteria only; Pro = assurance depth)
+- [x] **SOC2 Baseline (OSS)**: Control mapping pack for Common Criteria (implemented in PR #287)
+- [ ] **SOC2 Pro (Enterprise)**: Assurance-depth pack content and workflows
 - [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
 - [x] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021, implemented in PR #287)
 
@@ -387,15 +388,15 @@ assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.j
 - **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; no PR required-check impact in Step3
 - **Step4 rollout status**: fail-closed enforcement is active in release lane only (policy v1 + readiness enforcement script); PR lanes remain unchanged
 
-### H. Audit Kit & Closure (P2) [ADR-025]
+### H. Audit Kit & Closure (P2) [ADR-025] ✅ Complete
 
 Formalize "Evidence-as-a-Product" with provenance and replayability scores.
 
-**Scope (Iteration 1 & 2):**
-- [ ] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance
-- [ ] **Completeness**: Pack-relative signal gaps (`required` vs `captured`)
-- [ ] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness
-- [ ] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
+**Scope (Iteration 1, 2, 3):**
+- [x] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance (I2)
+- [x] **Completeness**: Pack-relative signal gaps (`required` vs `captured`) (I2)
+- [x] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness (I2)
+- [x] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
 
 ---
 
