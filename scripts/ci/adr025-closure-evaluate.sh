@@ -76,8 +76,9 @@ try:
 except Exception as e:
     die(2, f"Measurement error: invalid json: {e}")
 
-if soak.get("schema_version") != "soak_report_v1":
-    die(2, f"Measurement error: unexpected soak schema_version: {soak.get('schema_version')}")
+soak_schema = soak.get("schema_version")
+if soak_schema not in ("soak-report-v1", "soak_report_v1"):
+    die(2, f"Measurement error: unexpected soak schema_version: {soak_schema}")
 if readiness.get("schema_version") != "adr025-nightly-readiness-v1":
     die(2, f"Measurement error: unexpected readiness schema_version: {readiness.get('schema_version')}")
 if "classifier_version" not in readiness:
