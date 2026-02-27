@@ -334,9 +334,10 @@ fn normalize_json(value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assay_adapter_api::{AttachmentWriter, ConvertMode, ConvertOptions, RawPayloadRef};
-    use serde::Serialize;
-    use sha2::{Digest, Sha256};
+    use assay_adapter_api::{
+        digest_canonical_json, AttachmentWriter, ConvertMode, ConvertOptions, RawPayloadRef,
+    };
+    use sha2::Digest;
     use std::fs;
     use std::path::PathBuf;
 
@@ -348,10 +349,8 @@ mod tests {
             payload: &[u8],
             media_type: &str,
         ) -> AdapterResult<RawPayloadRef> {
-            let mut hasher = Sha256::new();
-            hasher.update(payload);
             Ok(RawPayloadRef {
-                sha256: hex::encode(hasher.finalize()),
+                sha256: hex::encode(sha2::Sha256::digest(payload)),
                 size_bytes: payload.len() as u64,
                 media_type: media_type.to_string(),
             })
@@ -365,13 +364,6 @@ mod tests {
 
     fn fixture(name: &str) -> Vec<u8> {
         fs::read(fixture_dir().join(name)).expect("fixture must exist")
-    }
-
-    fn digest_json<T: Serialize>(value: &T) -> String {
-        let encoded = serde_json::to_vec(value).expect("serializes");
-        let mut hasher = Sha256::new();
-        hasher.update(encoded);
-        hex::encode(hasher.finalize())
     }
 
     #[test]
@@ -394,7 +386,10 @@ mod tests {
 
         assert_eq!(first.events.len(), 1);
         assert_eq!(first.lossiness.lossiness_level, LossinessLevel::None);
-        assert_eq!(digest_json(&first), digest_json(&second));
+        assert_eq!(
+            digest_canonical_json(&first),
+            digest_canonical_json(&second)
+        );
         assert_eq!(first.events[0].type_, "assay.adapter.acp.intent.created");
         assert_eq!(
             first.events[0].payload["adapter_id"],
@@ -488,8 +483,8 @@ mod tests {
             .expect("second payload should convert");
 
         assert_eq!(
-            digest_json(&first.events[0].payload),
-            digest_json(&second.events[0].payload)
+            digest_canonical_json(&first.events[0].payload),
+            digest_canonical_json(&second.events[0].payload)
         );
         assert_ne!(
             first
