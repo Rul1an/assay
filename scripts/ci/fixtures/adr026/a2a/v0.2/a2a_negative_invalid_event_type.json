@@ -1,0 +1,13 @@
+{
+  "protocol": "a2a",
+  "version": "0.2",
+  "event_type": "session.unknown",
+  "timestamp": "2026-02-27T10:20:00Z",
+  "agent": {
+    "id": "agent://coordinator"
+  },
+  "message": {
+    "id": "msg-unknown",
+    "role": "assistant"
+  }
+}
