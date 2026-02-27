@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed (January 2026)
+Proposed (January 2026; boundary sync February 2026)
+
+Open-core boundary note (current `main`):
+- Open-core delivered signing/verification stops at local-key `x-assay-sig` flows.
+- Rekor/Fulcio integration remains part of the enterprise advanced-signing surface.
 
 ## Context
 
@@ -17,7 +21,7 @@ This ADR details the Rekor integration for verification and monitoring.
 
 ## Decision
 
-We will integrate with **public Rekor** (rekor.sigstore.dev) for open source, with optional private instance support for enterprise.
+We will integrate with Rekor as part of the **enterprise advanced-signing** extension described in [ADR-011](./ADR-011-Tool-Signing.md). Open-core verification does not require or query Rekor. Enterprise deployments may use the public Rekor service or a private instance depending policy and operating model.
 
 ### Verification Flow
 
@@ -315,7 +319,7 @@ impl RekorCache {
 - Operational burden
 - No cross-organization trust
 
-**Decision:** Public Rekor for open source, private option for enterprise.
+**Decision:** Rekor remains enterprise-only; enterprise deployments may choose public Rekor or a private instance.
 
 ### 3. Alternative Transparency Logs
 
@@ -329,7 +333,7 @@ impl RekorCache {
 ### CLI Flags
 
 ```bash
-# Require Rekor transparency proof for verification
+# Require Rekor transparency proof for verification (enterprise advanced signing)
 assay tool verify tool.json --rekor-required
 
 # Verify evidence bundle with Rekor check
@@ -345,7 +349,7 @@ assay evidence verify bundle.tar.gz --offline
 ```yaml
 # assay.yaml
 tool_verification:
-  require_transparency: true  # Equivalent to --rekor-required
+  require_transparency: true  # Enterprise advanced signing; equivalent to --rekor-required
 
 evidence_verification:
   require_transparency: true
@@ -353,7 +357,7 @@ evidence_verification:
 
 ## Implementation Plan
 
-### Phase 1: Basic Verification (Week 1)
+### Phase 1: Enterprise Verification (Week 1)
 - [ ] Rekor API client
 - [ ] Entry fetching
 - [ ] Inclusion proof verification
@@ -385,9 +389,9 @@ evidence_verification:
 ## Consequences
 
 ### Positive
-- Cryptographic proof of signing time
-- Detection of compromised identities
-- Append-only audit trail
+- Cryptographic proof of signing time for the enterprise signing surface
+- Detection of compromised enterprise identities
+- Append-only audit trail when the enterprise extension is enabled
 - No trust in single entity (distributed witnesses)
 
 ### Negative
