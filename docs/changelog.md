@@ -426,6 +426,7 @@
 - docs(open-core): split SOC2 baseline vs pro status and sync boundary (#438) @Rul1an
 - docs(adr025): mark roadmap audit-kit/closure scope complete + gate (#437) @Rul1an
 - docs(adr023): close starter pack docs follow-up + reviewer gate (#435) @Rul1an
+- chore(ci): bump github/codeql-action from 3.32.3 to 3.32.4 (#426) @app/dependabot
 ## [2026-02-26]
 
 - docs(adr023): close starter pack docs follow-up + reviewer gate (#435) @Rul1an
