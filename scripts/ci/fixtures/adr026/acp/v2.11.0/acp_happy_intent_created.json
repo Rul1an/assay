@@ -1,0 +1,18 @@
+{
+  "protocol": "acp",
+  "version": "2.11.0",
+  "packet_id": "pkt-1001",
+  "event_type": "intent.created",
+  "timestamp": "2026-02-27T10:00:00Z",
+  "actor": {
+    "id": "agent-buyer-1",
+    "role": "buyer_agent"
+  },
+  "intent": {
+    "id": "intent-1001",
+    "kind": "checkout"
+  },
+  "attributes": {
+    "merchant_id": "merchant-42"
+  }
+}
