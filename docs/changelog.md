@@ -433,6 +433,21 @@
 - feat(adr026): freeze adapter API contract + reviewer gate (Step1) (#443) @Rul1an
 - fix(adr025-i2): align closure evaluator with soak schema version (#442) @Rul1an
 - docs(adr016): sync SOC2 baseline open-core status + roadmap (#441) @Rul1an
+- docs(adr026): freeze AttachmentWriter host boundary (E2A) (#461) @Rul1an
+- feat(adr026): add adapter metadata identity to API and events (Stab E0B) (#460) @Rul1an
+- docs(adr026): freeze adapter metadata contract (E0A) (#458) @Rul1an
+- fix(adr026): preserve ACP attributes and lossiness invariants (Stab E1) (#457) @Rul1an
+- ci: harden docs-only CI publication and perf triggering (#455) @Rul1an
+- docs(adr026): close A2A rollout with checklist + review pack (A2A Step3) (#453) @Rul1an
+- feat(adr026): add A2A adapter MVP + conformance fixtures (A2A Step2) (#452) @Rul1an
+- docs(adr026): freeze A2A follow-up contract + crate skeleton (A2A Step1) (#451) @Rul1an
+- docs(adr011-012): sync signing boundary to open-core policy (#449) @Rul1an
+- docs(adr026): close adapter rollout with checklist + review pack (Step3) (#446) @Rul1an
+- feat(adr026): add ACP adapter MVP + conformance fixtures (Step2) (#445) @Rul1an
+- feat(adr026): add ACP adapter MVP + conformance fixtures (Step2) (#444) @Rul1an
+- feat(adr026): freeze adapter API contract + reviewer gate (Step1) (#443) @Rul1an
+- fix(adr025-i2): align closure evaluator with soak schema version (#442) @Rul1an
+- docs(adr016): sync SOC2 baseline open-core status + roadmap (#441) @Rul1an
 ## [2026-02-27]
 
 - docs(adr011-012): sync signing boundary to open-core policy (#449) @Rul1an
