@@ -2,16 +2,81 @@ name: CI
 
 on:
   push:
-    branches: [ main, "debug/**" ]
+    branches: [ main, "debug/**", "docs/auto-update" ]
   pull_request:
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
+  scope:
+    name: Detect CI scope
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      lightweight_only: ${{ steps.detect.outputs.lightweight_only }}
+      changed_file_count: ${{ steps.detect.outputs.changed_file_count }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed_file="$RUNNER_TEMP/changed_files.txt"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            : > "$changed_file"
+            lightweight_only=false
+          else
+            if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+              base_sha="${{ github.event.pull_request.base.sha }}"
+              head_sha="${{ github.sha }}"
+              git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+            else
+              base_sha="${{ github.event.before }}"
+              head_sha="${{ github.sha }}"
+              if [[ "${base_sha}" =~ ^0+$ ]]; then
+                git diff-tree --no-commit-id --name-only -r "${head_sha}" > "$changed_file"
+              else
+                git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+              fi
+            fi
+
+            if [[ ! -s "$changed_file" ]]; then
+              lightweight_only=false
+            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$)' "$changed_file" >/dev/null; then
+              lightweight_only=false
+            else
+              lightweight_only=true
+            fi
+          fi
+
+          {
+            echo "lightweight_only=${lightweight_only}"
+            echo "changed_file_count=$(wc -l < "$changed_file" | tr -d ' ')"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## CI scope"
+            echo "- event: ${GITHUB_EVENT_NAME}"
+            echo "- lightweight_only: ${lightweight_only}"
+            echo "- changed_file_count: $(wc -l < "$changed_file" | tr -d ' ')"
+            if [[ -s "$changed_file" ]]; then
+              echo ""
+              echo "### Changed files"
+              sed 's/^/- /' "$changed_file"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
     name: Dependency Security (cargo-deny + audit)
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,6 +96,8 @@ jobs:
 
   clippy:
     name: Clippy (deny warnings)
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,6 +147,8 @@ jobs:
 
   perf:
     name: Criterion benches (store + suite)
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -133,6 +202,8 @@ jobs:
 
   test:
     name: Build + Test (${{ matrix.os }})
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -228,7 +299,8 @@ jobs:
 
   ebpf-smoke-ubuntu:
     name: eBPF monitor smoke (Linux - Ubuntu)
-    needs: [test]
+    needs: [scope, test]
+    if: needs.scope.outputs.lightweight_only != 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-ubuntu
@@ -438,6 +510,45 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [deps-security, clippy, open-core-boundary, vendored-packs, perf, test, ebpf-smoke-ubuntu]
+    if: always()
+    needs: [scope, deps-security, clippy, open-core-boundary, vendored-packs, perf, test, ebpf-smoke-ubuntu]
     steps:
-      - run: echo "All required CI jobs passed."
+      - name: Evaluate required job results
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          LIGHTWEIGHT_ONLY: ${{ needs.scope.outputs.lightweight_only }}
+          DEPS_SECURITY_RESULT: ${{ needs.deps-security.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          OPEN_CORE_BOUNDARY_RESULT: ${{ needs.open-core-boundary.result }}
+          VENDORED_PACKS_RESULT: ${{ needs.vendored-packs.result }}
+          PERF_RESULT: ${{ needs.perf.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for pair in \
+            "scope:${SCOPE_RESULT}" \
+            "deps-security:${DEPS_SECURITY_RESULT}" \
+            "clippy:${CLIPPY_RESULT}" \
+            "open-core-boundary:${OPEN_CORE_BOUNDARY_RESULT}" \
+            "vendored-packs:${VENDORED_PACKS_RESULT}" \
+            "perf:${PERF_RESULT}" \
+            "test:${TEST_RESULT}" \
+            "ebpf-smoke-ubuntu:${EBPF_SMOKE_UBUNTU_RESULT}"
+          do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            case "${result}" in
+              success|skipped)
+                ;;
+              *)
+                echo "Required CI dependency ${name} ended with ${result}"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "lightweight_only=${LIGHTWEIGHT_ONLY}"
+          echo "All required CI jobs passed or were intentionally skipped."
