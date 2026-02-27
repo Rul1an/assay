@@ -12,6 +12,12 @@ name: Perf (PR compare)
 on:
   pull_request:
     types: [opened, reopened, edited, synchronize]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "benches/**"
+      - ".github/workflows/perf_pr.yml"
 
 permissions:
   pull-requests: write
