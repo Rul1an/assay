@@ -123,11 +123,14 @@ pub struct AdapterBatch {
 /// Error category for adapter failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdapterErrorKind {
     /// Invalid adapter configuration.
     Config,
     /// Measurement or contract failure while parsing/validating input.
     Measurement,
+    /// Host-side storage or attachment backend failure.
+    Infrastructure,
     /// Upstream protocol version unsupported by this adapter.
     UnsupportedProtocolVersion,
     /// Strict mode rejected a lossy conversion.

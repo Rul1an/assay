@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod attempts;
 pub mod baseline;
 pub mod cache;
