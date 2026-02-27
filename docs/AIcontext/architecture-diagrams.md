@@ -829,6 +829,8 @@ The following diagrams are automatically generated from the codebase by the
 flowchart TB
     subgraph workspace["Assay Workspace"]
         direction TB
+        assay_adapter_acp["assay-adapter-acp"]
+        assay_adapter_api["assay-adapter-api"]
         assay_cli["assay-cli"]
         assay_common["assay-common"]
         assay_core["assay-core"]
@@ -844,6 +846,9 @@ flowchart TB
         assay_xtask["assay-xtask"]
     end
 
+    assay_adapter_acp --> assay_adapter_api
+    assay_adapter_acp --> assay_evidence
+    assay_adapter_api --> assay_evidence
     assay_cli --> assay_common
     assay_cli --> assay_core
     assay_cli --> assay_evidence
