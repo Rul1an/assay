@@ -1,0 +1,14 @@
+{
+  "protocol": "acp",
+  "version": "2.11.0",
+  "event_type": "intent.created",
+  "timestamp": "2026-02-27T10:00:00Z",
+  "actor": {
+    "id": "agent-buyer-1",
+    "role": "buyer_agent"
+  },
+  "intent": {
+    "id": "intent-1001",
+    "kind": "checkout"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "protocol": "acp",
+  "version": "2.11.0",
+  "packet_id": "pkt-2001",
+  "event_type": "checkout.requested",
+  "timestamp": "2026-02-27T10:05:00Z",
+  "actor": {
+    "id": "agent-buyer-2",
+    "role": "buyer_agent"
+  },
+  "intent": {
+    "id": "intent-2001",
+    "kind": "checkout"
+  },
+  "attributes": {
+    "currency": "USD",
+    "amount": "42.00"
+  }
+}

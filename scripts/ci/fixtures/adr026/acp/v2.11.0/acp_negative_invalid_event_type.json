@@ -1,0 +1,16 @@
+{
+  "protocol": "acp",
+  "version": "2.11.0",
+  "packet_id": "pkt-3001",
+  "event_type": "intent.mutated",
+  "timestamp": "2026-02-27T10:10:00Z",
+  "actor": {
+    "id": "agent-buyer-3",
+    "role": "buyer_agent"
+  },
+  "intent": {
+    "id": "intent-3001",
+    "kind": "checkout"
+  },
+  "unknown_top_level": "should trigger lossiness"
+}

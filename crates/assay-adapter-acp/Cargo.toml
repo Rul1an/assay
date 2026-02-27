@@ -1,0 +1,21 @@
+[package]
+name = "assay-adapter-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "ACP protocol adapter for Assay evidence translation."
+readme.workspace = true
+
+[dependencies]
+assay-adapter-api = { path = "../assay-adapter-api", version = "2.18.0" }
+assay-evidence = { path = "../assay-evidence", version = "2.18.0" }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+chrono = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[lints]
+workspace = true
