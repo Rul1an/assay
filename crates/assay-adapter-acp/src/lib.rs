@@ -123,6 +123,7 @@ impl ProtocolAdapter for AcpAdapter {
             event_type.as_deref(),
             intent_id.as_deref(),
             intent_kind.as_deref(),
+            packet.get("attributes"),
             unmapped_fields_count,
         );
 
@@ -239,6 +240,7 @@ fn count_unmapped_top_level_fields(packet: &Value) -> u32 {
         .count() as u32
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_payload(
     packet_id: &str,
     actor_id: &str,
@@ -246,6 +248,7 @@ fn build_payload(
     upstream_event_type: Option<&str>,
     intent_id: Option<&str>,
     intent_kind: Option<&str>,
+    attributes: Option<&Value>,
     unmapped_fields_count: u32,
 ) -> Value {
     let mut payload = Map::new();
@@ -281,7 +284,26 @@ fn build_payload(
     if let Some(kind) = intent_kind {
         payload.insert("intent_kind".to_string(), Value::String(kind.to_string()));
     }
+    if let Some(attributes) = attributes {
+        payload.insert("attributes".to_string(), normalize_json(attributes));
+    }
     Value::Object(payload)
+}
+
+fn normalize_json(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<_> = map.keys().collect();
+            keys.sort();
+            let mut normalized = Map::new();
+            for key in keys {
+                normalized.insert(key.clone(), normalize_json(&map[key]));
+            }
+            Value::Object(normalized)
+        }
+        Value::Array(values) => Value::Array(values.iter().map(normalize_json).collect()),
+        _ => value.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -349,6 +371,101 @@ mod tests {
         assert_eq!(first.lossiness.lossiness_level, LossinessLevel::None);
         assert_eq!(digest_json(&first), digest_json(&second));
         assert_eq!(first.events[0].type_, "assay.adapter.acp.intent.created");
+        assert_eq!(
+            first.events[0].payload["attributes"]["merchant_id"],
+            Value::String("merchant-42".to_string())
+        );
+    }
+
+    #[test]
+    fn strict_checkout_fixture_preserves_attributes_without_lossiness() {
+        let adapter = AcpAdapter;
+        let writer = TestWriter;
+        let payload = fixture("acp_happy_checkout_requested.json");
+        let input = AdapterInput {
+            payload: &payload,
+            media_type: "application/json",
+            protocol_version: Some(SPEC_VERSION),
+        };
+
+        let batch = adapter
+            .convert(input, &ConvertOptions::default(), &writer)
+            .expect("strict checkout fixture should convert");
+
+        assert_eq!(batch.lossiness.lossiness_level, LossinessLevel::None);
+        assert_eq!(
+            batch.events[0].payload["attributes"],
+            serde_json::json!({
+                "amount": "42.00",
+                "currency": "USD"
+            })
+        );
+    }
+
+    #[test]
+    fn strict_attribute_order_normalizes_payload_but_keeps_raw_byte_hash_boundary() {
+        let adapter = AcpAdapter;
+        let writer = TestWriter;
+        let payload_a = br#"{
+          "protocol":"acp",
+          "version":"2.11.0",
+          "packet_id":"pkt-order-1",
+          "event_type":"checkout.requested",
+          "timestamp":"2026-02-27T10:05:00Z",
+          "actor":{"id":"agent-buyer-2","role":"buyer_agent"},
+          "intent":{"id":"intent-2001","kind":"checkout"},
+          "attributes":{"currency":"USD","amount":"42.00"}
+        }"#;
+        let payload_b = br#"{
+          "version":"2.11.0",
+          "protocol":"acp",
+          "packet_id":"pkt-order-1",
+          "timestamp":"2026-02-27T10:05:00Z",
+          "event_type":"checkout.requested",
+          "intent":{"kind":"checkout","id":"intent-2001"},
+          "actor":{"role":"buyer_agent","id":"agent-buyer-2"},
+          "attributes":{"amount":"42.00","currency":"USD"}
+        }"#;
+
+        let first = adapter
+            .convert(
+                AdapterInput {
+                    payload: payload_a,
+                    media_type: "application/json",
+                    protocol_version: Some(SPEC_VERSION),
+                },
+                &ConvertOptions::default(),
+                &writer,
+            )
+            .expect("first payload should convert");
+        let second = adapter
+            .convert(
+                AdapterInput {
+                    payload: payload_b,
+                    media_type: "application/json",
+                    protocol_version: Some(SPEC_VERSION),
+                },
+                &ConvertOptions::default(),
+                &writer,
+            )
+            .expect("second payload should convert");
+
+        assert_eq!(
+            digest_json(&first.events[0].payload),
+            digest_json(&second.events[0].payload)
+        );
+        assert_ne!(
+            first
+                .lossiness
+                .raw_payload_ref
+                .as_ref()
+                .map(|raw| raw.sha256.clone()),
+            second
+                .lossiness
+                .raw_payload_ref
+                .as_ref()
+                .map(|raw| raw.sha256.clone())
+        );
     }
 
     #[test]
