@@ -1,0 +1,20 @@
+{
+  "protocol": "a2a",
+  "version": "0.2.0",
+  "event_type": "agent.capabilities",
+  "timestamp": "2026-02-27T10:00:00Z",
+  "agent": {
+    "id": "agent://planner",
+    "name": "Planner",
+    "role": "assistant",
+    "capabilities": [
+      "tasks.update",
+      "artifacts.share",
+      "agent.describe"
+    ]
+  },
+  "attributes": {
+    "priority": "high",
+    "session": "alpha"
+  }
+}

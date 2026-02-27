@@ -1,0 +1,23 @@
+{
+  "protocol": "a2a",
+  "version": "0.2",
+  "event_type": "task.requested",
+  "timestamp": "2026-02-27T10:05:00Z",
+  "agent": {
+    "id": "agent://coordinator",
+    "role": "orchestrator"
+  },
+  "task": {
+    "id": "task-123",
+    "status": "requested",
+    "kind": "delegation"
+  },
+  "message": {
+    "id": "msg-1",
+    "role": "assistant"
+  },
+  "attributes": {
+    "priority": "urgent",
+    "channel": "web"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "protocol": "a2a",
+  "version": "0.2",
+  "event_type": "task.requested",
+  "timestamp": "2026-02-27T10:15:00Z",
+  "agent": {
+    "id": "agent://coordinator"
+  },
+  "task": {
+    "status": "requested",
+    "kind": "delegation"
+  },
+  "message": {
+    "id": "msg-2"
+  }
+}
