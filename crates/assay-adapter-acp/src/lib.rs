@@ -1,9 +1,9 @@
 //! ACP adapter MVP for translating selected ACP packets into canonical Assay evidence events.
 
 use assay_adapter_api::{
-    AdapterBatch, AdapterCapabilities, AdapterError, AdapterErrorKind, AdapterInput, AdapterResult,
-    AttachmentWriter, ConvertMode, ConvertOptions, LossinessLevel, LossinessReport,
-    ProtocolAdapter, ProtocolDescriptor,
+    AdapterBatch, AdapterCapabilities, AdapterDescriptor, AdapterError, AdapterErrorKind,
+    AdapterInput, AdapterResult, AttachmentWriter, ConvertMode, ConvertOptions, LossinessLevel,
+    LossinessReport, ProtocolAdapter, ProtocolDescriptor,
 };
 use assay_evidence::types::EvidenceEvent;
 use chrono::{DateTime, TimeZone, Utc};
@@ -14,12 +14,20 @@ const SPEC_VERSION: &str = "2.11.0";
 const SCHEMA_ID: &str = "acp.packet.v2_11_0";
 const SPEC_URL: &str = "https://example.invalid/specs/acp/2.11.0";
 const DEFAULT_TIME_SECS: i64 = 1_700_000_000;
+const ADAPTER_ID: &str = "assay-adapter-acp";
 
 /// ACP adapter MVP.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AcpAdapter;
 
 impl ProtocolAdapter for AcpAdapter {
+    fn adapter(&self) -> AdapterDescriptor {
+        AdapterDescriptor {
+            adapter_id: ADAPTER_ID,
+            adapter_version: env!("CARGO_PKG_VERSION"),
+        }
+    }
+
     fn protocol(&self) -> ProtocolDescriptor {
         ProtocolDescriptor {
             name: PROTOCOL_NAME.to_string(),
@@ -114,9 +122,12 @@ impl ProtocolAdapter for AcpAdapter {
             }
         };
 
+        let adapter = self.adapter();
         let timestamp = timestamp_field(&packet, "timestamp").unwrap_or_else(default_time);
         let run_id = format!("acp:{}", packet_id);
         let payload = build_payload(
+            adapter.adapter_id,
+            adapter.adapter_version,
             &packet_id,
             &actor_id,
             actor_role.as_deref(),
@@ -242,6 +253,8 @@ fn count_unmapped_top_level_fields(packet: &Value) -> u32 {
 
 #[allow(clippy::too_many_arguments)]
 fn build_payload(
+    adapter_id: &str,
+    adapter_version: &str,
     packet_id: &str,
     actor_id: &str,
     actor_role: Option<&str>,
@@ -253,7 +266,19 @@ fn build_payload(
 ) -> Value {
     let mut payload = Map::new();
     payload.insert(
+        "adapter_id".to_string(),
+        Value::String(adapter_id.to_string()),
+    );
+    payload.insert(
+        "adapter_version".to_string(),
+        Value::String(adapter_version.to_string()),
+    );
+    payload.insert(
         "protocol".to_string(),
+        Value::String(PROTOCOL_NAME.to_string()),
+    );
+    payload.insert(
+        "protocol_name".to_string(),
         Value::String(PROTOCOL_NAME.to_string()),
     );
     payload.insert(
@@ -371,6 +396,18 @@ mod tests {
         assert_eq!(first.lossiness.lossiness_level, LossinessLevel::None);
         assert_eq!(digest_json(&first), digest_json(&second));
         assert_eq!(first.events[0].type_, "assay.adapter.acp.intent.created");
+        assert_eq!(
+            first.events[0].payload["adapter_id"],
+            Value::String(ADAPTER_ID.to_string())
+        );
+        assert_eq!(
+            first.events[0].payload["adapter_version"],
+            Value::String(env!("CARGO_PKG_VERSION").to_string())
+        );
+        assert_eq!(
+            first.events[0].payload["protocol_name"],
+            Value::String(PROTOCOL_NAME.to_string())
+        );
         assert_eq!(
             first.events[0].payload["attributes"]["merchant_id"],
             Value::String("merchant-42".to_string())
@@ -515,6 +552,14 @@ mod tests {
         ));
         assert!(batch.lossiness.unmapped_fields_count >= 1);
         assert!(batch.lossiness.raw_payload_ref.is_some());
+        assert_eq!(
+            batch.events[0].payload["adapter_id"],
+            Value::String(ADAPTER_ID.to_string())
+        );
+        assert_eq!(
+            batch.events[0].payload["adapter_version"],
+            Value::String(env!("CARGO_PKG_VERSION").to_string())
+        );
     }
 
     #[test]

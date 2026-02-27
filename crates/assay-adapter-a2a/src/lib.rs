@@ -1,9 +1,9 @@
 //! A2A adapter MVP for translating selected A2A packets into canonical Assay evidence events.
 
 use assay_adapter_api::{
-    AdapterBatch, AdapterCapabilities, AdapterError, AdapterErrorKind, AdapterInput, AdapterResult,
-    AttachmentWriter, ConvertMode, ConvertOptions, LossinessLevel, LossinessReport,
-    ProtocolAdapter, ProtocolDescriptor,
+    AdapterBatch, AdapterCapabilities, AdapterDescriptor, AdapterError, AdapterErrorKind,
+    AdapterInput, AdapterResult, AttachmentWriter, ConvertMode, ConvertOptions, LossinessLevel,
+    LossinessReport, ProtocolAdapter, ProtocolDescriptor,
 };
 use assay_evidence::types::EvidenceEvent;
 use chrono::{DateTime, TimeZone, Utc};
@@ -15,12 +15,20 @@ const SUPPORTED_SPEC_VERSION_RANGE: &str = ">=0.2 <1.0";
 const SCHEMA_ID: &str = "a2a.message.v0_2";
 const SPEC_URL: &str = "https://google.github.io/A2A/";
 const DEFAULT_TIME_SECS: i64 = 1_700_100_000;
+const ADAPTER_ID: &str = "assay-adapter-a2a";
 
 /// A2A adapter MVP.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct A2aAdapter;
 
 impl ProtocolAdapter for A2aAdapter {
+    fn adapter(&self) -> AdapterDescriptor {
+        AdapterDescriptor {
+            adapter_id: ADAPTER_ID,
+            adapter_version: env!("CARGO_PKG_VERSION"),
+        }
+    }
+
     fn protocol(&self) -> ProtocolDescriptor {
         ProtocolDescriptor {
             name: PROTOCOL_NAME.to_string(),
@@ -164,6 +172,7 @@ impl ProtocolAdapter for A2aAdapter {
             }
         });
 
+        let adapter = self.adapter();
         let timestamp = timestamp_field(&packet, "timestamp").unwrap_or_else(default_time);
         let primary_id = primary_id_for_event(
             mapped_event_type,
@@ -174,6 +183,8 @@ impl ProtocolAdapter for A2aAdapter {
         );
         let run_id = format!("a2a:{primary_id}");
         let payload = build_payload(
+            adapter.adapter_id,
+            adapter.adapter_version,
             &version,
             event_type.as_deref(),
             &agent_id,
@@ -371,6 +382,8 @@ fn count_unmapped_top_level_fields(packet: &Value) -> u32 {
 
 #[allow(clippy::too_many_arguments)]
 fn build_payload(
+    adapter_id: &str,
+    adapter_version: &str,
     version: &str,
     upstream_event_type: Option<&str>,
     agent_id: &str,
@@ -390,7 +403,19 @@ fn build_payload(
 ) -> Value {
     let mut payload = Map::new();
     payload.insert(
+        "adapter_id".to_string(),
+        Value::String(adapter_id.to_string()),
+    );
+    payload.insert(
+        "adapter_version".to_string(),
+        Value::String(adapter_version.to_string()),
+    );
+    payload.insert(
         "protocol".to_string(),
+        Value::String(PROTOCOL_NAME.to_string()),
+    );
+    payload.insert(
+        "protocol_name".to_string(),
         Value::String(PROTOCOL_NAME.to_string()),
     );
     payload.insert(
@@ -544,9 +569,12 @@ mod tests {
     #[test]
     fn protocol_metadata_uses_exact_version_and_range_capability() {
         let adapter = A2aAdapter;
+        let descriptor = adapter.adapter();
         let protocol = adapter.protocol();
         let capabilities = adapter.capabilities();
 
+        assert_eq!(descriptor.adapter_id, ADAPTER_ID);
+        assert!(!descriptor.adapter_version.is_empty());
         assert_eq!(protocol.spec_version, "0.2.0");
         assert_eq!(
             capabilities.supported_spec_versions,
@@ -604,6 +632,18 @@ mod tests {
         assert_eq!(batch.events[0].type_, "assay.adapter.a2a.task.requested");
         assert_eq!(batch.events[0].subject.as_deref(), Some("task-123"));
         assert_eq!(batch.lossiness.lossiness_level, LossinessLevel::None);
+        assert_eq!(
+            batch.events[0].payload["adapter_id"],
+            Value::String(ADAPTER_ID.to_string())
+        );
+        assert_eq!(
+            batch.events[0].payload["adapter_version"],
+            Value::String(env!("CARGO_PKG_VERSION").to_string())
+        );
+        assert_eq!(
+            batch.events[0].payload["protocol_name"],
+            Value::String(PROTOCOL_NAME.to_string())
+        );
     }
 
     #[test]
@@ -698,6 +738,14 @@ mod tests {
             LossinessLevel::Low | LossinessLevel::High
         ));
         assert!(batch.lossiness.unmapped_fields_count >= 1);
+        assert_eq!(
+            batch.events[0].payload["adapter_id"],
+            Value::String(ADAPTER_ID.to_string())
+        );
+        assert_eq!(
+            batch.events[0].payload["adapter_version"],
+            Value::String(env!("CARGO_PKG_VERSION").to_string())
+        );
     }
 
     #[test]

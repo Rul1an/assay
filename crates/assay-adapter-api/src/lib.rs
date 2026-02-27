@@ -21,6 +21,15 @@ pub struct ProtocolDescriptor {
     pub spec_url: Option<String>,
 }
 
+/// Stable adapter implementation metadata exposed by each adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdapterDescriptor {
+    /// Stable adapter crate or implementation identifier.
+    pub adapter_id: &'static str,
+    /// Adapter build/version string.
+    pub adapter_version: &'static str,
+}
+
 /// Capabilities exposed by the adapter for review and routing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AdapterCapabilities {
@@ -154,6 +163,9 @@ pub trait AttachmentWriter {
 
 /// Stable contract implemented by protocol-specific adapters.
 pub trait ProtocolAdapter {
+    /// Return stable adapter implementation metadata.
+    fn adapter(&self) -> AdapterDescriptor;
+
     /// Return stable protocol metadata.
     fn protocol(&self) -> ProtocolDescriptor;
 
@@ -193,6 +205,13 @@ mod tests {
     struct StubAdapter;
 
     impl ProtocolAdapter for StubAdapter {
+        fn adapter(&self) -> AdapterDescriptor {
+            AdapterDescriptor {
+                adapter_id: "assay-adapter-acp",
+                adapter_version: env!("CARGO_PKG_VERSION"),
+            }
+        }
+
         fn protocol(&self) -> ProtocolDescriptor {
             ProtocolDescriptor {
                 name: "acp".to_string(),
@@ -285,5 +304,14 @@ mod tests {
             batch.lossiness.raw_payload_ref.expect("raw ref").size_bytes,
             19
         );
+    }
+
+    #[test]
+    fn adapter_descriptor_exposes_identity() {
+        let adapter = StubAdapter;
+        let descriptor = adapter.adapter();
+
+        assert_eq!(descriptor.adapter_id, "assay-adapter-acp");
+        assert!(!descriptor.adapter_version.is_empty());
     }
 }
