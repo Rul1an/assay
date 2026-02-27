@@ -191,6 +191,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | ✅ Complete (I1 closed-loop) |
 | **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | ✅ Complete (I1 closed-loop) |
 | **P2** | Closure Score & Completeness (ADR-025) | Medium | High | ✅ Complete (I2/I3 closed-loop) |
+| **P1** | Protocol Adapters (ADR-026) | Medium | High | ✅ Complete (ACP + A2A MVP) |
 | **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
 | **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
 | **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |

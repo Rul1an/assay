@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (February 2026)
+Accepted (February 2026; ACP and A2A open-core adapters implemented on `main`)
 
 ## Context
 
