@@ -21,6 +21,7 @@ We adopt an adapter-first strategy:
 - Implement protocol-specific adapters as separate crates such as `assay-adapter-acp` and later `assay-adapter-a2a`.
 - Keep adapter crates in open core because they are interoperability infrastructure, not enterprise workflow features.
 - Preserve raw protocol payloads via host-provided attachment writing and stable references instead of direct filesystem writes from adapters.
+- Freeze standalone distribution separately: current adapter crates remain workspace-internal OSS crates and are not published to crates.io until a dedicated distribution slice lands (see `ADR-026-Adapter-Distribution-Policy.md`).
 
 ### v1 execution model
 
