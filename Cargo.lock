@@ -118,6 +118,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "assay-adapter-a2a"
+version = "2.18.0"
+dependencies = [
+ "assay-adapter-api",
+]
+
+[[package]]
 name = "assay-adapter-acp"
 version = "2.18.0"
 dependencies = [
