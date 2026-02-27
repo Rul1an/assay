@@ -414,6 +414,7 @@
 
 ## [2026-02-27]
 
+- docs(adr011-012): sync signing boundary to open-core policy (#449) @Rul1an
 - docs(adr026): close adapter rollout with checklist + review pack (Step3) (#446) @Rul1an
 - feat(adr026): add ACP adapter MVP + conformance fixtures (Step2) (#445) @Rul1an
 - feat(adr026): add ACP adapter MVP + conformance fixtures (Step2) (#444) @Rul1an
