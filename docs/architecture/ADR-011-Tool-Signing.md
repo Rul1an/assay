@@ -86,10 +86,10 @@ We will implement **Sigstore-based keyless signing** as an enterprise extension 
 ### Signing Flow (CLI)
 
 ```bash
-# Keyless signing (recommended)
+# Keyless signing (enterprise advanced signing)
 assay tool sign --keyless tool-definition.json
 
-# Key-based signing (enterprise)
+# Local-key signing (open-core)
 assay tool sign --key private.pem tool-definition.json
 
 # Verify a signed tool
@@ -98,7 +98,7 @@ assay tool verify tool-definition.json
 # Verify with explicit trust requirements
 assay tool verify tool-definition.json --require-producer-trust policy.yaml
 
-# Verify and require Rekor transparency proof
+# Verify and require Rekor transparency proof (enterprise advanced signing)
 assay tool verify tool-definition.json --rekor-required
 ```
 
@@ -123,7 +123,7 @@ trust_anchors:
   - issuer: "https://accounts.google.com"
     subject: "*@mycompany.com"
 
-require_transparency: true
+require_transparency: true  # enterprise advanced signing
 allow_unsigned: false
 ```
 
@@ -377,7 +377,7 @@ This enables interoperability with other MCP security tools.
 
 ## Implementation Plan
 
-### Phase 1: Signing CLI (Week 1)
+### Phase 1: Enterprise Signing CLI (Week 1)
 - [ ] `assay tool sign --keyless` command
 - [ ] Fulcio integration for certificate issuance
 - [ ] Rekor integration for transparency logging
@@ -411,10 +411,10 @@ This enables interoperability with other MCP security tools.
 ## Consequences
 
 ### Positive
-- Provenance for all tool definitions
-- No key management for developers (keyless)
-- Transparency via public Rekor log
-- Interoperable with Sigstore ecosystem
+- Provenance for enterprise-managed tool definitions
+- No key management for enterprise developers using keyless mode
+- Transparency via Rekor for the enterprise advanced-signing extension
+- Interoperable with Sigstore ecosystem when that extension is enabled
 
 ### Negative
 - External dependency (Sigstore infrastructure)
