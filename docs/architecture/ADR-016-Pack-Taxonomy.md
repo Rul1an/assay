@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted (January 2026)
+Accepted (January 2026; boundary sync February 2026)
+
+## Status Sync (2026-02-26)
+
+- `soc2-baseline` is implemented in open core (`packs/open/soc2-baseline/`) and built into `assay-evidence`.
+- `soc2-pro` remains enterprise/commercial and is intentionally out of open-core scope.
 
 ## Context
 
@@ -48,7 +53,7 @@ Basic compliance checks that map directly to regulatory requirements:
 | Pack | Description | Rules |
 |------|-------------|-------|
 | `eu-ai-act-baseline` | Article 12(1) + 12(2)(a)(b)(c) | EU12-001 through EU12-004 |
-| `soc2-baseline` | Basic control mapping | (Future) |
+| `soc2-baseline` | SOC 2 Common Criteria baseline mapping | Implemented (see ADR-022) |
 
 **Baseline pack criteria**:
 - Direct mapping to source regulation text
