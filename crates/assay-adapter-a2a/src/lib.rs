@@ -10,7 +10,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{Map, Value};
 
 const PROTOCOL_NAME: &str = "a2a";
-const SPEC_VERSION_RANGE: &str = ">=0.2 <1.0";
+const PROTOCOL_VERSION: &str = "0.2.0";
+const SUPPORTED_SPEC_VERSION_RANGE: &str = ">=0.2 <1.0";
 const SCHEMA_ID: &str = "a2a.message.v0_2";
 const SPEC_URL: &str = "https://google.github.io/A2A/";
 const DEFAULT_TIME_SECS: i64 = 1_700_100_000;
@@ -23,7 +24,7 @@ impl ProtocolAdapter for A2aAdapter {
     fn protocol(&self) -> ProtocolDescriptor {
         ProtocolDescriptor {
             name: PROTOCOL_NAME.to_string(),
-            spec_version: SPEC_VERSION_RANGE.to_string(),
+            spec_version: PROTOCOL_VERSION.to_string(),
             schema_id: Some(SCHEMA_ID.to_string()),
             spec_url: Some(SPEC_URL.to_string()),
         }
@@ -38,7 +39,7 @@ impl ProtocolAdapter for A2aAdapter {
                 "assay.adapter.a2a.artifact.shared".to_string(),
                 "assay.adapter.a2a.message".to_string(),
             ],
-            supported_spec_versions: vec![SPEC_VERSION_RANGE.to_string()],
+            supported_spec_versions: vec![SUPPORTED_SPEC_VERSION_RANGE.to_string()],
             supports_strict: true,
             supports_lenient: true,
         }
@@ -538,6 +539,19 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(encoded);
         hex::encode(hasher.finalize())
+    }
+
+    #[test]
+    fn protocol_metadata_uses_exact_version_and_range_capability() {
+        let adapter = A2aAdapter;
+        let protocol = adapter.protocol();
+        let capabilities = adapter.capabilities();
+
+        assert_eq!(protocol.spec_version, "0.2.0");
+        assert_eq!(
+            capabilities.supported_spec_versions,
+            vec![">=0.2 <1.0".to_string()]
+        );
     }
 
     #[test]
