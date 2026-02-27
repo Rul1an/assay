@@ -123,6 +123,7 @@ pub struct AdapterBatch {
 /// Error category for adapter failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdapterErrorKind {
     /// Invalid adapter configuration.
     Config,

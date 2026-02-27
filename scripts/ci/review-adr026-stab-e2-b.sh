@@ -13,7 +13,9 @@ ALLOWLIST=(
   "crates/assay-core/Cargo.toml"
   "crates/assay-core/src/attachments.rs"
   "crates/assay-core/src/lib.rs"
+  "docs/architecture/ADR-026-CANONICALIZATION-HASH-BOUNDARY.md"
   "scripts/ci/review-adr026-stab-e2-b.sh"
+  "scripts/ci/review-adr026-stab-e3-a.sh"
 )
 
 echo "[review] allowlist-only diff vs $BASE_REF"

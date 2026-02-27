@@ -28,10 +28,25 @@ impl AttachmentWritePolicy {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        Self {
+        Self::try_new(max_payload_bytes, allowed_media_types)
+            .expect("attachment policy allowlist entries must be valid media types")
+    }
+
+    /// Create a new attachment policy with explicit validation errors.
+    pub fn try_new<I, S>(max_payload_bytes: u64, allowed_media_types: I) -> AdapterResult<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let allowed_media_types = allowed_media_types
+            .into_iter()
+            .map(|media_type| canonicalize_media_type(&media_type.into()))
+            .collect::<AdapterResult<BTreeSet<_>>>()?;
+
+        Ok(Self {
             max_payload_bytes,
-            allowed_media_types: allowed_media_types.into_iter().map(Into::into).collect(),
-        }
+            allowed_media_types,
+        })
     }
 
     fn validate(&self, payload: &[u8], media_type: &str) -> AdapterResult<String> {
@@ -82,7 +97,7 @@ impl FilesystemAttachmentWriter {
 
     /// Resolve the stored payload path for a digest.
     #[must_use]
-    pub fn stored_path(&self, sha256: &str) -> PathBuf {
+    fn stored_path(&self, sha256: &str) -> PathBuf {
         let shard = &sha256[..2];
         self.root.join(shard).join(sha256)
     }
@@ -171,7 +186,13 @@ fn canonicalize_media_type(media_type: &str) -> AdapterResult<String> {
     let valid = canonical
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'+' | b'-'));
-    if !valid || !canonical.contains('/') {
+    let Some((type_, subtype)) = canonical.split_once('/') else {
+        return Err(AdapterError::new(
+            AdapterErrorKind::Measurement,
+            "attachment media type is invalid",
+        ));
+    };
+    if !valid || type_.is_empty() || subtype.is_empty() || subtype.contains('/') {
         return Err(AdapterError::new(
             AdapterErrorKind::Measurement,
             "attachment media type is invalid",
@@ -238,6 +259,38 @@ mod tests {
 
         let err = writer
             .write_raw_payload(br#"{"ok":true}"#, "not a media type")
+            .unwrap_err();
+
+        assert_eq!(err.kind, AdapterErrorKind::Measurement);
+    }
+
+    #[test]
+    fn attachment_policy_canonicalizes_allowlist_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = AttachmentWritePolicy::try_new(
+            1024,
+            [
+                "Application/JSON; charset=utf-8",
+                "application/octet-stream",
+            ],
+        )
+        .unwrap();
+        let writer = FilesystemAttachmentWriter::new(dir.path(), policy);
+
+        let raw_ref = writer
+            .write_raw_payload(br#"{"ok":true}"#, "application/json")
+            .unwrap();
+
+        assert_eq!(raw_ref.media_type, "application/json");
+    }
+
+    #[test]
+    fn attachment_writer_rejects_structurally_invalid_media_type_as_measurement() {
+        let dir = tempfile::tempdir().unwrap();
+        let writer = FilesystemAttachmentWriter::new(dir.path(), policy());
+
+        let err = writer
+            .write_raw_payload(br#"{"ok":true}"#, "application/json/extra")
             .unwrap_err();
 
         assert_eq!(err.kind, AdapterErrorKind::Measurement);
