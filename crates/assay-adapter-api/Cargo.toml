@@ -1,0 +1,18 @@
+[package]
+name = "assay-adapter-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Protocol adapter API contracts for Assay evidence translation."
+readme.workspace = true
+
+[dependencies]
+assay-evidence = { path = "../assay-evidence", version = "2.18.0" }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
