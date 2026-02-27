@@ -128,6 +128,8 @@ pub enum AdapterErrorKind {
     Config,
     /// Measurement or contract failure while parsing/validating input.
     Measurement,
+    /// Host-side storage or attachment backend failure.
+    Infrastructure,
     /// Upstream protocol version unsupported by this adapter.
     UnsupportedProtocolVersion,
     /// Strict mode rejected a lossy conversion.

@@ -222,6 +222,7 @@ name = "assay-core"
 version = "2.18.0"
 dependencies = [
  "anyhow",
+ "assay-adapter-api",
  "assay-common",
  "async-trait",
  "base64",
