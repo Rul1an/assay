@@ -13,6 +13,8 @@ assay-evidence = { path = "../assay-evidence", version = "2.18.0" }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [lints]
 workspace = true
