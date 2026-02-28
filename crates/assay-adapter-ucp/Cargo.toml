@@ -1,0 +1,15 @@
+[package]
+name = "assay-adapter-ucp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "UCP protocol adapter for Assay evidence translation."
+readme.workspace = true
+
+[dependencies]
+assay-adapter-api = { path = "../assay-adapter-api", version = "2.18.0" }
+
+[lints]
+workspace = true
