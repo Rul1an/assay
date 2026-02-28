@@ -8,6 +8,7 @@ cd "$ROOT"
 git rev-parse --verify "$BASE_REF" >/dev/null
 
 ALLOWLIST=(
+  "Cargo.lock"
   "crates/assay-adapter-api/Cargo.toml"
   "crates/assay-adapter-api/src/canonical.rs"
   "crates/assay-adapter-api/src/lib.rs"
