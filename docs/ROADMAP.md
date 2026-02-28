@@ -414,10 +414,15 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 | `assay-adapter-ucp` | Universal Commerce Protocol | Google/Shopify commerce journeys |
 | `assay-adapter-a2a` | Agent2Agent | Agent discovery/tasks/messages |
 
-- [ ] **Adapter trait**: Common interface for protocol → EvidenceEvent mapping
-- [ ] **ACP adapter**: Tool calls, checkout events, payment intents (leverages v2.11.0 mandate support)
+- [x] **Adapter trait**: Common interface for protocol → EvidenceEvent mapping
+- [x] **ACP adapter**: Tool calls, checkout events, payment intents (leverages v2.11.0 mandate support)
 - [ ] **UCP adapter**: Discover/buy/post-purchase state transitions
-- [ ] **A2A adapter**: Agent capabilities, task delegation, artifacts
+- [x] **A2A adapter**: Agent capabilities, task delegation, artifacts
+
+Status on `main`:
+- `assay-adapter-api`, `assay-adapter-acp`, and `assay-adapter-a2a` are merged in open core.
+- ADR-026 stabilization through E4 is merged on `main` (metadata identity, lossiness preservation, host attachment policy, canonical digests, parser hardening).
+- `assay-adapter-ucp` remains the next protocol-adapter implementation gap in this roadmap section.
 
 **Why adapters:** The market is fragmenting (ACP vs UCP vs AP2 vs x402). Assay's value is protocol-agnostic governance, not protocol lock-in.
 
