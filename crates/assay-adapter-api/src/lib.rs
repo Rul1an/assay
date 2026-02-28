@@ -2,12 +2,14 @@
 //! into canonical Assay evidence events.
 
 mod canonical;
+mod shape;
 
 use assay_evidence::types::EvidenceEvent;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use canonical::{canonical_bytes, canonical_json_bytes, digest_canonical_json};
+pub use shape::validate_json_shape;
 
 /// Result type for adapter operations.
 pub type AdapterResult<T> = Result<T, AdapterError>;
@@ -65,6 +67,10 @@ pub struct ConvertOptions {
     pub mode: ConvertMode,
     /// Optional payload size ceiling enforced before deep parsing.
     pub max_payload_bytes: Option<u64>,
+    /// Optional maximum JSON nesting depth accepted during traversal.
+    pub max_json_depth: Option<u64>,
+    /// Optional maximum JSON array length accepted during traversal.
+    pub max_array_length: Option<u64>,
 }
 
 /// Raw protocol input supplied to an adapter.
@@ -301,6 +307,8 @@ mod tests {
                 &ConvertOptions {
                     mode: ConvertMode::Lenient,
                     max_payload_bytes: Some(4096),
+                    max_json_depth: None,
+                    max_array_length: None,
                 },
                 &writer,
             )
