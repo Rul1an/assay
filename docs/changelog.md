@@ -456,6 +456,14 @@
 - docs(adr026): freeze parser hardening boundary + reviewer gate (Stab E4A) (#467) @Rul1an
 - feat(adr026): canonicalize event digests and enforce key-order independence (Stab E3B) (#466) @Rul1an
 - feat(adr026): canonicalize event digests and enforce key-order independence (Stab E3B) (#465) @Rul1an
+- docs(adr026): freeze UCP follow-up contract + crate skeleton (UCP Step1) (#473) @Rul1an
+- docs(adr026): sync accepted status and roadmap progress (#471) @Rul1an
+- ci: auto-merge generated docs update PRs (#470) @Rul1an
+- docs(adr026): close parser hardening rollout with checklist and review pack (Stab E4C) (#469) @Rul1an
+- feat(adr026): harden adapter parser caps and property tests (Stab E4B) (#468) @Rul1an
+- docs(adr026): freeze parser hardening boundary + reviewer gate (Stab E4A) (#467) @Rul1an
+- feat(adr026): canonicalize event digests and enforce key-order independence (Stab E3B) (#466) @Rul1an
+- feat(adr026): canonicalize event digests and enforce key-order independence (Stab E3B) (#465) @Rul1an
 ## [2026-02-28]
 
 - docs(adr026): close parser hardening rollout with checklist and review pack (Stab E4C) (#469) @Rul1an
