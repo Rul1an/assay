@@ -158,6 +158,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "assay-adapter-ucp"
+version = "2.18.0"
+dependencies = [
+ "assay-adapter-api",
+]
+
+[[package]]
 name = "assay-cli"
 version = "2.18.0"
 dependencies = [
