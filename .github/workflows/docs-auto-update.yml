@@ -16,6 +16,7 @@ on:
         type: boolean
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -26,6 +27,7 @@ jobs:
     # Only run on main repo, not forks
     if: github.repository == 'Rul1an/assay'
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -72,6 +74,7 @@ jobs:
 
       # Requires repo Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests" enabled
       - name: Create Pull Request
+        id: create_pr
         if: steps.changes.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
@@ -94,3 +97,15 @@ jobs:
           branch: docs/auto-update
           delete-branch: true
           labels: documentation,automated
+
+      - name: Trigger CI for docs PR branch
+        if: steps.changes.outputs.has_changes == 'true' && steps.create_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref docs/auto-update
+
+      - name: Enable auto-merge for docs PR
+        if: steps.changes.outputs.has_changes == 'true' && steps.create_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr merge "${{ steps.create_pr.outputs.pull-request-number }}" --auto --squash
