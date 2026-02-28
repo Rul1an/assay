@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (February 2026)
+Accepted (February 2026; ACP + A2A adapter rollout and E0-E4 stabilization merged on `main`)
 
 ## Context
 
@@ -151,6 +151,19 @@ Rationale:
 - ADR includes explicit negative-fixture conformance requirements
 - ADR freezes ACP as MVP and A2A as follow-up
 - No workflow or runtime behavior changes are introduced in this slice
+
+## Implementation Status
+
+Current status on `main`:
+- `assay-adapter-api` exists as the shared adapter contract surface
+- `assay-adapter-acp` is implemented with strict/lenient conversion, fixtures, and conformance tests
+- `assay-adapter-a2a` is implemented with strict/lenient conversion, fixtures, and conformance tests
+- Stabilization through E4 is merged:
+  - E0: adapter identity metadata
+  - E1: ACP lossiness preservation
+  - E2: host-side `AttachmentWriter` policy
+  - E3: canonical event digests with bytes-exact raw payload hashes
+  - E4: parser caps and property-based hardening
 
 ## Consequences
 
