@@ -1,9 +1,9 @@
 //! ACP adapter MVP for translating selected ACP packets into canonical Assay evidence events.
 
 use assay_adapter_api::{
-    AdapterBatch, AdapterCapabilities, AdapterDescriptor, AdapterError, AdapterErrorKind,
-    AdapterInput, AdapterResult, AttachmentWriter, ConvertMode, ConvertOptions, LossinessLevel,
-    LossinessReport, ProtocolAdapter, ProtocolDescriptor,
+    validate_json_shape, AdapterBatch, AdapterCapabilities, AdapterDescriptor, AdapterError,
+    AdapterErrorKind, AdapterInput, AdapterResult, AttachmentWriter, ConvertMode, ConvertOptions,
+    LossinessLevel, LossinessReport, ProtocolAdapter, ProtocolDescriptor,
 };
 use assay_evidence::types::EvidenceEvent;
 use chrono::{DateTime, TimeZone, Utc};
@@ -67,6 +67,7 @@ impl ProtocolAdapter for AcpAdapter {
 
         let raw_ref = attachments.write_raw_payload(input.payload, input.media_type)?;
         let packet = parse_packet(input.payload)?;
+        validate_json_shape(&packet, options.max_json_depth, options.max_array_length)?;
         validate_protocol_version(&packet)?;
 
         let mut notes = Vec::new();
@@ -337,6 +338,7 @@ mod tests {
     use assay_adapter_api::{
         digest_canonical_json, AttachmentWriter, ConvertMode, ConvertOptions, RawPayloadRef,
     };
+    use proptest::prelude::*;
     use sha2::Digest;
     use std::fs;
     use std::path::PathBuf;
@@ -364,6 +366,20 @@ mod tests {
 
     fn fixture(name: &str) -> Vec<u8> {
         fs::read(fixture_dir().join(name)).expect("fixture must exist")
+    }
+
+    fn reserved_key(key: &str) -> bool {
+        matches!(
+            key,
+            "protocol"
+                | "version"
+                | "packet_id"
+                | "event_type"
+                | "timestamp"
+                | "actor"
+                | "intent"
+                | "attributes"
+        )
     }
 
     #[test]
@@ -534,6 +550,8 @@ mod tests {
                 &ConvertOptions {
                     mode: ConvertMode::Lenient,
                     max_payload_bytes: Some(8_192),
+                    max_json_depth: None,
+                    max_array_length: None,
                 },
                 &writer,
             )
@@ -574,6 +592,8 @@ mod tests {
                 &ConvertOptions {
                     mode: ConvertMode::Lenient,
                     max_payload_bytes: Some(8_192),
+                    max_json_depth: None,
+                    max_array_length: None,
                 },
                 &writer,
             )
@@ -598,10 +618,133 @@ mod tests {
                 &ConvertOptions {
                     mode: ConvertMode::Strict,
                     max_payload_bytes: Some(32),
+                    max_json_depth: None,
+                    max_array_length: None,
                 },
                 &writer,
             )
             .expect_err("oversized payload must fail measurement contract");
         assert_eq!(err.kind, AdapterErrorKind::Measurement);
+    }
+
+    #[test]
+    fn invalid_utf8_payload_fails_measurement_contract() {
+        let adapter = AcpAdapter;
+        let writer = TestWriter;
+        let payload = [0xff, 0xfe, 0xfd];
+        let input = AdapterInput {
+            payload: &payload,
+            media_type: "application/json",
+            protocol_version: Some(SPEC_VERSION),
+        };
+
+        let err = adapter
+            .convert(input, &ConvertOptions::default(), &writer)
+            .expect_err("invalid UTF-8 must fail measurement contract");
+        assert_eq!(err.kind, AdapterErrorKind::Measurement);
+    }
+
+    #[test]
+    fn excessive_json_depth_fails_measurement_contract() {
+        let adapter = AcpAdapter;
+        let writer = TestWriter;
+        let payload = br#"{
+          "protocol":"acp",
+          "version":"2.11.0",
+          "packet_id":"pkt-depth-1",
+          "event_type":"intent.created",
+          "timestamp":"2026-02-27T10:00:00Z",
+          "actor":{"id":"agent-1","role":"buyer_agent"},
+          "intent":{"id":"intent-1","kind":"checkout"},
+          "attributes":{"nested":{"deeper":{"value":"x"}}}
+        }"#;
+
+        let err = adapter
+            .convert(
+                AdapterInput {
+                    payload,
+                    media_type: "application/json",
+                    protocol_version: Some(SPEC_VERSION),
+                },
+                &ConvertOptions {
+                    mode: ConvertMode::Strict,
+                    max_payload_bytes: Some(8_192),
+                    max_json_depth: Some(4),
+                    max_array_length: None,
+                },
+                &writer,
+            )
+            .expect_err("deeply nested payload must fail");
+        assert_eq!(err.kind, AdapterErrorKind::Measurement);
+        assert!(err.message.contains("max_json_depth"));
+    }
+
+    #[test]
+    fn excessive_array_length_fails_measurement_contract() {
+        let adapter = AcpAdapter;
+        let writer = TestWriter;
+        let payload = br#"{
+          "protocol":"acp",
+          "version":"2.11.0",
+          "packet_id":"pkt-array-1",
+          "event_type":"checkout.requested",
+          "timestamp":"2026-02-27T10:05:00Z",
+          "actor":{"id":"agent-2","role":"buyer_agent"},
+          "intent":{"id":"intent-2","kind":"checkout"},
+          "attributes":{"items":[1,2,3,4]}
+        }"#;
+
+        let err = adapter
+            .convert(
+                AdapterInput {
+                    payload,
+                    media_type: "application/json",
+                    protocol_version: Some(SPEC_VERSION),
+                },
+                &ConvertOptions {
+                    mode: ConvertMode::Strict,
+                    max_payload_bytes: Some(8_192),
+                    max_json_depth: None,
+                    max_array_length: Some(3),
+                },
+                &writer,
+            )
+            .expect_err("oversized array must fail");
+        assert_eq!(err.kind, AdapterErrorKind::Measurement);
+        assert!(err.message.contains("max_array_length"));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn strict_unknown_top_level_fields_account_for_lossiness(
+            extras in proptest::collection::btree_map("[a-z_]{1,12}", "[a-z0-9_-]{0,12}", 1..5)
+        ) {
+            let mut packet: Value = serde_json::from_slice(&fixture("acp_happy_intent_created.json")).unwrap();
+            let object = packet.as_object_mut().unwrap();
+            let mut inserted = 0u32;
+
+            for (key, value) in extras {
+                prop_assume!(!reserved_key(&key));
+                object.insert(key, Value::String(value));
+                inserted += 1;
+            }
+
+            let payload = serde_json::to_vec(&packet).unwrap();
+            let adapter = AcpAdapter;
+            let writer = TestWriter;
+            let batch = adapter.convert(
+                AdapterInput {
+                    payload: &payload,
+                    media_type: "application/json",
+                    protocol_version: Some(SPEC_VERSION),
+                },
+                &ConvertOptions::default(),
+                &writer,
+            ).unwrap();
+
+            prop_assert!(batch.lossiness.unmapped_fields_count >= inserted);
+        }
     }
 }
