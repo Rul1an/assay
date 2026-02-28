@@ -528,9 +528,8 @@ fn normalize_json(value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assay_adapter_api::RawPayloadRef;
-    use serde::Serialize;
-    use sha2::{Digest, Sha256};
+    use assay_adapter_api::{digest_canonical_json, RawPayloadRef};
+    use sha2::Digest;
     use std::{fs, path::PathBuf};
 
     struct TestWriter;
@@ -541,10 +540,8 @@ mod tests {
             payload: &[u8],
             media_type: &str,
         ) -> AdapterResult<RawPayloadRef> {
-            let mut hasher = Sha256::new();
-            hasher.update(payload);
             Ok(RawPayloadRef {
-                sha256: hex::encode(hasher.finalize()),
+                sha256: hex::encode(sha2::Sha256::digest(payload)),
                 size_bytes: payload.len() as u64,
                 media_type: media_type.to_string(),
             })
@@ -557,13 +554,6 @@ mod tests {
 
     fn fixture(name: &str) -> Vec<u8> {
         fs::read(fixture_dir().join(name)).expect("fixture must exist")
-    }
-
-    fn digest_json<T: Serialize>(value: &T) -> String {
-        let encoded = serde_json::to_vec(value).expect("serializes");
-        let mut hasher = Sha256::new();
-        hasher.update(encoded);
-        hex::encode(hasher.finalize())
     }
 
     #[test]
@@ -606,10 +596,77 @@ mod tests {
             "assay.adapter.a2a.agent.capabilities"
         );
         assert_eq!(first.lossiness.lossiness_level, LossinessLevel::None);
-        assert_eq!(digest_json(&first), digest_json(&second));
+        assert_eq!(
+            digest_canonical_json(&first),
+            digest_canonical_json(&second)
+        );
         assert_eq!(
             first.events[0].payload["agent"]["capabilities"],
             serde_json::json!(["agent.describe", "artifacts.share", "tasks.update"])
+        );
+    }
+
+    #[test]
+    fn strict_key_order_independent_event_digest_keeps_raw_hash_bytes_exact() {
+        let adapter = A2aAdapter;
+        let writer = TestWriter;
+        let payload_a = br#"{
+          "protocol":"a2a",
+          "version":"0.2.0",
+          "event_type":"task.requested",
+          "timestamp":"2026-02-27T11:05:00Z",
+          "agent":{"id":"agent-7","name":"Agent Seven","role":"planner","capabilities":["tasks.update","agent.describe"]},
+          "task":{"id":"task-xyz","status":"queued","kind":"analysis"},
+          "attributes":{"priority":"high","tenant":"acme"}
+        }"#;
+        let payload_b = br#"{
+          "version":"0.2.0",
+          "protocol":"a2a",
+          "timestamp":"2026-02-27T11:05:00Z",
+          "event_type":"task.requested",
+          "task":{"kind":"analysis","status":"queued","id":"task-xyz"},
+          "agent":{"role":"planner","name":"Agent Seven","id":"agent-7","capabilities":["agent.describe","tasks.update"]},
+          "attributes":{"tenant":"acme","priority":"high"}
+        }"#;
+
+        let first = adapter
+            .convert(
+                AdapterInput {
+                    payload: payload_a,
+                    media_type: "application/json",
+                    protocol_version: Some("0.2.0"),
+                },
+                &ConvertOptions::default(),
+                &writer,
+            )
+            .expect("first payload should convert");
+        let second = adapter
+            .convert(
+                AdapterInput {
+                    payload: payload_b,
+                    media_type: "application/json",
+                    protocol_version: Some("0.2.0"),
+                },
+                &ConvertOptions::default(),
+                &writer,
+            )
+            .expect("second payload should convert");
+
+        assert_eq!(
+            digest_canonical_json(&first.events[0].payload),
+            digest_canonical_json(&second.events[0].payload)
+        );
+        assert_ne!(
+            first
+                .lossiness
+                .raw_payload_ref
+                .as_ref()
+                .map(|raw| raw.sha256.clone()),
+            second
+                .lossiness
+                .raw_payload_ref
+                .as_ref()
+                .map(|raw| raw.sha256.clone())
         );
     }
 
