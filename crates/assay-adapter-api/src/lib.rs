@@ -1,9 +1,13 @@
 //! Stable contracts for protocol adapters that translate external protocol payloads
 //! into canonical Assay evidence events.
 
+mod canonical;
+
 use assay_evidence::types::EvidenceEvent;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use canonical::{canonical_bytes, canonical_json_bytes, digest_canonical_json};
 
 /// Result type for adapter operations.
 pub type AdapterResult<T> = Result<T, AdapterError>;

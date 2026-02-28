@@ -148,8 +148,10 @@ name = "assay-adapter-api"
 version = "2.18.0"
 dependencies = [
  "assay-evidence",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
