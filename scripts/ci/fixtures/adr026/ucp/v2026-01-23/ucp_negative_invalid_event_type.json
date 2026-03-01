@@ -1,0 +1,15 @@
+{
+  "protocol": "ucp",
+  "version": "v2026-01-23",
+  "event_type": "offer.repriced",
+  "timestamp": "2026-02-28T10:25:00Z",
+  "actor": {
+    "id": "merchant-agent-9",
+    "role": "merchant_agent"
+  },
+  "message": {
+    "id": "message-900",
+    "kind": "offer"
+  },
+  "unknown_top_level": "should trigger lossiness"
+}

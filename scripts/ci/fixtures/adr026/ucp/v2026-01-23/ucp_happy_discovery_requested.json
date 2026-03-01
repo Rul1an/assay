@@ -1,0 +1,19 @@
+{
+  "protocol": "ucp",
+  "version": "v2026-01-23",
+  "event_type": "discovery.requested",
+  "timestamp": "2026-02-28T10:00:00Z",
+  "actor": {
+    "id": "buyer-agent-1",
+    "role": "buyer_agent"
+  },
+  "discovery": {
+    "id": "discovery-100",
+    "query": "running shoes",
+    "marketplace": "shop.example"
+  },
+  "attributes": {
+    "locale": "en-US",
+    "channel": "web"
+  }
+}
