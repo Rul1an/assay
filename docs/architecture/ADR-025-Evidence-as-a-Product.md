@@ -1,7 +1,7 @@
 # ADR-025: Evidence-as-a-Product — Reliability Surfaces, Completeness/Closure, and Portable Verifiability
 
 ## Status
-Proposed (Feb 2026; rollout slices I1/I2/I3 implemented on `main`)
+Accepted (March 2026; I1/I2/I3 rollout slices implemented and closed-loop on `main`)
 
 ## Status Sync (2026-02-26)
 - I1 closed-loop on `main`: soak/reliability surface + readiness + release-lane enforcement.
