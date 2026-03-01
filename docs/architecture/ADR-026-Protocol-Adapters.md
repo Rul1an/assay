@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (February 2026; ACP + A2A adapter rollout and E0-E4 stabilization merged on `main`)
+Accepted (February 2026; ACP + A2A + UCP adapter rollout and E0-E4 stabilization merged on `main`)
 
 ## Context
 
@@ -158,6 +158,7 @@ Current status on `main`:
 - `assay-adapter-api` exists as the shared adapter contract surface
 - `assay-adapter-acp` is implemented with strict/lenient conversion, fixtures, and conformance tests
 - `assay-adapter-a2a` is implemented with strict/lenient conversion, fixtures, and conformance tests
+- `assay-adapter-ucp` is implemented with strict/lenient conversion, fixtures, and conformance tests
 - Stabilization through E4 is merged:
   - E0: adapter identity metadata
   - E1: ACP lossiness preservation
