@@ -8,11 +8,8 @@ cd "$ROOT"
 git rev-parse --verify "$BASE_REF" >/dev/null
 
 ALLOWLIST=(
-  "docs/architecture/ADR-025-I2-CLOSURE-RELEASE-INTEGRATION.md"
-  "docs/architecture/ADR-025-I3-OTEL-RELEASE-INTEGRATION.md"
-  "docs/architecture/ADR-025-I2-STABILIZATION-POLICY.md"
-  "docs/architecture/ADR-025-I3-STABILIZATION-POLICY.md"
-  "docs/ROADMAP.md"
+  "docs/architecture/ADR-025-Evidence-as-a-Product.md"
+  "docs/architecture/adrs.md"
   "scripts/ci/review-adr025-status-sync.sh"
 )
 
@@ -36,15 +33,23 @@ git diff --name-only "$BASE_REF"...HEAD | while IFS= read -r f; do
   fi
 done
 
-echo "[review] status markers present"
-rg -n "Status Sync \(2026-02-25\)" docs/architecture/ADR-025-I2-CLOSURE-RELEASE-INTEGRATION.md >/dev/null || { echo "FAIL: missing I2 Step4 status sync"; exit 1; }
-rg -n "Status Sync \(2026-02-25\)" docs/architecture/ADR-025-I3-OTEL-RELEASE-INTEGRATION.md >/dev/null || { echo "FAIL: missing I3 Step4 status sync"; exit 1; }
-rg -n "Status Sync \(2026-02-25\)" docs/architecture/ADR-025-I2-STABILIZATION-POLICY.md >/dev/null || { echo "FAIL: missing I2 stabilization status sync"; exit 1; }
-rg -n "Status Sync \(2026-02-25\)" docs/architecture/ADR-025-I3-STABILIZATION-POLICY.md >/dev/null || { echo "FAIL: missing I3 stabilization status sync"; exit 1; }
+echo "[review] status markers"
+rg -n '^Accepted \(March 2026; I1/I2/I3 rollout slices implemented and closed-loop on `main`\)$' \
+  docs/architecture/ADR-025-Evidence-as-a-Product.md >/dev/null || {
+  echo "FAIL: ADR-025 accepted status missing"
+  exit 1
+}
 
-echo "[review] roadmap statuses updated"
-rg -n "Audit Kit \(Manifest/Provenance\) \(ADR-025\).*Complete" docs/ROADMAP.md >/dev/null || { echo "FAIL: roadmap audit kit row not updated"; exit 1; }
-rg -n "Soak Testing & Pass\^k \(ADR-025\).*Complete" docs/ROADMAP.md >/dev/null || { echo "FAIL: roadmap soak row not updated"; exit 1; }
-rg -n "Closure Score & Completeness \(ADR-025\).*Complete" docs/ROADMAP.md >/dev/null || { echo "FAIL: roadmap closure row not updated"; exit 1; }
+rg -n '\| \[ADR-025\]\(\./ADR-025-Evidence-as-a-Product.md\) \| Evidence-as-a-Product \| Accepted \| \*\*P1/P2\*\* \|' \
+  docs/architecture/adrs.md >/dev/null || {
+  echo "FAIL: adrs index missing accepted ADR-025 row"
+  exit 1
+}
+
+rg -n 'ADR-025.*Accepted.*I1/I2/I3 slices merged on `main`; formal accept complete' \
+  docs/architecture/adrs.md >/dev/null || {
+  echo "FAIL: priorities table missing ADR-025 accepted note"
+  exit 1
+}
 
 echo "[review] done"
