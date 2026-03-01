@@ -854,6 +854,7 @@ flowchart TB
     assay_adapter_acp --> assay_evidence
     assay_adapter_api --> assay_evidence
     assay_adapter_ucp --> assay_adapter_api
+    assay_adapter_ucp --> assay_evidence
     assay_cli --> assay_common
     assay_cli --> assay_core
     assay_cli --> assay_evidence
