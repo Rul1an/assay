@@ -1,0 +1,19 @@
+{
+  "protocol": "ucp",
+  "version": "v2026-01-23",
+  "event_type": "order.requested",
+  "timestamp": "2026-02-28T10:05:00Z",
+  "actor": {
+    "id": "merchant-agent-7",
+    "role": "merchant_agent"
+  },
+  "order": {
+    "id": "order-200",
+    "status": "requested",
+    "currency": "USD",
+    "total": "42.00"
+  },
+  "attributes": {
+    "tenant": "acme"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "protocol": "ucp",
+  "version": "v2026-01-23",
+  "event_type": "order.requested",
+  "timestamp": "2026-02-28T10:20:00Z",
+  "actor": {
+    "id": "merchant-agent-7",
+    "role": "merchant_agent"
+  },
+  "order": {
+    "status": "requested",
+    "currency": "USD"
+  }
+}

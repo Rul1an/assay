@@ -1,0 +1,18 @@
+{
+  "protocol": "ucp",
+  "version": "v2026-01-23",
+  "event_type": "checkout.updated",
+  "timestamp": "2026-02-28T10:10:00Z",
+  "actor": {
+    "id": "checkout-agent-9",
+    "role": "checkout_agent"
+  },
+  "checkout": {
+    "id": "checkout-300",
+    "status": "authorized",
+    "step": "payment"
+  },
+  "attributes": {
+    "region": "eu-west"
+  }
+}

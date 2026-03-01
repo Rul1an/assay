@@ -162,6 +162,13 @@ name = "assay-adapter-ucp"
 version = "2.18.0"
 dependencies = [
  "assay-adapter-api",
+ "assay-evidence",
+ "chrono",
+ "hex",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
