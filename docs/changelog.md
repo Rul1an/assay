@@ -468,6 +468,10 @@
 - docs(adr026): sync UCP accepted status + roadmap progress (#478) @Rul1an
 - docs(adr026): close UCP rollout with checklist + review pack (UCP Step3) (#476) @Rul1an
 - feat(adr026): add UCP adapter MVP + conformance fixtures (UCP Step2) (#475) @Rul1an
+- docs(adr026): freeze adapter distribution policy (#480) @Rul1an
+- docs(adr026): sync UCP accepted status + roadmap progress (#478) @Rul1an
+- docs(adr026): close UCP rollout with checklist + review pack (UCP Step3) (#476) @Rul1an
+- feat(adr026): add UCP adapter MVP + conformance fixtures (UCP Step2) (#475) @Rul1an
 ## [2026-03-01]
 
 - docs(adr026): close UCP rollout with checklist + review pack (UCP Step3) (#476) @Rul1an
