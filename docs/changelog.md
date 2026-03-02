@@ -478,6 +478,8 @@
 - docs(adr026): close UCP rollout with checklist + review pack (UCP Step3) (#476) @Rul1an
 - feat(adr026): add UCP adapter MVP + conformance fixtures (UCP Step2) (#475) @Rul1an
 
+- docs(adr013): sync accepted status in ADR index (#486) @Rul1an
+- docs(adr024): sync superseded status in ADR index (#484) @Rul1an
 ## [2026-03-02]
 
 - docs(adr024): sync superseded status in ADR index (#484) @Rul1an
