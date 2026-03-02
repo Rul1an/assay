@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shlex
 import statistics
 import subprocess
 import time
@@ -46,22 +47,35 @@ def parse_tool_payload(response):
         return {"raw": text}
 
 
-def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_path, wrap_policy):
-    assay_bin = repo_root / "target/debug/assay"
-    if not assay_bin.exists():
-        raise FileNotFoundError(f"Missing binary: {assay_bin}")
+def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_path, wrap_policy, run_live, mcp_host_cmd, mcp_host_args, assay_cmd):
     env = dict(**__import__("os").environ)
     env["EXP_FIXTURE_ROOT"] = str(fixture_root)
     env["EXP_TOOL_LOG"] = str(tool_log_path)
+
+    if run_live:
+        if not mcp_host_cmd:
+            raise ValueError("MCP_HOST_CMD is required for RUN_LIVE=1")
+        wrap_cmd = [assay_cmd or "assay"]
+        host_cmd = shlex.split(mcp_host_cmd)
+        host_args = shlex.split(mcp_host_args or "")
+    else:
+        assay_bin = repo_root / "target/debug/assay"
+        if not assay_bin.exists():
+            raise FileNotFoundError(f"Missing binary: {assay_bin}")
+        wrap_cmd = [str(assay_bin)]
+        host_cmd = ["python3", str(repo_root / "scripts/ci/exp-mcp-fragmented-ipi/mock_mcp_server.py")]
+        host_args = []
+
     cmd = [
-        str(assay_bin),
+        *wrap_cmd,
         "mcp", "wrap",
         "--policy", str(wrap_policy),
         "--label", "fragmented_ipi_mock",
         "--event-source", "assay://local/fragmented-ipi",
         "--decision-log", str(decision_log_path),
         "--",
-        "python3", str(repo_root / "scripts/ci/exp-mcp-fragmented-ipi/mock_mcp_server.py"),
+        *host_cmd,
+        *host_args,
     ]
     return subprocess.Popen(cmd, cwd=repo_root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
@@ -151,7 +165,17 @@ def run_once(args, run_idx, variant):
     decision_log = out_dir / f"decision-{args.mode}-{args.scenario}-{run_idx}.jsonl"
     tool_log = out_dir / f"tool-{args.mode}-{args.scenario}-{run_idx}.jsonl"
 
-    wrapped = spawn_wrapped_server(repo_root, fixture_root, tool_log, decision_log, Path(args.wrap_policy).resolve())
+    wrapped = spawn_wrapped_server(
+        repo_root,
+        fixture_root,
+        tool_log,
+        decision_log,
+        Path(args.wrap_policy).resolve(),
+        args.run_live == "1",
+        args.mcp_host_cmd,
+        args.mcp_host_args,
+        args.assay_cmd,
+    )
     guard = None
     latencies = []
     sensitive_history = []
@@ -255,6 +279,10 @@ def main():
     parser.add_argument("--scenario", choices=["attack", "legit"], required=True)
     parser.add_argument("--run-set", choices=["deterministic", "variance"], default="deterministic")
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--run-live", choices=["0", "1"], default=os.environ.get("RUN_LIVE", "0"))
+    parser.add_argument("--mcp-host-cmd", default=os.environ.get("MCP_HOST_CMD", ""))
+    parser.add_argument("--mcp-host-args", default=os.environ.get("MCP_HOST_ARGS", ""))
+    parser.add_argument("--assay-cmd", default=os.environ.get("ASSAY_CMD", "assay"))
     parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
     args = parser.parse_args()
 

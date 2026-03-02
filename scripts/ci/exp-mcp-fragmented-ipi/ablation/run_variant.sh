@@ -19,6 +19,15 @@ esac
 MODE_DIR="$ART_DIR/$MODE"
 mkdir -p "$MODE_DIR"
 
+RUN_LIVE="${RUN_LIVE:-0}"
+MCP_HOST_CMD="${MCP_HOST_CMD:-}"
+MCP_HOST_ARGS="${MCP_HOST_ARGS:-}"
+ASSAY_CMD="${ASSAY_CMD:-assay}"
+
+if [[ "$RUN_LIVE" == "1" ]]; then
+  : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
+fi
+
 SEQUENCE_SIDECAR=0
 ASSAY_POLICY=""
 SEQUENCE_POLICY_FILE="fragmented_sequence.yaml"
@@ -41,10 +50,17 @@ esac
 {
   echo "ABLATION_MODE=$MODE"
   echo "SCENARIO=baseline"
+  echo "RUN_LIVE=$RUN_LIVE"
+  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
   echo "WRAP_POLICY=$FIX_DIR/policies/baseline_wrap.yaml"
 } > "$MODE_DIR/baseline.log"
 
 ABLATION_MODE="$MODE" \
+RUN_LIVE="$RUN_LIVE" \
+MCP_HOST_CMD="$MCP_HOST_CMD" \
+MCP_HOST_ARGS="$MCP_HOST_ARGS" \
+ASSAY_CMD="$ASSAY_CMD" \
 RUNS_ATTACK="${RUNS_ATTACK:-2}" \
 RUNS_LEGIT="${RUNS_LEGIT:-1}" \
 RUN_SET="${RUN_SET:-deterministic}" \
@@ -53,15 +69,27 @@ bash "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/run_baseline.sh" "$MODE_DIR" >> "$
 {
   echo "ABLATION_MODE=$MODE"
   echo "SCENARIO=protected"
+  echo "RUN_LIVE=$RUN_LIVE"
   echo "SEQUENCE_SIDECAR=$SEQUENCE_SIDECAR"
-  echo "WRAP_POLICY=$ASSAY_POLICY"
+  if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
+    echo "SIDECAR=enabled"
+  else
+    echo "SIDECAR=disabled"
+  fi
+  echo "ASSAY_POLICY=$ASSAY_POLICY"
+  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
   echo "SEQUENCE_POLICY_FILE=$SEQUENCE_POLICY_FILE"
 } > "$MODE_DIR/protected.log"
 
 ABLATION_MODE="$MODE" \
+RUN_LIVE="$RUN_LIVE" \
 SEQUENCE_SIDECAR="$SEQUENCE_SIDECAR" \
 ASSAY_POLICY="$ASSAY_POLICY" \
 SEQUENCE_POLICY_FILE="$SEQUENCE_POLICY_FILE" \
+MCP_HOST_CMD="$MCP_HOST_CMD" \
+MCP_HOST_ARGS="$MCP_HOST_ARGS" \
+ASSAY_CMD="$ASSAY_CMD" \
 RUNS_ATTACK="${RUNS_ATTACK:-2}" \
 RUNS_LEGIT="${RUNS_LEGIT:-1}" \
 RUN_SET="${RUN_SET:-deterministic}" \
