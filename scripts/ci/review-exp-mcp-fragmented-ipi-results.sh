@@ -38,6 +38,18 @@ rg -n 'Runs total:\s+\*\*80\*\*' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-R
   echo "FAIL: results doc missing combined runs marker"
   exit 1
 }
+rg -n '^## Results and discussion$' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md >/dev/null || {
+  echo "FAIL: results doc missing discussion section"
+  exit 1
+}
+rg -n '^### What this does not prove$' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md >/dev/null || {
+  echo "FAIL: results doc missing limitations framing"
+  exit 1
+}
+rg -n '^### Recommended follow-up experiments$' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md >/dev/null || {
+  echo "FAIL: results doc missing follow-up plan"
+  exit 1
+}
 rg -n 'bash scripts/ci/test-exp-mcp-fragmented-ipi.sh' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RERUN.md >/dev/null || {
   echo "FAIL: rerun doc missing smoke rerun instruction"
   exit 1
