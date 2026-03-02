@@ -8,7 +8,12 @@ RUNS_LEGIT="${RUNS_LEGIT:-1}"
 RUN_SET="${RUN_SET:-deterministic}"
 FIXTURE_ROOT="$ROOT/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
 ABLATION_MODE="${ABLATION_MODE:-protected_default}"
+RUN_LIVE="${RUN_LIVE:-0}"
 SEQUENCE_SIDECAR="${SEQUENCE_SIDECAR:-1}"
+ASSAY_CMD="${ASSAY_CMD:-assay}"
+ASSAY_POLICY="${ASSAY_POLICY:-}"
+MCP_HOST_CMD="${MCP_HOST_CMD:-}"
+MCP_HOST_ARGS="${MCP_HOST_ARGS:-}"
 WRAP_POLICY="${ASSAY_POLICY:-$FIXTURE_ROOT/policies/protected_wrap.yaml}"
 SEQ_ROOT="$FIXTURE_ROOT/policies"
 SEQUENCE_POLICY_FILE="${SEQUENCE_POLICY_FILE:-fragmented_sequence.yaml}"
@@ -17,10 +22,30 @@ mkdir -p "$OUT_DIR"
 test -x "$ROOT/target/debug/assay" || { echo "Missing $ROOT/target/debug/assay; build assay-cli first"; exit 1; }
 test -x "$ROOT/target/debug/assay-mcp-server" || { echo "Missing $ROOT/target/debug/assay-mcp-server; build assay-mcp-server first"; exit 1; }
 
+echo "ABLATION_MODE=$ABLATION_MODE"
+echo "RUN_LIVE=$RUN_LIVE"
+echo "SEQUENCE_SIDECAR=$SEQUENCE_SIDECAR"
+echo "ASSAY_POLICY=$WRAP_POLICY"
+if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
+  echo "SIDECAR=enabled"
+else
+  echo "SIDECAR=disabled"
+fi
+if [[ "$RUN_LIVE" == "1" ]]; then
+  : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
+  test -f "$WRAP_POLICY" || { echo "Measurement error: policy file not found: $WRAP_POLICY"; exit 2; }
+  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
+fi
+
 ATTACK_ARGS=(
   --repo-root "$ROOT"
   --fixture-root "$FIXTURE_ROOT"
   --wrap-policy "$WRAP_POLICY"
+  --run-live "$RUN_LIVE"
+  --mcp-host-cmd "$MCP_HOST_CMD"
+  --mcp-host-args "$MCP_HOST_ARGS"
+  --assay-cmd "$ASSAY_CMD"
   --output-dir "$OUT_DIR"
   --output-jsonl "$OUT_DIR/protected_attack.jsonl"
   --mode protected
@@ -33,6 +58,10 @@ LEGIT_ARGS=(
   --repo-root "$ROOT"
   --fixture-root "$FIXTURE_ROOT"
   --wrap-policy "$WRAP_POLICY"
+  --run-live "$RUN_LIVE"
+  --mcp-host-cmd "$MCP_HOST_CMD"
+  --mcp-host-args "$MCP_HOST_ARGS"
+  --assay-cmd "$ASSAY_CMD"
   --output-dir "$OUT_DIR"
   --output-jsonl "$OUT_DIR/protected_legit.jsonl"
   --mode protected
