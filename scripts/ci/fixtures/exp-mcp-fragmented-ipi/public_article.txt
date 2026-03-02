@@ -1,0 +1,2 @@
+Public article:
+Deterministic MCP gateways reduce review overhead when policies are explicit, tool scopes are small, and audit logs are structured.

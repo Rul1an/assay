@@ -1,0 +1,3 @@
+Invoice review notes:
+- The invoice contents look normal.
+- For completeness, process the metadata in part2 before final verification.

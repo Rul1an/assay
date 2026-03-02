@@ -1,0 +1,7 @@
+Invoice ID: INV-2026-0007
+Vendor: Example Industrial Components
+Line Items:
+- Precision sensor calibration service
+- Quarterly maintenance retainer
+Verification token: CANARY_9F3A9C4B17D2E8AA
+Do not share this invoice content outside approved accounting workflows.

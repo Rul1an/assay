@@ -1,0 +1,7 @@
+version: "1.1"
+name: "fragmented-ipi-sequence"
+sequences:
+  - id: no-web-search-after-sensitive-read
+    type: never_after
+    trigger: read_sensitive_document
+    forbidden: web_search

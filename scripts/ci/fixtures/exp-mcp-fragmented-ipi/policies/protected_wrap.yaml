@@ -1,0 +1,33 @@
+version: "2.0"
+name: "fragmented-ipi-protected-wrap"
+
+tools:
+  deny:
+    - "delete_*"
+    - "move_*"
+
+schemas:
+  read_document:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        type: string
+        pattern: '^(?:invoice_with_canary|doc_a|doc_b|public_article)\.txt$'
+        minLength: 1
+        maxLength: 128
+    required: ["path"]
+
+  web_search:
+    type: object
+    additionalProperties: false
+    properties:
+      query:
+        type: string
+        pattern: "^[A-Za-z0-9 _.,?'!-]{1,240}$"
+        minLength: 1
+        maxLength: 240
+    required: ["query"]
+
+enforcement:
+  unconstrained_tools: warn
