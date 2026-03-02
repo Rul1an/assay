@@ -7,36 +7,48 @@ RUNS_ATTACK="${RUNS_ATTACK:-2}"
 RUNS_LEGIT="${RUNS_LEGIT:-1}"
 RUN_SET="${RUN_SET:-deterministic}"
 FIXTURE_ROOT="$ROOT/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
-WRAP_POLICY="$FIXTURE_ROOT/policies/protected_wrap.yaml"
+ABLATION_MODE="${ABLATION_MODE:-protected_default}"
+SEQUENCE_SIDECAR="${SEQUENCE_SIDECAR:-1}"
+WRAP_POLICY="${ASSAY_POLICY:-$FIXTURE_ROOT/policies/protected_wrap.yaml}"
 SEQ_ROOT="$FIXTURE_ROOT/policies"
+SEQUENCE_POLICY_FILE="${SEQUENCE_POLICY_FILE:-fragmented_sequence.yaml}"
 mkdir -p "$OUT_DIR"
 
 test -x "$ROOT/target/debug/assay" || { echo "Missing $ROOT/target/debug/assay; build assay-cli first"; exit 1; }
 test -x "$ROOT/target/debug/assay-mcp-server" || { echo "Missing $ROOT/target/debug/assay-mcp-server; build assay-mcp-server first"; exit 1; }
 
-python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" \
-  --repo-root "$ROOT" \
-  --fixture-root "$FIXTURE_ROOT" \
-  --wrap-policy "$WRAP_POLICY" \
-  --sequence-policy-root "$SEQ_ROOT" \
-  --output-dir "$OUT_DIR" \
-  --output-jsonl "$OUT_DIR/protected_attack.jsonl" \
-  --mode protected \
-  --scenario attack \
-  --run-set "$RUN_SET" \
+ATTACK_ARGS=(
+  --repo-root "$ROOT"
+  --fixture-root "$FIXTURE_ROOT"
+  --wrap-policy "$WRAP_POLICY"
+  --output-dir "$OUT_DIR"
+  --output-jsonl "$OUT_DIR/protected_attack.jsonl"
+  --mode protected
+  --scenario attack
+  --run-set "$RUN_SET"
   --runs "$RUNS_ATTACK"
-
-python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" \
-  --repo-root "$ROOT" \
-  --fixture-root "$FIXTURE_ROOT" \
-  --wrap-policy "$WRAP_POLICY" \
-  --sequence-policy-root "$SEQ_ROOT" \
-  --output-dir "$OUT_DIR" \
-  --output-jsonl "$OUT_DIR/protected_legit.jsonl" \
-  --mode protected \
-  --scenario legit \
-  --run-set "$RUN_SET" \
+  --ablation-mode "$ABLATION_MODE"
+)
+LEGIT_ARGS=(
+  --repo-root "$ROOT"
+  --fixture-root "$FIXTURE_ROOT"
+  --wrap-policy "$WRAP_POLICY"
+  --output-dir "$OUT_DIR"
+  --output-jsonl "$OUT_DIR/protected_legit.jsonl"
+  --mode protected
+  --scenario legit
+  --run-set "$RUN_SET"
   --runs "$RUNS_LEGIT"
+  --ablation-mode "$ABLATION_MODE"
+)
+
+if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
+  ATTACK_ARGS+=(--sequence-policy-root "$SEQ_ROOT" --sequence-policy-file "$SEQUENCE_POLICY_FILE")
+  LEGIT_ARGS+=(--sequence-policy-root "$SEQ_ROOT" --sequence-policy-file "$SEQUENCE_POLICY_FILE")
+fi
+
+python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" "${ATTACK_ARGS[@]}"
+python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" "${LEGIT_ARGS[@]}"
 
 python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/score_runs.py" \
   "$OUT_DIR/protected_attack.jsonl" \
