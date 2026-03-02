@@ -24,7 +24,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-021](./ADR-021-Local-Pack-Discovery.md) | Local Pack Discovery and Pack Resolution Order | **Accepted** | **P2** |
 | [ADR-022](./ADR-022-SOC2-Baseline-Pack.md) | SOC2 Baseline Pack (AICPA Trust Service Criteria) | **Accepted** | **P2** |
 | [ADR-023](./ADR-023-CICD-Starter-Pack.md) | CICD Starter Pack (Adoption Floor) | **Accepted** | **P1** |
-| [ADR-024](./ADR-024-Sim-Engine-Hardening.md) | Sim Engine Hardening (Limits + Time Budget) | Proposed | **P2** |
+| [ADR-024](./ADR-024-Sim-Engine-Hardening.md) | Sim Engine Hardening (Limits + Time Budget) | Superseded | **P2** |
 | [ADR-025](./ADR-025-Evidence-as-a-Product.md) | Evidence-as-a-Product | Accepted | **P1/P2** |
 | [ADR-026](./ADR-026-Protocol-Adapters.md) | Protocol Adapters | **Accepted** | **P1** |
 | [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
