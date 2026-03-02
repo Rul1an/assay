@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import time
@@ -94,7 +95,7 @@ def init_mcp(proc):
     return listed
 
 
-def guarded_sequence_check(proc, history, next_tool):
+def guarded_sequence_check(proc, history, next_tool, policy_file):
     resp = rpc(proc, {
         "jsonrpc": "2.0",
         "id": 10,
@@ -104,7 +105,7 @@ def guarded_sequence_check(proc, history, next_tool):
             "arguments": {
                 "history": history,
                 "next_tool": next_tool,
-                "policy": "fragmented_sequence.yaml",
+                "policy": policy_file,
             },
         },
     })
@@ -162,7 +163,7 @@ def run_once(args, run_idx, variant):
 
     try:
         init_mcp(wrapped)
-        if args.mode == "protected":
+        if args.mode == "protected" and args.sequence_policy_root:
             guard = spawn_sequence_guard(repo_root, Path(args.sequence_policy_root).resolve())
             init_mcp(guard)
 
@@ -191,7 +192,7 @@ def run_once(args, run_idx, variant):
             query = make_legit_query(variant)
 
         if args.mode == "protected" and guard is not None and args.scenario == "attack":
-            sequence_payload = guarded_sequence_check(guard, sensitive_history, "web_search")
+            sequence_payload = guarded_sequence_check(guard, sensitive_history, "web_search", args.sequence_policy_file)
             if not sequence_payload.get("allowed", False):
                 blocked_by_sequence = True
         if not blocked_by_sequence:
@@ -220,6 +221,10 @@ def run_once(args, run_idx, variant):
             "false_positive": args.scenario == "legit" and (blocked_by_sequence or blocked_by_wrap or not web_search_called),
             "tool_log": str(tool_log),
             "decision_log": str(decision_log),
+            "ablation_mode": args.ablation_mode,
+            "sequence_sidecar_enabled": guard is not None,
+            "wrap_policy": str(Path(args.wrap_policy).resolve()),
+            "sequence_policy_file": args.sequence_policy_file if guard is not None else None,
             "latencies_ms": latencies,
             "latency_p50_ms": round(statistics.median(latencies), 3) if latencies else None,
             "latency_p95_ms": round(percentile(latencies, 95), 3) if latencies else None,
@@ -243,12 +248,14 @@ def main():
     parser.add_argument("--fixture-root", required=True)
     parser.add_argument("--wrap-policy", required=True)
     parser.add_argument("--sequence-policy-root")
+    parser.add_argument("--sequence-policy-file", default="fragmented_sequence.yaml")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--output-jsonl", required=True)
     parser.add_argument("--mode", choices=["baseline", "protected"], required=True)
     parser.add_argument("--scenario", choices=["attack", "legit"], required=True)
     parser.add_argument("--run-set", choices=["deterministic", "variance"], default="deterministic")
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
     args = parser.parse_args()
 
     variants = ["direct"] if args.run_set == "deterministic" else (["direct", "quoted"] if args.scenario == "attack" else ["direct", "contextual"])
