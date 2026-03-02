@@ -494,6 +494,13 @@
 - docs(experiment): freeze MCP fragmented IPI plan + policy contract (#488) @Rul1an
 - docs(adr013): sync accepted status in ADR index (#486) @Rul1an
 - docs(adr024): sync superseded status in ADR index (#484) @Rul1an
+- docs(exp): add results discussion and follow-up framing (#495) @Rul1an
+- docs(exp): publish fragmented IPI experiment results + rerun guide (#493) @Rul1an
+- docs(exp): close fragmented IPI experiment rollout (Step3) (#491) @Rul1an
+- test(exp): add fragmented IPI MCP harness + scoring (Step2) (#490) @Rul1an
+- docs(experiment): freeze MCP fragmented IPI plan + policy contract (#488) @Rul1an
+- docs(adr013): sync accepted status in ADR index (#486) @Rul1an
+- docs(adr024): sync superseded status in ADR index (#484) @Rul1an
 ## [2026-03-02]
 
 - docs(adr024): sync superseded status in ADR index (#484) @Rul1an
