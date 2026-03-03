@@ -13,7 +13,7 @@ schemas:
     properties:
       path:
         type: string
-        pattern: '^(?:invoice_with_canary|doc_a|doc_b|public_article)\.txt$'
+        pattern: '^(?:(?:invoice_with_canary|doc_a|doc_b|public_article)\.txt|wrap_bypass/(?:attack_doc_part1|attack_doc_part2|legit_doc)\.txt)$'
         minLength: 1
         maxLength: 128
     required: ["path"]
