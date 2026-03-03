@@ -24,9 +24,16 @@ MCP_HOST_CMD="${MCP_HOST_CMD:-}"
 MCP_HOST_ARGS="${MCP_HOST_ARGS:-}"
 ASSAY_CMD="${ASSAY_CMD:-assay}"
 
-if [[ "$RUN_LIVE" == "1" ]]; then
-  : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
-fi
+case "$RUN_LIVE" in
+  0) ;;
+  1)
+    : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
+    ;;
+  *)
+    echo "FAIL: RUN_LIVE must be 0 or 1"
+    exit 2
+    ;;
+esac
 
 SEQUENCE_SIDECAR=0
 ASSAY_POLICY=""
@@ -51,8 +58,9 @@ esac
   echo "ABLATION_MODE=$MODE"
   echo "SCENARIO=baseline"
   echo "RUN_LIVE=$RUN_LIVE"
-  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
-  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
+  if [[ "$RUN_LIVE" == "1" ]]; then
+    echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+  fi
   echo "WRAP_POLICY=$FIX_DIR/policies/baseline_wrap.yaml"
 } > "$MODE_DIR/baseline.log"
 
@@ -77,8 +85,9 @@ bash "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/run_baseline.sh" "$MODE_DIR" >> "$
     echo "SIDECAR=disabled"
   fi
   echo "ASSAY_POLICY=$ASSAY_POLICY"
-  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
-  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
+  if [[ "$RUN_LIVE" == "1" ]]; then
+    echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+  fi
   echo "SEQUENCE_POLICY_FILE=$SEQUENCE_POLICY_FILE"
 } > "$MODE_DIR/protected.log"
 

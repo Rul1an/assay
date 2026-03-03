@@ -55,7 +55,9 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
     if run_live:
         if not mcp_host_cmd:
             raise ValueError("MCP_HOST_CMD is required for RUN_LIVE=1")
-        wrap_cmd = [assay_cmd or "assay"]
+        wrap_cmd = shlex.split(assay_cmd) if assay_cmd else ["assay"]
+        if not wrap_cmd:
+            raise ValueError("ASSAY_CMD must not be empty when RUN_LIVE=1")
         host_cmd = shlex.split(mcp_host_cmd)
         host_args = shlex.split(mcp_host_args or "")
     else:
