@@ -31,12 +31,18 @@ if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
 else
   echo "SIDECAR=disabled"
 fi
-if [[ "$RUN_LIVE" == "1" ]]; then
-  : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
-  test -f "$WRAP_POLICY" || { echo "Measurement error: policy file not found: $WRAP_POLICY"; exit 2; }
-  echo "MCP_HOST_CMD=$MCP_HOST_CMD"
-  echo "MCP_HOST_ARGS=$MCP_HOST_ARGS"
-fi
+case "$RUN_LIVE" in
+  0) ;;
+  1)
+    : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
+    test -f "$WRAP_POLICY" || { echo "Measurement error: policy file not found: $WRAP_POLICY"; exit 2; }
+    echo "MCP_HOST_CMD=$MCP_HOST_CMD"
+    ;;
+  *)
+    echo "FAIL: RUN_LIVE must be 0 or 1"
+    exit 2
+    ;;
+esac
 
 ATTACK_ARGS=(
   --repo-root "$ROOT"
