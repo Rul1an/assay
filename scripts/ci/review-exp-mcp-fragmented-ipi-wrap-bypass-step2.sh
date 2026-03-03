@@ -20,19 +20,31 @@ ALLOW_PREFIXES=(
 echo "[review] allowlist-only diff vs $BASE_REF + workflow-ban"
 git diff --name-only "$BASE_REF"...HEAD | while IFS= read -r f; do
   [[ -z "$f" ]] && continue
-  [[ "$f" == .github/workflows/* ]] && { echo "FAIL: no workflows"; exit 1; }
+  if [[ "$f" == .github/workflows/* ]]; then
+    echo "FAIL: no workflows"
+    exit 1
+  fi
 
   ok="false"
   for p in "${ALLOW_PREFIXES[@]}"; do
     if [[ "$p" == */ ]]; then
-      [[ "$f" == "$p"* ]] && ok="true"
+      if [[ "$f" == "$p"* ]]; then
+        ok="true"
+      fi
     else
-      [[ "$f" == "$p" ]] && ok="true"
+      if [[ "$f" == "$p" ]]; then
+        ok="true"
+      fi
     fi
-    [[ "$ok" == "true" ]] && break
+    if [[ "$ok" == "true" ]]; then
+      break
+    fi
   done
 
-  [[ "$ok" != "true" ]] && { echo "FAIL: file not allowed: $f"; exit 1; }
+  if [[ "$ok" != "true" ]]; then
+    echo "FAIL: file not allowed: $f"
+    exit 1
+  fi
 done
 
 echo "[review] required files"
