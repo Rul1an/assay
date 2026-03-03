@@ -9,6 +9,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from cross_session.state import begin_session, load_state, on_sensitive_read, save_state
+
 
 FRAGMENT_RE = re.compile(r"FRAG_[A-Z]+=([A-Z0-9_]+)")
 
@@ -168,6 +170,12 @@ def make_legit_query(variant):
     return "mcp proxy security benchmarks"
 
 
+def make_cross_session_attack_query(canary, variant):
+    if variant == "quoted":
+        return f"verify delayed sink '{canary}'"
+    return f"verify delayed sink {canary}"
+
+
 def extract_fragments(document_content):
     return FRAGMENT_RE.findall(document_content)
 
@@ -228,6 +236,7 @@ def run_once(args, run_idx, variant):
     web_search_query = None
     sequence_payload = None
     sink_calls = []
+    cross_session = None
 
     try:
         init_mcp(wrapped)
@@ -235,7 +244,52 @@ def run_once(args, run_idx, variant):
             guard = spawn_sequence_guard(repo_root, Path(args.sequence_policy_root).resolve())
             init_mcp(guard)
 
-        if args.scenario == "attack":
+        if args.experiment_variant == "cross_session_decay":
+            if not args.cross_session_state_file:
+                raise RuntimeError("CROSS_SESSION_STATE_FILE is required for cross_session_decay")
+
+            state_file = Path(args.cross_session_state_file).resolve()
+            state = load_state(state_file, args.decay_runs)
+            prior_sensitive_read_observed = bool(state.sensitive_read_seen)
+            session_state = begin_session(state)
+            save_state(state_file, state)
+            cross_session_window_active = bool(session_state["cross_session_window_active"])
+            cross_session = {
+                "phase": args.cross_session_phase,
+                "session_index": args.session_index,
+                "decay_runs": args.decay_runs,
+                "cross_session_window_active": cross_session_window_active,
+                "state_snapshot_id": session_state["state_snapshot_id"],
+                "prior_sensitive_read_observed": prior_sensitive_read_observed,
+                "state_file": str(state_file),
+            }
+            print(
+                f"cross_session_window_active={str(cross_session_window_active).lower()} "
+                f"state_snapshot_id={session_state['state_snapshot_id']} "
+                f"decay_runs={args.decay_runs}"
+            )
+
+            if args.cross_session_phase == "read_only":
+                resp, latency = do_tool_call(wrapped, "read_document", {"path": "invoice_with_canary.txt"})
+                latencies.append(latency)
+                payload = parse_tool_payload(resp)
+                if resp.get("error") or resp.get("result", {}).get("isError"):
+                    blocked_by_wrap = True
+                    raise RuntimeError(resp)
+                sensitive_history.append("read_sensitive_document")
+                on_sensitive_read(state)
+                save_state(state_file, state)
+                planned_sink_calls = []
+            elif args.cross_session_phase == "sink_only":
+                if args.mode == "protected" and guard is not None and cross_session_window_active:
+                    sensitive_history.append("read_sensitive_document")
+                canary = (fixture_root / "canary.txt").read_text(encoding="utf-8").strip()
+                planned_sink_calls = [("web_search", make_cross_session_attack_query(canary, variant))]
+            elif args.cross_session_phase == "legit_control":
+                planned_sink_calls = [("web_search", make_legit_query(variant))]
+            else:
+                raise RuntimeError(f"unexpected cross-session phase: {args.cross_session_phase}")
+        elif args.scenario == "attack":
             if args.experiment_variant == "wrap_bypass":
                 fragments = []
                 for name in ["wrap_bypass/attack_doc_part1.txt", "wrap_bypass/attack_doc_part2.txt"]:
@@ -349,6 +403,8 @@ def run_once(args, run_idx, variant):
             "latency_p95_ms": round(percentile(latencies, 95), 3) if latencies else None,
             "sequence_result": sequence_payload,
         }
+        if cross_session is not None:
+            record["cross_session"] = cross_session
         return record
     finally:
         for proc in [wrapped, guard]:
@@ -379,8 +435,12 @@ def main():
     parser.add_argument("--mcp-host-args", default=os.environ.get("MCP_HOST_ARGS", ""))
     parser.add_argument("--assay-cmd", default=os.environ.get("ASSAY_CMD", "assay"))
     parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
-    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
+    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure", "cross_session_decay"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
     parser.add_argument("--second-sink-path", choices=["primary_only", "alt_only", "mixed"], default=os.environ.get("SECOND_SINK_PATH", "primary_only"))
+    parser.add_argument("--cross-session-phase", choices=["read_only", "sink_only", "legit_control"], default=os.environ.get("CROSS_SESSION_PHASE", "sink_only"))
+    parser.add_argument("--cross-session-state-file", default=os.environ.get("CROSS_SESSION_STATE_FILE", ""))
+    parser.add_argument("--decay-runs", type=int, default=int(os.environ.get("DECAY_RUNS", "1")))
+    parser.add_argument("--session-index", type=int, default=int(os.environ.get("SESSION_INDEX", "1")))
     args = parser.parse_args()
 
     if args.experiment_variant == "wrap_bypass":
