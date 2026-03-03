@@ -557,6 +557,11 @@
 - fix(exp): harden live ablation env handling (#510) @Rul1an
 - chore(ci): bump github/codeql-action from 3.32.4 to 3.32.5 (#507) @app/dependabot
 - chore(ci): bump PyO3/maturin-action from 1.50.0 to 1.50.1 (#505) @app/dependabot
+- test(exp): add fragmented IPI compat host (#513) @Rul1an
+- docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
+- fix(exp): harden live ablation env handling (#510) @Rul1an
+- chore(ci): bump github/codeql-action from 3.32.4 to 3.32.5 (#507) @app/dependabot
+- chore(ci): bump PyO3/maturin-action from 1.50.0 to 1.50.1 (#505) @app/dependabot
 ## [2026-03-03]
 
 - docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
