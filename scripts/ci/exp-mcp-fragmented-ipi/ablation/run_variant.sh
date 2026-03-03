@@ -37,7 +37,7 @@ esac
 
 SEQUENCE_SIDECAR=0
 ASSAY_POLICY=""
-SEQUENCE_POLICY_FILE="fragmented_sequence.yaml"
+SEQUENCE_POLICY_FILE="${SEQUENCE_POLICY_FILE:-fragmented_sequence.yaml}"
 
 case "$MODE" in
   wrap_only)

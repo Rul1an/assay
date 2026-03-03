@@ -1,0 +1,11 @@
+version: "1.1"
+name: "fragmented-ipi-second-sink"
+aliases:
+  SinkSearch:
+    - web_search
+    - web_search_alt
+sequences:
+  - id: no-sink-search-after-sensitive-read
+    type: never_after
+    trigger: read_sensitive_document
+    forbidden: SinkSearch
