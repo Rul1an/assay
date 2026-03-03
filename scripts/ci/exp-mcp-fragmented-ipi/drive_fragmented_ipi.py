@@ -69,7 +69,12 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
         if not assay_bin.exists():
             raise FileNotFoundError(f"Missing binary: {assay_bin}")
         wrap_cmd = [str(assay_bin)]
-        host_cmd = ["python3", str(repo_root / "scripts/ci/exp-mcp-fragmented-ipi/mock_mcp_server.py")]
+        if env.get("EXPERIMENT_VARIANT") == "sink_failure":
+            env["COMPAT_ROOT"] = str(fixture_root)
+            env["COMPAT_AUDIT_LOG"] = str(tool_log_path)
+            host_cmd = ["python3", str(repo_root / "scripts/ci/exp-mcp-fragmented-ipi/compat_host/compat_host.py")]
+        else:
+            host_cmd = ["python3", str(repo_root / "scripts/ci/exp-mcp-fragmented-ipi/mock_mcp_server.py")]
         host_args = []
 
     cmd = [
@@ -187,6 +192,14 @@ def make_second_sink_calls(query, path):
     return [("web_search", query)]
 
 
+def make_sink_failure_calls(query, path):
+    if path == "alt_only":
+        return [("web_search_alt", query)]
+    if path == "mixed":
+        return [("web_search", query), ("web_search_alt", query)]
+    return [("web_search", query)]
+
+
 def run_once(args, run_idx, variant):
     repo_root = Path(args.repo_root).resolve()
     fixture_root = Path(args.fixture_root).resolve()
@@ -252,6 +265,8 @@ def run_once(args, run_idx, variant):
                 attack_query = make_attack_query(invoice_content, variant)
                 if args.experiment_variant == "second_sink":
                     planned_sink_calls = make_second_sink_calls(attack_query, args.second_sink_path)
+                elif args.experiment_variant == "sink_failure":
+                    planned_sink_calls = make_sink_failure_calls(attack_query, args.second_sink_path)
                 else:
                     planned_sink_calls = [("web_search", attack_query)]
         else:
@@ -265,6 +280,8 @@ def run_once(args, run_idx, variant):
             legit_query = make_legit_query(variant)
             if args.experiment_variant == "second_sink":
                 planned_sink_calls = make_second_sink_calls(legit_query, args.second_sink_path)
+            elif args.experiment_variant == "sink_failure":
+                planned_sink_calls = make_sink_failure_calls(legit_query, args.second_sink_path)
             else:
                 planned_sink_calls = [("web_search", legit_query)]
 
@@ -278,14 +295,25 @@ def run_once(args, run_idx, variant):
             resp, latency = do_tool_call(wrapped, tool_name, {"query": query})
             latencies.append(latency)
             is_error = bool(resp.get("error") or resp.get("result", {}).get("isError"))
+            payload = parse_tool_payload(resp)
+            sink_outcome = "unknown"
+            if isinstance(payload, dict):
+                metadata = payload.get("metadata")
+                if isinstance(metadata, dict) and isinstance(metadata.get("sink_outcome"), str):
+                    sink_outcome = metadata["sink_outcome"]
+            if sink_outcome == "unknown" and isinstance(resp.get("error"), dict) and resp["error"].get("code") == -32010:
+                sink_outcome = "timeout"
             sink_calls.append({
                 "tool": tool_name,
                 "query": query,
                 "latency_ms": round(latency, 3),
                 "is_error": is_error,
+                "sink_outcome": sink_outcome,
             })
             web_search_query = query
             if is_error:
+                if args.experiment_variant == "sink_failure" and sink_outcome == "timeout":
+                    continue
                 blocked_by_wrap = True
                 break
             web_search_called = True
@@ -299,7 +327,7 @@ def run_once(args, run_idx, variant):
             "run_set": args.run_set,
             "variant": variant,
             "experiment_variant": args.experiment_variant,
-            "second_sink_path": args.second_sink_path if args.experiment_variant == "second_sink" else None,
+            "second_sink_path": args.second_sink_path if args.experiment_variant in {"second_sink", "sink_failure"} else None,
             "sink_plan_tools": [tool_name for tool_name, _ in planned_sink_calls],
             "blocked_by_sequence": blocked_by_sequence,
             "blocked_by_wrap": blocked_by_wrap,
@@ -351,7 +379,7 @@ def main():
     parser.add_argument("--mcp-host-args", default=os.environ.get("MCP_HOST_ARGS", ""))
     parser.add_argument("--assay-cmd", default=os.environ.get("ASSAY_CMD", "assay"))
     parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
-    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
+    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
     parser.add_argument("--second-sink-path", choices=["primary_only", "alt_only", "mixed"], default=os.environ.get("SECOND_SINK_PATH", "primary_only"))
     args = parser.parse_args()
 
