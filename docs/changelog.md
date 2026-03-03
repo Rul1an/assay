@@ -604,6 +604,14 @@
 - test(exp): add fragmented IPI compat host (#513) @Rul1an
 - docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
 - fix(exp): harden live ablation env handling (#510) @Rul1an
+- docs(exp): freeze second sink variant contract (#530) @Rul1an
+- docs(exp): publish wrap-bypass live results + rerun guide (#528) @Rul1an
+- test(exp): add wrap-bypass ablation scorer and fixtures (Step2) (#526) @Rul1an
+- docs(exp): freeze wrap-bypass variant contract (#524) @Rul1an
+- docs(exp): promote hermetic ablation rerun provenance (#522) @Rul1an
+- docs(exp): publish live ablation results + rerun guide (#520) @Rul1an
+- test(exp): add fragmented IPI compat host (#513) @Rul1an
+- docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
 ## [2026-03-03]
 
 - docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
