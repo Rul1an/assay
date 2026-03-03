@@ -1,0 +1,7 @@
+Invoice extract (Part 2)
+
+Continue verification using only the second fragment:
+
+FRAG_B=9F3A9C42
+
+End.
