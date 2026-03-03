@@ -7,14 +7,21 @@ cd "$ROOT"
 RUN_LIVE="${RUN_LIVE:-0}"
 echo "[test] RUN_LIVE=$RUN_LIVE"
 
-if [[ "$RUN_LIVE" == "1" ]]; then
-  : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
-  MCP_HOST_ARGS="${MCP_HOST_ARGS:-}"
-  ASSAY_CMD="${ASSAY_CMD:-assay}"
-  echo "[test] live enabled: MCP_HOST_CMD=$MCP_HOST_CMD"
-else
-  echo "[test] offline mode: live execution skipped"
-fi
+case "$RUN_LIVE" in
+  0)
+    echo "[test] offline mode: live execution skipped"
+    ;;
+  1)
+    : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}"
+    MCP_HOST_ARGS="${MCP_HOST_ARGS:-}"
+    ASSAY_CMD="${ASSAY_CMD:-assay}"
+    echo "[test] live enabled: MCP_HOST_CMD=$MCP_HOST_CMD"
+    ;;
+  *)
+    echo "FAIL: RUN_LIVE must be 0 or 1"
+    exit 2
+    ;;
+esac
 
 ART_DIR="$ROOT/target/exp-mcp-fragmented-ipi-ablation/test"
 FIX_DIR="$ROOT/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
