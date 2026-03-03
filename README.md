@@ -10,6 +10,8 @@ Runs offline. No telemetry. No vendor lock-in.
 
 Assay validates AI agent behavior against policies. Record traces, generate policies, run deterministic CI gates, produce evidence bundles for audit. Works with any MCP-compatible agent.
 
+**Why Assay wins in 2026 agent security:** Assay's strongest wedge is deterministic governance on the tool-call path. The MCP fragmented-IPI experiment line shows that stateful sequence policies remain effective across payload fragmentation and tool-hopping, where wrap-only lexical checks fail. Assay does not claim to solve semantic hijacking in general or to block raw outbound network bytes by itself; it governs sink-call routes with auditable policy decisions and single-digit millisecond overhead. See `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md`, `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-WRAP-BYPASS-2026Q1-RESULTS.md`, and `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SECOND-SINK-2026Q1-RESULTS.md`.
+
 > **Open Core:** Engine + baseline packs are MIT/Apache-2.0.
 > Compliance packs (EU AI Act, SOC2) are commercial.
 > See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).

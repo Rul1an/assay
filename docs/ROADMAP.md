@@ -47,6 +47,8 @@ The agentic commerce/interop space is fragmenting (Jan 2026):
 
 All these protocols converge on "tool calls + state transitions" — exactly what Assay captures as trace-linked evidence.
 
+**2026 runtime-governance positioning:** Recent fragmented-IPI experiments on `main` sharpen this moat. Assay's value is not "better regex"; it is deterministic governance on the tool bus. Wrap-only lexical enforcement is useful but brittle against multi-step leakage and tool-hopping. Sequence/state policies stay robust because they govern behavioral routes across sink labels and payload variants. The bounded claim remains important: these experiments demonstrate sink-call exfiltration control with audit-grade evidence and low decision overhead, not a universal solution to semantic hijacking or raw network egress.
+
 ### Why This Matters
 
 1. **Tool Signing** becomes critical: "tool substitution" and "merchant tool spoofing" are real commerce risks
