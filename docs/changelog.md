@@ -540,6 +540,9 @@
 - docs(adr013): sync accepted status in ADR index (#486) @Rul1an
 - docs(adr024): sync superseded status in ADR index (#484) @Rul1an
 
+- test(exp): add fragmented IPI compat host (#513) @Rul1an
+- docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
+- fix(exp): harden live ablation env handling (#510) @Rul1an
 ## [2026-03-03]
 
 - docs(exp): freeze fragmented IPI compat-host contract (#511) @Rul1an
