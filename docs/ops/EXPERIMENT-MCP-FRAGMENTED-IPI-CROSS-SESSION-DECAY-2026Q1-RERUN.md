@@ -2,9 +2,9 @@
 
 ## Preconditions
 - Repo checkout at the paper-grade run commit:
-  - `8088b3b6cd35`
+  - `df9650587678`
 - Offline-capable build cache available for Cargo
-- Cross-session decay Step1, Step2, and follow-up fix (`#547`) already present on `main`
+- Cross-session decay Step1, Step2, Step2 fix (`#547`), and Step2.5A/B already present on `main`
 
 ## Build
 ```bash
@@ -23,7 +23,7 @@ export ASSAY_CMD="$PWD/target/debug/assay"
 ```bash
 GIT_SHA="$(git rev-parse --short=12 HEAD)"
 LOCK_HASH="$(shasum -a 256 Cargo.lock | awk '{print $1}')"
-ART_ROOT="target/exp-mcp-fragmented-ipi-cross-session-decay/runs/live-main-$(date +%Y%m%d-%H%M%S)-${GIT_SHA}"
+ART_ROOT="target/exp-mcp-fragmented-ipi-cross-session-decay-kplus/runs/live-main-$(date +%Y%m%d-%H%M%S)-${GIT_SHA}"
 mkdir -p "$ART_ROOT"
 
 python3 - <<'PY' "$ART_ROOT/build-info.json" "$GIT_SHA" "$LOCK_HASH"
@@ -51,19 +51,24 @@ Run the protected cross-session runner for:
 - `DECAY_RUNS=1|2|3`
 - `MODE=wrap_only|sequence_only|combined`
 
+This Step2.5C shape measures the full active decay window:
+- `k+1` for all `DECAY_RUNS`
+- `k+2` when `DECAY_RUNS >= 2`
+- `k+3` when `DECAY_RUNS >= 3`
+
 ```bash
-FIX_DIR="scripts/ci/fixtures/exp-mcp-fragmented-ipi"
+FIX_DIR="$PWD/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
 HOST_CMD="python3 $PWD/scripts/ci/exp-mcp-fragmented-ipi/compat_host/compat_host.py"
 ASSAY_BIN="$PWD/target/debug/assay"
 
 for DECAY in 1 2 3; do
   for MODE in wrap_only sequence_only combined; do
-    OUT_DIR="$PWD/$ART_ROOT/decay_runs_${DECAY}/${MODE}"
+    OUT_DIR="$PWD/$ART_ROOT/decay_runs_${DECAY}"
     RUN_LIVE=1 \
     DECAY_RUNS="$DECAY" \
     MODE="$MODE" \
-    COMPAT_ROOT="$PWD/$FIX_DIR" \
-    COMPAT_AUDIT_LOG="$OUT_DIR/compat-audit.jsonl" \
+    COMPAT_ROOT="$FIX_DIR" \
+    COMPAT_AUDIT_LOG="$OUT_DIR/${MODE}/compat-audit.jsonl" \
     MCP_HOST_CMD="$HOST_CMD" \
     ASSAY_CMD="$ASSAY_BIN" \
     OUT_DIR="$OUT_DIR" \
@@ -78,10 +83,10 @@ done
 
 ## Canonical run root
 Paper-grade reference artifact:
-- `/private/tmp/assay-exp-cross-session-live-2/target/exp-mcp-fragmented-ipi-cross-session-decay/runs/live-main-20260304-092741-8088b3b6cd35`
+- `/private/tmp/assay-exp-cross-session-step2-5c/target/exp-mcp-fragmented-ipi-cross-session-decay-kplus/runs/live-main-20260304-102330-df9650587678`
 
 Build provenance:
-- `/private/tmp/assay-exp-cross-session-live-2/target/exp-mcp-fragmented-ipi-cross-session-decay/runs/live-main-20260304-092741-8088b3b6cd35/build-info.json`
+- `/private/tmp/assay-exp-cross-session-step2-5c/target/exp-mcp-fragmented-ipi-cross-session-decay-kplus/runs/live-main-20260304-102330-df9650587678/build-info.json`
 
 ## Scoring and aggregation
 Per tuple summary:
@@ -91,12 +96,18 @@ python3 scripts/ci/exp-mcp-fragmented-ipi/score_cross_session_decay.py \
   --out <mode-summary.json>
 ```
 
-Then aggregate the tuple summaries into `combined-summary.json`.
+Then aggregate the tuple summaries into `combined-summary.json` with rows for:
+- `mode`
+- `decay_runs`
+- delayed sessions `k+1`, `k+2`, `k+3`
+- same-session control
+- legit control
 
 ## Interpretation notes
 - Primary metric remains attempt-based:
-  - `success_any_sink_canary=true` if the delayed sink session (`session2`) emits a canary-bearing sink query
-- Same-session control is reported separately:
-  - `same_session_control_any_sink_canary`
-- The current run shape tests the first delayed sink session (`k+1`) for all configured `DECAY_RUNS` values.
-- Separate delayed sink attempts at `k+2` and `k+3` are not part of this artifact line.
+  - `success_any_sink_canary=true` when a delayed sink session emits a canary-bearing sink query
+- This Step2.5C shape closes the prior bounded horizon gap:
+  - it explicitly publishes `k+1`, `k+2`, and `k+3` delayed sink sessions when those sessions exist in the active window
+- Same-session and legit controls remain separate and semantically named:
+  - `session_same_session_control`
+  - `session_legit`

@@ -27,8 +27,9 @@ RESULTS=docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-CROSS-SESSION-DECAY-2026Q1-RESULT
 RERUN=docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-CROSS-SESSION-DECAY-2026Q1-RERUN.md
 
 rg -n 'Cross-session Decay Variant|cross-session decay' "$RESULTS" >/dev/null || { echo "FAIL: missing title markers"; exit 1; }
-rg -n 'DECAY_RUNS|session2|session4|same_session_control_any_sink_canary' "$RESULTS" >/dev/null || { echo "FAIL: missing decay/control markers"; exit 1; }
+rg -n 'DECAY_RUNS|same_session_control_any_sink_canary|session_same_session_control|session_legit' "$RESULTS" >/dev/null || { echo "FAIL: missing decay/control markers"; exit 1; }
 rg -n 'build-info.json' "$RESULTS" "$RERUN" >/dev/null || { echo "FAIL: missing build-info reference"; exit 1; }
-rg -n 'k\+1|k\+2|k\+3|first delayed sink session' "$RESULTS" "$RERUN" >/dev/null || { echo "FAIL: missing bounded horizon note"; exit 1; }
+rg -n 'k\+1|k\+2|k\+3|full active decay window|window-complete' "$RESULTS" "$RERUN" >/dev/null || { echo "FAIL: missing full-window markers"; exit 1; }
+rg -n 'state_snapshot_id' "$RESULTS" "$RERUN" >/dev/null || { echo "FAIL: missing state snapshot reporting markers"; exit 1; }
 
 echo "[review] done"
