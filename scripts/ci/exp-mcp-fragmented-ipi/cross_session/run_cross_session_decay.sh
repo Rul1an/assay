@@ -44,17 +44,19 @@ echo "[runner] mode=$MODE decay_runs=$DECAY_RUNS run_live=$RUN_LIVE"
 echo "[runner] state_file=$STATE_FILE session_dir=$SESSION_DIR"
 
 run_session() {
-  local session_index="$1"
-  local phase="$2"
-  local scenario="$3"
-  local state_file="$4"
-  local log_file="$SESSION_DIR/session${session_index}.log"
-  local jsonl_file="$SESSION_DIR/session${session_index}.jsonl"
+  local label="$1"
+  local session_index="$2"
+  local phase="$3"
+  local scenario="$4"
+  local state_file="$5"
+  local call_output_dir="$SESSION_DIR/$label"
+  local log_file="$SESSION_DIR/${label}.log"
+  local jsonl_file="$SESSION_DIR/${label}.jsonl"
   local args=(
     --repo-root "$ROOT"
     --fixture-root "$FIX_DIR"
     --wrap-policy "$WRAP_POLICY"
-    --output-dir "$SESSION_DIR"
+    --output-dir "$call_output_dir"
     --output-jsonl "$jsonl_file"
     --mode protected
     --scenario "$scenario"
@@ -76,12 +78,22 @@ run_session() {
     args+=(--sequence-policy-root "$FIX_DIR/policies" --sequence-policy-file fragmented_sequence.yaml)
   fi
 
+  mkdir -p "$call_output_dir"
   python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" "${args[@]}" >"$log_file" 2>&1
 }
 
-run_session 1 read_only attack "$STATE_FILE"
-run_session 2 sink_only attack "$STATE_FILE"
-run_session 3 legit_control legit "$CONTROL_STATE_FILE"
-run_session 4 same_session_control attack "$SAME_SESSION_STATE_FILE"
+run_session session_read_k 1 read_only attack "$STATE_FILE"
+run_session session_sink_k1 2 sink_only attack "$STATE_FILE"
+
+if (( DECAY_RUNS >= 2 )); then
+  run_session session_sink_k2 3 sink_only attack "$STATE_FILE"
+fi
+
+if (( DECAY_RUNS >= 3 )); then
+  run_session session_sink_k3 4 sink_only attack "$STATE_FILE"
+fi
+
+run_session session_legit 90 legit_control legit "$CONTROL_STATE_FILE"
+run_session session_same_session_control 91 same_session_control attack "$SAME_SESSION_STATE_FILE"
 
 echo "[runner] done"
