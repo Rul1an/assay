@@ -395,6 +395,10 @@ pub struct CoverageArgs {
     #[arg(long = "declared-tool")]
     pub declared_tools: Vec<String>,
 
+    /// File with one declared tool per line (empty lines and # comments ignored).
+    #[arg(long = "declared-tools-file")]
+    pub declared_tools_file: Option<std::path::PathBuf>,
+
     #[arg(long, default_value = "eval.yaml")]
     pub config: std::path::PathBuf,
 
@@ -413,8 +417,12 @@ pub struct CoverageArgs {
     #[arg(long)]
     pub export_baseline: Option<PathBuf>,
 
+    /// Output format.
+    /// - `--format md|json` for `--input` mode
+    /// - `--input` mode: json|md (text aliases to json; markdown/github alias to md)
+    /// - legacy mode: text|json|markdown|github
     #[arg(long, default_value = "text")]
-    pub format: String, // text|json|markdown|github
+    pub format: String,
 }
 
 #[derive(Parser, Clone, Debug)]

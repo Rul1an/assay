@@ -1,16 +1,41 @@
 use crate::cli::args::CoverageArgs;
 use crate::exit_codes;
 use anyhow::{Context, Result};
+use std::collections::BTreeSet;
 use std::path::Path;
 
+mod format_md;
 mod report;
 mod schema;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CoverageOutputFormat {
+    Json,
+    Markdown,
+}
 
 pub(crate) async fn write_generated_coverage_report(
     input: &Path,
     out: &Path,
     declared_tools: &[String],
     source: &str,
+) -> Result<i32> {
+    write_generated_coverage_report_with_format(
+        input,
+        out,
+        declared_tools,
+        source,
+        CoverageOutputFormat::Json,
+    )
+    .await
+}
+
+pub(crate) async fn write_generated_coverage_report_with_format(
+    input: &Path,
+    out: &Path,
+    declared_tools: &[String],
+    source: &str,
+    format: CoverageOutputFormat,
 ) -> Result<i32> {
     use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR};
 
@@ -40,8 +65,20 @@ pub(crate) async fn write_generated_coverage_report(
         }
     }
 
-    let payload = serde_json::to_vec_pretty(&report_value)
-        .expect("coverage report serialization should be infallible");
+    let payload = match format {
+        CoverageOutputFormat::Json => serde_json::to_vec_pretty(&report_value)
+            .expect("coverage report serialization should be infallible"),
+        CoverageOutputFormat::Markdown => {
+            match format_md::render_coverage_markdown(&report_value) {
+                Ok(markdown) => markdown.into_bytes(),
+                Err(e) => {
+                    eprintln!("Measurement error: failed to render markdown output: {e}");
+                    return Ok(EXIT_CONFIG_ERROR);
+                }
+            }
+        }
+    };
+
     if let Err(e) = tokio::fs::write(out, payload).await {
         eprintln!(
             "Infra error: failed to write coverage report to {}: {e}",
@@ -50,11 +87,8 @@ pub(crate) async fn write_generated_coverage_report(
         return Ok(EXIT_INFRA_ERROR);
     }
 
-    eprintln!(
-        "Generated coverage_report_v1 from {} -> {}",
-        input.display(),
-        out.display()
-    );
+    let _ = input; // kept for call-site parity and future diagnostics.
+    eprintln!("Wrote coverage_report_v1 to {}", out.display());
 
     Ok(exit_codes::EXIT_SUCCESS)
 }
@@ -92,7 +126,69 @@ async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
         }
     };
 
-    write_generated_coverage_report(input, out, &args.declared_tools, "jsonl").await
+    let declared_tools = match load_declared_tools(args).await {
+        Ok(v) => v,
+        Err(code) => return Ok(code),
+    };
+
+    let output_format = match parse_generate_output_format(&args.format) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Measurement error: {e}");
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    };
+
+    write_generated_coverage_report_with_format(input, out, &declared_tools, "jsonl", output_format)
+        .await
+}
+
+async fn load_declared_tools(args: &CoverageArgs) -> std::result::Result<Vec<String>, i32> {
+    use crate::exit_codes::EXIT_CONFIG_ERROR;
+
+    let mut declared = BTreeSet::new();
+
+    for raw in &args.declared_tools {
+        let tool = raw.trim();
+        if tool.is_empty() {
+            eprintln!("Measurement error: --declared-tool must not be empty");
+            return Err(EXIT_CONFIG_ERROR);
+        }
+        declared.insert(tool.to_string());
+    }
+
+    if let Some(path) = args.declared_tools_file.as_ref() {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "Measurement error: failed to read --declared-tools-file {}: {e}",
+                    path.display()
+                );
+                return Err(EXIT_CONFIG_ERROR);
+            }
+        };
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            declared.insert(line.to_string());
+        }
+    }
+
+    Ok(declared.into_iter().collect())
+}
+
+fn parse_generate_output_format(raw: &str) -> std::result::Result<CoverageOutputFormat, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "json" | "text" => Ok(CoverageOutputFormat::Json),
+        "md" | "markdown" | "github" => Ok(CoverageOutputFormat::Markdown),
+        other => Err(format!(
+            "--format must be one of: json|md for --input mode (got '{other}')"
+        )),
+    }
 }
 
 async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {

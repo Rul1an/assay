@@ -1,0 +1,5 @@
+# tools declared for coverage
+read_document
+web_search
+
+# comment + blank lines should be ignored
