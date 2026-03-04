@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/session_state_window_v1.schema.json",
+  "title": "Assay Session/State Window Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_version",
+    "session",
+    "window",
+    "snapshot",
+    "privacy"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "session_state_window_v1"
+    },
+    "report_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_source", "server_id", "session_id"],
+      "properties": {
+        "event_source": { "type": "string", "minLength": 1 },
+        "server_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_kind"],
+      "properties": {
+        "window_kind": {
+          "type": "string",
+          "enum": ["session", "cross_session_decay"]
+        },
+        "decay_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Only used when window_kind=cross_session_decay"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "window_kind": { "const": "cross_session_decay" } },
+            "required": ["window_kind"]
+          },
+          "then": { "required": ["decay_runs"] }
+        },
+        {
+          "if": {
+            "properties": { "window_kind": { "const": "session" } },
+            "required": ["window_kind"]
+          },
+          "then": {
+            "not": { "required": ["decay_runs"] }
+          }
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state_snapshot_id", "canonicalization"],
+      "properties": {
+        "state_snapshot_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "canonicalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method"],
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": ["canonical_json_sha256"]
+            }
+          }
+        },
+        "contents_ref": {
+          "type": "string",
+          "description": "Optional reference to a stored snapshot payload; not required in v1."
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stores_raw_tool_args",
+        "stores_raw_prompt_bodies",
+        "stores_raw_document_bodies"
+      ],
+      "properties": {
+        "stores_raw_tool_args": { "type": "boolean" },
+        "stores_raw_prompt_bodies": { "type": "boolean" },
+        "stores_raw_document_bodies": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
