@@ -679,6 +679,9 @@
 
 - docs(exp): publish cross-session decay live results + rerun guide (#549) @Rul1an
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
+- docs(exp): freeze cross-session decay k+2/k+3 extension (#551) @Rul1an
+- docs(exp): publish cross-session decay live results + rerun guide (#549) @Rul1an
+- test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
 ## [2026-03-04]
 
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
