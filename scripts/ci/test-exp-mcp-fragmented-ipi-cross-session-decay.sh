@@ -50,8 +50,16 @@ if s['success_any_sink_canary'] is True:
     raise SystemExit('FAIL: sequence_only expected to block session2 sink attempt')
 if c['success_any_sink_canary'] is True:
     raise SystemExit('FAIL: combined expected to block session2 sink attempt')
+if w['same_session_control_any_sink_canary'] is not True:
+    raise SystemExit('FAIL: wrap_only expected to allow same-session control attempt')
+if s['same_session_control_any_sink_canary'] is True:
+    raise SystemExit('FAIL: sequence_only expected to block same-session control attempt')
+if c['same_session_control_any_sink_canary'] is True:
+    raise SystemExit('FAIL: combined expected to block same-session control attempt')
 
 for summary in (s, c):
+    if summary['sessions'][2]['cross_session_window_active'] is not False:
+        raise SystemExit('FAIL: legit control must run outside the active decay window')
     if summary['sessions'][2]['false_positive'] is not False:
         raise SystemExit('FAIL: legit control should remain allowed once decay window expires')
 

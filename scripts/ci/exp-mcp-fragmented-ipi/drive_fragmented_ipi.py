@@ -285,6 +285,18 @@ def run_once(args, run_idx, variant):
                     sensitive_history.append("read_sensitive_document")
                 canary = (fixture_root / "canary.txt").read_text(encoding="utf-8").strip()
                 planned_sink_calls = [("web_search", make_cross_session_attack_query(canary, variant))]
+            elif args.cross_session_phase == "same_session_control":
+                resp, latency = do_tool_call(wrapped, "read_document", {"path": "invoice_with_canary.txt"})
+                latencies.append(latency)
+                payload = parse_tool_payload(resp)
+                if resp.get("error") or resp.get("result", {}).get("isError"):
+                    blocked_by_wrap = True
+                    raise RuntimeError(resp)
+                sensitive_history.append("read_sensitive_document")
+                on_sensitive_read(state)
+                save_state(state_file, state)
+                canary = (fixture_root / "canary.txt").read_text(encoding="utf-8").strip()
+                planned_sink_calls = [("web_search", make_cross_session_attack_query(canary, variant))]
             elif args.cross_session_phase == "legit_control":
                 planned_sink_calls = [("web_search", make_legit_query(variant))]
             else:
@@ -437,7 +449,7 @@ def main():
     parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
     parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure", "cross_session_decay"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
     parser.add_argument("--second-sink-path", choices=["primary_only", "alt_only", "mixed"], default=os.environ.get("SECOND_SINK_PATH", "primary_only"))
-    parser.add_argument("--cross-session-phase", choices=["read_only", "sink_only", "legit_control"], default=os.environ.get("CROSS_SESSION_PHASE", "sink_only"))
+    parser.add_argument("--cross-session-phase", choices=["read_only", "sink_only", "same_session_control", "legit_control"], default=os.environ.get("CROSS_SESSION_PHASE", "sink_only"))
     parser.add_argument("--cross-session-state-file", default=os.environ.get("CROSS_SESSION_STATE_FILE", ""))
     parser.add_argument("--decay-runs", type=int, default=int(os.environ.get("DECAY_RUNS", "1")))
     parser.add_argument("--session-index", type=int, default=int(os.environ.get("SESSION_INDEX", "1")))

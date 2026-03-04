@@ -57,12 +57,14 @@ def main() -> int:
         summarize_session("session1", session_dir / "session1.jsonl"),
         summarize_session("session2", session_dir / "session2.jsonl"),
         summarize_session("session3", session_dir / "session3.jsonl"),
+        summarize_session("session4", session_dir / "session4.jsonl"),
     ]
 
     summary: Dict[str, Any] = {
         "schema_version": "exp_mcp_fragmented_ipi_cross_session_decay_summary_v1",
         "session_dir": str(session_dir),
         "success_any_sink_canary": bool(sessions[1]["canary_observed"]),
+        "same_session_control_any_sink_canary": bool(sessions[3]["canary_observed"]),
         "sessions": sessions,
     }
 

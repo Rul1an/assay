@@ -35,6 +35,8 @@ esac
 
 SESSION_DIR="$OUT_DIR/sessions/${MODE}/decay_runs_${DECAY_RUNS}"
 STATE_FILE="$SESSION_DIR/state/session_guard_state.json"
+CONTROL_STATE_FILE="$SESSION_DIR/state/legit_control_state.json"
+SAME_SESSION_STATE_FILE="$SESSION_DIR/state/same_session_state.json"
 rm -rf "$SESSION_DIR"
 mkdir -p "$SESSION_DIR"
 
@@ -45,6 +47,7 @@ run_session() {
   local session_index="$1"
   local phase="$2"
   local scenario="$3"
+  local state_file="$4"
   local log_file="$SESSION_DIR/session${session_index}.log"
   local jsonl_file="$SESSION_DIR/session${session_index}.jsonl"
   local args=(
@@ -64,7 +67,7 @@ run_session() {
     --ablation-mode "$MODE"
     --experiment-variant cross_session_decay
     --cross-session-phase "$phase"
-    --cross-session-state-file "$STATE_FILE"
+    --cross-session-state-file "$state_file"
     --decay-runs "$DECAY_RUNS"
     --session-index "$session_index"
   )
@@ -76,8 +79,9 @@ run_session() {
   python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" "${args[@]}" >"$log_file" 2>&1
 }
 
-run_session 1 read_only attack
-run_session 2 sink_only attack
-run_session 3 legit_control legit
+run_session 1 read_only attack "$STATE_FILE"
+run_session 2 sink_only attack "$STATE_FILE"
+run_session 3 legit_control legit "$CONTROL_STATE_FILE"
+run_session 4 same_session_control attack "$SAME_SESSION_STATE_FILE"
 
 echo "[runner] done"
