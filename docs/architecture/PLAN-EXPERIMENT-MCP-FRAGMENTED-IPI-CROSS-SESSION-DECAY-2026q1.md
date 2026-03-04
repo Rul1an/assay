@@ -64,3 +64,11 @@ Step2 will implement:
 - runner wiring to execute multi-session sequences deterministically
 - sidecar/sequence policy integration that reads the state flag
 - scorer updates + offline runner + reviewer gate
+
+## Step2.5 extension (frozen)
+We extend the cross-session matrix to explicitly measure delayed sink attempts at:
+- `k+1` (existing)
+- `k+2` when `DECAY_RUNS >= 2`
+- `k+3` when `DECAY_RUNS >= 3`
+
+This closes the remaining evidence gap: verifying enforcement holds across the entire active decay window, not just the first delayed session.
