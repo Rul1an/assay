@@ -157,7 +157,7 @@ pub(crate) async fn write_state_window_out(
         return Ok(EXIT_INFRA_ERROR);
     }
 
-    eprintln!("Generated session_state_window_v1 -> {}", out.display());
+    eprintln!("Wrote session_state_window_v1 to {}", out.display());
 
     Ok(EXIT_SUCCESS)
 }
