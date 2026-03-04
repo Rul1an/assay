@@ -527,6 +527,10 @@ pub struct McpWrapArgs {
     #[arg(long, requires = "event_source")]
     pub coverage_out: Option<PathBuf>,
 
+    /// Write a session_state_window_v1 informational report after the wrapped MCP session completes.
+    #[arg(long, requires = "event_source")]
+    pub state_window_out: Option<PathBuf>,
+
     /// CloudEvents source URI (e.g. assay://org/app).
     /// Must be absolute URI with scheme://. Required when --audit-log or --decision-log is set.
     #[arg(long, value_name = "URI")]

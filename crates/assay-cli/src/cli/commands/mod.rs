@@ -39,6 +39,7 @@ pub(crate) mod run;
 pub(crate) mod run_output;
 pub(crate) mod runner_builder;
 pub mod sandbox;
+pub(crate) mod session_state_window;
 pub mod setup;
 #[cfg(feature = "sim")]
 pub mod sim;
