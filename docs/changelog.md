@@ -717,6 +717,16 @@
 - docs(exp): freeze cross-session decay k+2/k+3 extension (#551) @Rul1an
 - docs(exp): publish cross-session decay live results + rerun guide (#549) @Rul1an
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
+- feat(coverage): generate coverage_report_v1 from JSONL inputs (B3.1) (#565) @Rul1an
+- docs(policy): freeze coverage report contract for tool/route completeness (A3) (#563) @Rul1an
+- feat(policy): enforce MCP rules by tool classes (B1) (#561) @Rul1an
+- docs(roadmap): prioritize route governance core (#558) @Rul1an
+- docs(exp): publish full-window cross-session decay results (#556) @Rul1an
+- test(exp): extend cross-session decay across full active window (#554) @Rul1an
+- test(exp): extend cross-session decay across full active window (#553) @Rul1an
+- docs(exp): freeze cross-session decay k+2/k+3 extension (#551) @Rul1an
+- docs(exp): publish cross-session decay live results + rerun guide (#549) @Rul1an
+- test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
 ## [2026-03-04]
 
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
