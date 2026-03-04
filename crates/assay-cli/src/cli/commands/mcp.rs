@@ -1,5 +1,6 @@
 use super::super::args::{McpArgs, McpSub, McpWrapArgs};
 use super::coverage;
+use super::session_state_window;
 use anyhow::{Context, Result};
 use assay_core::mcp::policy::McpPolicy;
 use assay_core::mcp::proxy::{McpProxy, ProxyConfig, ProxyConfigRaw};
@@ -152,6 +153,14 @@ fn unique_temp_path(stem: &str, extension: &str) -> PathBuf {
     ))
 }
 
+fn generate_session_id() -> String {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("mcpwrap-{}-{stamp}", std::process::id())
+}
+
 struct TempPathGuard {
     path: PathBuf,
 }
@@ -183,6 +192,7 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
 
     let cmd = &args.command[0];
     let cmd_args = &args.command[1..];
+    let session_id = generate_session_id();
 
     // Load Policy
     let policy = if args.policy.exists() {
@@ -228,6 +238,8 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
             .unwrap_or_else(|| "default-mcp-server".into()),
     };
     let config = ProxyConfig::try_from_raw(raw)?;
+    let state_window_event_source = config.event_source.clone();
+    let state_window_server_id = config.server_id.clone();
 
     if config.dry_run {
         eprintln!("[assay] DRY RUN MODE: No actions will be blocked.");
@@ -271,17 +283,43 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         crate::exit_codes::EXIT_SUCCESS
     };
 
+    let state_status = if let Some(state_window_out) = args.state_window_out.as_ref() {
+        let event_source = state_window_event_source
+            .as_deref()
+            .context("state window export requires event_source")?;
+        session_state_window::write_state_window_out(
+            state_window_out,
+            event_source,
+            &state_window_server_id,
+            &session_id,
+        )
+        .await?
+    } else {
+        crate::exit_codes::EXIT_SUCCESS
+    };
+
     if wrapped_code != crate::exit_codes::EXIT_SUCCESS {
-        if coverage_status != crate::exit_codes::EXIT_SUCCESS {
+        if coverage_status != crate::exit_codes::EXIT_SUCCESS
+            || state_status != crate::exit_codes::EXIT_SUCCESS
+        {
             eprintln!(
-                "Coverage generation failed after wrapped command exited with code {}; preserving wrapped exit code",
+                "Coverage/state-window generation failed after wrapped command exited with code {}; preserving wrapped exit code",
                 wrapped_code
             );
         }
         return Ok(wrapped_code);
     }
 
-    Ok(coverage_status)
+    if coverage_status != crate::exit_codes::EXIT_SUCCESS {
+        if state_status != crate::exit_codes::EXIT_SUCCESS {
+            eprintln!(
+                "State window export failed after coverage generation failed; preserving coverage exit code"
+            );
+        }
+        return Ok(coverage_status);
+    }
+
+    Ok(state_status)
 }
 
 #[cfg(test)]
