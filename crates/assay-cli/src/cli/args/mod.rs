@@ -522,6 +522,11 @@ pub struct McpWrapArgs {
     #[arg(long, requires = "event_source")]
     pub decision_log: Option<PathBuf>,
 
+    /// Generate a coverage_report_v1 from wrap decision events at session end.
+    /// Requires --event-source. If --decision-log is omitted, a temporary decision log is used.
+    #[arg(long, requires = "event_source")]
+    pub coverage_out: Option<PathBuf>,
+
     /// CloudEvents source URI (e.g. assay://org/app).
     /// Must be absolute URI with scheme://. Required when --audit-log or --decision-log is set.
     #[arg(long, value_name = "URI")]

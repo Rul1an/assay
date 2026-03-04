@@ -1,0 +1,1 @@
+{"specversion":"1.0","id":"evt-1","type":"assay.tool.decision","source":"assay://tests/basic","time":"2026-03-04T14:00:00Z","data":{"tool":"assay_policy_decide","tool_classes":["sink:network"],"decision":"allow","reason_code":"P_POLICY_ALLOW","tool_call_id":"tc-1"}}

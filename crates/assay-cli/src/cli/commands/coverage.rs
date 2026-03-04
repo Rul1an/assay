@@ -1,50 +1,27 @@
 use crate::cli::args::CoverageArgs;
 use crate::exit_codes;
 use anyhow::{Context, Result};
+use std::path::Path;
 
 mod report;
 mod schema;
 
-pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
-    if args.input.is_some() {
-        return cmd_coverage_generate(&args).await;
-    }
-
-    cmd_coverage_legacy(args).await
-}
-
-async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
+pub(crate) async fn write_generated_coverage_report(
+    input: &Path,
+    out: &Path,
+    declared_tools: &[String],
+    source: &str,
+) -> Result<i32> {
     use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR};
 
-    if args.declared_tools.iter().any(|t| t.trim().is_empty()) {
-        eprintln!("Measurement error: --declared-tool must not be empty");
-        return Ok(EXIT_CONFIG_ERROR);
-    }
-
-    if args.trace_file.is_some() {
-        eprintln!("Measurement error: --input and --trace-file/--traces cannot be used together");
-        return Ok(EXIT_CONFIG_ERROR);
-    }
-
-    let input = args
-        .input
-        .as_ref()
-        .expect("input mode already checked to be present");
-    let out = match args.out.as_ref() {
-        Some(out) => out,
-        None => {
-            eprintln!("Measurement error: --out is required when --input is used");
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    let report_value = match report::build_coverage_report(args).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Measurement error: {e}");
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
+    let report_value =
+        match report::build_coverage_report_from_input(input, declared_tools, source).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Measurement error: {e}");
+                return Ok(EXIT_CONFIG_ERROR);
+            }
+        };
 
     if let Err(e) = schema::validate_coverage_report_v1(&report_value) {
         eprintln!("Measurement error: coverage report schema validation failed: {e}");
@@ -80,6 +57,42 @@ async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
     );
 
     Ok(exit_codes::EXIT_SUCCESS)
+}
+
+pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
+    if args.input.is_some() {
+        return cmd_coverage_generate(&args).await;
+    }
+
+    cmd_coverage_legacy(args).await
+}
+
+async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
+    use crate::exit_codes::EXIT_CONFIG_ERROR;
+
+    if args.declared_tools.iter().any(|t| t.trim().is_empty()) {
+        eprintln!("Measurement error: --declared-tool must not be empty");
+        return Ok(EXIT_CONFIG_ERROR);
+    }
+
+    if args.trace_file.is_some() {
+        eprintln!("Measurement error: --input and --trace-file/--traces cannot be used together");
+        return Ok(EXIT_CONFIG_ERROR);
+    }
+
+    let input = args
+        .input
+        .as_ref()
+        .expect("input mode already checked to be present");
+    let out = match args.out.as_ref() {
+        Some(out) => out,
+        None => {
+            eprintln!("Measurement error: --out is required when --input is used");
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    };
+
+    write_generated_coverage_report(input, out, &args.declared_tools, "jsonl").await
 }
 
 async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {
