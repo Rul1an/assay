@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/tool_taxonomy_v1.schema.json",
+  "title": "Assay Tool Taxonomy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool_classes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "tool-taxonomy-v1"
+    },
+    "tool_classes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "route_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/route_rule"
+      }
+    }
+  },
+  "$defs": {
+    "class_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match_tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "match_any_class": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "match_all_classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "match_tool"
+          ]
+        },
+        {
+          "required": [
+            "match_any_class"
+          ]
+        },
+        {
+          "required": [
+            "match_all_classes"
+          ]
+        }
+      ]
+    },
+    "route_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "deny"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "after": {
+          "$ref": "#/$defs/class_match"
+        },
+        "deny": {
+          "$ref": "#/$defs/class_match"
+        }
+      }
+    }
+  }
+}
