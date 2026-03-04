@@ -677,6 +677,8 @@
 - docs(exp): publish wrap-bypass live results + rerun guide (#528) @Rul1an
 - test(exp): add wrap-bypass ablation scorer and fixtures (Step2) (#526) @Rul1an
 
+- docs(exp): publish cross-session decay live results + rerun guide (#549) @Rul1an
+- test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
 ## [2026-03-04]
 
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
