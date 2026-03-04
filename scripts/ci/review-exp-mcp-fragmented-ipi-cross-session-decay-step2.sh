@@ -16,7 +16,7 @@ ALLOW_PREFIXES=(
   "scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py"
 )
 
-git diff --name-only "$BASE_REF"...HEAD | while IFS= read -r f; do
+while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   [[ "$f" == .github/workflows/* ]] && { echo "FAIL: no workflows"; exit 1; }
   ok="false"
@@ -29,7 +29,9 @@ git diff --name-only "$BASE_REF"...HEAD | while IFS= read -r f; do
     [[ "$ok" == "true" ]] && break
   done
   [[ "$ok" != "true" ]] && { echo "FAIL: file not allowed: $f"; exit 1; }
-done
+done < <(git diff --name-only "$BASE_REF"...HEAD)
+
+rg -n 'same_session_control' scripts/ci/exp-mcp-fragmented-ipi/cross_session/run_cross_session_decay.sh >/dev/null || { echo 'FAIL: missing same-session control in cross-session runner'; exit 1; }
 
 RUN_LIVE=0 bash scripts/ci/test-exp-mcp-fragmented-ipi-cross-session-decay.sh
 echo "[review] done"

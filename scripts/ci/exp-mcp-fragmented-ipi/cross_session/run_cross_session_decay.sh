@@ -36,6 +36,7 @@ esac
 SESSION_DIR="$OUT_DIR/sessions/${MODE}/decay_runs_${DECAY_RUNS}"
 STATE_FILE="$SESSION_DIR/state/session_guard_state.json"
 CONTROL_STATE_FILE="$SESSION_DIR/state/legit_control_state.json"
+SAME_SESSION_STATE_FILE="$SESSION_DIR/state/same_session_state.json"
 rm -rf "$SESSION_DIR"
 mkdir -p "$SESSION_DIR"
 
@@ -81,5 +82,6 @@ run_session() {
 run_session 1 read_only attack "$STATE_FILE"
 run_session 2 sink_only attack "$STATE_FILE"
 run_session 3 legit_control legit "$CONTROL_STATE_FILE"
+run_session 4 same_session_control attack "$SAME_SESSION_STATE_FILE"
 
 echo "[runner] done"
