@@ -1,0 +1,4 @@
+{"tool":"read_document","tool_classes":["source:local","source:sensitive"]}
+{"tool":"web_search_alt","tool_classes":["sink:network"]}
+{"tool":"web_search","tool_classes":["sink:network"]}
+{"tool":"unknown_tool_x"}
