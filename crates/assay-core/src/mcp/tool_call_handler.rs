@@ -152,11 +152,28 @@ impl ToolCallHandler {
         let start = Instant::now();
 
         // Step 1: Policy evaluation
-        let policy_decision =
-            self.policy
-                .evaluate(&tool_name, &params.arguments, state, runtime_identity);
+        let policy_eval = self.policy.evaluate_with_metadata(
+            &tool_name,
+            &params.arguments,
+            state,
+            runtime_identity,
+        );
+        let tool_classes = policy_eval.metadata.tool_classes.clone();
+        let matched_tool_classes = policy_eval.metadata.matched_tool_classes.clone();
+        let match_basis = policy_eval
+            .metadata
+            .match_basis
+            .as_str()
+            .map(ToString::to_string);
+        let matched_rule = policy_eval.metadata.matched_rule.clone();
+        guard.set_tool_match(
+            policy_eval.metadata.tool_classes.clone(),
+            policy_eval.metadata.matched_tool_classes.clone(),
+            match_basis.clone(),
+            matched_rule.clone(),
+        );
 
-        match policy_decision {
+        match policy_eval.decision {
             PolicyDecision::Deny {
                 tool: _,
                 code,
@@ -174,7 +191,13 @@ impl ToolCallHandler {
                         tool_call_id,
                         tool_name,
                     )
-                    .deny(&reason_code, Some(reason)),
+                    .deny(&reason_code, Some(reason))
+                    .with_tool_match(
+                        tool_classes.clone(),
+                        matched_tool_classes.clone(),
+                        match_basis.clone(),
+                        matched_rule.clone(),
+                    ),
                 };
             }
             PolicyDecision::AllowWithWarning { .. } | PolicyDecision::Allow => {
@@ -201,6 +224,12 @@ impl ToolCallHandler {
                 .deny(
                     reason_codes::P_MANDATE_REQUIRED,
                     Some("Commit tool requires mandate authorization".to_string()),
+                )
+                .with_tool_match(
+                    tool_classes.clone(),
+                    matched_tool_classes.clone(),
+                    match_basis.clone(),
+                    matched_rule.clone(),
                 ),
             };
         }
@@ -250,7 +279,13 @@ impl ToolCallHandler {
                             tool_call_id,
                             tool_name,
                         )
-                        .allow(reason_codes::P_MANDATE_VALID),
+                        .allow(reason_codes::P_MANDATE_VALID)
+                        .with_tool_match(
+                            tool_classes.clone(),
+                            matched_tool_classes.clone(),
+                            match_basis.clone(),
+                            matched_rule.clone(),
+                        ),
                     };
                 }
                 Err(e) => {
@@ -259,12 +294,19 @@ impl ToolCallHandler {
                     guard.emit_deny(&reason_code, Some(reason.clone()));
 
                     return HandleResult::Deny {
-                        reason_code,
-                        reason,
+                        reason_code: reason_code.clone(),
+                        reason: reason.clone(),
                         decision_event: DecisionEvent::new(
                             self.config.event_source.clone(),
                             tool_call_id,
                             tool_name,
+                        )
+                        .deny(&reason_code, Some(reason))
+                        .with_tool_match(
+                            tool_classes.clone(),
+                            matched_tool_classes.clone(),
+                            match_basis.clone(),
+                            matched_rule.clone(),
                         ),
                     };
                 }
@@ -283,7 +325,13 @@ impl ToolCallHandler {
                 tool_call_id,
                 tool_name,
             )
-            .allow(reason_codes::P_POLICY_ALLOW),
+            .allow(reason_codes::P_POLICY_ALLOW)
+            .with_tool_match(
+                tool_classes,
+                matched_tool_classes,
+                match_basis,
+                matched_rule,
+            ),
         }
     }
 
@@ -489,6 +537,7 @@ mod tests {
             tools: super::super::policy::ToolPolicy {
                 allow: None,
                 deny: Some(vec!["dangerous_*".to_string()]),
+                ..Default::default()
             },
             ..Default::default()
         };

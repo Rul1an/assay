@@ -4,7 +4,9 @@ use super::decision::{
     NullDecisionEmitter,
 };
 use super::jsonrpc::JsonRpcRequest;
-use super::policy::{make_deny_response, McpPolicy, PolicyDecision, PolicyState};
+use super::policy::{
+    make_deny_response, McpPolicy, PolicyDecision, PolicyMatchMetadata, PolicyState,
+};
 use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, Write},
@@ -257,14 +259,16 @@ impl McpProxy {
                         let tool_name = req.tool_params().map(|p| p.name).unwrap_or_default();
                         let tool_call_id = Self::extract_tool_call_id(&req);
 
-                        match policy.evaluate(
+                        let policy_eval = policy.evaluate_with_metadata(
                             &tool_name,
                             &req.tool_params()
                                 .map(|p| p.arguments)
                                 .unwrap_or(serde_json::Value::Null),
                             &mut state,
                             runtime_id.as_ref(),
-                        ) {
+                        );
+
+                        match policy_eval.decision {
                             PolicyDecision::Allow => {
                                 Self::handle_allow(&req, &mut audit_log, config.verbose);
                                 // Emit decision event (I1: always emit)
@@ -278,6 +282,7 @@ impl McpProxy {
                                         reason_codes::P_POLICY_ALLOW,
                                         None,
                                         req.id.clone(),
+                                        &policy_eval.metadata,
                                     );
                                 }
                             }
@@ -309,6 +314,7 @@ impl McpProxy {
                                     &code,
                                     Some(reason),
                                     req.id.clone(),
+                                    &policy_eval.metadata,
                                 );
                                 // Then proceed as a normal allow
                                 Self::handle_allow(&req, &mut audit_log, false);
@@ -357,6 +363,7 @@ impl McpProxy {
                                     &reason_code,
                                     Some(reason),
                                     req.id.clone(),
+                                    &policy_eval.metadata,
                                 );
 
                                 if config.dry_run {
@@ -487,6 +494,7 @@ impl McpProxy {
         reason_code: &str,
         reason: Option<String>,
         request_id: Option<serde_json::Value>,
+        metadata: &PolicyMatchMetadata,
     ) {
         let mut event = DecisionEvent::new(
             source.to_string(),
@@ -497,6 +505,10 @@ impl McpProxy {
         event.data.reason_code = reason_code.to_string();
         event.data.reason = reason;
         event.data.request_id = request_id;
+        event.data.tool_classes = metadata.tool_classes.clone();
+        event.data.matched_tool_classes = metadata.matched_tool_classes.clone();
+        event.data.match_basis = metadata.match_basis.as_str().map(ToString::to_string);
+        event.data.matched_rule = metadata.matched_rule.clone();
         emitter.emit(&event);
     }
 }
