@@ -10,6 +10,7 @@
 > ADR-025 I3 Step4 status (2026-02-21): release-lane OTel bridge evidence integration merged on `main` (default `attach`, `enforce` is contract-only under policy v1).
 > ADR-025 P3 status (2026-02-24): index consolidation A/B/C complete on `main` (single entrypoint + reviewer gates).
 > Experiment evidence status (2026-03-04): the fragmented-IPI line is now closed-loop on `main` across baseline, ablation, wrap-bypass, second-sink, sink-failure, and full-window cross-session decay (`k+1..k+3`). This shifts 2026 product priority toward route-governance primitives: tool classes, replayable session/state contracts, and coverage/completeness.
+> Governance core status (2026-03-04): ADR-027/028/029/030 slices are merged on `main` (tool taxonomy + class matching, coverage contract/generator/wrap emission, session/state informational export, and DX polish closure).
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
