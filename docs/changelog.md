@@ -791,6 +791,16 @@
 - feat(policy): enforce MCP rules by tool classes (B1) (#561) @Rul1an
 - docs(adr027): freeze tool taxonomy contract (#560) @Rul1an
 - docs(roadmap): prioritize route governance core (#558) @Rul1an
+- docs(policy): freeze B4 DX contract for coverage + wrap (#578) @Rul1an
+- docs(ops): close MCP session/state export line with runbook + reviewer gate (C-slice) (#576) @Rul1an
+- feat(mcp): add informational --state-window-out export (B1) (#574) @Rul1an
+- docs(ops): close MCP taxonomy + coverage line with runbook + reviewer gate (C-slice) (#572) @Rul1an
+- docs(policy): freeze session/state window contract for MCP governance (A2) (#569) @Rul1an
+- feat(coverage): emit coverage reports from mcp wrap decision logs (B3.2) (#567) @Rul1an
+- feat(coverage): generate coverage_report_v1 from JSONL inputs (B3.1) (#565) @Rul1an
+- docs(policy): freeze coverage report contract for tool/route completeness (A3) (#563) @Rul1an
+- feat(policy): enforce MCP rules by tool classes (B1) (#561) @Rul1an
+- docs(adr027): freeze tool taxonomy contract (#560) @Rul1an
 ## [2026-03-04]
 
 - test(exp): fix cross-session decay controls + gate semantics (#547) @Rul1an
