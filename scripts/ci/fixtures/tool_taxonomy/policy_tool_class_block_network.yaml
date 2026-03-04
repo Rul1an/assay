@@ -1,0 +1,18 @@
+version: "2.0"
+name: "tool-taxonomy-b1"
+
+tool_classes:
+  read_document:
+    - "source:local"
+    - "source:sensitive"
+  web_search:
+    - "sink:network"
+  web_search_alt:
+    - "sink:network"
+
+tools:
+  deny_classes:
+    - "sink:network"
+
+enforcement:
+  unconstrained_tools: allow

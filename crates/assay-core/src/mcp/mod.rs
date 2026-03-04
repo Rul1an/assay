@@ -11,12 +11,16 @@ pub mod proxy;
 pub mod runtime_features;
 pub mod signing;
 pub mod tool_call_handler;
+pub mod tool_match;
+pub mod tool_taxonomy;
 pub mod trust_policy;
 pub mod types;
 
 pub use mapper_v2::*;
 pub use parser::*;
 pub use signing::{sign_tool, verify_tool, ToolSignature, VerifyError, VerifyResult};
+pub use tool_match::{MatchBasis, MatchResult, ToolContext, ToolRuleSelector};
+pub use tool_taxonomy::ToolTaxonomy;
 pub use trust_policy::TrustPolicy;
 pub use types::*;
 

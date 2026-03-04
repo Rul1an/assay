@@ -76,6 +76,18 @@ pub struct DecisionEvent {
 pub struct DecisionData {
     /// Tool name
     pub tool: String,
+    /// Tool classes observed at decision time (sorted)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_classes: Vec<String>,
+    /// Tool classes that matched the policy decision (sorted)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matched_tool_classes: Vec<String>,
+    /// Match basis for policy evaluation: name, class, or name+class
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_basis: Option<String>,
+    /// Rule or policy field that matched
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_rule: Option<String>,
     /// Decision outcome
     pub decision: Decision,
     /// Machine-parseable reason code (MUST)
@@ -125,6 +137,10 @@ impl DecisionEvent {
             time: chrono::Utc::now().to_rfc3339(),
             data: DecisionData {
                 tool,
+                tool_classes: Vec::new(),
+                matched_tool_classes: Vec::new(),
+                match_basis: None,
+                matched_rule: None,
                 decision: Decision::Error, // Default to error, will be set
                 reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
                 reason: Some("Decision not finalized (guard dropped without emit)".to_string()),
@@ -202,6 +218,21 @@ impl DecisionEvent {
     pub fn with_latencies(mut self, authz_ms: Option<u64>, store_ms: Option<u64>) -> Self {
         self.data.authz_latency_ms = authz_ms;
         self.data.store_latency_ms = store_ms;
+        self
+    }
+
+    /// Set tool match metadata.
+    pub fn with_tool_match(
+        mut self,
+        tool_classes: Vec<String>,
+        matched_tool_classes: Vec<String>,
+        match_basis: Option<String>,
+        matched_rule: Option<String>,
+    ) -> Self {
+        self.data.tool_classes = tool_classes;
+        self.data.matched_tool_classes = matched_tool_classes;
+        self.data.match_basis = match_basis;
+        self.data.matched_rule = matched_rule;
         self
     }
 }
@@ -320,6 +351,22 @@ impl DecisionEmitterGuard {
         if let Some(ref mut event) = self.event {
             event.data.authz_latency_ms = authz_ms;
             event.data.store_latency_ms = store_ms;
+        }
+    }
+
+    /// Set tool match metadata for the event.
+    pub fn set_tool_match(
+        &mut self,
+        tool_classes: Vec<String>,
+        matched_tool_classes: Vec<String>,
+        match_basis: Option<String>,
+        matched_rule: Option<String>,
+    ) {
+        if let Some(ref mut event) = self.event {
+            event.data.tool_classes = tool_classes;
+            event.data.matched_tool_classes = matched_tool_classes;
+            event.data.match_basis = match_basis;
+            event.data.matched_rule = matched_rule;
         }
     }
 

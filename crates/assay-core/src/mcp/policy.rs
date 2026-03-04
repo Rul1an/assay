@@ -2,9 +2,11 @@ use super::identity::ToolIdentity;
 use super::jsonrpc::{
     ContentItem, JsonRpcRequest, JsonRpcResponse, ToolCallResult, ToolResultBody,
 };
+use super::tool_match::MatchBasis;
+use super::tool_taxonomy::ToolTaxonomy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -44,6 +46,9 @@ pub struct McpPolicy {
     /// Cryptographic pins for tool integrity (Phase 9)
     #[serde(default)]
     pub tool_pins: HashMap<String, ToolIdentity>,
+
+    #[serde(default, flatten)]
+    pub tool_taxonomy: ToolTaxonomy,
 
     // Phase 4: Runtime Features
     #[serde(default)]
@@ -102,6 +107,24 @@ pub struct GlobalLimits {
 pub struct ToolPolicy {
     pub allow: Option<Vec<String>>,
     pub deny: Option<Vec<String>>,
+    #[serde(default)]
+    pub allow_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub deny_classes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PolicyMatchMetadata {
+    pub tool_classes: Vec<String>,
+    pub matched_tool_classes: Vec<String>,
+    pub match_basis: MatchBasis,
+    pub matched_rule: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolicyEvaluation {
+    pub decision: PolicyDecision,
+    pub metadata: PolicyMatchMetadata,
 }
 
 // Canonical Rule Shape (Legacy V1)
@@ -360,23 +383,44 @@ impl McpPolicy {
         state: &mut PolicyState,
         runtime_identity: Option<&ToolIdentity>,
     ) -> PolicyDecision {
+        self.evaluate_with_metadata(tool_name, args, state, runtime_identity)
+            .decision
+    }
+
+    pub fn evaluate_with_metadata(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        state: &mut PolicyState,
+        runtime_identity: Option<&ToolIdentity>,
+    ) -> PolicyEvaluation {
+        let tool_classes = self.tool_taxonomy.classes_for(tool_name);
+        let tool_classes_vec: Vec<String> = tool_classes.iter().cloned().collect();
+        let mut metadata = PolicyMatchMetadata {
+            tool_classes: tool_classes_vec,
+            ..PolicyMatchMetadata::default()
+        };
+
         // 0. Tool Integrity Check (Phase 9)
         if let Some(pinned) = self.tool_pins.get(tool_name) {
             if let Some(runtime) = runtime_identity {
                 if pinned != runtime {
-                    return PolicyDecision::Deny {
-                        tool: tool_name.to_string(),
-                        code: "E_TOOL_DRIFT".to_string(),
-                        reason: format!(
-                            "Tool integrity failure: identity drifted from pinned version. (Runtime: {}, Pinned: {})",
-                            runtime.fingerprint(),
-                            pinned.fingerprint()
-                        ),
-                        contract: self.format_deny_contract(
-                            tool_name,
-                            "E_TOOL_DRIFT",
-                            "Tool metadata or schema has changed without policy update (SOTA Moat)",
-                        ),
+                    return PolicyEvaluation {
+                        decision: PolicyDecision::Deny {
+                            tool: tool_name.to_string(),
+                            code: "E_TOOL_DRIFT".to_string(),
+                            reason: format!(
+                                "Tool integrity failure: identity drifted from pinned version. (Runtime: {}, Pinned: {})",
+                                runtime.fingerprint(),
+                                pinned.fingerprint()
+                            ),
+                            contract: self.format_deny_contract(
+                                tool_name,
+                                "E_TOOL_DRIFT",
+                                "Tool metadata or schema has changed without policy update (SOTA Moat)",
+                            ),
+                        },
+                        metadata,
                     };
                 }
             }
@@ -384,35 +428,69 @@ impl McpPolicy {
 
         // 1. Rate limits
         if let Some(decision) = self.check_rate_limits(state) {
-            return decision;
+            return PolicyEvaluation { decision, metadata };
         }
 
-        // 2. Deny list
-        if self.is_denied(tool_name) {
-            return PolicyDecision::Deny {
-                tool: tool_name.to_string(),
-                code: "E_TOOL_DENIED".to_string(),
-                reason: "Tool is explicitly denylisted".to_string(),
-                contract: self.format_deny_contract(
-                    tool_name,
-                    "E_TOOL_DENIED",
-                    "Tool is denylisted",
-                ),
+        let deny_name_match = self.is_denied(tool_name);
+        let deny_class_matches = self.matched_deny_classes(&tool_classes);
+        if deny_name_match || !deny_class_matches.is_empty() {
+            metadata.matched_tool_classes = deny_class_matches.clone();
+            metadata.match_basis =
+                Self::classify_match_basis(deny_name_match, !deny_class_matches.is_empty());
+            metadata.matched_rule = Some(Self::matched_rule_name(
+                "tools.deny",
+                "tools.deny_classes",
+                &metadata,
+            ));
+
+            let deny_reason = if deny_name_match && !deny_class_matches.is_empty() {
+                "Tool is explicitly denylisted by name and class"
+            } else if deny_name_match {
+                "Tool is explicitly denylisted by name"
+            } else {
+                "Tool is explicitly denylisted by class"
+            };
+
+            return PolicyEvaluation {
+                decision: PolicyDecision::Deny {
+                    tool: tool_name.to_string(),
+                    code: "E_TOOL_DENIED".to_string(),
+                    reason: deny_reason.to_string(),
+                    contract: self.format_deny_contract(tool_name, "E_TOOL_DENIED", deny_reason),
+                },
+                metadata,
             };
         }
 
-        // 3. Allow list
-        if self.has_allowlist() && !self.is_allowed(tool_name) {
-            return PolicyDecision::Deny {
-                tool: tool_name.to_string(),
-                code: "E_TOOL_NOT_ALLOWED".to_string(),
-                reason: "Tool is not in the allowlist".to_string(),
-                contract: self.format_deny_contract(
-                    tool_name,
-                    "E_TOOL_NOT_ALLOWED",
-                    "Tool is not in allowlist",
-                ),
+        let allow_name_match = self.is_allowed(tool_name);
+        let allow_class_matches = self.matched_allow_classes(&tool_classes);
+        if self.has_allowlist() && !allow_name_match && allow_class_matches.is_empty() {
+            return PolicyEvaluation {
+                decision: PolicyDecision::Deny {
+                    tool: tool_name.to_string(),
+                    code: "E_TOOL_NOT_ALLOWED".to_string(),
+                    reason: "Tool is not in the allowlist".to_string(),
+                    contract: self.format_deny_contract(
+                        tool_name,
+                        "E_TOOL_NOT_ALLOWED",
+                        "Tool is not in allowlist",
+                    ),
+                },
+                metadata,
             };
+        }
+
+        if allow_name_match || !allow_class_matches.is_empty() {
+            metadata.matched_tool_classes = allow_class_matches;
+            metadata.match_basis = Self::classify_match_basis(
+                allow_name_match,
+                !metadata.matched_tool_classes.is_empty(),
+            );
+            metadata.matched_rule = Some(Self::matched_rule_name(
+                "tools.allow",
+                "tools.allow_classes",
+                &metadata,
+            ));
         }
 
         // 4. Schema Validation
@@ -428,23 +506,29 @@ impl McpPolicy {
                         })
                     })
                     .collect();
-                return PolicyDecision::Deny {
-                    tool: tool_name.to_string(),
-                    code: "E_ARG_SCHEMA".to_string(),
-                    reason: "JSON Schema validation failed".to_string(),
-                    contract: json!({
-                        "status": "deny",
-                        "error_code": "E_ARG_SCHEMA",
-                        "tool": tool_name,
-                        "violations": violations,
-                    }),
+                return PolicyEvaluation {
+                    decision: PolicyDecision::Deny {
+                        tool: tool_name.to_string(),
+                        code: "E_ARG_SCHEMA".to_string(),
+                        reason: "JSON Schema validation failed".to_string(),
+                        contract: json!({
+                            "status": "deny",
+                            "error_code": "E_ARG_SCHEMA",
+                            "tool": tool_name,
+                            "violations": violations,
+                        }),
+                    },
+                    metadata,
                 };
             }
-            return PolicyDecision::Allow;
+            return PolicyEvaluation {
+                decision: PolicyDecision::Allow,
+                metadata,
+            };
         }
 
         // 5. Unconstrained Mode
-        match self.enforcement.unconstrained_tools {
+        let decision = match self.enforcement.unconstrained_tools {
             UnconstrainedMode::Deny => PolicyDecision::Deny {
                 tool: tool_name.to_string(),
                 code: "E_TOOL_UNCONSTRAINED".to_string(),
@@ -461,7 +545,9 @@ impl McpPolicy {
                 reason: "Tool allowed but has no schema".to_string(),
             },
             UnconstrainedMode::Allow => PolicyDecision::Allow,
-        }
+        };
+
+        PolicyEvaluation { decision, metadata }
     }
 
     // Helper methods (extracted from original code or refactored)
@@ -509,7 +595,7 @@ impl McpPolicy {
     }
 
     fn has_allowlist(&self) -> bool {
-        self.allow.is_some() || self.tools.allow.is_some()
+        self.allow.is_some() || self.tools.allow.is_some() || self.tools.allow_classes.is_some()
     }
 
     fn is_allowed(&self, tool_name: &str) -> bool {
@@ -529,6 +615,52 @@ impl McpPolicy {
             "tool": tool,
             "reason": reason
         })
+    }
+
+    fn matched_deny_classes(&self, tool_classes: &BTreeSet<String>) -> Vec<String> {
+        self.match_classes(tool_classes, self.tools.deny_classes.as_ref())
+    }
+
+    fn matched_allow_classes(&self, tool_classes: &BTreeSet<String>) -> Vec<String> {
+        self.match_classes(tool_classes, self.tools.allow_classes.as_ref())
+    }
+
+    fn match_classes(
+        &self,
+        tool_classes: &BTreeSet<String>,
+        configured: Option<&Vec<String>>,
+    ) -> Vec<String> {
+        let mut matched = BTreeSet::new();
+        if let Some(configured_classes) = configured {
+            for class_name in configured_classes {
+                if tool_classes.contains(class_name) {
+                    matched.insert(class_name.clone());
+                }
+            }
+        }
+        matched.into_iter().collect()
+    }
+
+    fn classify_match_basis(name_match: bool, class_match: bool) -> MatchBasis {
+        match (name_match, class_match) {
+            (true, true) => MatchBasis::NameAndClass,
+            (true, false) => MatchBasis::Name,
+            (false, true) => MatchBasis::Class,
+            (false, false) => MatchBasis::None,
+        }
+    }
+
+    fn matched_rule_name(
+        name_field: &str,
+        class_field: &str,
+        metadata: &PolicyMatchMetadata,
+    ) -> String {
+        match metadata.match_basis {
+            MatchBasis::NameAndClass => format!("{name_field}+{class_field}"),
+            MatchBasis::Name => name_field.to_string(),
+            MatchBasis::Class => class_field.to_string(),
+            MatchBasis::None => name_field.to_string(),
+        }
     }
 
     // Proxy-specific check method (Legacy compatibility wrapper)
