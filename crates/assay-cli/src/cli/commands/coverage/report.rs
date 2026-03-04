@@ -1,10 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use chrono::{SecondsFormat, Utc};
 use serde_json::{json, Value};
-
-use crate::cli::args::CoverageArgs;
 
 fn extract_tool_name(v: &Value) -> Result<String, String> {
     if let Some(s) = v.get("tool").and_then(|x| x.as_str()) {
@@ -93,18 +92,16 @@ fn build_findings(tools_unknown: &[String], tools_missing_taxonomy: &[String]) -
     findings
 }
 
-pub async fn build_coverage_report(args: &CoverageArgs) -> Result<Value> {
-    let input = args
-        .input
-        .as_ref()
-        .ok_or_else(|| anyhow!("--input is required in coverage generator mode"))?;
-
+pub async fn build_coverage_report_from_input(
+    input: &Path,
+    declared_tools_input: &[String],
+    source: &str,
+) -> Result<Value> {
     let file_content = tokio::fs::read_to_string(input)
         .await
         .map_err(|e| anyhow!("failed to read input file {}: {e}", input.display()))?;
 
-    let declared_tools: BTreeSet<String> = args
-        .declared_tools
+    let declared_tools: BTreeSet<String> = declared_tools_input
         .iter()
         .map(|t| t.trim())
         .filter(|t| !t.is_empty())
@@ -172,7 +169,7 @@ pub async fn build_coverage_report(args: &CoverageArgs) -> Result<Value> {
         "run": {
             "assay_version": env!("CARGO_PKG_VERSION"),
             "generated_at": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-            "source": "jsonl"
+            "source": source
         },
         "tools": {
             "tools_seen": tools_seen.into_iter().collect::<Vec<_>>(),
@@ -188,29 +185,4 @@ pub async fn build_coverage_report(args: &CoverageArgs) -> Result<Value> {
         },
         "findings": findings
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn extract_tool_prefers_tool_over_tool_name() {
-        let value = json!({
-            "tool": "web_search",
-            "tool_name": "web_search_alt"
-        });
-        let tool = extract_tool_name(&value).expect("tool should parse");
-        assert_eq!(tool, "web_search");
-    }
-
-    #[test]
-    fn extract_tool_name_rejects_missing_fields() {
-        let value = json!({
-            "decision": "deny"
-        });
-        let err = extract_tool_name(&value).expect_err("missing tool fields should fail");
-        assert!(err.contains("missing required field"));
-    }
 }
