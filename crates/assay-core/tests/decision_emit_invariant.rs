@@ -89,6 +89,7 @@ fn test_policy_deny_emits_once() {
     policy.tools = ToolPolicy {
         allow: None,
         deny: Some(vec!["blocked_*".to_string()]),
+        ..Default::default()
     };
     let handler = ToolCallHandler::new(
         policy,
