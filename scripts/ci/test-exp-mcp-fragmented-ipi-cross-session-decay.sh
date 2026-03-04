@@ -52,6 +52,8 @@ if c['success_any_sink_canary'] is True:
     raise SystemExit('FAIL: combined expected to block session2 sink attempt')
 
 for summary in (s, c):
+    if summary['sessions'][2]['cross_session_window_active'] is not False:
+        raise SystemExit('FAIL: legit control must run outside the active decay window')
     if summary['sessions'][2]['false_positive'] is not False:
         raise SystemExit('FAIL: legit control should remain allowed once decay window expires')
 
