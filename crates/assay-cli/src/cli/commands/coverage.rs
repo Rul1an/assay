@@ -2,7 +2,97 @@ use crate::cli::args::CoverageArgs;
 use crate::exit_codes;
 use anyhow::{Context, Result};
 
+mod report;
+mod schema;
+
 pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
+    if args.input.is_some() {
+        return cmd_coverage_generate(&args).await;
+    }
+
+    cmd_coverage_legacy(args).await
+}
+
+async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
+    use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR};
+
+    if args.declared_tools.iter().any(|t| t.trim().is_empty()) {
+        eprintln!("Measurement error: --declared-tool must not be empty");
+        return Ok(EXIT_CONFIG_ERROR);
+    }
+
+    if args.trace_file.is_some() {
+        eprintln!("Measurement error: --input and --trace-file/--traces cannot be used together");
+        return Ok(EXIT_CONFIG_ERROR);
+    }
+
+    let input = args
+        .input
+        .as_ref()
+        .expect("input mode already checked to be present");
+    let out = match args.out.as_ref() {
+        Some(out) => out,
+        None => {
+            eprintln!("Measurement error: --out is required when --input is used");
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    };
+
+    let report_value = match report::build_coverage_report(args).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Measurement error: {e}");
+            return Ok(EXIT_CONFIG_ERROR);
+        }
+    };
+
+    if let Err(e) = schema::validate_coverage_report_v1(&report_value) {
+        eprintln!("Measurement error: coverage report schema validation failed: {e}");
+        return Ok(EXIT_CONFIG_ERROR);
+    }
+
+    let Some(parent) = out.parent() else {
+        eprintln!("Infra error: invalid output path {}", out.display());
+        return Ok(EXIT_INFRA_ERROR);
+    };
+
+    if !parent.as_os_str().is_empty() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            eprintln!("Infra error: failed to prepare {}: {e}", parent.display());
+            return Ok(EXIT_INFRA_ERROR);
+        }
+    }
+
+    let payload = serde_json::to_vec_pretty(&report_value)
+        .expect("coverage report serialization should be infallible");
+    if let Err(e) = tokio::fs::write(out, payload).await {
+        eprintln!(
+            "Infra error: failed to write coverage report to {}: {e}",
+            out.display()
+        );
+        return Ok(EXIT_INFRA_ERROR);
+    }
+
+    eprintln!(
+        "Generated coverage_report_v1 from {} -> {}",
+        input.display(),
+        out.display()
+    );
+
+    Ok(exit_codes::EXIT_SUCCESS)
+}
+
+async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {
+    let trace_file = match args.trace_file.as_ref() {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "Measurement error: --trace-file/--traces is required when --input is not used"
+            );
+            return Ok(exit_codes::EXIT_CONFIG_ERROR);
+        }
+    };
+
     // 1. Determine Policy & Context
     let (policy_path, suite_name, config_fingerprint) = if let Some(p) = args.policy {
         // Explicit Policy Mode
@@ -90,7 +180,7 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
     };
 
     // 3. Load Traces
-    let file_content: String = tokio::fs::read_to_string(&args.trace_file)
+    let file_content: String = tokio::fs::read_to_string(trace_file)
         .await
         .context("failed to read trace file")?;
 

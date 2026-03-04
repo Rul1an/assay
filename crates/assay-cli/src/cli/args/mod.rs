@@ -383,6 +383,18 @@ pub struct MigrateArgs {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct CoverageArgs {
+    /// Path to JSONL tool/decision events for coverage_report_v1 generation.
+    #[arg(long)]
+    pub input: Option<std::path::PathBuf>,
+
+    /// Output path for coverage_report_v1 JSON.
+    #[arg(long)]
+    pub out: Option<std::path::PathBuf>,
+
+    /// Tools declared by policy/config (repeatable).
+    #[arg(long = "declared-tool")]
+    pub declared_tools: Vec<String>,
+
     #[arg(long, default_value = "eval.yaml")]
     pub config: std::path::PathBuf,
 
@@ -390,7 +402,7 @@ pub struct CoverageArgs {
     pub policy: Option<PathBuf>,
 
     #[arg(long, alias = "traces")]
-    pub trace_file: std::path::PathBuf,
+    pub trace_file: Option<std::path::PathBuf>,
 
     #[arg(long, default_value_t = 0.0)]
     pub min_coverage: f64,
