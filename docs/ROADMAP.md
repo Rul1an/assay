@@ -9,6 +9,7 @@
 > ADR-025 I2 Step4 status (2026-02-20): release-lane closure evidence integration merged on `main` (default `attach`), `enforce` remains opt-in.
 > ADR-025 I3 Step4 status (2026-02-21): release-lane OTel bridge evidence integration merged on `main` (default `attach`, `enforce` is contract-only under policy v1).
 > ADR-025 P3 status (2026-02-24): index consolidation A/B/C complete on `main` (single entrypoint + reviewer gates).
+> Experiment evidence status (2026-03-04): the fragmented-IPI line is now closed-loop on `main` across baseline, ablation, wrap-bypass, second-sink, sink-failure, and full-window cross-session decay (`k+1..k+3`). This shifts 2026 product priority toward route-governance primitives: tool classes, replayable session/state contracts, and coverage/completeness.
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -134,6 +135,8 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 - **Not observability**: Langfuse, LangSmith, Arize do this better and it's a different market. Integrate via OTel where needed, don't build dashboards.
 - **Not eval-as-a-service**: Agent CI and LangSmith do evals. Assay does policy enforcement + evidence. Overlap on PR-gates, but the value proposition is different.
 - **Not agent-building**: Dagger, Zencoder build agents. Assay validates them. Complementary, not competitive.
+- **Not universal semantic-hijacking detection**: LLM-as-judge or probabilistic semantic gates are not the core enforcement model. Assay stays deterministic and evidence-first.
+- **Not a full outbound egress firewall (yet)**: raw network containment belongs to OS/runtime isolation layers. Assay governs tool routes and records policy decisions; it does not replace platform egress controls as an MVP.
 
 ---
 
@@ -404,7 +407,23 @@ Formalize "Evidence-as-a-Product" with provenance and replayability scores.
 
 ## Q3 2026: Enterprise Scale (Growth)
 
-**Objective:** Integration with the broader security ecosystem + agentic protocol support.
+**Objective:** Integration with the broader security ecosystem + agentic protocol support, led by route-governance primitives rather than broader surface area.
+
+### Route Governance Core (Highest Priority)
+
+March 2026 experiment evidence changes the ordering inside Q3. Before expanding adapter breadth or managed surfaces, Assay should close the product gap between experiment-only route governance and reusable platform primitives.
+
+| Priority | Capability | Why now | MVP boundary |
+|----------|------------|---------|--------------|
+| **P0** | Tool taxonomy as first-class classes | Second-sink and tool-hopping results show raw tool names are brittle. | Source/sink/store/exec class map, policies written on classes, evidence logs record matched class. |
+| **P0** | Session identity + state store contract | Cross-session decay shows route memory is required beyond a single run. | Explicit session key, replayable state store interface, TTL/window semantics, evidence export/import. |
+| **P1** | Coverage/completeness reports | Governance without visibility into unknown tools and untested routes creates blind spots. | JSON + SARIF informational report for tools seen vs declared, unknown tools, and route coverage gaps. |
+| **P1** | Machine-readable decision logs | Enterprises need debugging without log archaeology. | JSONL decision events with `rule_id`, `reason_code`, `matched_fields`, `decision_path`, `policy_version`, `latency`. |
+| **P1** | Replay with state snapshots | The product claim is verifiability, not just blocking. | Replay tool-call logs plus policy + state snapshot, with decision diffs on policy/state changes. |
+| **P2** | Hardening defaults for ingest/proxy | Inline governance inherits parser attack surface. | Default caps, fuzz/property tests, and consistent fail-closed semantics. |
+| **P2** | Evidence-first interop bridges | OTel/MCP interop is useful only if enforcement and evidence stay first-class. | Lossiness-accounted bridges, adapter metadata everywhere, no LLM-judge in core enforcement. |
+
+These items outrank additional dashboard and growth-only work because the experiment ladder shows Assay wins on route/state governance, not on content filtering or surface-area expansion alone.
 
 ### A. Protocol Adapters (Adapter-First Strategy)
 
