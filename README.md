@@ -4,144 +4,141 @@
 [![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
 
-**Policy-as-Code for AI Agents.**
+Policy-as-Code for AI agents.
 
-Runs offline. No telemetry. No vendor lock-in.
+Deterministic MCP governance, CI gates, and verifiable evidence bundles.
+Runs offline-first with no required hosted backend.
 
-Assay validates AI agent behavior against policies. Record traces, generate policies, run deterministic CI gates, produce evidence bundles for audit. Works with any MCP-compatible agent.
+Assay validates tool-call behavior against explicit policy, records auditable decisions, and produces replayable evidence. It is built for teams that want hard gates and reviewable artifacts.
 
-**Why Assay wins in 2026 agent security:** Assay's strongest wedge is deterministic governance on the tool-call path. The MCP fragmented-IPI experiment line shows that stateful sequence policies remain effective across payload fragmentation and tool-hopping, where wrap-only lexical checks fail. Assay does not claim to solve semantic hijacking in general or to block raw outbound network bytes by itself; it governs sink-call routes with auditable policy decisions and single-digit millisecond overhead. See `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md`, `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-WRAP-BYPASS-2026Q1-RESULTS.md`, and `/Users/roelschuurkes/assay/docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SECOND-SINK-2026Q1-RESULTS.md`.
+## Why Assay
 
-> **Open Core:** Engine + baseline packs are MIT/Apache-2.0.
-> Compliance packs (EU AI Act, SOC2) are commercial.
-> See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).
+- Deterministic gates for MCP-compatible agents in local runs and CI
+- Auditable evidence with export, verify, lint, diff, and replay flows
+- Runtime control on the tool-call path via `assay mcp wrap`
+- Offline-first workflow with portable outputs
+- DX-first CLI with SARIF, JUnit, PR-comment, and markdown outputs
 
-<div align="center">
-  <img src="demo/output/hero.gif" alt="Assay Demo" width="100%" />
-</div>
+## Security Model (Bounded Claims)
 
-<!-- MP4 version available at demo/output/hero.mp4 for docs sites -->
+Assay’s strongest wedge is deterministic governance on the tool-call route.
 
-## Try It Now
+In the MCP fragmented-IPI experiment line, stateful sequence policy remained effective across payload fragmentation, tool-hopping, sink-failure pressure, and delayed cross-session sink attempts, where wrap-only lexical checks failed.
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Rul1an/assay?quickstart=1)
+Assay does not claim to solve semantic hijacking in general, and it does not claim to block raw outbound network bytes by itself. The bounded claim is narrower: Assay governs sink-call routes with explicit policy decisions, audit-grade evidence, and low single-digit millisecond overhead in the published experiment line.
 
-No install required. Opens a browser-based terminal with Assay pre-compiled and demo fixtures ready.
+Results and rerun docs:
 
-```bash
-# In the Codespace terminal:
-make demo        # See the full break & fix flow
-make test        # Run a safe trace (PASS)
-make fail        # Run an unsafe trace (FAIL)
-```
+- [Fragmented IPI results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)
+- [Wrap-bypass results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-WRAP-BYPASS-2026Q1-RESULTS.md)
+- [Second-sink results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SECOND-SINK-2026Q1-RESULTS.md)
+- [Cross-session decay results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-CROSS-SESSION-DECAY-2026Q1-RESULTS.md)
+- [Sink-failure results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SINK-FAILURE-2026Q1-RESULTS.md)
 
-Or install locally:
+## Open Core Boundary
 
-<br/>
+Open core covers the engine, CLI, runtime governance, evidence flows, and baseline packs.
 
-## Install
+Compliance packs and organization-specific governance packs can be commercial. See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).
+
+## Quickstart
+
+### Install
 
 ```bash
 cargo install assay-cli
 ```
 
-## Quickstart
-
 ### From scratch
 
 ```bash
-# Generate policy + config from project defaults
+# Scaffold config + policy + CI
 assay init --ci
 
-# Run smoke tests (uses bundled traces, no API calls)
-assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl
+# Run an offline smoke gate
+assay ci --config eval.yaml --trace-file traces/hello.jsonl
 ```
 
 ### From an existing trace
 
 ```bash
-# Generate policy from recorded agent behavior
+# Generate policy from recorded behavior
 assay init --from-trace trace.jsonl
 
-# Validate
+# Validate trace against config + policy
 assay validate --config eval.yaml --trace-file trace.jsonl
 ```
 
 ### From an MCP Inspector session
 
 ```bash
-# Import trace
+# Import Inspector session to Assay trace format
 assay import --format inspector session.json --out-trace traces/session.jsonl
 
-# Run tests
+# Run policy checks
 assay run --config eval.yaml --trace-file traces/session.jsonl
 ```
 
-## Commands
+### Demo
 
-### Testing & Validation
+```bash
+make demo   # full break/fix walkthrough
+make test   # safe trace (PASS)
+make fail   # unsafe trace (FAIL)
+```
 
-| Command | What it does |
-|---------|-------------|
-| `assay run` | Execute test suite against trace file and write `run.json`/`summary.json`. |
-| `assay ci` | CI-mode run. Adds `--sarif`, `--junit`, `--pr-comment` outputs. |
-| `assay validate` | Stateless policy check. Text, JSON, or SARIF output. |
-| `assay replay` | Replay from a self-contained bundle (offline, hermetic). |
+## Core Commands
 
-### Policy & Config
-
-| Command | What it does |
-|---------|-------------|
-| `assay init` | Scaffold project: policy, config, CI workflow. `--from-trace` for existing traces. |
-| `assay generate` | Generate policy from trace or multi-run profile. `--heuristics` for entropy analysis. |
-| `assay profile` | Multi-run stability profiling. Wilson interval gating. |
-| `assay doctor` | Diagnose config, trace, and baseline issues. |
-| `assay explain` | Step-by-step trace explanation against policy. Terminal, markdown, JSON output. |
-
-### Evidence & Compliance
+### Testing and validation
 
 | Command | What it does |
-|---------|-------------|
-| `assay evidence export` | Create evidence bundle (tar.gz, content-addressed, Merkle root). |
+| --- | --- |
+| `assay run` | Execute a test suite against a trace and write run outputs. |
+| `assay ci` | CI-mode run with SARIF, JUnit, and PR-comment outputs. |
+| `assay validate` | Stateless policy validation with text, JSON, or SARIF output. |
+| `assay replay` | Replay from a self-contained offline bundle. |
+
+### Policy and config
+
+| Command | What it does |
+| --- | --- |
+| `assay init` | Scaffold policy, config, and CI workflow. |
+| `assay generate` | Generate policy from traces or profiles. |
+| `assay profile` | Multi-run stability profiling. |
+| `assay doctor` | Diagnose config, trace, baseline, and runtime issues. |
+| `assay explain` | Explain policy behavior against a trace. |
+
+### Evidence and compliance
+
+| Command | What it does |
+| --- | --- |
+| `assay evidence export` | Create an evidence bundle. |
 | `assay evidence verify` | Verify bundle integrity. |
-| `assay evidence lint` | Lint bundle with SARIF output. Supports `--pack` for compliance rules. |
-| `assay evidence diff` | Diff two verified bundles (network, filesystem, process changes). |
-| `assay evidence explore` | Interactive TUI explorer. |
-| `assay evidence push/pull/list` | BYOS: S3, GCS, Azure Blob, R2, B2, MinIO. |
-| `assay bundle create/verify` | Replay bundles (portable, offline test artifacts). |
+| `assay evidence lint` | Lint evidence with optional packs and SARIF output. |
+| `assay evidence diff` | Diff two verified bundles. |
+| `assay evidence push/pull/list` | BYOS object storage flows. |
 
 ### Runtime
 
 | Command | What it does |
-|---------|-------------|
-| `assay mcp wrap` | Wrap an MCP process with policy enforcement (JSON-RPC over stdio). |
-| `assay sandbox` | Landlock sandbox execution (Linux, rootless). |
-| `assay monitor` | eBPF/LSM runtime enforcement (Linux, requires capabilities). |
+| --- | --- |
+| `assay mcp wrap` | Wrap an MCP process with policy enforcement. |
+| `assay sandbox` | Rootless Landlock sandbox execution on Linux. |
+| `assay monitor` | eBPF/LSM runtime enforcement on Linux. |
 
 ### Misc
 
 | Command | What it does |
-|---------|-------------|
-| `assay sim run` | Attack simulation suite (integrity, chaos, differential). |
-| `assay import` | Import traces from MCP Inspector or JSON-RPC logs. |
-| `assay tool sign/verify/keygen` | Ed25519 + DSSE tool signing. |
-| `assay fix` | Interactive auto-fix suggestions for policy issues. |
+| --- | --- |
+| `assay import` | Import traces from Inspector or JSON-RPC logs. |
+| `assay tool sign/verify/keygen` | Local-key tool signing and verification. |
+| `assay fix` | Interactive policy fix suggestions. |
 
 ## CI Integration
 
 ### GitHub Actions
 
 ```yaml
-- uses: Rul1an/assay-action@v2
-```
-
-The action installs assay, runs your gate, uploads SARIF to the Security tab, and posts a PR comment with results.
-
-Canonical public slug: `Rul1an/assay-action@v2` (Marketplace).
-Monorepo-internal workflows in this repo may use `./assay-action` for local action testing only.
-
-```yaml
-# .github/workflows/assay.yml
 name: Assay Gate
 on: [push, pull_request]
 
@@ -154,18 +151,20 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@<PINNED_SHA>
       - uses: Rul1an/assay-action@v2
 ```
 
-Or generate a workflow:
+Assay Action installs Assay, runs the gate, uploads SARIF, and can publish PR-friendly outputs.
+
+You can also generate a starter workflow:
 
 ```bash
-assay init --ci github   # writes .github/workflows/assay.yml
-assay init --ci gitlab   # writes .gitlab-ci.yml
+assay init --ci github
+assay init --ci gitlab
 ```
 
-### Manual CI
+Or run manually:
 
 ```bash
 assay ci \
@@ -177,13 +176,22 @@ assay ci \
   --replay-strict
 ```
 
-Exit codes: `0` pass, `1` test failure, `2` config error, `3` infra error.
+Exit codes:
+
+- `0` pass
+- `1` test failure
+- `2` config or measurement error
+- `3` infra error
 
 ## Configuration
 
-Two files: a test config (`eval.yaml`) and a policy (`policy.yaml`).
+Assay usually works with two files:
 
-**eval.yaml** — defines what to test:
+- `eval.yaml` for the test suite
+- `policy.yaml` for the allowed behavior
+
+`eval.yaml`:
+
 ```yaml
 version: 1
 suite: "my_agent"
@@ -199,10 +207,13 @@ tests:
           type: object
           required: [env]
           properties:
-            env: { type: string, enum: [staging, prod] }
+            env:
+              type: string
+              enum: [staging, prod]
 ```
 
-**policy.yaml** — defines what's allowed:
+`policy.yaml`:
+
 ```yaml
 version: "1.0"
 name: "my-policy"
@@ -218,11 +229,17 @@ constraints:
         matches: "^/app/.*|^/data/.*"
 ```
 
-Policy packs: `assay init --pack default|hardened|dev`
+Starter presets:
+
+```bash
+assay init --preset default
+assay init --preset hardened
+assay init --preset dev
+```
 
 ## Evidence Bundles
 
-Tamper-evident `.tar.gz` bundles containing `manifest.json` (SHA-256 hashes, Merkle root) and `events.ndjson` (CloudEvents format, content-addressed IDs).
+Assay produces tamper-evident `.tar.gz` bundles with manifests, hashes, and event streams.
 
 ```bash
 assay evidence export --profile profile.yaml --out bundle.tar.gz
@@ -231,43 +248,37 @@ assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
 assay evidence diff baseline.tar.gz current.tar.gz
 ```
 
-## Python SDK
+## Python Package
+
+The Python package is published as `assay-it`:
 
 ```bash
-pip install assay
+pip install assay-it
 ```
 
-```python
-from assay import AssayClient
+## Standards and Related Projects
 
-client = AssayClient("traces.jsonl")
-client.record_trace(tool_call)
-```
+Assay is easier to evaluate when mapped to established specs and ecosystems:
 
-Pytest plugin:
-```python
-@pytest.mark.assay(trace_file="test_traces.jsonl")
-def test_agent():
-    pass
-```
+- [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/modelcontextprotocol)
+- [OpenTelemetry specification](https://github.com/open-telemetry/opentelemetry-specification)
+- [CloudEvents specification](https://github.com/cloudevents/spec)
+- [SARIF specification](https://github.com/oasis-tcs/sarif-spec)
+- [JSON Schema specification](https://github.com/json-schema-org/json-schema-spec)
 
-## Project Structure
+These are interoperability references, not claims of full feature parity with each project.
 
-```
-crates/
-  assay-cli/        CLI binary
-  assay-core/       Eval engine, store, trace replay, report formatters
-  assay-metrics/    Built-in metrics (args_valid, sequence_valid, regex_match, etc.)
-  assay-evidence/   Evidence bundles, lint engine, diff, sanitize
-  assay-mcp-server/ MCP proxy for runtime enforcement
-  assay-sim/        Attack simulation harness
-  assay-monitor/    eBPF/LSM runtime (Linux)
-  assay-policy/     Policy compilation (kernel + userspace tiers)
-  assay-registry/   Pack registry client (DSSE, OIDC, lockfile)
-  assay-common/     Shared types
-  assay-ebpf/       Kernel eBPF programs
-assay-python-sdk/   Python SDK (PyO3 + pytest plugin)
-```
+## Documentation
+
+- Getting started: [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md)
+- CI guide: [`docs/guides/github-action.md`](docs/guides/github-action.md)
+- MCP quickstart: [`docs/mcp/quickstart.md`](docs/mcp/quickstart.md)
+- Use cases: [`docs/use-cases/index.md`](docs/use-cases/index.md)
+- Experiment runbooks/results: [`docs/ops/`](docs/ops/)
+- Architecture index: [`docs/architecture/index.md`](docs/architecture/index.md)
+- ADR index: [`docs/architecture/adrs.md`](docs/architecture/adrs.md)
+- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Contributing docs: [`docs/contributing/index.md`](docs/contributing/index.md)
 
 ## Contributing
 
@@ -276,7 +287,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
