@@ -119,7 +119,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-acp"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-ucp"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "aya",
  "chrono",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -439,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "assay-core",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "2.18.0"
+version = "2.19.0"
 dependencies = [
  "anyhow",
  "clap",

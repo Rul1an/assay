@@ -4,9 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### DX
+---
 
-- **E4.3 Progress N/M (PR #164):** Realtime progress during `assay run` / `assay ci`: "Running test X/N..." in completion order (JoinSet), throttled (200 ms min, step ≈ total/10), final N/N always; results sorted by test_id for deterministic artifacts.
+## [v2.19.0] - 2026-03-05
+
+### DX and Runtime
+
+- **Coverage v1.1 polish:** `assay coverage` supports `--out-md` for reviewer-friendly markdown output and `--routes-top` for route summary control while JSON remains canonical (`coverage_report_v1`).
+- **MCP coverage/session exports:** `assay mcp wrap` supports `--coverage-out` and `--state-window-out` informational artifacts with stable schemas and explicit write logging.
+- **Tool taxonomy governance:** MCP policy evaluation and decision metadata include tool taxonomy class matching (`tool_classes`, `matched_tool_classes`) for broader sink/source governance coverage.
+
+### Governance Contracts and Runbooks
+
+- Added/finalized ADR contract line for taxonomy, coverage, session/state window, and coverage DX polish (ADR-027/028/029/030/031).
+- Added operational runbooks for taxonomy+coverage and session/state export usage in enterprise workflows.
 
 ---
 
