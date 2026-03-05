@@ -13,7 +13,7 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  WAVE0_SEMVER_BASELINE_SHA: "b56610681f623394c14ec587cb7e3ed1921a2583"
+  WAVE0_SEMVER_BASELINE_SHA: "9cc23b4c684be7cfd81f170c4f66d59903dd76eb"
 
 jobs:
   detect-changes:
