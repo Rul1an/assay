@@ -20,7 +20,7 @@ kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
-assay-adapter-api = { path = "../assay-adapter-api", version = "2.19.0" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "3.0.0" }
 assay-common = { workspace = true, features = ["std"] }
 anyhow.workspace = true
 async-trait.workspace = true
