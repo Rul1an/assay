@@ -26,7 +26,7 @@ fn test_init_ci_contract() {
 
     // Contract assertions
     assert!(
-        content.contains("uses: Rul1an/assay/assay-action@v2"),
+        content.contains("uses: Rul1an/assay-action@v2"),
         "Must use blessed v2 action"
     );
     assert!(

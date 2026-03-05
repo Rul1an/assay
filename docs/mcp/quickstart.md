@@ -181,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v1
+      - uses: Rul1an/assay-action@v2
         with:
           config: eval.yaml
 ```

@@ -4,11 +4,14 @@
 
 **Marketplace:** [assay-ai-agent-security](https://github.com/marketplace/actions/assay-ai-agent-security)
 **Main Repository:** [Rul1an/assay](https://github.com/Rul1an/assay)
+**Canonical Action Slug:** `Rul1an/assay-action@v2`
+
+> Note: internal workflows in the monorepo may use `./assay-action` for local contract tests. External users should use the marketplace slug above.
 
 ## Quick Start
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
 ```
 
 That's it. Auto-discovers evidence bundles, verifies integrity, uploads findings to GitHub Security tab.
@@ -37,13 +40,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay/assay-action@v2
+      - uses: Rul1an/assay-action@v2
 ```
 
 ### With EU AI Act Compliance Pack
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
   with:
     pack: eu-ai-act-baseline
 ```
@@ -53,7 +56,7 @@ Lints against Article 12 logging requirements. SARIF includes article references
 ### With Baseline Comparison
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
   with:
     baseline_key: main
     write_baseline: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
@@ -69,7 +72,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: Rul1an/assay/assay-action@v2
+  - uses: Rul1an/assay-action@v2
     with:
       store: s3://my-bucket/evidence
       store_role: arn:aws:iam::123456789:role/AssayRole
@@ -86,7 +89,7 @@ permissions:
   id-token: write
 
 steps:
-  - uses: Rul1an/assay/assay-action@v2
+  - uses: Rul1an/assay-action@v2
     with:
       attest: true
 ```
@@ -121,7 +124,7 @@ jobs:
           assay run --policy policy.yaml -- pytest tests/
 
       - name: Verify & Report
-        uses: Rul1an/assay/assay-action@v2
+        uses: Rul1an/assay-action@v2
         with:
           pack: eu-ai-act-baseline
           store: s3://my-bucket/evidence
