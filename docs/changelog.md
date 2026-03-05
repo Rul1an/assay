@@ -812,6 +812,8 @@
 - docs(policy): freeze coverage report contract for tool/route completeness (A3) (#563) @Rul1an
 - feat(policy): enforce MCP rules by tool classes (B1) (#561) @Rul1an
 
+- docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
+- docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
 ## [2026-03-05]
 
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
