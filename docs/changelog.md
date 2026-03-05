@@ -814,6 +814,9 @@
 
 - docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
+- docs(ops): close Coverage v1.1 line with runbook + reviewer gate (C-slice) (#588) @Rul1an
+- docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
+- docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
 ## [2026-03-05]
 
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
