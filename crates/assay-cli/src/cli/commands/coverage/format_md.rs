@@ -1,7 +1,5 @@
 use serde_json::Value;
 
-const MAX_ROUTES: usize = 10;
-
 fn as_string_array(value: Option<&Value>) -> Vec<String> {
     match value {
         Some(Value::Array(items)) => items
@@ -13,7 +11,10 @@ fn as_string_array(value: Option<&Value>) -> Vec<String> {
     }
 }
 
-pub(crate) fn render_coverage_markdown(report: &Value) -> Result<String, String> {
+pub(crate) fn render_coverage_markdown(
+    report: &Value,
+    routes_top: usize,
+) -> Result<String, String> {
     let schema_version = report
         .get("schema_version")
         .and_then(Value::as_str)
@@ -85,12 +86,16 @@ pub(crate) fn render_coverage_markdown(report: &Value) -> Result<String, String>
     }
 
     out.push_str("## Top Routes\n\n");
-    out.push_str("| From | To | Count |\n");
-    out.push_str("| --- | --- | ---: |\n");
-    for (from, to, count) in routes.into_iter().take(MAX_ROUTES) {
-        out.push_str(&format!("| `{}` | `{}` | {} |\n", from, to, count));
+    if routes_top == 0 {
+        out.push_str("(routes hidden; --routes-top=0)\n\n");
+    } else {
+        out.push_str("| From | To | Count |\n");
+        out.push_str("| --- | --- | ---: |\n");
+        for (from, to, count) in routes.into_iter().take(routes_top) {
+            out.push_str(&format!("| `{}` | `{}` | {} |\n", from, to, count));
+        }
+        out.push('\n');
     }
-    out.push('\n');
 
     out.push_str("## Notes\n\n");
     out.push_str("- Routes are adjacent tool-call edges in observed order (v1).\n");

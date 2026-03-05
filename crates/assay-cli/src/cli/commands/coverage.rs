@@ -1,6 +1,7 @@
 use crate::cli::args::CoverageArgs;
 use crate::exit_codes;
 use anyhow::{Context, Result};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -14,6 +15,8 @@ pub(crate) enum CoverageOutputFormat {
     Markdown,
 }
 
+const DEFAULT_ROUTES_TOP: usize = 10;
+
 pub(crate) async fn write_generated_coverage_report(
     input: &Path,
     out: &Path,
@@ -26,6 +29,7 @@ pub(crate) async fn write_generated_coverage_report(
         declared_tools,
         source,
         CoverageOutputFormat::Json,
+        DEFAULT_ROUTES_TOP,
     )
     .await
 }
@@ -36,22 +40,48 @@ pub(crate) async fn write_generated_coverage_report_with_format(
     declared_tools: &[String],
     source: &str,
     format: CoverageOutputFormat,
+    routes_top: usize,
 ) -> Result<i32> {
-    use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR};
+    let report_value =
+        match build_and_validate_generated_coverage_report(input, declared_tools, source).await {
+            Ok(v) => v,
+            Err(code) => return Ok(code),
+        };
+
+    write_generated_coverage_payload(out, &report_value, format, routes_top).await
+}
+
+async fn build_and_validate_generated_coverage_report(
+    input: &Path,
+    declared_tools: &[String],
+    source: &str,
+) -> std::result::Result<Value, i32> {
+    use crate::exit_codes::EXIT_CONFIG_ERROR;
 
     let report_value =
         match report::build_coverage_report_from_input(input, declared_tools, source).await {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("Measurement error: {e}");
-                return Ok(EXIT_CONFIG_ERROR);
+                return Err(EXIT_CONFIG_ERROR);
             }
         };
 
     if let Err(e) = schema::validate_coverage_report_v1(&report_value) {
         eprintln!("Measurement error: coverage report schema validation failed: {e}");
-        return Ok(EXIT_CONFIG_ERROR);
+        return Err(EXIT_CONFIG_ERROR);
     }
+
+    Ok(report_value)
+}
+
+async fn write_generated_coverage_payload(
+    out: &Path,
+    report_value: &Value,
+    format: CoverageOutputFormat,
+    routes_top: usize,
+) -> Result<i32> {
+    use crate::exit_codes::EXIT_INFRA_ERROR;
 
     let Some(parent) = out.parent() else {
         eprintln!("Infra error: invalid output path {}", out.display());
@@ -69,11 +99,11 @@ pub(crate) async fn write_generated_coverage_report_with_format(
         CoverageOutputFormat::Json => serde_json::to_vec_pretty(&report_value)
             .expect("coverage report serialization should be infallible"),
         CoverageOutputFormat::Markdown => {
-            match format_md::render_coverage_markdown(&report_value) {
+            match format_md::render_coverage_markdown(report_value, routes_top) {
                 Ok(markdown) => markdown.into_bytes(),
                 Err(e) => {
                     eprintln!("Measurement error: failed to render markdown output: {e}");
-                    return Ok(EXIT_CONFIG_ERROR);
+                    return Ok(exit_codes::EXIT_CONFIG_ERROR);
                 }
             }
         }
@@ -87,13 +117,22 @@ pub(crate) async fn write_generated_coverage_report_with_format(
         return Ok(EXIT_INFRA_ERROR);
     }
 
-    let _ = input; // kept for call-site parity and future diagnostics.
-    eprintln!("Wrote coverage_report_v1 to {}", out.display());
+    match format {
+        CoverageOutputFormat::Json => eprintln!("Wrote coverage_report_v1 to {}", out.display()),
+        CoverageOutputFormat::Markdown => {
+            eprintln!("Wrote coverage_report_v1 markdown to {}", out.display())
+        }
+    }
 
     Ok(exit_codes::EXIT_SUCCESS)
 }
 
 pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
+    if args.input.is_none() && args.out_md.is_some() {
+        eprintln!("Measurement error: --out-md is only supported with --input mode");
+        return Ok(exit_codes::EXIT_CONFIG_ERROR);
+    }
+
     if args.input.is_some() {
         return cmd_coverage_generate(&args).await;
     }
@@ -139,8 +178,39 @@ async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
         }
     };
 
-    write_generated_coverage_report_with_format(input, out, &declared_tools, "jsonl", output_format)
-        .await
+    let primary_format = if args.out_md.is_some() {
+        CoverageOutputFormat::Json
+    } else {
+        output_format
+    };
+
+    let status = write_generated_coverage_report_with_format(
+        input,
+        out,
+        &declared_tools,
+        "jsonl",
+        primary_format,
+        args.routes_top,
+    )
+    .await?;
+
+    if status != exit_codes::EXIT_SUCCESS {
+        return Ok(status);
+    }
+
+    if let Some(out_md) = args.out_md.as_ref() {
+        return write_generated_coverage_report_with_format(
+            input,
+            out_md,
+            &declared_tools,
+            "jsonl",
+            CoverageOutputFormat::Markdown,
+            args.routes_top,
+        )
+        .await;
+    }
+
+    Ok(status)
 }
 
 async fn load_declared_tools(args: &CoverageArgs) -> std::result::Result<Vec<String>, i32> {
