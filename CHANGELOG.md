@@ -6,7 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [v2.19.0] - 2026-03-05
+## [v3.0.0] - 2026-03-05
+
+### Breaking API Changes
+
+- `assay_core::mcp::policy::ToolPolicy` adds `allow_classes` and `deny_classes`.
+- `assay_core::mcp::decision::DecisionData` adds `tool_classes`, `matched_tool_classes`, `match_basis`, and `matched_rule`.
+- External struct-literal construction against these types now requires populating the new fields.
 
 ### DX and Runtime
 
