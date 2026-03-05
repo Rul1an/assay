@@ -391,6 +391,10 @@ pub struct CoverageArgs {
     #[arg(long)]
     pub out: Option<std::path::PathBuf>,
 
+    /// Optional markdown output path for derived human-readable summary.
+    #[arg(long = "out-md")]
+    pub out_md: Option<std::path::PathBuf>,
+
     /// Tools declared by policy/config (repeatable).
     #[arg(long = "declared-tool")]
     pub declared_tools: Vec<String>,
@@ -423,6 +427,10 @@ pub struct CoverageArgs {
     /// - legacy mode: text|json|markdown|github
     #[arg(long, default_value = "text")]
     pub format: String,
+
+    /// Number of top routes to include in markdown output (default: 10).
+    #[arg(long = "routes-top", default_value_t = 10)]
+    pub routes_top: usize,
 }
 
 #[derive(Parser, Clone, Debug)]
