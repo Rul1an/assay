@@ -59,7 +59,8 @@ pub const HELLO_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "assay.tra
 ///
 /// This template uses `assay-action` to install the CLI, then runs `assay ci`
 /// directly for the eval-based gate, and finally uploads SARIF results to GitHub Code Scanning.
-/// See: https://github.com/Rul1an/assay/tree/main/assay-action
+/// Canonical marketplace slug: `Rul1an/assay-action@v2`.
+/// See: https://github.com/Rul1an/assay-action
 pub const CI_WORKFLOW_YML: &str = r#"name: Assay Gate
 on:
   push:
@@ -78,7 +79,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (Pinned for supply-chain security)
 
       - name: Setup Assay
-        uses: Rul1an/assay/assay-action@v2 # For strict supply-chain pinning, use a full commit SHA. Exact tags (e.g. v2.1.0) are less strict.
+        uses: Rul1an/assay-action@v2 # For strict supply-chain pinning, use a full commit SHA. Exact tags (e.g. v2.1.0) are less strict.
 
       - name: Run Assay Tests
         run: assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml --pr-comment .assay/reports/pr-comment.md

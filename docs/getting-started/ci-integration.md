@@ -50,10 +50,13 @@ jobs:
           assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay/assay-action@v2
+        uses: Rul1an/assay-action@v2
         with:
           fail_on: error
 ```
+
+Canonical public slug: `Rul1an/assay-action@v2` (Marketplace).
+Internal monorepo contract tests may reference `./assay-action` only inside this repository.
 
 ### Action Inputs
 
@@ -235,7 +238,7 @@ your-repo/
 ### 2. Use `fail_on` for Strict Mode
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
   with:
     fail_on: warn  # Fail on warnings AND errors
 ```
@@ -268,7 +271,7 @@ jobs:
     # Evidence verification (fast)
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay/assay-action@v2
+      - uses: Rul1an/assay-action@v2
 
   integration:
     needs: assay

@@ -132,10 +132,13 @@ assay run --config eval.yaml --trace-file traces/session.jsonl
 ### GitHub Actions
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
 ```
 
 The action installs assay, runs your gate, uploads SARIF to the Security tab, and posts a PR comment with results.
+
+Canonical public slug: `Rul1an/assay-action@v2` (Marketplace).
+Monorepo-internal workflows in this repo may use `./assay-action` for local action testing only.
 
 ```yaml
 # .github/workflows/assay.yml
@@ -152,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: Rul1an/assay/assay-action@v2
+      - uses: Rul1an/assay-action@v2
 ```
 
 Or generate a workflow:

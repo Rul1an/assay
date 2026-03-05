@@ -235,7 +235,7 @@ For the Assay repo, required status checks are: **CI**, **Smoke Install (E2E)**,
 jobs:
   fast-tests:
     # Assay (milliseconds, free)
-    - uses: Rul1an/assay/assay-action@v2
+    - uses: Rul1an/assay-action@v2
 
   slow-tests:
     needs: fast-tests  # Only if fast tests pass

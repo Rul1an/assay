@@ -211,7 +211,7 @@ See Debt: [RFC-001 DX/UX Governance](./architecture/RFC-001-dx-ux-governance.md)
 Published to GitHub Marketplace: [assay-ai-agent-security](https://github.com/marketplace/actions/assay-ai-agent-security)
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
 ```
 
 Features:
@@ -454,7 +454,7 @@ Status on `main`:
 
 ### B. Connectors
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
-- [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay/assay-action@v2](https://github.com/marketplace/actions/assay-ai-agent-security)) / GitLab CI integration
+- [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/marketplace/actions/assay-ai-agent-security)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
 - [ ] **GitLab CI**: Native integration
 - [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — conventions still experimental but Pydantic AI already follows them; monitor for stability before building bridge

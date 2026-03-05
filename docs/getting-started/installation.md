@@ -123,7 +123,7 @@ cargo build --release
   run: cargo install assay-cli --locked
 
 # Or use our action (includes caching)
-- uses: assay-dev/assay-action@v1
+- uses: Rul1an/assay-action@v2
 ```
 
 ### GitLab CI

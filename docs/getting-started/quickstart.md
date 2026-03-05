@@ -87,7 +87,7 @@ Creates `.github/workflows/assay.yml`. PRs that violate policy are blocked.
 Or use the GitHub Action directly:
 
 ```yaml
-- uses: Rul1an/assay/assay-action@v2
+- uses: Rul1an/assay-action@v2
 ```
 
 ## 8. Runtime Enforcement (Linux)
