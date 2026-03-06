@@ -7,6 +7,5 @@ pub(crate) mod consume;
 pub(crate) mod revocation;
 pub(crate) mod schema;
 pub(crate) mod stats;
-pub(crate) mod tests;
 pub(crate) mod txn;
 pub(crate) mod upsert;
