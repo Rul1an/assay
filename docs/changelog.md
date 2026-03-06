@@ -840,6 +840,12 @@
 - docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
 
+- docs(split/wave8a-step1): freeze a2a split scope and gates (#598) @Rul1an
+- refactor(split/wave8a-step2): mechanical a2a adapter module split (#605) @Rul1an
+- docs(split/wave8a-step1): freeze a2a split scope and gates (#598) @Rul1an
+- refactor(split/wave8a-step2): mechanical a2a adapter module split (#605) @Rul1an
+- docs(split/wave8a-step3): close a2a wave with final gate (#600) @Rul1an
+- docs(split/wave8a-step1): freeze a2a split scope and gates (#598) @Rul1an
 ## [2026-03-06]
 
 - ci(release): pin attest-build-provenance action by sha (#595) @Rul1an
