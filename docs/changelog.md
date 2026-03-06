@@ -861,6 +861,20 @@
 - docs(split/wave8b-step1): freeze ucp split scope and gates (#601) @Rul1an
 - docs(split/wave8a-step3): close a2a wave with final gate (#600) @Rul1an
 - docs(split/wave8a-step1): freeze a2a split scope and gates (#598) @Rul1an
+- docs(c1-c): close wave c1 with final layout and gate (#619) @Rul1an
+- refactor(c1-b3): split env filter into focused modules (#618) @Rul1an
+- refactor(c1-b2): split replay command behind thin facade (#617) @Rul1an
+- refactor(c1-b1): split cli args mod behind thin facade (#616) @Rul1an
+- refactor(split/c1-a): freeze cli surface scope and reviewer gate (#615) @Rul1an
+- refactor(split/t1-b3): mechanically split contract_exit_codes tests (#614) @Rul1an
+- refactor(split/t1-b2): mechanically split verify_internal tests (#613) @Rul1an
+- refactor(split/t1-b1): mechanically split parity test target (#612) @Rul1an
+- refactor(split/t1-a): freeze test hardening scope and reviewer gate (#611) @Rul1an
+- refactor(split/wave8a-step2): mechanical a2a adapter module split (#605) @Rul1an
+- docs(split/wave8b-step3): close ucp wave with final gate (#603) @Rul1an
+- refactor(split/wave8b-step2): mechanical ucp adapter module split (#602) @Rul1an
+- docs(split/wave8b-step1): freeze ucp split scope and gates (#601) @Rul1an
+- docs(split/wave8a-step3): close a2a wave with final gate (#600) @Rul1an
 ## [2026-03-06]
 
 - ci(release): pin attest-build-provenance action by sha (#595) @Rul1an
