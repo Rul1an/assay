@@ -443,7 +443,9 @@ jobs:
     name: Publish to crates.io
     needs: release
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))
     environment: crates
     permissions:
       id-token: write
@@ -513,7 +515,9 @@ jobs:
     name: Publish to PyPI
     needs: [release, wheels]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))
     environment: pypi
     permissions:
       id-token: write  # Required for PyPI trusted publishing
