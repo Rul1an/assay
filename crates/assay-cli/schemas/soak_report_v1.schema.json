@@ -1,0 +1,467 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/soak_report_v1.schema.json",
+  "title": "Assay Soak Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_version",
+    "assay_version",
+    "run",
+    "trace",
+    "target",
+    "decision_policy",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "soak-report-v1"
+    },
+    "report_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "assay_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "started_at_utc",
+        "duration_seconds",
+        "seed",
+        "iterations",
+        "time_budget_seconds",
+        "evaluation_unit"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "time_budget_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evaluation_unit": {
+          "type": "string",
+          "enum": [
+            "bundle",
+            "scenario",
+            "episode"
+          ]
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traceparent"
+      ],
+      "properties": {
+        "traceparent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tracestate": {
+          "type": "string"
+        },
+        "run_correlation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suite_correlation_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_id",
+        "bundle_digest",
+        "pack_ids"
+      ],
+      "properties": {
+        "bundle_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bundle_digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pack_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "policy_digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "judge_config_digest": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "decision_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "thresholds",
+        "fail_mode"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "fail_mode": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "enforce"
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass_all",
+        "pass_rate",
+        "ci_95",
+        "dimensions",
+        "thresholds_used"
+      ],
+      "properties": {
+        "pass_all": {
+          "type": "boolean"
+        },
+        "pass_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "ci_95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "correctness",
+            "safety",
+            "security",
+            "control"
+          ],
+          "properties": {
+            "correctness": {
+              "$ref": "#/$defs/dimension_stats"
+            },
+            "safety": {
+              "$ref": "#/$defs/dimension_stats"
+            },
+            "security": {
+              "$ref": "#/$defs/dimension_stats"
+            },
+            "control": {
+              "$ref": "#/$defs/dimension_stats"
+            }
+          }
+        },
+        "thresholds_used": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "trials": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trial_result"
+      }
+    },
+    "violations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule_violation"
+      }
+    },
+    "canaries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/canary_signal"
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified"
+      ],
+      "properties": {
+        "provenance_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "verifier_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "iterations_sampled": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/iteration_sample"
+      }
+    },
+    "sample_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "$defs": {
+    "dimension_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass_rate",
+        "pass_count",
+        "fail_count"
+      ],
+      "properties": {
+        "pass_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "rule_violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "count"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimension": {
+          "type": "string",
+          "enum": [
+            "correctness",
+            "safety",
+            "security",
+            "control"
+          ]
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "canary_signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "trigger_count"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail"
+          ]
+        },
+        "trigger_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "trial_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "seed",
+        "outcome",
+        "duration_seconds"
+      ],
+      "properties": {
+        "trial_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "infra_error"
+          ]
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "started_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error_message": {
+          "type": "string"
+        }
+      }
+    },
+    "iteration_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "status"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "infra_error"
+          ]
+        },
+        "dimension_outcomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "correctness": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            },
+            "safety": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            },
+            "security": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            },
+            "control": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

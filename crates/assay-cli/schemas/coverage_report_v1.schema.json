@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/coverage_report_v1.schema.json",
+  "title": "Assay Coverage Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_version", "run", "tools", "taxonomy", "routes", "findings"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "coverage_report_v1"
+    },
+    "report_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assay_version", "generated_at"],
+      "properties": {
+        "assay_version": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "minLength": 1 },
+        "source": {
+          "type": "string",
+          "description": "Observation source, e.g. mcp_proxy, trace_replay, bundle_replay."
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tools_seen", "tools_declared", "tools_unknown"],
+      "properties": {
+        "tools_seen": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "tools_declared": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "tools_unknown": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_classes_seen", "tool_classes_missing"],
+      "properties": {
+        "tool_classes_seen": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "tool_classes_missing": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Tools that were seen but have no taxonomy entry."
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routes_seen"],
+      "properties": {
+        "routes_seen": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to", "count"],
+            "properties": {
+              "from": { "type": "string", "minLength": 1 },
+              "to": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "severity", "message"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["unknown_tool", "missing_taxonomy", "uncovered_sink_class"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["note", "warning"]
+          },
+          "message": { "type": "string", "minLength": 1 },
+          "tool": { "type": "string" },
+          "tool_class": { "type": "string" },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

@@ -11,7 +11,7 @@ use serde_json::Value;
 /// NOTE: Use CARGO_MANIFEST_DIR to avoid fragile relative paths from src/.
 const SOAK_REPORT_V1_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../schemas/soak_report_v1.schema.json"
+    "/schemas/soak_report_v1.schema.json"
 ));
 
 static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();

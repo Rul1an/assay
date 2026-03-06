@@ -226,6 +226,9 @@ jobs:
           set +e
           echo "=== Disk before ==="
           df -h / || true
+          # Stale monitor logs can grow to tens of GB and block action downloads during job setup.
+          sudo pkill -x assay 2>/dev/null || true
+          sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-tmp-* /dev/shm/assay-tmp-* 2>/dev/null || true
           sudo docker system prune -af --volumes 2>/dev/null || true
           sudo apt-get clean 2>/dev/null || true
           sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* 2>/dev/null || true
@@ -426,6 +429,8 @@ jobs:
         run: |
           set +e
           echo "=== Freeing disk for next job (prevent No space left on device) ==="
+          sudo pkill -x assay 2>/dev/null || true
+          sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test /tmp/assay-tmp-* /dev/shm/assay-tmp-* 2>/dev/null || true
           sudo docker system prune -af --volumes 2>/dev/null || true
           sudo apt-get clean 2>/dev/null || true
           sudo rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* 2>/dev/null || true

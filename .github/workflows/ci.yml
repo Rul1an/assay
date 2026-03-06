@@ -347,6 +347,14 @@ jobs:
           sudo chown -R "$(id -u)":"$(id -g)" /tmp/assay-lsm-verify || true
           ls -l /tmp/assay-lsm-verify || true
 
+      - name: Cleanup verification logs (self-hosted)
+        if: always()
+        shell: bash
+        run: |
+          # Self-hosted lane does not upload these logs; remove aggressively to prevent disk exhaustion.
+          sudo pkill -x assay 2>/dev/null || true
+          sudo rm -rf /tmp/assay-lsm-verify /tmp/assay-test 2>/dev/null || true
+
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

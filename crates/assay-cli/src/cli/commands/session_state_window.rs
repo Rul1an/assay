@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 fn session_state_window_schema_json() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../schemas/session_state_window_v1.schema.json"
+        "/schemas/session_state_window_v1.schema.json"
     ))
 }
 
