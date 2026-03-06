@@ -1,77 +1,163 @@
 name: Regenerate Demo Assets
+
 on:
-  push:
-    paths:
-      - 'demo/*.tape'
-      - 'crates/assay-cli/**'
-      - '.github/workflows/demo.yml'
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or ref to regenerate"
+        required: true
+        default: "main"
+        type: string
+      push_changes:
+        description: "Commit and push regenerated demo/output assets"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: demo-assets-${{ github.workflow }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  VHS_VERSION: v0.10.0
+  TTYD_VERSION: "1.7.7"
 
 jobs:
-  vhs:
+  regenerate:
+    name: Regenerate Assets
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checkout target ref
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ inputs.ref }}
 
-      - name: Install vhs
-        uses: charmbracelet/vhs-action@59641cdc7fadf3978db65eb8c6937ea2752f4ec3 # v2.1
-        with:
-          path: 'demo/hero.tape'
-          install_only: true
+      - name: Install VHS runtime dependencies (pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl ffmpeg fonts-jetbrains-mono
+          fc-cache -f -v
 
-      # We run vhs manually to handle multiple files in one job more cleanly
-      # and ensure we have the latest assay binary built if needed (though tapes record terminal output,
-      # they ideally need the binary. The tapes currently use `cargo run` or expect `assay` in PATH.
-      # Let's check the tapes. They use `export PATH=$PWD/target/debug:$PATH`.
-      # So we need to build release first.
+          TTYD_URL="https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors "${TTYD_URL}" -o /tmp/ttyd
+          sudo install -m 0755 /tmp/ttyd /usr/local/bin/ttyd
 
-      - name: Install Rust
+          VHS_TARBALL="vhs_${VHS_VERSION#v}_Linux_x86_64.tar.gz"
+          VHS_URL="https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/${VHS_TARBALL}"
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors "${VHS_URL}" -o /tmp/vhs.tar.gz
+          tar -xzf /tmp/vhs.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/vhs_${VHS_VERSION#v}_Linux_x86_64/vhs" /usr/local/bin/vhs
+
+          vhs --version
+          ttyd --version || ttyd -v || true
+          ffmpeg -version | head -n 1
+
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
 
-      - name: Build Assay
-        run: cargo build --release
+      - name: Build assay-cli for tape playback
+        run: cargo build --locked -p assay-cli
 
-      - name: Update PATH for Tapes
-        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+      - name: Render all demo tapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          tapes=(
+            demo/hero.tape
+            demo/break-fix.tape
+            demo/evidence-lint.tape
+            demo/sim.tape
+            demo/explore.tape
+            demo/full-walkthrough.tape
+          )
+          for tape in "${tapes[@]}"; do
+            echo "Rendering ${tape}"
+            vhs "${tape}"
+          done
 
-      # Run VHS for each tape
-      - name: Run VHS (Hero)
-        run: vhs demo/hero.tape
+      - name: Detect generated asset changes
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- demo/output)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes in demo/output"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected in demo/output"
+          fi
 
-      - name: Run VHS (Break-Fix)
-        run: vhs demo/break-fix.tape
+      - name: Package generated assets
+        if: steps.diff.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C demo -czf /tmp/demo-output.tgz output
 
-      - name: Run VHS (Evidence Lint)
-        run: vhs demo/evidence-lint.tape
+      - name: Upload generated assets artifact
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: demo-output
+          path: /tmp/demo-output.tgz
+          retention-days: 7
 
-      - name: Run VHS (Sim)
-        run: vhs demo/sim.tape
+  commit:
+    name: Commit Regenerated Assets
+    needs: regenerate
+    if: ${{ (inputs.push_changes == true || inputs.push_changes == 'true') && needs.regenerate.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-      - name: Run VHS (Explore)
-        # Note: explore.tape might be interactive/hard to automate perfectly in CI without TTY,
-        # but vhs handles it.
-        run: vhs demo/explore.tape
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref }}
 
-      - name: Run VHS (Full Walkthrough)
-        run: vhs demo/full-walkthrough.tape
+      - name: Download generated assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: demo-output
+          path: /tmp
 
-      - name: Commit regenerated assets
+      - name: Apply generated assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf demo/output
+          tar -C demo -xzf /tmp/demo-output.tgz
+
+      - name: Commit and push regenerated assets
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add -A demo/output
           if git diff --cached --quiet; then
             echo "No demo asset changes detected."
             exit 0
           fi
+
           git commit -m "chore: regenerate demo assets [skip ci]"
-          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          git push origin "HEAD:${BRANCH}"
+          TARGET_REF="${{ inputs.ref }}"
+          TARGET_BRANCH="${TARGET_REF#refs/heads/}"
+
+          if ! git ls-remote --exit-code --heads origin "${TARGET_BRANCH}" >/dev/null 2>&1; then
+            echo "Ref '${TARGET_REF}' is not a pushable remote branch."
+            exit 1
+          fi
+
+          git push origin "HEAD:${TARGET_BRANCH}"
