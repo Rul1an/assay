@@ -839,6 +839,16 @@
 - feat(coverage): add --out-md and --routes-top (v1.1 DX polish) (#587) @Rul1an
 - docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
+
+## [2026-03-06]
+
+- ci(release): pin attest-build-provenance action by sha (#595) @Rul1an
+- chore(release): prepare v3.0.0 (#593) @Rul1an
+- chore(release): prepare v3.0.0 (#591) @Rul1an
+- docs(ops): close Coverage v1.1 line with runbook + reviewer gate (C-slice) (#588) @Rul1an
+- feat(coverage): add --out-md and --routes-top (v1.1 DX polish) (#587) @Rul1an
+- docs(policy): freeze Coverage v1.1 DX polish contract (A-slice) (#585) @Rul1an
+- docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
 ## [2026-03-05]
 
 - docs(architecture): sync ADR index and roadmap after B4 (#583) @Rul1an
