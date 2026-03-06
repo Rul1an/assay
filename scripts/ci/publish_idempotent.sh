@@ -8,6 +8,7 @@ CRATES=(
   "assay-common"
   "assay-registry"
   "assay-evidence"
+  "assay-adapter-api"
   "assay-core"
   "assay-metrics"
   "assay-policy"
