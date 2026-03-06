@@ -409,6 +409,8 @@ jobs:
           fi
           echo "Kernel: $(uname -r)" | sudo tee artifacts/kernel.txt > /dev/null || true
           echo "Arch: $(uname -m)" | sudo tee -a artifacts/kernel.txt > /dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" artifacts 2>/dev/null || true
+          chmod -R u+rwX artifacts 2>/dev/null || true
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()

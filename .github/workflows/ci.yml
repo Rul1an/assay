@@ -493,7 +493,12 @@ jobs:
           ASSAY_TEST_DIR: ${{ github.workspace }}/.assay-test
         run: |
           set -euo pipefail
+          # Prevent stale monitor state from previous runs from denying writes here.
+          sudo pkill -x assay 2>/dev/null || true
+          sudo chattr -R -i "$ASSAY_TEST_DIR" 2>/dev/null || true
+          sudo rm -rf "$ASSAY_TEST_DIR" 2>/dev/null || true
           mkdir -p "$ASSAY_TEST_DIR"
+          sudo chown -R "$(id -u)":"$(id -g)" "$ASSAY_TEST_DIR" 2>/dev/null || true
           echo "TOP SECRET DATA" > "$ASSAY_TEST_DIR/secret.txt"
           chmod +x scripts/verify_lsm_docker.sh
           sudo -E env "PATH=$PATH" "ASSAY_TEST_DIR=$ASSAY_TEST_DIR" ./scripts/verify_lsm_docker.sh --ci-mode
