@@ -90,8 +90,14 @@ check_has_match '^fn test_detect_policy_shape\(' "${tests_file}"
 check_has_match '^fn test_tool_poisoning_action_uses_assay_config_not_policy\(' "${tests_file}"
 
 echo '== Agentic Step3 diff allowlist =='
+if [[ "${base_ref}" == *"wave12-agentic-step2-mechanical"* ]]; then
+  allowlist_pattern='^docs/contributing/SPLIT-CHECKLIST-agentic-step3.md$|^docs/contributing/SPLIT-REVIEW-PACK-agentic-step3.md$|^scripts/ci/review-agentic-step3.sh$'
+else
+  allowlist_pattern='^crates/assay-core/src/agentic/.*\.rs$|^docs/contributing/SPLIT-PLAN-wave12-agentic.md$|^docs/contributing/SPLIT-CHECKLIST-agentic-step1.md$|^docs/contributing/SPLIT-REVIEW-PACK-agentic-step1.md$|^scripts/ci/review-agentic-step1.sh$|^docs/contributing/SPLIT-CHECKLIST-agentic-step2.md$|^docs/contributing/SPLIT-MOVE-MAP-agentic-step2.md$|^docs/contributing/SPLIT-REVIEW-PACK-agentic-step2.md$|^scripts/ci/review-agentic-step2.sh$|^docs/contributing/SPLIT-CHECKLIST-agentic-step3.md$|^docs/contributing/SPLIT-REVIEW-PACK-agentic-step3.md$|^scripts/ci/review-agentic-step3.sh$'
+fi
+
 leaks="$({ git diff --name-only "${base_ref}...HEAD" | \
-  "${rg_bin}" -v '^docs/contributing/SPLIT-CHECKLIST-agentic-step3.md$|^docs/contributing/SPLIT-REVIEW-PACK-agentic-step3.md$|^scripts/ci/review-agentic-step3.sh$' || true; })"
+  "${rg_bin}" -v "${allowlist_pattern}" || true; })"
 if [ -n "${leaks}" ]; then
   echo 'non-allowlisted files detected:'
   echo "${leaks}"

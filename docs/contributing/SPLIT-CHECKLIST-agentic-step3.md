@@ -31,6 +31,9 @@ Close Wave12 with strict closure gates while keeping Step2 split intact.
 - Step2 builder visibility invariant remains true
 - original 5 test names remain present
 - Step3 diff limited to Step3 docs/script files only
+  - when `BASE_REF=origin/codex/wave12-agentic-step2-mechanical`
+- promote-precheck allows full Wave12 file set
+  - when `BASE_REF=origin/main`
 - workflow-ban enforced
 
 ## Definition of done

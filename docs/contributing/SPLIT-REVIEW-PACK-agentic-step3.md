@@ -33,4 +33,7 @@ BASE_REF=origin/main bash scripts/ci/review-agentic-step3.sh
 1. Confirm Step3 diff is only closure docs + script.
 2. Confirm Step2 invariants are revalidated in the script.
 3. Confirm no workflow files changed.
-4. Confirm script passes for both stacked-base and promote precheck base.
+4. Confirm script dual-mode allowlist behavior:
+   - Step3 base: closure-only files
+   - main base (promote precheck): full Wave12 file set
+5. Confirm script passes for both stacked-base and promote precheck base.
