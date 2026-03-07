@@ -957,6 +957,19 @@
 - refactor(agentic): mechanical split into facade, builder, and helpers (wave12 step2) (#633) @Rul1an
 - docs(split): freeze wave12 agentic with reviewer gates (step1) (#632) @Rul1an
 - docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
+- docs(split): promote wave14 acp step3 closure to main (clean) (#652) @Rul1an
+- docs(split): wave14 acp step3 closure gates and review pack (#649) @Rul1an
+- refactor(acp): mechanical split of adapter lib into bounded modules (wave14 step2) (#648) @Rul1an
+- docs(split): freeze wave14 acp with step1 reviewer gate (#646) @Rul1an
+- refactor(model): split model.rs into bounded modules (wave13 clean promote) (#644) @Rul1an
+- docs(split): close wave13 model split with step3 gate (clean) (#643) @Rul1an
+- refactor(model): mechanically split model.rs into bounded modules (wave13 step2) (#639) @Rul1an
+- docs(split): freeze wave13 model with reviewer gates (step1) (#638) @Rul1an
+- refactor(agentic): wave12 final promote (step1+step2+step3) (#635) @Rul1an
+- docs(split): close wave12 agentic split with step3 gate (#634) @Rul1an
+- refactor(agentic): mechanical split into facade, builder, and helpers (wave12 step2) (#633) @Rul1an
+- docs(split): freeze wave12 agentic with reviewer gates (step1) (#632) @Rul1an
+- docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
 ## [2026-03-07]
 
 - docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
