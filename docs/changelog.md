@@ -915,6 +915,11 @@
 
 - docs(split): freeze wave12 agentic with reviewer gates (step1) (#632) @Rul1an
 - docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
+- refactor(agentic): wave12 final promote (step1+step2+step3) (#635) @Rul1an
+- docs(split): close wave12 agentic split with step3 gate (#634) @Rul1an
+- refactor(agentic): mechanical split into facade, builder, and helpers (wave12 step2) (#633) @Rul1an
+- docs(split): freeze wave12 agentic with reviewer gates (step1) (#632) @Rul1an
+- docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
 ## [2026-03-07]
 
 - docs(split): close wave11 registry_client split with step3 gate (#631) @Rul1an
