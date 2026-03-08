@@ -1034,6 +1034,9 @@
 
 - refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
+- docs(split): freeze wave18 mandate types with reviewer gates (step1) (#670) @Rul1an
+- refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
+- docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
 ## [2026-03-08]
 
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
