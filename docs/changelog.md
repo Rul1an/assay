@@ -1047,6 +1047,13 @@
 - docs(split): freeze wave18 mandate types with reviewer gates (step1) (#670) @Rul1an
 - refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
+- docs(split): freeze wave19 coverage command with reviewer gates (step1) (#677) @Rul1an
+- docs(split): promote wave18 mandate types step3 closure (#675) @Rul1an
+- docs(split): close wave18 mandate types with strict step3 gate (#674) @Rul1an
+- refactor(mandate): split evidence mandate types into bounded modules (wave18 step2) (#672) @Rul1an
+- docs(split): freeze wave18 mandate types with reviewer gates (step1) (#670) @Rul1an
+- refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
+- docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
 ## [2026-03-08]
 
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
