@@ -1032,6 +1032,8 @@
 - docs(split): freeze wave14 acp with step1 reviewer gate (#646) @Rul1an
 - refactor(model): split model.rs into bounded modules (wave13 clean promote) (#644) @Rul1an
 
+- refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
+- docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
 ## [2026-03-08]
 
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
