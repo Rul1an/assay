@@ -7,6 +7,8 @@ cd "$ROOT"
 export RUN_LIVE=0
 export EXPERIMENT_VARIANT="sink_failure"
 export SEQUENCE_POLICY_FILE="second_sink_sequence.yaml"
+export RUNS_ATTACK=2
+export RUNS_LEGIT=100
 
 OUT_DIR="$ROOT/target/exp-mcp-fragmented-ipi-sink-failure/test"
 FIX_DIR="$ROOT/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
@@ -28,7 +30,7 @@ run_case() {
 
   for mode in wrap_only sequence_only combined; do
     echo "[test] running case=$case_id mode=$mode"
-    RUNS_ATTACK=2 RUNS_LEGIT=1 RUN_SET=deterministic \
+    RUN_SET=deterministic \
       bash "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/ablation/run_variant.sh" "$OUT_DIR/$case_id" "$FIX_DIR" "$mode"
 
     python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/score_sink_failure.py" \
@@ -40,7 +42,7 @@ run_case() {
   done
 }
 
-# Wave20 Step2 bounded partial matrix
+# Wave21 Step2 bounded legit-volume matrix (same partial cases, higher legit volume)
 run_case "primary_partial" "primary_only" "partial" "ok"
 run_case "alt_partial" "alt_only" "ok" "partial"
 run_case "mixed_partial" "mixed" "partial" "ok"
@@ -79,6 +81,8 @@ for case_id, cfg in cases.items():
         for mode in ["wrap_only", "sequence_only", "combined"]
     }
     for mode, summary in summaries[case_id].items():
+        assert summary["attack_runs"] == 4, (case_id, mode, summary["attack_runs"])
+        assert summary["legit_runs"] == 200, (case_id, mode, summary["legit_runs"])
         assert summary["requested_paths"] == [cfg["requested_path"]], (case_id, mode, summary["requested_paths"])
 
         # Required per-run fields from Wave20 Step1 freeze
@@ -87,6 +91,21 @@ for case_id, cfg in cases.items():
             for key in ["sink_outcome_class", "sink_attempted", "sink_completed", "compat_mode"]:
                 assert key in sf, (case_id, mode, key)
             assert sf["compat_mode"] == "sink_failure_compat_host_stdio_v1", (case_id, mode, sf["compat_mode"])
+
+        # Confidence + derived rate fields required for Wave21 publication
+        for key in [
+            "protected_tpr_ci",
+            "protected_fnr_ci",
+            "protected_false_positive_rate_ci",
+            "sink_attempted_rate",
+            "blocked_before_attempt_rate",
+            "protected_sink_attempted_rate",
+            "protected_blocked_before_attempt_rate",
+        ]:
+            assert key in summary, (case_id, mode, key)
+        for condition in ["baseline", "protected"]:
+            for key in ["sink_attempted_rate", "blocked_before_attempt_rate", "blocked_before_attempt_total"]:
+                assert key in summary["conditions"][condition], (case_id, mode, condition, key)
 
 # Wrap-only may still fail under attempt-based scoring on partial
 for case_id in cases:
@@ -120,8 +139,13 @@ for case_id in cases:
     json.dumps(summaries, indent=2, sort_keys=True),
     encoding="utf-8",
 )
+(root / "sink-failure-legit-volume-summary.json").write_text(
+    json.dumps(summaries, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
 PY
 
 test -f "$OUT_DIR/sink-failure-partial-summary.json"
+test -f "$OUT_DIR/sink-failure-legit-volume-summary.json"
 
 echo "[test] done"
