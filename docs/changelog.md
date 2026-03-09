@@ -1074,6 +1074,8 @@
 - refactor(replay): mechanically split bundle module (wave17 step2) (#668) @Rul1an
 - docs(split): freeze wave17 replay-bundle with step1 gate (#666) @Rul1an
 
+- exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
+- docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
 ## [2026-03-09]
 
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
