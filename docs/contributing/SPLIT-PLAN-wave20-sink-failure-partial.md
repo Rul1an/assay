@@ -28,6 +28,7 @@ Step1 gate:
 - hard fail untracked files in `scripts/ci/exp-mcp-fragmented-ipi/**`
 - `cargo fmt --check`
 - `cargo clippy -p assay-cli -- -D warnings`
+- `cargo test -p assay-cli mcp_wrap_coverage_cli_smoke_writes_report -- --exact`
 
 ## Frozen `partial` semantics (must stay stable)
 

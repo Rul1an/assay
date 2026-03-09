@@ -48,5 +48,6 @@ fi
 
 cargo fmt --check
 cargo clippy -p assay-cli -- -D warnings
+cargo test -p assay-cli mcp_wrap_coverage_cli_smoke_writes_report -- --exact
 
 echo "[review] PASS"
