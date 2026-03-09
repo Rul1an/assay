@@ -16,6 +16,7 @@ CARGO_NET_OFFLINE=true cargo build -q -p assay-cli -p assay-mcp-server
 export RUN_LIVE=1
 export EXPERIMENT_VARIANT=sink_failure
 export SEQUENCE_POLICY_FILE=second_sink_sequence.yaml
+export SINK_FIDELITY_MODE=http_local
 export COMPAT_ROOT="$PWD/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
 export MCP_HOST_CMD="python3 $PWD/scripts/ci/exp-mcp-fragmented-ipi/compat_host/compat_host.py"
 export ASSAY_CMD="$PWD/target/debug/assay"
@@ -58,6 +59,13 @@ Wave21 bounded confidence branch (legit-volume uplift, same matrix axes):
 - `RUNS_LEGIT=100`
 - same tuples and modes as Wave20 bounded partial branch
 
+Wave22 bounded fidelity branch (offline HTTP sink, same matrix axes):
+- `RUNS_ATTACK=2`
+- `RUNS_LEGIT=100`
+- same tuples and modes as Wave20 bounded partial branch
+- set:
+  - `SINK_FIDELITY_MODE=http_local`
+
 ## Canonical run root
 Paper-grade reference artifact:
 - `/tmp/assay-exp-sink-failure-live/target/exp-mcp-fragmented-ipi-sink-failure/runs/live-main-20260303-222858-54c72fc7eda7`
@@ -82,6 +90,8 @@ Expected aggregate artifact:
   - `<run_root>/sink-failure-partial-summary.json`
 - For Wave21 bounded legit-volume run:
   - `<run_root>/sink-failure-legit-volume-summary.json`
+- For Wave22 bounded fidelity run:
+  - `<run_root>/sink-failure-fidelity-http-summary.json`
 
 ## Interpretation note
 The sink-failure variant uses an attempt-based metric:
@@ -105,3 +115,8 @@ Wave21 confidence publication additionally requires:
   - `blocked_before_attempt_rate`
   - `protected_sink_attempted_rate`
   - `protected_blocked_before_attempt_rate`
+
+Wave22 fidelity publication additionally requires completion-layer fields:
+- `egress_http_status_class`
+- `payload_delivered`
+- `response_observed`

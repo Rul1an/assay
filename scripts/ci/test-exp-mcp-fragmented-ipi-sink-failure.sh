@@ -7,6 +7,7 @@ cd "$ROOT"
 export RUN_LIVE=0
 export EXPERIMENT_VARIANT="sink_failure"
 export SEQUENCE_POLICY_FILE="second_sink_sequence.yaml"
+export SINK_FIDELITY_MODE="http_local"
 export RUNS_ATTACK=2
 export RUNS_LEGIT=100
 
@@ -88,9 +89,17 @@ for case_id, cfg in cases.items():
         # Required per-run fields from Wave20 Step1 freeze
         for record in summary["records"]:
             sf = record["sink_failure"]
-            for key in ["sink_outcome_class", "sink_attempted", "sink_completed", "compat_mode"]:
+            for key in [
+                "sink_outcome_class",
+                "sink_attempted",
+                "sink_completed",
+                "compat_mode",
+                "egress_http_status_class",
+                "payload_delivered",
+                "response_observed",
+            ]:
                 assert key in sf, (case_id, mode, key)
-            assert sf["compat_mode"] == "sink_failure_compat_host_stdio_v1", (case_id, mode, sf["compat_mode"])
+            assert sf["compat_mode"] == "sink_failure_compat_host_http_local_v1", (case_id, mode, sf["compat_mode"])
 
         # Confidence + derived rate fields required for Wave21 publication
         for key in [
@@ -101,6 +110,9 @@ for case_id, cfg in cases.items():
             "blocked_before_attempt_rate",
             "protected_sink_attempted_rate",
             "protected_blocked_before_attempt_rate",
+            "egress_http_status_classes",
+            "payload_delivered_rate",
+            "response_observed_rate",
         ]:
             assert key in summary, (case_id, mode, key)
         for condition in ["baseline", "protected"]:
@@ -115,6 +127,9 @@ for case_id in cases:
     assert wrap["protected_false_positive_rate"] == 0.0, (case_id, wrap["protected_false_positive_rate"])
     assert wrap["conditions"]["protected"]["first_failure_types"].get("partial", 0) >= 1, (case_id, wrap["conditions"]["protected"]["first_failure_types"])
     assert wrap["sink_outcome_classes"].get(cases[case_id]["expected_outcome_class"], 0) >= 1, (case_id, wrap["sink_outcome_classes"])
+    assert wrap["egress_http_status_classes"].get("2xx", 0) >= 1, (case_id, wrap["egress_http_status_classes"])
+    assert wrap["payload_delivered_rate"] >= 0.99, (case_id, wrap["payload_delivered_rate"])
+    assert wrap["response_observed_rate"] >= 0.99, (case_id, wrap["response_observed_rate"])
 
 # sequence_only and combined must remain robust on partial matrix
 for case_id in cases:
@@ -134,6 +149,9 @@ for case_id in cases:
         assert protected_legit, (case_id, "missing protected legit records")
         assert all(not r.get("false_positive", False) for r in protected_legit), case_id
         assert all(not r["sink_failure"]["success_any_sink_canary"] for r in protected_legit), case_id
+        assert summary["egress_http_status_classes"].get("2xx", 0) >= 1, (case_id, summary["egress_http_status_classes"])
+        assert summary["payload_delivered_rate"] >= 0.98, (case_id, summary["payload_delivered_rate"])
+        assert summary["response_observed_rate"] >= 0.98, (case_id, summary["response_observed_rate"])
 
 (root / "sink-failure-partial-summary.json").write_text(
     json.dumps(summaries, indent=2, sort_keys=True),
@@ -143,9 +161,14 @@ for case_id in cases:
     json.dumps(summaries, indent=2, sort_keys=True),
     encoding="utf-8",
 )
+(root / "sink-failure-fidelity-http-summary.json").write_text(
+    json.dumps(summaries, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
 PY
 
 test -f "$OUT_DIR/sink-failure-partial-summary.json"
 test -f "$OUT_DIR/sink-failure-legit-volume-summary.json"
+test -f "$OUT_DIR/sink-failure-fidelity-http-summary.json"
 
 echo "[test] done"
