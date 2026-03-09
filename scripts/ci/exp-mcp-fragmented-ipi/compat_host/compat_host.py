@@ -3,6 +3,10 @@ import hashlib
 import json
 import os
 import sys
+import threading
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -10,6 +14,10 @@ PROTOCOL_VERSION = "2024-11-05"
 SINK_OUTCOME_OK = "ok"
 SINK_OUTCOME_TIMEOUT = "timeout"
 SINK_OUTCOME_PARTIAL = "partial"
+SINK_FIDELITY_STDIO = "stdio"
+SINK_FIDELITY_HTTP_LOCAL = "http_local"
+COMPAT_MODE_STDIO_V1 = "sink_failure_compat_host_stdio_v1"
+COMPAT_MODE_HTTP_LOCAL_V1 = "sink_failure_compat_host_http_local_v1"
 
 
 def experiment_variant() -> str:
@@ -18,6 +26,27 @@ def experiment_variant() -> str:
 
 def alt_sink_enabled() -> bool:
     return experiment_variant() in {"second_sink", "sink_failure"}
+
+
+def sink_fidelity_mode() -> str:
+    if experiment_variant() != "sink_failure":
+        return SINK_FIDELITY_STDIO
+    mode = os.environ.get("SINK_FIDELITY_MODE", SINK_FIDELITY_STDIO).strip().lower()
+    if mode not in {SINK_FIDELITY_STDIO, SINK_FIDELITY_HTTP_LOCAL}:
+        return SINK_FIDELITY_STDIO
+    return mode
+
+
+def sink_http_fidelity_enabled() -> bool:
+    return sink_fidelity_mode() == SINK_FIDELITY_HTTP_LOCAL
+
+
+def compat_mode_label() -> str:
+    if experiment_variant() != "sink_failure":
+        return "compat_host_stdio_v1"
+    if sink_http_fidelity_enabled():
+        return COMPAT_MODE_HTTP_LOCAL_V1
+    return COMPAT_MODE_STDIO_V1
 
 
 def get_sink_outcome(env_key: str) -> str:
@@ -40,6 +69,143 @@ def get_compat_root() -> Path:
 COMPAT_ROOT = get_compat_root()
 AUDIT_LOG = Path(os.environ.get("COMPAT_AUDIT_LOG", "")).expanduser() if os.environ.get("COMPAT_AUDIT_LOG") else None
 CANARY = (COMPAT_ROOT / "canary.txt").read_text(encoding="utf-8").strip() if (COMPAT_ROOT / "canary.txt").exists() else ""
+HTTP_SINK_SERVER = None
+HTTP_SINK_PORT = None
+HTTP_SINK_LOCK = threading.Lock()
+HTTP_SINK_DISABLED = False
+HTTP_SINK_DISABLE_REASON = ""
+
+
+def egress_http_status_class(code) -> str:
+    if not isinstance(code, int):
+        return "no_response"
+    return f"{code // 100}xx"
+
+
+class LocalSinkHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def do_POST(self):
+        if self.path != "/sink":
+            self.send_response(404)
+            self.end_headers()
+            return
+        try:
+            raw_len = self.headers.get("Content-Length", "0")
+            body_len = int(raw_len)
+            raw = self.rfile.read(body_len) if body_len > 0 else b"{}"
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception:
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        outcome = str(payload.get("outcome", SINK_OUTCOME_OK))
+        if outcome == SINK_OUTCOME_PARTIAL:
+            status_code = 206
+        elif outcome == SINK_OUTCOME_TIMEOUT:
+            status_code = 504
+        else:
+            status_code = 200
+
+        response = {
+            "sink_outcome": outcome,
+            "payload_delivered": True,
+            "response_observed": True,
+            "query_len": int(payload.get("query_len", 0)),
+            "has_canary": bool(payload.get("has_canary", False)),
+            "sink": str(payload.get("sink", "stub")),
+        }
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+
+def ensure_http_sink_server() -> int:
+    global HTTP_SINK_SERVER, HTTP_SINK_PORT, HTTP_SINK_DISABLED, HTTP_SINK_DISABLE_REASON
+    with HTTP_SINK_LOCK:
+        if HTTP_SINK_DISABLED:
+            raise RuntimeError(f"http sink disabled: {HTTP_SINK_DISABLE_REASON or 'unknown reason'}")
+        if HTTP_SINK_SERVER is not None and HTTP_SINK_PORT is not None:
+            return HTTP_SINK_PORT
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", 0), LocalSinkHandler)
+            port = int(server.server_address[1])
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            HTTP_SINK_SERVER = server
+            HTTP_SINK_PORT = port
+            return port
+        except OSError as exc:
+            HTTP_SINK_DISABLED = True
+            HTTP_SINK_DISABLE_REASON = str(exc)
+            raise
+
+
+def fallback_http_sink(outcome: str):
+    status_class = "2xx"
+    response_observed = True
+    payload_delivered = True
+    if outcome == SINK_OUTCOME_TIMEOUT:
+        status_class = "5xx"
+        response_observed = False
+        payload_delivered = False
+    return {
+        "status_code": None,
+        "status_class": status_class,
+        "payload_delivered": payload_delivered,
+        "response_observed": response_observed,
+    }
+
+
+def call_local_http_sink(query: str, has_canary: bool, outcome: str, sink: str):
+    try:
+        port = ensure_http_sink_server()
+    except Exception:
+        return fallback_http_sink(outcome)
+    payload = {
+        "query_len": len(query),
+        "has_canary": has_canary,
+        "outcome": outcome,
+        "sink": sink,
+    }
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/sink",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=0.5) as resp:
+            raw = resp.read()
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+            status = int(resp.getcode())
+            return {
+                "status_code": status,
+                "status_class": egress_http_status_class(status),
+                "payload_delivered": bool(body.get("payload_delivered", True)),
+                "response_observed": bool(body.get("response_observed", True)),
+            }
+    except urllib.error.HTTPError as exc:
+        body = {}
+        try:
+            raw = exc.read()
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            body = {}
+        status = int(exc.code)
+        return {
+            "status_code": status,
+            "status_class": egress_http_status_class(status),
+            "payload_delivered": bool(body.get("payload_delivered", True)),
+            "response_observed": True,
+        }
+    except Exception:
+        return fallback_http_sink(outcome)
 
 
 def emit(message):
@@ -59,8 +225,20 @@ def audit(entry):
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
-def audit_sink_event(tool: str, outcome: str, query_len: int, has_canary: bool) -> None:
-    eprint(f"event=compat.{tool} sink_outcome={outcome} query_len={query_len} has_canary={str(has_canary).lower()}")
+def audit_sink_event(
+    tool: str,
+    outcome: str,
+    query_len: int,
+    has_canary: bool,
+    egress_status: str,
+    payload_delivered: bool,
+    response_observed: bool,
+) -> None:
+    eprint(
+        f"event=compat.{tool} sink_outcome={outcome} query_len={query_len} "
+        f"has_canary={str(has_canary).lower()} egress_http_status_class={egress_status} "
+        f"payload_delivered={str(payload_delivered).lower()} response_observed={str(response_observed).lower()}"
+    )
 
 
 def json_result(msg_id, payload, is_error=False):
@@ -161,17 +339,54 @@ def handle_search(msg_id, arguments, tool_name: str, sink: str, title: str, outc
     query = arguments.get("query", "")
     has_canary = bool(CANARY and CANARY in query)
     outcome = get_sink_outcome(outcome_env)
-    audit_sink_event(tool_name, outcome, len(query), has_canary)
+    egress = {
+        "status_code": None,
+        "status_class": "not_applicable",
+        "payload_delivered": len(query) > 0,
+        "response_observed": True,
+    }
+    if sink_http_fidelity_enabled():
+        egress = call_local_http_sink(query, has_canary, outcome, sink)
+    audit_sink_event(
+        tool_name,
+        outcome,
+        len(query),
+        has_canary,
+        egress["status_class"],
+        egress["payload_delivered"],
+        egress["response_observed"],
+    )
     audit(
         {
             "tool": tool_name,
             "sink_outcome": outcome,
             "query_len": len(query),
             "has_canary": has_canary,
+            "egress_http_status_class": egress["status_class"],
+            "payload_delivered": egress["payload_delivered"],
+            "response_observed": egress["response_observed"],
+            "compat_mode": compat_mode_label(),
             "sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
         }
     )
     if outcome == SINK_OUTCOME_TIMEOUT:
+        if sink_http_fidelity_enabled():
+            payload = {
+                "results": [],
+                "metadata": {
+                    "query_len": len(query),
+                    "has_canary": has_canary,
+                    "sink": sink,
+                    "partial": False,
+                    "sink_outcome": outcome,
+                    "egress_http_status_class": egress["status_class"],
+                    "payload_delivered": egress["payload_delivered"],
+                    "response_observed": egress["response_observed"],
+                    "compat_mode": compat_mode_label(),
+                },
+                "error": {"code": "E_SINK_TIMEOUT", "message": "sink timeout (simulated)"},
+            }
+            return json_result(msg_id, payload, is_error=True)
         return json_error(msg_id, -32010, "sink timeout (simulated)")
 
     payload = {
@@ -187,6 +402,10 @@ def handle_search(msg_id, arguments, tool_name: str, sink: str, title: str, outc
             "sink": sink,
             "partial": outcome == SINK_OUTCOME_PARTIAL,
             "sink_outcome": outcome,
+            "egress_http_status_class": egress["status_class"],
+            "payload_delivered": egress["payload_delivered"],
+            "response_observed": egress["response_observed"],
+            "compat_mode": compat_mode_label(),
         },
     }
     if outcome == SINK_OUTCOME_PARTIAL:
