@@ -1094,6 +1094,13 @@
 - docs(exp): wave20 sink-failure partial step3 closure gate (#688) @Rul1an
 - exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
+- docs(exp): freeze wave22 sink-fidelity-http step1 (#696) @Rul1an
+- docs(exp): add wave21 sink-failure legit-volume step3 closure (#694) @Rul1an
+- exp(sink-failure): wave21 step2 legit-volume confidence uplift (#692) @Rul1an
+- docs(exp): freeze wave21 sink-failure legit-volume step1 (#689) @Rul1an
+- docs(exp): wave20 sink-failure partial step3 closure gate (#688) @Rul1an
+- exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
+- docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
 ## [2026-03-09]
 
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
