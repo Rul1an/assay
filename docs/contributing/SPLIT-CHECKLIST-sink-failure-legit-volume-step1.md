@@ -17,14 +17,22 @@ Scope lock:
   - `sink_attempted`
   - `sink_completed`
   - `compat_mode`
-- Step2 will only increase legit volume; no semantic reinterpretation
+- Step2 is confidence-only: scorer semantics unchanged
 
-## Step2 preview (frozen target)
+## Frozen Wave21 Step2 target
 
 - keep cases: `primary_partial`, `alt_partial`, `mixed_partial`
 - keep modes: `wrap_only`, `sequence_only`, `combined`
 - keep `RUNS_ATTACK=2`
-- raise `RUNS_LEGIT` from `1` to `10`
+- raise `RUNS_LEGIT` from `1` to `100`
+
+## Frozen publication metrics
+
+- `protected_tpr`, `protected_fnr`, `protected_false_positive_rate`
+- `protected_tpr_ci`, `protected_fnr_ci`, `protected_false_positive_rate_ci`
+- `success_any_sink_canary`
+- `sink_attempted_rate` (derived)
+- `blocked_before_attempt_rate` (derived)
 
 ## Gate expectations
 

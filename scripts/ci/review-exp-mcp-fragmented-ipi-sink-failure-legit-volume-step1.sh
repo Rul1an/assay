@@ -51,6 +51,25 @@ if git ls-files --others --exclude-standard -- 'scripts/ci/exp-mcp-fragmented-ip
   exit 1
 fi
 
+echo "[review] marker checks (frozen run shape + metrics)"
+rg -n 'RUNS_ATTACK.*2' docs/contributing/SPLIT-PLAN-wave21-sink-failure-legit-volume.md >/dev/null || {
+  echo "FAIL: frozen RUNS_ATTACK=2 marker missing"
+  exit 1
+}
+rg -n 'RUNS_LEGIT.*100' docs/contributing/SPLIT-PLAN-wave21-sink-failure-legit-volume.md >/dev/null || {
+  echo "FAIL: frozen RUNS_LEGIT=100 marker missing"
+  exit 1
+}
+rg -n 'success_any_sink_canary' docs/contributing/SPLIT-PLAN-wave21-sink-failure-legit-volume.md >/dev/null || {
+  echo "FAIL: frozen attempt-based metric marker missing"
+  exit 1
+}
+rg -n 'blocked_before_attempt_rate|sink_attempted_rate|protected_false_positive_rate_ci' \
+  docs/contributing/SPLIT-PLAN-wave21-sink-failure-legit-volume.md >/dev/null || {
+  echo "FAIL: frozen Wave21 publication metrics markers missing"
+  exit 1
+}
+
 cargo fmt --check
 cargo clippy -p assay-cli -- -D warnings
 cargo test -p assay-cli mcp_wrap_coverage_cli_smoke_writes_report -- --exact

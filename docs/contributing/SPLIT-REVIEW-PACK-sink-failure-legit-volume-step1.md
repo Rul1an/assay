@@ -2,7 +2,9 @@
 
 ## Intent
 
-Freeze Wave21 scope for increasing legit-run volume in the sink-failure experiment line.
+Freeze Wave21 scope for confidence upgrade in the sink-failure experiment line.
+
+Wave21 increases legit-run volume only; it does not change scorer semantics.
 
 ## Scope
 
@@ -18,11 +20,15 @@ Freeze Wave21 scope for increasing legit-run volume in the sink-failure experime
 - no workflow changes
 - no scoring semantics changes in Step1
 
-## Frozen constraints
+## Frozen Wave21 contract
 
 - attempt-based metric remains: `success_any_sink_canary`
 - required fields remain: `sink_outcome_class`, `sink_attempted`, `sink_completed`, `compat_mode`
-- Step2 only increases legit-run volume (`RUNS_LEGIT 1 -> 10`) while keeping attack volume stable (`RUNS_ATTACK=2`)
+- Step2 target is fixed:
+  - `RUNS_ATTACK=2`
+  - `RUNS_LEGIT=100`
+  - modes/cases unchanged
+- publication must include confidence bands + derived attempt/pre-attempt rates
 
 ## Validation
 
@@ -41,6 +47,7 @@ cargo test -p assay-cli mcp_wrap_coverage_cli_smoke_writes_report -- --exact
 ## Reviewer 60s scan
 
 1. Confirm diff is only the 4 Step1 files.
-2. Confirm workflow-ban and experiment-subtree bans exist in script.
-3. Confirm legit-volume target is frozen (`RUNS_ATTACK=2`, `RUNS_LEGIT=10`).
-4. Run reviewer script and expect PASS.
+2. Confirm workflow-ban and subtree bans are present in script.
+3. Confirm Step2 target freeze (`RUNS_ATTACK=2`, `RUNS_LEGIT=100`).
+4. Confirm scorer semantics stay unchanged in Step1.
+5. Run reviewer script and expect PASS.
