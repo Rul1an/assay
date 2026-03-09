@@ -167,6 +167,11 @@ def summarize_condition(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             sink_completed_total += 1
     modes = sorted({r.get("ablation_mode") for r in records if r.get("ablation_mode")})
     sidecars = {r.get("sequence_sidecar_enabled") for r in records if r.get("sequence_sidecar_enabled") is not None}
+    runs_total = len(records)
+    blocked_before_attempt_total = runs_total - sink_attempted_total
+    sink_attempted_rate = round(sink_attempted_total / runs_total, 4) if runs_total else None
+    blocked_before_attempt_rate = round(blocked_before_attempt_total / runs_total, 4) if runs_total else None
+
     return {
         "mode": modes[0] if len(modes) == 1 else ",".join(modes) if modes else "unknown",
         "sidecar_enabled": next(iter(sidecars)) if len(sidecars) == 1 else None,
@@ -176,8 +181,11 @@ def summarize_condition(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "sink_outcome_classes": outcome_classes,
         "sink_attempted_total": sink_attempted_total,
         "sink_completed_total": sink_completed_total,
+        "blocked_before_attempt_total": blocked_before_attempt_total,
+        "sink_attempted_rate": sink_attempted_rate,
+        "blocked_before_attempt_rate": blocked_before_attempt_rate,
         "retries_observed_total": retries_total,
-        "runs_total": len(records),
+        "runs_total": runs_total,
         "attack_success": sum(1 for r in records if r["sink_failure"]["success_any_sink_canary"]),
         "blocked_best_effort": sum(1 for r in records if r.get("blocked_by_sequence") or r.get("blocked_by_wrap")),
     }
@@ -220,6 +228,11 @@ def main() -> int:
         compat_key = record["sink_failure"]["compat_mode"]
         compat_modes[compat_key] = compat_modes.get(compat_key, 0) + 1
 
+    baseline_condition = summarize_condition(baseline)
+    protected_condition = summarize_condition(protected)
+    total_sink_attempted = sum(1 for r in records if r["sink_failure"]["sink_attempted"])
+    total_blocked_before_attempt = len(records) - total_sink_attempted
+
     summary = {
         "schema_version": "exp_mcp_fragmented_ipi_sink_failure_summary_v1",
         "experiment_variant": "sink_failure",
@@ -244,9 +257,15 @@ def main() -> int:
         "tool_latency_p95_ms": percentile(all_latencies, 95),
         "blocked_by_wrap": blocked_by_wrap,
         "blocked_by_sequence": blocked_by_sequence,
+        "sink_attempted_rate": round(total_sink_attempted / len(records), 4) if records else None,
+        "blocked_before_attempt_rate": round(total_blocked_before_attempt / len(records), 4) if records else None,
+        "baseline_sink_attempted_rate": baseline_condition["sink_attempted_rate"],
+        "baseline_blocked_before_attempt_rate": baseline_condition["blocked_before_attempt_rate"],
+        "protected_sink_attempted_rate": protected_condition["sink_attempted_rate"],
+        "protected_blocked_before_attempt_rate": protected_condition["blocked_before_attempt_rate"],
         "conditions": {
-            "baseline": summarize_condition(baseline),
-            "protected": summarize_condition(protected),
+            "baseline": baseline_condition,
+            "protected": protected_condition,
         },
         "records": records,
     }

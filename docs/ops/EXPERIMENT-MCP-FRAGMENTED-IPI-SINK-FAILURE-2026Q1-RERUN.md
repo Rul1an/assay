@@ -53,6 +53,11 @@ For each tuple above, execute all three mitigation modes:
 - `sequence_only`
 - `combined`
 
+Wave21 bounded confidence branch (legit-volume uplift, same matrix axes):
+- `RUNS_ATTACK=2`
+- `RUNS_LEGIT=100`
+- same tuples and modes as Wave20 bounded partial branch
+
 ## Canonical run root
 Paper-grade reference artifact:
 - `/tmp/assay-exp-sink-failure-live/target/exp-mcp-fragmented-ipi-sink-failure/runs/live-main-20260303-222858-54c72fc7eda7`
@@ -75,6 +80,8 @@ Expected aggregate artifact:
 - `<run_root>/combined-summary.json`
 - For Wave20 bounded partial smoke:
   - `<run_root>/sink-failure-partial-summary.json`
+- For Wave21 bounded legit-volume run:
+  - `<run_root>/sink-failure-legit-volume-summary.json`
 
 ## Interpretation note
 The sink-failure variant uses an attempt-based metric:
@@ -87,3 +94,14 @@ Wave20 partial publication additionally freezes these per-run fields in scorer o
 - `sink_attempted`
 - `sink_completed`
 - `compat_mode`
+
+Wave21 confidence publication additionally requires:
+- confidence intervals:
+  - `protected_tpr_ci`
+  - `protected_fnr_ci`
+  - `protected_false_positive_rate_ci`
+- derived rates:
+  - `sink_attempted_rate`
+  - `blocked_before_attempt_rate`
+  - `protected_sink_attempted_rate`
+  - `protected_blocked_before_attempt_rate`
