@@ -10,7 +10,7 @@ TOOL_LOG = Path(os.environ["EXP_TOOL_LOG"])
 
 
 def second_sink_enabled() -> bool:
-    return os.environ.get("EXPERIMENT_VARIANT", "").strip() == "second_sink"
+    return os.environ.get("EXPERIMENT_VARIANT", "").strip() in {"second_sink", "interleaving"}
 
 
 def log_tool(entry):

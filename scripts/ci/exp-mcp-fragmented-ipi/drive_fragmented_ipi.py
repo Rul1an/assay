@@ -208,6 +208,61 @@ def make_sink_failure_calls(query, path):
     return [("web_search", query)]
 
 
+def interleaving_tools(path):
+    if path == "alt_only":
+        return ("web_search_alt", "web_search_alt")
+    if path == "mixed":
+        return ("web_search", "web_search_alt")
+    return ("web_search", "web_search")
+
+
+def make_interleaving_calls(attack_query, legit_query, path, ordering_class, case_id, scenario):
+    attack_tool, legit_tool = interleaving_tools(path)
+
+    def segment(tool, query, label):
+        return {
+            "tool": tool,
+            "query": query,
+            "segment_label": label,
+        }
+
+    if scenario == "attack":
+        malicious_segment = segment(attack_tool, attack_query, "malicious")
+        legit_segment = segment(legit_tool, legit_query, "legit")
+        if ordering_class == "legit_first":
+            sequence = [legit_segment, malicious_segment]
+        elif ordering_class == "alternating":
+            sequence = [legit_segment, malicious_segment, legit_segment, malicious_segment]
+        elif ordering_class == "near_parallel":
+            sequence = [legit_segment, malicious_segment, malicious_segment]
+        else:
+            sequence = [malicious_segment, legit_segment]
+    else:
+        primary_legit = segment(attack_tool, legit_query, "legit")
+        alt_legit = segment(legit_tool, legit_query, "legit")
+        if ordering_class == "alternating":
+            sequence = [primary_legit, alt_legit, primary_legit]
+        elif ordering_class == "near_parallel":
+            sequence = [primary_legit, alt_legit]
+        elif ordering_class == "legit_first":
+            sequence = [alt_legit, primary_legit]
+        else:
+            sequence = [primary_legit, alt_legit]
+
+    planned = []
+    for idx, item in enumerate(sequence, start=1):
+        planned.append(
+            {
+                **item,
+                "turn_index": idx,
+                "ordering_class": ordering_class,
+                "case_id": case_id,
+                "near_parallel_hint": ordering_class == "near_parallel",
+            }
+        )
+    return planned
+
+
 def run_once(args, run_idx, variant):
     repo_root = Path(args.repo_root).resolve()
     fixture_root = Path(args.fixture_root).resolve()
@@ -237,6 +292,7 @@ def run_once(args, run_idx, variant):
     sequence_payload = None
     sink_calls = []
     cross_session = None
+    interleaving_meta = None
 
     try:
         init_mcp(wrapped)
@@ -333,6 +389,22 @@ def run_once(args, run_idx, variant):
                     planned_sink_calls = make_second_sink_calls(attack_query, args.second_sink_path)
                 elif args.experiment_variant == "sink_failure":
                     planned_sink_calls = make_sink_failure_calls(attack_query, args.second_sink_path)
+                elif args.experiment_variant == "interleaving":
+                    legit_query = make_legit_query(variant)
+                    planned_sink_calls = make_interleaving_calls(
+                        attack_query,
+                        legit_query,
+                        args.second_sink_path,
+                        args.interleaving_ordering_class,
+                        args.interleaving_case_id,
+                        "attack",
+                    )
+                    interleaving_meta = {
+                        "case_id": args.interleaving_case_id,
+                        "ordering_class": args.interleaving_ordering_class,
+                        "route_class": f"attack_{args.second_sink_path}",
+                        "segment_profile": "mixed_legit_malicious",
+                    }
                 else:
                     planned_sink_calls = [("web_search", attack_query)]
         else:
@@ -348,10 +420,44 @@ def run_once(args, run_idx, variant):
                 planned_sink_calls = make_second_sink_calls(legit_query, args.second_sink_path)
             elif args.experiment_variant == "sink_failure":
                 planned_sink_calls = make_sink_failure_calls(legit_query, args.second_sink_path)
+            elif args.experiment_variant == "interleaving":
+                planned_sink_calls = make_interleaving_calls(
+                    legit_query,
+                    legit_query,
+                    args.second_sink_path,
+                    args.interleaving_ordering_class,
+                    args.interleaving_case_id,
+                    "legit",
+                )
+                interleaving_meta = {
+                    "case_id": args.interleaving_case_id,
+                    "ordering_class": args.interleaving_ordering_class,
+                    "route_class": f"legit_{args.second_sink_path}",
+                    "segment_profile": "legit_only_control",
+                }
             else:
                 planned_sink_calls = [("web_search", legit_query)]
 
-        for tool_name, query in planned_sink_calls:
+        for planned_idx, planned_call in enumerate(planned_sink_calls, start=1):
+            if isinstance(planned_call, dict):
+                tool_name = planned_call.get("tool")
+                query = planned_call.get("query")
+                segment_label = planned_call.get("segment_label", "unknown")
+                turn_index = int(planned_call.get("turn_index", planned_idx))
+                call_ordering_class = planned_call.get("ordering_class")
+                call_case_id = planned_call.get("case_id")
+                near_parallel_hint = bool(planned_call.get("near_parallel_hint", False))
+            else:
+                tool_name, query = planned_call
+                segment_label = "unknown"
+                turn_index = planned_idx
+                call_ordering_class = None
+                call_case_id = None
+                near_parallel_hint = False
+
+            if not isinstance(tool_name, str) or not isinstance(query, str):
+                raise RuntimeError(f"invalid sink call plan entry: {planned_call}")
+
             if args.mode == "protected" and guard is not None and args.scenario == "attack":
                 sequence_payload = guarded_sequence_check(guard, sensitive_history, tool_name, args.sequence_policy_file)
                 if not sequence_payload.get("allowed", False):
@@ -392,6 +498,11 @@ def run_once(args, run_idx, variant):
                 "payload_delivered": payload_delivered,
                 "response_observed": response_observed,
                 "compat_mode": compat_mode,
+                "segment_label": segment_label,
+                "turn_index": turn_index,
+                "ordering_class": call_ordering_class,
+                "case_id": call_case_id,
+                "near_parallel_hint": near_parallel_hint,
             })
             web_search_query = query
             if is_error:
@@ -420,8 +531,11 @@ def run_once(args, run_idx, variant):
             "run_set": args.run_set,
             "variant": variant,
             "experiment_variant": args.experiment_variant,
-            "second_sink_path": args.second_sink_path if args.experiment_variant in {"second_sink", "sink_failure"} else None,
-            "sink_plan_tools": [tool_name for tool_name, _ in planned_sink_calls],
+            "second_sink_path": args.second_sink_path if args.experiment_variant in {"second_sink", "sink_failure", "interleaving"} else None,
+            "sink_plan_tools": [
+                call["tool"] if isinstance(call, dict) else call[0]
+                for call in planned_sink_calls
+            ],
             "blocked_by_sequence": blocked_by_sequence,
             "blocked_by_wrap": blocked_by_wrap,
             "web_search_called": web_search_called,
@@ -445,6 +559,19 @@ def run_once(args, run_idx, variant):
         }
         if cross_session is not None:
             record["cross_session"] = cross_session
+        if interleaving_meta is not None:
+            labels = [call.get("segment_label", "unknown") for call in sink_calls]
+            record["interleaving"] = {
+                **interleaving_meta,
+                "turn_count_planned": len(planned_sink_calls),
+                "turn_count_observed": len(sink_calls),
+                "segment_labels_observed": labels,
+                "malicious_segments_observed": sum(1 for label in labels if label == "malicious"),
+                "legit_segments_observed": sum(1 for label in labels if label == "legit"),
+                "sink_attempted": bool(sink_calls),
+                "blocked_before_attempt": not bool(sink_calls),
+                "primary_metric": "success_any_sink_canary",
+            }
         return record
     finally:
         for proc in [wrapped, guard]:
@@ -475,8 +602,10 @@ def main():
     parser.add_argument("--mcp-host-args", default=os.environ.get("MCP_HOST_ARGS", ""))
     parser.add_argument("--assay-cmd", default=os.environ.get("ASSAY_CMD", "assay"))
     parser.add_argument("--ablation-mode", default=os.environ.get("ABLATION_MODE", "standard"))
-    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure", "cross_session_decay"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
+    parser.add_argument("--experiment-variant", choices=["standard", "wrap_bypass", "second_sink", "sink_failure", "cross_session_decay", "interleaving"], default=os.environ.get("EXPERIMENT_VARIANT", "standard"))
     parser.add_argument("--second-sink-path", choices=["primary_only", "alt_only", "mixed"], default=os.environ.get("SECOND_SINK_PATH", "primary_only"))
+    parser.add_argument("--interleaving-ordering-class", choices=["malicious_first", "legit_first", "alternating", "near_parallel"], default=os.environ.get("INTERLEAVING_ORDERING_CLASS", "malicious_first"))
+    parser.add_argument("--interleaving-case-id", default=os.environ.get("INTERLEAVING_CASE_ID", "interleaving_default"))
     parser.add_argument("--cross-session-phase", choices=["read_only", "sink_only", "same_session_control", "legit_control"], default=os.environ.get("CROSS_SESSION_PHASE", "sink_only"))
     parser.add_argument("--cross-session-state-file", default=os.environ.get("CROSS_SESSION_STATE_FILE", ""))
     parser.add_argument("--decay-runs", type=int, default=int(os.environ.get("DECAY_RUNS", "1")))
