@@ -5,6 +5,7 @@ Close the fragmented-IPI experiment family with a docs-only closure slice.
 
 This slice finalizes:
 - one line-wide summary table in the main results doc
+- interleaving inclusion in the final line table (Wave23)
 - one explicit DEC-007 closure note in the Wave22 fidelity results doc
 - one reviewer gate to keep scope and claims bounded
 

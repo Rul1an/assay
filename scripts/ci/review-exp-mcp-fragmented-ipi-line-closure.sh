@@ -56,6 +56,10 @@ rg -n 'Sink-fidelity HTTP \(offline localhost\)' docs/ops/EXPERIMENT-MCP-FRAGMEN
   echo "FAIL: final line table missing sink-fidelity HTTP row"
   exit 1
 }
+rg -n 'Interleaving \(mixed legit\+malicious\)' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md >/dev/null || {
+  echo "FAIL: final line table missing interleaving row"
+  exit 1
+}
 
 echo "[review] marker checks: DEC-007 closure note"
 rg -n '^## DEC-007 closure note$' docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SINK-FAILURE-FIDELITY-HTTP-2026Q1-RESULTS.md >/dev/null || {

@@ -19,6 +19,7 @@
   - sink-failure
   - sink-failure partial
   - sink-fidelity HTTP
+  - interleaving (mixed legit+malicious)
 - [ ] Main results doc includes bounded core claim:
   - `sequence_only` decisive
   - `combined` follows `sequence_only`
