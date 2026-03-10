@@ -1176,6 +1176,15 @@
 - docs(exp): close wave23 interleaving step3 (#719) @Rul1an
 - fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
 - exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- feat(wave25-step2): execute log obligations with additive outcomes (#732) @Rul1an
+- docs(wave25-step1): freeze obligations log execution contract (#730) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
 ## [2026-03-10]
 
 - docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
