@@ -1119,6 +1119,8 @@
 - exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
 
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
 ## [2026-03-10]
 
 - docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
