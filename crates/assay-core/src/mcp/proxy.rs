@@ -509,6 +509,14 @@ impl McpProxy {
         event.data.matched_tool_classes = metadata.matched_tool_classes.clone();
         event.data.match_basis = metadata.match_basis.as_str().map(ToString::to_string);
         event.data.matched_rule = metadata.matched_rule.clone();
+        event.data.typed_decision = metadata.typed_decision;
+        event.data.policy_version = metadata.policy_version.clone();
+        event.data.policy_digest = metadata.policy_digest.clone();
+        event.data.obligations = metadata.obligations.clone();
+        event.data.approval_state = metadata.approval_state.clone();
+        event.data.lane = metadata.lane.clone();
+        event.data.principal = metadata.principal.clone();
+        event.data.auth_context_summary = metadata.auth_context_summary.clone();
         emitter.emit(&event);
     }
 }

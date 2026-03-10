@@ -58,20 +58,14 @@ pub(super) fn handle_tool_call(
         state,
         runtime_identity,
     );
-    let tool_classes = policy_eval.metadata.tool_classes.clone();
-    let matched_tool_classes = policy_eval.metadata.matched_tool_classes.clone();
-    let match_basis = policy_eval
-        .metadata
-        .match_basis
-        .as_str()
-        .map(ToString::to_string);
-    let matched_rule = policy_eval.metadata.matched_rule.clone();
+    let tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
     guard.set_tool_match(
-        policy_eval.metadata.tool_classes.clone(),
-        policy_eval.metadata.matched_tool_classes.clone(),
-        match_basis.clone(),
-        matched_rule.clone(),
+        tool_match.tool_classes.clone(),
+        tool_match.matched_tool_classes.clone(),
+        tool_match.match_basis.clone(),
+        tool_match.matched_rule.clone(),
     );
+    guard.set_policy_context(tool_match.policy_context());
 
     match policy_eval.decision {
         PolicyDecision::Deny {
@@ -89,12 +83,7 @@ pub(super) fn handle_tool_call(
                 tool_name,
                 &reason_code,
                 reason,
-                emit::ToolMatchMetadata::new(
-                    tool_classes,
-                    matched_tool_classes,
-                    match_basis,
-                    matched_rule,
-                ),
+                tool_match,
             );
         }
         PolicyDecision::AllowWithWarning { .. } | PolicyDecision::Allow => {
@@ -114,12 +103,7 @@ pub(super) fn handle_tool_call(
             tool_name,
             reason_codes::P_MANDATE_REQUIRED,
             reason,
-            emit::ToolMatchMetadata::new(
-                tool_classes,
-                matched_tool_classes,
-                match_basis,
-                matched_rule,
-            ),
+            tool_match,
         );
     }
 
@@ -163,12 +147,7 @@ pub(super) fn handle_tool_call(
                     tool_name,
                     reason_codes::P_MANDATE_VALID,
                     Some(receipt),
-                    emit::ToolMatchMetadata::new(
-                        tool_classes,
-                        matched_tool_classes,
-                        match_basis,
-                        matched_rule,
-                    ),
+                    tool_match,
                 );
             }
             Err(e) => {
@@ -182,12 +161,7 @@ pub(super) fn handle_tool_call(
                     tool_name,
                     &reason_code,
                     reason,
-                    emit::ToolMatchMetadata::new(
-                        tool_classes,
-                        matched_tool_classes,
-                        match_basis,
-                        matched_rule,
-                    ),
+                    tool_match,
                 );
             }
         }
@@ -204,12 +178,7 @@ pub(super) fn handle_tool_call(
         tool_name,
         reason_codes::P_POLICY_ALLOW,
         None,
-        emit::ToolMatchMetadata::new(
-            tool_classes,
-            matched_tool_classes,
-            match_basis,
-            matched_rule,
-        ),
+        tool_match,
     )
 }
 

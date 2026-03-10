@@ -26,8 +26,10 @@ pub(super) fn evaluate_with_metadata(
     if let Some(pinned) = policy.tool_pins.get(tool_name) {
         if let Some(runtime) = runtime_identity {
             if pinned != runtime {
-                return PolicyEvaluation {
-                    decision: PolicyDecision::Deny {
+                return finalize_evaluation(
+                    policy,
+                    metadata,
+                    PolicyDecision::Deny {
                         tool: tool_name.to_string(),
                         code: "E_TOOL_DRIFT".to_string(),
                         reason: format!(
@@ -41,15 +43,14 @@ pub(super) fn evaluate_with_metadata(
                             "Tool metadata or schema has changed without policy update (SOTA Moat)",
                         ),
                     },
-                    metadata,
-                };
+                );
             }
         }
     }
 
     // 1. Rate limits
     if let Some(decision) = check_rate_limits(policy, state) {
-        return PolicyEvaluation { decision, metadata };
+        return finalize_evaluation(policy, metadata, decision);
     }
 
     let deny_name_match = is_denied(policy, tool_name);
@@ -72,22 +73,25 @@ pub(super) fn evaluate_with_metadata(
             "Tool is explicitly denylisted by class"
         };
 
-        return PolicyEvaluation {
-            decision: PolicyDecision::Deny {
+        return finalize_evaluation(
+            policy,
+            metadata,
+            PolicyDecision::Deny {
                 tool: tool_name.to_string(),
                 code: "E_TOOL_DENIED".to_string(),
                 reason: deny_reason.to_string(),
                 contract: format_deny_contract(tool_name, "E_TOOL_DENIED", deny_reason),
             },
-            metadata,
-        };
+        );
     }
 
     let allow_name_match = is_allowed(policy, tool_name);
     let allow_class_matches = matched_allow_classes(policy, &tool_classes);
     if has_allowlist(policy) && !allow_name_match && allow_class_matches.is_empty() {
-        return PolicyEvaluation {
-            decision: PolicyDecision::Deny {
+        return finalize_evaluation(
+            policy,
+            metadata,
+            PolicyDecision::Deny {
                 tool: tool_name.to_string(),
                 code: "E_TOOL_NOT_ALLOWED".to_string(),
                 reason: "Tool is not in the allowlist".to_string(),
@@ -97,8 +101,7 @@ pub(super) fn evaluate_with_metadata(
                     "Tool is not in allowlist",
                 ),
             },
-            metadata,
-        };
+        );
     }
 
     if allow_name_match || !allow_class_matches.is_empty() {
@@ -125,8 +128,10 @@ pub(super) fn evaluate_with_metadata(
                     })
                 })
                 .collect();
-            return PolicyEvaluation {
-                decision: PolicyDecision::Deny {
+            return finalize_evaluation(
+                policy,
+                metadata,
+                PolicyDecision::Deny {
                     tool: tool_name.to_string(),
                     code: "E_ARG_SCHEMA".to_string(),
                     reason: "JSON Schema validation failed".to_string(),
@@ -137,13 +142,9 @@ pub(super) fn evaluate_with_metadata(
                         "violations": violations,
                     }),
                 },
-                metadata,
-            };
+            );
         }
-        return PolicyEvaluation {
-            decision: PolicyDecision::Allow,
-            metadata,
-        };
+        return finalize_evaluation(policy, metadata, PolicyDecision::Allow);
     }
 
     // 5. Unconstrained Mode
@@ -166,7 +167,7 @@ pub(super) fn evaluate_with_metadata(
         UnconstrainedMode::Allow => PolicyDecision::Allow,
     };
 
-    PolicyEvaluation { decision, metadata }
+    finalize_evaluation(policy, metadata, decision)
 }
 
 pub(super) fn check(
@@ -221,6 +222,24 @@ fn check_rate_limits(policy: &McpPolicy, state: &mut PolicyState) -> Option<Poli
         }
     }
     None
+}
+
+fn finalize_evaluation(
+    policy: &McpPolicy,
+    mut metadata: PolicyMatchMetadata,
+    decision: PolicyDecision,
+) -> PolicyEvaluation {
+    metadata.policy_version = Some(if policy.version.trim().is_empty() {
+        "unspecified".to_string()
+    } else {
+        policy.version.clone()
+    });
+    metadata.policy_digest = policy.policy_digest();
+    let typed_contract = decision.typed_contract();
+    metadata.typed_decision = Some(typed_contract.decision);
+    metadata.obligations = typed_contract.obligations;
+
+    PolicyEvaluation { decision, metadata }
 }
 
 fn is_denied(policy: &McpPolicy, tool_name: &str) -> bool {
