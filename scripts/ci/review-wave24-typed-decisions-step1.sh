@@ -78,11 +78,12 @@ rg -n 'AllowWithWarning' \
   exit 1
 }
 
-rg -n 'policy_version|policy_digest|obligations|approval_state|lane|principal|auth_context_summary' \
-  docs/contributing/SPLIT-PLAN-wave24-typed-decisions.md >/dev/null || {
-  echo "FAIL: missing Decision Event v2 field markers"
-  exit 1
-}
+for field in policy_version policy_digest obligations approval_state lane principal auth_context_summary; do
+  rg -n "$field" docs/contributing/SPLIT-PLAN-wave24-typed-decisions.md >/dev/null || {
+    echo "FAIL: missing Decision Event v2 field marker: $field"
+    exit 1
+  }
+done
 
 echo "[review] repo checks"
 cargo fmt --check
