@@ -5,6 +5,7 @@ pub mod jcs;
 pub mod jsonrpc;
 pub mod lifecycle;
 pub mod mapper_v2;
+pub mod obligations;
 pub mod parser;
 pub mod policy;
 pub mod proxy;

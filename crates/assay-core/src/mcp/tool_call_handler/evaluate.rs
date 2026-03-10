@@ -2,6 +2,7 @@ use super::super::decision::{reason_codes, DecisionEmitterGuard};
 use super::super::identity::ToolIdentity;
 use super::super::jsonrpc::JsonRpcRequest;
 use super::super::lifecycle::mandate_used_event;
+use super::super::obligations;
 use super::super::policy::{PolicyDecision, PolicyState};
 use super::emit;
 use super::types::{HandleResult, ToolCallHandler};
@@ -58,7 +59,9 @@ pub(super) fn handle_tool_call(
         state,
         runtime_identity,
     );
-    let tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
+    let mut tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
+    tool_match.obligation_outcomes =
+        obligations::execute_log_only(&tool_match.obligations, &tool_name);
     guard.set_tool_match(
         tool_match.tool_classes.clone(),
         tool_match.matched_tool_classes.clone(),

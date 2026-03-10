@@ -513,6 +513,8 @@ impl McpProxy {
         event.data.policy_version = metadata.policy_version.clone();
         event.data.policy_digest = metadata.policy_digest.clone();
         event.data.obligations = metadata.obligations.clone();
+        event.data.obligation_outcomes =
+            super::obligations::execute_log_only(&metadata.obligations, tool);
         event.data.approval_state = metadata.approval_state.clone();
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
