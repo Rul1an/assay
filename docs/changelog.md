@@ -1145,6 +1145,12 @@
 - exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
 - docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
 - docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
 ## [2026-03-10]
 
 - docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
