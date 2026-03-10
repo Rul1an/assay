@@ -4,9 +4,11 @@ mod response;
 mod schema;
 
 use super::identity::ToolIdentity;
+use super::jcs;
 use super::jsonrpc::JsonRpcRequest;
 use super::tool_match::MatchBasis;
 use super::tool_taxonomy::ToolTaxonomy;
+use crate::fingerprint::sha256_hex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -122,6 +124,14 @@ pub struct PolicyMatchMetadata {
     pub matched_tool_classes: Vec<String>,
     pub match_basis: MatchBasis,
     pub matched_rule: Option<String>,
+    pub typed_decision: Option<TypedPolicyDecision>,
+    pub policy_version: Option<String>,
+    pub policy_digest: Option<String>,
+    pub obligations: Vec<PolicyObligation>,
+    pub approval_state: Option<String>,
+    pub lane: Option<String>,
+    pub principal: Option<String>,
+    pub auth_context_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +179,68 @@ pub enum PolicyDecision {
         reason: String,
         contract: Value,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TypedPolicyDecision {
+    Allow,
+    #[serde(rename = "allow_with_obligations")]
+    AllowWithObligations,
+    Deny,
+    #[serde(rename = "deny_with_alert")]
+    DenyWithAlert,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyObligation {
+    #[serde(rename = "type")]
+    pub obligation_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl PolicyObligation {
+    pub fn warning_compat(code: &str, reason: &str) -> Self {
+        Self {
+            obligation_type: "legacy_warning".to_string(),
+            detail: Some(format!("{code}:{reason}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyDecisionContract {
+    pub decision: TypedPolicyDecision,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<PolicyObligation>,
+}
+
+impl PolicyDecision {
+    pub fn typed_contract(&self) -> PolicyDecisionContract {
+        match self {
+            Self::Allow => PolicyDecisionContract {
+                decision: TypedPolicyDecision::Allow,
+                obligations: Vec::new(),
+            },
+            Self::AllowWithWarning { code, reason, .. } => PolicyDecisionContract {
+                decision: TypedPolicyDecision::AllowWithObligations,
+                obligations: vec![PolicyObligation::warning_compat(code, reason)],
+            },
+            Self::Deny { code, .. } if is_alert_deny_code(code) => PolicyDecisionContract {
+                decision: TypedPolicyDecision::DenyWithAlert,
+                obligations: Vec::new(),
+            },
+            Self::Deny { .. } => PolicyDecisionContract {
+                decision: TypedPolicyDecision::Deny,
+                obligations: Vec::new(),
+            },
+        }
+    }
+}
+
+fn is_alert_deny_code(code: &str) -> bool {
+    matches!(code, "E_TOOL_DRIFT")
 }
 
 // Dual-Shape Deserializer Helper (Legacy)
@@ -282,6 +354,11 @@ impl McpPolicy {
 
     pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::Validator>> {
         schema::compile_all_schemas(self)
+    }
+
+    pub fn policy_digest(&self) -> Option<String> {
+        let canonical = jcs::to_string(self).ok()?;
+        Some(format!("sha256:{}", sha256_hex(&canonical)))
     }
 
     /// Single evaluation entry point for CLI and Server

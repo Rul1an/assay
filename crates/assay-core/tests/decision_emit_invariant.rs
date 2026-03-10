@@ -6,7 +6,7 @@
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent,
 };
-use assay_core::mcp::policy::{McpPolicy, PolicyState, ToolPolicy};
+use assay_core::mcp::policy::{McpPolicy, PolicyState, ToolPolicy, TypedPolicyDecision};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -351,4 +351,11 @@ fn test_event_contains_required_fields() {
     assert!(!event.data.tool.is_empty());
     assert!(!event.data.tool_call_id.is_empty());
     assert!(!event.data.reason_code.is_empty());
+    assert!(event.data.policy_version.is_some());
+    assert!(event.data.policy_digest.is_some());
+    assert_eq!(
+        event.data.typed_decision,
+        Some(TypedPolicyDecision::AllowWithObligations)
+    );
+    assert!(!event.data.obligations.is_empty());
 }
