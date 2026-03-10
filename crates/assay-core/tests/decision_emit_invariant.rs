@@ -5,6 +5,7 @@
 
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent,
+    ObligationOutcomeStatus,
 };
 use assay_core::mcp::policy::{McpPolicy, PolicyState, ToolPolicy, TypedPolicyDecision};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
@@ -358,4 +359,10 @@ fn test_event_contains_required_fields() {
         Some(TypedPolicyDecision::AllowWithObligations)
     );
     assert!(!event.data.obligations.is_empty());
+    assert!(!event.data.obligation_outcomes.is_empty());
+    assert_eq!(event.data.obligation_outcomes[0].obligation_type, "log");
+    assert_eq!(
+        event.data.obligation_outcomes[0].status,
+        ObligationOutcomeStatus::Applied
+    );
 }

@@ -54,6 +54,25 @@ pub enum Decision {
     Error,
 }
 
+/// Fulfillment status for a runtime obligation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationOutcomeStatus {
+    Applied,
+    Skipped,
+    Error,
+}
+
+/// Runtime fulfillment result for an individual obligation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObligationOutcome {
+    #[serde(rename = "type")]
+    pub obligation_type: String,
+    pub status: ObligationOutcomeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Additional runtime policy context for Decision Event v2.
 #[derive(Debug, Clone, Default)]
 pub struct PolicyDecisionEventContext {
@@ -61,6 +80,7 @@ pub struct PolicyDecisionEventContext {
     pub policy_version: Option<String>,
     pub policy_digest: Option<String>,
     pub obligations: Vec<PolicyObligation>,
+    pub obligation_outcomes: Vec<ObligationOutcome>,
     pub approval_state: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
@@ -114,6 +134,9 @@ pub struct DecisionData {
     /// Obligations attached to an allow/deny decision
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obligations: Vec<PolicyObligation>,
+    /// Runtime fulfillment outcomes for attached obligations
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligation_outcomes: Vec<ObligationOutcome>,
     /// Approval state summary for runtime decisioning
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_state: Option<String>,
@@ -183,6 +206,7 @@ impl DecisionEvent {
                 policy_version: None,
                 policy_digest: None,
                 obligations: Vec::new(),
+                obligation_outcomes: Vec::new(),
                 approval_state: None,
                 lane: None,
                 principal: None,
@@ -288,6 +312,7 @@ impl DecisionEvent {
         self.data.policy_version = context.policy_version;
         self.data.policy_digest = context.policy_digest;
         self.data.obligations = context.obligations;
+        self.data.obligation_outcomes = context.obligation_outcomes;
         self.data.approval_state = context.approval_state;
         self.data.lane = context.lane;
         self.data.principal = context.principal;
@@ -436,6 +461,7 @@ impl DecisionEmitterGuard {
             event.data.policy_version = context.policy_version;
             event.data.policy_digest = context.policy_digest;
             event.data.obligations = context.obligations;
+            event.data.obligation_outcomes = context.obligation_outcomes;
             event.data.approval_state = context.approval_state;
             event.data.lane = context.lane;
             event.data.principal = context.principal;

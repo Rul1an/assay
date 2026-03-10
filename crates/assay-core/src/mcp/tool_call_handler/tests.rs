@@ -1,6 +1,9 @@
 use super::*;
-use crate::mcp::decision::{reason_codes, DecisionEvent, NullDecisionEmitter};
+use crate::mcp::decision::{
+    reason_codes, DecisionEvent, NullDecisionEmitter, ObligationOutcomeStatus,
+};
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
+use crate::mcp::policy::TypedPolicyDecision;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -70,6 +73,41 @@ fn test_handler_emits_decision_on_policy_allow() {
     let result = handler.handle_tool_call(&request, &mut state, None, None, None);
 
     assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn test_allow_with_warning_emits_log_obligation_outcome() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let policy = McpPolicy::default();
+    let handler = ToolCallHandler::new(
+        policy,
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request("unconstrained_tool", serde_json::json!({}));
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Allow { decision_event, .. } => {
+            assert_eq!(
+                decision_event.data.typed_decision,
+                Some(TypedPolicyDecision::AllowWithObligations)
+            );
+            assert_eq!(decision_event.data.obligation_outcomes.len(), 1);
+            let outcome = &decision_event.data.obligation_outcomes[0];
+            assert_eq!(outcome.obligation_type, "log");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Applied);
+            assert_eq!(
+                outcome.reason.as_deref(),
+                Some("mapped from legacy_warning")
+            );
+        }
+        other => panic!("expected allow result, got {:?}", other),
+    }
     assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
 }
 
