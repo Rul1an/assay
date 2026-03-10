@@ -101,10 +101,12 @@ done
 
 echo "[review] typed decision markers"
 
-rg -n 'allow_with_obligations|deny_with_alert' crates/assay-core/src/mcp >/dev/null || {
-  echo "FAIL: missing typed decision markers allow_with_obligations / deny_with_alert"
-  exit 1
-}
+for marker in allow_with_obligations deny_with_alert; do
+  rg -n "$marker" crates/assay-core/src/mcp >/dev/null || {
+    echo "FAIL: missing typed decision marker: $marker"
+    exit 1
+  }
+done
 
 rg -n 'AllowWithWarning' crates/assay-core/src/mcp >/dev/null || {
   echo "FAIL: missing AllowWithWarning compatibility path"
@@ -112,11 +114,12 @@ rg -n 'AllowWithWarning' crates/assay-core/src/mcp >/dev/null || {
 }
 
 echo "[review] Decision Event v2 field markers"
-rg -n 'policy_version|policy_digest|obligations|approval_state|lane|principal|auth_context_summary' \
-  crates/assay-core/src/mcp >/dev/null || {
-  echo "FAIL: missing Decision Event v2 field markers"
-  exit 1
-}
+for field in policy_version policy_digest obligations approval_state lane principal auth_context_summary; do
+  rg -n "$field" crates/assay-core/src/mcp >/dev/null || {
+    echo "FAIL: missing Decision Event v2 field marker: $field"
+    exit 1
+  }
+done
 
 echo "[review] required legacy decision markers still present"
 rg -n 'tool_classes|matched_tool_classes|match_basis|matched_rule|reason_code' \

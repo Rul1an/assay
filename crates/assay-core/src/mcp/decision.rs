@@ -3,6 +3,7 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
+use super::policy::{PolicyObligation, TypedPolicyDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
@@ -53,6 +54,19 @@ pub enum Decision {
     Error,
 }
 
+/// Additional runtime policy context for Decision Event v2.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyDecisionEventContext {
+    pub typed_decision: Option<TypedPolicyDecision>,
+    pub policy_version: Option<String>,
+    pub policy_digest: Option<String>,
+    pub obligations: Vec<PolicyObligation>,
+    pub approval_state: Option<String>,
+    pub lane: Option<String>,
+    pub principal: Option<String>,
+    pub auth_context_summary: Option<String>,
+}
+
 /// A tool decision event (CloudEvents compliant).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionEvent {
@@ -88,6 +102,30 @@ pub struct DecisionData {
     /// Rule or policy field that matched
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_rule: Option<String>,
+    /// Typed policy decision shape (Wave24 Decision Event v2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typed_decision: Option<TypedPolicyDecision>,
+    /// Policy bundle version used for evaluation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<String>,
+    /// Policy bundle digest used for evaluation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_digest: Option<String>,
+    /// Obligations attached to an allow/deny decision
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<PolicyObligation>,
+    /// Approval state summary for runtime decisioning
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_state: Option<String>,
+    /// Lane identifier summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    /// Principal identifier summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    /// Authentication context summary (non-sensitive, compact)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_context_summary: Option<String>,
     /// Decision outcome
     pub decision: Decision,
     /// Machine-parseable reason code (MUST)
@@ -141,6 +179,14 @@ impl DecisionEvent {
                 matched_tool_classes: Vec::new(),
                 match_basis: None,
                 matched_rule: None,
+                typed_decision: None,
+                policy_version: None,
+                policy_digest: None,
+                obligations: Vec::new(),
+                approval_state: None,
+                lane: None,
+                principal: None,
+                auth_context_summary: None,
                 decision: Decision::Error, // Default to error, will be set
                 reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
                 reason: Some("Decision not finalized (guard dropped without emit)".to_string()),
@@ -233,6 +279,19 @@ impl DecisionEvent {
         self.data.matched_tool_classes = matched_tool_classes;
         self.data.match_basis = match_basis;
         self.data.matched_rule = matched_rule;
+        self
+    }
+
+    /// Set policy context fields for Decision Event v2.
+    pub fn with_policy_context(mut self, context: PolicyDecisionEventContext) -> Self {
+        self.data.typed_decision = context.typed_decision;
+        self.data.policy_version = context.policy_version;
+        self.data.policy_digest = context.policy_digest;
+        self.data.obligations = context.obligations;
+        self.data.approval_state = context.approval_state;
+        self.data.lane = context.lane;
+        self.data.principal = context.principal;
+        self.data.auth_context_summary = context.auth_context_summary;
         self
     }
 }
@@ -367,6 +426,20 @@ impl DecisionEmitterGuard {
             event.data.matched_tool_classes = matched_tool_classes;
             event.data.match_basis = match_basis;
             event.data.matched_rule = matched_rule;
+        }
+    }
+
+    /// Set policy context metadata for Decision Event v2.
+    pub fn set_policy_context(&mut self, context: PolicyDecisionEventContext) {
+        if let Some(ref mut event) = self.event {
+            event.data.typed_decision = context.typed_decision;
+            event.data.policy_version = context.policy_version;
+            event.data.policy_digest = context.policy_digest;
+            event.data.obligations = context.obligations;
+            event.data.approval_state = context.approval_state;
+            event.data.lane = context.lane;
+            event.data.principal = context.principal;
+            event.data.auth_context_summary = context.auth_context_summary;
         }
     }
 

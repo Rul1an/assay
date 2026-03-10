@@ -41,7 +41,7 @@
 - [ ] No auth transport model wijzigingen toegevoegd
 
 ## Validation
-- [ ] `BASE_REF=origin/main bash scripts/ci/review-wave24-typed-decisions-step2.sh` passes
+- [ ] `BASE_REF=origin/codex/wave24-typed-decisions-step1-freeze bash scripts/ci/review-wave24-typed-decisions-step2.sh` passes
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D warnings` passes
 - [ ] Pinned tests blijven groen
