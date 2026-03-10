@@ -75,6 +75,22 @@ The core governance conclusion remains stable:
 - sequence-governed modes block the protected attack route before effective sink completion in the same pattern as Wave20/21,
 - wrap-only remains structurally weaker under attempt-based interpretation.
 
+## DEC-007 closure note
+### Proven in this bounded line
+- route/state governance remains robust across:
+  - payload fragmentation and tool-hopping variants
+  - delayed cross-session sink attempts
+  - sink-failure timeout and partial branches
+  - offline localhost HTTP-egress sink fidelity
+- `sequence_only` is the decisive blocking layer in this experiment family.
+- `combined` adds no observed decisive blocking gain over `sequence_only` in this matrix.
+
+### Not proven
+- no claim of general semantic-hijacking prevention outside this harness family
+- no claim of production external-network egress prevention
+- no claim outside the bounded matrix/run-shape and confidence reporting in these result docs
+- no universal low-false-positive claim outside the reported CI bounds
+
 ## Limitations
 - bounded local run (`RUN_LIVE=0`)
 - not a paper-grade all-up rerun
