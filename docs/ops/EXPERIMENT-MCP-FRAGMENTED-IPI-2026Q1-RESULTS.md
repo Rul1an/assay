@@ -146,7 +146,7 @@ The next low-blast-radius follow-ups are:
 - The current harness uses a local mock MCP tool server for reproducibility; it is not a live external-tool benchmark.
 
 ## 2026Q1 line closure summary
-The March 2026 fragmented-IPI line is now closed-loop across all bounded variants.
+The March 2026 fragmented-IPI line is now closed-loop across all bounded variants through Wave23 interleaving.
 
 ### Final line table
 | Variant | Wrap-only result | Sequence-only result | Combined result | Legit false-positive note |
@@ -158,11 +158,12 @@ The March 2026 fragmented-IPI line is now closed-loop across all bounded variant
 | Sink-failure (`timeout`) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | no false positives observed |
 | Sink-failure (`partial`) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | bounded smoke, no false positives observed |
 | Sink-fidelity HTTP (offline localhost) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | aggregate false-positive rate `0.0`, CI high `0.0126` |
+| Interleaving (mixed legit+malicious) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | aggregate false-positive rate `0.0`, CI high `0.0064` |
 
 ### Bounded core claim
 - `sequence_only` is the decisive governance layer in this experiment family.
 - `combined` follows `sequence_only` in observed decisive blocking behavior.
-- `wrap_only` is insufficient as a standalone control across wrap-bypass, second-sink, cross-session, sink-failure (`timeout`/`partial`), and sink-fidelity variants.
+- `wrap_only` is insufficient as a standalone control across wrap-bypass, second-sink, cross-session, sink-failure (`timeout`/`partial`), sink-fidelity, and interleaving variants.
 
 ### Explicit limits
 - Primary metric remains attempt-based (`success_any_sink_canary`).

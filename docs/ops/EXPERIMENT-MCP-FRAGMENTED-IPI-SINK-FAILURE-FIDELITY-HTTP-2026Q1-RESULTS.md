@@ -79,6 +79,7 @@ The core governance conclusion remains stable:
 ### Proven in this bounded line
 - route/state governance remains robust across:
   - payload fragmentation and tool-hopping variants
+  - mixed legit + malicious interleaving variants
   - delayed cross-session sink attempts
   - sink-failure timeout and partial branches
   - offline localhost HTTP-egress sink fidelity
