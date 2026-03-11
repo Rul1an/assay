@@ -365,4 +365,7 @@ fn test_event_contains_required_fields() {
         event.data.obligation_outcomes[0].status,
         ObligationOutcomeStatus::Applied
     );
+    assert!(event.data.approval_state.is_none());
+    assert!(event.data.approval_id.is_none());
+    assert!(event.data.approval_freshness.is_none());
 }

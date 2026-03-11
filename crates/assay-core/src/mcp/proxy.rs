@@ -516,6 +516,16 @@ impl McpProxy {
         event.data.obligation_outcomes =
             super::obligations::execute_log_only(&metadata.obligations, tool);
         event.data.approval_state = metadata.approval_state.clone();
+        if let Some(artifact) = &metadata.approval_artifact {
+            event.data.approval_id = Some(artifact.approval_id.clone());
+            event.data.approver = Some(artifact.approver.clone());
+            event.data.issued_at = Some(artifact.issued_at.clone());
+            event.data.expires_at = Some(artifact.expires_at.clone());
+            event.data.scope = Some(artifact.scope.clone());
+            event.data.approval_bound_tool = Some(artifact.bound_tool.clone());
+            event.data.approval_bound_resource = Some(artifact.bound_resource.clone());
+        }
+        event.data.approval_freshness = metadata.approval_freshness;
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();

@@ -3,7 +3,7 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
-use super::policy::{PolicyObligation, TypedPolicyDecision};
+use super::policy::{ApprovalArtifact, ApprovalFreshness, PolicyObligation, TypedPolicyDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
@@ -82,6 +82,8 @@ pub struct PolicyDecisionEventContext {
     pub obligations: Vec<PolicyObligation>,
     pub obligation_outcomes: Vec<ObligationOutcome>,
     pub approval_state: Option<String>,
+    pub approval_artifact: Option<ApprovalArtifact>,
+    pub approval_freshness: Option<ApprovalFreshness>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -140,6 +142,30 @@ pub struct DecisionData {
     /// Approval state summary for runtime decisioning
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_state: Option<String>,
+    /// Approval artifact identifier for runtime decisioning
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
+    /// Approval artifact approver principal summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approver: Option<String>,
+    /// Approval artifact issuance time (ISO 8601 expected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_at: Option<String>,
+    /// Approval artifact expiry time (ISO 8601 expected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// Approval artifact scope summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Approval artifact bound tool
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_bound_tool: Option<String>,
+    /// Approval artifact bound resource
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_bound_resource: Option<String>,
+    /// Freshness status derived from approval validity window
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_freshness: Option<ApprovalFreshness>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -208,6 +234,14 @@ impl DecisionEvent {
                 obligations: Vec::new(),
                 obligation_outcomes: Vec::new(),
                 approval_state: None,
+                approval_id: None,
+                approver: None,
+                issued_at: None,
+                expires_at: None,
+                scope: None,
+                approval_bound_tool: None,
+                approval_bound_resource: None,
+                approval_freshness: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -308,15 +342,39 @@ impl DecisionEvent {
 
     /// Set policy context fields for Decision Event v2.
     pub fn with_policy_context(mut self, context: PolicyDecisionEventContext) -> Self {
-        self.data.typed_decision = context.typed_decision;
-        self.data.policy_version = context.policy_version;
-        self.data.policy_digest = context.policy_digest;
-        self.data.obligations = context.obligations;
-        self.data.obligation_outcomes = context.obligation_outcomes;
-        self.data.approval_state = context.approval_state;
-        self.data.lane = context.lane;
-        self.data.principal = context.principal;
-        self.data.auth_context_summary = context.auth_context_summary;
+        let PolicyDecisionEventContext {
+            typed_decision,
+            policy_version,
+            policy_digest,
+            obligations,
+            obligation_outcomes,
+            approval_state,
+            approval_artifact,
+            approval_freshness,
+            lane,
+            principal,
+            auth_context_summary,
+        } = context;
+
+        self.data.typed_decision = typed_decision;
+        self.data.policy_version = policy_version;
+        self.data.policy_digest = policy_digest;
+        self.data.obligations = obligations;
+        self.data.obligation_outcomes = obligation_outcomes;
+        self.data.approval_state = approval_state;
+        if let Some(artifact) = approval_artifact {
+            self.data.approval_id = Some(artifact.approval_id);
+            self.data.approver = Some(artifact.approver);
+            self.data.issued_at = Some(artifact.issued_at);
+            self.data.expires_at = Some(artifact.expires_at);
+            self.data.scope = Some(artifact.scope);
+            self.data.approval_bound_tool = Some(artifact.bound_tool);
+            self.data.approval_bound_resource = Some(artifact.bound_resource);
+        }
+        self.data.approval_freshness = approval_freshness;
+        self.data.lane = lane;
+        self.data.principal = principal;
+        self.data.auth_context_summary = auth_context_summary;
         self
     }
 }
@@ -457,15 +515,39 @@ impl DecisionEmitterGuard {
     /// Set policy context metadata for Decision Event v2.
     pub fn set_policy_context(&mut self, context: PolicyDecisionEventContext) {
         if let Some(ref mut event) = self.event {
-            event.data.typed_decision = context.typed_decision;
-            event.data.policy_version = context.policy_version;
-            event.data.policy_digest = context.policy_digest;
-            event.data.obligations = context.obligations;
-            event.data.obligation_outcomes = context.obligation_outcomes;
-            event.data.approval_state = context.approval_state;
-            event.data.lane = context.lane;
-            event.data.principal = context.principal;
-            event.data.auth_context_summary = context.auth_context_summary;
+            let PolicyDecisionEventContext {
+                typed_decision,
+                policy_version,
+                policy_digest,
+                obligations,
+                obligation_outcomes,
+                approval_state,
+                approval_artifact,
+                approval_freshness,
+                lane,
+                principal,
+                auth_context_summary,
+            } = context;
+
+            event.data.typed_decision = typed_decision;
+            event.data.policy_version = policy_version;
+            event.data.policy_digest = policy_digest;
+            event.data.obligations = obligations;
+            event.data.obligation_outcomes = obligation_outcomes;
+            event.data.approval_state = approval_state;
+            if let Some(artifact) = approval_artifact {
+                event.data.approval_id = Some(artifact.approval_id);
+                event.data.approver = Some(artifact.approver);
+                event.data.issued_at = Some(artifact.issued_at);
+                event.data.expires_at = Some(artifact.expires_at);
+                event.data.scope = Some(artifact.scope);
+                event.data.approval_bound_tool = Some(artifact.bound_tool);
+                event.data.approval_bound_resource = Some(artifact.bound_resource);
+            }
+            event.data.approval_freshness = approval_freshness;
+            event.data.lane = lane;
+            event.data.principal = principal;
+            event.data.auth_context_summary = auth_context_summary;
         }
     }
 
@@ -640,6 +722,57 @@ mod tests {
         assert!(json.contains("assay.tool.decision"));
         assert!(json.contains("tc_005"));
         assert!(json.contains("allow"));
+    }
+
+    #[test]
+    fn test_with_policy_context_sets_approval_artifact_fields() {
+        let context = PolicyDecisionEventContext {
+            approval_state: Some("approved".to_string()),
+            approval_artifact: Some(ApprovalArtifact {
+                approval_id: "apr_001".to_string(),
+                approver: "alice@example.com".to_string(),
+                issued_at: "2026-03-11T11:00:00Z".to_string(),
+                expires_at: "2026-03-11T12:00:00Z".to_string(),
+                scope: "tool:deploy".to_string(),
+                bound_tool: "deploy_service".to_string(),
+                bound_resource: "service/prod".to_string(),
+            }),
+            approval_freshness: Some(ApprovalFreshness::Fresh),
+            ..PolicyDecisionEventContext::default()
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_006".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(context);
+
+        assert_eq!(event.data.approval_state.as_deref(), Some("approved"));
+        assert_eq!(event.data.approval_id.as_deref(), Some("apr_001"));
+        assert_eq!(event.data.approver.as_deref(), Some("alice@example.com"));
+        assert_eq!(
+            event.data.issued_at.as_deref(),
+            Some("2026-03-11T11:00:00Z")
+        );
+        assert_eq!(
+            event.data.expires_at.as_deref(),
+            Some("2026-03-11T12:00:00Z")
+        );
+        assert_eq!(event.data.scope.as_deref(), Some("tool:deploy"));
+        assert_eq!(
+            event.data.approval_bound_tool.as_deref(),
+            Some("deploy_service")
+        );
+        assert_eq!(
+            event.data.approval_bound_resource.as_deref(),
+            Some("service/prod")
+        );
+        assert_eq!(
+            event.data.approval_freshness,
+            Some(ApprovalFreshness::Fresh)
+        );
     }
 
     #[test]
