@@ -1195,6 +1195,8 @@
 - docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
 - docs(exp): close wave23 interleaving step3 (#719) @Rul1an
 
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
 ## [2026-03-11]
 
 - docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
