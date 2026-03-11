@@ -19,6 +19,7 @@ pub mod reason_codes {
     pub const P_ARG_SCHEMA: &str = "P_ARG_SCHEMA";
     pub const P_RATE_LIMIT: &str = "P_RATE_LIMIT";
     pub const P_TOOL_DRIFT: &str = "P_TOOL_DRIFT";
+    pub const P_APPROVAL_REQUIRED: &str = "P_APPROVAL_REQUIRED";
     pub const P_MANDATE_REQUIRED: &str = "P_MANDATE_REQUIRED";
     pub const P_MANDATE_VALID: &str = "P_MANDATE_VALID";
 
@@ -84,6 +85,7 @@ pub struct PolicyDecisionEventContext {
     pub approval_state: Option<String>,
     pub approval_artifact: Option<ApprovalArtifact>,
     pub approval_freshness: Option<ApprovalFreshness>,
+    pub approval_failure_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -166,6 +168,9 @@ pub struct DecisionData {
     /// Freshness status derived from approval validity window
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_freshness: Option<ApprovalFreshness>,
+    /// Approval failure reason for approval_required deny paths
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_failure_reason: Option<String>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -242,6 +247,7 @@ impl DecisionEvent {
                 approval_bound_tool: None,
                 approval_bound_resource: None,
                 approval_freshness: None,
+                approval_failure_reason: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -351,6 +357,7 @@ impl DecisionEvent {
             approval_state,
             approval_artifact,
             approval_freshness,
+            approval_failure_reason,
             lane,
             principal,
             auth_context_summary,
@@ -372,6 +379,7 @@ impl DecisionEvent {
             self.data.approval_bound_resource = Some(artifact.bound_resource);
         }
         self.data.approval_freshness = approval_freshness;
+        self.data.approval_failure_reason = approval_failure_reason;
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
@@ -524,6 +532,7 @@ impl DecisionEmitterGuard {
                 approval_state,
                 approval_artifact,
                 approval_freshness,
+                approval_failure_reason,
                 lane,
                 principal,
                 auth_context_summary,
@@ -545,6 +554,7 @@ impl DecisionEmitterGuard {
                 event.data.approval_bound_resource = Some(artifact.bound_resource);
             }
             event.data.approval_freshness = approval_freshness;
+            event.data.approval_failure_reason = approval_failure_reason;
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;

@@ -3,7 +3,7 @@ use super::super::jsonrpc::JsonRpcRequest;
 use super::super::tool_match::MatchBasis;
 use super::{
     matches_tool_pattern, McpPolicy, PolicyDecision, PolicyEvaluation, PolicyMatchMetadata,
-    PolicyState, UnconstrainedMode,
+    PolicyObligation, PolicyState, UnconstrainedMode,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -144,7 +144,15 @@ pub(super) fn evaluate_with_metadata(
                 },
             );
         }
-        return finalize_evaluation(policy, metadata, PolicyDecision::Allow);
+        let decision = PolicyDecision::Allow;
+        apply_approval_required_obligation(
+            policy,
+            tool_name,
+            &tool_classes,
+            &decision,
+            &mut metadata,
+        );
+        return finalize_evaluation(policy, metadata, decision);
     }
 
     // 5. Unconstrained Mode
@@ -167,6 +175,7 @@ pub(super) fn evaluate_with_metadata(
         UnconstrainedMode::Allow => PolicyDecision::Allow,
     };
 
+    apply_approval_required_obligation(policy, tool_name, &tool_classes, &decision, &mut metadata);
     finalize_evaluation(policy, metadata, decision)
 }
 
@@ -237,9 +246,53 @@ fn finalize_evaluation(
     metadata.policy_digest = policy.policy_digest();
     let typed_contract = decision.typed_contract();
     metadata.typed_decision = Some(typed_contract.decision);
-    metadata.obligations = typed_contract.obligations;
+    let mut obligations = typed_contract.obligations;
+    for obligation in metadata.obligations {
+        if !obligations.iter().any(|existing| existing == &obligation) {
+            obligations.push(obligation);
+        }
+    }
+    metadata.obligations = obligations;
 
     PolicyEvaluation { decision, metadata }
+}
+
+fn apply_approval_required_obligation(
+    policy: &McpPolicy,
+    tool_name: &str,
+    tool_classes: &BTreeSet<String>,
+    decision: &PolicyDecision,
+    metadata: &mut PolicyMatchMetadata,
+) {
+    if !matches!(
+        decision,
+        PolicyDecision::Allow | PolicyDecision::AllowWithWarning { .. }
+    ) {
+        return;
+    }
+
+    let name_required = policy
+        .tools
+        .approval_required
+        .as_ref()
+        .is_some_and(|patterns| {
+            patterns
+                .iter()
+                .any(|pattern| matches_tool_pattern(tool_name, pattern))
+        });
+    let class_required = !match_classes(
+        tool_classes,
+        policy.tools.approval_required_classes.as_ref(),
+    )
+    .is_empty();
+
+    if name_required || class_required {
+        metadata.obligations.push(PolicyObligation {
+            obligation_type: "approval_required".to_string(),
+            detail: Some("runtime approval artifact required".to_string()),
+        });
+        metadata.approval_state = Some("required".to_string());
+    }
 }
 
 fn is_denied(policy: &McpPolicy, tool_name: &str) -> bool {

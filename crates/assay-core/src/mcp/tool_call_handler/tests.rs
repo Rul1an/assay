@@ -4,7 +4,8 @@ use crate::mcp::decision::{
 };
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
-use crate::mcp::policy::TypedPolicyDecision;
+use crate::mcp::policy::{ApprovalFreshness, ToolPolicy, TypedPolicyDecision};
+use chrono::{Duration, Utc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -26,6 +27,35 @@ fn make_tool_call_request(tool: &str, args: Value) -> JsonRpcRequest {
             "arguments": args
         }),
     }
+}
+
+fn approval_required_policy() -> McpPolicy {
+    McpPolicy {
+        tools: ToolPolicy {
+            approval_required: Some(vec!["deploy_*".to_string()]),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn approval_artifact(bound_tool: &str, bound_resource: &str, expires_in_seconds: i64) -> Value {
+    let issued_at = Utc::now() - Duration::minutes(5);
+    let expires_at = Utc::now() + Duration::seconds(expires_in_seconds);
+    serde_json::json!({
+        "_meta": {
+            "resource": "service/prod",
+            "approval": {
+                "approval_id": "apr_test_001",
+                "approver": "alice@example.com",
+                "issued_at": issued_at.to_rfc3339(),
+                "expires_at": expires_at.to_rfc3339(),
+                "scope": "tool:deploy",
+                "bound_tool": bound_tool,
+                "bound_resource": bound_resource
+            }
+        }
+    })
 }
 
 #[test]
@@ -167,6 +197,184 @@ fn test_tool_drift_deny_emits_alert_obligation_outcome() {
         other => panic!("expected deny result, got {:?}", other),
     }
 
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn test_alert_obligation_outcome_emitted() {
+    test_tool_drift_deny_emits_alert_obligation_outcome();
+}
+
+#[test]
+fn approval_required_missing_denies() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Deny {
+            reason_code,
+            reason,
+            decision_event,
+        } => {
+            assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
+            assert_eq!(reason, "missing approval");
+            assert_eq!(
+                decision_event.data.approval_failure_reason.as_deref(),
+                Some("missing approval")
+            );
+            assert_eq!(
+                decision_event.data.approval_state.as_deref(),
+                Some("denied")
+            );
+            assert_eq!(decision_event.data.approval_freshness, None);
+        }
+        other => panic!("expected deny result, got {:?}", other),
+    }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn approval_required_expired_denies() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        approval_artifact("deploy_service", "service/prod", -30),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Deny {
+            reason_code,
+            reason,
+            decision_event,
+        } => {
+            assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
+            assert_eq!(reason, "expired approval");
+            assert_eq!(
+                decision_event.data.approval_failure_reason.as_deref(),
+                Some("expired approval")
+            );
+            assert_eq!(
+                decision_event.data.approval_state.as_deref(),
+                Some("denied")
+            );
+            assert_eq!(
+                decision_event.data.approval_freshness,
+                Some(ApprovalFreshness::Expired)
+            );
+        }
+        other => panic!("expected deny result, got {:?}", other),
+    }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn approval_required_bound_tool_mismatch_denies() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        approval_artifact("deploy_other", "service/prod", 300),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Deny {
+            reason_code,
+            reason,
+            decision_event,
+        } => {
+            assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
+            assert_eq!(reason, "bound tool mismatch");
+            assert_eq!(
+                decision_event.data.approval_failure_reason.as_deref(),
+                Some("bound tool mismatch")
+            );
+            assert_eq!(
+                decision_event.data.approval_state.as_deref(),
+                Some("denied")
+            );
+            assert_eq!(
+                decision_event.data.approval_freshness,
+                Some(ApprovalFreshness::Fresh)
+            );
+        }
+        other => panic!("expected deny result, got {:?}", other),
+    }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn approval_required_bound_resource_mismatch_denies() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        approval_artifact("deploy_service", "service/staging", 300),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Deny {
+            reason_code,
+            reason,
+            decision_event,
+        } => {
+            assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
+            assert_eq!(reason, "bound resource mismatch");
+            assert_eq!(
+                decision_event.data.approval_failure_reason.as_deref(),
+                Some("bound resource mismatch")
+            );
+            assert_eq!(
+                decision_event.data.approval_state.as_deref(),
+                Some("denied")
+            );
+            assert_eq!(
+                decision_event.data.approval_freshness,
+                Some(ApprovalFreshness::Fresh)
+            );
+        }
+        other => panic!("expected deny result, got {:?}", other),
+    }
     assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
 }
 
