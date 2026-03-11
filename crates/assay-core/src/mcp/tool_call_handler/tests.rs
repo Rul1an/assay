@@ -2,6 +2,7 @@ use super::*;
 use crate::mcp::decision::{
     reason_codes, DecisionEvent, NullDecisionEmitter, ObligationOutcomeStatus,
 };
+use crate::mcp::identity::ToolIdentity;
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
 use crate::mcp::policy::TypedPolicyDecision;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -108,6 +109,64 @@ fn test_allow_with_warning_emits_log_obligation_outcome() {
         }
         other => panic!("expected allow result, got {:?}", other),
     }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn test_tool_drift_deny_emits_alert_obligation_outcome() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let mut policy = McpPolicy::default();
+    let pinned = ToolIdentity::new(
+        "server-a",
+        "drift_tool",
+        &Some(serde_json::json!({"shape": "pinned"})),
+        &Some("Pinned version".to_string()),
+    );
+    policy
+        .tool_pins
+        .insert("drift_tool".to_string(), pinned.clone());
+
+    let handler = ToolCallHandler::new(
+        policy,
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let runtime_identity = ToolIdentity::new(
+        "server-a",
+        "drift_tool",
+        &Some(serde_json::json!({"shape": "runtime"})),
+        &Some("Runtime version".to_string()),
+    );
+
+    let request = make_tool_call_request("drift_tool", serde_json::json!({}));
+    let mut state = PolicyState::default();
+    let result =
+        handler.handle_tool_call(&request, &mut state, Some(&runtime_identity), None, None);
+
+    match result {
+        HandleResult::Deny {
+            reason_code,
+            decision_event,
+            ..
+        } => {
+            assert_eq!(reason_code, reason_codes::P_TOOL_DRIFT);
+            assert_eq!(
+                decision_event.data.typed_decision,
+                Some(TypedPolicyDecision::DenyWithAlert)
+            );
+            assert_eq!(decision_event.data.obligations.len(), 1);
+            assert_eq!(decision_event.data.obligations[0].obligation_type, "alert");
+            assert_eq!(decision_event.data.obligation_outcomes.len(), 1);
+            let outcome = &decision_event.data.obligation_outcomes[0];
+            assert_eq!(outcome.obligation_type, "alert");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Applied);
+            assert!(outcome.reason.is_none());
+        }
+        other => panic!("expected deny result, got {:?}", other),
+    }
+
     assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
 }
 

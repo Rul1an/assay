@@ -207,6 +207,13 @@ impl PolicyObligation {
             detail: Some(format!("{code}:{reason}")),
         }
     }
+
+    pub fn alert(code: &str, reason: &str) -> Self {
+        Self {
+            obligation_type: "alert".to_string(),
+            detail: Some(format!("{code}:{reason}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,9 +234,9 @@ impl PolicyDecision {
                 decision: TypedPolicyDecision::AllowWithObligations,
                 obligations: vec![PolicyObligation::warning_compat(code, reason)],
             },
-            Self::Deny { code, .. } if is_alert_deny_code(code) => PolicyDecisionContract {
+            Self::Deny { code, reason, .. } if is_alert_deny_code(code) => PolicyDecisionContract {
                 decision: TypedPolicyDecision::DenyWithAlert,
-                obligations: Vec::new(),
+                obligations: vec![PolicyObligation::alert(code, reason)],
             },
             Self::Deny { .. } => PolicyDecisionContract {
                 decision: TypedPolicyDecision::Deny,
@@ -390,3 +397,56 @@ impl McpPolicy {
 }
 
 pub use response::make_deny_response;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn typed_contract_maps_allow_with_warning_to_legacy_warning_obligation() {
+        let decision = PolicyDecision::AllowWithWarning {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_UNCONSTRAINED".to_string(),
+            reason: "Tool allowed but has no schema".to_string(),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::AllowWithObligations);
+        assert_eq!(contract.obligations.len(), 1);
+        assert_eq!(contract.obligations[0].obligation_type, "legacy_warning");
+    }
+
+    #[test]
+    fn typed_contract_maps_tool_drift_to_deny_with_alert_obligation() {
+        let decision = PolicyDecision::Deny {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_DRIFT".to_string(),
+            reason: "Tool drifted".to_string(),
+            contract: json!({ "status": "deny" }),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::DenyWithAlert);
+        assert_eq!(contract.obligations.len(), 1);
+        assert_eq!(contract.obligations[0].obligation_type, "alert");
+        assert_eq!(
+            contract.obligations[0].detail.as_deref(),
+            Some("E_TOOL_DRIFT:Tool drifted")
+        );
+    }
+
+    #[test]
+    fn typed_contract_maps_regular_deny_without_obligations() {
+        let decision = PolicyDecision::Deny {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_DENIED".to_string(),
+            reason: "Denied".to_string(),
+            contract: json!({ "status": "deny" }),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::Deny);
+        assert!(contract.obligations.is_empty());
+    }
+}
