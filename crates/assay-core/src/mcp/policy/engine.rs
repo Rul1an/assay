@@ -3,7 +3,7 @@ use super::super::jsonrpc::JsonRpcRequest;
 use super::super::tool_match::MatchBasis;
 use super::{
     matches_tool_pattern, McpPolicy, PolicyDecision, PolicyEvaluation, PolicyMatchMetadata,
-    PolicyObligation, PolicyState, UnconstrainedMode,
+    PolicyObligation, PolicyState, RestrictScopeContract, UnconstrainedMode,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -152,6 +152,14 @@ pub(super) fn evaluate_with_metadata(
             &decision,
             &mut metadata,
         );
+        apply_restrict_scope_obligation(
+            policy,
+            tool_name,
+            args,
+            &tool_classes,
+            &decision,
+            &mut metadata,
+        );
         return finalize_evaluation(policy, metadata, decision);
     }
 
@@ -176,6 +184,14 @@ pub(super) fn evaluate_with_metadata(
     };
 
     apply_approval_required_obligation(policy, tool_name, &tool_classes, &decision, &mut metadata);
+    apply_restrict_scope_obligation(
+        policy,
+        tool_name,
+        args,
+        &tool_classes,
+        &decision,
+        &mut metadata,
+    );
     finalize_evaluation(policy, metadata, decision)
 }
 
@@ -290,8 +306,177 @@ fn apply_approval_required_obligation(
         metadata.obligations.push(PolicyObligation {
             obligation_type: "approval_required".to_string(),
             detail: Some("runtime approval artifact required".to_string()),
+            restrict_scope: None,
         });
         metadata.approval_state = Some("required".to_string());
+    }
+}
+
+fn apply_restrict_scope_obligation(
+    policy: &McpPolicy,
+    tool_name: &str,
+    args: &Value,
+    tool_classes: &BTreeSet<String>,
+    decision: &PolicyDecision,
+    metadata: &mut PolicyMatchMetadata,
+) {
+    if !matches!(
+        decision,
+        PolicyDecision::Allow | PolicyDecision::AllowWithWarning { .. }
+    ) {
+        return;
+    }
+
+    let name_scoped = policy
+        .tools
+        .restrict_scope
+        .as_ref()
+        .is_some_and(|patterns| {
+            patterns
+                .iter()
+                .any(|pattern| matches_tool_pattern(tool_name, pattern))
+        });
+    let class_scoped =
+        !match_classes(tool_classes, policy.tools.restrict_scope_classes.as_ref()).is_empty();
+
+    if !name_scoped && !class_scoped {
+        return;
+    }
+
+    let contract = policy
+        .tools
+        .restrict_scope_contract
+        .clone()
+        .unwrap_or_else(default_restrict_scope_contract);
+
+    let evaluation = evaluate_restrict_scope_contract(&contract, tool_name, tool_classes, args);
+    metadata.obligations.push(PolicyObligation::restrict_scope(
+        contract.clone(),
+        Some("restrict_scope contract captured; runtime enforcement deferred".to_string()),
+    ));
+
+    metadata.scope_type = Some(contract.scope_type.clone());
+    metadata.scope_value = Some(contract.scope_value.clone());
+    metadata.scope_match_mode = Some(contract.scope_match_mode.clone());
+    metadata.scope_evaluation_state = Some(evaluation.state.clone());
+    metadata.scope_failure_reason = evaluation.reason.clone();
+    metadata.restrict_scope_present = Some(true);
+    metadata.restrict_scope_target = Some(evaluation.target);
+    metadata.restrict_scope_match = Some(evaluation.is_match);
+    metadata.restrict_scope_reason = evaluation.reason;
+}
+
+#[derive(Debug)]
+struct RestrictScopeEvaluation {
+    target: String,
+    is_match: bool,
+    state: String,
+    reason: Option<String>,
+}
+
+fn default_restrict_scope_contract() -> RestrictScopeContract {
+    RestrictScopeContract {
+        scope_type: "resource".to_string(),
+        scope_value: "*".to_string(),
+        scope_match_mode: "exact".to_string(),
+    }
+}
+
+fn evaluate_restrict_scope_contract(
+    contract: &RestrictScopeContract,
+    tool_name: &str,
+    tool_classes: &BTreeSet<String>,
+    args: &Value,
+) -> RestrictScopeEvaluation {
+    let scope_type = contract.scope_type.trim().to_ascii_lowercase();
+    let match_mode = contract.scope_match_mode.trim().to_ascii_lowercase();
+    let expected = contract.scope_value.as_str();
+
+    let observed = match scope_type.as_str() {
+        "tool" => Some(tool_name.to_string()),
+        "resource" => args
+            .get("_meta")
+            .and_then(|meta| meta.get("resource"))
+            .and_then(Value::as_str)
+            .or_else(|| args.get("resource").and_then(Value::as_str))
+            .map(ToString::to_string),
+        "tool_class" => tool_classes.iter().next().cloned(),
+        _ => None,
+    };
+
+    let target = match observed.as_deref() {
+        Some(value) => format!("{scope_type}:{value}"),
+        None => format!("{scope_type}:<missing>"),
+    };
+
+    let result = match (scope_type.as_str(), observed.as_deref()) {
+        ("tool" | "resource" | "tool_class", None) => (
+            false,
+            "mismatch".to_string(),
+            Some("scope_target_missing".to_string()),
+        ),
+        ("tool" | "resource" | "tool_class", Some(actual)) => match match_mode.as_str() {
+            "exact" => (
+                actual == expected,
+                if actual == expected {
+                    "matched"
+                } else {
+                    "mismatch"
+                }
+                .to_string(),
+                if actual == expected {
+                    None
+                } else {
+                    Some("scope_target_mismatch".to_string())
+                },
+            ),
+            "prefix" => (
+                actual.starts_with(expected),
+                if actual.starts_with(expected) {
+                    "matched"
+                } else {
+                    "mismatch"
+                }
+                .to_string(),
+                if actual.starts_with(expected) {
+                    None
+                } else {
+                    Some("scope_target_mismatch".to_string())
+                },
+            ),
+            "contains" => (
+                actual.contains(expected),
+                if actual.contains(expected) {
+                    "matched"
+                } else {
+                    "mismatch"
+                }
+                .to_string(),
+                if actual.contains(expected) {
+                    None
+                } else {
+                    Some("scope_target_mismatch".to_string())
+                },
+            ),
+            "any" => (true, "matched".to_string(), None),
+            _ => (
+                false,
+                "not_evaluated".to_string(),
+                Some("scope_match_mode_unsupported".to_string()),
+            ),
+        },
+        _ => (
+            false,
+            "not_evaluated".to_string(),
+            Some("scope_type_unsupported".to_string()),
+        ),
+    };
+
+    RestrictScopeEvaluation {
+        target,
+        is_match: result.0,
+        state: result.1,
+        reason: result.2,
     }
 }
 

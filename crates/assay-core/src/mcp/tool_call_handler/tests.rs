@@ -4,7 +4,9 @@ use crate::mcp::decision::{
 };
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
-use crate::mcp::policy::{ApprovalFreshness, ToolPolicy, TypedPolicyDecision};
+use crate::mcp::policy::{
+    ApprovalFreshness, RestrictScopeContract, ToolPolicy, TypedPolicyDecision,
+};
 use chrono::{Duration, Utc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -33,6 +35,21 @@ fn approval_required_policy() -> McpPolicy {
     McpPolicy {
         tools: ToolPolicy {
             approval_required: Some(vec!["deploy_*".to_string()]),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn restrict_scope_policy() -> McpPolicy {
+    McpPolicy {
+        tools: ToolPolicy {
+            restrict_scope: Some(vec!["deploy_*".to_string()]),
+            restrict_scope_contract: Some(RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            }),
             ..Default::default()
         },
         ..Default::default()
@@ -374,6 +391,98 @@ fn approval_required_bound_resource_mismatch_denies() {
             );
         }
         other => panic!("expected deny result, got {:?}", other),
+    }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn restrict_scope_mismatch_does_not_deny() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/staging"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Allow { decision_event, .. } => {
+            assert_eq!(decision_event.data.restrict_scope_present, Some(true));
+            assert_eq!(decision_event.data.scope_type.as_deref(), Some("resource"));
+            assert_eq!(
+                decision_event.data.scope_value.as_deref(),
+                Some("service/prod")
+            );
+            assert_eq!(
+                decision_event.data.scope_match_mode.as_deref(),
+                Some("exact")
+            );
+            assert_eq!(
+                decision_event.data.scope_evaluation_state.as_deref(),
+                Some("mismatch")
+            );
+            assert_eq!(decision_event.data.restrict_scope_match, Some(false));
+            assert_eq!(
+                decision_event.data.restrict_scope_reason.as_deref(),
+                Some("scope_target_mismatch")
+            );
+            assert!(decision_event
+                .data
+                .obligation_outcomes
+                .iter()
+                .any(|outcome| {
+                    outcome.obligation_type == "restrict_scope"
+                        && outcome.status == ObligationOutcomeStatus::Skipped
+                }));
+        }
+        other => panic!("expected allow result, got {:?}", other),
+    }
+    assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn restrict_scope_match_sets_additive_fields() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_call_request(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+
+    match result {
+        HandleResult::Allow { decision_event, .. } => {
+            assert_eq!(decision_event.data.restrict_scope_present, Some(true));
+            assert_eq!(decision_event.data.restrict_scope_match, Some(true));
+            assert_eq!(
+                decision_event.data.scope_evaluation_state.as_deref(),
+                Some("matched")
+            );
+            assert!(decision_event.data.restrict_scope_reason.is_none());
+        }
+        other => panic!("expected allow result, got {:?}", other),
     }
     assert_eq!(emitter.0.load(Ordering::SeqCst), 1);
 }

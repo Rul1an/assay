@@ -8,6 +8,7 @@ use super::policy::PolicyObligation;
 /// - `alert` is applied as a non-blocking runtime alert signal
 /// - `legacy_warning` is mapped to `log` for compatibility
 /// - `approval_required` is validated in tool_call_handler (non-blocking here)
+/// - `restrict_scope` is emitted as contract/evidence only (non-blocking here)
 /// - any other type is emitted as skipped (non-blocking)
 pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<ObligationOutcome> {
     obligations
@@ -60,6 +61,11 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                 status: ObligationOutcomeStatus::Skipped,
                 reason: Some("validated in handler".to_string()),
             },
+            "restrict_scope" => ObligationOutcome {
+                obligation_type: "restrict_scope".to_string(),
+                status: ObligationOutcomeStatus::Skipped,
+                reason: Some("contract-only in wave29 (no runtime enforcement)".to_string()),
+            },
             other => ObligationOutcome {
                 obligation_type: other.to_string(),
                 status: ObligationOutcomeStatus::Skipped,
@@ -78,6 +84,7 @@ mod tests {
         let obligations = vec![PolicyObligation {
             obligation_type: "log".to_string(),
             detail: Some("record event".to_string()),
+            restrict_scope: None,
         }];
 
         let outcomes = execute_log_only(&obligations, "test_tool");
@@ -92,6 +99,7 @@ mod tests {
         let obligations = vec![PolicyObligation {
             obligation_type: "legacy_warning".to_string(),
             detail: Some("E_TOOL_UNCONSTRAINED:Tool allowed but has no schema".to_string()),
+            restrict_scope: None,
         }];
 
         let outcomes = execute_log_only(&obligations, "test_tool");
@@ -109,6 +117,7 @@ mod tests {
         let obligations = vec![PolicyObligation {
             obligation_type: "alert".to_string(),
             detail: Some("notify-monitor".to_string()),
+            restrict_scope: None,
         }];
 
         let outcomes = execute_log_only(&obligations, "test_tool");
@@ -123,6 +132,7 @@ mod tests {
         let obligations = vec![PolicyObligation {
             obligation_type: "custom_blocking_gate".to_string(),
             detail: None,
+            restrict_scope: None,
         }];
 
         let outcomes = execute_log_only(&obligations, "test_tool");
@@ -132,6 +142,28 @@ mod tests {
         assert_eq!(
             outcomes[0].reason.as_deref(),
             Some("unsupported obligation type in wave25")
+        );
+    }
+
+    #[test]
+    fn execute_log_only_marks_restrict_scope_as_contract_only() {
+        let obligations = vec![PolicyObligation {
+            obligation_type: "restrict_scope".to_string(),
+            detail: Some("shape-only".to_string()),
+            restrict_scope: Some(crate::mcp::policy::RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            }),
+        }];
+
+        let outcomes = execute_log_only(&obligations, "test_tool");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].obligation_type, "restrict_scope");
+        assert_eq!(outcomes[0].status, ObligationOutcomeStatus::Skipped);
+        assert_eq!(
+            outcomes[0].reason.as_deref(),
+            Some("contract-only in wave29 (no runtime enforcement)")
         );
     }
 }
