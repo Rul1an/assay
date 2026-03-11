@@ -1,6 +1,6 @@
 use assay_core::mcp::decision::{Decision, NullDecisionEmitter};
 use assay_core::mcp::jsonrpc::JsonRpcRequest;
-use assay_core::mcp::policy::{McpPolicy, PolicyDecision, PolicyState};
+use assay_core::mcp::policy::{McpPolicy, PolicyDecision, PolicyState, TypedPolicyDecision};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
 use assay_core::mcp::{ToolRuleSelector, ToolTaxonomy};
 use serde_json::json;
@@ -121,6 +121,12 @@ fn tool_taxonomy_policy_match_handler_decision_event_records_classes() {
                 decision_event.data.matched_rule.as_deref(),
                 Some("tools.deny_classes")
             );
+            assert_eq!(
+                decision_event.data.typed_decision,
+                Some(TypedPolicyDecision::Deny)
+            );
+            assert!(decision_event.data.policy_version.is_some());
+            assert!(decision_event.data.policy_digest.is_some());
         }
         other => panic!("expected deny result, got {:?}", other),
     }

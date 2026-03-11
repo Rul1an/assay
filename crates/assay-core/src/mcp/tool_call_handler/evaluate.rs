@@ -2,10 +2,12 @@ use super::super::decision::{reason_codes, DecisionEmitterGuard};
 use super::super::identity::ToolIdentity;
 use super::super::jsonrpc::JsonRpcRequest;
 use super::super::lifecycle::mandate_used_event;
-use super::super::policy::{PolicyDecision, PolicyState};
+use super::super::obligations;
+use super::super::policy::{ApprovalArtifact, ApprovalFreshness, PolicyDecision, PolicyState};
 use super::emit;
 use super::types::{HandleResult, ToolCallHandler};
 use crate::runtime::{AuthorizeError, MandateData, OperationClass, ToolCallData};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::Instant;
 
@@ -58,20 +60,16 @@ pub(super) fn handle_tool_call(
         state,
         runtime_identity,
     );
-    let tool_classes = policy_eval.metadata.tool_classes.clone();
-    let matched_tool_classes = policy_eval.metadata.matched_tool_classes.clone();
-    let match_basis = policy_eval
-        .metadata
-        .match_basis
-        .as_str()
-        .map(ToString::to_string);
-    let matched_rule = policy_eval.metadata.matched_rule.clone();
+    let mut tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
+    tool_match.obligation_outcomes =
+        obligations::execute_log_only(&tool_match.obligations, &tool_name);
     guard.set_tool_match(
-        policy_eval.metadata.tool_classes.clone(),
-        policy_eval.metadata.matched_tool_classes.clone(),
-        match_basis.clone(),
-        matched_rule.clone(),
+        tool_match.tool_classes.clone(),
+        tool_match.matched_tool_classes.clone(),
+        tool_match.match_basis.clone(),
+        tool_match.matched_rule.clone(),
     );
+    guard.set_policy_context(tool_match.policy_context());
 
     match policy_eval.decision {
         PolicyDecision::Deny {
@@ -81,6 +79,7 @@ pub(super) fn handle_tool_call(
             contract: _,
         } => {
             let reason_code = handler.map_policy_code_to_reason(&code);
+            guard.set_policy_context(tool_match.policy_context());
             guard.emit_deny(&reason_code, Some(reason.clone()));
 
             return emit::deny(
@@ -89,12 +88,7 @@ pub(super) fn handle_tool_call(
                 tool_name,
                 &reason_code,
                 reason,
-                emit::ToolMatchMetadata::new(
-                    tool_classes,
-                    matched_tool_classes,
-                    match_basis,
-                    matched_rule,
-                ),
+                tool_match,
             );
         }
         PolicyDecision::AllowWithWarning { .. } | PolicyDecision::Allow => {
@@ -102,10 +96,29 @@ pub(super) fn handle_tool_call(
         }
     }
 
-    // Step 2: Check if mandate is required
+    // Step 2: approval_required obligation enforcement (Wave28)
+    if let Some(failure) =
+        validate_approval_required(&tool_name, &params.arguments, &mut tool_match)
+    {
+        let reason = failure.to_string();
+        guard.set_policy_context(tool_match.policy_context());
+        guard.emit_deny(reason_codes::P_APPROVAL_REQUIRED, Some(reason.clone()));
+
+        return emit::deny(
+            &handler.config.event_source,
+            tool_call_id,
+            tool_name,
+            reason_codes::P_APPROVAL_REQUIRED,
+            reason,
+            tool_match,
+        );
+    }
+
+    // Step 3: Check if mandate is required
     let is_commit_tool = handler.is_commit_tool(&tool_name);
     if is_commit_tool && handler.config.require_mandate_for_commit && mandate.is_none() {
         let reason = "Commit tool requires mandate authorization".to_string();
+        guard.set_policy_context(tool_match.policy_context());
         guard.emit_deny(reason_codes::P_MANDATE_REQUIRED, Some(reason.clone()));
 
         return emit::deny(
@@ -114,16 +127,11 @@ pub(super) fn handle_tool_call(
             tool_name,
             reason_codes::P_MANDATE_REQUIRED,
             reason,
-            emit::ToolMatchMetadata::new(
-                tool_classes,
-                matched_tool_classes,
-                match_basis,
-                matched_rule,
-            ),
+            tool_match,
         );
     }
 
-    // Step 3: Mandate authorization (if mandate present)
+    // Step 4: Mandate authorization (if mandate present)
     if let (Some(authorizer), Some(mandate_data)) = (&handler.authorizer, mandate) {
         let operation_class = handler.operation_class_for_tool(&tool_name);
 
@@ -146,6 +154,7 @@ pub(super) fn handle_tool_call(
                 );
                 guard.set_mandate_matches(Some(true), Some(true), Some(true));
                 guard.set_latencies(Some(authz_ms), None);
+                guard.set_policy_context(tool_match.policy_context());
                 guard.emit_allow(reason_codes::P_MANDATE_VALID);
 
                 // Emit mandate.used lifecycle event (P0-B)
@@ -163,17 +172,13 @@ pub(super) fn handle_tool_call(
                     tool_name,
                     reason_codes::P_MANDATE_VALID,
                     Some(receipt),
-                    emit::ToolMatchMetadata::new(
-                        tool_classes,
-                        matched_tool_classes,
-                        match_basis,
-                        matched_rule,
-                    ),
+                    tool_match,
                 );
             }
             Err(e) => {
                 let (reason_code, reason) = handler.map_authz_error(&e);
                 guard.set_mandate_info(Some(mandate_data.mandate_id.clone()), None, None);
+                guard.set_policy_context(tool_match.policy_context());
                 guard.emit_deny(&reason_code, Some(reason.clone()));
 
                 return emit::deny(
@@ -182,20 +187,16 @@ pub(super) fn handle_tool_call(
                     tool_name,
                     &reason_code,
                     reason,
-                    emit::ToolMatchMetadata::new(
-                        tool_classes,
-                        matched_tool_classes,
-                        match_basis,
-                        matched_rule,
-                    ),
+                    tool_match,
                 );
             }
         }
     }
 
-    // Step 4: No mandate required, policy allows
+    // Step 5: No mandate required, policy allows
     let elapsed_ms = start.elapsed().as_millis() as u64;
     guard.set_latencies(Some(elapsed_ms), None);
+    guard.set_policy_context(tool_match.policy_context());
     guard.emit_allow(reason_codes::P_POLICY_ALLOW);
 
     emit::allow(
@@ -204,13 +205,167 @@ pub(super) fn handle_tool_call(
         tool_name,
         reason_codes::P_POLICY_ALLOW,
         None,
-        emit::ToolMatchMetadata::new(
-            tool_classes,
-            matched_tool_classes,
-            match_basis,
-            matched_rule,
-        ),
+        tool_match,
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApprovalFailure {
+    MissingApproval,
+    ExpiredApproval,
+    BoundToolMismatch,
+    BoundResourceMismatch,
+}
+
+impl ApprovalFailure {
+    fn as_reason(self) -> &'static str {
+        match self {
+            Self::MissingApproval => "missing approval",
+            Self::ExpiredApproval => "expired approval",
+            Self::BoundToolMismatch => "bound tool mismatch",
+            Self::BoundResourceMismatch => "bound resource mismatch",
+        }
+    }
+}
+
+impl std::fmt::Display for ApprovalFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_reason())
+    }
+}
+
+fn validate_approval_required(
+    tool_name: &str,
+    args: &Value,
+    tool_match: &mut emit::ToolMatchMetadata,
+) -> Option<ApprovalFailure> {
+    let requires_approval = tool_match
+        .obligations
+        .iter()
+        .any(|obligation| obligation.obligation_type == "approval_required");
+    if !requires_approval {
+        return None;
+    }
+
+    let artifact = parse_approval_artifact(args);
+    let Some(artifact) = artifact else {
+        return Some(mark_approval_failure(
+            tool_match,
+            ApprovalFailure::MissingApproval,
+        ));
+    };
+    tool_match.approval_artifact = Some(artifact.clone());
+
+    let freshness = classify_approval_freshness(&artifact);
+    tool_match.approval_freshness = Some(freshness);
+    if !matches!(freshness, ApprovalFreshness::Fresh) {
+        return Some(mark_approval_failure(
+            tool_match,
+            ApprovalFailure::ExpiredApproval,
+        ));
+    }
+
+    if artifact.bound_tool != tool_name {
+        return Some(mark_approval_failure(
+            tool_match,
+            ApprovalFailure::BoundToolMismatch,
+        ));
+    }
+
+    let requested_resource = requested_resource(args);
+    if requested_resource != Some(artifact.bound_resource.as_str()) {
+        return Some(mark_approval_failure(
+            tool_match,
+            ApprovalFailure::BoundResourceMismatch,
+        ));
+    }
+
+    tool_match.approval_state = Some("approved".to_string());
+    tool_match.approval_failure_reason = None;
+    mark_approval_outcome(
+        tool_match,
+        super::super::decision::ObligationOutcomeStatus::Applied,
+        None,
+    );
+    None
+}
+
+fn mark_approval_failure(
+    tool_match: &mut emit::ToolMatchMetadata,
+    failure: ApprovalFailure,
+) -> ApprovalFailure {
+    tool_match.approval_state = Some("denied".to_string());
+    tool_match.approval_failure_reason = Some(failure.as_reason().to_string());
+    mark_approval_outcome(
+        tool_match,
+        super::super::decision::ObligationOutcomeStatus::Error,
+        Some(failure.as_reason()),
+    );
+    failure
+}
+
+fn mark_approval_outcome(
+    tool_match: &mut emit::ToolMatchMetadata,
+    status: super::super::decision::ObligationOutcomeStatus,
+    reason: Option<&str>,
+) {
+    if let Some(outcome) = tool_match
+        .obligation_outcomes
+        .iter_mut()
+        .find(|outcome| outcome.obligation_type == "approval_required")
+    {
+        outcome.status = status;
+        outcome.reason = reason.map(ToString::to_string);
+        return;
+    }
+
+    tool_match
+        .obligation_outcomes
+        .push(super::super::decision::ObligationOutcome {
+            obligation_type: "approval_required".to_string(),
+            status,
+            reason: reason.map(ToString::to_string),
+        });
+}
+
+fn parse_approval_artifact(args: &Value) -> Option<ApprovalArtifact> {
+    let approval = args.get("_meta")?.get("approval")?;
+    Some(ApprovalArtifact {
+        approval_id: approval.get("approval_id")?.as_str()?.to_string(),
+        approver: approval.get("approver")?.as_str()?.to_string(),
+        issued_at: approval.get("issued_at")?.as_str()?.to_string(),
+        expires_at: approval.get("expires_at")?.as_str()?.to_string(),
+        scope: approval.get("scope")?.as_str()?.to_string(),
+        bound_tool: approval.get("bound_tool")?.as_str()?.to_string(),
+        bound_resource: approval.get("bound_resource")?.as_str()?.to_string(),
+    })
+}
+
+fn classify_approval_freshness(artifact: &ApprovalArtifact) -> ApprovalFreshness {
+    let issued = DateTime::parse_from_rfc3339(&artifact.issued_at).ok();
+    let expires = DateTime::parse_from_rfc3339(&artifact.expires_at).ok();
+    let (Some(issued_at), Some(expires_at)) = (issued, expires) else {
+        return ApprovalFreshness::Expired;
+    };
+
+    let now = Utc::now();
+    let issued_at = issued_at.with_timezone(&Utc);
+    let expires_at = expires_at.with_timezone(&Utc);
+
+    if now > expires_at {
+        ApprovalFreshness::Expired
+    } else if now < issued_at {
+        ApprovalFreshness::Stale
+    } else {
+        ApprovalFreshness::Fresh
+    }
+}
+
+fn requested_resource(args: &Value) -> Option<&str> {
+    args.get("_meta")
+        .and_then(|meta| meta.get("resource"))
+        .and_then(Value::as_str)
+        .or_else(|| args.get("resource").and_then(Value::as_str))
 }
 
 impl ToolCallHandler {

@@ -4,9 +4,11 @@ mod response;
 mod schema;
 
 use super::identity::ToolIdentity;
+use super::jcs;
 use super::jsonrpc::JsonRpcRequest;
 use super::tool_match::MatchBasis;
 use super::tool_taxonomy::ToolTaxonomy;
+use crate::fingerprint::sha256_hex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -114,6 +116,16 @@ pub struct ToolPolicy {
     pub allow_classes: Option<Vec<String>>,
     #[serde(default)]
     pub deny_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub approval_required: Option<Vec<String>>,
+    #[serde(default)]
+    pub approval_required_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope_contract: Option<RestrictScopeContract>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -122,6 +134,26 @@ pub struct PolicyMatchMetadata {
     pub matched_tool_classes: Vec<String>,
     pub match_basis: MatchBasis,
     pub matched_rule: Option<String>,
+    pub typed_decision: Option<TypedPolicyDecision>,
+    pub policy_version: Option<String>,
+    pub policy_digest: Option<String>,
+    pub obligations: Vec<PolicyObligation>,
+    pub approval_state: Option<String>,
+    pub approval_artifact: Option<ApprovalArtifact>,
+    pub approval_freshness: Option<ApprovalFreshness>,
+    pub approval_failure_reason: Option<String>,
+    pub scope_type: Option<String>,
+    pub scope_value: Option<String>,
+    pub scope_match_mode: Option<String>,
+    pub scope_evaluation_state: Option<String>,
+    pub scope_failure_reason: Option<String>,
+    pub restrict_scope_present: Option<bool>,
+    pub restrict_scope_target: Option<String>,
+    pub restrict_scope_match: Option<bool>,
+    pub restrict_scope_reason: Option<String>,
+    pub lane: Option<String>,
+    pub principal: Option<String>,
+    pub auth_context_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +201,114 @@ pub enum PolicyDecision {
         reason: String,
         contract: Value,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TypedPolicyDecision {
+    Allow,
+    #[serde(rename = "allow_with_obligations")]
+    AllowWithObligations,
+    Deny,
+    #[serde(rename = "deny_with_alert")]
+    DenyWithAlert,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyObligation {
+    #[serde(rename = "type")]
+    pub obligation_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope: Option<RestrictScopeContract>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalArtifact {
+    pub approval_id: String,
+    pub approver: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub scope: String,
+    pub bound_tool: String,
+    pub bound_resource: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RestrictScopeContract {
+    pub scope_type: String,
+    pub scope_value: String,
+    pub scope_match_mode: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalFreshness {
+    Fresh,
+    Stale,
+    Expired,
+    Unknown,
+}
+
+impl PolicyObligation {
+    pub fn warning_compat(code: &str, reason: &str) -> Self {
+        Self {
+            obligation_type: "legacy_warning".to_string(),
+            detail: Some(format!("{code}:{reason}")),
+            restrict_scope: None,
+        }
+    }
+
+    pub fn alert(code: &str, reason: &str) -> Self {
+        Self {
+            obligation_type: "alert".to_string(),
+            detail: Some(format!("{code}:{reason}")),
+            restrict_scope: None,
+        }
+    }
+
+    pub fn restrict_scope(contract: RestrictScopeContract, detail: Option<String>) -> Self {
+        Self {
+            obligation_type: "restrict_scope".to_string(),
+            detail,
+            restrict_scope: Some(contract),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyDecisionContract {
+    pub decision: TypedPolicyDecision,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<PolicyObligation>,
+}
+
+impl PolicyDecision {
+    pub fn typed_contract(&self) -> PolicyDecisionContract {
+        match self {
+            Self::Allow => PolicyDecisionContract {
+                decision: TypedPolicyDecision::Allow,
+                obligations: Vec::new(),
+            },
+            Self::AllowWithWarning { code, reason, .. } => PolicyDecisionContract {
+                decision: TypedPolicyDecision::AllowWithObligations,
+                obligations: vec![PolicyObligation::warning_compat(code, reason)],
+            },
+            Self::Deny { code, reason, .. } if is_alert_deny_code(code) => PolicyDecisionContract {
+                decision: TypedPolicyDecision::DenyWithAlert,
+                obligations: vec![PolicyObligation::alert(code, reason)],
+            },
+            Self::Deny { .. } => PolicyDecisionContract {
+                decision: TypedPolicyDecision::Deny,
+                obligations: Vec::new(),
+            },
+        }
+    }
+}
+
+fn is_alert_deny_code(code: &str) -> bool {
+    matches!(code, "E_TOOL_DRIFT")
 }
 
 // Dual-Shape Deserializer Helper (Legacy)
@@ -284,6 +424,11 @@ impl McpPolicy {
         schema::compile_all_schemas(self)
     }
 
+    pub fn policy_digest(&self) -> Option<String> {
+        let canonical = jcs::to_string(self).ok()?;
+        Some(format!("sha256:{}", sha256_hex(&canonical)))
+    }
+
     /// Single evaluation entry point for CLI and Server
     pub fn evaluate(
         &self,
@@ -313,3 +458,78 @@ impl McpPolicy {
 }
 
 pub use response::make_deny_response;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn typed_contract_maps_allow_with_warning_to_legacy_warning_obligation() {
+        let decision = PolicyDecision::AllowWithWarning {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_UNCONSTRAINED".to_string(),
+            reason: "Tool allowed but has no schema".to_string(),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::AllowWithObligations);
+        assert_eq!(contract.obligations.len(), 1);
+        assert_eq!(contract.obligations[0].obligation_type, "legacy_warning");
+    }
+
+    #[test]
+    fn typed_contract_maps_tool_drift_to_deny_with_alert_obligation() {
+        let decision = PolicyDecision::Deny {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_DRIFT".to_string(),
+            reason: "Tool drifted".to_string(),
+            contract: json!({ "status": "deny" }),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::DenyWithAlert);
+        assert_eq!(contract.obligations.len(), 1);
+        assert_eq!(contract.obligations[0].obligation_type, "alert");
+        assert_eq!(
+            contract.obligations[0].detail.as_deref(),
+            Some("E_TOOL_DRIFT:Tool drifted")
+        );
+    }
+
+    #[test]
+    fn typed_contract_maps_regular_deny_without_obligations() {
+        let decision = PolicyDecision::Deny {
+            tool: "tool_a".to_string(),
+            code: "E_TOOL_DENIED".to_string(),
+            reason: "Denied".to_string(),
+            contract: json!({ "status": "deny" }),
+        };
+
+        let contract = decision.typed_contract();
+        assert_eq!(contract.decision, TypedPolicyDecision::Deny);
+        assert!(contract.obligations.is_empty());
+    }
+
+    #[test]
+    fn restrict_scope_obligation_preserves_typed_shape() {
+        let obligation = PolicyObligation::restrict_scope(
+            RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            },
+            Some("shape-only contract".to_string()),
+        );
+
+        assert_eq!(obligation.obligation_type, "restrict_scope");
+        assert_eq!(
+            obligation.restrict_scope,
+            Some(RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            })
+        );
+    }
+}

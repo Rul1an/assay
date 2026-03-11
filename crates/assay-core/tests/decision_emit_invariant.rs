@@ -5,9 +5,14 @@
 
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent,
+    ObligationOutcomeStatus,
 };
-use assay_core::mcp::policy::{McpPolicy, PolicyState, ToolPolicy};
+use assay_core::mcp::policy::{
+    ApprovalFreshness, McpPolicy, PolicyState, RestrictScopeContract, ToolPolicy,
+    TypedPolicyDecision,
+};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
+use chrono::{Duration, Utc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -51,6 +56,68 @@ fn make_tool_request(tool: &str) -> assay_core::mcp::jsonrpc::JsonRpcRequest {
             "arguments": {}
         }),
     }
+}
+
+fn make_tool_request_with_args(
+    tool: &str,
+    args: serde_json::Value,
+) -> assay_core::mcp::jsonrpc::JsonRpcRequest {
+    assay_core::mcp::jsonrpc::JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(1)),
+        method: "tools/call".to_string(),
+        params: serde_json::json!({
+            "name": tool,
+            "arguments": args
+        }),
+    }
+}
+
+#[allow(clippy::field_reassign_with_default)]
+fn approval_required_policy() -> McpPolicy {
+    let mut policy = McpPolicy::default();
+    policy.tools = ToolPolicy {
+        approval_required: Some(vec!["deploy_*".to_string()]),
+        ..Default::default()
+    };
+    policy
+}
+
+fn restrict_scope_policy() -> McpPolicy {
+    let mut policy = McpPolicy::default();
+    policy.tools = ToolPolicy {
+        restrict_scope: Some(vec!["deploy_*".to_string()]),
+        restrict_scope_contract: Some(RestrictScopeContract {
+            scope_type: "resource".to_string(),
+            scope_value: "service/prod".to_string(),
+            scope_match_mode: "exact".to_string(),
+        }),
+        ..Default::default()
+    };
+    policy
+}
+
+fn approval_artifact(
+    bound_tool: &str,
+    bound_resource: &str,
+    expires_in_seconds: i64,
+) -> serde_json::Value {
+    let issued_at = Utc::now() - Duration::minutes(5);
+    let expires_at = Utc::now() + Duration::seconds(expires_in_seconds);
+    serde_json::json!({
+        "_meta": {
+            "resource": "service/prod",
+            "approval": {
+                "approval_id": "apr_it_001",
+                "approver": "alice@example.com",
+                "issued_at": issued_at.to_rfc3339(),
+                "expires_at": expires_at.to_rfc3339(),
+                "scope": "tool:deploy",
+                "bound_tool": bound_tool,
+                "bound_resource": bound_resource
+            }
+        }
+    })
 }
 
 // =============================================================================
@@ -135,6 +202,226 @@ fn test_commit_tool_no_mandate_emits_deny() {
     let event = emitter.last_event().expect("Should have event");
     assert_eq!(event.data.decision, Decision::Deny);
     assert_eq!(event.data.reason_code, reason_codes::P_MANDATE_REQUIRED);
+}
+
+#[test]
+fn test_alert_obligation_outcome_emitted() {
+    let emitter = Arc::new(TestEmitter::new());
+    let mut policy = McpPolicy::default();
+    let pinned = assay_core::mcp::identity::ToolIdentity::new(
+        "server-a",
+        "drift_tool",
+        &Some(serde_json::json!({"shape": "pinned"})),
+        &Some("Pinned version".to_string()),
+    );
+    policy
+        .tool_pins
+        .insert("drift_tool".to_string(), pinned.clone());
+    let handler = ToolCallHandler::new(
+        policy,
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let runtime_identity = assay_core::mcp::identity::ToolIdentity::new(
+        "server-a",
+        "drift_tool",
+        &Some(serde_json::json!({"shape": "runtime"})),
+        &Some("Runtime version".to_string()),
+    );
+
+    let request = make_tool_request("drift_tool");
+    let mut state = PolicyState::default();
+    let result =
+        handler.handle_tool_call(&request, &mut state, Some(&runtime_identity), None, None);
+    assert!(matches!(result, HandleResult::Deny { .. }));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.typed_decision,
+        Some(TypedPolicyDecision::DenyWithAlert)
+    );
+    assert_eq!(event.data.obligation_outcomes.len(), 1);
+    assert_eq!(event.data.obligation_outcomes[0].obligation_type, "alert");
+}
+
+#[test]
+fn approval_required_missing_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({"_meta": {"resource": "service/prod"}}),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Deny { .. }));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.reason_code, reason_codes::P_APPROVAL_REQUIRED);
+    assert_eq!(
+        event.data.approval_failure_reason.as_deref(),
+        Some("missing approval")
+    );
+}
+
+#[test]
+fn approval_required_expired_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        approval_artifact("deploy_service", "service/prod", -30),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Deny { .. }));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.reason_code, reason_codes::P_APPROVAL_REQUIRED);
+    assert_eq!(
+        event.data.approval_failure_reason.as_deref(),
+        Some("expired approval")
+    );
+    assert_eq!(
+        event.data.approval_freshness,
+        Some(ApprovalFreshness::Expired)
+    );
+}
+
+#[test]
+fn approval_required_bound_tool_mismatch_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        approval_artifact("deploy_other", "service/prod", 300),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Deny { .. }));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.approval_failure_reason.as_deref(),
+        Some("bound tool mismatch")
+    );
+}
+
+#[test]
+fn approval_required_bound_resource_mismatch_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        approval_required_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        approval_artifact("deploy_service", "service/staging", 300),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Deny { .. }));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.approval_failure_reason.as_deref(),
+        Some("bound resource mismatch")
+    );
+}
+
+#[test]
+fn restrict_scope_mismatch_does_not_deny() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/staging"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.event_count(), 1);
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.restrict_scope_present, Some(true));
+    assert_eq!(event.data.restrict_scope_match, Some(false));
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("mismatch")
+    );
+    assert_eq!(
+        event.data.restrict_scope_reason.as_deref(),
+        Some("scope_target_mismatch")
+    );
+}
+
+#[test]
+fn restrict_scope_match_sets_additive_fields() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.event_count(), 1);
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.restrict_scope_present, Some(true));
+    assert_eq!(event.data.restrict_scope_match, Some(true));
+    assert_eq!(event.data.scope_type.as_deref(), Some("resource"));
+    assert_eq!(event.data.scope_value.as_deref(), Some("service/prod"));
+    assert_eq!(event.data.scope_match_mode.as_deref(), Some("exact"));
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("matched")
+    );
+    assert!(event.data.restrict_scope_reason.is_none());
 }
 
 // =============================================================================
@@ -351,4 +638,20 @@ fn test_event_contains_required_fields() {
     assert!(!event.data.tool.is_empty());
     assert!(!event.data.tool_call_id.is_empty());
     assert!(!event.data.reason_code.is_empty());
+    assert!(event.data.policy_version.is_some());
+    assert!(event.data.policy_digest.is_some());
+    assert_eq!(
+        event.data.typed_decision,
+        Some(TypedPolicyDecision::AllowWithObligations)
+    );
+    assert!(!event.data.obligations.is_empty());
+    assert!(!event.data.obligation_outcomes.is_empty());
+    assert_eq!(event.data.obligation_outcomes[0].obligation_type, "log");
+    assert_eq!(
+        event.data.obligation_outcomes[0].status,
+        ObligationOutcomeStatus::Applied
+    );
+    assert!(event.data.approval_state.is_none());
+    assert!(event.data.approval_id.is_none());
+    assert!(event.data.approval_freshness.is_none());
 }

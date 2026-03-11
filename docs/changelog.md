@@ -1118,6 +1118,179 @@
 - docs(exp): wave20 sink-failure partial step3 closure gate (#688) @Rul1an
 - exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
+
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- docs(exp): freeze wave23 interleaving step1 (#710) @Rul1an
+- docs(wave25-step1): freeze obligations log execution contract (#730) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- exp(wave23): implement bounded interleaving step2 (#712) @Rul1an
+- feat(wave25-step2): execute log obligations with additive outcomes (#732) @Rul1an
+- docs(wave25-step1): freeze obligations log execution contract (#730) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+- fix(deps): patch quinn-proto to 0.11.14 (RUSTSEC-2026-0037) (#713) @Rul1an
+- docs(wave25-step3): close obligations-log wave with docs+gate (#733) @Rul1an
+- feat(wave25-step2): execute log obligations with additive outcomes (#732) @Rul1an
+- docs(wave25-step1): freeze obligations log execution contract (#730) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- promote(wave28): land Step2+Step3 on main (#752) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- fix(wave28): recovery step2 approval_required enforcement (#754) @Rul1an
+- promote(wave28): land Step2+Step3 on main (#752) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave29-step1): freeze restrict_scope contract (#756) @Rul1an
+- fix(wave28): recovery step2 approval_required enforcement (#754) @Rul1an
+- promote(wave28): land Step2+Step3 on main (#752) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- feat(wave29-step2): add restrict_scope contract and evidence shape (#758) @Rul1an
+- docs(wave29-step1): freeze restrict_scope contract (#756) @Rul1an
+- fix(wave28): recovery step2 approval_required enforcement (#754) @Rul1an
+- promote(wave28): land Step2+Step3 on main (#752) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+## [2026-03-11]
+
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave25-step3): close obligations-log wave with docs+gate (#733) @Rul1an
+- feat(wave25-step2): execute log obligations with additive outcomes (#732) @Rul1an
+- docs(wave25-step1): freeze obligations log execution contract (#730) @Rul1an
+- feat(wave24): promote step2+step3 typed decisions to main (#728) @Rul1an
+- docs(wave24-step3): add closure checklist and gate (#726) @Rul1an
+- docs(wave24-step2): add implementation gates and move-map (#725) @Rul1an
+- docs(wave24-step1): freeze typed decision and event-v2 contract (#724) @Rul1an
+- docs(exp): finalize fragmented-ipi line closure with wave23 (#722) @Rul1an
+- docs(exp): close wave23 interleaving step3 (#719) @Rul1an
+## [2026-03-10]
+
+- docs(exp): close fragmented-ipi line with bounded final claim (#708) @Rul1an
+- docs(exp): close wave22 sink-fidelity-http step3 (#700) @Rul1an
+- exp(wave22): bounded sink-fidelity HTTP step2 (#698) @Rul1an
+- docs(exp): freeze wave22 sink-fidelity-http step1 (#696) @Rul1an
+- docs(exp): add wave21 sink-failure legit-volume step3 closure (#694) @Rul1an
+- exp(sink-failure): wave21 step2 legit-volume confidence uplift (#692) @Rul1an
+- docs(exp): freeze wave21 sink-failure legit-volume step1 (#689) @Rul1an
+- docs(exp): wave20 sink-failure partial step3 closure gate (#688) @Rul1an
+- exp(sink-failure): activate partial branch matrix with bounded step2 gate (#686) @Rul1an
+- docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an
 ## [2026-03-09]
 
 - docs(exp): freeze wave20 sink-failure partial with reviewer gate (step1) (#684) @Rul1an

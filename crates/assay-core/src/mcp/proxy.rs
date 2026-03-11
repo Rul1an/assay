@@ -509,6 +509,36 @@ impl McpProxy {
         event.data.matched_tool_classes = metadata.matched_tool_classes.clone();
         event.data.match_basis = metadata.match_basis.as_str().map(ToString::to_string);
         event.data.matched_rule = metadata.matched_rule.clone();
+        event.data.typed_decision = metadata.typed_decision;
+        event.data.policy_version = metadata.policy_version.clone();
+        event.data.policy_digest = metadata.policy_digest.clone();
+        event.data.obligations = metadata.obligations.clone();
+        event.data.obligation_outcomes =
+            super::obligations::execute_log_only(&metadata.obligations, tool);
+        event.data.approval_state = metadata.approval_state.clone();
+        if let Some(artifact) = &metadata.approval_artifact {
+            event.data.approval_id = Some(artifact.approval_id.clone());
+            event.data.approver = Some(artifact.approver.clone());
+            event.data.issued_at = Some(artifact.issued_at.clone());
+            event.data.expires_at = Some(artifact.expires_at.clone());
+            event.data.scope = Some(artifact.scope.clone());
+            event.data.approval_bound_tool = Some(artifact.bound_tool.clone());
+            event.data.approval_bound_resource = Some(artifact.bound_resource.clone());
+        }
+        event.data.approval_freshness = metadata.approval_freshness;
+        event.data.approval_failure_reason = metadata.approval_failure_reason.clone();
+        event.data.scope_type = metadata.scope_type.clone();
+        event.data.scope_value = metadata.scope_value.clone();
+        event.data.scope_match_mode = metadata.scope_match_mode.clone();
+        event.data.scope_evaluation_state = metadata.scope_evaluation_state.clone();
+        event.data.scope_failure_reason = metadata.scope_failure_reason.clone();
+        event.data.restrict_scope_present = metadata.restrict_scope_present;
+        event.data.restrict_scope_target = metadata.restrict_scope_target.clone();
+        event.data.restrict_scope_match = metadata.restrict_scope_match;
+        event.data.restrict_scope_reason = metadata.restrict_scope_reason.clone();
+        event.data.lane = metadata.lane.clone();
+        event.data.principal = metadata.principal.clone();
+        event.data.auth_context_summary = metadata.auth_context_summary.clone();
         emitter.emit(&event);
     }
 }

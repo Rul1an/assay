@@ -3,6 +3,10 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
+use super::policy::{
+    ApprovalArtifact, ApprovalFreshness, PolicyObligation, RestrictScopeContract,
+    TypedPolicyDecision,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
@@ -18,6 +22,7 @@ pub mod reason_codes {
     pub const P_ARG_SCHEMA: &str = "P_ARG_SCHEMA";
     pub const P_RATE_LIMIT: &str = "P_RATE_LIMIT";
     pub const P_TOOL_DRIFT: &str = "P_TOOL_DRIFT";
+    pub const P_APPROVAL_REQUIRED: &str = "P_APPROVAL_REQUIRED";
     pub const P_MANDATE_REQUIRED: &str = "P_MANDATE_REQUIRED";
     pub const P_MANDATE_VALID: &str = "P_MANDATE_VALID";
 
@@ -51,6 +56,49 @@ pub enum Decision {
     Allow,
     Deny,
     Error,
+}
+
+/// Fulfillment status for a runtime obligation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationOutcomeStatus {
+    Applied,
+    Skipped,
+    Error,
+}
+
+/// Runtime fulfillment result for an individual obligation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObligationOutcome {
+    #[serde(rename = "type")]
+    pub obligation_type: String,
+    pub status: ObligationOutcomeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Additional runtime policy context for Decision Event v2.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyDecisionEventContext {
+    pub typed_decision: Option<TypedPolicyDecision>,
+    pub policy_version: Option<String>,
+    pub policy_digest: Option<String>,
+    pub obligations: Vec<PolicyObligation>,
+    pub obligation_outcomes: Vec<ObligationOutcome>,
+    pub approval_state: Option<String>,
+    pub approval_artifact: Option<ApprovalArtifact>,
+    pub approval_freshness: Option<ApprovalFreshness>,
+    pub approval_failure_reason: Option<String>,
+    pub scope_contract: Option<RestrictScopeContract>,
+    pub scope_evaluation_state: Option<String>,
+    pub scope_failure_reason: Option<String>,
+    pub restrict_scope_present: Option<bool>,
+    pub restrict_scope_target: Option<String>,
+    pub restrict_scope_match: Option<bool>,
+    pub restrict_scope_reason: Option<String>,
+    pub lane: Option<String>,
+    pub principal: Option<String>,
+    pub auth_context_summary: Option<String>,
 }
 
 /// A tool decision event (CloudEvents compliant).
@@ -88,6 +136,87 @@ pub struct DecisionData {
     /// Rule or policy field that matched
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_rule: Option<String>,
+    /// Typed policy decision shape (Wave24 Decision Event v2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typed_decision: Option<TypedPolicyDecision>,
+    /// Policy bundle version used for evaluation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<String>,
+    /// Policy bundle digest used for evaluation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_digest: Option<String>,
+    /// Obligations attached to an allow/deny decision
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<PolicyObligation>,
+    /// Runtime fulfillment outcomes for attached obligations
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligation_outcomes: Vec<ObligationOutcome>,
+    /// Approval state summary for runtime decisioning
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_state: Option<String>,
+    /// Approval artifact identifier for runtime decisioning
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
+    /// Approval artifact approver principal summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approver: Option<String>,
+    /// Approval artifact issuance time (ISO 8601 expected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_at: Option<String>,
+    /// Approval artifact expiry time (ISO 8601 expected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// Approval artifact scope summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Approval artifact bound tool
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_bound_tool: Option<String>,
+    /// Approval artifact bound resource
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_bound_resource: Option<String>,
+    /// Freshness status derived from approval validity window
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_freshness: Option<ApprovalFreshness>,
+    /// Approval failure reason for approval_required deny paths
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_failure_reason: Option<String>,
+    /// Restrict-scope obligation shape field: type
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_type: Option<String>,
+    /// Restrict-scope obligation shape field: value
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_value: Option<String>,
+    /// Restrict-scope obligation shape field: match mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_match_mode: Option<String>,
+    /// Restrict-scope evaluation state (contract/evidence only in Wave29)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_evaluation_state: Option<String>,
+    /// Restrict-scope failure reason (contract/evidence only in Wave29)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_failure_reason: Option<String>,
+    /// Restrict-scope evidence marker: obligation present
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_present: Option<bool>,
+    /// Restrict-scope evidence marker: evaluated target
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_target: Option<String>,
+    /// Restrict-scope evidence marker: passive match result
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_match: Option<bool>,
+    /// Restrict-scope evidence marker: passive reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_reason: Option<String>,
+    /// Lane identifier summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    /// Principal identifier summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    /// Authentication context summary (non-sensitive, compact)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_context_summary: Option<String>,
     /// Decision outcome
     pub decision: Decision,
     /// Machine-parseable reason code (MUST)
@@ -141,6 +270,33 @@ impl DecisionEvent {
                 matched_tool_classes: Vec::new(),
                 match_basis: None,
                 matched_rule: None,
+                typed_decision: None,
+                policy_version: None,
+                policy_digest: None,
+                obligations: Vec::new(),
+                obligation_outcomes: Vec::new(),
+                approval_state: None,
+                approval_id: None,
+                approver: None,
+                issued_at: None,
+                expires_at: None,
+                scope: None,
+                approval_bound_tool: None,
+                approval_bound_resource: None,
+                approval_freshness: None,
+                approval_failure_reason: None,
+                scope_type: None,
+                scope_value: None,
+                scope_match_mode: None,
+                scope_evaluation_state: None,
+                scope_failure_reason: None,
+                restrict_scope_present: None,
+                restrict_scope_target: None,
+                restrict_scope_match: None,
+                restrict_scope_reason: None,
+                lane: None,
+                principal: None,
+                auth_context_summary: None,
                 decision: Decision::Error, // Default to error, will be set
                 reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
                 reason: Some("Decision not finalized (guard dropped without emit)".to_string()),
@@ -233,6 +389,64 @@ impl DecisionEvent {
         self.data.matched_tool_classes = matched_tool_classes;
         self.data.match_basis = match_basis;
         self.data.matched_rule = matched_rule;
+        self
+    }
+
+    /// Set policy context fields for Decision Event v2.
+    pub fn with_policy_context(mut self, context: PolicyDecisionEventContext) -> Self {
+        let PolicyDecisionEventContext {
+            typed_decision,
+            policy_version,
+            policy_digest,
+            obligations,
+            obligation_outcomes,
+            approval_state,
+            approval_artifact,
+            approval_freshness,
+            approval_failure_reason,
+            scope_contract,
+            scope_evaluation_state,
+            scope_failure_reason,
+            restrict_scope_present,
+            restrict_scope_target,
+            restrict_scope_match,
+            restrict_scope_reason,
+            lane,
+            principal,
+            auth_context_summary,
+        } = context;
+
+        self.data.typed_decision = typed_decision;
+        self.data.policy_version = policy_version;
+        self.data.policy_digest = policy_digest;
+        self.data.obligations = obligations;
+        self.data.obligation_outcomes = obligation_outcomes;
+        self.data.approval_state = approval_state;
+        if let Some(artifact) = approval_artifact {
+            self.data.approval_id = Some(artifact.approval_id);
+            self.data.approver = Some(artifact.approver);
+            self.data.issued_at = Some(artifact.issued_at);
+            self.data.expires_at = Some(artifact.expires_at);
+            self.data.scope = Some(artifact.scope);
+            self.data.approval_bound_tool = Some(artifact.bound_tool);
+            self.data.approval_bound_resource = Some(artifact.bound_resource);
+        }
+        self.data.approval_freshness = approval_freshness;
+        self.data.approval_failure_reason = approval_failure_reason;
+        if let Some(contract) = scope_contract {
+            self.data.scope_type = Some(contract.scope_type);
+            self.data.scope_value = Some(contract.scope_value);
+            self.data.scope_match_mode = Some(contract.scope_match_mode);
+        }
+        self.data.scope_evaluation_state = scope_evaluation_state;
+        self.data.scope_failure_reason = scope_failure_reason;
+        self.data.restrict_scope_present = restrict_scope_present;
+        self.data.restrict_scope_target = restrict_scope_target;
+        self.data.restrict_scope_match = restrict_scope_match;
+        self.data.restrict_scope_reason = restrict_scope_reason;
+        self.data.lane = lane;
+        self.data.principal = principal;
+        self.data.auth_context_summary = auth_context_summary;
         self
     }
 }
@@ -367,6 +581,65 @@ impl DecisionEmitterGuard {
             event.data.matched_tool_classes = matched_tool_classes;
             event.data.match_basis = match_basis;
             event.data.matched_rule = matched_rule;
+        }
+    }
+
+    /// Set policy context metadata for Decision Event v2.
+    pub fn set_policy_context(&mut self, context: PolicyDecisionEventContext) {
+        if let Some(ref mut event) = self.event {
+            let PolicyDecisionEventContext {
+                typed_decision,
+                policy_version,
+                policy_digest,
+                obligations,
+                obligation_outcomes,
+                approval_state,
+                approval_artifact,
+                approval_freshness,
+                approval_failure_reason,
+                scope_contract,
+                scope_evaluation_state,
+                scope_failure_reason,
+                restrict_scope_present,
+                restrict_scope_target,
+                restrict_scope_match,
+                restrict_scope_reason,
+                lane,
+                principal,
+                auth_context_summary,
+            } = context;
+
+            event.data.typed_decision = typed_decision;
+            event.data.policy_version = policy_version;
+            event.data.policy_digest = policy_digest;
+            event.data.obligations = obligations;
+            event.data.obligation_outcomes = obligation_outcomes;
+            event.data.approval_state = approval_state;
+            if let Some(artifact) = approval_artifact {
+                event.data.approval_id = Some(artifact.approval_id);
+                event.data.approver = Some(artifact.approver);
+                event.data.issued_at = Some(artifact.issued_at);
+                event.data.expires_at = Some(artifact.expires_at);
+                event.data.scope = Some(artifact.scope);
+                event.data.approval_bound_tool = Some(artifact.bound_tool);
+                event.data.approval_bound_resource = Some(artifact.bound_resource);
+            }
+            event.data.approval_freshness = approval_freshness;
+            event.data.approval_failure_reason = approval_failure_reason;
+            if let Some(contract) = scope_contract {
+                event.data.scope_type = Some(contract.scope_type);
+                event.data.scope_value = Some(contract.scope_value);
+                event.data.scope_match_mode = Some(contract.scope_match_mode);
+            }
+            event.data.scope_evaluation_state = scope_evaluation_state;
+            event.data.scope_failure_reason = scope_failure_reason;
+            event.data.restrict_scope_present = restrict_scope_present;
+            event.data.restrict_scope_target = restrict_scope_target;
+            event.data.restrict_scope_match = restrict_scope_match;
+            event.data.restrict_scope_reason = restrict_scope_reason;
+            event.data.lane = lane;
+            event.data.principal = principal;
+            event.data.auth_context_summary = auth_context_summary;
         }
     }
 
@@ -541,6 +814,57 @@ mod tests {
         assert!(json.contains("assay.tool.decision"));
         assert!(json.contains("tc_005"));
         assert!(json.contains("allow"));
+    }
+
+    #[test]
+    fn test_with_policy_context_sets_approval_artifact_fields() {
+        let context = PolicyDecisionEventContext {
+            approval_state: Some("approved".to_string()),
+            approval_artifact: Some(ApprovalArtifact {
+                approval_id: "apr_001".to_string(),
+                approver: "alice@example.com".to_string(),
+                issued_at: "2026-03-11T11:00:00Z".to_string(),
+                expires_at: "2026-03-11T12:00:00Z".to_string(),
+                scope: "tool:deploy".to_string(),
+                bound_tool: "deploy_service".to_string(),
+                bound_resource: "service/prod".to_string(),
+            }),
+            approval_freshness: Some(ApprovalFreshness::Fresh),
+            ..PolicyDecisionEventContext::default()
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_006".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(context);
+
+        assert_eq!(event.data.approval_state.as_deref(), Some("approved"));
+        assert_eq!(event.data.approval_id.as_deref(), Some("apr_001"));
+        assert_eq!(event.data.approver.as_deref(), Some("alice@example.com"));
+        assert_eq!(
+            event.data.issued_at.as_deref(),
+            Some("2026-03-11T11:00:00Z")
+        );
+        assert_eq!(
+            event.data.expires_at.as_deref(),
+            Some("2026-03-11T12:00:00Z")
+        );
+        assert_eq!(event.data.scope.as_deref(), Some("tool:deploy"));
+        assert_eq!(
+            event.data.approval_bound_tool.as_deref(),
+            Some("deploy_service")
+        );
+        assert_eq!(
+            event.data.approval_bound_resource.as_deref(),
+            Some("service/prod")
+        );
+        assert_eq!(
+            event.data.approval_freshness,
+            Some(ApprovalFreshness::Fresh)
+        );
     }
 
     #[test]

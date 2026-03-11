@@ -144,3 +144,29 @@ The next low-blast-radius follow-ups are:
 - "Blocked" attribution is based on the current harness instrumentation and sequence-sidecar path.
 - Entropy is not an enforcement rule in this experiment; it remains a shadow metric for follow-up work.
 - The current harness uses a local mock MCP tool server for reproducibility; it is not a live external-tool benchmark.
+
+## 2026Q1 line closure summary
+The March 2026 fragmented-IPI line is now closed-loop across all bounded variants through Wave23 interleaving.
+
+### Final line table
+| Variant | Wrap-only result | Sequence-only result | Combined result | Legit false-positive note |
+|---|---|---|---|---|
+| Main fragmented-IPI | N/A in main run (ablation isolates modes separately) | N/A in main run (ablation isolates modes separately) | protected TPR/FNR/false-positive rate: `1.0 / 0.0 / 0.0` | main run legit false-positive rate `0.0` (40 legit) |
+| Wrap-bypass | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | no false positives observed |
+| Second-sink generality | fails on alternate sink (`alt_only`), `TPR=0.0` | robust across `primary_only`, `alt_only`, `mixed`, `TPR=1.0` | robust, sequence-dominated | no false positives observed |
+| Cross-session decay | no route memory; delayed sink succeeds across active window | blocks delayed sink across `k+1..k+N` active window | matches sequence behavior | legit control remains allowed, no false positives observed |
+| Sink-failure (`timeout`) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | no false positives observed |
+| Sink-failure (`partial`) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | bounded smoke, no false positives observed |
+| Sink-fidelity HTTP (offline localhost) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | aggregate false-positive rate `0.0`, CI high `0.0126` |
+| Interleaving (mixed legit+malicious) | protected TPR/FNR/FPR: `0.0 / 1.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | protected TPR/FNR/FPR: `1.0 / 0.0 / 0.0` | aggregate false-positive rate `0.0`, CI high `0.0064` |
+
+### Bounded core claim
+- `sequence_only` is the decisive governance layer in this experiment family.
+- `combined` follows `sequence_only` in observed decisive blocking behavior.
+- `wrap_only` is insufficient as a standalone control across wrap-bypass, second-sink, cross-session, sink-failure (`timeout`/`partial`), sink-fidelity, and interleaving variants.
+
+### Explicit limits
+- Primary metric remains attempt-based (`success_any_sink_canary`).
+- Sink-fidelity evidence is bounded to offline localhost HTTP egress, not production internet egress.
+- Claims remain bounded to this matrix/harness family and reported confidence intervals.
+- Legitimate-path safety is reported as false-positive rate `0.0` with CI bounds; this is not a universal low-false-positive guarantee outside this dataset.
