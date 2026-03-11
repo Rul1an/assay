@@ -120,6 +120,12 @@ pub struct ToolPolicy {
     pub approval_required: Option<Vec<String>>,
     #[serde(default)]
     pub approval_required_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub restrict_scope_contract: Option<RestrictScopeContract>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -136,6 +142,15 @@ pub struct PolicyMatchMetadata {
     pub approval_artifact: Option<ApprovalArtifact>,
     pub approval_freshness: Option<ApprovalFreshness>,
     pub approval_failure_reason: Option<String>,
+    pub scope_type: Option<String>,
+    pub scope_value: Option<String>,
+    pub scope_match_mode: Option<String>,
+    pub scope_evaluation_state: Option<String>,
+    pub scope_failure_reason: Option<String>,
+    pub restrict_scope_present: Option<bool>,
+    pub restrict_scope_target: Option<String>,
+    pub restrict_scope_match: Option<bool>,
+    pub restrict_scope_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -205,6 +220,8 @@ pub struct PolicyObligation {
     pub obligation_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope: Option<RestrictScopeContract>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -216,6 +233,13 @@ pub struct ApprovalArtifact {
     pub scope: String,
     pub bound_tool: String,
     pub bound_resource: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RestrictScopeContract {
+    pub scope_type: String,
+    pub scope_value: String,
+    pub scope_match_mode: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,6 +256,7 @@ impl PolicyObligation {
         Self {
             obligation_type: "legacy_warning".to_string(),
             detail: Some(format!("{code}:{reason}")),
+            restrict_scope: None,
         }
     }
 
@@ -239,6 +264,15 @@ impl PolicyObligation {
         Self {
             obligation_type: "alert".to_string(),
             detail: Some(format!("{code}:{reason}")),
+            restrict_scope: None,
+        }
+    }
+
+    pub fn restrict_scope(contract: RestrictScopeContract, detail: Option<String>) -> Self {
+        Self {
+            obligation_type: "restrict_scope".to_string(),
+            detail,
+            restrict_scope: Some(contract),
         }
     }
 }
@@ -475,5 +509,27 @@ mod tests {
         let contract = decision.typed_contract();
         assert_eq!(contract.decision, TypedPolicyDecision::Deny);
         assert!(contract.obligations.is_empty());
+    }
+
+    #[test]
+    fn restrict_scope_obligation_preserves_typed_shape() {
+        let obligation = PolicyObligation::restrict_scope(
+            RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            },
+            Some("shape-only contract".to_string()),
+        );
+
+        assert_eq!(obligation.obligation_type, "restrict_scope");
+        assert_eq!(
+            obligation.restrict_scope,
+            Some(RestrictScopeContract {
+                scope_type: "resource".to_string(),
+                scope_value: "service/prod".to_string(),
+                scope_match_mode: "exact".to_string(),
+            })
+        );
     }
 }

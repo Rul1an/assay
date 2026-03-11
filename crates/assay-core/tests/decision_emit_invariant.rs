@@ -8,7 +8,8 @@ use assay_core::mcp::decision::{
     ObligationOutcomeStatus,
 };
 use assay_core::mcp::policy::{
-    ApprovalFreshness, McpPolicy, PolicyState, ToolPolicy, TypedPolicyDecision,
+    ApprovalFreshness, McpPolicy, PolicyState, RestrictScopeContract, ToolPolicy,
+    TypedPolicyDecision,
 };
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
 use chrono::{Duration, Utc};
@@ -77,6 +78,20 @@ fn approval_required_policy() -> McpPolicy {
     let mut policy = McpPolicy::default();
     policy.tools = ToolPolicy {
         approval_required: Some(vec!["deploy_*".to_string()]),
+        ..Default::default()
+    };
+    policy
+}
+
+fn restrict_scope_policy() -> McpPolicy {
+    let mut policy = McpPolicy::default();
+    policy.tools = ToolPolicy {
+        restrict_scope: Some(vec!["deploy_*".to_string()]),
+        restrict_scope_contract: Some(RestrictScopeContract {
+            scope_type: "resource".to_string(),
+            scope_value: "service/prod".to_string(),
+            scope_match_mode: "exact".to_string(),
+        }),
         ..Default::default()
     };
     policy
@@ -335,6 +350,78 @@ fn approval_required_bound_resource_mismatch_denies() {
         event.data.approval_failure_reason.as_deref(),
         Some("bound resource mismatch")
     );
+}
+
+#[test]
+fn restrict_scope_mismatch_does_not_deny() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/staging"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.event_count(), 1);
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.restrict_scope_present, Some(true));
+    assert_eq!(event.data.restrict_scope_match, Some(false));
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("mismatch")
+    );
+    assert_eq!(
+        event.data.restrict_scope_reason.as_deref(),
+        Some("scope_target_mismatch")
+    );
+}
+
+#[test]
+fn restrict_scope_match_sets_additive_fields() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.event_count(), 1);
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.restrict_scope_present, Some(true));
+    assert_eq!(event.data.restrict_scope_match, Some(true));
+    assert_eq!(event.data.scope_type.as_deref(), Some("resource"));
+    assert_eq!(event.data.scope_value.as_deref(), Some("service/prod"));
+    assert_eq!(event.data.scope_match_mode.as_deref(), Some("exact"));
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("matched")
+    );
+    assert!(event.data.restrict_scope_reason.is_none());
 }
 
 // =============================================================================

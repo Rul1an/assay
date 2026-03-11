@@ -3,7 +3,10 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
-use super::policy::{ApprovalArtifact, ApprovalFreshness, PolicyObligation, TypedPolicyDecision};
+use super::policy::{
+    ApprovalArtifact, ApprovalFreshness, PolicyObligation, RestrictScopeContract,
+    TypedPolicyDecision,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
@@ -86,6 +89,13 @@ pub struct PolicyDecisionEventContext {
     pub approval_artifact: Option<ApprovalArtifact>,
     pub approval_freshness: Option<ApprovalFreshness>,
     pub approval_failure_reason: Option<String>,
+    pub scope_contract: Option<RestrictScopeContract>,
+    pub scope_evaluation_state: Option<String>,
+    pub scope_failure_reason: Option<String>,
+    pub restrict_scope_present: Option<bool>,
+    pub restrict_scope_target: Option<String>,
+    pub restrict_scope_match: Option<bool>,
+    pub restrict_scope_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -171,6 +181,33 @@ pub struct DecisionData {
     /// Approval failure reason for approval_required deny paths
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_failure_reason: Option<String>,
+    /// Restrict-scope obligation shape field: type
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_type: Option<String>,
+    /// Restrict-scope obligation shape field: value
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_value: Option<String>,
+    /// Restrict-scope obligation shape field: match mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_match_mode: Option<String>,
+    /// Restrict-scope evaluation state (contract/evidence only in Wave29)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_evaluation_state: Option<String>,
+    /// Restrict-scope failure reason (contract/evidence only in Wave29)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_failure_reason: Option<String>,
+    /// Restrict-scope evidence marker: obligation present
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_present: Option<bool>,
+    /// Restrict-scope evidence marker: evaluated target
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_target: Option<String>,
+    /// Restrict-scope evidence marker: passive match result
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_match: Option<bool>,
+    /// Restrict-scope evidence marker: passive reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restrict_scope_reason: Option<String>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -248,6 +285,15 @@ impl DecisionEvent {
                 approval_bound_resource: None,
                 approval_freshness: None,
                 approval_failure_reason: None,
+                scope_type: None,
+                scope_value: None,
+                scope_match_mode: None,
+                scope_evaluation_state: None,
+                scope_failure_reason: None,
+                restrict_scope_present: None,
+                restrict_scope_target: None,
+                restrict_scope_match: None,
+                restrict_scope_reason: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -358,6 +404,13 @@ impl DecisionEvent {
             approval_artifact,
             approval_freshness,
             approval_failure_reason,
+            scope_contract,
+            scope_evaluation_state,
+            scope_failure_reason,
+            restrict_scope_present,
+            restrict_scope_target,
+            restrict_scope_match,
+            restrict_scope_reason,
             lane,
             principal,
             auth_context_summary,
@@ -380,6 +433,17 @@ impl DecisionEvent {
         }
         self.data.approval_freshness = approval_freshness;
         self.data.approval_failure_reason = approval_failure_reason;
+        if let Some(contract) = scope_contract {
+            self.data.scope_type = Some(contract.scope_type);
+            self.data.scope_value = Some(contract.scope_value);
+            self.data.scope_match_mode = Some(contract.scope_match_mode);
+        }
+        self.data.scope_evaluation_state = scope_evaluation_state;
+        self.data.scope_failure_reason = scope_failure_reason;
+        self.data.restrict_scope_present = restrict_scope_present;
+        self.data.restrict_scope_target = restrict_scope_target;
+        self.data.restrict_scope_match = restrict_scope_match;
+        self.data.restrict_scope_reason = restrict_scope_reason;
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
@@ -533,6 +597,13 @@ impl DecisionEmitterGuard {
                 approval_artifact,
                 approval_freshness,
                 approval_failure_reason,
+                scope_contract,
+                scope_evaluation_state,
+                scope_failure_reason,
+                restrict_scope_present,
+                restrict_scope_target,
+                restrict_scope_match,
+                restrict_scope_reason,
                 lane,
                 principal,
                 auth_context_summary,
@@ -555,6 +626,17 @@ impl DecisionEmitterGuard {
             }
             event.data.approval_freshness = approval_freshness;
             event.data.approval_failure_reason = approval_failure_reason;
+            if let Some(contract) = scope_contract {
+                event.data.scope_type = Some(contract.scope_type);
+                event.data.scope_value = Some(contract.scope_value);
+                event.data.scope_match_mode = Some(contract.scope_match_mode);
+            }
+            event.data.scope_evaluation_state = scope_evaluation_state;
+            event.data.scope_failure_reason = scope_failure_reason;
+            event.data.restrict_scope_present = restrict_scope_present;
+            event.data.restrict_scope_target = restrict_scope_target;
+            event.data.restrict_scope_match = restrict_scope_match;
+            event.data.restrict_scope_reason = restrict_scope_reason;
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;

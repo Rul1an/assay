@@ -527,6 +527,15 @@ impl McpProxy {
         }
         event.data.approval_freshness = metadata.approval_freshness;
         event.data.approval_failure_reason = metadata.approval_failure_reason.clone();
+        event.data.scope_type = metadata.scope_type.clone();
+        event.data.scope_value = metadata.scope_value.clone();
+        event.data.scope_match_mode = metadata.scope_match_mode.clone();
+        event.data.scope_evaluation_state = metadata.scope_evaluation_state.clone();
+        event.data.scope_failure_reason = metadata.scope_failure_reason.clone();
+        event.data.restrict_scope_present = metadata.restrict_scope_present;
+        event.data.restrict_scope_target = metadata.restrict_scope_target.clone();
+        event.data.restrict_scope_match = metadata.restrict_scope_match;
+        event.data.restrict_scope_reason = metadata.restrict_scope_reason.clone();
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();
