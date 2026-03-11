@@ -1200,6 +1200,10 @@
 - docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
 - feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
 - docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
+- docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+- feat(wave26-step2): execute bounded alert obligations (#738) @Rul1an
+- docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
 ## [2026-03-11]
 
 - docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
