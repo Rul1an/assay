@@ -526,6 +526,7 @@ impl McpProxy {
             event.data.approval_bound_resource = Some(artifact.bound_resource.clone());
         }
         event.data.approval_freshness = metadata.approval_freshness;
+        event.data.approval_failure_reason = metadata.approval_failure_reason.clone();
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();

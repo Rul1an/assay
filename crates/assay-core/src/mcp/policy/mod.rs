@@ -116,6 +116,10 @@ pub struct ToolPolicy {
     pub allow_classes: Option<Vec<String>>,
     #[serde(default)]
     pub deny_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub approval_required: Option<Vec<String>>,
+    #[serde(default)]
+    pub approval_required_classes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -131,6 +135,7 @@ pub struct PolicyMatchMetadata {
     pub approval_state: Option<String>,
     pub approval_artifact: Option<ApprovalArtifact>,
     pub approval_freshness: Option<ApprovalFreshness>,
+    pub approval_failure_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,

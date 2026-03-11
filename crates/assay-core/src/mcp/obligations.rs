@@ -7,6 +7,7 @@ use super::policy::PolicyObligation;
 /// - `log` is applied directly
 /// - `alert` is applied as a non-blocking runtime alert signal
 /// - `legacy_warning` is mapped to `log` for compatibility
+/// - `approval_required` is validated in tool_call_handler (non-blocking here)
 /// - any other type is emitted as skipped (non-blocking)
 pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<ObligationOutcome> {
     obligations
@@ -54,6 +55,11 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                     reason: Some("mapped from legacy_warning".to_string()),
                 }
             }
+            "approval_required" => ObligationOutcome {
+                obligation_type: "approval_required".to_string(),
+                status: ObligationOutcomeStatus::Skipped,
+                reason: Some("validated in handler".to_string()),
+            },
             other => ObligationOutcome {
                 obligation_type: other.to_string(),
                 status: ObligationOutcomeStatus::Skipped,
