@@ -129,6 +129,8 @@ pub struct PolicyMatchMetadata {
     pub policy_digest: Option<String>,
     pub obligations: Vec<PolicyObligation>,
     pub approval_state: Option<String>,
+    pub approval_artifact: Option<ApprovalArtifact>,
+    pub approval_freshness: Option<ApprovalFreshness>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -198,6 +200,26 @@ pub struct PolicyObligation {
     pub obligation_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalArtifact {
+    pub approval_id: String,
+    pub approver: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub scope: String,
+    pub bound_tool: String,
+    pub bound_resource: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalFreshness {
+    Fresh,
+    Stale,
+    Expired,
+    Unknown,
 }
 
 impl PolicyObligation {
