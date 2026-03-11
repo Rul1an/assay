@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_REF="${BASE_REF:-origin/main}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+git rev-parse --verify "$BASE_REF" >/dev/null
+
+ALLOWLIST=(
+  "docs/contributing/SPLIT-PLAN-wave29-restrict-scope.md"
+  "docs/contributing/SPLIT-CHECKLIST-wave29-restrict-scope-step1.md"
+  "docs/contributing/SPLIT-REVIEW-PACK-wave29-restrict-scope-step1.md"
+  "scripts/ci/review-wave29-restrict-scope-step1.sh"
+)
+
+FROZEN_PATHS=(
+  "crates/assay-core/src/mcp"
+  "crates/assay-cli/src/cli/commands/mcp.rs"
+  "crates/assay-cli/src/cli/commands/coverage"
+  "crates/assay-cli/src/cli/commands/session_state_window.rs"
+  "crates/assay-mcp-server"
+)
+
+echo "[review] allowlist-only diff vs $BASE_REF + workflow-ban"
+while IFS= read -r f; do
+  [[ -z "${f:-}" ]] && continue
+
+  if [[ "$f" == .github/workflows/* ]]; then
+    echo "FAIL: Wave29 Step1 must not touch workflows ($f)"
+    exit 1
+  fi
+
+  ok="false"
+  for a in "${ALLOWLIST[@]}"; do
+    [[ "$f" == "$a" ]] && ok="true" && break
+  done
+
+  if [[ "$ok" != "true" ]]; then
+    echo "FAIL: file not allowed in Wave29 Step1: $f"
+    exit 1
+  fi
+done < <(git diff --name-only "$BASE_REF"...HEAD)
+
+echo "[review] frozen tracked paths must not change"
+for p in "${FROZEN_PATHS[@]}"; do
+  if git diff --name-only "$BASE_REF"...HEAD -- "$p" | rg -n '.' >/dev/null; then
+    echo "FAIL: Wave29 Step1 must not change frozen path: $p"
+    git diff --name-only "$BASE_REF"...HEAD -- "$p"
+    exit 1
+  fi
+done
+
+echo "[review] frozen paths must not contain untracked files"
+for p in "${FROZEN_PATHS[@]}"; do
+  if git ls-files --others --exclude-standard -- "$p" | rg -n '.' >/dev/null; then
+    echo "FAIL: untracked files present under frozen path: $p"
+    git ls-files --others --exclude-standard -- "$p" | sed 's/^/  - /'
+    exit 1
+  fi
+done
+
+echo "[review] marker checks"
+rg -n '^# SPLIT PLAN — Wave29 Restrict Scope Contract$' \
+  docs/contributing/SPLIT-PLAN-wave29-restrict-scope.md >/dev/null || {
+  echo "FAIL: missing plan title"
+  exit 1
+}
+
+for marker in \
+  'restrict_scope' \
+  'scope_profile' \
+  'allowed_servers' \
+  'allowed_tool_classes' \
+  'allowed_resources' \
+  'max_resource_selectors' \
+  'scope_server_mismatch' \
+  'scope_tool_class_mismatch' \
+  'scope_resource_mismatch' \
+  'scope_selector_limit_exceeded' \
+  'scope_decision' \
+  'scope_effective' \
+  'scope_violation_reason' \
+  'scope_policy_version' \
+  'scope_policy_digest'
+do
+  rg -n "$marker" docs/contributing/SPLIT-PLAN-wave29-restrict-scope.md >/dev/null || {
+    echo "FAIL: missing marker in plan: $marker"
+    exit 1
+  }
+done
+
+echo "[review] repo checks"
+cargo fmt --check
+cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D warnings
+
+echo "[review] pinned tests"
+cargo test -p assay-core tool_taxonomy_policy_match_handler_decision_event_records_classes -- --exact
+cargo test -p assay-core test_event_contains_required_fields -- --exact
+cargo test -p assay-core decision_emit_invariant
+cargo test -p assay-core test_allow_with_warning_emits_log_obligation_outcome -- --exact
+cargo test -p assay-core test_alert_obligation_outcome_emitted -- --exact
+cargo test -p assay-core approval_required_missing_denies
+cargo test -p assay-core approval_required_expired_denies
+cargo test -p assay-core approval_required_bound_tool_mismatch_denies
+cargo test -p assay-core approval_required_bound_resource_mismatch_denies
+cargo test -p assay-cli mcp_wrap_coverage
+cargo test -p assay-cli mcp_wrap_state_window_out
+cargo test -p assay-mcp-server auth_integration
+
+echo "[review] PASS"
