@@ -97,7 +97,7 @@ cargo test -p assay-core tool_taxonomy_policy_match_handler_decision_event_recor
 cargo test -p assay-core test_event_contains_required_fields -- --exact
 cargo test -p assay-core decision_emit_invariant
 cargo test -p assay-core test_allow_with_warning_emits_log_obligation_outcome -- --exact
-cargo test -p assay-core test_tool_drift_deny_emits_alert_obligation_outcome -- --exact
+cargo test -p assay-core test_tool_drift_deny_emits_alert_obligation_outcome
 cargo test -p assay-core approval_required_missing_denies
 cargo test -p assay-core approval_required_expired_denies
 cargo test -p assay-core approval_required_bound_tool_mismatch_denies
@@ -107,8 +107,8 @@ cargo test -p assay-core restrict_scope_target_missing_denies
 cargo test -p assay-core restrict_scope_unsupported_match_mode_denies
 cargo test -p assay-core restrict_scope_unsupported_scope_type_denies
 cargo test -p assay-core restrict_scope_match_sets_additive_fields
-cargo test -p assay-core execute_log_only_marks_restrict_scope_as_contract_only -- --exact
-cargo test -p assay-core execute_log_only_marks_redact_args_as_contract_only -- --exact
+cargo test -p assay-core execute_log_only_marks_restrict_scope_as_contract_only
+cargo test -p assay-core execute_log_only_marks_redact_args_as_contract_only
 cargo test -p assay-core redact_args_contract_sets_additive_fields
 cargo test -p assay-cli mcp_wrap_coverage
 cargo test -p assay-cli mcp_wrap_state_window_out
