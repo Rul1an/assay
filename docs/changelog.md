@@ -1284,6 +1284,10 @@
 - feat(wave30-step2): enforce restrict_scope runtime deny semantics (#765) @Rul1an
 - docs(wave30-step1): freeze restrict_scope enforcement contract (#763) @Rul1an
 - docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
+- docs(wave30-step3): close restrict_scope enforcement wave (#767) @Rul1an
+- feat(wave30-step2): enforce restrict_scope runtime deny semantics (#765) @Rul1an
+- docs(wave30-step1): freeze restrict_scope enforcement contract (#763) @Rul1an
+- docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
 ## [2026-03-12]
 
 - docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
