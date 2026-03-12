@@ -1279,6 +1279,8 @@
 - docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
 - docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
 
+- docs(wave30-step1): freeze restrict_scope enforcement contract (#763) @Rul1an
+- docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
 ## [2026-03-12]
 
 - docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
