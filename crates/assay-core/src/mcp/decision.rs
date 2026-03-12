@@ -23,6 +23,7 @@ pub mod reason_codes {
     pub const P_RATE_LIMIT: &str = "P_RATE_LIMIT";
     pub const P_TOOL_DRIFT: &str = "P_TOOL_DRIFT";
     pub const P_APPROVAL_REQUIRED: &str = "P_APPROVAL_REQUIRED";
+    pub const P_RESTRICT_SCOPE: &str = "P_RESTRICT_SCOPE";
     pub const P_MANDATE_REQUIRED: &str = "P_MANDATE_REQUIRED";
     pub const P_MANDATE_VALID: &str = "P_MANDATE_VALID";
 
@@ -872,6 +873,7 @@ mod tests {
         // Ensure reason codes are stable strings
         assert_eq!(reason_codes::P_POLICY_ALLOW, "P_POLICY_ALLOW");
         assert_eq!(reason_codes::P_POLICY_DENY, "P_POLICY_DENY");
+        assert_eq!(reason_codes::P_RESTRICT_SCOPE, "P_RESTRICT_SCOPE");
         assert_eq!(reason_codes::M_EXPIRED, "M_EXPIRED");
         assert_eq!(reason_codes::S_DB_ERROR, "S_DB_ERROR");
         assert_eq!(reason_codes::T_TIMEOUT, "T_TIMEOUT");

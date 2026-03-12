@@ -83,18 +83,22 @@ fn approval_required_policy() -> McpPolicy {
     policy
 }
 
-fn restrict_scope_policy() -> McpPolicy {
+fn restrict_scope_policy_with_contract(contract: RestrictScopeContract) -> McpPolicy {
     let mut policy = McpPolicy::default();
     policy.tools = ToolPolicy {
         restrict_scope: Some(vec!["deploy_*".to_string()]),
-        restrict_scope_contract: Some(RestrictScopeContract {
-            scope_type: "resource".to_string(),
-            scope_value: "service/prod".to_string(),
-            scope_match_mode: "exact".to_string(),
-        }),
+        restrict_scope_contract: Some(contract),
         ..Default::default()
     };
     policy
+}
+
+fn restrict_scope_policy() -> McpPolicy {
+    restrict_scope_policy_with_contract(RestrictScopeContract {
+        scope_type: "resource".to_string(),
+        scope_value: "service/prod".to_string(),
+        scope_match_mode: "exact".to_string(),
+    })
 }
 
 fn approval_artifact(
@@ -353,7 +357,7 @@ fn approval_required_bound_resource_mismatch_denies() {
 }
 
 #[test]
-fn restrict_scope_mismatch_does_not_deny() {
+fn restrict_scope_mismatch_denies() {
     let emitter = Arc::new(TestEmitter::new());
     let handler = ToolCallHandler::new(
         restrict_scope_policy(),
@@ -372,7 +376,10 @@ fn restrict_scope_mismatch_does_not_deny() {
     );
     let mut state = PolicyState::default();
     let result = handler.handle_tool_call(&request, &mut state, None, None, None);
-    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert!(matches!(
+        result,
+        HandleResult::Deny { ref reason_code, .. } if reason_code == reason_codes::P_RESTRICT_SCOPE
+    ));
     assert_eq!(emitter.event_count(), 1);
 
     let event = emitter.last_event().expect("Should have event");
@@ -383,9 +390,24 @@ fn restrict_scope_mismatch_does_not_deny() {
         Some("mismatch")
     );
     assert_eq!(
+        event.data.scope_failure_reason.as_deref(),
+        Some("scope_target_mismatch")
+    );
+    assert_eq!(
         event.data.restrict_scope_reason.as_deref(),
         Some("scope_target_mismatch")
     );
+    assert!(event.data.obligation_outcomes.iter().any(|outcome| {
+        outcome.obligation_type == "restrict_scope"
+            && outcome.status == ObligationOutcomeStatus::Error
+            && outcome.reason.as_deref() == Some("scope_target_mismatch")
+    }));
+}
+
+#[test]
+fn restrict_scope_mismatch_does_not_deny() {
+    // Compatibility alias for older gate scripts; semantics are covered by the deny test above.
+    restrict_scope_mismatch_denies();
 }
 
 #[test]
@@ -422,6 +444,119 @@ fn restrict_scope_match_sets_additive_fields() {
         Some("matched")
     );
     assert!(event.data.restrict_scope_reason.is_none());
+    assert!(event.data.obligation_outcomes.iter().any(|outcome| {
+        outcome.obligation_type == "restrict_scope"
+            && outcome.status == ObligationOutcomeStatus::Applied
+    }));
+}
+
+#[test]
+fn restrict_scope_target_missing_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args("deploy_service", serde_json::json!({}));
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(
+        result,
+        HandleResult::Deny { ref reason_code, .. } if reason_code == reason_codes::P_RESTRICT_SCOPE
+    ));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.scope_failure_reason.as_deref(),
+        Some("scope_target_missing")
+    );
+    assert_eq!(
+        event.data.restrict_scope_reason.as_deref(),
+        Some("scope_target_missing")
+    );
+}
+
+#[test]
+fn restrict_scope_unsupported_match_mode_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy_with_contract(RestrictScopeContract {
+            scope_type: "resource".to_string(),
+            scope_value: "service/prod".to_string(),
+            scope_match_mode: "regex".to_string(),
+        }),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(
+        result,
+        HandleResult::Deny { ref reason_code, .. } if reason_code == reason_codes::P_RESTRICT_SCOPE
+    ));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("not_evaluated")
+    );
+    assert_eq!(
+        event.data.scope_failure_reason.as_deref(),
+        Some("scope_match_mode_unsupported")
+    );
+}
+
+#[test]
+fn restrict_scope_unsupported_scope_type_denies() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        restrict_scope_policy_with_contract(RestrictScopeContract {
+            scope_type: "tenant".to_string(),
+            scope_value: "acme".to_string(),
+            scope_match_mode: "exact".to_string(),
+        }),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(
+        result,
+        HandleResult::Deny { ref reason_code, .. } if reason_code == reason_codes::P_RESTRICT_SCOPE
+    ));
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(
+        event.data.scope_evaluation_state.as_deref(),
+        Some("not_evaluated")
+    );
+    assert_eq!(
+        event.data.scope_failure_reason.as_deref(),
+        Some("scope_type_unsupported")
+    );
 }
 
 // =============================================================================

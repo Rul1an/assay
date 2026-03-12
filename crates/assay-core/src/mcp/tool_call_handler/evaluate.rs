@@ -114,7 +114,23 @@ pub(super) fn handle_tool_call(
         );
     }
 
-    // Step 3: Check if mandate is required
+    // Step 3: restrict_scope obligation enforcement (Wave30)
+    if let Some(failure) = validate_restrict_scope(&mut tool_match) {
+        let reason = failure.to_string();
+        guard.set_policy_context(tool_match.policy_context());
+        guard.emit_deny(reason_codes::P_RESTRICT_SCOPE, Some(reason.clone()));
+
+        return emit::deny(
+            &handler.config.event_source,
+            tool_call_id,
+            tool_name,
+            reason_codes::P_RESTRICT_SCOPE,
+            reason,
+            tool_match,
+        );
+    }
+
+    // Step 4: Check if mandate is required
     let is_commit_tool = handler.is_commit_tool(&tool_name);
     if is_commit_tool && handler.config.require_mandate_for_commit && mandate.is_none() {
         let reason = "Commit tool requires mandate authorization".to_string();
@@ -131,7 +147,7 @@ pub(super) fn handle_tool_call(
         );
     }
 
-    // Step 4: Mandate authorization (if mandate present)
+    // Step 5: Mandate authorization (if mandate present)
     if let (Some(authorizer), Some(mandate_data)) = (&handler.authorizer, mandate) {
         let operation_class = handler.operation_class_for_tool(&tool_name);
 
@@ -193,7 +209,7 @@ pub(super) fn handle_tool_call(
         }
     }
 
-    // Step 5: No mandate required, policy allows
+    // Step 6: No mandate required, policy allows
     let elapsed_ms = start.elapsed().as_millis() as u64;
     guard.set_latencies(Some(elapsed_ms), None);
     guard.set_policy_context(tool_match.policy_context());
@@ -217,6 +233,43 @@ enum ApprovalFailure {
     BoundResourceMismatch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestrictScopeFailure {
+    TargetMissing,
+    TargetMismatch,
+    MatchModeUnsupported,
+    TypeUnsupported,
+}
+
+impl RestrictScopeFailure {
+    fn code(self) -> &'static str {
+        match self {
+            Self::TargetMissing => "scope_target_missing",
+            Self::TargetMismatch => "scope_target_mismatch",
+            Self::MatchModeUnsupported => "scope_match_mode_unsupported",
+            Self::TypeUnsupported => "scope_type_unsupported",
+        }
+    }
+
+    fn from_code(code: Option<&str>) -> Self {
+        match code {
+            Some("scope_target_missing") => Self::TargetMissing,
+            Some("scope_match_mode_unsupported") => Self::MatchModeUnsupported,
+            Some("scope_type_unsupported") => Self::TypeUnsupported,
+            _ => Self::TargetMismatch,
+        }
+    }
+
+    fn as_reason(self) -> &'static str {
+        match self {
+            Self::TargetMissing => "scope target missing",
+            Self::TargetMismatch => "scope target mismatch",
+            Self::MatchModeUnsupported => "scope match mode unsupported",
+            Self::TypeUnsupported => "scope type unsupported",
+        }
+    }
+}
+
 impl ApprovalFailure {
     fn as_reason(self) -> &'static str {
         match self {
@@ -229,6 +282,12 @@ impl ApprovalFailure {
 }
 
 impl std::fmt::Display for ApprovalFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_reason())
+    }
+}
+
+impl std::fmt::Display for RestrictScopeFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_reason())
     }
@@ -323,6 +382,84 @@ fn mark_approval_outcome(
         .obligation_outcomes
         .push(super::super::decision::ObligationOutcome {
             obligation_type: "approval_required".to_string(),
+            status,
+            reason: reason.map(ToString::to_string),
+        });
+}
+
+fn validate_restrict_scope(
+    tool_match: &mut emit::ToolMatchMetadata,
+) -> Option<RestrictScopeFailure> {
+    let requires_scope = tool_match
+        .obligations
+        .iter()
+        .any(|obligation| obligation.obligation_type == "restrict_scope");
+    if !requires_scope {
+        return None;
+    }
+
+    if matches!(
+        tool_match.scope_evaluation_state.as_deref(),
+        Some("matched")
+    ) {
+        tool_match.restrict_scope_match = Some(true);
+        tool_match.scope_failure_reason = None;
+        tool_match.restrict_scope_reason = None;
+        mark_restrict_scope_outcome(
+            tool_match,
+            super::super::decision::ObligationOutcomeStatus::Applied,
+            None,
+        );
+        return None;
+    }
+
+    let failure = RestrictScopeFailure::from_code(
+        tool_match
+            .scope_failure_reason
+            .as_deref()
+            .or(tool_match.restrict_scope_reason.as_deref()),
+    );
+    Some(mark_restrict_scope_failure(tool_match, failure))
+}
+
+fn mark_restrict_scope_failure(
+    tool_match: &mut emit::ToolMatchMetadata,
+    failure: RestrictScopeFailure,
+) -> RestrictScopeFailure {
+    let failure_code = failure.code().to_string();
+    tool_match.restrict_scope_match = Some(false);
+    tool_match.scope_failure_reason = Some(failure_code.clone());
+    tool_match.restrict_scope_reason = Some(failure_code.clone());
+    if tool_match.scope_evaluation_state.is_none() {
+        tool_match.scope_evaluation_state = Some("not_evaluated".to_string());
+    }
+    mark_restrict_scope_outcome(
+        tool_match,
+        super::super::decision::ObligationOutcomeStatus::Error,
+        Some(failure_code.as_str()),
+    );
+    failure
+}
+
+fn mark_restrict_scope_outcome(
+    tool_match: &mut emit::ToolMatchMetadata,
+    status: super::super::decision::ObligationOutcomeStatus,
+    reason: Option<&str>,
+) {
+    if let Some(outcome) = tool_match
+        .obligation_outcomes
+        .iter_mut()
+        .find(|outcome| outcome.obligation_type == "restrict_scope")
+    {
+        outcome.status = status;
+        outcome.reason = reason.map(ToString::to_string);
+        return;
+    }
+
+    tool_match
+        .obligation_outcomes
+        .push(super::super::decision::ObligationOutcome {
+            obligation_type: "restrict_scope".to_string(),
             status,
             reason: reason.map(ToString::to_string),
         });
