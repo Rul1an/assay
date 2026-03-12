@@ -536,6 +536,16 @@ impl McpProxy {
         event.data.restrict_scope_target = metadata.restrict_scope_target.clone();
         event.data.restrict_scope_match = metadata.restrict_scope_match;
         event.data.restrict_scope_reason = metadata.restrict_scope_reason.clone();
+        event.data.redaction_target = metadata.redaction_target.clone();
+        event.data.redaction_mode = metadata.redaction_mode.clone();
+        event.data.redaction_scope = metadata.redaction_scope.clone();
+        event.data.redaction_applied_state = metadata.redaction_applied_state.clone();
+        event.data.redaction_reason = metadata.redaction_reason.clone();
+        event.data.redact_args_present = metadata.redact_args_present;
+        event.data.redact_args_target = metadata.redact_args_target.clone();
+        event.data.redact_args_mode = metadata.redact_args_mode.clone();
+        event.data.redact_args_result = metadata.redact_args_result.clone();
+        event.data.redact_args_reason = metadata.redact_args_reason.clone();
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();

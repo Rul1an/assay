@@ -126,6 +126,12 @@ pub struct ToolPolicy {
     pub restrict_scope_classes: Option<Vec<String>>,
     #[serde(default)]
     pub restrict_scope_contract: Option<RestrictScopeContract>,
+    #[serde(default)]
+    pub redact_args: Option<Vec<String>>,
+    #[serde(default)]
+    pub redact_args_classes: Option<Vec<String>>,
+    #[serde(default)]
+    pub redact_args_contract: Option<RedactArgsContract>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -151,6 +157,16 @@ pub struct PolicyMatchMetadata {
     pub restrict_scope_target: Option<String>,
     pub restrict_scope_match: Option<bool>,
     pub restrict_scope_reason: Option<String>,
+    pub redaction_target: Option<String>,
+    pub redaction_mode: Option<String>,
+    pub redaction_scope: Option<String>,
+    pub redaction_applied_state: Option<String>,
+    pub redaction_reason: Option<String>,
+    pub redact_args_present: Option<bool>,
+    pub redact_args_target: Option<String>,
+    pub redact_args_mode: Option<String>,
+    pub redact_args_result: Option<String>,
+    pub redact_args_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -222,6 +238,8 @@ pub struct PolicyObligation {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restrict_scope: Option<RestrictScopeContract>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args: Option<RedactArgsContract>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -242,6 +260,13 @@ pub struct RestrictScopeContract {
     pub scope_match_mode: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactArgsContract {
+    pub redaction_target: String,
+    pub redaction_mode: String,
+    pub redaction_scope: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalFreshness {
@@ -257,6 +282,7 @@ impl PolicyObligation {
             obligation_type: "legacy_warning".to_string(),
             detail: Some(format!("{code}:{reason}")),
             restrict_scope: None,
+            redact_args: None,
         }
     }
 
@@ -265,6 +291,7 @@ impl PolicyObligation {
             obligation_type: "alert".to_string(),
             detail: Some(format!("{code}:{reason}")),
             restrict_scope: None,
+            redact_args: None,
         }
     }
 
@@ -273,6 +300,16 @@ impl PolicyObligation {
             obligation_type: "restrict_scope".to_string(),
             detail,
             restrict_scope: Some(contract),
+            redact_args: None,
+        }
+    }
+
+    pub fn redact_args(contract: RedactArgsContract, detail: Option<String>) -> Self {
+        Self {
+            obligation_type: "redact_args".to_string(),
+            detail,
+            restrict_scope: None,
+            redact_args: Some(contract),
         }
     }
 }
@@ -529,6 +566,28 @@ mod tests {
                 scope_type: "resource".to_string(),
                 scope_value: "service/prod".to_string(),
                 scope_match_mode: "exact".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn redact_args_obligation_preserves_typed_shape() {
+        let obligation = PolicyObligation::redact_args(
+            RedactArgsContract {
+                redaction_target: "body".to_string(),
+                redaction_mode: "mask".to_string(),
+                redaction_scope: "request".to_string(),
+            },
+            Some("shape-only contract".to_string()),
+        );
+
+        assert_eq!(obligation.obligation_type, "redact_args");
+        assert_eq!(
+            obligation.redact_args,
+            Some(RedactArgsContract {
+                redaction_target: "body".to_string(),
+                redaction_mode: "mask".to_string(),
+                redaction_scope: "request".to_string(),
             })
         );
     }
