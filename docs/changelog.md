@@ -1278,6 +1278,20 @@
 - feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
 - docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
 - docs(wave26-step3): close obligations alert wave with docs+gate (#740) @Rul1an
+
+## [2026-03-12]
+
+- docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
+- feat(wave29-step2): add restrict_scope contract and evidence shape (#758) @Rul1an
+- docs(wave29-step1): freeze restrict_scope contract (#756) @Rul1an
+- fix(wave28): recovery step2 approval_required enforcement (#754) @Rul1an
+- promote(wave28): land Step2+Step3 on main (#752) @Rul1an
+- docs(wave28-step3): add closure gate and review templates (#750) @Rul1an
+- chore(wave28-step2): add approval_required reviewer gate (#749) @Rul1an
+- docs(wave28-step1): freeze approval_required enforcement contract (#748) @Rul1an
+- docs(wave27-step3): close approval artifact wave with docs+gate (#746) @Rul1an
+- feat(wave27-step2): approval artifact shape and additive evidence fields (#744) @Rul1an
+- docs(wave27-step1): freeze approval artifact contract (#742) @Rul1an
 ## [2026-03-11]
 
 - docs(wave26-step1): freeze alert obligations execution scope (#736) @Rul1an
