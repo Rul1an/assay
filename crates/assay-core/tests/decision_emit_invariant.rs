@@ -8,8 +8,8 @@ use assay_core::mcp::decision::{
     ObligationOutcomeStatus,
 };
 use assay_core::mcp::policy::{
-    ApprovalFreshness, McpPolicy, PolicyState, RestrictScopeContract, ToolPolicy,
-    TypedPolicyDecision,
+    ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
+    ToolPolicy, TypedPolicyDecision,
 };
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
 use chrono::{Duration, Utc};
@@ -98,6 +98,24 @@ fn restrict_scope_policy() -> McpPolicy {
         scope_type: "resource".to_string(),
         scope_value: "service/prod".to_string(),
         scope_match_mode: "exact".to_string(),
+    })
+}
+
+fn redact_args_policy_with_contract(contract: RedactArgsContract) -> McpPolicy {
+    let mut policy = McpPolicy::default();
+    policy.tools = ToolPolicy {
+        redact_args: Some(vec!["deploy_*".to_string()]),
+        redact_args_contract: Some(contract),
+        ..Default::default()
+    };
+    policy
+}
+
+fn redact_args_policy() -> McpPolicy {
+    redact_args_policy_with_contract(RedactArgsContract {
+        redaction_target: "body".to_string(),
+        redaction_mode: "mask".to_string(),
+        redaction_scope: "request".to_string(),
     })
 }
 
@@ -557,6 +575,61 @@ fn restrict_scope_unsupported_scope_type_denies() {
         event.data.scope_failure_reason.as_deref(),
         Some("scope_type_unsupported")
     );
+}
+
+#[test]
+fn redact_args_contract_sets_additive_fields() {
+    let emitter = Arc::new(TestEmitter::new());
+    let handler = ToolCallHandler::new(
+        redact_args_policy(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+
+    let request = make_tool_request_with_args(
+        "deploy_service",
+        serde_json::json!({
+            "body": {"token": "secret"},
+            "_meta": {
+                "resource": "service/prod"
+            }
+        }),
+    );
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call(&request, &mut state, None, None, None);
+    assert!(matches!(result, HandleResult::Allow { .. }));
+    assert_eq!(emitter.event_count(), 1);
+
+    let event = emitter.last_event().expect("Should have event");
+    assert_eq!(event.data.redaction_target.as_deref(), Some("body"));
+    assert_eq!(event.data.redaction_mode.as_deref(), Some("mask"));
+    assert_eq!(event.data.redaction_scope.as_deref(), Some("request"));
+    assert_eq!(
+        event.data.redaction_applied_state.as_deref(),
+        Some("contract_only")
+    );
+    assert_eq!(
+        event.data.redaction_reason.as_deref(),
+        Some("runtime_redaction_deferred")
+    );
+    assert_eq!(event.data.redact_args_present, Some(true));
+    assert_eq!(event.data.redact_args_target.as_deref(), Some("body"));
+    assert_eq!(event.data.redact_args_mode.as_deref(), Some("mask"));
+    assert_eq!(
+        event.data.redact_args_result.as_deref(),
+        Some("contract_only")
+    );
+    assert_eq!(
+        event.data.redact_args_reason.as_deref(),
+        Some("runtime_redaction_deferred")
+    );
+    assert!(event.data.obligation_outcomes.iter().any(|outcome| {
+        outcome.obligation_type == "redact_args"
+            && outcome.status == ObligationOutcomeStatus::Skipped
+            && outcome.reason.as_deref()
+                == Some("contract-only in wave31 (no runtime redaction execution)")
+    }));
 }
 
 // =============================================================================

@@ -4,8 +4,8 @@
 //! Every tool call attempt MUST emit exactly one decision event.
 
 use super::policy::{
-    ApprovalArtifact, ApprovalFreshness, PolicyObligation, RestrictScopeContract,
-    TypedPolicyDecision,
+    ApprovalArtifact, ApprovalFreshness, PolicyObligation, RedactArgsContract,
+    RestrictScopeContract, TypedPolicyDecision,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -97,6 +97,14 @@ pub struct PolicyDecisionEventContext {
     pub restrict_scope_target: Option<String>,
     pub restrict_scope_match: Option<bool>,
     pub restrict_scope_reason: Option<String>,
+    pub redaction_contract: Option<RedactArgsContract>,
+    pub redaction_applied_state: Option<String>,
+    pub redaction_reason: Option<String>,
+    pub redact_args_present: Option<bool>,
+    pub redact_args_target: Option<String>,
+    pub redact_args_mode: Option<String>,
+    pub redact_args_result: Option<String>,
+    pub redact_args_reason: Option<String>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -209,6 +217,36 @@ pub struct DecisionData {
     /// Restrict-scope evidence marker: passive reason
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restrict_scope_reason: Option<String>,
+    /// Redact-args obligation shape field: target
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_target: Option<String>,
+    /// Redact-args obligation shape field: mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_mode: Option<String>,
+    /// Redact-args obligation shape field: scope
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_scope: Option<String>,
+    /// Redact-args evidence field: applied state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_applied_state: Option<String>,
+    /// Redact-args evidence field: reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_reason: Option<String>,
+    /// Redact-args additive marker: obligation present
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args_present: Option<bool>,
+    /// Redact-args additive marker: target summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args_target: Option<String>,
+    /// Redact-args additive marker: mode summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args_mode: Option<String>,
+    /// Redact-args additive marker: evaluation result
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args_result: Option<String>,
+    /// Redact-args additive marker: evaluation reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redact_args_reason: Option<String>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -295,6 +333,16 @@ impl DecisionEvent {
                 restrict_scope_target: None,
                 restrict_scope_match: None,
                 restrict_scope_reason: None,
+                redaction_target: None,
+                redaction_mode: None,
+                redaction_scope: None,
+                redaction_applied_state: None,
+                redaction_reason: None,
+                redact_args_present: None,
+                redact_args_target: None,
+                redact_args_mode: None,
+                redact_args_result: None,
+                redact_args_reason: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -412,6 +460,14 @@ impl DecisionEvent {
             restrict_scope_target,
             restrict_scope_match,
             restrict_scope_reason,
+            redaction_contract,
+            redaction_applied_state,
+            redaction_reason,
+            redact_args_present,
+            redact_args_target,
+            redact_args_mode,
+            redact_args_result,
+            redact_args_reason,
             lane,
             principal,
             auth_context_summary,
@@ -445,6 +501,18 @@ impl DecisionEvent {
         self.data.restrict_scope_target = restrict_scope_target;
         self.data.restrict_scope_match = restrict_scope_match;
         self.data.restrict_scope_reason = restrict_scope_reason;
+        if let Some(contract) = redaction_contract {
+            self.data.redaction_target = Some(contract.redaction_target);
+            self.data.redaction_mode = Some(contract.redaction_mode);
+            self.data.redaction_scope = Some(contract.redaction_scope);
+        }
+        self.data.redaction_applied_state = redaction_applied_state;
+        self.data.redaction_reason = redaction_reason;
+        self.data.redact_args_present = redact_args_present;
+        self.data.redact_args_target = redact_args_target;
+        self.data.redact_args_mode = redact_args_mode;
+        self.data.redact_args_result = redact_args_result;
+        self.data.redact_args_reason = redact_args_reason;
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
@@ -605,6 +673,14 @@ impl DecisionEmitterGuard {
                 restrict_scope_target,
                 restrict_scope_match,
                 restrict_scope_reason,
+                redaction_contract,
+                redaction_applied_state,
+                redaction_reason,
+                redact_args_present,
+                redact_args_target,
+                redact_args_mode,
+                redact_args_result,
+                redact_args_reason,
                 lane,
                 principal,
                 auth_context_summary,
@@ -638,6 +714,18 @@ impl DecisionEmitterGuard {
             event.data.restrict_scope_target = restrict_scope_target;
             event.data.restrict_scope_match = restrict_scope_match;
             event.data.restrict_scope_reason = restrict_scope_reason;
+            if let Some(contract) = redaction_contract {
+                event.data.redaction_target = Some(contract.redaction_target);
+                event.data.redaction_mode = Some(contract.redaction_mode);
+                event.data.redaction_scope = Some(contract.redaction_scope);
+            }
+            event.data.redaction_applied_state = redaction_applied_state;
+            event.data.redaction_reason = redaction_reason;
+            event.data.redact_args_present = redact_args_present;
+            event.data.redact_args_target = redact_args_target;
+            event.data.redact_args_mode = redact_args_mode;
+            event.data.redact_args_result = redact_args_result;
+            event.data.redact_args_reason = redact_args_reason;
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;

@@ -3,7 +3,7 @@ use super::super::jsonrpc::JsonRpcRequest;
 use super::super::tool_match::MatchBasis;
 use super::{
     matches_tool_pattern, McpPolicy, PolicyDecision, PolicyEvaluation, PolicyMatchMetadata,
-    PolicyObligation, PolicyState, RestrictScopeContract, UnconstrainedMode,
+    PolicyObligation, PolicyState, RedactArgsContract, RestrictScopeContract, UnconstrainedMode,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -160,6 +160,14 @@ pub(super) fn evaluate_with_metadata(
             &decision,
             &mut metadata,
         );
+        apply_redact_args_obligation(
+            policy,
+            tool_name,
+            args,
+            &tool_classes,
+            &decision,
+            &mut metadata,
+        );
         return finalize_evaluation(policy, metadata, decision);
     }
 
@@ -185,6 +193,14 @@ pub(super) fn evaluate_with_metadata(
 
     apply_approval_required_obligation(policy, tool_name, &tool_classes, &decision, &mut metadata);
     apply_restrict_scope_obligation(
+        policy,
+        tool_name,
+        args,
+        &tool_classes,
+        &decision,
+        &mut metadata,
+    );
+    apply_redact_args_obligation(
         policy,
         tool_name,
         args,
@@ -307,6 +323,7 @@ fn apply_approval_required_obligation(
             obligation_type: "approval_required".to_string(),
             detail: Some("runtime approval artifact required".to_string()),
             restrict_scope: None,
+            redact_args: None,
         });
         metadata.approval_state = Some("required".to_string());
     }
@@ -366,6 +383,57 @@ fn apply_restrict_scope_obligation(
     metadata.restrict_scope_reason = evaluation.reason;
 }
 
+fn apply_redact_args_obligation(
+    policy: &McpPolicy,
+    tool_name: &str,
+    args: &Value,
+    tool_classes: &BTreeSet<String>,
+    decision: &PolicyDecision,
+    metadata: &mut PolicyMatchMetadata,
+) {
+    if !matches!(
+        decision,
+        PolicyDecision::Allow | PolicyDecision::AllowWithWarning { .. }
+    ) {
+        return;
+    }
+
+    let name_redact = policy.tools.redact_args.as_ref().is_some_and(|patterns| {
+        patterns
+            .iter()
+            .any(|pattern| matches_tool_pattern(tool_name, pattern))
+    });
+    let class_redact =
+        !match_classes(tool_classes, policy.tools.redact_args_classes.as_ref()).is_empty();
+
+    if !name_redact && !class_redact {
+        return;
+    }
+
+    let contract = policy
+        .tools
+        .redact_args_contract
+        .clone()
+        .unwrap_or_else(default_redact_args_contract);
+
+    let evaluation = evaluate_redact_args_contract(&contract, args);
+    metadata.obligations.push(PolicyObligation::redact_args(
+        contract.clone(),
+        Some("redact_args contract captured; runtime redaction deferred".to_string()),
+    ));
+
+    metadata.redaction_target = Some(contract.redaction_target.clone());
+    metadata.redaction_mode = Some(contract.redaction_mode.clone());
+    metadata.redaction_scope = Some(contract.redaction_scope.clone());
+    metadata.redaction_applied_state = Some(evaluation.result.clone());
+    metadata.redaction_reason = evaluation.reason.clone();
+    metadata.redact_args_present = Some(true);
+    metadata.redact_args_target = Some(contract.redaction_target.clone());
+    metadata.redact_args_mode = Some(contract.redaction_mode.clone());
+    metadata.redact_args_result = Some(evaluation.result);
+    metadata.redact_args_reason = evaluation.reason;
+}
+
 #[derive(Debug)]
 struct RestrictScopeEvaluation {
     target: String,
@@ -374,11 +442,25 @@ struct RestrictScopeEvaluation {
     reason: Option<String>,
 }
 
+#[derive(Debug)]
+struct RedactArgsEvaluation {
+    result: String,
+    reason: Option<String>,
+}
+
 fn default_restrict_scope_contract() -> RestrictScopeContract {
     RestrictScopeContract {
         scope_type: "resource".to_string(),
         scope_value: "*".to_string(),
         scope_match_mode: "exact".to_string(),
+    }
+}
+
+fn default_redact_args_contract() -> RedactArgsContract {
+    RedactArgsContract {
+        redaction_target: "body".to_string(),
+        redaction_mode: "mask".to_string(),
+        redaction_scope: "request".to_string(),
     }
 }
 
@@ -477,6 +559,43 @@ fn evaluate_restrict_scope_contract(
         is_match: result.0,
         state: result.1,
         reason: result.2,
+    }
+}
+
+fn evaluate_redact_args_contract(
+    contract: &RedactArgsContract,
+    _args: &Value,
+) -> RedactArgsEvaluation {
+    let target = contract.redaction_target.trim().to_ascii_lowercase();
+    let mode = contract.redaction_mode.trim().to_ascii_lowercase();
+    let scope = contract.redaction_scope.trim().to_ascii_lowercase();
+
+    let target_supported = matches!(
+        target.as_str(),
+        "path" | "query" | "headers" | "body" | "metadata" | "args"
+    );
+    let mode_supported = matches!(mode.as_str(), "mask" | "hash" | "drop" | "partial");
+    let scope_supported = matches!(scope.as_str(), "request" | "args" | "metadata");
+
+    let reason = if target_supported && mode_supported && scope_supported {
+        Some("runtime_redaction_deferred".to_string())
+    } else if !target_supported {
+        Some("redaction_target_unsupported".to_string())
+    } else if !mode_supported {
+        Some("redaction_mode_unsupported".to_string())
+    } else {
+        Some("redaction_scope_unsupported".to_string())
+    };
+
+    let result = if target_supported && mode_supported && scope_supported {
+        "contract_only"
+    } else {
+        "contract_only_invalid"
+    };
+
+    RedactArgsEvaluation {
+        result: result.to_string(),
+        reason,
     }
 }
 
