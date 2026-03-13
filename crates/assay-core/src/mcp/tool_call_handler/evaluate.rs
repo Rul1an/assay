@@ -62,11 +62,13 @@ pub(super) fn handle_tool_call(
     guard.set_request_id(request.id.clone());
 
     let start = Instant::now();
+    let original_arguments = params.arguments.clone();
+    let mut effective_arguments = original_arguments.clone();
 
     // Step 1: Policy evaluation
     let policy_eval = handler.policy.evaluate_with_metadata(
         &tool_name,
-        &params.arguments,
+        &effective_arguments,
         state,
         runtime_identity,
     );
@@ -112,7 +114,7 @@ pub(super) fn handle_tool_call(
 
     // Step 2: approval_required obligation enforcement (Wave28)
     if let Some(failure) =
-        validate_approval_required(&tool_name, &params.arguments, &mut tool_match)
+        validate_approval_required(&tool_name, &effective_arguments, &mut tool_match)
     {
         let reason = failure.to_string();
         guard.set_policy_context(tool_match.policy_context());
@@ -145,7 +147,7 @@ pub(super) fn handle_tool_call(
     }
 
     // Step 4: redact_args obligation enforcement (Wave32)
-    if let Some(failure) = validate_redact_args(&mut tool_match) {
+    if let Some(failure) = validate_redact_args(&mut effective_arguments, &mut tool_match) {
         let reason = failure.to_string();
         guard.set_policy_context(tool_match.policy_context());
         guard.emit_deny(reason_codes::P_REDACT_ARGS, Some(reason.clone()));
@@ -218,6 +220,7 @@ pub(super) fn handle_tool_call(
                     tool_name,
                     reason_codes::P_MANDATE_VALID,
                     Some(receipt),
+                    (effective_arguments != original_arguments).then_some(effective_arguments),
                     tool_match,
                 );
             }
@@ -259,6 +262,7 @@ pub(super) fn handle_tool_call(
         tool_name,
         reason_codes::P_POLICY_ALLOW,
         None,
+        (effective_arguments != original_arguments).then_some(effective_arguments),
         tool_match,
     )
 }
@@ -332,16 +336,6 @@ impl RedactArgsFailure {
             Self::ModeUnsupported => "redaction mode unsupported",
             Self::ScopeUnsupported => "redaction scope unsupported",
             Self::ApplyFailed => "redaction apply failed",
-        }
-    }
-
-    fn from_code(code: Option<&str>) -> Self {
-        match code {
-            Some("redaction_target_missing") => Self::TargetMissing,
-            Some("redaction_mode_unsupported") => Self::ModeUnsupported,
-            Some("redaction_scope_unsupported") => Self::ScopeUnsupported,
-            Some("redaction_apply_failed") => Self::ApplyFailed,
-            _ => Self::ApplyFailed,
         }
     }
 }
@@ -523,7 +517,10 @@ fn validate_restrict_scope(
     Some(mark_restrict_scope_failure(tool_match, failure))
 }
 
-fn validate_redact_args(tool_match: &mut emit::ToolMatchMetadata) -> Option<RedactArgsFailure> {
+fn validate_redact_args(
+    args: &mut Value,
+    tool_match: &mut emit::ToolMatchMetadata,
+) -> Option<RedactArgsFailure> {
     let requires_redaction = tool_match
         .obligations
         .iter()
@@ -532,31 +529,131 @@ fn validate_redact_args(tool_match: &mut emit::ToolMatchMetadata) -> Option<Reda
         return None;
     }
 
-    if matches!(
-        tool_match.redaction_applied_state.as_deref(),
-        Some("applied")
-    ) {
-        tool_match.redaction_failure_reason = None;
-        tool_match.redaction_reason = None;
-        tool_match.redact_args_reason = None;
-        tool_match.redact_args_result = Some("applied".to_string());
-        mark_redact_args_outcome(
+    let Some(contract) = tool_match.redaction_contract.as_ref() else {
+        return Some(mark_redact_args_failure(
             tool_match,
-            super::super::decision::ObligationOutcomeStatus::Applied,
-            None,
-            None,
-        );
-        return None;
+            RedactArgsFailure::TargetMissing,
+        ));
+    };
+
+    match apply_redact_args_runtime(args, contract) {
+        Ok(()) => {
+            tool_match.redaction_applied_state = Some("applied".to_string());
+            tool_match.redact_args_result = Some("applied".to_string());
+            tool_match.redaction_failure_reason = None;
+            tool_match.redaction_reason = None;
+            tool_match.redact_args_reason = None;
+            mark_redact_args_outcome(
+                tool_match,
+                super::super::decision::ObligationOutcomeStatus::Applied,
+                None,
+                Some(OUTCOME_REASON_VALIDATED_IN_HANDLER),
+            );
+            None
+        }
+        Err(failure) => {
+            let reason_code = failure.code();
+            let applied_state = match failure {
+                RedactArgsFailure::ModeUnsupported | RedactArgsFailure::ScopeUnsupported => {
+                    "not_evaluated"
+                }
+                RedactArgsFailure::TargetMissing | RedactArgsFailure::ApplyFailed => "not_applied",
+            };
+            tool_match.redaction_applied_state = Some(applied_state.to_string());
+            tool_match.redact_args_result = Some(applied_state.to_string());
+            tool_match.redaction_failure_reason = Some(reason_code.to_string());
+            tool_match.redaction_reason = Some(reason_code.to_string());
+            tool_match.redact_args_reason = Some(reason_code.to_string());
+            Some(mark_redact_args_failure(tool_match, failure))
+        }
+    }
+}
+
+fn apply_redact_args_runtime(
+    args: &mut Value,
+    contract: &super::super::policy::RedactArgsContract,
+) -> Result<(), RedactArgsFailure> {
+    let target = contract.redaction_target.trim().to_ascii_lowercase();
+    let mode = contract.redaction_mode.trim().to_ascii_lowercase();
+    let scope = contract.redaction_scope.trim().to_ascii_lowercase();
+
+    if !matches!(scope.as_str(), "request" | "args" | "metadata") {
+        return Err(RedactArgsFailure::ScopeUnsupported);
     }
 
-    let failure = RedactArgsFailure::from_code(
-        tool_match
-            .redaction_failure_reason
-            .as_deref()
-            .or(tool_match.redaction_reason.as_deref())
-            .or(tool_match.redact_args_reason.as_deref()),
-    );
-    Some(mark_redact_args_failure(tool_match, failure))
+    if mode == "drop" {
+        return apply_drop_redaction(args, &target);
+    }
+
+    let Some(target_value) = redaction_target_value_mut(args, &target) else {
+        return Err(RedactArgsFailure::TargetMissing);
+    };
+
+    apply_value_redaction(target_value, &mode)
+}
+
+fn apply_drop_redaction(args: &mut Value, target: &str) -> Result<(), RedactArgsFailure> {
+    match target {
+        "path" | "query" | "headers" | "body" => args
+            .as_object_mut()
+            .ok_or(RedactArgsFailure::ApplyFailed)?
+            .remove(target)
+            .map(|_| ())
+            .ok_or(RedactArgsFailure::TargetMissing),
+        "metadata" => args
+            .as_object_mut()
+            .ok_or(RedactArgsFailure::ApplyFailed)?
+            .remove("_meta")
+            .map(|_| ())
+            .ok_or(RedactArgsFailure::TargetMissing),
+        "args" => {
+            *args = Value::Object(serde_json::Map::new());
+            Ok(())
+        }
+        _ => Err(RedactArgsFailure::TargetMissing),
+    }
+}
+
+fn redaction_target_value_mut<'a>(args: &'a mut Value, target: &str) -> Option<&'a mut Value> {
+    match target {
+        "path" => args.get_mut("path"),
+        "query" => args.get_mut("query"),
+        "headers" => args.get_mut("headers"),
+        "body" => args.get_mut("body"),
+        "metadata" => args.get_mut("_meta"),
+        "args" => Some(args),
+        _ => None,
+    }
+}
+
+fn apply_value_redaction(target_value: &mut Value, mode: &str) -> Result<(), RedactArgsFailure> {
+    match mode {
+        "mask" => {
+            *target_value = Value::String("[REDACTED]".to_string());
+            Ok(())
+        }
+        "hash" => {
+            let input = target_value.to_string();
+            *target_value = Value::String(format!("md5:{:x}", md5::compute(input)));
+            Ok(())
+        }
+        "partial" => {
+            let Some(input) = target_value.as_str() else {
+                return Err(RedactArgsFailure::ApplyFailed);
+            };
+            *target_value = Value::String(partial_mask(input));
+            Ok(())
+        }
+        _ => Err(RedactArgsFailure::ModeUnsupported),
+    }
+}
+
+fn partial_mask(input: &str) -> String {
+    if input.is_empty() {
+        return "***".to_string();
+    }
+    let keep = input.chars().take(2).collect::<String>();
+    format!("{keep}***")
 }
 
 fn mark_restrict_scope_failure(

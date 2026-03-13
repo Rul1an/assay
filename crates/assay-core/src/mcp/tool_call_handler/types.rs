@@ -10,6 +10,9 @@ pub enum HandleResult {
     /// Tool call is allowed, forward to server
     Allow {
         receipt: Option<AuthzReceipt>,
+        /// Runtime-redacted arguments when redact_args enforcement changed payload.
+        /// `None` means original args are unchanged.
+        effective_arguments: Option<serde_json::Value>,
         decision_event: DecisionEvent,
     },
     /// Tool call is denied, return error response

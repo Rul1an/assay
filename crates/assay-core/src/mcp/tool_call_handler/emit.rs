@@ -187,6 +187,7 @@ pub(super) fn allow(
     tool_name: String,
     reason_code: &str,
     receipt: Option<AuthzReceipt>,
+    effective_arguments: Option<serde_json::Value>,
     tool_match: ToolMatchMetadata,
 ) -> HandleResult {
     let decision_event = DecisionEvent::new(event_source.to_string(), tool_call_id, tool_name)
@@ -201,6 +202,7 @@ pub(super) fn allow(
 
     HandleResult::Allow {
         receipt,
+        effective_arguments,
         decision_event,
     }
 }
