@@ -4,7 +4,7 @@
 //! Every tool call attempt MUST emit exactly one decision event.
 
 use super::policy::{
-    ApprovalArtifact, ApprovalFreshness, PolicyObligation, RedactArgsContract,
+    ApprovalArtifact, ApprovalFreshness, FailClosedContext, PolicyObligation, RedactArgsContract,
     RestrictScopeContract, TypedPolicyDecision,
 };
 use serde::{Deserialize, Serialize};
@@ -113,6 +113,7 @@ pub struct PolicyDecisionEventContext {
     pub redact_args_mode: Option<String>,
     pub redact_args_result: Option<String>,
     pub redact_args_reason: Option<String>,
+    pub fail_closed: Option<FailClosedContext>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -258,6 +259,9 @@ pub struct DecisionData {
     /// Redact-args additive marker: evaluation reason
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redact_args_reason: Option<String>,
+    /// Additive fail-closed matrix context for this decision
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_closed: Option<FailClosedContext>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -355,6 +359,7 @@ impl DecisionEvent {
                 redact_args_mode: None,
                 redact_args_result: None,
                 redact_args_reason: None,
+                fail_closed: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -481,6 +486,7 @@ impl DecisionEvent {
             redact_args_mode,
             redact_args_result,
             redact_args_reason,
+            fail_closed,
             lane,
             principal,
             auth_context_summary,
@@ -527,6 +533,7 @@ impl DecisionEvent {
         self.data.redact_args_mode = redact_args_mode;
         self.data.redact_args_result = redact_args_result;
         self.data.redact_args_reason = redact_args_reason;
+        self.data.fail_closed = fail_closed;
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
@@ -696,6 +703,7 @@ impl DecisionEmitterGuard {
                 redact_args_mode,
                 redact_args_result,
                 redact_args_reason,
+                fail_closed,
                 lane,
                 principal,
                 auth_context_summary,
@@ -742,6 +750,7 @@ impl DecisionEmitterGuard {
             event.data.redact_args_mode = redact_args_mode;
             event.data.redact_args_result = redact_args_result;
             event.data.redact_args_reason = redact_args_reason;
+            event.data.fail_closed = fail_closed;
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;
