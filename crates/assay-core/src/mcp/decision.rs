@@ -3,6 +3,7 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
+use self::outcome_convergence::classify_decision_outcome;
 use super::policy::{
     ApprovalArtifact, ApprovalFreshness, FailClosedContext, PolicyObligation, RedactArgsContract,
     RestrictScopeContract, TypedPolicyDecision,
@@ -11,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Write;
 use std::sync::Arc;
+
+mod outcome_convergence;
+pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
 
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
@@ -278,6 +282,15 @@ pub struct DecisionData {
     /// Additive fail-closed matrix context for this decision
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fail_closed: Option<FailClosedContext>,
+    /// Canonical decision/evidence convergence outcome classification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_outcome_kind: Option<DecisionOutcomeKind>,
+    /// Origin for the canonical convergence classification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_origin: Option<DecisionOrigin>,
+    /// Compatibility state for downstream consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_compat_state: Option<OutcomeCompatState>,
     /// Normalized decision path for fulfillment evidence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment_decision_path: Option<FulfillmentDecisionPath>,
@@ -401,6 +414,20 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
             .iter()
             .any(|outcome| outcome.status == ObligationOutcomeStatus::Error),
     );
+    let outcome = classify_decision_outcome(
+        data.decision,
+        data.reason_code.as_str(),
+        data.fail_closed
+            .as_ref()
+            .map(|ctx| ctx.fail_closed_applied)
+            .unwrap_or(false),
+        data.obligation_applied_present.unwrap_or(false),
+        data.obligation_skipped_present.unwrap_or(false),
+        data.obligation_error_present.unwrap_or(false),
+    );
+    data.decision_outcome_kind = Some(outcome.kind);
+    data.decision_origin = Some(outcome.origin);
+    data.outcome_compat_state = Some(outcome.compat_state);
     data.fulfillment_decision_path = Some(classify_fulfillment_decision_path(data));
 }
 
@@ -455,6 +482,9 @@ impl DecisionEvent {
                 redact_args_result: None,
                 redact_args_reason: None,
                 fail_closed: None,
+                decision_outcome_kind: None,
+                decision_origin: None,
+                outcome_compat_state: None,
                 fulfillment_decision_path: None,
                 obligation_applied_present: None,
                 obligation_skipped_present: None,

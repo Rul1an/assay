@@ -4,8 +4,8 @@
 //! one decision event being emitted, regardless of outcome.
 
 use assay_core::mcp::decision::{
-    reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent,
-    FulfillmentDecisionPath, ObligationOutcomeStatus,
+    reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent, DecisionOrigin,
+    DecisionOutcomeKind, FulfillmentDecisionPath, ObligationOutcomeStatus, OutcomeCompatState,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1026,6 +1026,18 @@ fn test_event_contains_required_fields() {
     assert_eq!(
         event.data.fulfillment_decision_path,
         Some(FulfillmentDecisionPath::PolicyAllow)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::ObligationApplied)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::ObligationExecutor)
+    );
+    assert_eq!(
+        event.data.outcome_compat_state,
+        Some(OutcomeCompatState::LegacyFieldsPreserved)
     );
     assert_eq!(event.data.obligation_applied_present, Some(true));
     assert_eq!(event.data.obligation_skipped_present, Some(false));

@@ -1,6 +1,6 @@
 use assay_core::mcp::decision::{
-    reason_codes, DecisionEvent, FulfillmentDecisionPath, ObligationOutcome,
-    ObligationOutcomeStatus, PolicyDecisionEventContext,
+    reason_codes, DecisionEvent, DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath,
+    ObligationOutcome, ObligationOutcomeStatus, OutcomeCompatState, PolicyDecisionEventContext,
 };
 use assay_core::mcp::policy::{
     FailClosedContext, FailClosedMode, FailClosedTrigger, ToolRiskClass,
@@ -34,6 +34,18 @@ fn fulfillment_normalizes_outcomes_and_sets_policy_deny_path() {
     assert_eq!(
         event.data.fulfillment_decision_path,
         Some(FulfillmentDecisionPath::PolicyDeny)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::EnforcementDeny)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::RuntimeEnforcement)
+    );
+    assert_eq!(
+        event.data.outcome_compat_state,
+        Some(OutcomeCompatState::LegacyFieldsPreserved)
     );
     assert_eq!(event.data.obligation_applied_present, Some(true));
     assert_eq!(event.data.obligation_skipped_present, Some(false));
@@ -84,5 +96,43 @@ fn fulfillment_sets_fail_closed_deny_path() {
     assert_eq!(
         event.data.fulfillment_decision_path,
         Some(FulfillmentDecisionPath::FailClosedDeny)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::FailClosedDeny)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::FailClosedMatrix)
+    );
+}
+
+#[test]
+fn fulfillment_sets_policy_deny_convergence_fields() {
+    let event = DecisionEvent::new(
+        "assay://test".to_string(),
+        "tc_009".to_string(),
+        "deploy_service".to_string(),
+    )
+    .deny(
+        reason_codes::P_POLICY_DENY,
+        Some("policy blocked".to_string()),
+    );
+
+    assert_eq!(
+        event.data.fulfillment_decision_path,
+        Some(FulfillmentDecisionPath::PolicyDeny)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::PolicyDeny)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::PolicyEngine)
+    );
+    assert_eq!(
+        event.data.outcome_compat_state,
+        Some(OutcomeCompatState::LegacyFieldsPreserved)
     );
 }
