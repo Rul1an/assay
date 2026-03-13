@@ -17,7 +17,6 @@ use std::time::Instant;
 const OUTCOME_NORMALIZATION_VERSION: &str = "v1";
 const OUTCOME_STAGE_HANDLER: &str = "handler";
 const OUTCOME_REASON_VALIDATED_IN_HANDLER: &str = "validated_in_handler";
-const FAIL_CLOSED_CONTEXT_PROVIDER_UNAVAILABLE: &str = "fail_closed_context_provider_unavailable";
 const FAIL_CLOSED_RUNTIME_DEPENDENCY_ERROR: &str = "fail_closed_runtime_dependency_error";
 const DEGRADE_READ_ONLY_RUNTIME_DEPENDENCY_ERROR: &str =
     "degrade_read_only_runtime_dependency_error";
@@ -446,11 +445,6 @@ fn mark_approval_failure(
     tool_match: &mut emit::ToolMatchMetadata,
     failure: ApprovalFailure,
 ) -> ApprovalFailure {
-    mark_fail_closed(
-        tool_match,
-        FailClosedTrigger::ContextProviderUnavailable,
-        FAIL_CLOSED_CONTEXT_PROVIDER_UNAVAILABLE.to_string(),
-    );
     tool_match.approval_state = Some("denied".to_string());
     tool_match.approval_failure_reason = Some(failure.as_reason().to_string());
     mark_approval_outcome(
@@ -712,7 +706,7 @@ fn requested_resource(args: &Value) -> Option<&str> {
 
 fn seed_fail_closed_context(tool_match: &mut emit::ToolMatchMetadata, op: OperationClass) {
     let tool_risk_class = match op {
-        OperationClass::Read => ToolRiskClass::Default,
+        OperationClass::Read => ToolRiskClass::LowRiskRead,
         OperationClass::Write | OperationClass::Commit => ToolRiskClass::HighRisk,
     };
     let fail_closed_mode = match tool_risk_class {

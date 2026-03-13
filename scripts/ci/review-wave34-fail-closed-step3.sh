@@ -33,6 +33,20 @@ while IFS= read -r f; do
   fi
 done < <(git diff --name-only "$BASE_REF"...HEAD)
 
+echo "[review] no untracked files under bounded runtime scope"
+for p in \
+  "crates/assay-core/src/mcp" \
+  "crates/assay-core/tests" \
+  "crates/assay-cli/src/cli/commands" \
+  "crates/assay-mcp-server"
+do
+  if git ls-files --others --exclude-standard -- "$p" | rg -n '.' >/dev/null; then
+    echo "FAIL: untracked files present under $p"
+    git ls-files --others --exclude-standard -- "$p" | sed 's/^/  - /'
+    exit 1
+  fi
+done
+
 echo "[review] rerun Step2 invariants"
 
 echo "[review] fail-closed matrix markers"

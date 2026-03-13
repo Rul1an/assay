@@ -5,8 +5,8 @@ use crate::mcp::decision::{
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
 use crate::mcp::policy::{
-    ApprovalFreshness, FailClosedMode, FailClosedTrigger, RedactArgsContract,
-    RestrictScopeContract, ToolPolicy, ToolRiskClass, TypedPolicyDecision,
+    ApprovalFreshness, FailClosedMode, RedactArgsContract, RestrictScopeContract, ToolPolicy,
+    ToolRiskClass, TypedPolicyDecision,
 };
 use chrono::{Duration, Utc};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -117,30 +117,11 @@ fn assert_fail_closed_defaults(event: &DecisionEvent) {
         .fail_closed
         .as_ref()
         .expect("expected fail_closed context");
-    assert_eq!(context.tool_risk_class, ToolRiskClass::Default);
-    assert_eq!(context.fail_closed_mode, FailClosedMode::FailClosed);
+    assert_eq!(context.tool_risk_class, ToolRiskClass::LowRiskRead);
+    assert_eq!(context.fail_closed_mode, FailClosedMode::DegradeReadOnly);
     assert_eq!(context.fail_closed_trigger, None);
     assert!(!context.fail_closed_applied);
     assert!(context.fail_closed_error_code.is_none());
-}
-
-fn assert_fail_closed_context_provider_deny(event: &DecisionEvent) {
-    let context = event
-        .data
-        .fail_closed
-        .as_ref()
-        .expect("expected fail_closed context");
-    assert_eq!(context.tool_risk_class, ToolRiskClass::Default);
-    assert_eq!(context.fail_closed_mode, FailClosedMode::FailClosed);
-    assert_eq!(
-        context.fail_closed_trigger,
-        Some(FailClosedTrigger::ContextProviderUnavailable)
-    );
-    assert!(context.fail_closed_applied);
-    assert_eq!(
-        context.fail_closed_error_code.as_deref(),
-        Some("fail_closed_context_provider_unavailable")
-    );
 }
 
 #[test]
@@ -330,7 +311,7 @@ fn approval_required_missing_denies() {
         } => {
             assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
             assert_eq!(reason, "missing approval");
-            assert_fail_closed_context_provider_deny(&decision_event);
+            assert_fail_closed_defaults(&decision_event);
             assert_eq!(
                 decision_event.data.approval_failure_reason.as_deref(),
                 Some("missing approval")
@@ -377,7 +358,7 @@ fn approval_required_expired_denies() {
         } => {
             assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
             assert_eq!(reason, "expired approval");
-            assert_fail_closed_context_provider_deny(&decision_event);
+            assert_fail_closed_defaults(&decision_event);
             assert_eq!(
                 decision_event.data.approval_failure_reason.as_deref(),
                 Some("expired approval")
@@ -427,7 +408,7 @@ fn approval_required_bound_tool_mismatch_denies() {
         } => {
             assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
             assert_eq!(reason, "bound tool mismatch");
-            assert_fail_closed_context_provider_deny(&decision_event);
+            assert_fail_closed_defaults(&decision_event);
             assert_eq!(
                 decision_event.data.approval_failure_reason.as_deref(),
                 Some("bound tool mismatch")
@@ -480,7 +461,7 @@ fn approval_required_bound_resource_mismatch_denies() {
         } => {
             assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
             assert_eq!(reason, "bound resource mismatch");
-            assert_fail_closed_context_provider_deny(&decision_event);
+            assert_fail_closed_defaults(&decision_event);
             assert_eq!(
                 decision_event.data.approval_failure_reason.as_deref(),
                 Some("bound resource mismatch")
