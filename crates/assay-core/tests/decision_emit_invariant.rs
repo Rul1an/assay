@@ -6,6 +6,7 @@
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent, DecisionOrigin,
     DecisionOutcomeKind, FulfillmentDecisionPath, ObligationOutcomeStatus, OutcomeCompatState,
+    ReplayClassificationSource, DECISION_BASIS_VERSION_V1,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1055,6 +1056,20 @@ fn test_event_contains_required_fields() {
         event.data.outcome_compat_state,
         Some(OutcomeCompatState::LegacyFieldsPreserved)
     );
+    assert_eq!(
+        event.data.decision_basis_version.as_deref(),
+        Some(DECISION_BASIS_VERSION_V1)
+    );
+    assert_eq!(event.data.compat_fallback_applied, Some(false));
+    assert_eq!(
+        event.data.classification_source,
+        Some(ReplayClassificationSource::ConvergedOutcome)
+    );
+    assert_eq!(
+        event.data.replay_diff_reason.as_deref(),
+        Some("converged_obligation_applied")
+    );
+    assert_eq!(event.data.legacy_shape_detected, Some(false));
     assert_eq!(event.data.obligation_applied_present, Some(true));
     assert_eq!(event.data.obligation_skipped_present, Some(false));
     assert_eq!(event.data.obligation_error_present, Some(false));

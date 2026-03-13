@@ -1,7 +1,8 @@
 use assay_core::mcp::decision::{
     basis_from_decision_data, classify_replay_diff, reason_codes, Decision, DecisionEvent,
     DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath, OutcomeCompatState,
-    PolicyDecisionEventContext, ReplayDiffBucket,
+    PolicyDecisionEventContext, ReplayClassificationSource, ReplayDiffBucket,
+    DECISION_BASIS_VERSION_V1,
 };
 use assay_core::mcp::policy::TypedPolicyDecision;
 
@@ -43,6 +44,14 @@ fn basis_extraction_contains_frozen_fields() {
         basis.fulfillment_decision_path,
         Some(FulfillmentDecisionPath::PolicyAllow)
     );
+    assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
+    assert!(!basis.compat_fallback_applied);
+    assert_eq!(
+        basis.classification_source,
+        ReplayClassificationSource::ConvergedOutcome
+    );
+    assert_eq!(basis.replay_diff_reason, "converged_obligation_skipped");
+    assert!(!basis.legacy_shape_detected);
     assert_eq!(basis.reason_code, reason_codes::P_POLICY_ALLOW);
     assert_eq!(
         basis.typed_decision,
@@ -52,6 +61,53 @@ fn basis_extraction_contains_frozen_fields() {
     assert_eq!(basis.policy_digest.as_deref(), Some("sha1"));
     assert_eq!(basis.decision, Decision::Allow);
     assert!(!basis.fail_closed_applied);
+}
+
+#[test]
+fn basis_extraction_prefers_fulfillment_path_when_converged_markers_missing() {
+    let mut event = allow_event("v1", "sha1");
+    event.data.decision_outcome_kind = None;
+    event.data.decision_origin = None;
+    event.data.outcome_compat_state = None;
+    event.data.decision_basis_version = None;
+    event.data.compat_fallback_applied = None;
+    event.data.classification_source = None;
+    event.data.replay_diff_reason = None;
+    event.data.legacy_shape_detected = None;
+
+    let basis = basis_from_decision_data(&event.data);
+    assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
+    assert!(basis.compat_fallback_applied);
+    assert_eq!(
+        basis.classification_source,
+        ReplayClassificationSource::FulfillmentPath
+    );
+    assert_eq!(basis.replay_diff_reason, "fulfillment_policy_allow");
+    assert!(basis.legacy_shape_detected);
+}
+
+#[test]
+fn basis_extraction_marks_legacy_fallback_when_shape_is_missing() {
+    let mut event = allow_event("v1", "sha1");
+    event.data.decision_outcome_kind = None;
+    event.data.decision_origin = None;
+    event.data.outcome_compat_state = None;
+    event.data.fulfillment_decision_path = None;
+    event.data.decision_basis_version = None;
+    event.data.compat_fallback_applied = None;
+    event.data.classification_source = None;
+    event.data.replay_diff_reason = None;
+    event.data.legacy_shape_detected = None;
+
+    let basis = basis_from_decision_data(&event.data);
+    assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
+    assert!(basis.compat_fallback_applied);
+    assert_eq!(
+        basis.classification_source,
+        ReplayClassificationSource::LegacyFallback
+    );
+    assert_eq!(basis.replay_diff_reason, "legacy_decision_allow");
+    assert!(basis.legacy_shape_detected);
 }
 
 #[test]
