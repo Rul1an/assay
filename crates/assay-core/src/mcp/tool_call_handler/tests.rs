@@ -98,6 +98,18 @@ fn approval_artifact(bound_tool: &str, bound_resource: &str, expires_in_seconds:
     })
 }
 
+fn outcome_for<'a>(
+    event: &'a DecisionEvent,
+    obligation_type: &str,
+) -> &'a crate::mcp::decision::ObligationOutcome {
+    event
+        .data
+        .obligation_outcomes
+        .iter()
+        .find(|outcome| outcome.obligation_type == obligation_type)
+        .expect("expected obligation outcome")
+}
+
 #[test]
 fn test_handler_emits_decision_on_policy_deny() {
     let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
@@ -176,6 +188,12 @@ fn test_allow_with_warning_emits_log_obligation_outcome() {
                 outcome.reason.as_deref(),
                 Some("mapped from legacy_warning")
             );
+            assert_eq!(
+                outcome.reason_code.as_deref(),
+                Some("legacy_warning_mapped")
+            );
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("executor"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected allow result, got {:?}", other),
     }
@@ -233,6 +251,9 @@ fn test_tool_drift_deny_emits_alert_obligation_outcome() {
             assert_eq!(outcome.obligation_type, "alert");
             assert_eq!(outcome.status, ObligationOutcomeStatus::Applied);
             assert!(outcome.reason.is_none());
+            assert!(outcome.reason_code.is_none());
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("executor"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -283,6 +304,12 @@ fn approval_required_missing_denies() {
                 Some("denied")
             );
             assert_eq!(decision_event.data.approval_freshness, None);
+            let outcome = outcome_for(&decision_event, "approval_required");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Error);
+            assert_eq!(outcome.reason.as_deref(), Some("missing approval"));
+            assert_eq!(outcome.reason_code.as_deref(), Some("approval_missing"));
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("handler"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -326,6 +353,12 @@ fn approval_required_expired_denies() {
                 decision_event.data.approval_freshness,
                 Some(ApprovalFreshness::Expired)
             );
+            let outcome = outcome_for(&decision_event, "approval_required");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Error);
+            assert_eq!(outcome.reason.as_deref(), Some("expired approval"));
+            assert_eq!(outcome.reason_code.as_deref(), Some("approval_expired"));
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("handler"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -369,6 +402,15 @@ fn approval_required_bound_tool_mismatch_denies() {
                 decision_event.data.approval_freshness,
                 Some(ApprovalFreshness::Fresh)
             );
+            let outcome = outcome_for(&decision_event, "approval_required");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Error);
+            assert_eq!(outcome.reason.as_deref(), Some("bound tool mismatch"));
+            assert_eq!(
+                outcome.reason_code.as_deref(),
+                Some("approval_bound_tool_mismatch")
+            );
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("handler"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -412,6 +454,15 @@ fn approval_required_bound_resource_mismatch_denies() {
                 decision_event.data.approval_freshness,
                 Some(ApprovalFreshness::Fresh)
             );
+            let outcome = outcome_for(&decision_event, "approval_required");
+            assert_eq!(outcome.status, ObligationOutcomeStatus::Error);
+            assert_eq!(outcome.reason.as_deref(), Some("bound resource mismatch"));
+            assert_eq!(
+                outcome.reason_code.as_deref(),
+                Some("approval_bound_resource_mismatch")
+            );
+            assert_eq!(outcome.enforcement_stage.as_deref(), Some("handler"));
+            assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -478,6 +529,9 @@ fn restrict_scope_mismatch_denies() {
                     outcome.obligation_type == "restrict_scope"
                         && outcome.status == ObligationOutcomeStatus::Error
                         && outcome.reason.as_deref() == Some("scope_target_mismatch")
+                        && outcome.reason_code.as_deref() == Some("scope_target_mismatch")
+                        && outcome.enforcement_stage.as_deref() == Some("handler")
+                        && outcome.normalization_version.as_deref() == Some("v1")
                 }));
         }
         other => panic!("expected deny result, got {:?}", other),
@@ -528,6 +582,9 @@ fn restrict_scope_match_sets_additive_fields() {
                 .any(|outcome| {
                     outcome.obligation_type == "restrict_scope"
                         && outcome.status == ObligationOutcomeStatus::Applied
+                        && outcome.reason_code.is_none()
+                        && outcome.enforcement_stage.as_deref() == Some("handler")
+                        && outcome.normalization_version.as_deref() == Some("v1")
                 }));
         }
         other => panic!("expected allow result, got {:?}", other),
@@ -724,6 +781,9 @@ fn redact_args_contract_sets_additive_fields() {
                     outcome.obligation_type == "redact_args"
                         && outcome.status == ObligationOutcomeStatus::Applied
                         && outcome.reason.is_none()
+                        && outcome.reason_code.is_none()
+                        && outcome.enforcement_stage.as_deref() == Some("handler")
+                        && outcome.normalization_version.as_deref() == Some("v1")
                 }));
         }
         other => panic!("expected allow result, got {:?}", other),
@@ -774,6 +834,9 @@ fn redact_args_target_missing_denies() {
                     outcome.obligation_type == "redact_args"
                         && outcome.status == ObligationOutcomeStatus::Error
                         && outcome.reason.as_deref() == Some("redaction_target_missing")
+                        && outcome.reason_code.as_deref() == Some("redaction_target_missing")
+                        && outcome.enforcement_stage.as_deref() == Some("handler")
+                        && outcome.normalization_version.as_deref() == Some("v1")
                 }));
         }
         other => panic!("expected deny result, got {:?}", other),

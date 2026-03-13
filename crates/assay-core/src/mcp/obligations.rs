@@ -1,6 +1,13 @@
 use super::decision::{ObligationOutcome, ObligationOutcomeStatus};
 use super::policy::PolicyObligation;
 
+const OUTCOME_NORMALIZATION_VERSION: &str = "v1";
+const STAGE_EXECUTOR: &str = "executor";
+const REASON_CODE_LEGACY_WARNING_MAPPED: &str = "legacy_warning_mapped";
+const REASON_CODE_VALIDATED_IN_HANDLER: &str = "validated_in_handler";
+const REASON_CODE_CONTRACT_ONLY: &str = "contract_only";
+const REASON_CODE_UNSUPPORTED_OBLIGATION: &str = "unsupported_obligation_type";
+
 /// Execute bounded runtime obligations.
 ///
 /// Supported in Wave26:
@@ -27,6 +34,9 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                     obligation_type: "log".to_string(),
                     status: ObligationOutcomeStatus::Applied,
                     reason: None,
+                    reason_code: None,
+                    enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                    normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
                 }
             }
             "alert" => {
@@ -41,6 +51,9 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                     obligation_type: "alert".to_string(),
                     status: ObligationOutcomeStatus::Applied,
                     reason: None,
+                    reason_code: None,
+                    enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                    normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
                 }
             }
             "legacy_warning" => {
@@ -55,17 +68,26 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                     obligation_type: "log".to_string(),
                     status: ObligationOutcomeStatus::Applied,
                     reason: Some("mapped from legacy_warning".to_string()),
+                    reason_code: Some(REASON_CODE_LEGACY_WARNING_MAPPED.to_string()),
+                    enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                    normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
                 }
             }
             "approval_required" => ObligationOutcome {
                 obligation_type: "approval_required".to_string(),
                 status: ObligationOutcomeStatus::Skipped,
                 reason: Some("validated in handler".to_string()),
+                reason_code: Some(REASON_CODE_VALIDATED_IN_HANDLER.to_string()),
+                enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
             },
             "restrict_scope" => ObligationOutcome {
                 obligation_type: "restrict_scope".to_string(),
                 status: ObligationOutcomeStatus::Skipped,
                 reason: Some("contract-only in wave29 (no runtime enforcement)".to_string()),
+                reason_code: Some(REASON_CODE_CONTRACT_ONLY.to_string()),
+                enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
             },
             "redact_args" => ObligationOutcome {
                 obligation_type: "redact_args".to_string(),
@@ -73,11 +95,17 @@ pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<Obl
                 reason: Some(
                     "contract-only in wave31 (no runtime redaction execution)".to_string(),
                 ),
+                reason_code: Some(REASON_CODE_CONTRACT_ONLY.to_string()),
+                enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
             },
             other => ObligationOutcome {
                 obligation_type: other.to_string(),
                 status: ObligationOutcomeStatus::Skipped,
                 reason: Some("unsupported obligation type in wave25".to_string()),
+                reason_code: Some(REASON_CODE_UNSUPPORTED_OBLIGATION.to_string()),
+                enforcement_stage: Some(STAGE_EXECUTOR.to_string()),
+                normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
             },
         })
         .collect()
@@ -101,6 +129,9 @@ mod tests {
         assert_eq!(outcomes[0].obligation_type, "log");
         assert_eq!(outcomes[0].status, ObligationOutcomeStatus::Applied);
         assert!(outcomes[0].reason.is_none());
+        assert!(outcomes[0].reason_code.is_none());
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 
     #[test]
@@ -120,6 +151,12 @@ mod tests {
             outcomes[0].reason.as_deref(),
             Some("mapped from legacy_warning")
         );
+        assert_eq!(
+            outcomes[0].reason_code.as_deref(),
+            Some("legacy_warning_mapped")
+        );
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 
     #[test]
@@ -136,6 +173,9 @@ mod tests {
         assert_eq!(outcomes[0].obligation_type, "alert");
         assert_eq!(outcomes[0].status, ObligationOutcomeStatus::Applied);
         assert!(outcomes[0].reason.is_none());
+        assert!(outcomes[0].reason_code.is_none());
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 
     #[test]
@@ -155,6 +195,12 @@ mod tests {
             outcomes[0].reason.as_deref(),
             Some("unsupported obligation type in wave25")
         );
+        assert_eq!(
+            outcomes[0].reason_code.as_deref(),
+            Some("unsupported_obligation_type")
+        );
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 
     #[test]
@@ -178,6 +224,9 @@ mod tests {
             outcomes[0].reason.as_deref(),
             Some("contract-only in wave29 (no runtime enforcement)")
         );
+        assert_eq!(outcomes[0].reason_code.as_deref(), Some("contract_only"));
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 
     #[test]
@@ -201,5 +250,8 @@ mod tests {
             outcomes[0].reason.as_deref(),
             Some("contract-only in wave31 (no runtime redaction execution)")
         );
+        assert_eq!(outcomes[0].reason_code.as_deref(), Some("contract_only"));
+        assert_eq!(outcomes[0].enforcement_stage.as_deref(), Some("executor"));
+        assert_eq!(outcomes[0].normalization_version.as_deref(), Some("v1"));
     }
 }

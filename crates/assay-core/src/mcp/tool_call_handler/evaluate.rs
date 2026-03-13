@@ -11,6 +11,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::Instant;
 
+const OUTCOME_NORMALIZATION_VERSION: &str = "v1";
+const OUTCOME_STAGE_HANDLER: &str = "handler";
+const OUTCOME_REASON_VALIDATED_IN_HANDLER: &str = "validated_in_handler";
+
 pub(super) fn handle_tool_call(
     handler: &ToolCallHandler,
     request: &JsonRpcRequest,
@@ -325,6 +329,15 @@ impl RedactArgsFailure {
 }
 
 impl ApprovalFailure {
+    fn code(self) -> &'static str {
+        match self {
+            Self::MissingApproval => "approval_missing",
+            Self::ExpiredApproval => "approval_expired",
+            Self::BoundToolMismatch => "approval_bound_tool_mismatch",
+            Self::BoundResourceMismatch => "approval_bound_resource_mismatch",
+        }
+    }
+
     fn as_reason(self) -> &'static str {
         match self {
             Self::MissingApproval => "missing approval",
@@ -405,6 +418,7 @@ fn validate_approval_required(
         tool_match,
         super::super::decision::ObligationOutcomeStatus::Applied,
         None,
+        Some(OUTCOME_REASON_VALIDATED_IN_HANDLER),
     );
     None
 }
@@ -419,6 +433,7 @@ fn mark_approval_failure(
         tool_match,
         super::super::decision::ObligationOutcomeStatus::Error,
         Some(failure.as_reason()),
+        Some(failure.code()),
     );
     failure
 }
@@ -427,6 +442,7 @@ fn mark_approval_outcome(
     tool_match: &mut emit::ToolMatchMetadata,
     status: super::super::decision::ObligationOutcomeStatus,
     reason: Option<&str>,
+    reason_code: Option<&str>,
 ) {
     if let Some(outcome) = tool_match
         .obligation_outcomes
@@ -435,6 +451,9 @@ fn mark_approval_outcome(
     {
         outcome.status = status;
         outcome.reason = reason.map(ToString::to_string);
+        outcome.reason_code = reason_code.map(ToString::to_string);
+        outcome.enforcement_stage = Some(OUTCOME_STAGE_HANDLER.to_string());
+        outcome.normalization_version = Some(OUTCOME_NORMALIZATION_VERSION.to_string());
         return;
     }
 
@@ -444,6 +463,9 @@ fn mark_approval_outcome(
             obligation_type: "approval_required".to_string(),
             status,
             reason: reason.map(ToString::to_string),
+            reason_code: reason_code.map(ToString::to_string),
+            enforcement_stage: Some(OUTCOME_STAGE_HANDLER.to_string()),
+            normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
         });
 }
 
@@ -468,6 +490,7 @@ fn validate_restrict_scope(
         mark_restrict_scope_outcome(
             tool_match,
             super::super::decision::ObligationOutcomeStatus::Applied,
+            None,
             None,
         );
         return None;
@@ -503,6 +526,7 @@ fn validate_redact_args(tool_match: &mut emit::ToolMatchMetadata) -> Option<Reda
             tool_match,
             super::super::decision::ObligationOutcomeStatus::Applied,
             None,
+            None,
         );
         return None;
     }
@@ -532,6 +556,7 @@ fn mark_restrict_scope_failure(
         tool_match,
         super::super::decision::ObligationOutcomeStatus::Error,
         Some(failure_code.as_str()),
+        Some(failure_code.as_str()),
     );
     failure
 }
@@ -540,6 +565,7 @@ fn mark_restrict_scope_outcome(
     tool_match: &mut emit::ToolMatchMetadata,
     status: super::super::decision::ObligationOutcomeStatus,
     reason: Option<&str>,
+    reason_code: Option<&str>,
 ) {
     if let Some(outcome) = tool_match
         .obligation_outcomes
@@ -548,6 +574,9 @@ fn mark_restrict_scope_outcome(
     {
         outcome.status = status;
         outcome.reason = reason.map(ToString::to_string);
+        outcome.reason_code = reason_code.map(ToString::to_string);
+        outcome.enforcement_stage = Some(OUTCOME_STAGE_HANDLER.to_string());
+        outcome.normalization_version = Some(OUTCOME_NORMALIZATION_VERSION.to_string());
         return;
     }
 
@@ -557,6 +586,9 @@ fn mark_restrict_scope_outcome(
             obligation_type: "restrict_scope".to_string(),
             status,
             reason: reason.map(ToString::to_string),
+            reason_code: reason_code.map(ToString::to_string),
+            enforcement_stage: Some(OUTCOME_STAGE_HANDLER.to_string()),
+            normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
         });
 }
 
@@ -578,6 +610,7 @@ fn mark_redact_args_failure(
         tool_match,
         super::super::decision::ObligationOutcomeStatus::Error,
         Some(failure_code.as_str()),
+        Some(failure_code.as_str()),
     );
     failure
 }
@@ -586,6 +619,7 @@ fn mark_redact_args_outcome(
     tool_match: &mut emit::ToolMatchMetadata,
     status: super::super::decision::ObligationOutcomeStatus,
     reason: Option<&str>,
+    reason_code: Option<&str>,
 ) {
     if let Some(outcome) = tool_match
         .obligation_outcomes
@@ -594,6 +628,9 @@ fn mark_redact_args_outcome(
     {
         outcome.status = status;
         outcome.reason = reason.map(ToString::to_string);
+        outcome.reason_code = reason_code.map(ToString::to_string);
+        outcome.enforcement_stage = Some(OUTCOME_STAGE_HANDLER.to_string());
+        outcome.normalization_version = Some(OUTCOME_NORMALIZATION_VERSION.to_string());
         return;
     }
 
@@ -603,6 +640,9 @@ fn mark_redact_args_outcome(
             obligation_type: "redact_args".to_string(),
             status,
             reason: reason.map(ToString::to_string),
+            reason_code: reason_code.map(ToString::to_string),
+            enforcement_stage: Some(OUTCOME_STAGE_HANDLER.to_string()),
+            normalization_version: Some(OUTCOME_NORMALIZATION_VERSION.to_string()),
         });
 }
 
