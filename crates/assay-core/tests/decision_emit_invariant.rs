@@ -976,6 +976,22 @@ fn test_non_tool_call_emits_error() {
     let event = emitter.last_event().expect("Should have event");
     assert_eq!(event.data.decision, Decision::Error);
     assert_eq!(event.data.reason_code, reason_codes::S_INTERNAL_ERROR);
+    assert_eq!(
+        event.data.fulfillment_decision_path,
+        Some(FulfillmentDecisionPath::DecisionError)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::EnforcementDeny)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::RuntimeEnforcement)
+    );
+    assert_eq!(
+        event.data.outcome_compat_state,
+        Some(OutcomeCompatState::LegacyFieldsPreserved)
+    );
 }
 
 // =============================================================================

@@ -136,3 +136,30 @@ fn fulfillment_sets_policy_deny_convergence_fields() {
         Some(OutcomeCompatState::LegacyFieldsPreserved)
     );
 }
+
+#[test]
+fn fulfillment_sets_mandate_deny_convergence_fields() {
+    let event = DecisionEvent::new(
+        "assay://test".to_string(),
+        "tc_010".to_string(),
+        "deploy_service".to_string(),
+    )
+    .deny(reason_codes::M_EXPIRED, Some("mandate expired".to_string()));
+
+    assert_eq!(
+        event.data.fulfillment_decision_path,
+        Some(FulfillmentDecisionPath::PolicyDeny)
+    );
+    assert_eq!(
+        event.data.decision_outcome_kind,
+        Some(DecisionOutcomeKind::EnforcementDeny)
+    );
+    assert_eq!(
+        event.data.decision_origin,
+        Some(DecisionOrigin::RuntimeEnforcement)
+    );
+    assert_eq!(
+        event.data.outcome_compat_state,
+        Some(OutcomeCompatState::LegacyFieldsPreserved)
+    );
+}

@@ -106,6 +106,6 @@ cargo test -p assay-core redact_args_apply_failed_denies -- --exact
 cargo test -p assay-core fulfillment_normalizes_outcomes_and_sets_policy_deny_path -- --exact
 cargo test -p assay-cli mcp_wrap_coverage
 cargo test -p assay-cli mcp_wrap_state_window_out
-cargo test -p assay-mcp-server auth_integration
+cargo test -p assay-mcp-server --test auth_integration
 
 echo "[review] PASS"

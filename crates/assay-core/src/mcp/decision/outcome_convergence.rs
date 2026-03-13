@@ -82,7 +82,7 @@ pub(super) fn classify_decision_outcome(
             }
         }
         Decision::Error => (
-            DecisionOutcomeKind::ObligationError,
+            DecisionOutcomeKind::EnforcementDeny,
             DecisionOrigin::RuntimeEnforcement,
         ),
     };
@@ -95,13 +95,14 @@ pub(super) fn classify_decision_outcome(
 }
 
 fn is_enforcement_deny_reason(reason_code: &str) -> bool {
-    matches!(
-        reason_code,
-        reason_codes::P_APPROVAL_REQUIRED
-            | reason_codes::P_RESTRICT_SCOPE
-            | reason_codes::P_REDACT_ARGS
-            | reason_codes::P_MANDATE_REQUIRED
-    )
+    reason_code.starts_with("M_")
+        || matches!(
+            reason_code,
+            reason_codes::P_APPROVAL_REQUIRED
+                | reason_codes::P_RESTRICT_SCOPE
+                | reason_codes::P_REDACT_ARGS
+                | reason_codes::P_MANDATE_REQUIRED
+        )
 }
 
 #[cfg(test)]
@@ -149,6 +150,34 @@ mod tests {
             false,
             false,
             true,
+        );
+        assert_eq!(result.kind, DecisionOutcomeKind::EnforcementDeny);
+        assert_eq!(result.origin, DecisionOrigin::RuntimeEnforcement);
+    }
+
+    #[test]
+    fn classifies_mandate_deny_as_enforcement_deny() {
+        let result = classify_decision_outcome(
+            Decision::Deny,
+            reason_codes::M_EXPIRED,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(result.kind, DecisionOutcomeKind::EnforcementDeny);
+        assert_eq!(result.origin, DecisionOrigin::RuntimeEnforcement);
+    }
+
+    #[test]
+    fn classifies_decision_error_as_enforcement_deny() {
+        let result = classify_decision_outcome(
+            Decision::Error,
+            reason_codes::S_INTERNAL_ERROR,
+            false,
+            false,
+            false,
+            false,
         );
         assert_eq!(result.kind, DecisionOutcomeKind::EnforcementDeny);
         assert_eq!(result.origin, DecisionOrigin::RuntimeEnforcement);
