@@ -1307,6 +1307,9 @@
 - docs(wave30-step1): freeze restrict_scope enforcement contract (#763) @Rul1an
 - docs(wave29-step3): add restrict_scope closure gate and review templates (#760) @Rul1an
 
+- docs(wave32-step3): closure docs+gate for redact_args enforcement (#778) @Rul1an
+- feat(wave32-step2): enforce redact_args with deterministic deny paths (#777) @Rul1an
+- docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
 ## [2026-03-13]
 
 - docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
