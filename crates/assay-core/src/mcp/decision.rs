@@ -24,6 +24,7 @@ pub mod reason_codes {
     pub const P_TOOL_DRIFT: &str = "P_TOOL_DRIFT";
     pub const P_APPROVAL_REQUIRED: &str = "P_APPROVAL_REQUIRED";
     pub const P_RESTRICT_SCOPE: &str = "P_RESTRICT_SCOPE";
+    pub const P_REDACT_ARGS: &str = "P_REDACT_ARGS";
     pub const P_MANDATE_REQUIRED: &str = "P_MANDATE_REQUIRED";
     pub const P_MANDATE_VALID: &str = "P_MANDATE_VALID";
 
@@ -100,6 +101,7 @@ pub struct PolicyDecisionEventContext {
     pub redaction_contract: Option<RedactArgsContract>,
     pub redaction_applied_state: Option<String>,
     pub redaction_reason: Option<String>,
+    pub redaction_failure_reason: Option<String>,
     pub redact_args_present: Option<bool>,
     pub redact_args_target: Option<String>,
     pub redact_args_mode: Option<String>,
@@ -232,6 +234,9 @@ pub struct DecisionData {
     /// Redact-args evidence field: reason
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redaction_reason: Option<String>,
+    /// Redact-args deny-path failure reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_failure_reason: Option<String>,
     /// Redact-args additive marker: obligation present
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redact_args_present: Option<bool>,
@@ -338,6 +343,7 @@ impl DecisionEvent {
                 redaction_scope: None,
                 redaction_applied_state: None,
                 redaction_reason: None,
+                redaction_failure_reason: None,
                 redact_args_present: None,
                 redact_args_target: None,
                 redact_args_mode: None,
@@ -463,6 +469,7 @@ impl DecisionEvent {
             redaction_contract,
             redaction_applied_state,
             redaction_reason,
+            redaction_failure_reason,
             redact_args_present,
             redact_args_target,
             redact_args_mode,
@@ -508,6 +515,7 @@ impl DecisionEvent {
         }
         self.data.redaction_applied_state = redaction_applied_state;
         self.data.redaction_reason = redaction_reason;
+        self.data.redaction_failure_reason = redaction_failure_reason;
         self.data.redact_args_present = redact_args_present;
         self.data.redact_args_target = redact_args_target;
         self.data.redact_args_mode = redact_args_mode;
@@ -676,6 +684,7 @@ impl DecisionEmitterGuard {
                 redaction_contract,
                 redaction_applied_state,
                 redaction_reason,
+                redaction_failure_reason,
                 redact_args_present,
                 redact_args_target,
                 redact_args_mode,
@@ -721,6 +730,7 @@ impl DecisionEmitterGuard {
             }
             event.data.redaction_applied_state = redaction_applied_state;
             event.data.redaction_reason = redaction_reason;
+            event.data.redaction_failure_reason = redaction_failure_reason;
             event.data.redact_args_present = redact_args_present;
             event.data.redact_args_target = redact_args_target;
             event.data.redact_args_mode = redact_args_mode;
@@ -962,6 +972,7 @@ mod tests {
         assert_eq!(reason_codes::P_POLICY_ALLOW, "P_POLICY_ALLOW");
         assert_eq!(reason_codes::P_POLICY_DENY, "P_POLICY_DENY");
         assert_eq!(reason_codes::P_RESTRICT_SCOPE, "P_RESTRICT_SCOPE");
+        assert_eq!(reason_codes::P_REDACT_ARGS, "P_REDACT_ARGS");
         assert_eq!(reason_codes::M_EXPIRED, "M_EXPIRED");
         assert_eq!(reason_codes::S_DB_ERROR, "S_DB_ERROR");
         assert_eq!(reason_codes::T_TIMEOUT, "T_TIMEOUT");

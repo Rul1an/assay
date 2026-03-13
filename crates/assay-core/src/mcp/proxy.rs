@@ -541,6 +541,7 @@ impl McpProxy {
         event.data.redaction_scope = metadata.redaction_scope.clone();
         event.data.redaction_applied_state = metadata.redaction_applied_state.clone();
         event.data.redaction_reason = metadata.redaction_reason.clone();
+        event.data.redaction_failure_reason = metadata.redaction_failure_reason.clone();
         event.data.redact_args_present = metadata.redact_args_present;
         event.data.redact_args_target = metadata.redact_args_target.clone();
         event.data.redact_args_mode = metadata.redact_args_mode.clone();

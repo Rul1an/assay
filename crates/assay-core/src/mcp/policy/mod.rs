@@ -162,6 +162,7 @@ pub struct PolicyMatchMetadata {
     pub redaction_scope: Option<String>,
     pub redaction_applied_state: Option<String>,
     pub redaction_reason: Option<String>,
+    pub redaction_failure_reason: Option<String>,
     pub redact_args_present: Option<bool>,
     pub redact_args_target: Option<String>,
     pub redact_args_mode: Option<String>,
