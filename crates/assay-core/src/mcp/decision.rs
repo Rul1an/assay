@@ -77,6 +77,12 @@ pub struct ObligationOutcome {
     pub status: ObligationOutcomeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforcement_stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normalization_version: Option<String>,
 }
 
 /// Additional runtime policy context for Decision Event v2.
