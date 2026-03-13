@@ -3,7 +3,10 @@ use super::super::identity::ToolIdentity;
 use super::super::jsonrpc::JsonRpcRequest;
 use super::super::lifecycle::mandate_used_event;
 use super::super::obligations;
-use super::super::policy::{ApprovalArtifact, ApprovalFreshness, PolicyDecision, PolicyState};
+use super::super::policy::{
+    ApprovalArtifact, ApprovalFreshness, FailClosedContext, FailClosedMode, FailClosedTrigger,
+    PolicyDecision, PolicyState, ToolRiskClass,
+};
 use super::emit;
 use super::types::{HandleResult, ToolCallHandler};
 use crate::runtime::{AuthorizeError, MandateData, OperationClass, ToolCallData};
@@ -14,6 +17,10 @@ use std::time::Instant;
 const OUTCOME_NORMALIZATION_VERSION: &str = "v1";
 const OUTCOME_STAGE_HANDLER: &str = "handler";
 const OUTCOME_REASON_VALIDATED_IN_HANDLER: &str = "validated_in_handler";
+const FAIL_CLOSED_CONTEXT_PROVIDER_UNAVAILABLE: &str = "fail_closed_context_provider_unavailable";
+const FAIL_CLOSED_RUNTIME_DEPENDENCY_ERROR: &str = "fail_closed_runtime_dependency_error";
+const DEGRADE_READ_ONLY_RUNTIME_DEPENDENCY_ERROR: &str =
+    "degrade_read_only_runtime_dependency_error";
 
 pub(super) fn handle_tool_call(
     handler: &ToolCallHandler,
@@ -67,6 +74,10 @@ pub(super) fn handle_tool_call(
     let mut tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
     tool_match.obligation_outcomes =
         obligations::execute_log_only(&tool_match.obligations, &tool_name);
+    seed_fail_closed_context(
+        &mut tool_match,
+        handler.operation_class_for_tool(&tool_name),
+    );
     guard.set_tool_match(
         tool_match.tool_classes.clone(),
         tool_match.matched_tool_classes.clone(),
@@ -213,6 +224,14 @@ pub(super) fn handle_tool_call(
             }
             Err(e) => {
                 let (reason_code, reason) = handler.map_authz_error(&e);
+                if reason_code == reason_codes::S_DB_ERROR {
+                    let fail_code = runtime_dependency_error_code(&tool_match).to_string();
+                    mark_fail_closed(
+                        &mut tool_match,
+                        FailClosedTrigger::RuntimeDependencyError,
+                        fail_code,
+                    );
+                }
                 guard.set_mandate_info(Some(mandate_data.mandate_id.clone()), None, None);
                 guard.set_policy_context(tool_match.policy_context());
                 guard.emit_deny(&reason_code, Some(reason.clone()));
@@ -427,6 +446,11 @@ fn mark_approval_failure(
     tool_match: &mut emit::ToolMatchMetadata,
     failure: ApprovalFailure,
 ) -> ApprovalFailure {
+    mark_fail_closed(
+        tool_match,
+        FailClosedTrigger::ContextProviderUnavailable,
+        FAIL_CLOSED_CONTEXT_PROVIDER_UNAVAILABLE.to_string(),
+    );
     tool_match.approval_state = Some("denied".to_string());
     tool_match.approval_failure_reason = Some(failure.as_reason().to_string());
     mark_approval_outcome(
@@ -684,6 +708,50 @@ fn requested_resource(args: &Value) -> Option<&str> {
         .and_then(|meta| meta.get("resource"))
         .and_then(Value::as_str)
         .or_else(|| args.get("resource").and_then(Value::as_str))
+}
+
+fn seed_fail_closed_context(tool_match: &mut emit::ToolMatchMetadata, op: OperationClass) {
+    let tool_risk_class = match op {
+        OperationClass::Read => ToolRiskClass::Default,
+        OperationClass::Write | OperationClass::Commit => ToolRiskClass::HighRisk,
+    };
+    let fail_closed_mode = match tool_risk_class {
+        ToolRiskClass::LowRiskRead => FailClosedMode::DegradeReadOnly,
+        ToolRiskClass::HighRisk | ToolRiskClass::Default => FailClosedMode::FailClosed,
+    };
+    tool_match.fail_closed = Some(FailClosedContext {
+        tool_risk_class,
+        fail_closed_mode,
+        fail_closed_trigger: None,
+        fail_closed_applied: false,
+        fail_closed_error_code: None,
+    });
+}
+
+fn runtime_dependency_error_code(tool_match: &emit::ToolMatchMetadata) -> &'static str {
+    match tool_match
+        .fail_closed
+        .as_ref()
+        .map(|ctx| ctx.fail_closed_mode)
+        .unwrap_or(FailClosedMode::FailClosed)
+    {
+        FailClosedMode::DegradeReadOnly => DEGRADE_READ_ONLY_RUNTIME_DEPENDENCY_ERROR,
+        FailClosedMode::FailClosed | FailClosedMode::FailSafeAllow => {
+            FAIL_CLOSED_RUNTIME_DEPENDENCY_ERROR
+        }
+    }
+}
+
+fn mark_fail_closed(
+    tool_match: &mut emit::ToolMatchMetadata,
+    trigger: FailClosedTrigger,
+    error_code: String,
+) {
+    if let Some(ctx) = tool_match.fail_closed.as_mut() {
+        ctx.fail_closed_trigger = Some(trigger);
+        ctx.fail_closed_applied = true;
+        ctx.fail_closed_error_code = Some(error_code);
+    }
 }
 
 impl ToolCallHandler {

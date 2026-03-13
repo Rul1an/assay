@@ -168,6 +168,7 @@ pub struct PolicyMatchMetadata {
     pub redact_args_mode: Option<String>,
     pub redact_args_result: Option<String>,
     pub redact_args_reason: Option<String>,
+    pub fail_closed: Option<FailClosedContext>,
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
@@ -275,6 +276,39 @@ pub enum ApprovalFreshness {
     Stale,
     Expired,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRiskClass {
+    HighRisk,
+    LowRiskRead,
+    Default,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailClosedMode {
+    FailClosed,
+    DegradeReadOnly,
+    FailSafeAllow,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailClosedTrigger {
+    PolicyEngineUnavailable,
+    ContextProviderUnavailable,
+    RuntimeDependencyError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FailClosedContext {
+    pub tool_risk_class: ToolRiskClass,
+    pub fail_closed_mode: FailClosedMode,
+    pub fail_closed_trigger: Option<FailClosedTrigger>,
+    pub fail_closed_applied: bool,
+    pub fail_closed_error_code: Option<String>,
 }
 
 impl PolicyObligation {

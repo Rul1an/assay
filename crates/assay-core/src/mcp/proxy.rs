@@ -547,6 +547,7 @@ impl McpProxy {
         event.data.redact_args_mode = metadata.redact_args_mode.clone();
         event.data.redact_args_result = metadata.redact_args_result.clone();
         event.data.redact_args_reason = metadata.redact_args_reason.clone();
+        event.data.fail_closed = metadata.fail_closed.clone();
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();
