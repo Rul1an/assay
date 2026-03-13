@@ -1,5 +1,6 @@
 use super::{
-    DecisionData, DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath, OutcomeCompatState,
+    Decision, DecisionData, DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath,
+    OutcomeCompatState,
 };
 use crate::mcp::policy::TypedPolicyDecision;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ pub struct ReplayDiffBasis {
     pub typed_decision: Option<TypedPolicyDecision>,
     pub policy_version: Option<String>,
     pub policy_digest: Option<String>,
+    pub decision: Decision,
+    pub fail_closed_applied: bool,
 }
 
 /// Build replay basis from an emitted decision payload.
@@ -39,6 +42,12 @@ pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
         typed_decision: data.typed_decision,
         policy_version: data.policy_version.clone(),
         policy_digest: data.policy_digest.clone(),
+        decision: data.decision,
+        fail_closed_applied: data
+            .fail_closed
+            .as_ref()
+            .map(|ctx| ctx.fail_closed_applied)
+            .unwrap_or(false),
     }
 }
 
@@ -76,6 +85,8 @@ fn same_effective_decision_class(baseline: &ReplayDiffBasis, candidate: &ReplayD
         && baseline.fulfillment_decision_path == candidate.fulfillment_decision_path
         && baseline.reason_code == candidate.reason_code
         && baseline.typed_decision == candidate.typed_decision
+        && baseline.decision == candidate.decision
+        && baseline.fail_closed_applied == candidate.fail_closed_applied
 }
 
 fn restrictiveness_rank(basis: &ReplayDiffBasis) -> u8 {
@@ -90,7 +101,11 @@ fn restrictiveness_rank(basis: &ReplayDiffBasis) -> u8 {
             Some(FulfillmentDecisionPath::PolicyDeny)
             | Some(FulfillmentDecisionPath::FailClosedDeny)
             | Some(FulfillmentDecisionPath::DecisionError) => 2,
-            Some(FulfillmentDecisionPath::PolicyAllow) | None => 1,
+            Some(FulfillmentDecisionPath::PolicyAllow) => 1,
+            None => match basis.decision {
+                Decision::Deny | Decision::Error => 2,
+                Decision::Allow => 1,
+            },
         },
     }
 }
@@ -109,6 +124,8 @@ mod tests {
             typed_decision: Some(TypedPolicyDecision::AllowWithObligations),
             policy_version: Some("v1".to_string()),
             policy_digest: Some("sha1".to_string()),
+            decision: Decision::Allow,
+            fail_closed_applied: false,
         }
     }
 
@@ -157,15 +174,47 @@ mod tests {
     fn classifies_reclassified() {
         let mut baseline = make_basis(Some(DecisionOutcomeKind::PolicyDeny), "P_POLICY_DENY");
         baseline.fulfillment_decision_path = Some(FulfillmentDecisionPath::PolicyDeny);
+        baseline.decision = Decision::Deny;
 
         let mut candidate = baseline.clone();
         candidate.decision_outcome_kind = Some(DecisionOutcomeKind::FailClosedDeny);
         candidate.decision_origin = Some(DecisionOrigin::FailClosedMatrix);
         candidate.fulfillment_decision_path = Some(FulfillmentDecisionPath::FailClosedDeny);
+        candidate.fail_closed_applied = true;
 
         assert_eq!(
             classify_replay_diff(&baseline, &candidate),
             ReplayDiffBucket::Reclassified
+        );
+    }
+
+    #[test]
+    fn classifies_legacy_events_with_decision_fallback() {
+        let baseline = ReplayDiffBasis {
+            decision_outcome_kind: None,
+            decision_origin: None,
+            outcome_compat_state: None,
+            fulfillment_decision_path: None,
+            reason_code: "P_POLICY_ALLOW".to_string(),
+            typed_decision: None,
+            policy_version: None,
+            policy_digest: None,
+            decision: Decision::Allow,
+            fail_closed_applied: false,
+        };
+        let candidate = ReplayDiffBasis {
+            decision: Decision::Deny,
+            reason_code: "P_POLICY_DENY".to_string(),
+            ..baseline.clone()
+        };
+
+        assert_eq!(
+            classify_replay_diff(&baseline, &candidate),
+            ReplayDiffBucket::Stricter
+        );
+        assert_eq!(
+            classify_replay_diff(&candidate, &baseline),
+            ReplayDiffBucket::Looser
         );
     }
 }

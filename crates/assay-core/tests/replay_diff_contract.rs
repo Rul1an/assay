@@ -1,7 +1,7 @@
 use assay_core::mcp::decision::{
-    basis_from_decision_data, classify_replay_diff, reason_codes, DecisionEvent, DecisionOrigin,
-    DecisionOutcomeKind, FulfillmentDecisionPath, OutcomeCompatState, PolicyDecisionEventContext,
-    ReplayDiffBucket,
+    basis_from_decision_data, classify_replay_diff, reason_codes, Decision, DecisionEvent,
+    DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath, OutcomeCompatState,
+    PolicyDecisionEventContext, ReplayDiffBucket,
 };
 use assay_core::mcp::policy::TypedPolicyDecision;
 
@@ -50,6 +50,8 @@ fn basis_extraction_contains_frozen_fields() {
     );
     assert_eq!(basis.policy_version.as_deref(), Some("v1"));
     assert_eq!(basis.policy_digest.as_deref(), Some("sha1"));
+    assert_eq!(basis.decision, Decision::Allow);
+    assert!(!basis.fail_closed_applied);
 }
 
 #[test]
@@ -138,5 +140,37 @@ fn classify_replay_diff_reclassified() {
     assert_eq!(
         classify_replay_diff(&baseline, &candidate),
         ReplayDiffBucket::Reclassified
+    );
+}
+
+#[test]
+fn classify_replay_diff_legacy_decision_fallback() {
+    let allow_event = allow_event("v1", "sha1");
+    let deny_event = DecisionEvent::new(
+        "assay://test".to_string(),
+        "tc_204".to_string(),
+        "deploy_service".to_string(),
+    )
+    .deny(reason_codes::P_POLICY_DENY, Some("blocked".to_string()));
+
+    let mut baseline = basis_from_decision_data(&allow_event.data);
+    baseline.decision_outcome_kind = None;
+    baseline.decision_origin = None;
+    baseline.outcome_compat_state = None;
+    baseline.fulfillment_decision_path = None;
+
+    let mut candidate = basis_from_decision_data(&deny_event.data);
+    candidate.decision_outcome_kind = None;
+    candidate.decision_origin = None;
+    candidate.outcome_compat_state = None;
+    candidate.fulfillment_decision_path = None;
+
+    assert_eq!(
+        classify_replay_diff(&baseline, &candidate),
+        ReplayDiffBucket::Stricter
+    );
+    assert_eq!(
+        classify_replay_diff(&candidate, &baseline),
+        ReplayDiffBucket::Looser
     );
 }
