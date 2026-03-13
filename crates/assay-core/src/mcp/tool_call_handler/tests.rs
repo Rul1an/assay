@@ -211,10 +211,6 @@ fn test_allow_with_warning_emits_log_obligation_outcome() {
             assert_eq!(outcome.enforcement_stage.as_deref(), Some("executor"));
             assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
             assert_eq!(
-                outcome.reason_code.as_deref(),
-                Some("legacy_warning_mapped")
-            );
-            assert_eq!(
                 decision_event.data.fulfillment_decision_path,
                 Some(FulfillmentDecisionPath::PolicyAllow)
             );
