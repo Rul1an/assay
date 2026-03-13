@@ -1484,6 +1484,16 @@
 - docs(wave35-step3): add fulfillment-normalization closure gate (#801) @Rul1an
 - feat(wave35-step2): normalize obligation fulfillment evidence (#799) @Rul1an
 - docs(wave35-step1): freeze obligation fulfillment normalization (#797) @Rul1an
+- fix(wave37): tighten convergence classification and gate test target (#817) @Rul1an
+- docs(wave37-step3): close decision/evidence convergence wave (#815) @Rul1an
+- feat(wave37-step2): decision/evidence convergence normalization (#813) @Rul1an
+- docs(wave37-step1): freeze decision/evidence convergence (#811) @Rul1an
+- docs(wave36-step3): closure for redact_args enforcement (#809) @Rul1an
+- feat(wave36-step2): enforce redact_args runtime execution (#807) @Rul1an
+- fix(copilot): resolve latest review findings in wave gates/tests (#805) @Rul1an
+- docs(wave36-step1): freeze redact_args enforcement hardening contract (#803) @Rul1an
+- docs(wave35-step3): add fulfillment-normalization closure gate (#801) @Rul1an
+- feat(wave35-step2): normalize obligation fulfillment evidence (#799) @Rul1an
 ## [2026-03-13]
 
 - docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
