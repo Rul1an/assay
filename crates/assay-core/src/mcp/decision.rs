@@ -85,6 +85,22 @@ pub struct ObligationOutcome {
     pub normalization_version: Option<String>,
 }
 
+/// Normalized decision path classification for fulfillment evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FulfillmentDecisionPath {
+    PolicyAllow,
+    PolicyDeny,
+    FailClosedDeny,
+    DecisionError,
+}
+
+const OUTCOME_STAGE_HANDLER: &str = "handler";
+const OUTCOME_REASON_CODE_APPLIED: &str = "obligation_applied";
+const OUTCOME_REASON_CODE_SKIPPED: &str = "obligation_skipped";
+const OUTCOME_REASON_CODE_ERROR: &str = "obligation_error";
+const OUTCOME_NORMALIZATION_VERSION_V1: &str = "v1";
+
 /// Additional runtime policy context for Decision Event v2.
 #[derive(Debug, Clone, Default)]
 pub struct PolicyDecisionEventContext {
@@ -262,6 +278,18 @@ pub struct DecisionData {
     /// Additive fail-closed matrix context for this decision
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fail_closed: Option<FailClosedContext>,
+    /// Normalized decision path for fulfillment evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfillment_decision_path: Option<FulfillmentDecisionPath>,
+    /// Whether any obligation outcome is normalized as applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub obligation_applied_present: Option<bool>,
+    /// Whether any obligation outcome is normalized as skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub obligation_skipped_present: Option<bool>,
+    /// Whether any obligation outcome is normalized as error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub obligation_error_present: Option<bool>,
     /// Lane identifier summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lane: Option<String>,
@@ -307,6 +335,73 @@ pub struct DecisionData {
     /// Store latency in milliseconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store_latency_ms: Option<u64>,
+}
+
+fn normalize_obligation_outcome(mut outcome: ObligationOutcome) -> ObligationOutcome {
+    if outcome.reason_code.is_none() {
+        outcome.reason_code = Some(
+            match outcome.status {
+                ObligationOutcomeStatus::Applied => OUTCOME_REASON_CODE_APPLIED,
+                ObligationOutcomeStatus::Skipped => OUTCOME_REASON_CODE_SKIPPED,
+                ObligationOutcomeStatus::Error => OUTCOME_REASON_CODE_ERROR,
+            }
+            .to_string(),
+        );
+    }
+    if outcome.enforcement_stage.is_none() {
+        outcome.enforcement_stage = Some(OUTCOME_STAGE_HANDLER.to_string());
+    }
+    if outcome.normalization_version.is_none() {
+        outcome.normalization_version = Some(OUTCOME_NORMALIZATION_VERSION_V1.to_string());
+    }
+    outcome
+}
+
+fn normalize_obligation_outcomes(outcomes: Vec<ObligationOutcome>) -> Vec<ObligationOutcome> {
+    outcomes
+        .into_iter()
+        .map(normalize_obligation_outcome)
+        .collect()
+}
+
+fn classify_fulfillment_decision_path(data: &DecisionData) -> FulfillmentDecisionPath {
+    match data.decision {
+        Decision::Allow => FulfillmentDecisionPath::PolicyAllow,
+        Decision::Deny => {
+            if data
+                .fail_closed
+                .as_ref()
+                .map(|ctx| ctx.fail_closed_applied)
+                .unwrap_or(false)
+            {
+                FulfillmentDecisionPath::FailClosedDeny
+            } else {
+                FulfillmentDecisionPath::PolicyDeny
+            }
+        }
+        Decision::Error => FulfillmentDecisionPath::DecisionError,
+    }
+}
+
+fn refresh_fulfillment_normalization(data: &mut DecisionData) {
+    let outcomes = std::mem::take(&mut data.obligation_outcomes);
+    data.obligation_outcomes = normalize_obligation_outcomes(outcomes);
+    data.obligation_applied_present = Some(
+        data.obligation_outcomes
+            .iter()
+            .any(|outcome| outcome.status == ObligationOutcomeStatus::Applied),
+    );
+    data.obligation_skipped_present = Some(
+        data.obligation_outcomes
+            .iter()
+            .any(|outcome| outcome.status == ObligationOutcomeStatus::Skipped),
+    );
+    data.obligation_error_present = Some(
+        data.obligation_outcomes
+            .iter()
+            .any(|outcome| outcome.status == ObligationOutcomeStatus::Error),
+    );
+    data.fulfillment_decision_path = Some(classify_fulfillment_decision_path(data));
 }
 
 impl DecisionEvent {
@@ -360,6 +455,10 @@ impl DecisionEvent {
                 redact_args_result: None,
                 redact_args_reason: None,
                 fail_closed: None,
+                fulfillment_decision_path: None,
+                obligation_applied_present: None,
+                obligation_skipped_present: None,
+                obligation_error_present: None,
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
@@ -385,6 +484,7 @@ impl DecisionEvent {
         self.data.decision = Decision::Allow;
         self.data.reason_code = reason_code.to_string();
         self.data.reason = None;
+        refresh_fulfillment_normalization(&mut self.data);
         self
     }
 
@@ -393,6 +493,7 @@ impl DecisionEvent {
         self.data.decision = Decision::Deny;
         self.data.reason_code = reason_code.to_string();
         self.data.reason = reason;
+        refresh_fulfillment_normalization(&mut self.data);
         self
     }
 
@@ -401,6 +502,7 @@ impl DecisionEvent {
         self.data.decision = Decision::Error;
         self.data.reason_code = reason_code.to_string();
         self.data.reason = reason;
+        refresh_fulfillment_normalization(&mut self.data);
         self
     }
 
@@ -537,6 +639,7 @@ impl DecisionEvent {
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
+        refresh_fulfillment_normalization(&mut self.data);
         self
     }
 }
@@ -754,6 +857,7 @@ impl DecisionEmitterGuard {
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;
+            refresh_fulfillment_normalization(&mut event.data);
         }
     }
 
