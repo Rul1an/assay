@@ -782,7 +782,13 @@ fn redact_args_contract_sets_additive_fields() {
     let result = handler.handle_tool_call(&request, &mut state, None, None, None);
 
     match result {
-        HandleResult::Allow { decision_event, .. } => {
+        HandleResult::Allow {
+            effective_arguments,
+            decision_event,
+            ..
+        } => {
+            let redacted_args = effective_arguments.expect("redacted effective_arguments");
+            assert_eq!(redacted_args["body"], serde_json::json!("[REDACTED]"));
             assert_eq!(
                 decision_event.data.redaction_target.as_deref(),
                 Some("body")
@@ -820,7 +826,7 @@ fn redact_args_contract_sets_additive_fields() {
                     outcome.obligation_type == "redact_args"
                         && outcome.status == ObligationOutcomeStatus::Applied
                         && outcome.reason.is_none()
-                        && outcome.reason_code.as_deref() == Some("obligation_applied")
+                        && outcome.reason_code.as_deref() == Some("validated_in_handler")
                         && outcome.enforcement_stage.as_deref() == Some("handler")
                         && outcome.normalization_version.as_deref() == Some("v1")
                 }));
