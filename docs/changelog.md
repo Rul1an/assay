@@ -1310,6 +1310,11 @@
 - docs(wave32-step3): closure docs+gate for redact_args enforcement (#778) @Rul1an
 - feat(wave32-step2): enforce redact_args with deterministic deny paths (#777) @Rul1an
 - docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
+- docs(wave33-step1): freeze obligation outcomes normalization contract (#781) @Rul1an
+- docs(adr-032): formalize MCP policy obligations and execution plan (#780) @Rul1an
+- docs(wave32-step3): closure docs+gate for redact_args enforcement (#778) @Rul1an
+- feat(wave32-step2): enforce redact_args with deterministic deny paths (#777) @Rul1an
+- docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
 ## [2026-03-13]
 
 - docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
