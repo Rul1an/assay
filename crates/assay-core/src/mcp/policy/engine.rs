@@ -425,12 +425,13 @@ fn apply_redact_args_obligation(
     metadata.redaction_target = Some(contract.redaction_target.clone());
     metadata.redaction_mode = Some(contract.redaction_mode.clone());
     metadata.redaction_scope = Some(contract.redaction_scope.clone());
-    metadata.redaction_applied_state = Some(evaluation.result.clone());
+    metadata.redaction_applied_state = Some(evaluation.state.clone());
     metadata.redaction_reason = evaluation.reason.clone();
+    metadata.redaction_failure_reason = evaluation.failure_reason.clone();
     metadata.redact_args_present = Some(true);
     metadata.redact_args_target = Some(contract.redaction_target.clone());
     metadata.redact_args_mode = Some(contract.redaction_mode.clone());
-    metadata.redact_args_result = Some(evaluation.result);
+    metadata.redact_args_result = Some(evaluation.state);
     metadata.redact_args_reason = evaluation.reason;
 }
 
@@ -444,8 +445,9 @@ struct RestrictScopeEvaluation {
 
 #[derive(Debug)]
 struct RedactArgsEvaluation {
-    result: String,
+    state: String,
     reason: Option<String>,
+    failure_reason: Option<String>,
 }
 
 fn default_restrict_scope_contract() -> RestrictScopeContract {
@@ -564,38 +566,71 @@ fn evaluate_restrict_scope_contract(
 
 fn evaluate_redact_args_contract(
     contract: &RedactArgsContract,
-    _args: &Value,
+    args: &Value,
 ) -> RedactArgsEvaluation {
     let target = contract.redaction_target.trim().to_ascii_lowercase();
     let mode = contract.redaction_mode.trim().to_ascii_lowercase();
     let scope = contract.redaction_scope.trim().to_ascii_lowercase();
 
-    let target_supported = matches!(
-        target.as_str(),
-        "path" | "query" | "headers" | "body" | "metadata" | "args"
-    );
     let mode_supported = matches!(mode.as_str(), "mask" | "hash" | "drop" | "partial");
     let scope_supported = matches!(scope.as_str(), "request" | "args" | "metadata");
 
-    let reason = if target_supported && mode_supported && scope_supported {
-        Some("runtime_redaction_deferred".to_string())
-    } else if !target_supported {
-        Some("redaction_target_unsupported".to_string())
-    } else if !mode_supported {
-        Some("redaction_mode_unsupported".to_string())
-    } else {
-        Some("redaction_scope_unsupported".to_string())
+    if !mode_supported {
+        return RedactArgsEvaluation {
+            state: "not_evaluated".to_string(),
+            reason: Some("redaction_mode_unsupported".to_string()),
+            failure_reason: Some("redaction_mode_unsupported".to_string()),
+        };
+    }
+
+    if !scope_supported {
+        return RedactArgsEvaluation {
+            state: "not_evaluated".to_string(),
+            reason: Some("redaction_scope_unsupported".to_string()),
+            failure_reason: Some("redaction_scope_unsupported".to_string()),
+        };
+    }
+
+    let Some(target_value) = redaction_target_value(args, &target) else {
+        return RedactArgsEvaluation {
+            state: "not_applied".to_string(),
+            reason: Some("redaction_target_missing".to_string()),
+            failure_reason: Some("redaction_target_missing".to_string()),
+        };
     };
 
-    let result = if target_supported && mode_supported && scope_supported {
-        "contract_only"
+    if can_apply_redaction(&mode, target_value) {
+        RedactArgsEvaluation {
+            state: "applied".to_string(),
+            reason: None,
+            failure_reason: None,
+        }
     } else {
-        "contract_only_invalid"
-    };
+        RedactArgsEvaluation {
+            state: "not_applied".to_string(),
+            reason: Some("redaction_apply_failed".to_string()),
+            failure_reason: Some("redaction_apply_failed".to_string()),
+        }
+    }
+}
 
-    RedactArgsEvaluation {
-        result: result.to_string(),
-        reason,
+fn redaction_target_value<'a>(args: &'a Value, target: &str) -> Option<&'a Value> {
+    match target {
+        "path" => args.get("path"),
+        "query" => args.get("query"),
+        "headers" => args.get("headers"),
+        "body" => args.get("body"),
+        "metadata" => args.get("_meta"),
+        "args" => Some(args),
+        _ => None,
+    }
+}
+
+fn can_apply_redaction(mode: &str, value: &Value) -> bool {
+    match mode {
+        "mask" | "hash" | "drop" => !value.is_null(),
+        "partial" => value.is_string(),
+        _ => false,
     }
 }
 

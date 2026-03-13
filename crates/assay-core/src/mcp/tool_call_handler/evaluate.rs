@@ -130,7 +130,23 @@ pub(super) fn handle_tool_call(
         );
     }
 
-    // Step 4: Check if mandate is required
+    // Step 4: redact_args obligation enforcement (Wave32)
+    if let Some(failure) = validate_redact_args(&mut tool_match) {
+        let reason = failure.to_string();
+        guard.set_policy_context(tool_match.policy_context());
+        guard.emit_deny(reason_codes::P_REDACT_ARGS, Some(reason.clone()));
+
+        return emit::deny(
+            &handler.config.event_source,
+            tool_call_id,
+            tool_name,
+            reason_codes::P_REDACT_ARGS,
+            reason,
+            tool_match,
+        );
+    }
+
+    // Step 5: Check if mandate is required
     let is_commit_tool = handler.is_commit_tool(&tool_name);
     if is_commit_tool && handler.config.require_mandate_for_commit && mandate.is_none() {
         let reason = "Commit tool requires mandate authorization".to_string();
@@ -147,7 +163,7 @@ pub(super) fn handle_tool_call(
         );
     }
 
-    // Step 5: Mandate authorization (if mandate present)
+    // Step 6: Mandate authorization (if mandate present)
     if let (Some(authorizer), Some(mandate_data)) = (&handler.authorizer, mandate) {
         let operation_class = handler.operation_class_for_tool(&tool_name);
 
@@ -209,7 +225,7 @@ pub(super) fn handle_tool_call(
         }
     }
 
-    // Step 6: No mandate required, policy allows
+    // Step 7: No mandate required, policy allows
     let elapsed_ms = start.elapsed().as_millis() as u64;
     guard.set_latencies(Some(elapsed_ms), None);
     guard.set_policy_context(tool_match.policy_context());
@@ -241,6 +257,14 @@ enum RestrictScopeFailure {
     TypeUnsupported,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RedactArgsFailure {
+    TargetMissing,
+    ModeUnsupported,
+    ScopeUnsupported,
+    ApplyFailed,
+}
+
 impl RestrictScopeFailure {
     fn code(self) -> &'static str {
         match self {
@@ -270,6 +294,36 @@ impl RestrictScopeFailure {
     }
 }
 
+impl RedactArgsFailure {
+    fn code(self) -> &'static str {
+        match self {
+            Self::TargetMissing => "redaction_target_missing",
+            Self::ModeUnsupported => "redaction_mode_unsupported",
+            Self::ScopeUnsupported => "redaction_scope_unsupported",
+            Self::ApplyFailed => "redaction_apply_failed",
+        }
+    }
+
+    fn as_reason(self) -> &'static str {
+        match self {
+            Self::TargetMissing => "redaction target missing",
+            Self::ModeUnsupported => "redaction mode unsupported",
+            Self::ScopeUnsupported => "redaction scope unsupported",
+            Self::ApplyFailed => "redaction apply failed",
+        }
+    }
+
+    fn from_code(code: Option<&str>) -> Self {
+        match code {
+            Some("redaction_target_missing") => Self::TargetMissing,
+            Some("redaction_mode_unsupported") => Self::ModeUnsupported,
+            Some("redaction_scope_unsupported") => Self::ScopeUnsupported,
+            Some("redaction_apply_failed") => Self::ApplyFailed,
+            _ => Self::ApplyFailed,
+        }
+    }
+}
+
 impl ApprovalFailure {
     fn as_reason(self) -> &'static str {
         match self {
@@ -288,6 +342,12 @@ impl std::fmt::Display for ApprovalFailure {
 }
 
 impl std::fmt::Display for RestrictScopeFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_reason())
+    }
+}
+
+impl std::fmt::Display for RedactArgsFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_reason())
     }
@@ -422,6 +482,41 @@ fn validate_restrict_scope(
     Some(mark_restrict_scope_failure(tool_match, failure))
 }
 
+fn validate_redact_args(tool_match: &mut emit::ToolMatchMetadata) -> Option<RedactArgsFailure> {
+    let requires_redaction = tool_match
+        .obligations
+        .iter()
+        .any(|obligation| obligation.obligation_type == "redact_args");
+    if !requires_redaction {
+        return None;
+    }
+
+    if matches!(
+        tool_match.redaction_applied_state.as_deref(),
+        Some("applied")
+    ) {
+        tool_match.redaction_failure_reason = None;
+        tool_match.redaction_reason = None;
+        tool_match.redact_args_reason = None;
+        tool_match.redact_args_result = Some("applied".to_string());
+        mark_redact_args_outcome(
+            tool_match,
+            super::super::decision::ObligationOutcomeStatus::Applied,
+            None,
+        );
+        return None;
+    }
+
+    let failure = RedactArgsFailure::from_code(
+        tool_match
+            .redaction_failure_reason
+            .as_deref()
+            .or(tool_match.redaction_reason.as_deref())
+            .or(tool_match.redact_args_reason.as_deref()),
+    );
+    Some(mark_redact_args_failure(tool_match, failure))
+}
+
 fn mark_restrict_scope_failure(
     tool_match: &mut emit::ToolMatchMetadata,
     failure: RestrictScopeFailure,
@@ -460,6 +555,52 @@ fn mark_restrict_scope_outcome(
         .obligation_outcomes
         .push(super::super::decision::ObligationOutcome {
             obligation_type: "restrict_scope".to_string(),
+            status,
+            reason: reason.map(ToString::to_string),
+        });
+}
+
+fn mark_redact_args_failure(
+    tool_match: &mut emit::ToolMatchMetadata,
+    failure: RedactArgsFailure,
+) -> RedactArgsFailure {
+    let failure_code = failure.code().to_string();
+    tool_match.redaction_failure_reason = Some(failure_code.clone());
+    if tool_match.redaction_applied_state.is_none() {
+        tool_match.redaction_applied_state = Some("not_evaluated".to_string());
+    }
+    if tool_match.redact_args_result.is_none() {
+        tool_match.redact_args_result = tool_match.redaction_applied_state.clone();
+    }
+    tool_match.redaction_reason = Some(failure_code.clone());
+    tool_match.redact_args_reason = Some(failure_code.clone());
+    mark_redact_args_outcome(
+        tool_match,
+        super::super::decision::ObligationOutcomeStatus::Error,
+        Some(failure_code.as_str()),
+    );
+    failure
+}
+
+fn mark_redact_args_outcome(
+    tool_match: &mut emit::ToolMatchMetadata,
+    status: super::super::decision::ObligationOutcomeStatus,
+    reason: Option<&str>,
+) {
+    if let Some(outcome) = tool_match
+        .obligation_outcomes
+        .iter_mut()
+        .find(|outcome| outcome.obligation_type == "redact_args")
+    {
+        outcome.status = status;
+        outcome.reason = reason.map(ToString::to_string);
+        return;
+    }
+
+    tool_match
+        .obligation_outcomes
+        .push(super::super::decision::ObligationOutcome {
+            obligation_type: "redact_args".to_string(),
             status,
             reason: reason.map(ToString::to_string),
         });
