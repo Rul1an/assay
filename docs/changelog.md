@@ -1444,6 +1444,16 @@
 - docs(wave34-promote): land step3 fail-closed closure on main (#791) @Rul1an
 - docs(wave34-step3): close fail-closed matrix slice (#789) @Rul1an
 - feat(wave34-step2): add fail-closed matrix typing context (#788) @Rul1an
+- docs(wave36-step3): closure for redact_args enforcement (#809) @Rul1an
+- feat(wave36-step2): enforce redact_args runtime execution (#807) @Rul1an
+- fix(copilot): resolve latest review findings in wave gates/tests (#805) @Rul1an
+- docs(wave36-step1): freeze redact_args enforcement hardening contract (#803) @Rul1an
+- docs(wave35-step3): add fulfillment-normalization closure gate (#801) @Rul1an
+- feat(wave35-step2): normalize obligation fulfillment evidence (#799) @Rul1an
+- docs(wave35-step1): freeze obligation fulfillment normalization (#797) @Rul1an
+- fix(wave34): close remaining Copilot findings on fail-closed (#795) @Rul1an
+- fix(wave34-gates): execute decision_emit_invariant test target (#793) @Rul1an
+- docs(wave34-promote): land step3 fail-closed closure on main (#791) @Rul1an
 ## [2026-03-13]
 
 - docs(wave32-step1): freeze redact_args enforcement contract (#775) @Rul1an
