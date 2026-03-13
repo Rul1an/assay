@@ -14,7 +14,11 @@ use std::io::Write;
 use std::sync::Arc;
 
 mod outcome_convergence;
+mod replay_diff;
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
+pub use replay_diff::{
+    basis_from_decision_data, classify_replay_diff, ReplayDiffBasis, ReplayDiffBucket,
+};
 
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
