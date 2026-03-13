@@ -496,6 +496,9 @@ fn validate_redact_args(tool_match: &mut emit::ToolMatchMetadata) -> Option<Reda
         Some("applied")
     ) {
         tool_match.redaction_failure_reason = None;
+        tool_match.redaction_reason = None;
+        tool_match.redact_args_reason = None;
+        tool_match.redact_args_result = Some("applied".to_string());
         mark_redact_args_outcome(
             tool_match,
             super::super::decision::ObligationOutcomeStatus::Applied,
