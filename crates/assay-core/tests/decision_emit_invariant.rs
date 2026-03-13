@@ -5,7 +5,7 @@
 
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent,
-    ObligationOutcomeStatus,
+    FulfillmentDecisionPath, ObligationOutcomeStatus,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1009,6 +1009,17 @@ fn test_event_contains_required_fields() {
         event.data.obligation_outcomes[0].status,
         ObligationOutcomeStatus::Applied
     );
+    assert_eq!(
+        event.data.obligation_outcomes[0].reason_code.as_deref(),
+        Some("legacy_warning_mapped")
+    );
+    assert_eq!(
+        event.data.fulfillment_decision_path,
+        Some(FulfillmentDecisionPath::PolicyAllow)
+    );
+    assert_eq!(event.data.obligation_applied_present, Some(true));
+    assert_eq!(event.data.obligation_skipped_present, Some(false));
+    assert_eq!(event.data.obligation_error_present, Some(false));
     assert!(event.data.approval_state.is_none());
     assert!(event.data.approval_id.is_none());
     assert!(event.data.approval_freshness.is_none());

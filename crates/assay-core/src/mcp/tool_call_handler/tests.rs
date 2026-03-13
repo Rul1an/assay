@@ -1,6 +1,7 @@
 use super::*;
 use crate::mcp::decision::{
-    reason_codes, DecisionEvent, NullDecisionEmitter, ObligationOutcomeStatus,
+    reason_codes, DecisionEvent, FulfillmentDecisionPath, NullDecisionEmitter,
+    ObligationOutcomeStatus,
 };
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
@@ -209,6 +210,17 @@ fn test_allow_with_warning_emits_log_obligation_outcome() {
             );
             assert_eq!(outcome.enforcement_stage.as_deref(), Some("executor"));
             assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
+            assert_eq!(
+                outcome.reason_code.as_deref(),
+                Some("legacy_warning_mapped")
+            );
+            assert_eq!(
+                decision_event.data.fulfillment_decision_path,
+                Some(FulfillmentDecisionPath::PolicyAllow)
+            );
+            assert_eq!(decision_event.data.obligation_applied_present, Some(true));
+            assert_eq!(decision_event.data.obligation_skipped_present, Some(false));
+            assert_eq!(decision_event.data.obligation_error_present, Some(false));
         }
         other => panic!("expected allow result, got {:?}", other),
     }
@@ -267,9 +279,16 @@ fn test_tool_drift_deny_emits_alert_obligation_outcome() {
             assert_eq!(outcome.obligation_type, "alert");
             assert_eq!(outcome.status, ObligationOutcomeStatus::Applied);
             assert!(outcome.reason.is_none());
-            assert!(outcome.reason_code.is_none());
+            assert_eq!(outcome.reason_code.as_deref(), Some("obligation_applied"));
             assert_eq!(outcome.enforcement_stage.as_deref(), Some("executor"));
             assert_eq!(outcome.normalization_version.as_deref(), Some("v1"));
+            assert_eq!(
+                decision_event.data.fulfillment_decision_path,
+                Some(FulfillmentDecisionPath::PolicyDeny)
+            );
+            assert_eq!(decision_event.data.obligation_applied_present, Some(true));
+            assert_eq!(decision_event.data.obligation_skipped_present, Some(false));
+            assert_eq!(decision_event.data.obligation_error_present, Some(false));
         }
         other => panic!("expected deny result, got {:?}", other),
     }
@@ -312,6 +331,10 @@ fn approval_required_missing_denies() {
             assert_eq!(reason_code, reason_codes::P_APPROVAL_REQUIRED);
             assert_eq!(reason, "missing approval");
             assert_fail_closed_defaults(&decision_event);
+            assert_eq!(
+                decision_event.data.fulfillment_decision_path,
+                Some(FulfillmentDecisionPath::PolicyDeny)
+            );
             assert_eq!(
                 decision_event.data.approval_failure_reason.as_deref(),
                 Some("missing approval")
@@ -602,7 +625,7 @@ fn restrict_scope_match_sets_additive_fields() {
                 .any(|outcome| {
                     outcome.obligation_type == "restrict_scope"
                         && outcome.status == ObligationOutcomeStatus::Applied
-                        && outcome.reason_code.is_none()
+                        && outcome.reason_code.as_deref() == Some("obligation_applied")
                         && outcome.enforcement_stage.as_deref() == Some("handler")
                         && outcome.normalization_version.as_deref() == Some("v1")
                 }));
@@ -801,7 +824,7 @@ fn redact_args_contract_sets_additive_fields() {
                     outcome.obligation_type == "redact_args"
                         && outcome.status == ObligationOutcomeStatus::Applied
                         && outcome.reason.is_none()
-                        && outcome.reason_code.is_none()
+                        && outcome.reason_code.as_deref() == Some("obligation_applied")
                         && outcome.enforcement_stage.as_deref() == Some("handler")
                         && outcome.normalization_version.as_deref() == Some("v1")
                 }));
