@@ -65,13 +65,6 @@ while IFS= read -r f; do
     [[ "$f" == "$a" ]] && ok="true" && break
   done
 
-  if [[ "$ok" != "true" && "$f" == crates/assay-core/src/mcp/* ]]; then
-    ok="true"
-  fi
-  if [[ "$ok" != "true" && "$f" == crates/assay-core/tests/* ]]; then
-    ok="true"
-  fi
-
   if [[ "$ok" != "true" ]]; then
     echo "FAIL: file not allowed in Wave34 Step2: $f"
     exit 1
