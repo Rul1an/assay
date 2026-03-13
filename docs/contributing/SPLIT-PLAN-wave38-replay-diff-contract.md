@@ -56,7 +56,7 @@ Replay outcome is strictly less restrictive than baseline.
 ### Reclassified
 Decision remains effectively equivalent but shifts classification basis (e.g. policy deny vs fail-closed deny).
 
-### Evidence-only
+### evidence_only
 Decision equivalence holds; only additive evidence fields differ.
 
 ## Acceptance shape for Step2
