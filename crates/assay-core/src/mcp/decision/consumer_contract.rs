@@ -63,15 +63,18 @@ pub fn project_consumer_contract(
         ConsumerReadPath::LegacyDecision
     };
 
-    let fallback_applied =
-        compat_fallback_applied.unwrap_or(read_path != ConsumerReadPath::ConvergedDecision);
+    let fallback_applied = read_path != ConsumerReadPath::ConvergedDecision;
 
-    let payload_state = if read_path == ConsumerReadPath::LegacyDecision {
-        ConsumerPayloadState::LegacyBase
-    } else if fallback_applied || legacy_shape_detected.unwrap_or(false) {
-        ConsumerPayloadState::CompatibilityFallback
-    } else {
-        ConsumerPayloadState::Converged
+    let payload_state = match read_path {
+        ConsumerReadPath::ConvergedDecision => {
+            if compat_fallback_applied.unwrap_or(false) || legacy_shape_detected.unwrap_or(false) {
+                ConsumerPayloadState::CompatibilityFallback
+            } else {
+                ConsumerPayloadState::Converged
+            }
+        }
+        ConsumerReadPath::CompatibilityMarkers => ConsumerPayloadState::CompatibilityFallback,
+        ConsumerReadPath::LegacyDecision => ConsumerPayloadState::LegacyBase,
     };
 
     ConsumerContractProjection {
@@ -141,5 +144,25 @@ mod tests {
         assert_eq!(projection.read_path, ConsumerReadPath::LegacyDecision);
         assert!(projection.fallback_applied);
         assert_eq!(projection.payload_state, ConsumerPayloadState::LegacyBase);
+    }
+
+    #[test]
+    fn partial_markers_still_count_as_consumer_fallback() {
+        let projection = project_consumer_contract(
+            Some(DecisionOutcomeKind::ObligationApplied),
+            None,
+            None,
+            Some("wave39_v1"),
+            Some(false),
+            Some(ReplayClassificationSource::ConvergedOutcome),
+            Some(false),
+        );
+
+        assert_eq!(projection.read_path, ConsumerReadPath::CompatibilityMarkers);
+        assert!(projection.fallback_applied);
+        assert_eq!(
+            projection.payload_state,
+            ConsumerPayloadState::CompatibilityFallback
+        );
     }
 }
