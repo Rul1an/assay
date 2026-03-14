@@ -1,7 +1,7 @@
 use super::audit::{AuditEvent, AuditLog};
 use super::decision::{
-    reason_codes, Decision, DecisionEmitter, DecisionEvent, FileDecisionEmitter,
-    NullDecisionEmitter,
+    reason_codes, refresh_contract_projections, Decision, DecisionEmitter, DecisionEvent,
+    FileDecisionEmitter, NullDecisionEmitter,
 };
 use super::jsonrpc::JsonRpcRequest;
 use super::policy::{
@@ -551,6 +551,7 @@ impl McpProxy {
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();
+        refresh_contract_projections(&mut event.data);
         emitter.emit(&event);
     }
 }
