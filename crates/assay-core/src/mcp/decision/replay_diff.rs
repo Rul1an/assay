@@ -211,7 +211,7 @@ mod tests {
             fail_closed_deny: false,
             enforcement_deny: false,
             deny_precedence_version: DENY_PRECEDENCE_VERSION_V1.to_string(),
-            deny_classification_source: DenyClassificationSource::NotDeny,
+            deny_classification_source: DenyClassificationSource::OutcomeKind,
             deny_legacy_fallback_applied: false,
             deny_convergence_reason: "outcome_not_deny".to_string(),
             reason_code: reason.to_string(),
