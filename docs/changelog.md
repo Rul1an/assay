@@ -1610,6 +1610,16 @@
 - feat(wave40-step2): converge deny evidence precedence and fallback (#836) @Rul1an
 - docs(wave40-step1): freeze deny evidence convergence contract (#833) @Rul1an
 - chore(wave38): align step3 deny-path gate with checklist (#832) @Rul1an
+- docs(wave42-step3): close context envelope hardening (#852) @Rul1an
+- feat(wave42-step2): harden context envelope payloads (#850) @Rul1an
+- docs(wave42-step1): freeze context envelope hardening (#848) @Rul1an
+- docs(wave41-step3): close consumer hardening slice (#846) @Rul1an
+- feat(wave41-step2): harden consumer decision payloads (#844) @Rul1an
+- docs(wave41-step1): freeze consumer hardening contract (#842) @Rul1an
+- chore(wave40-hygiene): resolve replay diff review follow-ups (#840) @Rul1an
+- docs(wave40-step3): close deny evidence convergence wave (#838) @Rul1an
+- feat(wave40-step2): converge deny evidence precedence and fallback (#836) @Rul1an
+- docs(wave40-step1): freeze deny evidence convergence contract (#833) @Rul1an
 ## [2026-03-14]
 
 - feat(wave39-step2): implement replay/evidence compat normalization (#828) @Rul1an
