@@ -32,6 +32,7 @@ This slice must not:
 BASE_REF=origin/codex/wave40-deny-evidence-step2-impl-v2 \
   bash scripts/ci/review-wave40-deny-evidence-step3.sh
 ```
+Use this only when the stacked Step2 ref is synced with current `main` history.
 
 ### Against origin/main after sync
 ```bash
@@ -42,4 +43,4 @@ BASE_REF=origin/main \
 Expected outcome:
 - Step3 adds no runtime behavior.
 - closure remains diff-proof.
-- promote can happen cleanly after stacked validation.
+- promote can happen cleanly after authoritative `origin/main` validation.

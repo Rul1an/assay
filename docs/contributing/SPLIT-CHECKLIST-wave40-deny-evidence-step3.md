@@ -56,8 +56,8 @@
 - [ ] No control-plane/auth transport changes
 
 ## Validation
-- [ ] Step3 gate passes against stacked Step2 base
-- [ ] Step3 gate can also pass against `origin/main` after sync
+- [ ] Step3 gate passes against stacked Step2 base **when that ref is synced to current main history**
+- [ ] Step3 gate passes against `origin/main` after sync (authoritative closure validation)
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D warnings` passes
 - [ ] Pinned replay/decision tests remain green
