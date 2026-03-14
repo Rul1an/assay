@@ -81,6 +81,13 @@ do
   }
 done
 
+echo "[review] deny-path separation markers remain present"
+rg -n 'classify_fulfillment_decision_path|fail_closed_applied' \
+  crates/assay-core/src/mcp/decision.rs >/dev/null || {
+  echo "FAIL: missing deny-path separation markers"
+  exit 1
+}
+
 echo "[review] no scope creep into non-goals"
 if rg -n 'new obligation type|runtime enforcement expansion|policy backend replacement|control-plane|auth transport' \
   crates/assay-core/src/mcp crates/assay-cli/src/cli/commands crates/assay-mcp-server \
