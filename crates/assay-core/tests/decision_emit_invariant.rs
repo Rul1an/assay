@@ -4,10 +4,11 @@
 //! one decision event being emitted, regardless of outcome.
 
 use assay_core::mcp::decision::{
-    reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent, DecisionOrigin,
-    DecisionOutcomeKind, DenyClassificationSource, FulfillmentDecisionPath,
-    ObligationOutcomeStatus, OutcomeCompatState, ReplayClassificationSource,
-    DECISION_BASIS_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
+    reason_codes, ConsumerPayloadState, ConsumerReadPath, Decision, DecisionEmitter,
+    DecisionEmitterGuard, DecisionEvent, DecisionOrigin, DecisionOutcomeKind,
+    DenyClassificationSource, FulfillmentDecisionPath, ObligationOutcomeStatus, OutcomeCompatState,
+    ReplayClassificationSource, DECISION_BASIS_VERSION_V1, DECISION_CONSUMER_CONTRACT_VERSION_V1,
+    DENY_PRECEDENCE_VERSION_V1,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1071,6 +1072,30 @@ fn test_event_contains_required_fields() {
         Some("converged_obligation_applied")
     );
     assert_eq!(event.data.legacy_shape_detected, Some(false));
+    assert_eq!(
+        event.data.decision_consumer_contract_version.as_deref(),
+        Some(DECISION_CONSUMER_CONTRACT_VERSION_V1)
+    );
+    assert_eq!(
+        event.data.consumer_read_path,
+        Some(ConsumerReadPath::ConvergedDecision)
+    );
+    assert_eq!(event.data.consumer_fallback_applied, Some(false));
+    assert_eq!(
+        event.data.consumer_payload_state,
+        Some(ConsumerPayloadState::Converged)
+    );
+    assert_eq!(
+        event.data.required_consumer_fields,
+        vec![
+            "decision".to_string(),
+            "reason_code".to_string(),
+            "decision_outcome_kind".to_string(),
+            "decision_origin".to_string(),
+            "fulfillment_decision_path".to_string(),
+            "decision_basis_version".to_string(),
+        ]
+    );
     assert_eq!(event.data.policy_deny, Some(false));
     assert_eq!(event.data.fail_closed_deny, Some(false));
     assert_eq!(event.data.enforcement_deny, Some(false));

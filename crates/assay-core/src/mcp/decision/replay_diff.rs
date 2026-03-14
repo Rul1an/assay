@@ -1,4 +1,8 @@
 use super::{
+    consumer_contract::{
+        project_consumer_contract, required_consumer_fields_v1, ConsumerPayloadState,
+        ConsumerReadPath, DECISION_CONSUMER_CONTRACT_VERSION_V1,
+    },
     deny_convergence::{project_deny_convergence, DENY_PRECEDENCE_VERSION_V1},
     replay_compat::{project_replay_compat, DECISION_BASIS_VERSION_V1},
     Decision, DecisionData, DecisionOrigin, DecisionOutcomeKind, DenyClassificationSource,
@@ -30,6 +34,11 @@ pub struct ReplayDiffBasis {
     pub classification_source: ReplayClassificationSource,
     pub replay_diff_reason: String,
     pub legacy_shape_detected: bool,
+    pub decision_consumer_contract_version: String,
+    pub consumer_read_path: ConsumerReadPath,
+    pub consumer_fallback_applied: bool,
+    pub consumer_payload_state: ConsumerPayloadState,
+    pub required_consumer_fields: Vec<String>,
     pub policy_deny: bool,
     pub fail_closed_deny: bool,
     pub enforcement_deny: bool,
@@ -59,6 +68,26 @@ pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
         data.outcome_compat_state,
         data.fulfillment_decision_path,
         data.decision,
+    );
+    let consumer_projection = project_consumer_contract(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.fulfillment_decision_path,
+        data.decision_basis_version
+            .as_deref()
+            .or(Some(DECISION_BASIS_VERSION_V1)),
+        Some(
+            data.compat_fallback_applied
+                .unwrap_or(replay_projection.compat_fallback_applied),
+        ),
+        Some(
+            data.classification_source
+                .unwrap_or(replay_projection.classification_source),
+        ),
+        Some(
+            data.legacy_shape_detected
+                .unwrap_or(replay_projection.legacy_shape_detected),
+        ),
     );
     let deny_projection = project_deny_convergence(
         data.decision_outcome_kind,
@@ -91,6 +120,24 @@ pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
         legacy_shape_detected: data
             .legacy_shape_detected
             .unwrap_or(replay_projection.legacy_shape_detected),
+        decision_consumer_contract_version: data
+            .decision_consumer_contract_version
+            .clone()
+            .unwrap_or_else(|| DECISION_CONSUMER_CONTRACT_VERSION_V1.to_string()),
+        consumer_read_path: data
+            .consumer_read_path
+            .unwrap_or(consumer_projection.read_path),
+        consumer_fallback_applied: data
+            .consumer_fallback_applied
+            .unwrap_or(consumer_projection.fallback_applied),
+        consumer_payload_state: data
+            .consumer_payload_state
+            .unwrap_or(consumer_projection.payload_state),
+        required_consumer_fields: if data.required_consumer_fields.is_empty() {
+            required_consumer_fields_v1()
+        } else {
+            data.required_consumer_fields.clone()
+        },
         policy_deny: data.policy_deny.unwrap_or(deny_projection.policy_deny),
         fail_closed_deny: data
             .fail_closed_deny
@@ -158,6 +205,12 @@ fn same_effective_decision_class(baseline: &ReplayDiffBasis, candidate: &ReplayD
         && baseline.classification_source == candidate.classification_source
         && baseline.replay_diff_reason == candidate.replay_diff_reason
         && baseline.legacy_shape_detected == candidate.legacy_shape_detected
+        && baseline.decision_consumer_contract_version
+            == candidate.decision_consumer_contract_version
+        && baseline.consumer_read_path == candidate.consumer_read_path
+        && baseline.consumer_fallback_applied == candidate.consumer_fallback_applied
+        && baseline.consumer_payload_state == candidate.consumer_payload_state
+        && baseline.required_consumer_fields == candidate.required_consumer_fields
         && baseline.policy_deny == candidate.policy_deny
         && baseline.fail_closed_deny == candidate.fail_closed_deny
         && baseline.enforcement_deny == candidate.enforcement_deny
@@ -207,6 +260,11 @@ mod tests {
             classification_source: ReplayClassificationSource::ConvergedOutcome,
             replay_diff_reason: "converged_obligation_applied".to_string(),
             legacy_shape_detected: false,
+            decision_consumer_contract_version: DECISION_CONSUMER_CONTRACT_VERSION_V1.to_string(),
+            consumer_read_path: ConsumerReadPath::ConvergedDecision,
+            consumer_fallback_applied: false,
+            consumer_payload_state: ConsumerPayloadState::Converged,
+            required_consumer_fields: required_consumer_fields_v1(),
             policy_deny: false,
             fail_closed_deny: false,
             enforcement_deny: false,
@@ -294,6 +352,11 @@ mod tests {
             classification_source: ReplayClassificationSource::LegacyFallback,
             replay_diff_reason: "legacy_decision_allow".to_string(),
             legacy_shape_detected: true,
+            decision_consumer_contract_version: DECISION_CONSUMER_CONTRACT_VERSION_V1.to_string(),
+            consumer_read_path: ConsumerReadPath::LegacyDecision,
+            consumer_fallback_applied: true,
+            consumer_payload_state: ConsumerPayloadState::LegacyBase,
+            required_consumer_fields: required_consumer_fields_v1(),
             policy_deny: false,
             fail_closed_deny: false,
             enforcement_deny: false,

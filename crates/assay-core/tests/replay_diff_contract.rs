@@ -1,8 +1,9 @@
 use assay_core::mcp::decision::{
-    basis_from_decision_data, classify_replay_diff, reason_codes, Decision, DecisionEvent,
-    DecisionOrigin, DecisionOutcomeKind, DenyClassificationSource, FulfillmentDecisionPath,
-    OutcomeCompatState, PolicyDecisionEventContext, ReplayClassificationSource, ReplayDiffBucket,
-    DECISION_BASIS_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
+    basis_from_decision_data, classify_replay_diff, reason_codes, ConsumerPayloadState,
+    ConsumerReadPath, Decision, DecisionEvent, DecisionOrigin, DecisionOutcomeKind,
+    DenyClassificationSource, FulfillmentDecisionPath, OutcomeCompatState,
+    PolicyDecisionEventContext, ReplayClassificationSource, ReplayDiffBucket,
+    DECISION_BASIS_VERSION_V1, DECISION_CONSUMER_CONTRACT_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
 };
 use assay_core::mcp::policy::TypedPolicyDecision;
 
@@ -52,6 +53,30 @@ fn basis_extraction_contains_frozen_fields() {
     );
     assert_eq!(basis.replay_diff_reason, "converged_obligation_skipped");
     assert!(!basis.legacy_shape_detected);
+    assert_eq!(
+        basis.decision_consumer_contract_version,
+        DECISION_CONSUMER_CONTRACT_VERSION_V1
+    );
+    assert_eq!(
+        basis.consumer_read_path,
+        ConsumerReadPath::ConvergedDecision
+    );
+    assert!(!basis.consumer_fallback_applied);
+    assert_eq!(
+        basis.consumer_payload_state,
+        ConsumerPayloadState::Converged
+    );
+    assert_eq!(
+        basis.required_consumer_fields,
+        vec![
+            "decision".to_string(),
+            "reason_code".to_string(),
+            "decision_outcome_kind".to_string(),
+            "decision_origin".to_string(),
+            "fulfillment_decision_path".to_string(),
+            "decision_basis_version".to_string(),
+        ]
+    );
     assert!(!basis.policy_deny);
     assert!(!basis.fail_closed_deny);
     assert!(!basis.enforcement_deny);
@@ -84,6 +109,11 @@ fn basis_extraction_prefers_fulfillment_path_when_converged_markers_missing() {
     event.data.classification_source = None;
     event.data.replay_diff_reason = None;
     event.data.legacy_shape_detected = None;
+    event.data.decision_consumer_contract_version = None;
+    event.data.consumer_read_path = None;
+    event.data.consumer_fallback_applied = None;
+    event.data.consumer_payload_state = None;
+    event.data.required_consumer_fields.clear();
     event.data.policy_deny = None;
     event.data.fail_closed_deny = None;
     event.data.enforcement_deny = None;
@@ -101,6 +131,19 @@ fn basis_extraction_prefers_fulfillment_path_when_converged_markers_missing() {
     );
     assert_eq!(basis.replay_diff_reason, "fulfillment_policy_allow");
     assert!(basis.legacy_shape_detected);
+    assert_eq!(
+        basis.decision_consumer_contract_version,
+        DECISION_CONSUMER_CONTRACT_VERSION_V1
+    );
+    assert_eq!(
+        basis.consumer_read_path,
+        ConsumerReadPath::CompatibilityMarkers
+    );
+    assert!(basis.consumer_fallback_applied);
+    assert_eq!(
+        basis.consumer_payload_state,
+        ConsumerPayloadState::CompatibilityFallback
+    );
     assert_eq!(
         basis.deny_classification_source,
         DenyClassificationSource::FulfillmentPath
@@ -121,6 +164,11 @@ fn basis_extraction_marks_legacy_fallback_when_shape_is_missing() {
     event.data.classification_source = None;
     event.data.replay_diff_reason = None;
     event.data.legacy_shape_detected = None;
+    event.data.decision_consumer_contract_version = None;
+    event.data.consumer_read_path = None;
+    event.data.consumer_fallback_applied = None;
+    event.data.consumer_payload_state = None;
+    event.data.required_consumer_fields.clear();
     event.data.policy_deny = None;
     event.data.fail_closed_deny = None;
     event.data.enforcement_deny = None;
@@ -138,6 +186,19 @@ fn basis_extraction_marks_legacy_fallback_when_shape_is_missing() {
     );
     assert_eq!(basis.replay_diff_reason, "legacy_decision_allow");
     assert!(basis.legacy_shape_detected);
+    assert_eq!(
+        basis.decision_consumer_contract_version,
+        DECISION_CONSUMER_CONTRACT_VERSION_V1
+    );
+    assert_eq!(
+        basis.consumer_read_path,
+        ConsumerReadPath::CompatibilityMarkers
+    );
+    assert!(basis.consumer_fallback_applied);
+    assert_eq!(
+        basis.consumer_payload_state,
+        ConsumerPayloadState::CompatibilityFallback
+    );
     assert_eq!(
         basis.deny_classification_source,
         DenyClassificationSource::NotDeny
