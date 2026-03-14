@@ -90,3 +90,17 @@ Tradeoffs:
 - more policy/event surface area to maintain
 - slower delivery by design due to bounded wave discipline
 - temporary compatibility code paths remain until explicit deprecation waves complete
+
+## Public API Note (Wave39/Wave40 Replay Evidence)
+The replay/evidence hardening waves widened `assay_core::mcp::decision::ReplayDiffBasis`
+with additional deny-convergence and compatibility fields.
+
+This widening is intentional public API surface within the `v3.x` line, not an accidental
+internal-only detail:
+
+- downstream code that constructs `ReplayDiffBasis` directly must treat the new fields as part
+  of the frozen replay basis contract
+- downstream consumers that deserialize emitted replay basis data should expect these fields to
+  be present after Wave39/Wave40 normalization
+- no retroactive compatibility shim is introduced in this hygiene follow-up; any future external
+  compatibility adapter should be handled as a separate, explicit follow-up
