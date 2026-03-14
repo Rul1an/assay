@@ -5,8 +5,9 @@
 
 use assay_core::mcp::decision::{
     reason_codes, Decision, DecisionEmitter, DecisionEmitterGuard, DecisionEvent, DecisionOrigin,
-    DecisionOutcomeKind, FulfillmentDecisionPath, ObligationOutcomeStatus, OutcomeCompatState,
-    ReplayClassificationSource, DECISION_BASIS_VERSION_V1,
+    DecisionOutcomeKind, DenyClassificationSource, FulfillmentDecisionPath,
+    ObligationOutcomeStatus, OutcomeCompatState, ReplayClassificationSource,
+    DECISION_BASIS_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1070,6 +1071,22 @@ fn test_event_contains_required_fields() {
         Some("converged_obligation_applied")
     );
     assert_eq!(event.data.legacy_shape_detected, Some(false));
+    assert_eq!(event.data.policy_deny, Some(false));
+    assert_eq!(event.data.fail_closed_deny, Some(false));
+    assert_eq!(event.data.enforcement_deny, Some(false));
+    assert_eq!(
+        event.data.deny_precedence_version.as_deref(),
+        Some(DENY_PRECEDENCE_VERSION_V1)
+    );
+    assert_eq!(
+        event.data.deny_classification_source,
+        Some(DenyClassificationSource::OutcomeKind)
+    );
+    assert_eq!(event.data.deny_legacy_fallback_applied, Some(false));
+    assert_eq!(
+        event.data.deny_convergence_reason.as_deref(),
+        Some("outcome_not_deny")
+    );
     assert_eq!(event.data.obligation_applied_present, Some(true));
     assert_eq!(event.data.obligation_skipped_present, Some(false));
     assert_eq!(event.data.obligation_error_present, Some(false));

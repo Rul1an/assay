@@ -3,6 +3,7 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
+use self::deny_convergence::project_deny_convergence;
 use self::outcome_convergence::classify_decision_outcome;
 use self::replay_compat::project_replay_compat;
 use super::policy::{
@@ -14,9 +15,11 @@ use serde_json::Value;
 use std::io::Write;
 use std::sync::Arc;
 
+mod deny_convergence;
 mod outcome_convergence;
 mod replay_compat;
 mod replay_diff;
+pub use deny_convergence::{DenyClassificationSource, DENY_PRECEDENCE_VERSION_V1};
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
 pub use replay_compat::{ReplayClassificationSource, DECISION_BASIS_VERSION_V1};
 pub use replay_diff::{
@@ -316,6 +319,27 @@ pub struct DecisionData {
     /// Whether legacy event shape was detected by compatibility normalization.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy_shape_detected: Option<bool>,
+    /// Explicit deny classification marker: policy deny path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_deny: Option<bool>,
+    /// Explicit deny classification marker: fail-closed deny path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_closed_deny: Option<bool>,
+    /// Explicit deny classification marker: runtime enforcement deny path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforcement_deny: Option<bool>,
+    /// Version tag for deterministic deny-precedence convergence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deny_precedence_version: Option<String>,
+    /// Source selected by deterministic deny-classification precedence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deny_classification_source: Option<DenyClassificationSource>,
+    /// Whether deny classification used additive legacy fallback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deny_legacy_fallback_applied: Option<bool>,
+    /// Deterministic reason token for deny convergence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deny_convergence_reason: Option<String>,
     /// Whether any obligation outcome is normalized as applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub obligation_applied_present: Option<bool>,
@@ -451,6 +475,11 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
     data.decision_origin = Some(outcome.origin);
     data.outcome_compat_state = Some(outcome.compat_state);
     data.fulfillment_decision_path = Some(classify_fulfillment_decision_path(data));
+    let fail_closed_applied = data
+        .fail_closed
+        .as_ref()
+        .map(|ctx| ctx.fail_closed_applied)
+        .unwrap_or(false);
     let replay_projection = project_replay_compat(
         data.decision_outcome_kind,
         data.decision_origin,
@@ -458,11 +487,26 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
         data.fulfillment_decision_path,
         data.decision,
     );
+    let deny_projection = project_deny_convergence(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.fulfillment_decision_path,
+        data.decision,
+        fail_closed_applied,
+        data.reason_code.as_str(),
+    );
     data.decision_basis_version = Some(DECISION_BASIS_VERSION_V1.to_string());
     data.compat_fallback_applied = Some(replay_projection.compat_fallback_applied);
     data.classification_source = Some(replay_projection.classification_source);
     data.replay_diff_reason = Some(replay_projection.replay_diff_reason.to_string());
     data.legacy_shape_detected = Some(replay_projection.legacy_shape_detected);
+    data.policy_deny = Some(deny_projection.policy_deny);
+    data.fail_closed_deny = Some(deny_projection.fail_closed_deny);
+    data.enforcement_deny = Some(deny_projection.enforcement_deny);
+    data.deny_precedence_version = Some(DENY_PRECEDENCE_VERSION_V1.to_string());
+    data.deny_classification_source = Some(deny_projection.classification_source);
+    data.deny_legacy_fallback_applied = Some(deny_projection.legacy_fallback_applied);
+    data.deny_convergence_reason = Some(deny_projection.deny_convergence_reason.to_string());
 }
 
 impl DecisionEvent {
@@ -525,6 +569,13 @@ impl DecisionEvent {
                 classification_source: None,
                 replay_diff_reason: None,
                 legacy_shape_detected: None,
+                policy_deny: None,
+                fail_closed_deny: None,
+                enforcement_deny: None,
+                deny_precedence_version: None,
+                deny_classification_source: None,
+                deny_legacy_fallback_applied: None,
+                deny_convergence_reason: None,
                 obligation_applied_present: None,
                 obligation_skipped_present: None,
                 obligation_error_present: None,

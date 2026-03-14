@@ -1,7 +1,8 @@
 use super::{
+    deny_convergence::{project_deny_convergence, DENY_PRECEDENCE_VERSION_V1},
     replay_compat::{project_replay_compat, DECISION_BASIS_VERSION_V1},
-    Decision, DecisionData, DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath,
-    OutcomeCompatState, ReplayClassificationSource,
+    Decision, DecisionData, DecisionOrigin, DecisionOutcomeKind, DenyClassificationSource,
+    FulfillmentDecisionPath, OutcomeCompatState, ReplayClassificationSource,
 };
 use crate::mcp::policy::TypedPolicyDecision;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,13 @@ pub struct ReplayDiffBasis {
     pub classification_source: ReplayClassificationSource,
     pub replay_diff_reason: String,
     pub legacy_shape_detected: bool,
+    pub policy_deny: bool,
+    pub fail_closed_deny: bool,
+    pub enforcement_deny: bool,
+    pub deny_precedence_version: String,
+    pub deny_classification_source: DenyClassificationSource,
+    pub deny_legacy_fallback_applied: bool,
+    pub deny_convergence_reason: String,
     pub reason_code: String,
     pub typed_decision: Option<TypedPolicyDecision>,
     pub policy_version: Option<String>,
@@ -39,12 +47,26 @@ pub struct ReplayDiffBasis {
 
 /// Build replay basis from an emitted decision payload.
 pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
+    let fail_closed_applied = data
+        .fail_closed
+        .as_ref()
+        .map(|ctx| ctx.fail_closed_applied)
+        .unwrap_or(false);
+
     let replay_projection = project_replay_compat(
         data.decision_outcome_kind,
         data.decision_origin,
         data.outcome_compat_state,
         data.fulfillment_decision_path,
         data.decision,
+    );
+    let deny_projection = project_deny_convergence(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.fulfillment_decision_path,
+        data.decision,
+        fail_closed_applied,
+        data.reason_code.as_str(),
     );
 
     ReplayDiffBasis {
@@ -69,16 +91,33 @@ pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
         legacy_shape_detected: data
             .legacy_shape_detected
             .unwrap_or(replay_projection.legacy_shape_detected),
+        policy_deny: data.policy_deny.unwrap_or(deny_projection.policy_deny),
+        fail_closed_deny: data
+            .fail_closed_deny
+            .unwrap_or(deny_projection.fail_closed_deny),
+        enforcement_deny: data
+            .enforcement_deny
+            .unwrap_or(deny_projection.enforcement_deny),
+        deny_precedence_version: data
+            .deny_precedence_version
+            .clone()
+            .unwrap_or_else(|| DENY_PRECEDENCE_VERSION_V1.to_string()),
+        deny_classification_source: data
+            .deny_classification_source
+            .unwrap_or(deny_projection.classification_source),
+        deny_legacy_fallback_applied: data
+            .deny_legacy_fallback_applied
+            .unwrap_or(deny_projection.legacy_fallback_applied),
+        deny_convergence_reason: data
+            .deny_convergence_reason
+            .clone()
+            .unwrap_or_else(|| deny_projection.deny_convergence_reason.to_string()),
         reason_code: data.reason_code.clone(),
         typed_decision: data.typed_decision,
         policy_version: data.policy_version.clone(),
         policy_digest: data.policy_digest.clone(),
         decision: data.decision,
-        fail_closed_applied: data
-            .fail_closed
-            .as_ref()
-            .map(|ctx| ctx.fail_closed_applied)
-            .unwrap_or(false),
+        fail_closed_applied,
     }
 }
 
@@ -119,6 +158,13 @@ fn same_effective_decision_class(baseline: &ReplayDiffBasis, candidate: &ReplayD
         && baseline.classification_source == candidate.classification_source
         && baseline.replay_diff_reason == candidate.replay_diff_reason
         && baseline.legacy_shape_detected == candidate.legacy_shape_detected
+        && baseline.policy_deny == candidate.policy_deny
+        && baseline.fail_closed_deny == candidate.fail_closed_deny
+        && baseline.enforcement_deny == candidate.enforcement_deny
+        && baseline.deny_precedence_version == candidate.deny_precedence_version
+        && baseline.deny_classification_source == candidate.deny_classification_source
+        && baseline.deny_legacy_fallback_applied == candidate.deny_legacy_fallback_applied
+        && baseline.deny_convergence_reason == candidate.deny_convergence_reason
         && baseline.reason_code == candidate.reason_code
         && baseline.typed_decision == candidate.typed_decision
         && baseline.decision == candidate.decision
@@ -161,6 +207,13 @@ mod tests {
             classification_source: ReplayClassificationSource::ConvergedOutcome,
             replay_diff_reason: "converged_obligation_applied".to_string(),
             legacy_shape_detected: false,
+            policy_deny: false,
+            fail_closed_deny: false,
+            enforcement_deny: false,
+            deny_precedence_version: DENY_PRECEDENCE_VERSION_V1.to_string(),
+            deny_classification_source: DenyClassificationSource::NotDeny,
+            deny_legacy_fallback_applied: false,
+            deny_convergence_reason: "outcome_not_deny".to_string(),
             reason_code: reason.to_string(),
             typed_decision: Some(TypedPolicyDecision::AllowWithObligations),
             policy_version: Some("v1".to_string()),
@@ -241,6 +294,13 @@ mod tests {
             classification_source: ReplayClassificationSource::LegacyFallback,
             replay_diff_reason: "legacy_decision_allow".to_string(),
             legacy_shape_detected: true,
+            policy_deny: false,
+            fail_closed_deny: false,
+            enforcement_deny: false,
+            deny_precedence_version: DENY_PRECEDENCE_VERSION_V1.to_string(),
+            deny_classification_source: DenyClassificationSource::NotDeny,
+            deny_legacy_fallback_applied: true,
+            deny_convergence_reason: "legacy_decision_allow".to_string(),
             reason_code: "P_POLICY_ALLOW".to_string(),
             typed_decision: None,
             policy_version: None,

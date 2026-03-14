@@ -1,8 +1,8 @@
 use assay_core::mcp::decision::{
     basis_from_decision_data, classify_replay_diff, reason_codes, Decision, DecisionEvent,
-    DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath, OutcomeCompatState,
-    PolicyDecisionEventContext, ReplayClassificationSource, ReplayDiffBucket,
-    DECISION_BASIS_VERSION_V1,
+    DecisionOrigin, DecisionOutcomeKind, DenyClassificationSource, FulfillmentDecisionPath,
+    OutcomeCompatState, PolicyDecisionEventContext, ReplayClassificationSource, ReplayDiffBucket,
+    DECISION_BASIS_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
 };
 use assay_core::mcp::policy::TypedPolicyDecision;
 
@@ -52,6 +52,16 @@ fn basis_extraction_contains_frozen_fields() {
     );
     assert_eq!(basis.replay_diff_reason, "converged_obligation_skipped");
     assert!(!basis.legacy_shape_detected);
+    assert!(!basis.policy_deny);
+    assert!(!basis.fail_closed_deny);
+    assert!(!basis.enforcement_deny);
+    assert_eq!(basis.deny_precedence_version, DENY_PRECEDENCE_VERSION_V1);
+    assert_eq!(
+        basis.deny_classification_source,
+        DenyClassificationSource::OutcomeKind
+    );
+    assert!(!basis.deny_legacy_fallback_applied);
+    assert_eq!(basis.deny_convergence_reason, "outcome_not_deny");
     assert_eq!(basis.reason_code, reason_codes::P_POLICY_ALLOW);
     assert_eq!(
         basis.typed_decision,
@@ -74,6 +84,13 @@ fn basis_extraction_prefers_fulfillment_path_when_converged_markers_missing() {
     event.data.classification_source = None;
     event.data.replay_diff_reason = None;
     event.data.legacy_shape_detected = None;
+    event.data.policy_deny = None;
+    event.data.fail_closed_deny = None;
+    event.data.enforcement_deny = None;
+    event.data.deny_precedence_version = None;
+    event.data.deny_classification_source = None;
+    event.data.deny_legacy_fallback_applied = None;
+    event.data.deny_convergence_reason = None;
 
     let basis = basis_from_decision_data(&event.data);
     assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
@@ -84,6 +101,12 @@ fn basis_extraction_prefers_fulfillment_path_when_converged_markers_missing() {
     );
     assert_eq!(basis.replay_diff_reason, "fulfillment_policy_allow");
     assert!(basis.legacy_shape_detected);
+    assert_eq!(
+        basis.deny_classification_source,
+        DenyClassificationSource::FulfillmentPath
+    );
+    assert!(basis.deny_legacy_fallback_applied);
+    assert_eq!(basis.deny_convergence_reason, "fulfillment_policy_allow");
 }
 
 #[test]
@@ -98,6 +121,13 @@ fn basis_extraction_marks_legacy_fallback_when_shape_is_missing() {
     event.data.classification_source = None;
     event.data.replay_diff_reason = None;
     event.data.legacy_shape_detected = None;
+    event.data.policy_deny = None;
+    event.data.fail_closed_deny = None;
+    event.data.enforcement_deny = None;
+    event.data.deny_precedence_version = None;
+    event.data.deny_classification_source = None;
+    event.data.deny_legacy_fallback_applied = None;
+    event.data.deny_convergence_reason = None;
 
     let basis = basis_from_decision_data(&event.data);
     assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
@@ -108,6 +138,11 @@ fn basis_extraction_marks_legacy_fallback_when_shape_is_missing() {
     );
     assert_eq!(basis.replay_diff_reason, "legacy_decision_allow");
     assert!(basis.legacy_shape_detected);
+    assert_eq!(
+        basis.deny_classification_source,
+        DenyClassificationSource::NotDeny
+    );
+    assert!(basis.deny_legacy_fallback_applied);
 }
 
 #[test]
@@ -229,4 +264,58 @@ fn classify_replay_diff_legacy_decision_fallback() {
         classify_replay_diff(&candidate, &baseline),
         ReplayDiffBucket::Looser
     );
+}
+
+#[test]
+fn basis_extracts_deny_convergence_for_policy_deny() {
+    let deny_event = DecisionEvent::new(
+        "assay://test".to_string(),
+        "tc_205".to_string(),
+        "deploy_service".to_string(),
+    )
+    .deny(reason_codes::P_POLICY_DENY, Some("blocked".to_string()));
+
+    let basis = basis_from_decision_data(&deny_event.data);
+    assert!(basis.policy_deny);
+    assert!(!basis.fail_closed_deny);
+    assert!(!basis.enforcement_deny);
+    assert_eq!(
+        basis.deny_classification_source,
+        DenyClassificationSource::OutcomeKind
+    );
+    assert!(!basis.deny_legacy_fallback_applied);
+    assert_eq!(basis.deny_convergence_reason, "outcome_policy_deny");
+}
+
+#[test]
+fn basis_extracts_deny_convergence_legacy_fallback_for_missing_shape() {
+    let mut deny_event = DecisionEvent::new(
+        "assay://test".to_string(),
+        "tc_206".to_string(),
+        "deploy_service".to_string(),
+    )
+    .deny(reason_codes::P_POLICY_DENY, Some("blocked".to_string()));
+    deny_event.data.decision_outcome_kind = None;
+    deny_event.data.decision_origin = None;
+    deny_event.data.outcome_compat_state = None;
+    deny_event.data.fulfillment_decision_path = None;
+    deny_event.data.policy_deny = None;
+    deny_event.data.fail_closed_deny = None;
+    deny_event.data.enforcement_deny = None;
+    deny_event.data.deny_precedence_version = None;
+    deny_event.data.deny_classification_source = None;
+    deny_event.data.deny_legacy_fallback_applied = None;
+    deny_event.data.deny_convergence_reason = None;
+
+    let basis = basis_from_decision_data(&deny_event.data);
+    assert!(basis.policy_deny);
+    assert!(!basis.fail_closed_deny);
+    assert!(!basis.enforcement_deny);
+    assert_eq!(basis.deny_precedence_version, DENY_PRECEDENCE_VERSION_V1);
+    assert_eq!(
+        basis.deny_classification_source,
+        DenyClassificationSource::LegacyDecision
+    );
+    assert!(basis.deny_legacy_fallback_applied);
+    assert_eq!(basis.deny_convergence_reason, "legacy_policy_deny");
 }
