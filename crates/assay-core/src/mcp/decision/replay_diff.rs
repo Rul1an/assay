@@ -1,6 +1,7 @@
 use super::{
+    replay_compat::{project_replay_compat, DECISION_BASIS_VERSION_V1},
     Decision, DecisionData, DecisionOrigin, DecisionOutcomeKind, FulfillmentDecisionPath,
-    OutcomeCompatState,
+    OutcomeCompatState, ReplayClassificationSource,
 };
 use crate::mcp::policy::TypedPolicyDecision;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,11 @@ pub struct ReplayDiffBasis {
     pub decision_origin: Option<DecisionOrigin>,
     pub outcome_compat_state: Option<OutcomeCompatState>,
     pub fulfillment_decision_path: Option<FulfillmentDecisionPath>,
+    pub decision_basis_version: String,
+    pub compat_fallback_applied: bool,
+    pub classification_source: ReplayClassificationSource,
+    pub replay_diff_reason: String,
+    pub legacy_shape_detected: bool,
     pub reason_code: String,
     pub typed_decision: Option<TypedPolicyDecision>,
     pub policy_version: Option<String>,
@@ -33,11 +39,36 @@ pub struct ReplayDiffBasis {
 
 /// Build replay basis from an emitted decision payload.
 pub fn basis_from_decision_data(data: &DecisionData) -> ReplayDiffBasis {
+    let replay_projection = project_replay_compat(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.outcome_compat_state,
+        data.fulfillment_decision_path,
+        data.decision,
+    );
+
     ReplayDiffBasis {
         decision_outcome_kind: data.decision_outcome_kind,
         decision_origin: data.decision_origin,
         outcome_compat_state: data.outcome_compat_state,
         fulfillment_decision_path: data.fulfillment_decision_path,
+        decision_basis_version: data
+            .decision_basis_version
+            .clone()
+            .unwrap_or_else(|| DECISION_BASIS_VERSION_V1.to_string()),
+        compat_fallback_applied: data
+            .compat_fallback_applied
+            .unwrap_or(replay_projection.compat_fallback_applied),
+        classification_source: data
+            .classification_source
+            .unwrap_or(replay_projection.classification_source),
+        replay_diff_reason: data
+            .replay_diff_reason
+            .clone()
+            .unwrap_or_else(|| replay_projection.replay_diff_reason.to_string()),
+        legacy_shape_detected: data
+            .legacy_shape_detected
+            .unwrap_or(replay_projection.legacy_shape_detected),
         reason_code: data.reason_code.clone(),
         typed_decision: data.typed_decision,
         policy_version: data.policy_version.clone(),
@@ -83,6 +114,11 @@ fn same_effective_decision_class(baseline: &ReplayDiffBasis, candidate: &ReplayD
         && baseline.decision_origin == candidate.decision_origin
         && baseline.outcome_compat_state == candidate.outcome_compat_state
         && baseline.fulfillment_decision_path == candidate.fulfillment_decision_path
+        && baseline.decision_basis_version == candidate.decision_basis_version
+        && baseline.compat_fallback_applied == candidate.compat_fallback_applied
+        && baseline.classification_source == candidate.classification_source
+        && baseline.replay_diff_reason == candidate.replay_diff_reason
+        && baseline.legacy_shape_detected == candidate.legacy_shape_detected
         && baseline.reason_code == candidate.reason_code
         && baseline.typed_decision == candidate.typed_decision
         && baseline.decision == candidate.decision
@@ -120,6 +156,11 @@ mod tests {
             decision_origin: Some(DecisionOrigin::PolicyEngine),
             outcome_compat_state: Some(OutcomeCompatState::LegacyFieldsPreserved),
             fulfillment_decision_path: Some(FulfillmentDecisionPath::PolicyAllow),
+            decision_basis_version: DECISION_BASIS_VERSION_V1.to_string(),
+            compat_fallback_applied: false,
+            classification_source: ReplayClassificationSource::ConvergedOutcome,
+            replay_diff_reason: "converged_obligation_applied".to_string(),
+            legacy_shape_detected: false,
             reason_code: reason.to_string(),
             typed_decision: Some(TypedPolicyDecision::AllowWithObligations),
             policy_version: Some("v1".to_string()),
@@ -195,6 +236,11 @@ mod tests {
             decision_origin: None,
             outcome_compat_state: None,
             fulfillment_decision_path: None,
+            decision_basis_version: DECISION_BASIS_VERSION_V1.to_string(),
+            compat_fallback_applied: true,
+            classification_source: ReplayClassificationSource::LegacyFallback,
+            replay_diff_reason: "legacy_decision_allow".to_string(),
+            legacy_shape_detected: true,
             reason_code: "P_POLICY_ALLOW".to_string(),
             typed_decision: None,
             policy_version: None,

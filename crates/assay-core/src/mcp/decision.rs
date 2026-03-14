@@ -4,6 +4,7 @@
 //! Every tool call attempt MUST emit exactly one decision event.
 
 use self::outcome_convergence::classify_decision_outcome;
+use self::replay_compat::project_replay_compat;
 use super::policy::{
     ApprovalArtifact, ApprovalFreshness, FailClosedContext, PolicyObligation, RedactArgsContract,
     RestrictScopeContract, TypedPolicyDecision,
@@ -14,8 +15,10 @@ use std::io::Write;
 use std::sync::Arc;
 
 mod outcome_convergence;
+mod replay_compat;
 mod replay_diff;
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
+pub use replay_compat::{ReplayClassificationSource, DECISION_BASIS_VERSION_V1};
 pub use replay_diff::{
     basis_from_decision_data, classify_replay_diff, ReplayDiffBasis, ReplayDiffBucket,
 };
@@ -298,6 +301,21 @@ pub struct DecisionData {
     /// Normalized decision path for fulfillment evidence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment_decision_path: Option<FulfillmentDecisionPath>,
+    /// Version tag for replay basis compatibility normalization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_basis_version: Option<String>,
+    /// Whether compatibility fallback was applied during classification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compat_fallback_applied: Option<bool>,
+    /// Deterministic source used for compatibility classification precedence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_source: Option<ReplayClassificationSource>,
+    /// Deterministic replay classification reason token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_diff_reason: Option<String>,
+    /// Whether legacy event shape was detected by compatibility normalization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_shape_detected: Option<bool>,
     /// Whether any obligation outcome is normalized as applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub obligation_applied_present: Option<bool>,
@@ -433,6 +451,18 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
     data.decision_origin = Some(outcome.origin);
     data.outcome_compat_state = Some(outcome.compat_state);
     data.fulfillment_decision_path = Some(classify_fulfillment_decision_path(data));
+    let replay_projection = project_replay_compat(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.outcome_compat_state,
+        data.fulfillment_decision_path,
+        data.decision,
+    );
+    data.decision_basis_version = Some(DECISION_BASIS_VERSION_V1.to_string());
+    data.compat_fallback_applied = Some(replay_projection.compat_fallback_applied);
+    data.classification_source = Some(replay_projection.classification_source);
+    data.replay_diff_reason = Some(replay_projection.replay_diff_reason.to_string());
+    data.legacy_shape_detected = Some(replay_projection.legacy_shape_detected);
 }
 
 impl DecisionEvent {
@@ -490,6 +520,11 @@ impl DecisionEvent {
                 decision_origin: None,
                 outcome_compat_state: None,
                 fulfillment_decision_path: None,
+                decision_basis_version: None,
+                compat_fallback_applied: None,
+                classification_source: None,
+                replay_diff_reason: None,
+                legacy_shape_detected: None,
                 obligation_applied_present: None,
                 obligation_skipped_present: None,
                 obligation_error_present: None,
