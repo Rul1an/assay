@@ -3,6 +3,7 @@
 //! This module implements the "always emit decision" invariant (I1):
 //! Every tool call attempt MUST emit exactly one decision event.
 
+use self::consumer_contract::project_consumer_contract;
 use self::deny_convergence::project_deny_convergence;
 use self::outcome_convergence::classify_decision_outcome;
 use self::replay_compat::project_replay_compat;
@@ -15,10 +16,15 @@ use serde_json::Value;
 use std::io::Write;
 use std::sync::Arc;
 
+mod consumer_contract;
 mod deny_convergence;
 mod outcome_convergence;
 mod replay_compat;
 mod replay_diff;
+pub use consumer_contract::{
+    required_consumer_fields_v1, ConsumerPayloadState, ConsumerReadPath,
+    DECISION_CONSUMER_CONTRACT_VERSION_V1,
+};
 pub use deny_convergence::{DenyClassificationSource, DENY_PRECEDENCE_VERSION_V1};
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
 pub use replay_compat::{ReplayClassificationSource, DECISION_BASIS_VERSION_V1};
@@ -319,6 +325,21 @@ pub struct DecisionData {
     /// Whether legacy event shape was detected by compatibility normalization.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy_shape_detected: Option<bool>,
+    /// Version tag for bounded consumer-facing compatibility reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_consumer_contract_version: Option<String>,
+    /// Consumer-facing precedence path selected for deterministic reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumer_read_path: Option<ConsumerReadPath>,
+    /// Whether consumer-facing reads depended on compatibility fallback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumer_fallback_applied: Option<bool>,
+    /// Overall consumer-facing payload robustness state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumer_payload_state: Option<ConsumerPayloadState>,
+    /// Contract-level required fields for bounded consumer reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_consumer_fields: Vec<String>,
     /// Explicit deny classification marker: policy deny path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_deny: Option<bool>,
@@ -500,6 +521,21 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
     data.classification_source = Some(replay_projection.classification_source);
     data.replay_diff_reason = Some(replay_projection.replay_diff_reason.to_string());
     data.legacy_shape_detected = Some(replay_projection.legacy_shape_detected);
+    let consumer_projection = project_consumer_contract(
+        data.decision_outcome_kind,
+        data.decision_origin,
+        data.fulfillment_decision_path,
+        data.decision_basis_version.as_deref(),
+        data.compat_fallback_applied,
+        data.classification_source,
+        data.legacy_shape_detected,
+    );
+    data.decision_consumer_contract_version =
+        Some(DECISION_CONSUMER_CONTRACT_VERSION_V1.to_string());
+    data.consumer_read_path = Some(consumer_projection.read_path);
+    data.consumer_fallback_applied = Some(consumer_projection.fallback_applied);
+    data.consumer_payload_state = Some(consumer_projection.payload_state);
+    data.required_consumer_fields = consumer_projection.required_consumer_fields;
     data.policy_deny = Some(deny_projection.policy_deny);
     data.fail_closed_deny = Some(deny_projection.fail_closed_deny);
     data.enforcement_deny = Some(deny_projection.enforcement_deny);
@@ -569,6 +605,11 @@ impl DecisionEvent {
                 classification_source: None,
                 replay_diff_reason: None,
                 legacy_shape_detected: None,
+                decision_consumer_contract_version: None,
+                consumer_read_path: None,
+                consumer_fallback_applied: None,
+                consumer_payload_state: None,
+                required_consumer_fields: Vec::new(),
                 policy_deny: None,
                 fail_closed_deny: None,
                 enforcement_deny: None,
