@@ -1536,6 +1536,8 @@
 - docs(wave36-step3): closure for redact_args enforcement (#809) @Rul1an
 - feat(wave36-step2): enforce redact_args runtime execution (#807) @Rul1an
 
+- docs(wave39-step3): close evidence-compat wave with docs+gate (#830) @Rul1an
+- feat(wave39-step2): implement replay/evidence compat normalization (#828) @Rul1an
 ## [2026-03-14]
 
 - feat(wave39-step2): implement replay/evidence compat normalization (#828) @Rul1an
