@@ -4,6 +4,7 @@
 //! Every tool call attempt MUST emit exactly one decision event.
 
 use self::consumer_contract::project_consumer_contract;
+use self::context_contract::project_context_contract;
 use self::deny_convergence::project_deny_convergence;
 use self::outcome_convergence::classify_decision_outcome;
 use self::replay_compat::project_replay_compat;
@@ -17,6 +18,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 mod consumer_contract;
+mod context_contract;
 mod deny_convergence;
 mod outcome_convergence;
 mod replay_compat;
@@ -24,6 +26,9 @@ mod replay_diff;
 pub use consumer_contract::{
     required_consumer_fields_v1, ConsumerPayloadState, ConsumerReadPath,
     DECISION_CONSUMER_CONTRACT_VERSION_V1,
+};
+pub use context_contract::{
+    required_context_fields_v1, ContextPayloadState, DECISION_CONTEXT_CONTRACT_VERSION_V1,
 };
 pub use deny_convergence::{DenyClassificationSource, DENY_PRECEDENCE_VERSION_V1};
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
@@ -340,6 +345,18 @@ pub struct DecisionData {
     /// Contract-level required fields for bounded consumer reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_consumer_fields: Vec<String>,
+    /// Version tag for bounded context-envelope compatibility reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_context_contract_version: Option<String>,
+    /// Overall context-envelope completeness state for downstream consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_payload_state: Option<ContextPayloadState>,
+    /// Contract-level required fields for bounded context-envelope reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_context_fields: Vec<String>,
+    /// Missing context fields for the current envelope projection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_context_fields: Vec<String>,
     /// Explicit deny classification marker: policy deny path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_deny: Option<bool>,
@@ -536,6 +553,16 @@ fn refresh_fulfillment_normalization(data: &mut DecisionData) {
     data.consumer_fallback_applied = Some(consumer_projection.fallback_applied);
     data.consumer_payload_state = Some(consumer_projection.payload_state);
     data.required_consumer_fields = consumer_projection.required_consumer_fields;
+    let context_projection = project_context_contract(
+        data.lane.as_deref(),
+        data.principal.as_deref(),
+        data.auth_context_summary.as_deref(),
+        data.approval_state.as_deref(),
+    );
+    data.decision_context_contract_version = Some(DECISION_CONTEXT_CONTRACT_VERSION_V1.to_string());
+    data.context_payload_state = Some(context_projection.payload_state);
+    data.required_context_fields = context_projection.required_context_fields;
+    data.missing_context_fields = context_projection.missing_context_fields;
     data.policy_deny = Some(deny_projection.policy_deny);
     data.fail_closed_deny = Some(deny_projection.fail_closed_deny);
     data.enforcement_deny = Some(deny_projection.enforcement_deny);
@@ -610,6 +637,10 @@ impl DecisionEvent {
                 consumer_fallback_applied: None,
                 consumer_payload_state: None,
                 required_consumer_fields: Vec::new(),
+                decision_context_contract_version: None,
+                context_payload_state: None,
+                required_context_fields: Vec::new(),
+                missing_context_fields: Vec::new(),
                 policy_deny: None,
                 fail_closed_deny: None,
                 enforcement_deny: None,
@@ -1064,6 +1095,10 @@ impl Drop for DecisionEmitterGuard {
     }
 }
 
+pub(crate) fn refresh_contract_projections(data: &mut DecisionData) {
+    refresh_fulfillment_normalization(data);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1244,6 +1279,60 @@ mod tests {
             event.data.approval_freshness,
             Some(ApprovalFreshness::Fresh)
         );
+        assert_eq!(
+            event.data.decision_context_contract_version.as_deref(),
+            Some(DECISION_CONTEXT_CONTRACT_VERSION_V1)
+        );
+        assert_eq!(
+            event.data.context_payload_state,
+            Some(ContextPayloadState::PartialEnvelope)
+        );
+        assert_eq!(
+            event.data.missing_context_fields,
+            vec![
+                "lane".to_string(),
+                "principal".to_string(),
+                "auth_context_summary".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_with_policy_context_sets_complete_context_contract_fields() {
+        let context = PolicyDecisionEventContext {
+            lane: Some("lane-prod".to_string()),
+            principal: Some("alice@example.com".to_string()),
+            auth_context_summary: Some("aud=deploy scopes=tool:deploy".to_string()),
+            approval_state: Some("approved".to_string()),
+            ..PolicyDecisionEventContext::default()
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_007".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(context);
+
+        assert_eq!(
+            event.data.decision_context_contract_version.as_deref(),
+            Some(DECISION_CONTEXT_CONTRACT_VERSION_V1)
+        );
+        assert_eq!(
+            event.data.context_payload_state,
+            Some(ContextPayloadState::CompleteEnvelope)
+        );
+        assert_eq!(
+            event.data.required_context_fields,
+            vec![
+                "lane".to_string(),
+                "principal".to_string(),
+                "auth_context_summary".to_string(),
+                "approval_state".to_string(),
+            ]
+        );
+        assert!(event.data.missing_context_fields.is_empty());
     }
 
     #[test]

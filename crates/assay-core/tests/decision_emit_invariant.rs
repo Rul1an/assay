@@ -4,11 +4,11 @@
 //! one decision event being emitted, regardless of outcome.
 
 use assay_core::mcp::decision::{
-    reason_codes, ConsumerPayloadState, ConsumerReadPath, Decision, DecisionEmitter,
-    DecisionEmitterGuard, DecisionEvent, DecisionOrigin, DecisionOutcomeKind,
+    reason_codes, ConsumerPayloadState, ConsumerReadPath, ContextPayloadState, Decision,
+    DecisionEmitter, DecisionEmitterGuard, DecisionEvent, DecisionOrigin, DecisionOutcomeKind,
     DenyClassificationSource, FulfillmentDecisionPath, ObligationOutcomeStatus, OutcomeCompatState,
     ReplayClassificationSource, DECISION_BASIS_VERSION_V1, DECISION_CONSUMER_CONTRACT_VERSION_V1,
-    DENY_PRECEDENCE_VERSION_V1,
+    DECISION_CONTEXT_CONTRACT_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
 };
 use assay_core::mcp::policy::{
     ApprovalFreshness, McpPolicy, PolicyState, RedactArgsContract, RestrictScopeContract,
@@ -1115,6 +1115,32 @@ fn test_event_contains_required_fields() {
     assert_eq!(event.data.obligation_applied_present, Some(true));
     assert_eq!(event.data.obligation_skipped_present, Some(false));
     assert_eq!(event.data.obligation_error_present, Some(false));
+    assert_eq!(
+        event.data.decision_context_contract_version.as_deref(),
+        Some(DECISION_CONTEXT_CONTRACT_VERSION_V1)
+    );
+    assert_eq!(
+        event.data.context_payload_state,
+        Some(ContextPayloadState::AbsentEnvelope)
+    );
+    assert_eq!(
+        event.data.required_context_fields,
+        vec![
+            "lane".to_string(),
+            "principal".to_string(),
+            "auth_context_summary".to_string(),
+            "approval_state".to_string(),
+        ]
+    );
+    assert_eq!(
+        event.data.missing_context_fields,
+        vec![
+            "lane".to_string(),
+            "principal".to_string(),
+            "auth_context_summary".to_string(),
+            "approval_state".to_string(),
+        ]
+    );
     assert!(event.data.approval_state.is_none());
     assert!(event.data.approval_id.is_none());
     assert!(event.data.approval_freshness.is_none());
