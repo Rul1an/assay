@@ -1,0 +1,30 @@
+name: Structurizr Validate
+
+on:
+  pull_request:
+    paths:
+      - "docs/architecture/structurizr/**"
+      - "scripts/structurizr-validate.sh"
+      - ".github/workflows/structurizr-validate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Validate Structurizr workspaces
+        run: |
+          for dsl in docs/architecture/structurizr/*/workspace.dsl; do
+            [ -f "$dsl" ] || continue
+            dir="$(dirname "$dsl")"
+            file="$(basename "$dsl")"
+            echo "::group::Validate $dsl"
+            docker run --rm -v "$PWD/$dir:/workspace" structurizr/cli:latest \
+              validate -workspace "/workspace/$file"
+            echo "::endgroup::"
+          done
