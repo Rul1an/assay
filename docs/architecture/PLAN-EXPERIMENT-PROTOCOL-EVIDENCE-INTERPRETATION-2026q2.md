@@ -44,7 +44,7 @@ Consumer downgrades happen when self-reported or inferred signals are treated as
 
 ### Vector 1: Partial-Field Trust Read (Legacy Override)
 
-**Realism class**: consumer-realistic synthetic
+**Realism class**: `consumer_realistic_synthetic`
 
 A consumer ignores `consumer_read_path: ConvergedDecision` and reads `decision: Allow`
 directly, even though `decision_outcome_kind: PolicyDeny` is present.
@@ -76,7 +76,7 @@ via replay or cross-version evidence.
 
 ### Vector 2: Precedence Inversion (Deny Convergence)
 
-**Realism class**: producer-realistic
+**Realism class**: `producer_realistic`
 
 A consumer reads the correct deny-related fields but applies the wrong tier precedence.
 It trusts tier-4 legacy deny flags, ignoring tier-1 `decision_outcome_kind`.
@@ -95,8 +95,8 @@ the wrong order. V3 suppresses trust signals entirely.
 ```
 ReplayDiffBasis {
     decision_outcome_kind: Some(EnforcementDeny),
-    policy_deny: false,      // legacy field not yet normalised
-    enforcement_deny: false,  // legacy field not yet normalised
+    policy_deny: false,      // legacy field not yet normalized
+    enforcement_deny: false,  // legacy field not yet normalized
     deny_classification_source: LegacyDecision,
     decision: Allow,
 }
@@ -107,7 +107,7 @@ ReplayDiffBasis {
 
 ### Vector 3: Compat Flattening (Trust Signal Suppression)
 
-**Realism class**: consumer-realistic (common in SDK/analytics chains)
+**Realism class**: `consumer_realistic` (common in SDK/analytics chains)
 
 A consumer does not read all trust-relevant fields. It treats
 `ConsumerPayloadState::CompatibilityFallback` as decorative metadata rather than
@@ -143,7 +143,7 @@ producing `EvidenceOnly` diff when canonical says `Reclassified`.
 
 ### Vector 4: Projection Loss (Required Fields Dropped)
 
-**Realism class**: adapter-realistic (serialization/forwarding chains)
+**Realism class**: `adapter_realistic` (serialization/forwarding chains)
 
 A consumer drops one or more of the 6 required consumer fields during serialization,
 caching, or forwarding. The dropped field causes silent read-path fallback.
@@ -152,17 +152,29 @@ caching, or forwarding. The dropped field causes silent read-path fallback.
 - All 6 `required_consumer_fields` present — `ConvergedDecision` path (verified)
 
 **Lossy read** (attack):
-- `decision_outcome_kind` dropped — falls to `decision` field (inferred)
+- All converged fields (`decision_outcome_kind`, `decision_origin`,
+  `fulfillment_decision_path`) and all compat markers (`decision_basis_version`,
+  `compat_fallback_applied`, `classification_source`, `legacy_shape_detected`)
+  dropped in transit — only legacy `decision` survives
 
 **Payload:**
 ```
-// Full basis serialised, then decision_outcome_kind removed
+// Full basis serialized, then all converged + compat fields stripped
 ReplayDiffBasis {
-    decision_outcome_kind: None,  // dropped in transit
-    // remaining converged fields still present
+    decision_outcome_kind: None,
+    decision_origin: None,
+    fulfillment_decision_path: None,
+    decision_basis_version: "",           // empty / absent
+    compat_fallback_applied: false,
+    classification_source: LegacyFallback,
+    legacy_shape_detected: false,
+    // only legacy field survives:
     decision: Allow,
 }
 ```
+
+This simulates a forwarding chain (SDK, cache, analytics pipeline) that strips
+all Wave24+ fields and preserves only the legacy `decision` field.
 
 **Success:** Consumer silently falls from `ConvergedDecision` to `LegacyDecision`
 read path, producing a different classification.

@@ -72,9 +72,9 @@ LITERAL_MARKERS=(
   'Verified'
   'Self-reported'
   'Inferred'
-  'consumer-realistic'
-  'producer-realistic'
-  'adapter-realistic'
+  'consumer_realistic'
+  'producer_realistic'
+  'adapter_realistic'
 )
 for marker in "${LITERAL_MARKERS[@]}"; do
   rg -Fn "$marker" "$PLAN" >/dev/null || {
