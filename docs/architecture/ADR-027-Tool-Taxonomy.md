@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (March 2026, A1 freeze)
+Accepted (March 2026; implemented on `main` via PRs #560, #561, and #572)
 
 ## Context
 

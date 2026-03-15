@@ -72,6 +72,9 @@ Delivered slices on `main`:
 
 For the current maintainer-facing architecture view, see the
 [ADR-032 Implementation Overview](./OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md).
+For the current structural decomposition and quality attributes, see the
+[ADR-032 Building Block View](./BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md)
+and [ADR-032 Quality Scenarios](./QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md).
 
 ## Short-Term Scope (What We Will Build)
 Near-term follow-up remains limited to bounded hardening and consistency work around this contract:

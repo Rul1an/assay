@@ -4,6 +4,9 @@
 > Updated: 2026-03-15
 > Canonical ADR: [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md)
 > Historical execution log: [ADR-032 Execution Plan](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md)
+> Structural decomposition: [ADR-032 Building Block View](./BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md)
+> Quality attributes: [ADR-032 Quality Scenarios](./QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md)
+> Architecture-as-code: [ADR-032 Structurizr Workspace](./STRUCTURIZR-ADR-032-WORKSPACE-2026q2.md)
 
 This page is the maintainer-facing architecture overview for the ADR-032 line after Waves 24 through 42 landed on `main`.
 
@@ -163,6 +166,9 @@ If you are extending this line:
 ## Further Reading
 
 - [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md)
+- [ADR-032 Building Block View](./BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md)
+- [ADR-032 Quality Scenarios](./QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md)
+- [ADR-032 Structurizr Workspace](./STRUCTURIZR-ADR-032-WORKSPACE-2026q2.md)
 - [ADR-032 Execution Plan](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md)
 - [Data Flow](./data-flow.md)
 - [Runtime enforcement](./runtime.md)

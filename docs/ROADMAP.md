@@ -1,16 +1,11 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-02-17):** Q2 items verified — all P0/P1/P2 DX features delivered.
-> Code health (RFC-002) and generate decomposition (RFC-003 G1–G6) merged.
-> Golden path, drift-aware feedback, GitHub Action v2.1 confirmed complete.
-> **Starter packs (ADR-023)** merged PR #289 — cicd-starter default pack, assayrunid fix, vendored drift CI, --explain UX.
-> Split refactor program closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
-> Next: [Evidence-as-a-Product (ADR-025)](architecture/ADR-025-Evidence-as-a-Product.md) - Pivot from Sim Hardening to Audit Kit & Soak. Structural items in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
-> ADR-025 I2 Step4 status (2026-02-20): release-lane closure evidence integration merged on `main` (default `attach`), `enforce` remains opt-in.
-> ADR-025 I3 Step4 status (2026-02-21): release-lane OTel bridge evidence integration merged on `main` (default `attach`, `enforce` is contract-only under policy v1).
-> ADR-025 P3 status (2026-02-24): index consolidation A/B/C complete on `main` (single entrypoint + reviewer gates).
-> Experiment evidence status (2026-03-04): the fragmented-IPI line is now closed-loop on `main` across baseline, ablation, wrap-bypass, second-sink, sink-failure, and full-window cross-session decay (`k+1..k+3`). This shifts 2026 product priority toward route-governance primitives: tool classes, replayable session/state contracts, and coverage/completeness.
-> Governance core status (2026-03-04): ADR-027/028/029/030 slices are merged on `main` (tool taxonomy + class matching, coverage contract/generator/wrap emission, session/state informational export, and DX polish closure).
+> **Status sync (2026-03-15):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
+> Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
+> Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
+> **BYOS truth (ADR-015):** `assay evidence push`, `pull`, and `list` are shipped; `assay evidence store-status`, structured `assay.yaml` config, and fuller provider docs remain open.
+> Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
+> Next repo-level priorities: roadmap truth sync, ADR-015 Phase 1 closure, and release/changelog hygiene.
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -182,7 +177,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P0** | Exit Codes (V2) | Low | High | ✅ Complete (v2.12.0) |
 | **P0** | Report IO Robustness (Warnings) | Low | High | ✅ Complete (v2.12.0) |
-| **P1** | BYOS CLI Commands | Low | High | ✅ Complete |
+| **P1** | BYOS CLI Commands | Low | High | ◐ Mostly complete (`push/pull/list` shipped; `store-status` + richer config/docs pending) |
 | **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete (v2.9.0) |
 | **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |
 | **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
@@ -192,7 +187,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P2** | GitHub Action v2.1 | Low | Medium | ✅ Complete (PR #185) |
 | **P1** | Golden path (<30 min first signal) | Medium | High | ✅ Complete (PR #187, `init --hello-trace --ci`) |
 | **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
-| **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Wave A/B merged, Wave C gated |
+| **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Delivered on `main`; Wave C remains explicitly data-gated |
 | **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
 | **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | ✅ Complete (I1 closed-loop) |
 | **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | ✅ Complete (I1 closed-loop) |
@@ -204,7 +199,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 
 See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md), [ADR-016 (Pack Taxonomy)](./architecture/ADR-016-Pack-Taxonomy.md)
 See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
-See Debt: [RFC-001 DX/UX Governance](./architecture/RFC-001-dx-ux-governance.md) (Wave A: correctness ✅, Wave B: maintainability ✅, Wave C: performance — gated)
+See Debt: [RFC-001 DX/UX Governance](./architecture/RFC-001-dx-ux-governance.md) (historical governance RFC: Wave A/B delivered, Wave C remains performance-only and data-gated)
 
 ### GitHub Action v2 ✅ Complete
 
@@ -221,7 +216,7 @@ Features:
 - Baseline comparison via cache
 - Job Summary reports
 
-### A. BYOS CLI Commands ✅ Complete
+### A. BYOS CLI Commands ◐ Mostly Complete
 
 Per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md), evidence storage uses user-provided S3-compatible buckets:
 
@@ -238,6 +233,9 @@ assay evidence list --run-id run_123 --store s3://bucket/prefix
 - [x] **list command**: List bundles with filtering, JSON/table/plain output
 - [x] **Conditional writes**: `If-None-Match: "*"` for immutability
 - [x] **Content-addressed keys**: SHA-256 bundle_id as source of truth
+- [ ] **store-status command**: Not yet shipped on `main`
+- [ ] **Structured `assay.yaml` config**: env vars and `--store` are shipped; YAML ergonomics remain open
+- [ ] **Provider runbooks**: backend-specific operator docs are still partial
 
 Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Blob, GCS, local filesystem
 

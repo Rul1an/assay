@@ -1,7 +1,7 @@
 # ADR-031: Coverage v1.1 DX Polish
 
 ## Status
-Proposed (March 2026)
+Accepted (March 2026; implemented on `main` via PRs #585, #587, and #588)
 
 ## Context
 Coverage v1 is schema-stable and already supports:

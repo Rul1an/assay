@@ -2,11 +2,11 @@
 
 > **Status sync (2026-02-17):** All P0/P1/P2 DX features are delivered.
 > Code health (RFC-002) and generate decomposition (RFC-003) are complete.
-> Remaining structural items tracked in [RFC-004](architecture/RFC-004-open-items-convergence-q1-2026.md).
+> RFC-004 is now a historical closure ledger; no remaining structural blocker from that line is open on `main`.
 > Split refactor closure status is tracked in [PLAN-split-refactor-2026q1](architecture/PLAN-split-refactor-2026q1.md) and [REPORT-split-refactor-2026q1](architecture/REPORT-split-refactor-2026q1.md).
 > **Status sync (2026-03-04):** B4 DX polish is closed-loop on `main` (freeze, implement, closure): `coverage --format md`, `--declared-tools-file`, consistent wrap export write logs, and runbook/gates.
 
-**Last updated:** 2026-03-04
+**Last updated:** 2026-03-15
 **Scope:** 6 features across 3 priority tiers + DX polish
 **EU AI Act phased dates:** 2025-02-02, 2025-08-02, 2026-08-02
 **Planning assumption:** no stop-clock; roadmap tracks current phased dates.

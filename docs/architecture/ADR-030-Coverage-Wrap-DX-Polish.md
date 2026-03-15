@@ -1,7 +1,7 @@
 # ADR-030: Coverage + Wrap DX Polish
 
 ## Status
-Proposed (March 2026)
+Accepted (March 2026; implemented on `main` via PRs #578, #580, and #582)
 
 ## Context
 The current MCP governance spine is complete and working on `main`:

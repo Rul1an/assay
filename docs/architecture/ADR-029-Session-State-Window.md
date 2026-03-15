@@ -1,7 +1,7 @@
 # ADR-029: Session & State Window Contract (MCP Governance)
 
 ## Status
-Proposed (March 2026)
+Accepted (March 2026; implemented on `main` via PRs #569, #574, and #576)
 
 ## Context
 Assay enforces deterministic governance for MCP tool routes. Several experiment lines demonstrated that stateful invariants (sequence/state) generalize beyond lexical checks, including tool-hopping and cross-session delayed sink attempts.
@@ -90,6 +90,6 @@ A JSON schema `session_state_window_v1` defines the report/snapshot envelope for
 - Any persistence format beyond this informational contract
 
 ## Acceptance criteria (for this A-slice)
-- ADR exists and is marked Proposed.
+- Freeze slice introduced the ADR as Proposed; the contract is now implemented on `main`.
 - `session_state_window_v1` schema exists.
 - Reviewer gate enforces allowlist-only scope + workflow-ban and validates schema parses.

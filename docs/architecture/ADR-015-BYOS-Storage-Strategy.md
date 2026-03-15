@@ -83,7 +83,7 @@ We will implement a **BYOS-first (Bring Your Own Storage)** strategy:
 ### CLI Commands (Open Core)
 
 ```bash
-# Configuration (environment variables or assay.yaml)
+# Current shipped configuration (`--store` + environment variables)
 export ASSAY_STORE_ENDPOINT=s3.us-west-002.backblazeb2.com
 export ASSAY_STORE_BUCKET=my-evidence-bucket
 export ASSAY_STORE_ACCESS_KEY=...
@@ -106,7 +106,14 @@ assay evidence list --after 2026-01-01
 assay evidence store-status
 ```
 
-### Configuration
+### Structured configuration target (not fully shipped on `main` as of 2026-03-15)
+
+The current `main` branch supports:
+- `--store <s3://bucket/prefix>`
+- `ASSAY_STORE_URL`
+- AWS/object-store credential environment variables
+
+The `assay.yaml` shape below remains the intended ergonomic target, but is not yet the proven shipped interface on `main`.
 
 ```yaml
 # assay.yaml
@@ -203,12 +210,13 @@ If conditional writes fail with "not supported", Assay falls back to check-then-
 ### Phase 1: BYOS CLI (Q2 2026)
 
 - [x] Generic S3 client using `object_store` crate
-- [ ] `assay evidence push` command
-- [ ] `assay evidence pull` command
-- [ ] `assay evidence list` command
+- [x] `assay evidence push` command
+- [x] `assay evidence pull` command
+- [x] `assay evidence list` command
 - [ ] `assay evidence store-status` command
-- [ ] Configuration via env vars and assay.yaml
-- [ ] Documentation for configuring AWS S3, Backblaze B2, Wasabi, R2, MinIO
+- [x] Configuration via `--store` and environment variables
+- [ ] Structured `assay.yaml` `evidence_store:` configuration
+- [ ] Documentation/runbooks for configuring AWS S3, Backblaze B2, Wasabi, R2, MinIO, and the other supported backends
 
 ### Phase 2: GitHub Action Integration (Q2 2026)
 

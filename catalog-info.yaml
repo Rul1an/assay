@@ -1,0 +1,32 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: assay
+  title: Assay
+  description: Governance and evidence platform for AI agents, including the ADR-032 MCP policy enforcement and replay/evidence stack.
+  annotations:
+    github.com/project-slug: Rul1an/assay
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - rust
+    - ai
+    - mcp
+    - policy-enforcement
+    - evidence
+    - replay
+    - governance
+  links:
+    - url: https://github.com/Rul1an/assay
+      title: Repository
+      icon: github
+    - url: https://docs.assay.dev
+      title: Documentation Site
+    - url: https://github.com/Rul1an/assay/tree/main/docs/architecture/ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md
+      title: ADR-032
+    - url: https://github.com/Rul1an/assay/tree/main/docs/architecture/OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md
+      title: ADR-032 Overview
+spec:
+  type: service
+  lifecycle: production
+  owner: user:default/rul1an
+  system: assay

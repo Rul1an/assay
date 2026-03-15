@@ -208,6 +208,14 @@ nav:
     - architecture/index.md
     - Crate Structure: architecture/crates.md
     - Data Flow: architecture/data-flow.md
+    - ADR-032 Overview: architecture/OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md
+    - ADR-032 Building Blocks: architecture/BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md
+    - ADR-032 Quality Scenarios: architecture/QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md
+    - ADR-032 Structurizr Workspace: architecture/STRUCTURIZR-ADR-032-WORKSPACE-2026q2.md
+    - ADR-032 Obsidian View Layer: architecture/OBSIDIAN-ADR-032-VIEW-LAYER-2026q2.md
+    - ADR-032 Gap Analysis: architecture/GAP-ADR-032-MCP-POLICY-DOCS-MATURITY-2026q2.md
+    - Assay Architecture & Roadmap Gap Analysis: architecture/GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md
+    - ADR-032 Execution Plan: architecture/PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md
     - Performance Budgets: PERFORMANCE-BUDGETS.md
     - ADRs: architecture/adrs.md
 
