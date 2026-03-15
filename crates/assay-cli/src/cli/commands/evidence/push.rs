@@ -2,7 +2,9 @@
 
 use anyhow::{Context, Result};
 use assay_evidence::store::BundleStore;
-use assay_evidence::{verify_bundle, Bytes, ObjectStoreBundleStore, StoreError, StoreSpec};
+use assay_evidence::{
+    resolve_store_url, verify_bundle, Bytes, ObjectStoreBundleStore, StoreError, StoreSpec,
+};
 use clap::Args;
 use std::fs::File;
 use std::io::Read;
@@ -19,9 +21,12 @@ pub struct PushArgs {
     pub run_id: Option<String>,
 
     /// Store URL (e.g., s3://bucket/prefix, file:///path)
-    /// Can also be set via ASSAY_STORE_URL
     #[arg(long, env = "ASSAY_STORE_URL")]
-    pub store: String,
+    pub store: Option<String>,
+
+    /// Path to store config YAML (default: .assay/store.yaml)
+    #[arg(long)]
+    pub store_config: Option<PathBuf>,
 
     /// Skip verification before upload
     #[arg(long)]
@@ -45,8 +50,6 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
 
     // 2. Verify bundle (unless --no-verify)
     let bundle_id = if args.no_verify {
-        // Extract bundle_id without full verification
-        // We still need to parse manifest to get the ID
         let cursor = std::io::Cursor::new(&buffer);
         let reader = assay_evidence::BundleReader::open_unverified(cursor)
             .context("failed to read bundle manifest")?;
@@ -59,8 +62,10 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
     };
 
     // 3. Connect to store
-    let spec = StoreSpec::parse(&args.store)
-        .with_context(|| format!("invalid store URL: {}", args.store))?;
+    let url = resolve_store_url(args.store.as_deref(), args.store_config.as_deref())
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let spec = StoreSpec::parse(&url).with_context(|| format!("invalid store URL: {}", url))?;
 
     let store = ObjectStoreBundleStore::from_spec(&spec)
         .await

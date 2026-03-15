@@ -17,7 +17,10 @@ pub use bundle::{
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};
-pub use store::{BundleMeta, BundleStore, ObjectStoreBundleStore, StoreError, StoreSpec};
+pub use store::config::{resolve_store_url, StoreConfig};
+pub use store::{
+    BundleMeta, BundleStore, ObjectStoreBundleStore, StoreError, StoreSpec, StoreStatus,
+};
 pub use types::{Envelope, EvidenceEvent, ProducerMeta, SPEC_VERSION};
 
 // Re-export bytes for CLI convenience
