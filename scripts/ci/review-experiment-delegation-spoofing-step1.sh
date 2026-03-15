@@ -92,4 +92,8 @@ done
 echo "[review] repo checks"
 cargo fmt --check
 
+echo "[review] pinned adapter + evidence tests"
+cargo test -p assay-adapter-api
+cargo test -p assay-evidence
+
 echo "[review] PASS"

@@ -47,19 +47,23 @@ All injected payloads must be:
 ```
 AdapterCapabilities {
     supported_event_types: ["tool.decision"],
-    lossiness_report: { lossiness_level: Lossless, dropped_fields: [] }
+    supported_spec_versions: [">=1.0 <2.0"],
+    supports_strict: true,
+    supports_lenient: true,
 }
 ```
-Adapter claims only `tool.decision` events and lossless conversion.
+Adapter claims only `tool.decision` events.
 
 **Poisoned payload:**
 ```
 AdapterCapabilities {
     supported_event_types: ["tool.decision", "mandate.used", "approval.granted"],
-    lossiness_report: { lossiness_level: Lossless, dropped_fields: [] }
+    supported_spec_versions: [">=1.0 <2.0"],
+    supports_strict: true,
+    supports_lenient: true,
 }
 ```
-Adapter claims mandate and approval capabilities it cannot actually fulfill.
+Adapter claims mandate and approval event types it cannot actually produce.
 
 **Trigger condition:** Downstream consumer trusts `mandate.used` events from this adapter
 as genuine mandate evidence. Replay/diff uses the overclaimed capabilities to classify
@@ -73,36 +77,44 @@ the adapter's coverage as broader than it actually is.
 
 ### Vector 2: Provenance Ambiguity
 
-**Target:** `RawPayloadRef.sha256`, `LossinessReport`, `AdapterBatch.raw_payload_ref` provenance chain
+**Target:** `AdapterBatch.lossiness` (`LossinessReport`, `RawPayloadRef`) provenance chain
 
 **Clean baseline:**
 ```
 AdapterBatch {
     events: [...],
-    raw_payload_ref: Some(RawPayloadRef { sha256: "abc123...", media_type: "application/json" }),
-    lossiness_report: { lossiness_level: Lossless, dropped_fields: [] }
+    lossiness: LossinessReport {
+        lossiness_level: None,
+        unmapped_fields_count: 0,
+        raw_payload_ref: Some(RawPayloadRef { sha256: "abc123...", size_bytes: 1024, media_type: "application/json" }),
+        notes: [],
+    }
 }
 ```
-Events have verified provenance back to raw protocol payload.
+Events have verified provenance back to raw protocol payload with `LossinessLevel::None`.
 
 **Poisoned payload:**
 ```
 AdapterBatch {
     events: [...],
-    raw_payload_ref: None,  // provenance chain broken
-    lossiness_report: { lossiness_level: BestEffort, dropped_fields: ["source_id"] }
+    lossiness: LossinessReport {
+        lossiness_level: High,
+        unmapped_fields_count: 3,
+        raw_payload_ref: None,  // provenance chain broken
+        notes: ["source_id unmapped"],
+    }
 }
 ```
-Events have no raw payload reference and acknowledge lossy conversion, but the events
+Events have no raw payload reference and acknowledge high lossiness, but the events
 themselves look schema-valid and complete.
 
 **Trigger condition:** Replay or evidence consumer treats events without provenance
-the same as events with verified provenance. A `BestEffort` lossiness level is
-interpreted as equivalent to `Lossless`.
+the same as events with verified provenance. `LossinessLevel::High` is interpreted
+as equivalent to `LossinessLevel::None`.
 
 **Success:** Consumer accepts provenance-absent events with same trust as provenance-backed events.
 **Failure:** Provenance absence triggers lower trust / fallback classification.
-**Defended outcome:** Events without `raw_payload_ref` or with `BestEffort` lossiness
+**Defended outcome:** Events without `raw_payload_ref` or with `High` lossiness
 receive explicit downgraded trust markers in evidence.
 
 ### Vector 3: Delegation Identity Spoofing
@@ -111,16 +123,18 @@ receive explicit downgraded trust markers in evidence.
 
 **Clean baseline:**
 ```
-Event source: "assay://adapter/acp/v1"
-ProtocolDescriptor { name: "acp", version: "1.0" }
+Event source: "urn:assay:adapter:acp"
+ProtocolDescriptor { name: "acp", spec_version: "1.0", schema_id: Some("acp.packet"), spec_url: None }
+AdapterDescriptor { adapter_id: "assay-adapter-acp", adapter_version: "3.1.0" }
 ```
 Events clearly attributed to a specific, trusted adapter.
 
 **Poisoned payload:**
 ```
-Event source: "assay://adapter/acp/v1"     // same source string
-ProtocolDescriptor { name: "acp", version: "1.0" }  // same protocol
-// But actually produced by a different, untrusted adapter
+Event source: "urn:assay:adapter:acp"                     // same source URN
+ProtocolDescriptor { name: "acp", spec_version: "1.0", schema_id: Some("acp.packet"), spec_url: None }
+AdapterDescriptor { adapter_id: "assay-adapter-acp-fork", adapter_version: "3.1.0" }
+// Different adapter_id but same source URN and protocol metadata
 ```
 Metadata looks identical to the trusted adapter but originates from a different trust domain.
 

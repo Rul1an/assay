@@ -14,7 +14,7 @@ silently upgrade trust or weaken classification.
 ## Vectors
 
 1. **Capability Overclaim** — adapter claims more event types than it produces
-2. **Provenance Ambiguity** — events without `raw_payload_ref` or with `BestEffort` lossiness
+2. **Provenance Ambiguity** — events without `raw_payload_ref` or with `LossinessLevel::High`
 3. **Delegation Identity Spoofing** — spoofed `source`/`ProtocolDescriptor` from untrusted adapter
 4. **Preference/Selection Manipulation** — overclaimed capabilities influence adapter selection
 
