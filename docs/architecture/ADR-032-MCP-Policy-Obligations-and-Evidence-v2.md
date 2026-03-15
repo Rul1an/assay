@@ -47,7 +47,7 @@ Execution is introduced in bounded slices to avoid scope creep.
 HTTP and STDIO auth models are not collapsed into one transport contract.
 Assay consumes context; it does not own token issuance or browser auth flows.
 
-## Implementation Status (Closed on Main Through Wave32)
+## Implementation Status (Closed on Main Through Wave42)
 Delivered slices on `main`:
 
 - Wave24: typed decisions + Decision Event v2 contract
@@ -59,14 +59,27 @@ Delivered slices on `main`:
 - Wave30: `restrict_scope` runtime enforcement
 - Wave31: `redact_args` shape/evidence (no execution)
 - Wave32: `redact_args` runtime enforcement + deterministic deny reasons
+- Wave33: normalized `obligation_outcomes` fields (`reason_code`, `enforcement_stage`, `normalization_version`)
+- Wave34: fail-closed matrix typing + additive fail-closed evidence
+- Wave35: fulfillment normalization hardening across obligation paths
+- Wave36: redact-enforcement hardening aligned with normalized fulfillment semantics
+- Wave37: decision/evidence convergence across policy, fail-closed, enforcement, and obligation paths
+- Wave38: replay diff basis + deterministic diff buckets
+- Wave39: replay/evidence compatibility normalization for legacy and converged payloads
+- Wave40: deny-evidence convergence + deterministic deny precedence
+- Wave41: consumer read-precedence hardening for decision and replay payloads
+- Wave42: context-envelope completeness hardening for `lane`, `principal`, `auth_context_summary`, and `approval_state`
+
+For the current maintainer-facing architecture view, see the
+[ADR-032 Implementation Overview](./OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md).
 
 ## Short-Term Scope (What We Will Build)
-Near-term follow-up is limited to hardening and consistency work around this contract:
+Near-term follow-up remains limited to bounded hardening and consistency work around this contract:
 
-- unify obligation fulfillment evidence semantics across all obligation types
-- tighten fail-closed matrix typing for high-risk classes
-- deepen replay/diff ergonomics against policy revisions
-- keep lane/principal/auth summary envelope additive and deterministic
+- preserve additive compatibility paths while consumers move to normalized payloads
+- keep replay/diff ergonomics deterministic as new readers are added
+- keep lane/principal/auth summary envelope additive and explicit
+- treat any new runtime capability as a separate bounded wave, not as incidental hardening
 
 ## Non-Goals (What We Will Not Build)
 Not in scope for this ADR line:

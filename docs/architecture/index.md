@@ -8,6 +8,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [Data Flow](./data-flow.md) — trace → gate → evidence pipeline
 - [Split Refactor Plan (Q1-Q2 2026)](./PLAN-split-refactor-2026q1.md) — wave-by-wave execution plan
 - [Split Refactor Report (Q1 2026)](./REPORT-split-refactor-2026q1.md) — verified closure and LOC outcomes
+- [ADR-032 Implementation Overview (Q2 2026)](./OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md) — current MCP policy stack on `main`
 - [ADR-032 Execution Plan (Q2 2026)](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md) — MCP policy/obligation rollout status
 
 ## Active RFCs
