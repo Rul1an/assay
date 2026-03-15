@@ -442,6 +442,7 @@ name = "assay-sim"
 version = "3.1.0"
 dependencies = [
  "anyhow",
+ "assay-adapter-api",
  "assay-core",
  "assay-evidence",
  "chrono",
