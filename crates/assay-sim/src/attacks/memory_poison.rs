@@ -243,11 +243,11 @@ pub fn vector2_deny_convergence_poisoning(delay_turns: u32) -> (PoisonResult, At
 pub fn vector3_context_envelope_poisoning(delay_turns: u32) -> (PoisonResult, AttackResult) {
     let start = Instant::now();
 
-    let required = required_context_fields_v1();
+    let required_count = required_context_fields_v1().len() as u32;
 
-    // Clean: 3 of 4 fields present → PartialEnvelope
-    let clean_present = 3u32; // lane, principal, approval_state — missing auth_context_summary
-    let clean_state = if clean_present == required.len() as u32 {
+    // Clean: N-1 of N fields present → PartialEnvelope
+    let clean_present = required_count - 1;
+    let clean_state = if clean_present == required_count {
         ContextPayloadState::CompleteEnvelope
     } else if clean_present == 0 {
         ContextPayloadState::AbsentEnvelope
@@ -255,9 +255,9 @@ pub fn vector3_context_envelope_poisoning(delay_turns: u32) -> (PoisonResult, At
         ContextPayloadState::PartialEnvelope
     };
 
-    // Poisoned: inject auth_context_summary → 4 of 4 → CompleteEnvelope
-    let poisoned_present = 4u32;
-    let poisoned_state = if poisoned_present == required.len() as u32 {
+    // Poisoned: inject missing field → N of N → CompleteEnvelope
+    let poisoned_present = required_count;
+    let poisoned_state = if poisoned_present == required_count {
         ContextPayloadState::CompleteEnvelope
     } else if poisoned_present == 0 {
         ContextPayloadState::AbsentEnvelope
@@ -382,7 +382,8 @@ pub fn vector4_decay_escape(decay_runs: u32) -> (PoisonResult, AttackResult) {
 
 fn compute_snapshot_id(tool_classes: &[String]) -> String {
     use sha2::{Digest, Sha256};
-    let canonical = serde_json::to_string(tool_classes).unwrap_or_default();
+    let canonical = serde_json::to_string(tool_classes)
+        .expect("snapshot serialization is infallible for Vec<String>");
     let hash = Sha256::digest(canonical.as_bytes());
     format!("sha256:{}", hex::encode(hash))
 }

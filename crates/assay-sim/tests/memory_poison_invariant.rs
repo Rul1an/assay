@@ -34,10 +34,18 @@ fn overarching_invariant_no_silent_downgrades_in_controls() {
 fn attack_vectors_activate_under_condition_a() {
     let (results, _) = run_memory_poison_matrix();
 
-    for pr in results
+    let cond_a: Vec<_> = results
         .iter()
         .filter(|r| r.condition == "condition_a" && !r.vector_id.starts_with("control_"))
-    {
+        .collect();
+
+    assert_eq!(
+        cond_a.len(),
+        12,
+        "Expected 12 Condition A vector results (4 vectors * 3 delays)"
+    );
+
+    for pr in &cond_a {
         assert!(
             pr.activation_succeeded,
             "{} should activate under Condition A",
@@ -92,6 +100,7 @@ fn full_matrix_structure() {
 }
 
 #[test]
+#[ignore] // Run with: cargo test -p assay-sim --test memory_poison_invariant -- --ignored --nocapture
 fn results_output_dump() {
     let (results, _) = run_memory_poison_matrix();
 
