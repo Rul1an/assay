@@ -1,0 +1,57 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: Assay MCP Policy Stack - Policy Runtime"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    1["<div style='font-weight: bold'>Agent / MCP Client</div><div style='font-size: 70%; margin-top: 0px'>[Person]</div><div style='font-size: 80%; margin-top:10px'>An agent or MCP client that<br />issues tool calls through<br />Assay-governed runtime paths.</div>"]
+    style 1 fill:#1168bd,stroke:#0b4884,color:#ffffff
+
+    2["<div style='font-weight: bold'>Transport Auth / Resource Server</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Owns transport authentication<br />and resource-server concerns<br />outside Assay.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    3["<div style='font-weight: bold'>Approval Artifact Source</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Provides approval artifacts<br />and approval-state inputs to<br />the runtime path.</div>"]
+    style 3 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    4["<div style='font-weight: bold'>Policy Bundle Source</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Provides typed policy bundles<br />and bounded obligation<br />declarations consumed by<br />Assay.</div>"]
+    style 4 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    subgraph 6 ["Assay MCP Policy Stack"]
+      style 6 fill:#ffffff,stroke:#074f5d,color:#074f5d
+
+      subgraph 7 ["Policy Runtime"]
+        style 7 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        10["<div style='font-weight: bold'>PDP / Evaluator</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Evaluates typed policy rules<br />against runtime context.</div>"]
+        style 10 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        11["<div style='font-weight: bold'>Typed Decision Model</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Normalizes evaluation results<br />into typed decision variants.</div>"]
+        style 11 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        12["<div style='font-weight: bold'>Bounded Obligation Executor</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Executes only the bounded<br />obligation paths landed by<br />Waves25-Wave42.</div>"]
+        style 12 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        13["<div style='font-weight: bold'>Fail-Closed Selector</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Selects typed fail-closed<br />fallback outcomes separate<br />from policy and enforcement<br />deny origins.</div>"]
+        style 13 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        14["<div style='font-weight: bold'>Evidence Emitter</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Emits decision events,<br />obligation outcomes, and<br />additive evidence metadata.</div>"]
+        style 14 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        8["<div style='font-weight: bold'>PEP Hook</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Intercepts MCP runtime calls<br />and hands them into policy<br />evaluation.</div>"]
+        style 8 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        9["<div style='font-weight: bold'>Context Envelope</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Collects lane, principal,<br />auth summaries, approval<br />state, and other bounded<br />policy inputs.</div>"]
+        style 9 fill:#85bbf0,stroke:#5d82a8,color:#000000
+      end
+
+      15["<div style='font-weight: bold'>Evidence and Replay Layer</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust runtime / library path]</div><div style='font-size: 80%; margin-top:10px'>Normalizes evidence, builds<br />replay basis payloads, and<br />supports deterministic<br />downstream reads.</div>"]
+      style 15 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    1-. "<div>Issues MCP tool calls through<br />governed runtime paths</div><div style='font-size: 70%'>[MCP]</div>" .->8
+    2-. "<div>Supplies transport-auth<br />summaries and runtime auth<br />context</div><div style='font-size: 70%'>[Context summary]</div>" .->9
+    3-. "<div>Supplies approval state and<br />artifact-bound inputs</div><div style='font-size: 70%'>[Approval state]</div>" .->9
+    4-. "<div>Supplies typed rules and<br />obligations</div><div style='font-size: 70%'>[Policy bundle]</div>" .->10
+    8-. "<div>Builds runtime context<br />envelope</div><div style='font-size: 70%'>[In-process call]</div>" .->9
+    9-. "<div>Supplies policy inputs</div><div style='font-size: 70%'>[In-process call]</div>" .->10
+    10-. "<div>Produces evaluation result</div><div style='font-size: 70%'>[In-process call]</div>" .->11
+    11-. "<div>Carries allow/obligation<br />semantics</div><div style='font-size: 70%'>[In-process call]</div>" .->12
+    11-. "<div>Carries deny/fallback<br />semantics</div><div style='font-size: 70%'>[In-process call]</div>" .->13
+    12-. "<div>Reports bounded enforcement<br />outcomes</div><div style='font-size: 70%'>[In-process call]</div>" .->14
+    13-. "<div>Reports fail-closed outcomes</div><div style='font-size: 70%'>[In-process call]</div>" .->14
+    11-. "<div>Reports typed decision<br />metadata</div><div style='font-size: 70%'>[In-process call]</div>" .->14
+    14-. "<div>Projects normalized<br />decision/evidence payloads</div><div style='font-size: 70%'>[In-process call]</div>" .->15
+
+  end

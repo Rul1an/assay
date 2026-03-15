@@ -70,16 +70,17 @@ This was the biggest strategy-to-delivery gap; it is now closed.
 
 The auto-generated PR log (`docs/changelog.md`) has been replaced by a redirect to the curated `CHANGELOG.md`. The broken `docs/contributing/releases.md` now points to the real release process. The auto-update script is a no-op.
 
-### 3. Next architecture-as-code step
+### 3. ~~Next architecture-as-code step~~ ✅ Initial CI automation added
 
-The current Structurizr/C4 workspace is intentionally bounded and docs-first.
+Structurizr CI validation is now in place:
+- `structurizr-validate.yml` workflow validates workspace DSL on changes
+- `scripts/structurizr-validate.sh` for local validation
+- `scripts/structurizr-export.sh` exports Mermaid diagrams
+- Exported Mermaid views committed under `structurizr/adr-032/export/`
 
-Still missing, if Assay wants to move from strong docs-as-code to stronger architecture-as-code:
-- automated Structurizr validation/export
-- inspections in CI
+Still possible as future follow-ups (not blocking):
 - broader component-view discipline outside ADR-032
-
-This is valuable, but should come after the roadmap truth and BYOS closure work.
+- automated diagram publishing to docs site
 
 ## Recommended Order
 
@@ -89,9 +90,7 @@ This is valuable, but should come after the roadmap truth and BYOS closure work.
 
 3. ~~**Release/changelog hygiene**~~ ✅ Done (auto-generated PR log replaced by redirect to curated CHANGELOG.md)
 
-4. **Next architecture-as-code slice**
-   - Add CI validation/export around the Structurizr workspace.
-   - Do not mix that work with runtime behavior changes.
+4. ~~**Next architecture-as-code slice**~~ ✅ Done (Structurizr CI validation + Mermaid export)
 
 ## Decision Rule
 

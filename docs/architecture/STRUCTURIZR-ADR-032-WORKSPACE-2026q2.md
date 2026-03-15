@@ -60,17 +60,29 @@ Relevant Structurizr tooling/docs:
 - [Structurizr component view cookbook](https://docs.structurizr.com/dsl/cookbook/component-view/)
 - [Structurizr system context cookbook](https://docs.structurizr.com/dsl/cookbook/system-context-view/)
 
+## CI Validation
+
+The workspace is validated in CI via `.github/workflows/structurizr-validate.yml` on changes to `docs/architecture/structurizr/`.
+
+Local validation and export:
+
+```bash
+bash scripts/structurizr-validate.sh   # validate DSL
+bash scripts/structurizr-export.sh     # export Mermaid diagrams
+```
+
+Exported Mermaid views are in `structurizr/adr-032/export/`.
+
 ## Scope Discipline
 
-This initial workspace is intentionally small.
-It does not yet add:
+This workspace is intentionally bounded.
+It does not add:
 
 - automatic ADR import via `!adrs`
-- CI-based Structurizr validate/inspect gates
 - generated static-site publishing of Structurizr exports
 - code-discovered components via `!components`
 
-Those are possible later, but they should be separate bounded follow-ups.
+Those are possible later as separate bounded follow-ups.
 
 ## Relationship to the Canonical Docs
 
