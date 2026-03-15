@@ -54,7 +54,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | **P1** | [ADR-029](./ADR-029-Session-State-Window.md) | Proposed | A/B slices merged on `main` (session/state contract + informational export); formal status update pending |
 | **P2** | [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Proposed | A/B/C slices merged on `main` (coverage markdown/file input + closure docs); formal status update pending |
 | **P2** | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Proposed | v1.1 DX contract accepted; follow-up implementation slices pending |
-| **P1** | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | Accepted | Wave24-Wave32 merged on `main`; see plan for hardening follow-ups |
+| **P1** | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | Accepted | Wave24-Wave42 merged on `main`; see overview + plan for capability grouping and historical rollout |
 | **P2** | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | Accepted | Article 12 mapping, `--pack` flag |
 | **P3** | [ADR-012](./ADR-012-Transparency-Log.md) | Proposed | Builds on ADR-011 |
 | Deferred | [ADR-009](./ADR-009-WORM-Storage.md) | Deferred | Managed WORM → Q3+ if demand |
