@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
-use super::{BundleMeta, BundleStore, KeyBuilder, StoreError, StoreResult, StoreSpec};
+use super::{BundleMeta, BundleStore, KeyBuilder, StoreError, StoreResult, StoreSpec, StoreStatus};
 
 /// Bundle store backed by `object_store`.
 ///
@@ -132,6 +132,61 @@ impl ObjectStoreBundleStore {
         Self {
             inner: Arc::new(object_store::memory::InMemory::new()),
             keys: KeyBuilder::new(prefix),
+        }
+    }
+
+    /// Check store connectivity, access, and inventory.
+    ///
+    /// Probes the store for reachability, read/write access, bundle count,
+    /// and total size. Object Lock detection is best-effort (`"unknown"` for
+    /// most backends).
+    pub async fn store_status(&self, spec: &StoreSpec) -> StoreStatus {
+        let backend = spec.scheme.clone();
+        let bucket = spec.bucket.clone();
+        let prefix = spec.prefix.clone();
+
+        // Probe: reachable + readable via list
+        let list_result = self.list_bundles(None, Some(10_000)).await;
+        let (reachable, readable, bundles) = match list_result {
+            Ok(metas) => (true, true, metas),
+            Err(_) => (false, false, vec![]),
+        };
+
+        let bundle_count = bundles.len() as u64;
+        let total_size_bytes: u64 = bundles.iter().filter_map(|m| m.size).sum();
+
+        // Probe: writable via put + delete of a probe key outside the bundles/ namespace
+        let writable = if reachable {
+            let probe_path = if prefix.is_empty() {
+                ".assay_probe_write_test".to_string()
+            } else {
+                format!("{}/.assay_probe_write_test", prefix.trim_end_matches('/'))
+            };
+            let probe_key = object_store::path::Path::from(probe_path);
+            let probe_bytes = Bytes::from("probe");
+            let put_ok = self
+                .inner
+                .put(&probe_key, PutPayload::from_bytes(probe_bytes))
+                .await
+                .is_ok();
+            if put_ok {
+                let _ = self.inner.delete(&probe_key).await;
+            }
+            put_ok
+        } else {
+            false
+        };
+
+        StoreStatus {
+            reachable,
+            readable,
+            writable,
+            backend,
+            bucket,
+            prefix,
+            bundle_count,
+            total_size_bytes,
+            object_lock: "unknown".to_string(),
         }
     }
 

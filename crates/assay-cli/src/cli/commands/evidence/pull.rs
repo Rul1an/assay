@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use assay_evidence::store::BundleStore;
-use assay_evidence::{ObjectStoreBundleStore, StoreError, StoreSpec};
+use assay_evidence::{resolve_store_url, ObjectStoreBundleStore, StoreError, StoreSpec};
 use clap::Args;
 use std::fs::File;
 use std::io::Write;
@@ -24,7 +24,11 @@ pub struct PullArgs {
 
     /// Store URL (e.g., s3://bucket/prefix, file:///path)
     #[arg(long, env = "ASSAY_STORE_URL")]
-    pub store: String,
+    pub store: Option<String>,
+
+    /// Path to store config YAML (default: .assay/store.yaml)
+    #[arg(long)]
+    pub store_config: Option<PathBuf>,
 
     /// Verify bundle after download
     #[arg(long)]
@@ -32,9 +36,10 @@ pub struct PullArgs {
 }
 
 pub async fn cmd_pull(args: PullArgs) -> Result<i32> {
-    // Connect to store
-    let spec = StoreSpec::parse(&args.store)
-        .with_context(|| format!("invalid store URL: {}", args.store))?;
+    let url = resolve_store_url(args.store.as_deref(), args.store_config.as_deref())
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let spec = StoreSpec::parse(&url).with_context(|| format!("invalid store URL: {}", url))?;
 
     let store = ObjectStoreBundleStore::from_spec(&spec)
         .await

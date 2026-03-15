@@ -39,7 +39,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Record(args) => super::record::run(args).await,
         Command::Profile(args) => super::profile::run(args),
         Command::Sandbox(args) => super::sandbox::run(args).await,
-        Command::Evidence(args) => super::evidence::run(args),
+        Command::Evidence(args) => super::evidence::run(args).await,
         Command::Bundle(args) => super::bundle::run(args, legacy_mode).await,
         Command::Replay(args) => super::replay::run(args, legacy_mode).await,
         #[cfg(feature = "sim")]

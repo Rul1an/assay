@@ -4,6 +4,7 @@ pub mod list;
 pub mod mapping;
 pub mod pull;
 pub mod push;
+pub mod store_status;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
@@ -30,6 +31,8 @@ pub enum EvidenceCmd {
     Pull(pull::PullArgs),
     /// List bundles in remote storage (BYOS)
     List(list::ListArgs),
+    /// Check evidence store connectivity and status (BYOS)
+    StoreStatus(store_status::StoreStatusArgs),
     /// Interactive TUI explorer for evidence bundles
     #[cfg(feature = "tui")]
     Explore(explore::ExploreArgs),
@@ -72,23 +75,17 @@ pub struct EvidenceShowArgs {
     pub format: String,
 }
 
-pub fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
+pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
     match args.cmd {
         EvidenceCmd::Export(a) => cmd_export(a),
         EvidenceCmd::Verify(a) => cmd_verify(a),
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Lint(a) => lint::cmd_lint(a),
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
-        // BYOS commands (async)
-        EvidenceCmd::Push(a) => tokio::runtime::Runtime::new()
-            .expect("failed to create tokio runtime")
-            .block_on(push::cmd_push(a)),
-        EvidenceCmd::Pull(a) => tokio::runtime::Runtime::new()
-            .expect("failed to create tokio runtime")
-            .block_on(pull::cmd_pull(a)),
-        EvidenceCmd::List(a) => tokio::runtime::Runtime::new()
-            .expect("failed to create tokio runtime")
-            .block_on(list::cmd_list(a)),
+        EvidenceCmd::Push(a) => push::cmd_push(a).await,
+        EvidenceCmd::Pull(a) => pull::cmd_pull(a).await,
+        EvidenceCmd::List(a) => list::cmd_list(a).await,
+        EvidenceCmd::StoreStatus(a) => store_status::cmd_store_status(a).await,
         #[cfg(feature = "tui")]
         EvidenceCmd::Explore(a) => explore::cmd_explore(a),
     }

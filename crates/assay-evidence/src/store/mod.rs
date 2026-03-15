@@ -18,16 +18,36 @@
 //! runs/{run_id}/bundles/{bundle_id}.ref # Run-to-bundle index (for list --run-id)
 //! ```
 
+pub mod config;
 pub mod error;
 pub mod naming;
 pub mod object_store_backend;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use serde::Serialize;
 
 pub use error::{StoreError, StoreResult};
 pub use naming::KeyBuilder;
 pub use object_store_backend::ObjectStoreBundleStore;
+
+/// Diagnostic status of a connected evidence store.
+///
+/// `bundle_count` and `total_size_bytes` are capped at 10,000 entries for
+/// responsiveness. Stores with more bundles will show approximate values.
+#[derive(Debug, Clone, Serialize)]
+pub struct StoreStatus {
+    pub reachable: bool,
+    pub readable: bool,
+    pub writable: bool,
+    pub backend: String,
+    pub bucket: Option<String>,
+    pub prefix: String,
+    pub bundle_count: u64,
+    pub total_size_bytes: u64,
+    /// Best-effort Object Lock detection: `"unknown"`, `"enabled"`, or `"disabled"`.
+    pub object_lock: String,
+}
 
 /// Parsed store specification from CLI/config.
 ///
