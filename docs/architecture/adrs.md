@@ -27,11 +27,11 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-024](./ADR-024-Sim-Engine-Hardening.md) | Sim Engine Hardening (Limits + Time Budget) | Superseded | **P2** |
 | [ADR-025](./ADR-025-Evidence-as-a-Product.md) | Evidence-as-a-Product | Accepted | **P1/P2** |
 | [ADR-026](./ADR-026-Protocol-Adapters.md) | Protocol Adapters | **Accepted** | **P1** |
-| [ADR-027](./ADR-027-Tool-Taxonomy.md) | Tool Taxonomy and Class-Based Route Policies | Proposed | **P1** |
-| [ADR-028](./ADR-028-Coverage-Report.md) | Coverage Report (Tool & Route Completeness) | Proposed | **P1** |
-| [ADR-029](./ADR-029-Session-State-Window.md) | Session & State Window Contract (MCP Governance) | Proposed | **P1** |
-| [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Coverage + Wrap DX Polish | Proposed | **P2** |
-| [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Proposed | **P2** |
+| [ADR-027](./ADR-027-Tool-Taxonomy.md) | Tool Taxonomy and Class-Based Route Policies | Accepted | **P1** |
+| [ADR-028](./ADR-028-Coverage-Report.md) | Coverage Report (Tool & Route Completeness) | Accepted | **P1** |
+| [ADR-029](./ADR-029-Session-State-Window.md) | Session & State Window Contract (MCP Governance) | Accepted | **P1** |
+| [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Coverage + Wrap DX Polish | Accepted | **P2** |
+| [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Accepted | **P2** |
 | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | MCP Policy Enforcement, Obligations, and Evidence v2 | Accepted | **P1** |
 | [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
 
@@ -42,18 +42,18 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | Priority | ADR | Status | Notes |
 |----------|-----|--------|-------|
 | ✅ | [ADR-014](./ADR-014-GitHub-Action-v2.md) | Implemented | [Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security) |
-| **P1** | [ADR-015](./ADR-015-BYOS-Storage-Strategy.md) | Accepted | `push/pull/list` with S3-compatible storage |
+| **P1** | [ADR-015](./ADR-015-BYOS-Storage-Strategy.md) | Accepted | `push/pull/list` shipped on `main`; `store-status`, richer config ergonomics, and fuller provider docs remain open |
 | **P1** | [ADR-011](./ADR-011-Tool-Signing.md) | Proposed | `x-assay-sig` + local-key signing in OSS; Sigstore keyless deferred to enterprise |
 | **P1** | [ADR-023](./ADR-023-CICD-Starter-Pack.md) | Accepted | OSS starter adoption floor (implemented) |
 | **P2** | [ADR-021](./ADR-021-Local-Pack-Discovery.md) | Accepted | Local pack discovery + safe resolution order (implemented) |
 | **P2** | [ADR-022](./ADR-022-SOC2-Baseline-Pack.md) | Accepted | SOC2 baseline OSS pack (implemented) |
 | **P1/P2** | [ADR-025](./ADR-025-Evidence-as-a-Product.md) | Accepted | I1/I2/I3 slices merged on `main`; formal accept complete |
 | **P1** | [ADR-026](./ADR-026-Protocol-Adapters.md) | Accepted | ACP + A2A + UCP adapter slices and E0-E4 stabilization are merged on `main` |
-| **P1** | [ADR-027](./ADR-027-Tool-Taxonomy.md) | Proposed | A/B slices merged on `main` (taxonomy + class-aware tool matching); formal status update pending |
-| **P1** | [ADR-028](./ADR-028-Coverage-Report.md) | Proposed | A/B slices merged on `main` (coverage contract + generator + wrap emission); formal status update pending |
-| **P1** | [ADR-029](./ADR-029-Session-State-Window.md) | Proposed | A/B slices merged on `main` (session/state contract + informational export); formal status update pending |
-| **P2** | [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Proposed | A/B/C slices merged on `main` (coverage markdown/file input + closure docs); formal status update pending |
-| **P2** | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Proposed | v1.1 DX contract accepted; follow-up implementation slices pending |
+| **P1** | [ADR-027](./ADR-027-Tool-Taxonomy.md) | Accepted | Implemented on `main` via PRs #560, #561, and #572 (taxonomy + class-aware tool matching + closure) |
+| **P1** | [ADR-028](./ADR-028-Coverage-Report.md) | Accepted | Implemented on `main` via PRs #563, #565, #567, and #572 (coverage contract + generator + wrap emission + closure) |
+| **P1** | [ADR-029](./ADR-029-Session-State-Window.md) | Accepted | Implemented on `main` via PRs #569, #574, and #576 (session/state contract + informational export + closure) |
+| **P2** | [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Accepted | Implemented on `main` via PRs #578, #580, and #582 (coverage markdown/file input + wrap export log consistency + closure) |
+| **P2** | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Accepted | Implemented on `main` via PRs #585, #587, and #588 (`--out-md`, `--routes-top`, and closure docs/gates) |
 | **P1** | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | Accepted | Wave24-Wave42 merged on `main`; see overview + plan for capability grouping and historical rollout |
 | **P2** | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | Accepted | Article 12 mapping, `--pack` flag |
 | **P3** | [ADR-012](./ADR-012-Transparency-Log.md) | Proposed | Builds on ADR-011 |
@@ -71,6 +71,10 @@ The ADR-032 line has supporting architecture documents with separate roles:
 - [ADR-032 Obsidian View Layer Recommendations](./OBSIDIAN-ADR-032-VIEW-LAYER-2026q2.md) — internal view-layer guidance
 - [ADR-032 Execution Plan](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md) — historical rollout log
 - [ADR-032 Documentation Maturity Gap Analysis](./GAP-ADR-032-MCP-POLICY-DOCS-MATURITY-2026q2.md) — current-state gap analysis
+
+## Repo-wide Architecture & Roadmap
+
+- [Assay Architecture & Roadmap Gap Analysis](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — current-state truth sync across roadmap, ADRs, RFCs, and delivery gaps
 
 ## Template
 

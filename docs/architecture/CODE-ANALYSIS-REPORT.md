@@ -21,7 +21,7 @@ High-level refresh:
 - P2/P3 batches from RFC-002 E1-E4 delivered (store consistency, metrics dedup, registry cleanup, comment cleanup).
 - `generate.rs` decomposition: **complete** — RFC-003 G1-G6 all merged (PR #271 = G6, `f21c85ef`).
 - RFC-002: **complete** (E1-E5 all delivered).
-- Remaining structural work tracked in RFC-004 (O6 docs auto-update pending).
+- RFC-004 is now closed on `main`; there is no remaining open execution item from that convergence line.
 
 ---
 

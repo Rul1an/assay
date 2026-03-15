@@ -1,7 +1,7 @@
 # ADR-028: Coverage Report (Tool & Route Completeness)
 
 ## Status
-Proposed (March 2026)
+Accepted (March 2026; implemented on `main` via PRs #563, #565, #567, and #572)
 
 ## Context
 Assay's governance model is deterministic policy-as-code + evidence. As tool surfaces grow (multiple sinks, alternates, protocol adapters), correctness alone is not enough: we need to detect blind spots.
