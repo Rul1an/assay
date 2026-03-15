@@ -1,4 +1,5 @@
 pub mod chaos;
+pub mod consumer_downgrade;
 pub mod delegation_spoofing;
 pub mod differential;
 pub mod integrity;
