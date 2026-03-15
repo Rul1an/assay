@@ -3,9 +3,9 @@
 > **Status sync (2026-03-15):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
 > Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
 > Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
-> **BYOS truth (ADR-015):** `assay evidence push`, `pull`, and `list` are shipped; `assay evidence store-status`, structured `assay.yaml` config, and fuller provider docs remain open.
+> **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
-> Next repo-level priorities: roadmap truth sync, ADR-015 Phase 1 closure, and release/changelog hygiene.
+> Next repo-level priorities: release/changelog hygiene, then ADR-015 Phase 2 (GitHub Action integration) or next bounded wave.
 
 **Strategic Focus:** Agent Runtime Evidence & Control Plane.
 **Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
@@ -177,7 +177,7 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 | **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
 | **P0** | Exit Codes (V2) | Low | High | ✅ Complete (v2.12.0) |
 | **P0** | Report IO Robustness (Warnings) | Low | High | ✅ Complete (v2.12.0) |
-| **P1** | BYOS CLI Commands | Low | High | ◐ Mostly complete (`push/pull/list` shipped; `store-status` + richer config/docs pending) |
+| **P1** | BYOS CLI Commands | Low | High | ✅ Complete (Phase 1: `push/pull/list/store-status`, `.assay/store.yaml` config, provider docs) |
 | **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete (v2.9.0) |
 | **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |
 | **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
@@ -216,28 +216,29 @@ Features:
 - Baseline comparison via cache
 - Job Summary reports
 
-### A. BYOS CLI Commands ◐ Mostly Complete
+### A. BYOS CLI Commands ✅ Complete (Phase 1)
 
 Per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md), evidence storage uses user-provided S3-compatible buckets:
 
 ```bash
-# CLI commands
-assay evidence push bundle.tar.gz --store s3://bucket/prefix
-assay evidence pull --bundle-id sha256:... --store s3://bucket/prefix
-assay evidence list --run-id run_123 --store s3://bucket/prefix
+# CLI commands (--store optional when .assay/store.yaml is present)
+assay evidence push bundle.tar.gz
+assay evidence pull --bundle-id sha256:...
+assay evidence list --run-id run_123
+assay evidence store-status
 ```
 
 - [x] **Generic S3 Client**: Using `object_store` crate
 - [x] **push command**: Upload verified bundle with immutability-safe writes
 - [x] **pull command**: Download bundle by ID or run
 - [x] **list command**: List bundles with filtering, JSON/table/plain output
+- [x] **store-status command**: Connectivity/access/inventory diagnostics (JSON/table/plain)
 - [x] **Conditional writes**: `If-None-Match: "*"` for immutability
 - [x] **Content-addressed keys**: SHA-256 bundle_id as source of truth
-- [ ] **store-status command**: Not yet shipped on `main`
-- [ ] **Structured `assay.yaml` config**: env vars and `--store` are shipped; YAML ergonomics remain open
-- [ ] **Provider runbooks**: backend-specific operator docs are still partial
+- [x] **Structured config**: `.assay/store.yaml` with frozen precedence chain
+- [x] **Provider quickstart docs**: [AWS S3](guides/evidence-store-aws-s3.md), [Backblaze B2](guides/evidence-store-backblaze-b2.md), [MinIO](guides/evidence-store-minio.md)
 
-Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Blob, GCS, local filesystem
+Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, local filesystem (via S3-compatible endpoint or `file://`)
 
 ### B. Tool Signing ✅ Complete
 

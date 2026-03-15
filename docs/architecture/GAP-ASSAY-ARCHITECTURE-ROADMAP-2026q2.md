@@ -27,7 +27,7 @@ The weakest lines are not missing architecture, but status convergence and a sma
 | MCP runtime governance (ADR-032) | Wave24-Wave42 closed-loop on `main`: typed decisions, obligations execution, approval/restrict/redact enforcement, convergence and consumer hardening | No open execution blocker in ADR-032 itself | Keep compatibility paths stable; open only new bounded waves |
 | Protocol adapters (ADR-026) | ACP/A2A/UCP adapter posture is accepted and implemented | Cross-repo discoverability could improve | Keep adapter architecture stable; use catalog metadata and published docs for discovery |
 | DX/refactor governance (RFC-001/002/003/004) | Wave A/B landed, RFC-002 and RFC-003 complete, RFC-004 closure merged | Wave C remains intentionally data-gated, not an active delivery track | Treat RFC-001 as historical governance guidance unless new performance data justifies revival |
-| BYOS storage (ADR-015) | `assay evidence push`, `pull`, and `list` shipped; object-store backend exists; env-var configuration exists | `assay evidence store-status` not shipped; structured `assay.yaml` config path not proven; provider runbooks/docs are partial | Make ADR-015 Phase 1 true in product terms before opening a larger storage lane |
+| BYOS storage (ADR-015) | Phase 1 complete: `push/pull/list/store-status`, `.assay/store.yaml` config, provider quickstart docs (S3, B2, MinIO) | Phase 2 (GitHub Action integration) and Phase 3 (managed store) remain future work | Phase 1 is closed; next bounded move is Phase 2 if demand justifies it |
 | Tool signing and transparency | OSS signing is shipped; keyless/transparency remain explicitly later-stage | Sigstore keyless and transparency-log layers are still future work | Keep deferred until demand justifies the operational cost |
 | Docs-as-code maturity | ADR-032 overview, building blocks, quality scenarios, Structurizr workspace, catalog metadata, MkDocs wiring | Repo-wide architecture maturity was less explicit before this pass | Keep the repo-wide gap view current and use it to decide sequencing |
 
@@ -54,18 +54,15 @@ The weakest lines are not missing architecture, but status convergence and a sma
 
 ## What Assay Still Needs
 
-### 1. ADR-015 Phase 1 product closure
+### 1. ~~ADR-015 Phase 1 product closure~~ ✅ Closed
 
-The BYOS decision is strategically sound, but the shipped user story is still only mostly complete.
+ADR-015 Phase 1 is now complete on `main`:
+- shipped: `push`, `pull`, `list`, `store-status`
+- shipped: `.assay/store.yaml` structured config (option A, separate from eval config)
+- shipped: provider quickstart docs (AWS S3, Backblaze B2, MinIO)
+- shipped: CLI integration tests with `file://` backend
 
-Current truth:
-- shipped: `push`, `pull`, `list`
-- shipped: object-store backend + env-var configuration
-- not shipped: `store-status`
-- not yet proven on `main`: structured `assay.yaml` `evidence_store:` configuration
-- only partially documented: backend-specific operator guidance
-
-This is the biggest remaining strategy-to-delivery gap in the repo.
+This was the biggest strategy-to-delivery gap; it is now closed.
 
 ### 2. Release/changelog hygiene
 
@@ -86,15 +83,9 @@ This is valuable, but should come after the roadmap truth and BYOS closure work.
 
 ## Recommended Order
 
-1. **Roadmap truth sync**
-   - Keep ADR/RFC status language aligned with merged reality.
-   - Avoid reopening already closed lines in prose.
+1. ~~**Roadmap truth sync**~~ ✅ Done (PR #857)
 
-2. **ADR-015 Phase 1 closure**
-   - Ship or explicitly defer:
-     - `assay evidence store-status`
-     - structured `assay.yaml` configuration
-     - provider/runbook documentation
+2. ~~**ADR-015 Phase 1 closure**~~ ✅ Done (PR #859 Step 1, PR #860 Step 2, this PR Step 3)
 
 3. **Release/changelog hygiene**
    - Keep release notes as the consumer-facing truth.
