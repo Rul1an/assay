@@ -231,11 +231,12 @@ fn test_store_status_with_config_file() {
 }
 
 #[test]
-fn test_no_store_configured_fails() {
+fn test_no_store_configured_exits_2() {
     Command::cargo_bin("assay")
         .unwrap()
         .args(["evidence", "store-status", "--format", "json"])
         .env_remove("ASSAY_STORE_URL")
         .assert()
-        .failure();
+        .code(2)
+        .stderr(predicate::str::contains("Config error"));
 }

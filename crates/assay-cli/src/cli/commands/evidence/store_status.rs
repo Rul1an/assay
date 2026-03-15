@@ -31,10 +31,21 @@ pub enum StatusFormat {
 }
 
 pub async fn cmd_store_status(args: StoreStatusArgs) -> Result<i32> {
-    let url = resolve_store_url(args.store.as_deref(), args.store_config.as_deref())
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let url = match resolve_store_url(args.store.as_deref(), args.store_config.as_deref()) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("Config error: {}", e);
+            return Ok(2);
+        }
+    };
 
-    let spec = StoreSpec::parse(&url).with_context(|| format!("invalid store URL: {}", url))?;
+    let spec = match StoreSpec::parse(&url) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Config error: invalid store URL '{}': {}", url, e);
+            return Ok(2);
+        }
+    };
 
     let store = ObjectStoreBundleStore::from_spec(&spec)
         .await

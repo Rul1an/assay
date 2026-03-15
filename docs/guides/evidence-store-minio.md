@@ -44,6 +44,8 @@ export ASSAY_STORE_PATH_STYLE=1
 
 ### Option B: Config file
 
+Create `.assay/store.yaml` (preferred) or `assay-store.yaml` in your project root:
+
 ```yaml
 # .assay/store.yaml
 url: s3://assay-evidence/evidence

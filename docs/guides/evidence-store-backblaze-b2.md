@@ -32,6 +32,8 @@ export ASSAY_STORE_REGION=us-west-002
 
 ### Option B: Config file
 
+Create `.assay/store.yaml` (preferred) or `assay-store.yaml` in your project root:
+
 ```yaml
 # .assay/store.yaml
 url: s3://my-assay-evidence/assay/evidence
