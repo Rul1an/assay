@@ -13,13 +13,13 @@ The canonical narrative docs remain in the repo:
 ## Embedded Views
 
 ### System Context
-![](embed:ADR032SystemContext)
+<img alt="ADR-032 system context" src="embed:ADR032SystemContext" />
 
 ### Containers
-![](embed:ADR032Containers)
+<img alt="ADR-032 containers" src="embed:ADR032Containers" />
 
 ### Policy Runtime Components
-![](embed:ADR032PolicyRuntimeComponents)
+<img alt="ADR-032 policy runtime components" src="embed:ADR032PolicyRuntimeComponents" />
 
 ### Evidence and Replay Components
-![](embed:ADR032EvidenceComponents)
+<img alt="ADR-032 evidence and replay components" src="embed:ADR032EvidenceComponents" />
