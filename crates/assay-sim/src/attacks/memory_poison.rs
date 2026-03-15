@@ -317,7 +317,11 @@ pub fn vector3_context_envelope_poisoning(delay_turns: u32) -> (PoisonResult, At
 // ---------------------------------------------------------------------------
 
 /// Poison: inject phantom tool class into state snapshot.
-/// Tests whether the poisoned entry persists past the decay window.
+///
+/// Tests snapshot-hash divergence when a phantom tool class is injected.
+/// The `decay_runs` parameter is report metadata only — this vector does not
+/// simulate window-based purge semantics. It validates that content-addressed
+/// snapshot comparison detects injected entries, regardless of window position.
 pub fn vector4_decay_escape(decay_runs: u32) -> (PoisonResult, AttackResult) {
     let start = Instant::now();
 

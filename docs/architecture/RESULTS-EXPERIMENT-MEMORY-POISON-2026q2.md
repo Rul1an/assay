@@ -70,6 +70,11 @@ This was not predicted by H4. The decay window's snapshot-level hash is sufficie
 detect V4, but the context contract's field-level completeness check has a structural
 gap that only provenance validation closes.
 
+Note: V4 in this experiment tests snapshot-hash divergence under delayed trigger
+framing, not full window-based purge semantics. The `decay_runs` parameter is
+report metadata; the hash comparison result is identical regardless of delay.
+Full decay-window purge testing is a possible follow-up but was out of scope.
+
 ### 4. Zero false positives across all conditions
 
 FPBR = 0% means the defense mechanisms do not harm legitimate delayed-memory recall.
