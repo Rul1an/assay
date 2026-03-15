@@ -108,6 +108,25 @@ silent path degradation. (Protocol Evidence V4)
 - Do not treat provenance/compat signals as optional metadata
 - Do not bypass trust-domain checks for convenience
 
+## Practical Implications
+
+For each layer in the trust chain:
+- **Producers** must preserve field provenance — when a field was produced matters as much as its value
+- **Adapters** must preserve trust-domain identity — source URN and metadata alone are not sufficient
+- **Consumers** must fail-closed on missing required fields and follow canonical tier precedence
+
+## Scope Boundary
+
+This synthesis is bounded to deterministic structural attacks on trust interpretation.
+It does not claim coverage over semantic persuasion, multi-agent planning, or
+control-plane compromise. All attacks are schema-valid, protocol-plausible, and
+tested without LLM involvement.
+
+## Next Frontier
+
+The next open question is not whether the trust chain works in isolation, but whether
+external integrations and SDK consumers preserve these invariants end-to-end.
+
 ## Experiment Infrastructure
 
 | Metric | Value |
