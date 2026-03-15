@@ -1,0 +1,18 @@
+version: "1.0"
+name: "mcp-quickstart"
+allow:
+  - "read_file"
+  - "list_dir"
+deny:
+  - "exec"
+  - "shell"
+  - "write_file"
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/tmp/assay-demo/.*"
+  - tool: "list_dir"
+    params:
+      path:
+        matches: "^/tmp/assay-demo/.*"

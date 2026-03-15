@@ -1,8 +1,16 @@
-# Assay Examples 🌟
+# Assay Examples
 
-This directory contains ready-to-use examples for common Evaluation use-cases.
+Ready-to-use examples to get started with Assay.
 
-## 1. [RAG Grounding](./rag-grounding)
+## Start here
+
+### [MCP Quickstart](./mcp-quickstart)
+Wrap an MCP server with policy enforcement in under 2 minutes.
+See ALLOW/DENY decisions for every tool call.
+
+## Evaluation examples
+
+### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
 
