@@ -14,10 +14,11 @@ Assay wraps your MCP server with deterministic policy enforcement. Every tool ca
 cargo install assay-cli
 ```
 
-Wrap any MCP server and see policy decisions in real-time:
+Wrap any MCP server with a policy and see decisions in real-time:
 
 ```bash
-assay mcp wrap -- npx @modelcontextprotocol/server-filesystem ./
+assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
+  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
 
 Every tool call now shows a clear decision:
@@ -36,18 +37,28 @@ That's it. Your MCP server now has a policy gate.
 **Catch problems locally:**
 
 ```bash
-# Wrap your server → see decisions instantly
-assay mcp wrap -- your-mcp-server
+# Wrap your server with a policy → see decisions instantly
+assay mcp wrap --policy policy.yaml -- your-mcp-server
 
-# Generate a policy from observed behavior
-assay generate --from-trace trace.jsonl
+# Generate a policy from recorded behavior
+assay init --from-trace trace.jsonl
 ```
 
 **Gate your CI:**
 
 ```yaml
 # .github/workflows/assay.yml
-- uses: Rul1an/assay-action@v2
+name: Assay Gate
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Rul1an/assay-action@v2
 ```
 
 ```bash
@@ -102,7 +113,7 @@ constraints:
 **`eval.yaml`** — what to test:
 
 ```yaml
-version: 1
+configVersion: 1
 suite: "my_agent"
 model: "trace"
 tests:

@@ -66,13 +66,15 @@ Step 1: Install (10s)
   cargo install assay-cli
   # or: brew install assay (needs Homebrew formula)
 
-Step 2: Wrap your MCP server (30s)
-  assay mcp wrap -- npx @modelcontextprotocol/server-filesystem ./
+Step 2: Wrap your MCP server with the quickstart policy (30s)
+  assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
+    -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
   # Every tool call shows: ALLOW / DENY + reason
 
-Step 3: See a policy violation (60s)
-  # Try a tool call that hits a deny rule
-  # Immediate visible feedback: ❌ DENY + reason_code
+Step 3: See a policy violation (immediate)
+  # The quickstart policy denies exec, shell, write_file
+  # and restricts read_file to /tmp/assay-demo/
+  # Any out-of-scope call shows: ❌ DENY + reason_code
 
 Step 4: Export evidence (30s)
   assay evidence export --profile profile.yaml --out evidence.tar.gz
@@ -82,7 +84,7 @@ Step 5: Add to CI (2min)
   # Copy GitHub Action snippet from README
 ```
 
-Each step gives immediate, visible feedback. No config file needed for step 2-3.
+Each step gives immediate, visible feedback. The quickstart policy is included in the repo.
 
 ## Activation Instrumentation
 
