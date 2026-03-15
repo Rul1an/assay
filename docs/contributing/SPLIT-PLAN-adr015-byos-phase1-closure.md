@@ -88,17 +88,36 @@ Config shape (frozen):
 # .assay/store.yaml
 url: s3://my-bucket/assay/evidence
 
-# Optional overrides (take precedence over env vars)
+# Optional connection overrides
 region: us-west-2
 allow_http: false
 path_style: false
 ```
 
+Precedence clarification (two layers):
+
+**Store URL resolution** (which store to connect to):
+1. `--store` CLI arg
+2. `ASSAY_STORE_URL` env var
+3. `url` field from config file (via `--store-config` or default lookup)
+
+If `--store` or `ASSAY_STORE_URL` is set, the config file `url` field is ignored.
+The config file is still loaded for connection overrides below.
+
+**Connection override resolution** (how to connect):
+- `region`: `ASSAY_STORE_REGION` env var > config file `region` > URL query param > `AWS_REGION`
+- `allow_http`: `ASSAY_STORE_ALLOW_HTTP` env var > config file `allow_http`
+- `path_style`: `ASSAY_STORE_PATH_STYLE` env var > config file `path_style`
+
+Env-specific overrides (`ASSAY_STORE_*`) always win over config file values.
+This lets operators pin connection details in the config file while CI/dev
+environments override via env vars.
+
 Mapping to `StoreSpec`:
 - `url` → `StoreSpec::parse(url)`
-- `region` → overrides URL query param and `AWS_REGION` (same as `ASSAY_STORE_REGION`)
-- `allow_http` → same as `ASSAY_STORE_ALLOW_HTTP`
-- `path_style` → same as `ASSAY_STORE_PATH_STYLE`
+- `region` → applied to `StoreSpec.region` per precedence above
+- `allow_http` → applied to S3 builder per precedence above
+- `path_style` → applied to S3 builder per precedence above
 
 The config file does not store credentials. Credentials remain in env vars
 (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, IAM roles, etc.).

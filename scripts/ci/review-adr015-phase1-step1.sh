@@ -66,6 +66,8 @@ rg -n '^# SPLIT PLAN - ADR-015 BYOS Phase 1 Closure$' \
   exit 1
 }
 
+PLAN="docs/contributing/SPLIT-PLAN-adr015-byos-phase1-closure.md"
+
 for marker in \
   'store-status' \
   'StoreConfig' \
@@ -77,12 +79,21 @@ for marker in \
   'AWS S3' \
   'Backblaze B2' \
   'MinIO' \
-  'No change to.*EvalConfig' \
   'az://' \
   'gcs://'
 do
-  rg -n "$marker" docs/contributing/SPLIT-PLAN-adr015-byos-phase1-closure.md >/dev/null || {
-    echo "FAIL: missing marker in plan: $marker"
+  rg -Fn "$marker" "$PLAN" >/dev/null || {
+    echo "FAIL: missing literal marker in plan: $marker"
+    exit 1
+  }
+done
+
+REGEX_MARKERS=(
+  'No change to.*EvalConfig'
+)
+for pattern in "${REGEX_MARKERS[@]}"; do
+  rg -n "$pattern" "$PLAN" >/dev/null || {
+    echo "FAIL: missing regex marker in plan: $pattern"
     exit 1
   }
 done

@@ -28,7 +28,7 @@ It must not:
 4. Precedence chain is explicit: `--store` > env > config file > default lookup.
 5. Provider docs scope is bounded (S3, B2, MinIO only in Phase 1).
 6. Out-of-scope items are explicit (az/gcs, auto-push, Action integration, EvalConfig).
-7. Step 2 frozen paths are explicit and include `assay-core/config.rs` and workflows.
+7. Step 2 frozen paths are explicit: `crates/assay-core/src/config.rs`, `crates/assay-core/src/model/types.rs`, `.github/workflows/*`.
 8. No runtime code is touched.
 
 ## Reviewer command
