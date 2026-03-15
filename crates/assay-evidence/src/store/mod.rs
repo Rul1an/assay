@@ -32,6 +32,9 @@ pub use naming::KeyBuilder;
 pub use object_store_backend::ObjectStoreBundleStore;
 
 /// Diagnostic status of a connected evidence store.
+///
+/// `bundle_count` and `total_size_bytes` are capped at 10,000 entries for
+/// responsiveness. Stores with more bundles will show approximate values.
 #[derive(Debug, Clone, Serialize)]
 pub struct StoreStatus {
     pub reachable: bool,

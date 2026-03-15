@@ -57,21 +57,16 @@ impl StoreConfig {
     /// Discover config from default locations.
     ///
     /// Checks `.assay/store.yaml` and `assay-store.yaml` in order.
-    /// Returns `None` if no config file is found (not an error).
-    pub fn discover() -> Option<Self> {
+    /// Returns `Ok(None)` if no config file is found.
+    /// Returns `Err` if a config file exists but fails to parse.
+    pub fn discover() -> StoreResult<Option<Self>> {
         for path in DEFAULT_PATHS {
             let p = PathBuf::from(path);
             if p.exists() {
-                match Self::load(&p) {
-                    Ok(cfg) => return Some(cfg),
-                    Err(e) => {
-                        tracing::warn!(path = %p.display(), error = %e, "found store config but failed to load");
-                        return None;
-                    }
-                }
+                return Self::load(&p).map(Some);
             }
         }
-        None
+        Ok(None)
     }
 
     /// Apply config-file connection overrides to environment, respecting
@@ -110,7 +105,7 @@ pub fn resolve_store_url(
         // Config may still provide connection overrides
         let config = match store_config_path {
             Some(p) => Some(StoreConfig::load(p)?),
-            None => StoreConfig::discover(),
+            None => StoreConfig::discover()?,
         };
         if let Some(cfg) = config {
             cfg.apply_env_defaults();
@@ -121,7 +116,7 @@ pub fn resolve_store_url(
     // Try config file
     let config = match store_config_path {
         Some(p) => Some(StoreConfig::load(p)?),
-        None => StoreConfig::discover(),
+        None => StoreConfig::discover()?,
     };
 
     if let Some(cfg) = config {

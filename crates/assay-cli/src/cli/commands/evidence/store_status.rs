@@ -1,6 +1,6 @@
 //! `assay evidence store-status` - Check evidence store connectivity and status.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use assay_evidence::{resolve_store_url, ObjectStoreBundleStore, StoreSpec};
 use clap::{Args, ValueEnum};
 use std::path::PathBuf;
@@ -47,9 +47,13 @@ pub async fn cmd_store_status(args: StoreStatusArgs) -> Result<i32> {
         }
     };
 
-    let store = ObjectStoreBundleStore::from_spec(&spec)
-        .await
-        .with_context(|| "failed to connect to store")?;
+    let store = match ObjectStoreBundleStore::from_spec(&spec).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Connection error: {}", e);
+            return Ok(1);
+        }
+    };
 
     let status = store.store_status(&spec).await;
 
@@ -71,15 +75,15 @@ pub async fn cmd_store_status(args: StoreStatusArgs) -> Result<i32> {
         StatusFormat::Table => {
             let check = |ok: bool| if ok { "OK" } else { "FAIL" };
 
-            eprintln!("Evidence Store Status");
-            eprintln!("====================");
-            eprintln!();
-            eprintln!("  Backend:      {}", status.backend);
-            eprintln!(
+            println!("Evidence Store Status");
+            println!("====================");
+            println!();
+            println!("  Backend:      {}", status.backend);
+            println!(
                 "  Bucket:       {}",
                 status.bucket.as_deref().unwrap_or("-")
             );
-            eprintln!(
+            println!(
                 "  Prefix:       {}",
                 if status.prefix.is_empty() {
                     "(none)"
@@ -87,14 +91,14 @@ pub async fn cmd_store_status(args: StoreStatusArgs) -> Result<i32> {
                     &status.prefix
                 }
             );
-            eprintln!();
-            eprintln!("  Reachable:    {}", check(status.reachable));
-            eprintln!("  Readable:     {}", check(status.readable));
-            eprintln!("  Writable:     {}", check(status.writable));
-            eprintln!("  Object Lock:  {}", status.object_lock);
-            eprintln!();
-            eprintln!("  Bundles:      {}", status.bundle_count);
-            eprintln!("  Total size:   {}", format_size(status.total_size_bytes));
+            println!();
+            println!("  Reachable:    {}", check(status.reachable));
+            println!("  Readable:     {}", check(status.readable));
+            println!("  Writable:     {}", check(status.writable));
+            println!("  Object Lock:  {}", status.object_lock);
+            println!();
+            println!("  Bundles:      {}", status.bundle_count);
+            println!("  Total size:   {}", format_size(status.total_size_bytes));
 
             if !status.reachable {
                 eprintln!();
@@ -103,7 +107,8 @@ pub async fn cmd_store_status(args: StoreStatusArgs) -> Result<i32> {
         }
     }
 
-    if status.reachable {
+    let usable = status.reachable && status.readable && status.writable;
+    if usable {
         Ok(0)
     } else {
         Ok(1)

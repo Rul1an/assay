@@ -11,10 +11,8 @@ Quickstart for using AWS S3 as your BYOS evidence store.
 ## Bucket setup
 
 ```bash
-aws s3 mb s3://my-assay-evidence --region us-east-1
-
-# (Recommended) Enable Object Lock for WORM compliance
-# Object Lock must be enabled at bucket creation time:
+# Create bucket with Object Lock enabled (recommended for WORM compliance).
+# Object Lock must be enabled at bucket creation time.
 aws s3api create-bucket \
   --bucket my-assay-evidence \
   --region us-east-1 \

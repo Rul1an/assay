@@ -155,10 +155,14 @@ impl ObjectStoreBundleStore {
         let bundle_count = bundles.len() as u64;
         let total_size_bytes: u64 = bundles.iter().filter_map(|m| m.size).sum();
 
-        // Probe: writable via conditional put + delete of a probe key
+        // Probe: writable via put + delete of a probe key outside the bundles/ namespace
         let writable = if reachable {
-            let probe_key =
-                object_store::path::Path::from(format!("{}__assay_probe_write_test", prefix));
+            let probe_path = if prefix.is_empty() {
+                ".assay_probe_write_test".to_string()
+            } else {
+                format!("{}/.assay_probe_write_test", prefix.trim_end_matches('/'))
+            };
+            let probe_key = object_store::path::Path::from(probe_path);
             let probe_bytes = Bytes::from("probe");
             let put_ok = self
                 .inner
