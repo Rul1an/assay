@@ -6,6 +6,43 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v3.1.0] - 2026-03-15
+
+### MCP Policy Enforcement (Wave24–Wave42)
+
+- **Typed decisions + Decision Event v2**: Deterministic typed decision outcomes with structured `DecisionData` payloads replacing stringly-typed fields.
+- **Obligation execution**: Runtime execution of `log`, `alert`, `approval_required`, `restrict_scope`, and `redact_args` obligations with deterministic evidence emission.
+- **Approval enforcement**: `approval_required` blocks tool calls without valid approval artifacts; approval shape is additive evidence.
+- **Restrict scope enforcement**: `restrict_scope` narrows tool-call arguments at runtime with evidence of what was restricted and why.
+- **Redact args enforcement**: `redact_args` strips sensitive fields from tool-call arguments before forwarding, with redaction evidence markers.
+- **Fulfillment normalization**: Obligation fulfillment outcomes are normalized into a stable contract for downstream consumers.
+- **Deny/fail-closed evidence convergence**: Deny paths and fail-closed decisions emit consistent, typed evidence with deterministic precedence.
+- **Replay diff basis**: Deterministic replay diff buckets with legacy fallback classification for backward compatibility.
+- **Evidence compatibility normalization**: Replay evidence compatibility markers for additive reader contracts.
+- **Consumer hardening**: Frozen consumer read precedence for `DecisionEvent`, `DecisionData`, and `ReplayDiffBasis` payloads.
+- **Context envelope hardening**: Completeness markers and additive metadata on context-envelope payloads.
+
+### BYOS Evidence Store (ADR-015 Phase 1)
+
+- **`assay evidence store-status`**: New diagnostic command — checks connectivity, credentials, inventory, and write access. Supports JSON, table, and plain output. Exit codes: 0 (OK), 1 (connectivity/access failure), 2 (config error).
+- **`.assay/store.yaml` config**: Structured YAML configuration for evidence store connection. Precedence: `--store` > `ASSAY_STORE_URL` > config file. Credentials stay in environment variables.
+- **Config fallback for push/pull/list**: `--store` is now optional — falls back to `ASSAY_STORE_URL` or `.assay/store.yaml` automatically.
+- **Provider quickstart docs**: AWS S3, Backblaze B2, MinIO setup guides.
+
+### Architecture & Documentation
+
+- Architecture-as-code workspace: Structurizr/C4, building blocks, quality scenarios, Obsidian view layer, catalog metadata.
+- ADR-027 through ADR-031 closed as implemented contracts.
+- Repo-wide architecture gap analysis and roadmap truth sync.
+- Release/changelog hygiene: consolidated to single curated CHANGELOG.md.
+
+### Fixes
+
+- Evidence command dispatch is now async (fixes nested tokio runtime panic for BYOS commands).
+- `StoreConfig::discover()` returns errors on malformed config files instead of silently ignoring them.
+
+---
+
 ## [v3.0.0] - 2026-03-05
 
 ### Breaking API Changes
