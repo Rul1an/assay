@@ -2,8 +2,6 @@
   <h1 align="center">Assay</h1>
   <p align="center">
     <strong>The firewall for MCP tool calls.</strong>
-    <br />
-    Block unsafe calls. Audit every decision. Replay anything.
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -11,26 +9,34 @@
     <a href="https://github.com/Rul1an/assay/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/assay-core.svg" alt="License"></a>
   </p>
   <p align="center">
+    <a href="#see-it-work">See It Work</a> ·
     <a href="examples/mcp-quickstart/">Quick Start</a> ·
     <a href="docs/guides/github-action.md">CI Guide</a> ·
-    <a href="docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md">Security Research</a> ·
     <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
   </p>
 </p>
 
 ---
 
-Assay wraps your MCP server with deterministic policy enforcement. Every tool call gets an explicit **ALLOW** or **DENY** with a replayable evidence trail.
+Your MCP agent calls `read_file`, `exec`, `web_search` — but should it?
 
-No hosted backend. No probabilistic filtering. No API keys for basic use.
+Assay sits between your agent and its tools. It intercepts every MCP tool call, checks it against your policy, and blocks what shouldn't happen. Every decision produces an evidence trail you can audit, diff, and replay.
+
+```
+  Agent ──► Assay ──► MCP Server
+              │
+              ├─ ✅ ALLOW (policy match)
+              ├─ ❌ DENY  (blocked, logged)
+              └─ 📋 Evidence bundle
+```
+
+No hosted backend. No API keys. Deterministic — same input, same decision, every time.
 
 ## See It Work
 
 ```bash
 cargo install assay-cli
-```
 
-```bash
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
 
 assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
@@ -44,37 +50,39 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 
-Two commands. Immediate feedback. Your MCP server now has a policy gate.
+## Is This For Me?
 
-## How It Works
+**Yes, if you:**
+- Build with Claude Desktop, Cursor, Windsurf, or any MCP client
+- Ship agents that call tools and you need to control which ones
+- Want a CI gate that catches tool-call regressions before production
+- Need a deterministic audit trail, not sampled observability
 
+**Not yet, if you:**
+- Don't use MCP (Assay is MCP-native; other protocols are on the roadmap)
+- Need a hosted dashboard (Assay is CLI-first and offline)
+
+## Policy Is Simple
+
+```yaml
+version: "1.0"
+name: "my-policy"
+allow: ["read_file", "list_dir"]
+deny: ["exec", "shell", "write_file"]
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"
 ```
-  Agent ──► Assay proxy ──► MCP Server
-               │
-               ├─ ALLOW / DENY (deterministic)
-               ├─ Evidence trail (auditable)
-               └─ Replay bundle (reproducible)
-```
 
-Assay intercepts every tool call on the MCP transport, evaluates it against your policy, and emits a decision with evidence. Blocked calls never reach the server.
-
-## Use Cases
-
-**You're building with Claude Desktop, Cursor, or Windsurf** and you want to know exactly which tools your agent calls — and stop the ones you didn't expect.
-
-**Your team ships MCP-enabled agents** and you need a CI gate that catches tool-call regressions before they reach production.
-
-**You need an audit trail** for compliance, debugging, or security review — and you need it to be deterministic, not sampled.
-
-## Get Started in 3 Ways
-
-### Wrap locally
+Or don't write one — generate it from what your agent actually does:
 
 ```bash
-assay mcp wrap --policy policy.yaml -- your-mcp-server
+assay init --from-trace trace.jsonl
 ```
 
-### Gate in CI
+## Add to CI
 
 ```yaml
 # .github/workflows/assay.yml
@@ -91,38 +99,18 @@ jobs:
       - uses: Rul1an/assay-action@v2
 ```
 
-### Generate from behavior
-
-Don't write policy from scratch. Record what your agent does, then lock it down:
-
-```bash
-assay init --from-trace trace.jsonl
-```
-
-## Policy in 6 Lines
-
-```yaml
-version: "1.0"
-name: "my-policy"
-allow: ["read_file", "list_dir"]
-deny: ["exec", "shell", "write_file"]
-constraints:
-  - tool: "read_file"
-    params:
-      path:
-        matches: "^/app/.*"
-```
+PRs that violate policy get blocked. SARIF results show up in the Security tab.
 
 ## Why Assay
 
 | | |
 |---|---|
-| **Deterministic** | Same input, same decision, every time. No probabilistic filtering. |
-| **MCP-native** | Built for the Model Context Protocol tool-call path, not bolted on. |
-| **Evidence trail** | Every decision produces an auditable, replayable bundle. |
-| **Offline-first** | No hosted backend. Your policies and traces never leave your machine. |
-| **Fast** | < 5ms overhead per tool call in published benchmarks. |
-| **Battle-tested** | [Three security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, zero false positives. |
+| **Deterministic** | Same input, same decision, every time. Not probabilistic. |
+| **MCP-native** | Built for MCP tool calls, not bolted on. |
+| **Evidence trail** | Every decision is auditable, diffable, replayable. |
+| **Offline-first** | No backend, no API keys. Runs on your machine. |
+| **Fast** | < 5ms per tool call. |
+| **Tested** | [3 security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, 0 false positives. |
 
 ## Install
 
@@ -130,17 +118,17 @@ constraints:
 cargo install assay-cli
 ```
 
-Use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) in CI without installing locally.
+In CI: use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) directly.
 
-Python: `pip install assay-it`
+Python SDK: `pip install assay-it`
 
 ## Learn More
 
-- [MCP Quickstart Example](examples/mcp-quickstart/)
-- [CI Integration Guide](docs/guides/github-action.md)
-- [Evidence Store Setup](docs/guides/evidence-store-aws-s3.md) (AWS S3, [Backblaze B2](docs/guides/evidence-store-backblaze-b2.md), [MinIO](docs/guides/evidence-store-minio.md))
-- [Architecture](docs/architecture/index.md)
-- [Roadmap](docs/ROADMAP.md)
+- [MCP Quickstart](examples/mcp-quickstart/) — full walkthrough with a filesystem server
+- [CI Guide](docs/guides/github-action.md) — GitHub Action setup
+- [Evidence Store](docs/guides/evidence-store-aws-s3.md) — push bundles to S3, B2, or MinIO
+- [Architecture](docs/architecture/index.md) — how it works under the hood
+- [Security Research](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) — experiment results
 
 ## Contributing
 
