@@ -1,6 +1,10 @@
 # Changelog
 
 - chore(release): prepare v3.1.0 line (#854) @Rul1an
+- docs(adr015): freeze BYOS Phase 1 closure contract (#859) @Rul1an
+- docs(adr032): add architecture-as-code workspace (#857) @Rul1an
+- docs(architecture): document ADR-032 through Wave42 (#856) @Rul1an
+- chore(release): prepare v3.1.0 line (#854) @Rul1an
 ## [2026-03-15]
 
 - chore(release): prepare v3.1.0 release line for Wave24-Wave42 MCP policy enforcement work
