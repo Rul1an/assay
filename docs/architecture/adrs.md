@@ -60,6 +60,18 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | Deferred | [ADR-009](./ADR-009-WORM-Storage.md) | Deferred | Managed WORM → Q3+ if demand |
 | Deferred | [ADR-010](./ADR-010-Evidence-Store-API.md) | Deferred | Managed API → Q3+ if demand |
 
+## ADR-032 Companion Docs
+
+The ADR-032 line has supporting architecture documents with separate roles:
+
+- [ADR-032 Implementation Overview](./OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md) — current-state maintainer map
+- [ADR-032 Building Block View](./BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md) — structural decomposition
+- [ADR-032 Quality Scenarios](./QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md) — explicit quality attributes
+- [ADR-032 Structurizr Workspace](./STRUCTURIZR-ADR-032-WORKSPACE-2026q2.md) — bounded architecture-as-code model
+- [ADR-032 Obsidian View Layer Recommendations](./OBSIDIAN-ADR-032-VIEW-LAYER-2026q2.md) — internal view-layer guidance
+- [ADR-032 Execution Plan](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md) — historical rollout log
+- [ADR-032 Documentation Maturity Gap Analysis](./GAP-ADR-032-MCP-POLICY-DOCS-MATURITY-2026q2.md) — current-state gap analysis
+
 ## Template
 
 New ADRs should follow this structure:

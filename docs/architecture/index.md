@@ -9,6 +9,11 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [Split Refactor Plan (Q1-Q2 2026)](./PLAN-split-refactor-2026q1.md) — wave-by-wave execution plan
 - [Split Refactor Report (Q1 2026)](./REPORT-split-refactor-2026q1.md) — verified closure and LOC outcomes
 - [ADR-032 Implementation Overview (Q2 2026)](./OVERVIEW-ADR-032-MCP-POLICY-STACK-2026q2.md) — current MCP policy stack on `main`
+- [ADR-032 Building Block View (Q2 2026)](./BUILDING-BLOCKS-ADR-032-MCP-POLICY-STACK-2026q2.md) — structural decomposition of the MCP policy stack
+- [ADR-032 Quality Scenarios (Q2 2026)](./QUALITY-SCENARIOS-ADR-032-MCP-POLICY-STACK-2026q2.md) — explicit quality attributes and review scenarios
+- [ADR-032 Structurizr Workspace (Q2 2026)](./STRUCTURIZR-ADR-032-WORKSPACE-2026q2.md) — bounded architecture-as-code workspace and C4 model
+- [ADR-032 Obsidian View Layer Recommendations (Q2 2026)](./OBSIDIAN-ADR-032-VIEW-LAYER-2026q2.md) — recommended internal view-layer setup
+- [ADR-032 Documentation Maturity Gap Analysis (Q2 2026)](./GAP-ADR-032-MCP-POLICY-DOCS-MATURITY-2026q2.md) — current-state gap analysis and follow-up posture
 - [ADR-032 Execution Plan (Q2 2026)](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md) — MCP policy/obligation rollout status
 
 ## Active RFCs
