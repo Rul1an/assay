@@ -20,6 +20,10 @@ All three experiments complete. This document synthesizes the cross-experiment f
 | Delegation Spoofing | 4/4 bypass | 1/4 bypass | **0/4 bypass** | 0% |
 | Protocol Evidence | CCAR 0% | CCAR 50% | **CCAR 100%** | 0% |
 
+Each experiment uses the primary metric most appropriate to its perspective:
+activation rate for producer-side, bypass count for adapter-side, and canonical
+consumer agreement for consumer-side.
+
 ## The Pattern
 
 All three experiments independently confirm the same structural principle:
@@ -127,7 +131,7 @@ tested without LLM involvement.
 The next open question is not whether the trust chain works in isolation, but whether
 external integrations and SDK consumers preserve these invariants end-to-end.
 
-## Experiment Infrastructure
+## Experiment Infrastructure (snapshot as of 2026-03-15)
 
 | Metric | Value |
 |--------|-------|
@@ -136,7 +140,7 @@ external integrations and SDK consumers preserve these invariants end-to-end.
 | Total conditions tested | 9 (3 per experiment) |
 | Total test runs | 87 (21 per matrix + overhead) |
 | Total tests | 46 (unit + integration across all three) |
-| False positives | 0 across all experiments and conditions |
+| False positives | 0 across all experiments and conditions (within bounded benign controls) |
 | LLM calls | 0 (all deterministic structural testing) |
 | Runtime pipeline changes | 0 |
 
