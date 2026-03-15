@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026-03-15]
+
+- chore(release): prepare v3.1.0 release line for Wave24-Wave42 MCP policy enforcement work
+- feat(mcp): ship typed decisions, Decision Event v2, obligations execution, approval enforcement, restrict_scope enforcement, redact_args enforcement, and fulfillment normalization on the v3.1.0 line
+- feat(replay): ship replay diff basis, evidence compatibility normalization, deny-evidence convergence, consumer hardening, and context-envelope hardening on the v3.1.0 line
+
 - feat(e9c): replay bundle CLI flow + modular command refactor (single commit) (#168) @Rul1an
 - E9b: Scrubbing + bundle verify (scrub, read_bundle_tar_gz, verify_bundle) (#166) @Rul1an
 - feat(e9d.3): harden replay contract + strategic positioning & DX plan (#172) @Rul1an
