@@ -1,33 +1,41 @@
-# Assay
+<p align="center">
+  <h1 align="center">Assay</h1>
+  <p align="center">
+    <strong>The firewall for MCP tool calls.</strong>
+    <br />
+    Block unsafe calls. Audit every decision. Replay anything.
+  </p>
+  <p align="center">
+    <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
+    <a href="https://github.com/Rul1an/assay/actions/workflows/ci.yml"><img src="https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/Rul1an/assay/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/assay-core.svg" alt="License"></a>
+  </p>
+  <p align="center">
+    <a href="examples/mcp-quickstart/">Quick Start</a> ·
+    <a href="docs/guides/github-action.md">CI Guide</a> ·
+    <a href="docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md">Security Research</a> ·
+    <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
+  </p>
+</p>
 
-[![Crates.io](https://img.shields.io/crates/v/assay-cli.svg)](https://crates.io/crates/assay-cli)
-[![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
-[![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
+---
 
-**The firewall for MCP tool calls.** Block, audit, replay.
+Assay wraps your MCP server with deterministic policy enforcement. Every tool call gets an explicit **ALLOW** or **DENY** with a replayable evidence trail.
 
-Assay sits between your agent and its MCP tools. Every tool call gets an explicit ALLOW or DENY with a replayable evidence trail. No hosted backend, no probabilistic filtering — just deterministic policy enforcement.
+No hosted backend. No probabilistic filtering. No API keys for basic use.
 
-## Quick Start
+## See It Work
 
 ```bash
 cargo install assay-cli
 ```
 
-**1. Set up a demo workspace:**
-
 ```bash
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
-```
 
-**2. Wrap an MCP server with policy:**
-
-```bash
 assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
   -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
-
-**3. See decisions on every tool call:**
 
 ```
 ✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
@@ -36,28 +44,37 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 
-Your MCP server now has a policy gate. See the full [MCP quickstart example](examples/mcp-quickstart/) for details.
+Two commands. Immediate feedback. Your MCP server now has a policy gate.
 
-## Why Assay
+## How It Works
 
-| | |
-|---|---|
-| **Deterministic** | Same input, same decision, every time. Not probabilistic. |
-| **MCP-native** | Built for the Model Context Protocol tool-call path. |
-| **Evidence trail** | Every decision produces auditable, replayable bundles. |
-| **Offline** | No hosted backend. Policies and traces stay on your machine. |
-| **Fast** | Single-digit ms overhead per tool call. |
-| **Tested** | [Three security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) with zero false positives. |
+```
+  Agent ──► Assay proxy ──► MCP Server
+               │
+               ├─ ALLOW / DENY (deterministic)
+               ├─ Evidence trail (auditable)
+               └─ Replay bundle (reproducible)
+```
 
-## What Assay Does
+Assay intercepts every tool call on the MCP transport, evaluates it against your policy, and emits a decision with evidence. Blocked calls never reach the server.
 
-### Guard your MCP server
+## Use Cases
+
+**You're building with Claude Desktop, Cursor, or Windsurf** and you want to know exactly which tools your agent calls — and stop the ones you didn't expect.
+
+**Your team ships MCP-enabled agents** and you need a CI gate that catches tool-call regressions before they reach production.
+
+**You need an audit trail** for compliance, debugging, or security review — and you need it to be deterministic, not sampled.
+
+## Get Started in 3 Ways
+
+### Wrap locally
 
 ```bash
 assay mcp wrap --policy policy.yaml -- your-mcp-server
 ```
 
-### Gate your CI
+### Gate in CI
 
 ```yaml
 # .github/workflows/assay.yml
@@ -74,33 +91,15 @@ jobs:
       - uses: Rul1an/assay-action@v2
 ```
 
-### Generate policy from behavior
+### Generate from behavior
+
+Don't write policy from scratch. Record what your agent does, then lock it down:
 
 ```bash
 assay init --from-trace trace.jsonl
 ```
 
-### Audit and replay
-
-```bash
-assay evidence export --profile profile.yaml --out evidence.tar.gz
-assay evidence verify evidence.tar.gz
-assay evidence lint --pack eu-ai-act-baseline evidence.tar.gz
-```
-
-## Install
-
-```bash
-cargo install assay-cli
-```
-
-Or use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) directly in CI — no local install needed.
-
-Python SDK: `pip install assay-it`
-
-## Policy
-
-A policy file controls what tools are allowed:
+## Policy in 6 Lines
 
 ```yaml
 version: "1.0"
@@ -114,19 +113,34 @@ constraints:
         matches: "^/app/.*"
 ```
 
-Or generate one from observed behavior:
+## Why Assay
+
+| | |
+|---|---|
+| **Deterministic** | Same input, same decision, every time. No probabilistic filtering. |
+| **MCP-native** | Built for the Model Context Protocol tool-call path, not bolted on. |
+| **Evidence trail** | Every decision produces an auditable, replayable bundle. |
+| **Offline-first** | No hosted backend. Your policies and traces never leave your machine. |
+| **Fast** | < 5ms overhead per tool call in published benchmarks. |
+| **Battle-tested** | [Three security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, zero false positives. |
+
+## Install
 
 ```bash
-assay init --from-trace trace.jsonl
+cargo install assay-cli
 ```
+
+Use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) in CI without installing locally.
+
+Python: `pip install assay-it`
 
 ## Learn More
 
 - [MCP Quickstart Example](examples/mcp-quickstart/)
-- [CI Guide](docs/guides/github-action.md)
-- [Evidence Store](docs/guides/evidence-store-aws-s3.md) (S3, [B2](docs/guides/evidence-store-backblaze-b2.md), [MinIO](docs/guides/evidence-store-minio.md))
+- [CI Integration Guide](docs/guides/github-action.md)
+- [Evidence Store Setup](docs/guides/evidence-store-aws-s3.md) (AWS S3, [Backblaze B2](docs/guides/evidence-store-backblaze-b2.md), [MinIO](docs/guides/evidence-store-minio.md))
 - [Architecture](docs/architecture/index.md)
-- [Security Experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md)
+- [Roadmap](docs/ROADMAP.md)
 
 ## Contributing
 
@@ -135,7 +149,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Join the [discussion](https://github.com/Rul1an/assay/discussions).
 
 ## License
 
