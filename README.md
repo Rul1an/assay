@@ -4,9 +4,9 @@
 [![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
 
-**The firewall for MCP tool calls.** Block unsafe calls, audit every decision, replay anything.
+**The firewall for MCP tool calls.** Block, audit, replay.
 
-Assay wraps your MCP server with deterministic policy enforcement. Every tool call gets an explicit ALLOW or DENY with an auditable evidence trail. No hosted backend required.
+Assay sits between your agent and its MCP tools. Every tool call gets an explicit ALLOW or DENY with a replayable evidence trail. No hosted backend, no probabilistic filtering — just deterministic policy enforcement.
 
 ## Quick Start
 
@@ -14,37 +14,50 @@ Assay wraps your MCP server with deterministic policy enforcement. Every tool ca
 cargo install assay-cli
 ```
 
-Wrap any MCP server with a policy and see decisions in real-time:
+**1. Set up a demo workspace:**
+
+```bash
+mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
+```
+
+**2. Wrap an MCP server with policy:**
 
 ```bash
 assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
   -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
 
-Every tool call now shows a clear decision:
+**3. See decisions on every tool call:**
 
 ```
-✅ ALLOW  read_file  path=/app/src/main.rs  reason=policy_allow
-✅ ALLOW  list_dir   path=/app/src/         reason=policy_allow
-❌ DENY   read_file  path=/etc/passwd       reason=path_constraint_violation
-❌ DENY   exec       cmd=rm -rf /           reason=tool_denied
+✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
+✅ ALLOW  list_dir   path=/tmp/assay-demo/           reason=policy_allow
+❌ DENY   read_file  path=/etc/passwd                reason=path_constraint_violation
+❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 
-That's it. Your MCP server now has a policy gate.
+Your MCP server now has a policy gate. See the full [MCP quickstart example](examples/mcp-quickstart/) for details.
 
-## What You Can Do
+## Why Assay
 
-**Catch problems locally:**
+| | |
+|---|---|
+| **Deterministic** | Same input, same decision, every time. Not probabilistic. |
+| **MCP-native** | Built for the Model Context Protocol tool-call path. |
+| **Evidence trail** | Every decision produces auditable, replayable bundles. |
+| **Offline** | No hosted backend. Policies and traces stay on your machine. |
+| **Fast** | Single-digit ms overhead per tool call. |
+| **Tested** | [Three security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) with zero false positives. |
+
+## What Assay Does
+
+### Guard your MCP server
 
 ```bash
-# Wrap your server with a policy → see decisions instantly
 assay mcp wrap --policy policy.yaml -- your-mcp-server
-
-# Generate a policy from recorded behavior
-assay init --from-trace trace.jsonl
 ```
 
-**Gate your CI:**
+### Gate your CI
 
 ```yaml
 # .github/workflows/assay.yml
@@ -61,28 +74,19 @@ jobs:
       - uses: Rul1an/assay-action@v2
 ```
 
+### Generate policy from behavior
+
 ```bash
-# Or run manually
-assay ci --config eval.yaml --trace-file traces/golden.jsonl
+assay init --from-trace trace.jsonl
 ```
 
-**Audit and replay:**
+### Audit and replay
 
 ```bash
 assay evidence export --profile profile.yaml --out evidence.tar.gz
 assay evidence verify evidence.tar.gz
 assay evidence lint --pack eu-ai-act-baseline evidence.tar.gz
-assay evidence diff baseline.tar.gz current.tar.gz
 ```
-
-## Why Assay
-
-- **Deterministic** — same input, same decision, every time. No probabilistic filtering.
-- **MCP-native** — built for the Model Context Protocol tool-call path, not retrofitted.
-- **Evidence-first** — every decision produces auditable, replayable evidence bundles.
-- **Offline** — runs locally with no hosted backend. Your policies and traces stay on your machine.
-- **Fast** — single-digit millisecond overhead per tool call in published benchmarks.
-- **Open source** — MIT licensed, open core model.
 
 ## Install
 
@@ -90,19 +94,19 @@ assay evidence diff baseline.tar.gz current.tar.gz
 cargo install assay-cli
 ```
 
-Also available via the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) for CI.
+Or use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) directly in CI — no local install needed.
 
-## Configuration
+Python SDK: `pip install assay-it`
 
-Two files, minimal config:
+## Policy
 
-**`policy.yaml`** — what tools are allowed:
+A policy file controls what tools are allowed:
 
 ```yaml
 version: "1.0"
 name: "my-policy"
-allow: ["*"]
-deny: ["exec", "shell", "bash"]
+allow: ["read_file", "list_dir"]
+deny: ["exec", "shell", "write_file"]
 constraints:
   - tool: "read_file"
     params:
@@ -110,76 +114,19 @@ constraints:
         matches: "^/app/.*"
 ```
 
-**`eval.yaml`** — what to test:
-
-```yaml
-configVersion: 1
-suite: "my_agent"
-model: "trace"
-tests:
-  - id: "safe_deploy"
-    input:
-      prompt: "deploy staging"
-    expected:
-      type: args_valid
-      schema:
-        deploy_service:
-          type: object
-          required: [env]
-          properties:
-            env:
-              enum: [staging, prod]
-```
-
-Or skip config entirely and start from observed behavior:
+Or generate one from observed behavior:
 
 ```bash
 assay init --from-trace trace.jsonl
 ```
 
-## Evidence & Compliance
+## Learn More
 
-Assay produces tamper-evident `.tar.gz` bundles with manifests, content-addressed hashes, and event streams.
-
-```bash
-assay evidence export --profile profile.yaml --out bundle.tar.gz
-assay evidence verify bundle.tar.gz
-assay evidence push bundle.tar.gz --store s3://my-bucket/evidence
-assay evidence store-status
-```
-
-Compliance packs map to regulatory frameworks:
-
-```bash
-assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
-assay evidence lint --pack cicd-starter bundle.tar.gz
-```
-
-## Security Research
-
-Assay's trust chain has been tested through three bounded security experiments:
-
-| Experiment | Perspective | Result |
-|-----------|------------|--------|
-| [Memory Poisoning](docs/architecture/RESULTS-EXPERIMENT-MEMORY-POISON-2026q2.md) | Producer | 0% delayed activation under full stack |
-| [Delegation Spoofing](docs/architecture/RESULTS-EXPERIMENT-DELEGATION-SPOOFING-2026q2.md) | Adapter | 0/4 bypass under full stack |
-| [Protocol Evidence](docs/architecture/RESULTS-EXPERIMENT-PROTOCOL-EVIDENCE-INTERPRETATION-2026q2.md) | Consumer | 100% canonical agreement under full stack |
-
-Zero false positives across all experiments. See the [synthesis](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) for the full analysis.
-
-## Documentation
-
-- [MCP Quickstart](docs/mcp/quickstart.md)
+- [MCP Quickstart Example](examples/mcp-quickstart/)
 - [CI Guide](docs/guides/github-action.md)
-- [Evidence Store Setup](docs/guides/evidence-store-aws-s3.md) (S3, [B2](docs/guides/evidence-store-backblaze-b2.md), [MinIO](docs/guides/evidence-store-minio.md))
+- [Evidence Store](docs/guides/evidence-store-aws-s3.md) (S3, [B2](docs/guides/evidence-store-backblaze-b2.md), [MinIO](docs/guides/evidence-store-minio.md))
 - [Architecture](docs/architecture/index.md)
-- [Roadmap](docs/ROADMAP.md)
-
-## Python
-
-```bash
-pip install assay-it
-```
+- [Security Experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md)
 
 ## Contributing
 
