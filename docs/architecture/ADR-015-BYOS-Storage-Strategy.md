@@ -106,34 +106,25 @@ assay evidence list --after 2026-01-01
 assay evidence store-status
 ```
 
-### Structured configuration target (not fully shipped on `main` as of 2026-03-15)
+### Structured configuration (shipped on `main`)
 
-The current `main` branch supports:
-- `--store <s3://bucket/prefix>`
-- `ASSAY_STORE_URL`
-- AWS/object-store credential environment variables
+Store configuration uses a separate file (`.assay/store.yaml` or `assay-store.yaml`),
+keeping evidence store config cleanly separated from the eval config (`assay.yaml`).
 
-The `assay.yaml` shape below remains the intended ergonomic target, but is not yet the proven shipped interface on `main`.
+Precedence for store URL: `--store` > `ASSAY_STORE_URL` > config file `url`.
+Connection overrides: `ASSAY_STORE_*` env vars > config file values.
 
 ```yaml
-# assay.yaml
-evidence_store:
-  # S3-compatible endpoint (required)
-  endpoint: s3.us-west-002.backblazeb2.com
-  bucket: my-evidence-bucket
-
-  # Credentials (can also be environment variables)
-  # access_key: from ASSAY_STORE_ACCESS_KEY
-  # secret_key: from ASSAY_STORE_SECRET_KEY
-
-  # Optional settings
-  region: us-west-002
-  path_prefix: assay/bundles/  # Organize within bucket
-
-  # Behavior
-  auto_push: false  # Push after every export
-  verify_on_push: true  # Verify bundle before upload
+# .assay/store.yaml
+url: s3://my-bucket/assay/evidence
+region: us-west-002
+allow_http: false
+path_style: false
 ```
+
+Credentials remain in environment variables (`AWS_ACCESS_KEY_ID`, etc.) — never in the config file.
+
+See quickstart guides: [AWS S3](../guides/evidence-store-aws-s3.md), [Backblaze B2](../guides/evidence-store-backblaze-b2.md), [MinIO](../guides/evidence-store-minio.md).
 
 ### Object Key Schema (Simplified)
 
@@ -207,16 +198,16 @@ If conditional writes fail with "not supported", Assay falls back to check-then-
 
 ## Phases
 
-### Phase 1: BYOS CLI (Q2 2026)
+### Phase 1: BYOS CLI (Q2 2026) ✅ Complete
 
 - [x] Generic S3 client using `object_store` crate
 - [x] `assay evidence push` command
 - [x] `assay evidence pull` command
 - [x] `assay evidence list` command
-- [ ] `assay evidence store-status` command
+- [x] `assay evidence store-status` command
 - [x] Configuration via `--store` and environment variables
-- [ ] Structured `assay.yaml` `evidence_store:` configuration
-- [ ] Documentation/runbooks for configuring AWS S3, Backblaze B2, Wasabi, R2, MinIO, and the other supported backends
+- [x] Structured `.assay/store.yaml` store configuration (option A, separate from `assay.yaml`)
+- [x] Quickstart docs for AWS S3, Backblaze B2, MinIO (Phase 1 scope; Wasabi/R2 deferred)
 
 ### Phase 2: GitHub Action Integration (Q2 2026)
 
