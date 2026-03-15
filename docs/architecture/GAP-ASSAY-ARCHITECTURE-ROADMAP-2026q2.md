@@ -66,9 +66,9 @@ This was the biggest strategy-to-delivery gap; it is now closed.
 
 ### 2. Release/changelog hygiene
 
-The architecture and rollout docs are currently cleaner than the aggregate changelog.
+~~The architecture and rollout docs are currently cleaner than the aggregate changelog.~~ ✅ Cleaned
 
-That is not a product blocker, but it weakens external readability and release accounting. The right fix is a bounded hygiene pass, not new architecture.
+The auto-generated PR log (`docs/changelog.md`) has been replaced by a redirect to the curated `CHANGELOG.md`. The broken `docs/contributing/releases.md` now points to the real release process. The auto-update script is a no-op.
 
 ### 3. Next architecture-as-code step
 
@@ -87,9 +87,7 @@ This is valuable, but should come after the roadmap truth and BYOS closure work.
 
 2. ~~**ADR-015 Phase 1 closure**~~ ✅ Done (PR #859 Step 1, PR #860 Step 2, this PR Step 3)
 
-3. **Release/changelog hygiene**
-   - Keep release notes as the consumer-facing truth.
-   - Reduce duplicated changelog aggregation.
+3. ~~**Release/changelog hygiene**~~ ✅ Done (auto-generated PR log replaced by redirect to curated CHANGELOG.md)
 
 4. **Next architecture-as-code slice**
    - Add CI validation/export around the Structurizr workspace.
