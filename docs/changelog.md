@@ -1,5 +1,6 @@
 # Changelog
 
+- chore(release): prepare v3.1.0 line (#854) @Rul1an
 ## [2026-03-15]
 
 - chore(release): prepare v3.1.0 release line for Wave24-Wave42 MCP policy enforcement work
