@@ -1,0 +1,20 @@
+{
+  "$schema": "https://registry.mcpservers.org/schema/server.json",
+  "name": "assay",
+  "display_name": "Assay — MCP Policy Firewall",
+  "description": "The firewall for MCP tool calls. Block unsafe calls, audit every decision, replay anything. Deterministic policy enforcement with replayable evidence bundles.",
+  "repository": "https://github.com/Rul1an/assay",
+  "homepage": "https://www.getassay.dev",
+  "license": "MIT",
+  "categories": ["security", "development"],
+  "tags": ["security", "policy", "firewall", "audit", "evidence", "compliance", "mcp-proxy"],
+  "features": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  },
+  "install": {
+    "cargo": "cargo install assay-cli",
+    "github_action": "Rul1an/assay-action@v2"
+  }
+}

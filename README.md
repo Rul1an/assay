@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>The firewall for MCP tool calls.</strong>
+    <strong>The firewall for MCP tool calls — with a replayable audit trail.</strong>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -31,6 +31,8 @@ Assay sits between your agent and its tools. It intercepts every MCP tool call, 
 ```
 
 No hosted backend. No API keys. Deterministic — same input, same decision, every time.
+
+> The average MCP server scores [34/100 on security](https://dev.to/elliotllliu/we-scanned-17-popular-mcp-servers-heres-what-we-found-321c). Assay gives you the policy gate and audit trail to fix that. Covers [7 of 10 OWASP MCP Top 10](docs/security/OWASP-MCP-TOP10-MAPPING.md) risks.
 
 ## See It Work
 
@@ -126,9 +128,9 @@ Python SDK: `pip install assay-it`
 
 - [MCP Quickstart](examples/mcp-quickstart/) — full walkthrough with a filesystem server
 - [CI Guide](docs/guides/github-action.md) — GitHub Action setup
+- [OWASP MCP Top 10 Mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) — how Assay addresses each risk
 - [Evidence Store](docs/guides/evidence-store-aws-s3.md) — push bundles to S3, B2, or MinIO
-- [Architecture](docs/architecture/index.md) — how it works under the hood
-- [Security Research](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) — experiment results
+- [Security Experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) — 12 vectors, 0 false positives
 
 ## Contributing
 
