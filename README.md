@@ -1,284 +1,134 @@
-# Assay
+<p align="center">
+  <h1 align="center">Assay</h1>
+  <p align="center">
+    <strong>The firewall for MCP tool calls.</strong>
+  </p>
+  <p align="center">
+    <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
+    <a href="https://github.com/Rul1an/assay/actions/workflows/ci.yml"><img src="https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/Rul1an/assay/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/assay-core.svg" alt="License"></a>
+  </p>
+  <p align="center">
+    <a href="#see-it-work">See It Work</a> ·
+    <a href="examples/mcp-quickstart/">Quick Start</a> ·
+    <a href="docs/guides/github-action.md">CI Guide</a> ·
+    <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
+  </p>
+</p>
 
-[![Crates.io](https://img.shields.io/crates/v/assay-cli.svg)](https://crates.io/crates/assay-cli)
-[![CI](https://github.com/Rul1an/assay/actions/workflows/ci.yml/badge.svg)](https://github.com/Rul1an/assay/actions/workflows/ci.yml)
-[![License](https://img.shields.io/crates/l/assay-core.svg)](https://github.com/Rul1an/assay/blob/main/LICENSE)
+---
 
-Policy-as-Code for AI agents.
+Your MCP agent calls `read_file`, `exec`, `web_search` — but should it?
 
-Deterministic MCP governance, CI gates, and verifiable evidence bundles.
-Runs offline-first with no required hosted backend.
+Assay sits between your agent and its tools. It intercepts every MCP tool call, checks it against your policy, and blocks what shouldn't happen. Every decision produces an evidence trail you can audit, diff, and replay.
 
-Assay validates tool-call behavior against explicit policy, records auditable decisions, and produces replayable evidence. It is built for teams that want hard gates and reviewable artifacts.
+```
+  Agent ──► Assay ──► MCP Server
+              │
+              ├─ ✅ ALLOW (policy match)
+              ├─ ❌ DENY  (blocked, logged)
+              └─ 📋 Evidence bundle
+```
+
+No hosted backend. No API keys. Deterministic — same input, same decision, every time.
+
+## See It Work
+
+```bash
+cargo install assay-cli
+
+mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
+
+assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
+  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+```
+
+```
+✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
+✅ ALLOW  list_dir   path=/tmp/assay-demo/           reason=policy_allow
+❌ DENY   read_file  path=/etc/passwd                reason=path_constraint_violation
+❌ DENY   exec       cmd=ls                          reason=tool_denied
+```
+
+## Is This For Me?
+
+**Yes, if you:**
+- Build with Claude Desktop, Cursor, Windsurf, or any MCP client
+- Ship agents that call tools and you need to control which ones
+- Want a CI gate that catches tool-call regressions before production
+- Need a deterministic audit trail, not sampled observability
+
+**Not yet, if you:**
+- Don't use MCP (Assay is MCP-native; other protocols are on the roadmap)
+- Need a hosted dashboard (Assay is CLI-first and offline)
+
+## Policy Is Simple
+
+```yaml
+version: "1.0"
+name: "my-policy"
+allow: ["read_file", "list_dir"]
+deny: ["exec", "shell", "write_file"]
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/app/.*"
+```
+
+Or don't write one — generate it from what your agent actually does:
+
+```bash
+assay init --from-trace trace.jsonl
+```
+
+## Add to CI
+
+```yaml
+# .github/workflows/assay.yml
+name: Assay Gate
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  assay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Rul1an/assay-action@v2
+```
+
+PRs that violate policy get blocked. SARIF results show up in the Security tab.
 
 ## Why Assay
 
-- Deterministic gates for MCP-compatible agents in local runs and CI
-- Auditable evidence with export, verify, lint, diff, and replay flows
-- Runtime control on the tool-call path via `assay mcp wrap`
-- Offline-first workflow with portable outputs
-- DX-first CLI with SARIF, JUnit, PR-comment, and markdown outputs
+| | |
+|---|---|
+| **Deterministic** | Same input, same decision, every time. Not probabilistic. |
+| **MCP-native** | Built for MCP tool calls, not bolted on. |
+| **Evidence trail** | Every decision is auditable, diffable, replayable. |
+| **Offline-first** | No backend, no API keys. Runs on your machine. |
+| **Fast** | < 5ms per tool call. |
+| **Tested** | [3 security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, 0 false positives. |
 
-## Security Model (Bounded Claims)
-
-Assay’s strongest wedge is deterministic governance on the tool-call route.
-
-In the MCP fragmented-IPI experiment line, stateful sequence policy remained effective across payload fragmentation, tool-hopping, sink-failure pressure, and delayed cross-session sink attempts, where wrap-only lexical checks failed.
-
-Assay does not claim to solve semantic hijacking in general, and it does not claim to block raw outbound network bytes by itself. The bounded claim is narrower: Assay governs sink-call routes with explicit policy decisions, audit-grade evidence, and low single-digit millisecond overhead in the published experiment line.
-
-Results and rerun docs:
-
-- [Fragmented IPI results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)
-- [Wrap-bypass results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-WRAP-BYPASS-2026Q1-RESULTS.md)
-- [Second-sink results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SECOND-SINK-2026Q1-RESULTS.md)
-- [Cross-session decay results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-CROSS-SESSION-DECAY-2026Q1-RESULTS.md)
-- [Sink-failure results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-SINK-FAILURE-2026Q1-RESULTS.md)
-
-## Open Core Boundary
-
-Open core covers the engine, CLI, runtime governance, evidence flows, and baseline packs.
-
-Compliance packs and organization-specific governance packs can be commercial. See [ADR-016](docs/architecture/ADR-016-Pack-Taxonomy.md).
-
-## Quickstart
-
-### Install
+## Install
 
 ```bash
 cargo install assay-cli
 ```
 
-### From scratch
+In CI: use the [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security) directly.
 
-```bash
-# Scaffold config + policy + CI
-assay init --ci
+Python SDK: `pip install assay-it`
 
-# Run an offline smoke gate
-assay ci --config eval.yaml --trace-file traces/hello.jsonl
-```
+## Learn More
 
-### From an existing trace
-
-```bash
-# Generate policy from recorded behavior
-assay init --from-trace trace.jsonl
-
-# Validate trace against config + policy
-assay validate --config eval.yaml --trace-file trace.jsonl
-```
-
-### From an MCP Inspector session
-
-```bash
-# Import Inspector session to Assay trace format
-assay import --format inspector session.json --out-trace traces/session.jsonl
-
-# Run policy checks
-assay run --config eval.yaml --trace-file traces/session.jsonl
-```
-
-### Demo
-
-```bash
-make demo   # full break/fix walkthrough
-make test   # safe trace (PASS)
-make fail   # unsafe trace (FAIL)
-```
-
-## Core Commands
-
-### Testing and validation
-
-| Command | What it does |
-| --- | --- |
-| `assay run` | Execute a test suite against a trace and write run outputs. |
-| `assay ci` | CI-mode run with SARIF, JUnit, and PR-comment outputs. |
-| `assay validate` | Stateless policy validation with text, JSON, or SARIF output. |
-| `assay replay` | Replay from a self-contained offline bundle. |
-
-### Policy and config
-
-| Command | What it does |
-| --- | --- |
-| `assay init` | Scaffold policy, config, and CI workflow. |
-| `assay generate` | Generate policy from traces or profiles. |
-| `assay profile` | Multi-run stability profiling. |
-| `assay doctor` | Diagnose config, trace, baseline, and runtime issues. |
-| `assay explain` | Explain policy behavior against a trace. |
-
-### Evidence and compliance
-
-| Command | What it does |
-| --- | --- |
-| `assay evidence export` | Create an evidence bundle. |
-| `assay evidence verify` | Verify bundle integrity. |
-| `assay evidence lint` | Lint evidence with optional packs and SARIF output. |
-| `assay evidence diff` | Diff two verified bundles. |
-| `assay evidence push/pull/list` | BYOS object storage flows. |
-
-### Runtime
-
-| Command | What it does |
-| --- | --- |
-| `assay mcp wrap` | Wrap an MCP process with policy enforcement. |
-| `assay sandbox` | Rootless Landlock sandbox execution on Linux. |
-| `assay monitor` | eBPF/LSM runtime enforcement on Linux. |
-
-### Misc
-
-| Command | What it does |
-| --- | --- |
-| `assay import` | Import traces from Inspector or JSON-RPC logs. |
-| `assay tool sign/verify/keygen` | Local-key tool signing and verification. |
-| `assay fix` | Interactive policy fix suggestions. |
-
-## CI Integration
-
-### GitHub Actions
-
-```yaml
-name: Assay Gate
-on: [push, pull_request]
-
-permissions:
-  contents: read
-  pull-requests: write
-  security-events: write
-
-jobs:
-  assay:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@<PINNED_SHA>
-      - uses: Rul1an/assay-action@v2
-```
-
-Assay Action installs Assay, runs the gate, uploads SARIF, and can publish PR-friendly outputs.
-
-You can also generate a starter workflow:
-
-```bash
-assay init --ci github
-assay init --ci gitlab
-```
-
-Or run manually:
-
-```bash
-assay ci \
-  --config eval.yaml \
-  --trace-file traces/golden.jsonl \
-  --sarif reports/sarif.json \
-  --junit reports/junit.xml \
-  --pr-comment reports/pr-comment.md \
-  --replay-strict
-```
-
-Exit codes:
-
-- `0` pass
-- `1` test failure
-- `2` config or measurement error
-- `3` infra error
-
-## Configuration
-
-Assay usually works with two files:
-
-- `eval.yaml` for the test suite
-- `policy.yaml` for the allowed behavior
-
-`eval.yaml`:
-
-```yaml
-version: 1
-suite: "my_agent"
-model: "trace"
-tests:
-  - id: "deploy_args"
-    input:
-      prompt: "deploy_staging"
-    expected:
-      type: args_valid
-      schema:
-        deploy_service:
-          type: object
-          required: [env]
-          properties:
-            env:
-              type: string
-              enum: [staging, prod]
-```
-
-`policy.yaml`:
-
-```yaml
-version: "1.0"
-name: "my-policy"
-allow: ["*"]
-deny:
-  - "exec"
-  - "shell"
-  - "bash"
-constraints:
-  - tool: "read_file"
-    params:
-      path:
-        matches: "^/app/.*|^/data/.*"
-```
-
-Starter presets:
-
-```bash
-assay init --preset default
-assay init --preset hardened
-assay init --preset dev
-```
-
-## Evidence Bundles
-
-Assay produces tamper-evident `.tar.gz` bundles with manifests, hashes, and event streams.
-
-```bash
-assay evidence export --profile profile.yaml --out bundle.tar.gz
-assay evidence verify bundle.tar.gz
-assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
-assay evidence diff baseline.tar.gz current.tar.gz
-```
-
-## Python Package
-
-The Python package is published as `assay-it`:
-
-```bash
-pip install assay-it
-```
-
-## Standards and Related Projects
-
-Assay is easier to evaluate when mapped to established specs and ecosystems:
-
-- [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/modelcontextprotocol)
-- [OpenTelemetry specification](https://github.com/open-telemetry/opentelemetry-specification)
-- [CloudEvents specification](https://github.com/cloudevents/spec)
-- [SARIF specification](https://github.com/oasis-tcs/sarif-spec)
-- [JSON Schema specification](https://github.com/json-schema-org/json-schema-spec)
-
-These are interoperability references, not claims of full feature parity with each project.
-
-## Documentation
-
-- Getting started: [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md)
-- CI guide: [`docs/guides/github-action.md`](docs/guides/github-action.md)
-- MCP quickstart: [`docs/mcp/quickstart.md`](docs/mcp/quickstart.md)
-- Use cases: [`docs/use-cases/index.md`](docs/use-cases/index.md)
-- Experiment runbooks/results: [`docs/ops/`](docs/ops/)
-- Architecture index: [`docs/architecture/index.md`](docs/architecture/index.md)
-- ADR index: [`docs/architecture/adrs.md`](docs/architecture/adrs.md)
-- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- Contributing docs: [`docs/contributing/index.md`](docs/contributing/index.md)
+- [MCP Quickstart](examples/mcp-quickstart/) — full walkthrough with a filesystem server
+- [CI Guide](docs/guides/github-action.md) — GitHub Action setup
+- [Evidence Store](docs/guides/evidence-store-aws-s3.md) — push bundles to S3, B2, or MinIO
+- [Architecture](docs/architecture/index.md) — how it works under the hood
+- [Security Research](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) — experiment results
 
 ## Contributing
 
@@ -287,7 +137,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Join the [discussion](https://github.com/Rul1an/assay/discussions).
 
 ## License
 
