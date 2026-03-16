@@ -87,4 +87,4 @@ harness = false
 tempfile = "3.26.0"
 serial_test = "3"
 criterion = "0.8"
-tracing-subscriber = { version = "0.3.22", features = ["json", "fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["json", "fmt", "env-filter"] }
