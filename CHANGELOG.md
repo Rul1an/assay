@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v3.2.1] - 2026-03-17
+
+### Fixes
+
+- **Windows build**: Gate `std::os::unix::fs::PermissionsExt` with `#[cfg(unix)]` so the Windows release build succeeds.
+
+---
+
 ## [v3.2.0] - 2026-03-17
 
 ### Release
