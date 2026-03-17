@@ -4,11 +4,11 @@ set -euo pipefail
 echo "📦 Starting Idempotent Publisher..."
 
 # Crates published in dependency order
+# assay-adapter-api: excluded — Trusted Publishing not configured; assay-core uses 3.1.0 from crates.io
 CRATES=(
   "assay-common"
   "assay-registry"
   "assay-evidence"
-  "assay-adapter-api"
   "assay-core"
   "assay-metrics"
   "assay-policy"

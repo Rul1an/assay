@@ -6,11 +6,11 @@
     "url": "https://github.com/Rul1an/assay",
     "source": "github"
   },
-  "version": "3.2.1",
+  "version": "3.2.2",
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/Rul1an/assay/releases/download/v3.2.1/assay-mcp-cli-v3.2.1-x86_64-unknown-linux-gnu.tar.gz",
+      "identifier": "https://github.com/Rul1an/assay/releases/download/v3.2.2/assay-mcp-cli-v3.2.2-x86_64-unknown-linux-gnu.tar.gz",
       "fileSha256": "700133b9af68f54b8c4b16a6d1611bbd23223a86dad15b4ba0132c91a3e4c098",
       "transport": {
         "type": "stdio"

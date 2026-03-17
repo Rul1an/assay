@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v3.2.2] - 2026-03-17
+
+### Fixes
+
+- **crates.io publish**: Exclude assay-adapter-api from publish list (Trusted Publishing not configured). Use 3.1.0 from crates.io.
+- **crates.io publish**: Broaden grep pattern for token-not-valid skip.
+
+---
+
 ## [v3.2.1] - 2026-03-17
 
 ### Fixes
