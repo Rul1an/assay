@@ -166,3 +166,79 @@ Items 2 and 3 can be executed via `gh` CLI immediately:
 
 Items 1, 7, 8, 9 require web form submission (manual, 5-10 min each).
 Items 4, 5, 6 require content creation and manual posting.
+
+---
+
+## Additional Channels (discovered March 15, 2026)
+
+### MCP-Specific
+
+| # | Channel | Type | URL | Impact |
+|---|---------|------|-----|--------|
+| 10 | **Official MCP Registry** (preview) | CLI publish | https://modelcontextprotocol.io/registry/quickstart | High — official registry |
+| 11 | **Apigene MCP Directory** | Listing | https://apigene.ai/blog/mcp-server-directory | Medium — 100+ verified servers |
+| 12 | **MCP Security Alliance** | Contribute | https://mcp-security-alliance.org/contribute/ | High — direct OWASP/security community |
+
+### AI Agent Security Lists
+
+| # | Channel | Stars | URL | Impact |
+|---|---------|-------|-----|--------|
+| 13 | **awesome-ai-agent-security** | Active | https://github.com/zhangjunmengyang/awesome-ai-agent-security | Medium — academic + tools |
+| 14 | **awesome-ai-agents-2026** | 300+ resources | https://github.com/caramaschiHG/awesome-ai-agents-2026 | Medium — safety/guardrails section |
+| 15 | **AgentSeal scanner** | Active | https://github.com/AgentSeal/agentseal | Explore integration |
+
+### Rust-Specific
+
+| # | Channel | Stars | URL | Impact |
+|---|---------|-------|-----|--------|
+| 16 | **awesome-rust** | 56,000+ | https://github.com/rust-unofficial/awesome-rust | High — Security tools section |
+| 17 | **awesome-rust-security** | 578 | https://github.com/osirislab/awesome-rust-security | Medium — Rust security focused |
+
+### Product Channels
+
+| # | Channel | Type | URL | Impact |
+|---|---------|------|-----|--------|
+| 18 | **Product Hunt** | Launch | https://www.producthunt.com/ | High if executed well |
+| 19 | **AI Agents List** | Directory | https://aiagentslist.com/ | Medium — 600+ AI tools |
+
+### Steps for High-Priority New Channels
+
+**Official MCP Registry (#10):**
+```bash
+# Requires mcp-publisher CLI
+brew install mcp-publisher
+mcp-publisher init  # generates server.json
+mcp-publisher login github --registry https://registry.mcpcentral.io
+mcp-publisher publish
+```
+
+**MCP Security Alliance (#12):**
+Submit Assay as a security tool via https://mcp-security-alliance.org/contribute/
+Focus on MCP08 (audit/telemetry) coverage.
+
+**awesome-rust (#16, 56K stars):**
+```bash
+gh repo fork rust-unofficial/awesome-rust --clone
+cd awesome-rust
+# Add to Security tools section:
+# * [assay](https://github.com/Rul1an/assay) — MCP tool-call firewall with replayable evidence bundles
+git checkout -b add-assay
+# edit README.md
+gh pr create --repo rust-unofficial/awesome-rust \
+  --title "Add assay — MCP tool-call firewall" \
+  --body "Assay is a Rust CLI for MCP policy enforcement with evidence bundles. MIT licensed."
+```
+
+**awesome-ai-agent-security (#13):**
+```bash
+gh issue create --repo zhangjunmengyang/awesome-ai-agent-security \
+  --title "Add Assay — MCP policy enforcement + evidence" \
+  --body "Assay provides deterministic MCP tool-call policy enforcement with replayable evidence. Covers 7/10 OWASP MCP Top 10 risks. https://github.com/Rul1an/assay"
+```
+
+**awesome-ai-agents-2026 (#14):**
+```bash
+gh issue create --repo caramaschiHG/awesome-ai-agents-2026 \
+  --title "Add Assay to AI Safety/Guardrails section" \
+  --body "Assay is an open-source MCP tool-call firewall with replayable evidence bundles. MIT licensed. https://github.com/Rul1an/assay"
+```
