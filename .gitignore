@@ -3,11 +3,25 @@
 docs/maintainers/
 docs/project/
 docs/DEMO-STRATEGY.md
+docs/drafts/
+docs/ADOPTION-DIAGNOSIS-2026q2.md
+docs/DISTRIBUTION-CHANNELS.md
 
 # Local / one-off
 .claude/
+.obsidian/
+.cursor/
 _v.txt
 ai-agent-eval-plugin/
+Assay/
+_sync/
+
+# Removed from repo (prevent re-add)
+conductor/
+demo-test/
+my-agent/
+check_output_2.txt
+pr_body.md
 
 /target
 /archive/
