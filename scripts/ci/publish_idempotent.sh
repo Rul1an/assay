@@ -104,7 +104,8 @@ try_publish() {
 
   # During Trusted Publishing rollouts, some crates might not yet have tokens enabled.
   # Treat this as a skip (yellow warning) rather than a pipeline failure.
-  if grep -qi "token not valid for crate" "$log"; then
+  # Error: "The provided access token is not valid for crate `name`"
+  if grep -qiE "token.*not valid for crate|403.*token|provided access token.*not valid" "$log"; then
     echo "⚠️  Token not valid for ${crate} (Trusted Publishing restriction?) — skipping."
     rm -f "$log"
     return 0
