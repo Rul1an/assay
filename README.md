@@ -103,12 +103,26 @@ jobs:
 
 PRs that violate policy get blocked. SARIF results show up in the Security tab.
 
+## Beyond MCP: Protocol Adapters
+
+Assay already ships adapters for emerging agent protocols:
+
+| Protocol | Adapter | What it maps |
+|----------|---------|-------------|
+| **ACP** (OpenAI/Stripe) | `assay-adapter-acp` | Checkout events, payment intents, tool calls |
+| **A2A** (Google) | `assay-adapter-a2a` | Agent capabilities, task delegation, artifacts |
+| **UCP** (Google/Shopify) | `assay-adapter-ucp` | Discover/buy/post-purchase state transitions |
+
+Each adapter translates protocol-specific events into Assay's canonical evidence format. Same policy engine, same evidence trail — regardless of which protocol your agent speaks.
+
+The agent protocol landscape is fragmenting (ACP, A2A, UCP, AP2, x402). Assay's bet: **governance is protocol-agnostic.** The evidence and policy layer stays the same even as protocols come and go.
+
 ## Why Assay
 
 | | |
 |---|---|
 | **Deterministic** | Same input, same decision, every time. Not probabilistic. |
-| **MCP-native** | Built for MCP tool calls, not bolted on. |
+| **MCP-native** | Built for MCP tool calls. Adapters for ACP, A2A, UCP. |
 | **Evidence trail** | Every decision is auditable, diffable, replayable. |
 | **Offline-first** | No backend, no API keys. Runs on your machine. |
 | **Fast** | < 5ms per tool call. |
