@@ -15,7 +15,7 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 | **Perf (main baseline)** | `perf_main.yml` | push (main), schedule (nightly 03:00 UTC) | benches | Bencher: Criterion-baseline op main + nightly; benchmarks `sw/50x400b`, `sw/12xlarge` (store_write_heavy) en `sr/wc` (suite_run_worstcase); stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99). |
 | **Perf (PR compare)** | `perf_pr.yml` | pull_request (opened, reopened, edited, synchronize) | benches | Bencher: PR vergelijken met main (start-point, clone-thresholds); zelfde threshold-flags als main; soft (geen --err); alleen same-repo. |
 | **Publish Docs** | `docs.yml` | push (main, paths: docs/**, mkdocs.yml), workflow_dispatch | deploy | MkDocs → GitHub Pages. |
-| **Release** | `release.yml` | push (tags v*), workflow_dispatch (version input) | build, release, verify-lsm-blocking, publish-crates, wheels, publish-pypi | Cross-platform binaries (Linux x86/aarch64; macOS/Windows uitgecommentarieerd), LSM verify, crates.io + Python wheels + PyPI. |
+| **Release** | `release.yml` | push (tags v*), workflow_dispatch (version input) | build, release, verify-lsm-blocking, publish-crates, wheels, publish-pypi | Cross-platform binaries (Linux x86/aarch64, macOS x86/aarch64, Windows x86_64), LSM verify, crates.io + Python wheels + PyPI. |
 | **MCP Security** | `assay-security.yml` | push/pull_request (paths: assay.yaml, policy.yaml, examples/**, **/*.mcp.json), workflow_dispatch | security-check | Validate demo config → SARIF → GitHub Security tab; gate op text output. |
 | **Smoke Install** | `smoke-install.yml` | pull_request, push (main), workflow_dispatch | assay | E2E: install from source, migrate --check, assay ci (contract pass.yaml), JUnit artifact + test reporter. |
 | **Parity Tests** | `parity.yml` | push (main, paths: assay-core, assay-metrics, assay-mcp-server), pull_request, workflow_dispatch | parity, integration-parity | Batch vs streaming parity (assay run vs MCP server); latency benchmark; release blocker. |
@@ -244,8 +244,8 @@ flowchart TB
 |--------|---------------|
 | **Doel** | Bij tag v* (of handmatig met version) cross-platform binaries bouwen, release aanmaken, LSM verifiëren, crates.io + wheels + PyPI publiceren. |
 | **Triggers** | push tags `v*`; workflow_dispatch met version input. |
-| **Jobs** | **build:** matrix (Linux x86_64, aarch64; rest uitgecommentarieerd). **release:** upload artifacts, create release. **verify-lsm-blocking:** LSM-check. **publish-crates**, **wheels**, **publish-pypi:** publicatie. |
-| **Assessment** | Duidelijke release-pipeline; LSM-verify vóór publish; matrix uitbreidbaar voor macOS/Windows. |
+| **Jobs** | **build:** matrix (Linux x86_64, aarch64; macOS x86_64, aarch64; Windows x86_64). **release:** upload artifacts, create release. **verify-lsm-blocking:** LSM-check. **publish-crates**, **wheels**, **publish-pypi:** publicatie. |
+| **Assessment** | Duidelijke release-pipeline; LSM-verify vóór publish; volledige cross-platform matrix. |
 
 ---
 

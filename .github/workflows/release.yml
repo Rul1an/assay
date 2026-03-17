@@ -8,7 +8,7 @@
 # Builds for:
 #   - Linux x86_64 (GNU)
 #   - Linux aarch64 (GNU)
-#   - macOS x86_64
+#   - macOS x86_64 (Intel, cross from ARM)
 #   - macOS aarch64 (Apple Silicon)
 #   - Windows x86_64
 
@@ -63,23 +63,23 @@ jobs:
             archive: tar.gz
             cross: true
 
-          # macOS x86_64
-          # - os: macos-latest
-          #   target: x86_64-apple-darwin
-          #   artifact: assay
-          #   archive: tar.gz
+          # macOS x86_64 (cross-compile on ARM runner)
+          - os: macos-15
+            target: x86_64-apple-darwin
+            artifact: assay
+            archive: tar.gz
 
           # macOS aarch64 (Apple Silicon)
-          # - os: macos-14
-          #   target: aarch64-apple-darwin
-          #   artifact: assay
-          #   archive: tar.gz
+          - os: macos-15
+            target: aarch64-apple-darwin
+            artifact: assay
+            archive: tar.gz
 
           # Windows x86_64
-          # - os: windows-latest
-          #   target: x86_64-pc-windows-msvc
-          #   artifact: assay.exe
-          #   archive: zip
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            artifact: assay.exe
+            archive: zip
 
     steps:
       - name: Checkout
@@ -234,6 +234,12 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
+          # MCP Registry MCPB: URL must contain "mcp" per https://modelcontextprotocol.io/registry/package-types
+          for f in release/assay-*-x86_64-unknown-linux-gnu.tar.gz; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f" .tar.gz)
+            cp "$f" "release/assay-mcp-cli-${base#assay-}.tar.gz"
+          done
           ls -la release/
 
       - name: ADR-025 enforce readiness (fail-closed)
@@ -485,9 +491,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-latest
+          - os: macos-15
             target: x86_64-apple-darwin
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
 
     steps:
