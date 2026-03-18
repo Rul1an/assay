@@ -9,7 +9,8 @@ Learn how to configure Assay for your project.
 | File | Purpose |
 |------|---------|
 | `eval.yaml` | Main test suite configuration |
-| `policy.yaml` | MCP tool allow/deny rules plus per-tool JSON Schema |
+| `assay.yaml` | Default MCP policy file for `assay mcp wrap` |
+| `policy.yaml` | Alternate MCP policy filename; load it with `assay mcp wrap --policy policy.yaml` |
 
 ---
 

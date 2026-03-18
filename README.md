@@ -150,7 +150,6 @@ Already tracing with Langfuse or an OTel-enabled agent stack? Keep that pipeline
 assay trace ingest-otel \
   --input otel-export.jsonl \
   --db .eval/eval.db \
-  --suite checkout-agent \
   --out-trace traces/otel.v2.jsonl
 ```
 

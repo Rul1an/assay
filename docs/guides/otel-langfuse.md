@@ -34,13 +34,12 @@ If your stack already sends spans to Langfuse, keep doing that. Assay can consum
 assay trace ingest-otel \
   --input otel-export.jsonl \
   --db .eval/eval.db \
-  --suite checkout-agent \
   --out-trace traces/otel.v2.jsonl
 ```
 
 What this gives you:
 
-- a normalized Assay trace dataset in SQLite for structural assertions
+- a normalized Assay trace dataset in SQLite for downstream processing
 - an optional replay trace file for deterministic CI runs
 
 ## 3. Gate and Replay

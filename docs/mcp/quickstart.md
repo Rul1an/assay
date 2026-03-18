@@ -193,11 +193,10 @@ If your agent stack already emits OpenTelemetry spans, import them instead of re
 assay trace ingest-otel \
   --input otel-export.jsonl \
   --db .eval/eval.db \
-  --suite my-agent \
   --out-trace traces/otel.v2.jsonl
 ```
 
-That gives you replayable Assay traces plus a database-backed dataset for assertions.
+That gives you replayable Assay traces you can reuse in your assertions pipeline.
 
 ## Next Steps
 
