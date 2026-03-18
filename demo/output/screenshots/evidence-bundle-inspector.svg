@@ -1,0 +1,25 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" rx="28" fill="#0B1020"/>
+  <rect x="40" y="40" width="1520" height="820" rx="22" fill="#111827"/>
+  <rect x="40" y="40" width="1520" height="64" rx="22" fill="#1F2937"/>
+  <circle cx="86" cy="72" r="10" fill="#F87171"/>
+  <circle cx="118" cy="72" r="10" fill="#FBBF24"/>
+  <circle cx="150" cy="72" r="10" fill="#34D399"/>
+  <text x="190" y="80" fill="#93C5FD" font-family="Menlo, Monaco, Consolas, monospace" font-size="24">assay evidence show demo/fixtures/bundle.tar.gz</text>
+
+  <text x="80" y="150" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="28">Evidence Bundle Inspector</text>
+  <text x="80" y="190" fill="#6B7280" font-family="Menlo, Monaco, Consolas, monospace" font-size="24">=========================</text>
+  <text x="80" y="235" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Verified:    OK</text>
+  <text x="80" y="275" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Bundle ID:   sha256:634b7fef2127e156796b09339c690c9ce14d82cf1f775de63bfb11311115e4fa</text>
+  <text x="80" y="315" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Producer:    assay v2.17.0</text>
+  <text x="80" y="355" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Run ID:      demo-run-1</text>
+  <text x="80" y="395" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Events:      2</text>
+  <text x="80" y="435" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">Run Root:    sha256:634b7fef2...</text>
+
+  <text x="80" y="510" fill="#93C5FD" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">SEQ  TIME      TYPE                           SUBJECT</text>
+  <text x="80" y="550" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">0    09:54:51  assay.profile.started          urn:assay:phase:profile</text>
+  <text x="80" y="590" fill="#F9FAFB" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">1    09:54:51  assay.profile.finished         urn:assay:phase:profile</text>
+
+  <text x="80" y="680" fill="#34D399" font-family="Menlo, Monaco, Consolas, monospace" font-size="28">Verified integrity</text>
+  <text x="80" y="742" fill="#9CA3AF" font-family="Menlo, Monaco, Consolas, monospace" font-size="22">Tamper-evident Evidence Bundle with content-addressed IDs and deterministic verification.</text>
+</svg>

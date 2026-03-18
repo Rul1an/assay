@@ -203,6 +203,7 @@ nav:
     - guides/index.md
     - Sandbox Security: guides/sandbox-security.md
     - Gateway Pattern: guides/gateway-pattern.md
+    - OpenTelemetry & Langfuse: guides/otel-langfuse.md
 
   - Architecture:
     - architecture/index.md

@@ -10,3 +10,4 @@ Technical implementation guides and architectural patterns for Assay.
 
 *   [**CI/CD Integration**](../getting-started/ci-integration.md): Configuring Assay in GitHub Actions, GitLab CI, and other pipelines.
 *   [**Self-Correction**](../mcp/self-correction.md): Implementing runtime policy checks within MCP clients.
+*   [**OpenTelemetry & Langfuse**](otel-langfuse.md): Reuse existing traces for deterministic replay, policy gates, and evidence bundles.

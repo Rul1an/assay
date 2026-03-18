@@ -9,7 +9,7 @@ Learn how to configure Assay for your project.
 | File | Purpose |
 |------|---------|
 | `eval.yaml` | Main test suite configuration |
-| `policies/*.yaml` | Argument validation rules |
+| `policy.yaml` | MCP tool allow/deny rules plus per-tool JSON Schema |
 
 ---
 
@@ -37,7 +37,7 @@ output:
 ## Sections
 
 - [eval.yaml Reference](eval-yaml.md) — Full config options
-- [Policy Files](policies.md) — Argument validation schemas
+- [Policy Files](policies.md) — MCP policy YAML and JSON Schema reference
 - [Sequence Rules DSL](sequences.md) — Order constraints
 - [Migration Guide](migration.md) — Upgrading from v0
 

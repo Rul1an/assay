@@ -28,7 +28,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
     Validate tool calls against JSON Schema constraints, sequence rules, and allowlists. No LLM calls in CI.
 
-    [:octicons-arrow-right-24: Policy Reference](reference/policies.md)
+    [:octicons-arrow-right-24: Policy Reference](reference/config/policies.md)
 
 -   :material-package-variant-closed:{ .lg .middle } __Evidence Bundles__
 
@@ -125,5 +125,6 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 
 - [**Getting Started**](getting-started/index.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
+- [**OpenTelemetry & Langfuse**](guides/otel-langfuse.md)
 - [**CLI Reference**](reference/cli/index.md)
 - [**Architecture**](architecture/index.md)
