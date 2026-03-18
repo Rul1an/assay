@@ -1,0 +1,14 @@
+{
+  "name": "assay-mcp-compliance",
+  "version": "1.0.0",
+  "description": "Minimal MCP server for marketplace compliance. Assay is a Rust-based MCP proxy.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "zod": "^3.23.0"
+  }
+}
