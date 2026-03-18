@@ -1,21 +1,20 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.rul1an/assay",
+  "name": "io.github.Rul1an/assay",
   "description": "The firewall for MCP tool calls. Block, audit, replay with evidence bundles.",
   "repository": {
     "url": "https://github.com/Rul1an/assay",
     "source": "github"
   },
-  "version": "3.1.0",
+  "version": "3.2.2",
   "packages": [
     {
-      "registryType": "cargo",
-      "identifier": "assay-cli",
-      "version": "3.1.0",
+      "registryType": "mcpb",
+      "identifier": "https://github.com/Rul1an/assay/releases/download/v3.2.2/assay-mcp-cli-v3.2.2-x86_64-unknown-linux-gnu.tar.gz",
+      "fileSha256": "700133b9af68f54b8c4b16a6d1611bbd23223a86dad15b4ba0132c91a3e4c098",
       "transport": {
         "type": "stdio"
-      },
-      "environmentVariables": []
+      }
     }
   ]
 }

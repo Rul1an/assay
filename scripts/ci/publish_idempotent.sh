@@ -4,11 +4,11 @@ set -euo pipefail
 echo "📦 Starting Idempotent Publisher..."
 
 # Crates published in dependency order
+# assay-adapter-api: excluded — Trusted Publishing not configured; assay-core uses path dep 3.0.0
 CRATES=(
   "assay-common"
   "assay-registry"
   "assay-evidence"
-  "assay-adapter-api"
   "assay-core"
   "assay-metrics"
   "assay-policy"
@@ -104,7 +104,8 @@ try_publish() {
 
   # During Trusted Publishing rollouts, some crates might not yet have tokens enabled.
   # Treat this as a skip (yellow warning) rather than a pipeline failure.
-  if grep -qi "token not valid for crate" "$log"; then
+  # Error: "The provided access token is not valid for crate `name`"
+  if grep -qiE "token.*not valid for crate|provided access token.*not valid" "$log"; then
     echo "⚠️  Token not valid for ${crate} (Trusted Publishing restriction?) — skipping."
     rm -f "$log"
     return 0

@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v3.2.2] - 2026-03-17
+
+### Fixes
+
+- **crates.io publish**: Exclude assay-adapter-api from publish list (Trusted Publishing not configured). Use 3.1.0 from crates.io.
+- **crates.io publish**: Broaden grep pattern for token-not-valid skip.
+
+---
+
+## [v3.2.1] - 2026-03-17
+
+### Fixes
+
+- **Windows build**: Gate `std::os::unix::fs::PermissionsExt` with `#[cfg(unix)]` so the Windows release build succeeds.
+
+---
+
+## [v3.2.0] - 2026-03-17
+
+### Release
+
+- **Cross-platform builds re-enabled**: macOS x86_64, macOS aarch64 (Apple Silicon), and Windows x86_64 are back in the release matrix.
+- **Runner updates (March 2026)**: `macos-15` (was macos-14), `windows-2025` (explicit version).
+- **Install script**: `curl -fsSL https://getassay.dev/install.sh | sh` now supports macOS ARM.
+
+---
+
 ## [v3.1.0] - 2026-03-15
 
 ### MCP Policy Enforcement (Wave24–Wave42)

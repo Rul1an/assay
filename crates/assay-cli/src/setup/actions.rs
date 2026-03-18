@@ -1,6 +1,8 @@
 use super::plan::SetupAction;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[allow(unused_variables)] // mode only used on Unix
 pub async fn execute_action(action: SetupAction) -> anyhow::Result<()> {
     match action {
         SetupAction::Mkdir {

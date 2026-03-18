@@ -76,6 +76,7 @@ extend-exclude = [
     "**/DX-IMPLEMENTATION-PLAN.md",
     # Dutch project docs (internal)
     "**/docs/project/**",
+    "**/DISTRIBUTION-SUBMISSION-GUIDE.md",
     "**/docs/maintainers/**",
     "**/docs/archive/**",
     "**/RESEARCH-ci-cd-ai-agents-feb2026.md",
