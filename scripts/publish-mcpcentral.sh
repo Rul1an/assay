@@ -37,7 +37,10 @@ if [[ ! -f "$SERVER_JSON" ]]; then
 fi
 
 echo "Validating server.json..."
-mcp-publisher validate "$SERVER_JSON" || true
+if ! mcp-publisher validate "$SERVER_JSON"; then
+  echo "server.json validation failed. Aborting publish."
+  exit 1
+fi
 
 echo ""
 if ! host registry.mcpcentral.io &>/dev/null; then
