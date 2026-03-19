@@ -375,10 +375,12 @@ dependencies = [
  "assay-common",
  "assay-core",
  "async-trait",
+ "hex",
  "jsonschema",
  "regex",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tokio",
  "tracing",
 ]

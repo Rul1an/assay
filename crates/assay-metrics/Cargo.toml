@@ -20,6 +20,8 @@ regex.workspace = true
 jsonschema = "0.45"
 serde_yaml.workspace = true
 tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
