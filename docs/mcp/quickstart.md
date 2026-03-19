@@ -7,6 +7,71 @@ Add a policy gate to your MCP server in under 5 minutes.
 - Assay CLI: `cargo install assay-cli`
 - An MCP server (any stdio-based server works)
 
+## Add Assay to Cursor, Windsurf, or Zed
+
+### Cursor
+
+Assay has a built-in helper for Cursor:
+
+```bash
+assay mcp config-path cursor
+```
+
+That command prints the detected config location plus a ready-to-paste `mcpServers` entry.
+
+### Windsurf
+
+Windsurf uses `mcpServers` in `~/.codeium/windsurf/mcp_config.json`.
+Use the same wrapped command Assay generates for Cursor:
+
+```json
+{
+  "mcpServers": {
+    "filesystem-secure": {
+      "command": "assay",
+      "args": [
+        "mcp",
+        "wrap",
+        "--policy",
+        "/path/to/policy.yaml",
+        "--",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/you"
+      ]
+    }
+  }
+}
+```
+
+### Zed
+
+Zed stores custom MCP commands under `context_servers` in the settings JSON:
+
+```json
+{
+  "context_servers": {
+    "filesystem-secure": {
+      "command": "assay",
+      "args": [
+        "mcp",
+        "wrap",
+        "--policy",
+        "/path/to/policy.yaml",
+        "--",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/you"
+      ]
+    }
+  }
+}
+```
+
+Assay only auto-detects Cursor and Claude today, but the wrapped command itself is portable across MCP clients.
+
 ## Step 1: Wrap Your Server
 
 ```bash
@@ -39,15 +104,23 @@ A policy is a YAML file that says which tools are allowed and which are denied:
 
 ```yaml
 # policy.yaml
-version: "1.0"
+version: "2.0"
 name: "my-policy"
-allow: ["read_file", "list_dir"]
-deny: ["exec", "shell", "write_file"]
-constraints:
-  - tool: "read_file"
-    params:
+
+tools:
+  allow: ["read_file", "list_dir"]
+  deny: ["exec", "shell", "write_file"]
+
+schemas:
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
       path:
-        matches: "^/app/.*"
+        type: string
+        pattern: "^/app/.*"
+        minLength: 1
+    required: ["path"]
 ```
 
 Or generate one from what your agent actually does:
@@ -112,9 +185,23 @@ assay mcp wrap \
 | `audit.ndjson` | Mandate lifecycle events |
 | `decisions.ndjson` | Tool-call ALLOW/DENY decisions |
 
+## Step 6: Reuse Existing OTel / Langfuse Traces (Optional)
+
+If your agent stack already emits OpenTelemetry spans, import them instead of recapturing everything:
+
+```bash
+assay trace ingest-otel \
+  --input otel-export.jsonl \
+  --db .eval/eval.db \
+  --out-trace traces/otel.v2.jsonl
+```
+
+That gives you replayable Assay traces you can reuse in your assertions pipeline.
+
 ## Next Steps
 
 - [CI Integration Guide](../guides/github-action.md)
+- [OpenTelemetry & Langfuse](../guides/otel-langfuse.md)
 - [Evidence Store Setup](../guides/evidence-store-aws-s3.md)
 - [Full Example](../../examples/mcp-quickstart/)
 - [Architecture](../architecture/index.md)

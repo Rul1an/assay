@@ -1,373 +1,260 @@
-# Policy Files
+# MCP Policy Files
 
-Detailed reference for policy YAML configuration.
+This page documents the YAML schema consumed by `assay mcp wrap`.
 
----
+Assay policy files decide:
 
-## Overview
+- which MCP tools are allowed or denied
+- how tool arguments are validated with JSON Schema
+- which tools need extra controls such as approval, scope restriction, or argument redaction
 
-Policy files define validation rules for tool arguments. They're YAML files that specify:
+## Supported Versions
 
-- Argument types (string, number, boolean, etc.)
-- Constraints (min, max, pattern, enum, etc.)
-- Required fields
-- Violation actions
+- `version: "2.0"`: current format, with per-tool JSON Schema under `schemas:`
+- `version: "1.0"`: legacy `constraints:` format
 
----
+Assay still reads v1 policies, warns once, and can migrate them with `assay policy migrate`.
 
-## File Structure
+## Minimal v2 Policy
 
 ```yaml
-# policies/customer-service.yaml
+version: "2.0"
+name: "starter"
 
-# Optional metadata
-description: "Customer service agent policies"
-version: "1.0"
-
-# Tool definitions
 tools:
-  tool_name:
-    description: "Optional description"
-    arguments:
-      arg_name:
-        type: string
-        # ... constraints
-```
+  allow: ["read_file", "list_dir"]
+  deny: ["exec", "shell", "write_file"]
 
----
-
-## Tool Definitions
-
-### Basic Structure
-
-```yaml
-tools:
-  get_customer:
-    arguments:
-      id:
-        type: string
-        required: true
-```
-
-### With Description
-
-```yaml
-tools:
-  apply_discount:
-    description: "Apply a percentage discount to an order"
-    arguments:
-      percent:
-        type: number
-        description: "Discount percentage (0-30)"
-        min: 0
-        max: 30
-```
-
----
-
-## Type Validation
-
-### Primitive Types
-
-```yaml
-arguments:
-  # String
-  name:
-    type: string
-
-  # Number (integer or float)
-  amount:
-    type: number
-
-  # Integer only
-  count:
-    type: integer
-
-  # Boolean
-  active:
-    type: boolean
-```
-
-### Complex Types
-
-```yaml
-arguments:
-  # Array
-  tags:
-    type: array
-    items:
-      type: string
-
-  # Object
-  address:
+schemas:
+  read_file:
     type: object
+    additionalProperties: false
     properties:
-      street: { type: string }
-      city: { type: string }
-```
+      path:
+        type: string
+        pattern: "^/workspace/.*"
+        minLength: 1
+        maxLength: 4096
+    required: ["path"]
 
----
-
-## Constraints
-
-### String Constraints
-
-```yaml
-arguments:
-  code:
-    type: string
-    minLength: 3          # Minimum length
-    maxLength: 10         # Maximum length
-    pattern: "^[A-Z]+$"   # Regex pattern
-    format: email         # Built-in format
-    enum:                 # Allowed values
-      - "pending"
-      - "approved"
-      - "rejected"
-```
-
-### Number Constraints
-
-```yaml
-arguments:
-  price:
-    type: number
-    min: 0                # Minimum value (inclusive)
-    max: 9999.99          # Maximum value (inclusive)
-    exclusiveMin: 0       # Minimum (exclusive)
-    exclusiveMax: 10000   # Maximum (exclusive)
-    multipleOf: 0.01      # Must be multiple of
-    enum: [1, 2, 3, 4, 5] # Allowed values
-```
-
-### Array Constraints
-
-```yaml
-arguments:
-  items:
-    type: array
-    minItems: 1           # Minimum items
-    maxItems: 100         # Maximum items
-    uniqueItems: true     # No duplicates
-    items:                # Item schema
-      type: string
-      maxLength: 50
-```
-
-### Object Constraints
-
-```yaml
-arguments:
-  config:
+  list_dir:
     type: object
+    additionalProperties: false
     properties:
-      enabled: { type: boolean }
-      threshold: { type: number, min: 0 }
-    required:
-      - enabled
-    additionalProperties: false  # No extra fields
-```
-
----
-
-## Built-in Formats
-
-| Format | Validates | Example |
-|--------|-----------|---------|
-| `email` | Email address | `user@example.com` |
-| `uri` | URI/URL | `https://example.com` |
-| `uuid` | UUID v4 | `550e8400-e29b-41d4-a716-446655440000` |
-| `date` | ISO date | `2025-12-27` |
-| `datetime` | ISO datetime | `2025-12-27T10:00:00Z` |
-| `time` | ISO time | `10:00:00` |
-| `ipv4` | IPv4 address | `192.168.1.1` |
-| `ipv6` | IPv6 address | `::1` |
-| `hostname` | Hostname | `example.com` |
-
-```yaml
-arguments:
-  email:
-    type: string
-    format: email
-
-  created_at:
-    type: string
-    format: datetime
-```
-
----
-
-## Required Fields
-
-```yaml
-arguments:
-  id:
-    type: string
-    required: true     # Must be present
-
-  nickname:
-    type: string
-    required: false    # Optional (default)
-```
-
----
-
-## Violation Actions
-
-Control behavior when validation fails:
-
-```yaml
-arguments:
-  percent:
-    type: number
-    max: 30
-    on_violation: block   # Fail the test (default)
-
-  legacy_field:
-    type: string
-    on_violation: warn    # Log warning, continue
-
-  debug_mode:
-    type: boolean
-    on_violation: log     # Silent log, continue
-```
-
-| Action | Test Result | Logs |
-|--------|-------------|------|
-| `block` | ❌ Fail | Error logged |
-| `warn` | ✅ Pass | Warning logged |
-| `log` | ✅ Pass | Debug logged |
-
----
-
-## References ($ref)
-
-Share definitions across tools:
-
-```yaml
-# policies/common.yaml
-definitions:
-  customer_id:
-    type: string
-    pattern: "^cust_[0-9]+$"
-    description: "Customer ID format: cust_<digits>"
-
-# policies/customer.yaml
-tools:
-  get_customer:
-    arguments:
-      id:
-        $ref: "common.yaml#/definitions/customer_id"
-
-  update_customer:
-    arguments:
-      id:
-        $ref: "common.yaml#/definitions/customer_id"
-      email:
+      path:
         type: string
-        format: email
+        pattern: "^/workspace/.*"
+        minLength: 1
+        maxLength: 4096
+    required: ["path"]
+
+enforcement:
+  unconstrained_tools: warn
 ```
 
----
+## Top-Level Fields
 
-## Conditional Validation
+| Field | Type | Meaning |
+|------|------|---------|
+| `version` | string | Policy schema version. Use `"2.0"` for new files. |
+| `name` | string | Optional human-readable label. |
+| `tools` | object | Allow/deny lists and obligation controls. |
+| `allow` / `deny` | list<string> | Legacy aliases merged into `tools.allow` / `tools.deny` on load. |
+| `schemas` | map<string, object> | JSON Schema per tool. `$defs` is reserved for shared definitions. |
+| `constraints` | list<object> | Legacy v1 regex constraints. Deprecated. |
+| `enforcement` | object | What to do with allowed tools that have no schema. |
+| `limits` | object | Optional request and tool-call ceilings. |
+| `signatures` | object | Optional tool-description integrity checks. |
+| `tool_pins` | map<string, object> | Cryptographic pins for expected tool identity. |
+| `discovery` | object | Advanced runtime discovery settings. |
+| `runtime_monitor` | object | Advanced runtime monitoring rules. |
+| `kill_switch` | object | Advanced kill-switch triggers. |
 
-*(Advanced, v1.1+)*
+Unknown fields are ignored with a warning, so it is worth keeping this page and your checked-in policies aligned.
+
+## `tools:` Fields
+
+The `tools` section handles both filtering and extra controls.
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `allow` | list<string> | Allowed tool names or wildcard patterns. |
+| `deny` | list<string> | Blocked tool names or wildcard patterns. |
+| `allow_classes` | list<string> | Allow by tool taxonomy class. |
+| `deny_classes` | list<string> | Deny by tool taxonomy class. |
+| `approval_required` | list<string> | Tools that require a valid approval artifact. |
+| `approval_required_classes` | list<string> | Approval requirement by tool class. |
+| `restrict_scope` | list<string> | Tools whose arguments must match a scope contract. |
+| `restrict_scope_classes` | list<string> | Scope restriction by tool class. |
+| `restrict_scope_contract` | object | Shared contract used for `restrict_scope`. |
+| `redact_args` | list<string> | Tools whose arguments should be redacted. |
+| `redact_args_classes` | list<string> | Redaction by tool class. |
+| `redact_args_contract` | object | Shared contract used for `redact_args`. |
+
+### Wildcards
+
+Assay uses simple `*` wildcards:
+
+- `"*"` matches all tools
+- `"read_*"` matches by prefix
+- `"*_file"` matches by suffix
+- `"*search*"` matches by substring
+- patterns without `*` are exact matches
+
+## JSON Schema in `schemas:`
+
+Each tool can have a full JSON Schema for its argument object:
 
 ```yaml
-arguments:
-  payment_type:
-    type: string
-    enum: ["card", "bank_transfer"]
-
-  card_number:
-    type: string
-    pattern: "^[0-9]{16}$"
-    required_if:
-      payment_type: "card"
-
-  account_number:
-    type: string
-    required_if:
-      payment_type: "bank_transfer"
+schemas:
+  create_ticket:
+    type: object
+    additionalProperties: false
+    properties:
+      title:
+        type: string
+        minLength: 5
+        maxLength: 120
+      priority:
+        type: string
+        enum: ["low", "medium", "high"]
+      labels:
+        type: array
+        items:
+          type: string
+          maxLength: 32
+    required: ["title", "priority"]
 ```
 
----
+Recommended defaults for security-sensitive tools:
 
-## Complete Example
+- `additionalProperties: false`
+- `minLength: 1` on required strings
+- explicit `required: [...]`
+- bounded arrays and strings
+
+If a call violates the schema, Assay denies it with `E_ARG_SCHEMA`.
+
+## Shared Definitions With `$defs`
+
+Assay supports local shared definitions via `$defs`.
+Use `#/$defs/...` references inside tool schemas.
 
 ```yaml
-# policies/ecommerce.yaml
-description: "E-commerce agent validation rules"
+schemas:
+  $defs:
+    safe_path:
+      type: string
+      pattern: "^/workspace/.*"
+      minLength: 1
+      maxLength: 4096
+
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
+      path:
+        $ref: "#/$defs/safe_path"
+    required: ["path"]
+```
+
+## Enforcement
+
+Allowed tools can still be considered unsafe if you do not attach a schema.
+`enforcement.unconstrained_tools` decides what happens then:
+
+```yaml
+enforcement:
+  unconstrained_tools: warn
+```
+
+Supported values:
+
+- `warn`: allow the tool, but emit `E_TOOL_UNCONSTRAINED`
+- `deny`: block allowed tools that have no schema
+- `allow`: silently allow unconstrained tools
+
+## Limits
+
+```yaml
+limits:
+  max_requests_total: 1000
+  max_tool_calls_total: 500
+```
+
+Exceeding these limits produces `E_RATE_LIMIT`.
+
+## Approval, Scope Restriction, and Redaction
+
+These controls sit next to ordinary allow/deny rules:
+
+```yaml
+tools:
+  allow: ["read_file", "deploy_release", "create_ticket"]
+  approval_required: ["deploy_release"]
+  restrict_scope: ["read_file"]
+  redact_args: ["create_ticket"]
+
+  restrict_scope_contract:
+    scope_type: "path_prefix"
+    scope_value: "/workspace"
+    scope_match_mode: "prefix"
+
+  redact_args_contract:
+    redaction_target: "args"
+    redaction_mode: "mask"
+    redaction_scope: "sensitive_fields"
+```
+
+Use these when you want:
+
+- explicit human approval for risky tools
+- runtime enforcement that file or resource arguments stay in-bounds
+- redaction of secrets before downstream logging or evidence export
+
+## Tool Pins
+
+`tool_pins` protect against tool-definition drift by pinning the expected server, tool name, and hashes:
+
+```yaml
+tool_pins:
+  read_file:
+    server_id: "filesystem-prod"
+    tool_name: "read_file"
+    schema_hash: "9f4d4d0f..."
+    meta_hash: "42f5df3e..."
+```
+
+## Legacy v1 Compatibility
+
+Legacy v1 policies use `constraints:`:
+
+```yaml
 version: "1.0"
-
-tools:
-  add_to_cart:
-    description: "Add item to shopping cart"
-    arguments:
-      product_id:
-        type: string
-        required: true
-        pattern: "^prod_[a-z0-9]+$"
-      quantity:
-        type: integer
-        required: true
-        min: 1
-        max: 99
-
-  apply_coupon:
-    description: "Apply a coupon code"
-    arguments:
-      code:
-        type: string
-        required: true
-        pattern: "^[A-Z0-9]{6,12}$"
-        description: "Coupon code (6-12 alphanumeric chars)"
-
-  process_payment:
-    description: "Process payment for order"
-    arguments:
-      order_id:
-        type: string
-        required: true
-      amount:
-        type: number
-        required: true
-        min: 0.01
-        max: 10000
-      currency:
-        type: string
-        required: true
-        enum: ["USD", "EUR", "GBP"]
-      card_token:
-        type: string
-        required: true
-        description: "Tokenized card (never raw card numbers)"
-
-  refund:
-    description: "Process refund"
-    arguments:
-      order_id:
-        type: string
-        required: true
-      amount:
-        type: number
-        required: true
-        min: 0.01
-      reason:
-        type: string
-        required: true
-        enum:
-          - "customer_request"
-          - "item_defective"
-          - "wrong_item"
-          - "other"
+deny: ["exec"]
+constraints:
+  - tool: "read_file"
+    params:
+      path:
+        matches: "^/workspace/.*"
 ```
 
----
+Assay loads this shape, warns, normalizes `allow` / `deny` into `tools.*`, and auto-migrates constraints into in-memory JSON Schemas.
+
+To write the v2 form to disk:
+
+```bash
+assay policy migrate --input policy.yaml
+```
+
+To fail CI if deprecated constructs are still present:
+
+```bash
+assay policy validate --deny-deprecations --input policy.yaml
+```
 
 ## See Also
 
-- [Policies Concept](../concepts/policies.md)
-- [args_valid Metric](../metrics/args-valid.md)
-- [Sequence Rules](sequences.md)
+- [MCP Quick Start](../../mcp/quickstart.md)
+- [OpenTelemetry & Langfuse](../../guides/otel-langfuse.md)
+- [Migration Guide](../../migration/v1-to-v2.md)

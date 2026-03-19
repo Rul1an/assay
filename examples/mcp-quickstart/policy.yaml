@@ -1,18 +1,34 @@
-version: "1.0"
+version: "2.0"
 name: "mcp-quickstart"
-allow:
-  - "read_file"
-  - "list_dir"
-deny:
-  - "exec"
-  - "shell"
-  - "write_file"
-constraints:
-  - tool: "read_file"
-    params:
+
+tools:
+  allow:
+    - "read_file"
+    - "list_dir"
+  deny:
+    - "exec"
+    - "shell"
+    - "write_file"
+
+schemas:
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
       path:
-        matches: "^/tmp/assay-demo/.*"
-  - tool: "list_dir"
-    params:
+        type: string
+        pattern: "^/tmp/assay-demo/.*"
+        minLength: 1
+    required:
+      - "path"
+
+  list_dir:
+    type: object
+    additionalProperties: false
+    properties:
       path:
-        matches: "^/tmp/assay-demo/.*"
+        type: string
+        pattern: "^/tmp/assay-demo/.*"
+        minLength: 1
+    required:
+      - "path"

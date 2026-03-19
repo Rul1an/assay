@@ -52,6 +52,16 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 
+Then inspect the audit artifact Assay can hand to security or compliance:
+
+```bash
+assay evidence show demo/fixtures/bundle.tar.gz
+```
+
+![Evidence Bundle Inspector](demo/output/screenshots/evidence-bundle-inspector.svg)
+
+The bundle is tamper-evident and cryptographically verifiable. If your run includes signed mandate events, the same bundle also carries the Ed25519-backed authorization trail for high-risk actions.
+
 ## Is This For Me?
 
 **Yes, if you:**
@@ -64,25 +74,86 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 - Don't use MCP (Assay is MCP-native; other protocols are on the roadmap)
 - Need a hosted dashboard (Assay is CLI-first and offline)
 
+## Add to Cursor in 30 Seconds
+
+Assay ships a helper that finds your local Cursor MCP config path and prints a ready-to-paste entry:
+
+```bash
+assay mcp config-path cursor
+```
+
+It generates JSON like:
+
+```json
+{
+  "filesystem-secure": {
+    "command": "assay",
+    "args": [
+      "mcp",
+      "wrap",
+      "--policy",
+      "/path/to/policy.yaml",
+      "--",
+      "npx",
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "/Users/you"
+    ]
+  }
+}
+```
+
+The same wrapped command works in other MCP clients:
+- Cursor: paste the generated entry into `mcpServers`
+- Windsurf: paste the same `mcpServers` entry into `~/.codeium/windsurf/mcp_config.json`
+- Zed: paste the wrapped command into `context_servers` in your settings JSON
+
+See [MCP Quick Start](docs/mcp/quickstart.md) for client-specific examples.
+
 ## Policy Is Simple
 
 ```yaml
-version: "1.0"
+version: "2.0"
 name: "my-policy"
-allow: ["read_file", "list_dir"]
-deny: ["exec", "shell", "write_file"]
-constraints:
-  - tool: "read_file"
-    params:
+
+tools:
+  allow: ["read_file", "list_dir"]
+  deny: ["exec", "shell", "write_file"]
+
+schemas:
+  read_file:
+    type: object
+    additionalProperties: false
+    properties:
       path:
-        matches: "^/app/.*"
+        type: string
+        pattern: "^/app/.*"
+        minLength: 1
+    required: ["path"]
 ```
+
+Already have a legacy `constraints:` policy? Assay still reads it, warns once, and ships `assay policy migrate` to write the v2 JSON Schema form.
 
 Or don't write one — generate it from what your agent actually does:
 
 ```bash
 assay init --from-trace trace.jsonl
 ```
+
+See [Policy Files](docs/reference/config/policies.md) for the full YAML schema.
+
+## OpenTelemetry In, Evidence Out
+
+Already tracing with Langfuse or an OTel-enabled agent stack? Keep that pipeline. Assay ingests OpenTelemetry JSONL, turns it into replayable traces, and gives you deterministic policy gates plus exportable evidence bundles.
+
+```bash
+assay trace ingest-otel \
+  --input otel-export.jsonl \
+  --db .eval/eval.db \
+  --out-trace traces/otel.v2.jsonl
+```
+
+Then run `assay ci` on the converted trace or export an Evidence Bundle for audit handoff. See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
 
 ## Add to CI
 
@@ -102,6 +173,14 @@ jobs:
 ```
 
 PRs that violate policy get blocked. SARIF results show up in the Security tab.
+
+## Measured Latency
+
+On the M1 Pro/macOS fragmented-IPI harness, Assay's protected tool-decision path measured:
+- Main protection run: `0.771ms` p50 / `1.913ms` p95
+- Fast-path scenario: `0.345ms` p50 / `1.145ms` p95
+
+These are tool-decision timings, not end-to-end model latency.
 
 ## Beyond MCP: Protocol Adapters
 
@@ -125,7 +204,7 @@ The agent protocol landscape is fragmenting (ACP, A2A, UCP, AP2, x402). Assay's 
 | **MCP-native** | Built for MCP tool calls. Adapters for ACP, A2A, UCP. |
 | **Evidence trail** | Every decision is auditable, diffable, replayable. |
 | **Offline-first** | No backend, no API keys. Runs on your machine. |
-| **Fast** | < 5ms per tool call. |
+| **Measured** | `0.771ms` p50 / `1.913ms` p95 in the main M1 Pro/macOS tool-decision harness. |
 | **Tested** | [3 security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, 0 false positives. |
 
 ## Install
@@ -141,6 +220,8 @@ Python SDK: `pip install assay-it`
 ## Learn More
 
 - [MCP Quickstart](examples/mcp-quickstart/) — full walkthrough with a filesystem server
+- [Policy Files](docs/reference/config/policies.md) — current YAML schema for `assay mcp wrap`
+- [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md) — turn existing traces into replay and evidence
 - [CI Guide](docs/guides/github-action.md) — GitHub Action setup
 - [OWASP MCP Top 10 Mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) — how Assay addresses each risk
 - [Evidence Store](docs/guides/evidence-store-aws-s3.md) — push bundles to S3, B2, or MinIO
