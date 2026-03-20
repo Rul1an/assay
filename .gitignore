@@ -13,7 +13,7 @@ docs/DISTRIBUTION-CHANNELS.md
 .cursor/
 _v.txt
 ai-agent-eval-plugin/
-Assay/
+/Assay/
 _sync/
 
 # Removed from repo (prevent re-add)
@@ -24,6 +24,7 @@ check_output_2.txt
 pr_body.md
 
 /target
+/fuzz/target/
 /archive/
 **/*.rs.bk
 benchmark_results/
