@@ -33,9 +33,7 @@ fn snapshots(resp: &LlmResponse) -> Vec<Vec<serde_json::Value>> {
         .map(|outer| {
             outer
                 .iter()
-                .map(|snap| {
-                    snap.as_array().cloned().unwrap_or_default()
-                })
+                .map(|snap| snap.as_array().cloned().unwrap_or_default())
                 .collect()
         })
         .unwrap_or_default()
@@ -226,7 +224,10 @@ mod tests {
             ..Default::default()
         };
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
-        assert!(result.passed, "should pass when no tool_definitions in meta");
+        assert!(
+            result.passed,
+            "should pass when no tool_definitions in meta"
+        );
     }
 
     #[tokio::test]
@@ -287,7 +288,9 @@ mod tests {
     async fn snapshot_mode_detects_rug_pull() {
         let metric = ToolDescriptionIntegrityMetric;
         let tc = test_case();
-        let expected = Expected::ToolDescriptionIntegrity { pinned_tools: vec![] };
+        let expected = Expected::ToolDescriptionIntegrity {
+            pinned_tools: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_definition_snapshots": [
@@ -313,7 +316,9 @@ mod tests {
     async fn snapshot_mode_passes_with_single_snapshot() {
         let metric = ToolDescriptionIntegrityMetric;
         let tc = test_case();
-        let expected = Expected::ToolDescriptionIntegrity { pinned_tools: vec![] };
+        let expected = Expected::ToolDescriptionIntegrity {
+            pinned_tools: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_definition_snapshots": [

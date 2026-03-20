@@ -1,0 +1,27 @@
+[package]
+name = "assay-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+assay-core = { path = "../crates/assay-core" }
+libfuzzer-sys = "0.4"
+serde_yaml = "0.9"
+
+[[bin]]
+name = "policy_yaml"
+path = "fuzz_targets/policy_yaml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bundle_reader"
+path = "fuzz_targets/bundle_reader.rs"
+test = false
+doc = false
+bench = false

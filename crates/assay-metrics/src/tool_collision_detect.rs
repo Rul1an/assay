@@ -145,7 +145,9 @@ mod tests {
     async fn passes_when_no_tool_definitions_in_meta() {
         let metric = ToolCollisionDetectMetric;
         let tc = test_case();
-        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        let expected = Expected::ToolCollisionDetect {
+            trusted_servers: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({}),
             ..Default::default()
@@ -158,7 +160,9 @@ mod tests {
     async fn passes_when_all_names_unique() {
         let metric = ToolCollisionDetectMetric;
         let tc = test_case();
-        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        let expected = Expected::ToolCollisionDetect {
+            trusted_servers: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_definitions": [
@@ -177,7 +181,9 @@ mod tests {
     async fn detects_collision_across_servers() {
         let metric = ToolCollisionDetectMetric;
         let tc = test_case();
-        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        let expected = Expected::ToolCollisionDetect {
+            trusted_servers: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_definitions": [
@@ -247,7 +253,9 @@ mod tests {
     async fn same_server_duplicate_is_not_a_collision() {
         let metric = ToolCollisionDetectMetric;
         let tc = test_case();
-        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        let expected = Expected::ToolCollisionDetect {
+            trusted_servers: vec![],
+        };
         // server-a registers "exec" twice — same origin, not a collision.
         let resp = LlmResponse {
             meta: serde_json::json!({
@@ -259,14 +267,19 @@ mod tests {
             ..Default::default()
         };
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
-        assert!(result.passed, "same server registering the same tool twice is not a collision");
+        assert!(
+            result.passed,
+            "same server registering the same tool twice is not a collision"
+        );
     }
 
     #[tokio::test]
     async fn detects_collision_without_server_ids() {
         let metric = ToolCollisionDetectMetric;
         let tc = test_case();
-        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        let expected = Expected::ToolCollisionDetect {
+            trusted_servers: vec![],
+        };
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_definitions": [
@@ -277,6 +290,9 @@ mod tests {
             ..Default::default()
         };
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
-        assert!(!result.passed, "duplicate names without server_id must be flagged");
+        assert!(
+            !result.passed,
+            "duplicate names without server_id must be flagged"
+        );
     }
 }

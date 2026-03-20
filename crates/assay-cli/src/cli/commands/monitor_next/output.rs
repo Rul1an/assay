@@ -26,6 +26,20 @@ pub(crate) fn dump_prefix_hex(data: &[u8], n: usize) -> String {
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn decode_file_blocked_payload(data: &[u8]) -> Option<(u64, u64, u64, u32)> {
+    if data.len() < 28 {
+        return None;
+    }
+
+    let dev = u64::from_ne_bytes(data[0..8].try_into().ok()?);
+    let ino = u64::from_ne_bytes(data[8..16].try_into().ok()?);
+    let cgroup_id = u64::from_ne_bytes(data[16..24].try_into().ok()?);
+    let rule_id = u32::from_ne_bytes(data[24..28].try_into().ok()?);
+
+    Some((dev, ino, cgroup_id, rule_id))
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn log_violation(pid: u32, rule_id: &str, quiet: bool) {
     if !quiet {
         println!(
@@ -52,7 +66,7 @@ pub(crate) fn log_kill(
 
 #[cfg(target_os = "linux")]
 pub(crate) fn log_monitor_event(event: &assay_common::MonitorEvent, args: &MonitorArgs) {
-    use assay_common::{EVENT_CONNECT, EVENT_OPENAT};
+    use assay_common::{EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT};
 
     if args.quiet {
         return;
@@ -69,11 +83,17 @@ pub(crate) fn log_monitor_event(event: &assay_common::MonitorEvent, args: &Monit
             event.pid,
             dump_prefix_hex(&event.data, 32)
         ),
-        10 => println!(
-            "[PID {}] 🛡️ BLOCKED FILE: {}",
-            event.pid,
-            decode_utf8_cstr(&event.data)
-        ),
+        EVENT_FILE_BLOCKED => match decode_file_blocked_payload(&event.data) {
+            Some((dev, ino, cgroup_id, rule_id)) => println!(
+                "[PID {}] 🛡️ BLOCKED FILE: dev={} ino={} cgroup={} rule_id={}",
+                event.pid, dev, ino, cgroup_id, rule_id
+            ),
+            None => println!(
+                "[PID {}] 🛡️ BLOCKED FILE: 0x{}",
+                event.pid,
+                dump_prefix_hex(&event.data, 32)
+            ),
+        },
         11 => println!(
             "[PID {}] 🟢 ALLOWED FILE: {}",
             event.pid,
@@ -142,5 +162,22 @@ pub(crate) fn log_monitor_event(event: &assay_common::MonitorEvent, args: &Monit
             println!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", event.pid, ptr);
         }
         _ => if args.monitor_all || !args.quiet {},
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::decode_file_blocked_payload;
+
+    #[test]
+    fn decode_file_blocked_payload_reads_binary_layout() {
+        let mut data = [0u8; 32];
+        data[0..8].copy_from_slice(&42u64.to_ne_bytes());
+        data[8..16].copy_from_slice(&7u64.to_ne_bytes());
+        data[16..24].copy_from_slice(&99u64.to_ne_bytes());
+        data[24..28].copy_from_slice(&1234u32.to_ne_bytes());
+
+        let decoded = decode_file_blocked_payload(&data).expect("payload should decode");
+        assert_eq!(decoded, (42, 7, 99, 1234));
     }
 }

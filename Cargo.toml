@@ -23,6 +23,7 @@ default-members = [
   "crates/assay-common",
   "assay-python-sdk",
 ]
+exclude = ["fuzz"]
 
 [workspace.lints.rust]
 unsafe_code = "deny"

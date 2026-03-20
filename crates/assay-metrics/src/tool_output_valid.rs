@@ -41,15 +41,13 @@ impl Metric for ToolOutputValidMetric {
         // per-call loop, so traces with many calls to the same tool don't recompile.
         let mut compiled_schemas: HashMap<&str, jsonschema::Validator> = HashMap::new();
         for (tool_name, schema) in schemas_obj {
-            let compiled = jsonschema::options()
-                .build(schema)
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "config error: invalid output schema for tool '{}': {}",
-                        tool_name,
-                        e
-                    )
-                })?;
+            let compiled = jsonschema::options().build(schema).map_err(|e| {
+                anyhow::anyhow!(
+                    "config error: invalid output schema for tool '{}': {}",
+                    tool_name,
+                    e
+                )
+            })?;
             compiled_schemas.insert(tool_name.as_str(), compiled);
         }
 
@@ -71,8 +69,10 @@ impl Metric for ToolOutputValidMetric {
             }
 
             if !compiled.is_valid(result) {
-                let errors: Vec<String> =
-                    compiled.iter_errors(result).map(|e| e.to_string()).collect();
+                let errors: Vec<String> = compiled
+                    .iter_errors(result)
+                    .map(|e| e.to_string())
+                    .collect();
                 violations.push(serde_json::json!({
                     "tool": call.tool_name,
                     "call_id": call.id,

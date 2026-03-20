@@ -13,6 +13,10 @@ use aya_log_ebpf::info;
 use core::ffi::c_void;
 
 const MAX_DENY_PATHS: u32 = 256;
+const FILE_BLOCKED_DEV_OFFSET: usize = 0;
+const FILE_BLOCKED_INO_OFFSET: usize = 8;
+const FILE_BLOCKED_CGROUP_OFFSET: usize = 16;
+const FILE_BLOCKED_RULE_ID_OFFSET: usize = 24;
 
 #[map]
 static DENY_PATHS_EXACT: HashMap<u64, u32> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
@@ -33,8 +37,8 @@ static DENY_PATHS_PREFIX: HashMap<u64, DenyPrefix> = HashMap::with_max_entries(M
 fn emit_event(
     ctx: &LsmContext,
     event_id: u32,
-    _cgroup_id: u64,
-    _rule_id: u32,
+    cgroup_id: u64,
+    rule_id: u32,
     data: &[u8],
     _path_len: u32,
 ) {
@@ -51,11 +55,20 @@ fn emit_event(
             // Write Data
             let data_ptr = buf.add(8);
             let len = if data.len() > 512 { 512 } else { data.len() };
+            core::ptr::write_bytes(data_ptr, 0, 512);
             core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
 
-            // Zero pad
-            if len < 512 {
-                core::ptr::write_bytes(data_ptr.add(len), 0, 512 - len);
+            if event_id == assay_common::EVENT_FILE_BLOCKED && len >= FILE_BLOCKED_INO_OFFSET + 8 {
+                core::ptr::copy_nonoverlapping(
+                    cgroup_id.to_ne_bytes().as_ptr(),
+                    data_ptr.add(FILE_BLOCKED_CGROUP_OFFSET),
+                    8,
+                );
+                core::ptr::copy_nonoverlapping(
+                    rule_id.to_ne_bytes().as_ptr(),
+                    data_ptr.add(FILE_BLOCKED_RULE_ID_OFFSET),
+                    4,
+                );
             }
         }
         entry.submit(0);
@@ -154,11 +167,25 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
             let mut alert_data = [0u8; 64];
             unsafe {
-                *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
-                *(alert_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
-                *(alert_data.as_mut_ptr().add(16) as *mut u32) = *rule_id;
+                core::ptr::copy_nonoverlapping(
+                    (s_dev as u64).to_ne_bytes().as_ptr(),
+                    alert_data.as_mut_ptr().add(FILE_BLOCKED_DEV_OFFSET),
+                    8,
+                );
+                core::ptr::copy_nonoverlapping(
+                    i_ino.to_ne_bytes().as_ptr(),
+                    alert_data.as_mut_ptr().add(FILE_BLOCKED_INO_OFFSET),
+                    8,
+                );
             }
-            emit_event(&ctx, 10, cgroup_id, *rule_id, &alert_data, 0);
+            emit_event(
+                &ctx,
+                assay_common::EVENT_FILE_BLOCKED,
+                cgroup_id,
+                *rule_id,
+                &alert_data,
+                0,
+            );
             return Err(-1); // EPERM matched exact
         }
     }
@@ -188,11 +215,25 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
         let mut alert_data = [0u8; 64];
         unsafe {
-            *(alert_data.as_mut_ptr() as *mut u64) = s_dev as u64;
-            *(alert_data.as_mut_ptr().add(8) as *mut u64) = i_ino;
-            *(alert_data.as_mut_ptr().add(16) as *mut u32) = *rule_id;
+            core::ptr::copy_nonoverlapping(
+                (s_dev as u64).to_ne_bytes().as_ptr(),
+                alert_data.as_mut_ptr().add(FILE_BLOCKED_DEV_OFFSET),
+                8,
+            );
+            core::ptr::copy_nonoverlapping(
+                i_ino.to_ne_bytes().as_ptr(),
+                alert_data.as_mut_ptr().add(FILE_BLOCKED_INO_OFFSET),
+                8,
+            );
         }
-        emit_event(&ctx, 10, cgroup_id, *rule_id, &alert_data, 0);
+        emit_event(
+            &ctx,
+            assay_common::EVENT_FILE_BLOCKED,
+            cgroup_id,
+            *rule_id,
+            &alert_data,
+            0,
+        );
         return Err(-1); // EPERM
     }
 

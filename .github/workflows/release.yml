@@ -215,6 +215,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
       - name: Get version
         id: version
         run: |
@@ -224,6 +227,31 @@ jobs:
             V="${GITHUB_REF#refs/tags/}"
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Install CycloneDX generator
+        shell: bash
+        run: cargo install cargo-cyclonedx --version 0.5.9 --locked
+
+      - name: Generate CycloneDX SBOM bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+
+          cargo cyclonedx \
+            --format json \
+            --spec-version 1.5 \
+            --target all \
+            --override-filename assay-sbom \
+            --manifest-path Cargo.toml
+
+          mkdir -p release/sbom
+          while IFS= read -r file; do
+            cp --parents "$file" release/sbom/
+          done < <(find . -name 'assay-sbom.json' -print)
+
+          tar -czf "release/assay-${VERSION}-sbom-cyclonedx.tar.gz" -C release/sbom .
+          shasum -a 256 "release/assay-${VERSION}-sbom-cyclonedx.tar.gz" > "release/assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"
 
       - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
