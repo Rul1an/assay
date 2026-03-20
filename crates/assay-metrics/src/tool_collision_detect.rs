@@ -1,7 +1,7 @@
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct ToolCollisionDetectMetric;
 
@@ -56,23 +56,37 @@ impl Metric for ToolCollisionDetectMetric {
         let mut collisions: Vec<serde_json::Value> = Vec::new();
 
         for (name, servers) in &by_name {
-            if servers.len() < 2 {
-                continue; // Single registration — no collision.
+            // De-duplicate named server_ids so the same server registering the same
+            // tool multiple times is not counted as a collision.  Unknown origins
+            // (None) cannot be attributed to a single server, so each occurrence is
+            // kept as a separate potential origin (security-conservative).
+            let mut seen_named: HashSet<&str> = HashSet::new();
+            let distinct: Vec<Option<&str>> = servers
+                .iter()
+                .filter(|s| match s {
+                    None => true,
+                    Some(id) => seen_named.insert(id),
+                })
+                .copied()
+                .collect();
+
+            if distinct.len() < 2 {
+                continue; // Single distinct origin — no collision.
             }
 
             let should_flag = if trusted_servers.is_empty() {
                 // No trust filter: any duplicate name is a collision.
                 true
             } else {
-                // Flag only when at least one server is outside the trusted set.
-                servers.iter().any(|s| match s {
+                // Flag only when at least one distinct origin is outside the trusted set.
+                distinct.iter().any(|s| match s {
                     None => true, // Unknown origin is untrusted.
                     Some(id) => !trusted_servers.iter().any(|t| t == id),
                 })
             };
 
             if should_flag {
-                let server_list: Vec<serde_json::Value> = servers
+                let server_list: Vec<serde_json::Value> = distinct
                     .iter()
                     .map(|s| match s {
                         Some(id) => serde_json::Value::String((*id).to_string()),
@@ -84,7 +98,7 @@ impl Metric for ToolCollisionDetectMetric {
                     "tool": name,
                     "code": "E_TOOL_COLLISION",
                     "servers": server_list,
-                    "count": servers.len()
+                    "count": distinct.len()
                 }));
             }
         }
@@ -227,6 +241,25 @@ mod tests {
         };
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
         assert!(!result.passed, "untrusted server collision must be flagged");
+    }
+
+    #[tokio::test]
+    async fn same_server_duplicate_is_not_a_collision() {
+        let metric = ToolCollisionDetectMetric;
+        let tc = test_case();
+        let expected = Expected::ToolCollisionDetect { trusted_servers: vec![] };
+        // server-a registers "exec" twice — same origin, not a collision.
+        let resp = LlmResponse {
+            meta: serde_json::json!({
+                "tool_definitions": [
+                    {"name": "exec", "server_id": "server-a"},
+                    {"name": "exec", "server_id": "server-a"}
+                ]
+            }),
+            ..Default::default()
+        };
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+        assert!(result.passed, "same server registering the same tool twice is not a collision");
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase};
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 use crate::tool_calls::extract_tool_calls_best_effort;
 
@@ -23,15 +24,40 @@ impl Metric for ToolOutputValidMetric {
             _ => return Ok(MetricResult::pass(1.0)),
         };
 
-        let Some(schemas) = schemas else {
+        let Some(schemas_value) = schemas else {
             return Ok(MetricResult::pass(1.0)); // N/A — no schemas configured.
         };
+
+        // Validate that schemas is a JSON object; return a config error otherwise
+        // to prevent false negatives from silently skipping all tool validation.
+        let schemas_obj = schemas_value.as_object().ok_or_else(|| {
+            anyhow::anyhow!(
+                "config error: 'schemas' for ToolOutputValid must be a JSON object \
+                 mapping tool names to JSON Schemas"
+            )
+        })?;
+
+        // Pre-compile all schemas once per evaluate() call rather than inside the
+        // per-call loop, so traces with many calls to the same tool don't recompile.
+        let mut compiled_schemas: HashMap<&str, jsonschema::Validator> = HashMap::new();
+        for (tool_name, schema) in schemas_obj {
+            let compiled = jsonschema::options()
+                .build(schema)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "config error: invalid output schema for tool '{}': {}",
+                        tool_name,
+                        e
+                    )
+                })?;
+            compiled_schemas.insert(tool_name.as_str(), compiled);
+        }
 
         let tool_calls = extract_tool_calls_best_effort(resp);
         let mut violations: Vec<serde_json::Value> = Vec::new();
 
         for call in &tool_calls {
-            let Some(schema) = schemas.get(&call.tool_name) else {
+            let Some(compiled) = compiled_schemas.get(call.tool_name.as_str()) else {
                 continue; // No schema for this tool — skip.
             };
 
@@ -43,16 +69,6 @@ impl Metric for ToolOutputValidMetric {
             if call.error.is_some() {
                 continue;
             }
-
-            let compiled = jsonschema::options()
-                .build(schema)
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "config error: invalid output schema for tool '{}': {}",
-                        call.tool_name,
-                        e
-                    )
-                })?;
 
             if !compiled.is_valid(result) {
                 let errors: Vec<String> =
@@ -189,6 +205,22 @@ mod tests {
         let resp = resp_with_result("exec", serde_json::json!("anything goes"));
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
         assert!(result.passed);
+    }
+
+    #[tokio::test]
+    async fn errors_when_schemas_is_not_an_object() {
+        let metric = ToolOutputValidMetric;
+        let tc = test_case();
+        // Passing an array instead of an object for schemas should be a config error.
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!(["schema1", "schema2"])),
+        };
+        let resp = resp_with_result("exec", serde_json::json!({"exit_code": 0}));
+        let err = metric.evaluate(&tc, &expected, &resp).await.unwrap_err();
+        assert!(
+            err.to_string().contains("config error"),
+            "expected a config error, got: {err}"
+        );
     }
 
     #[tokio::test]
