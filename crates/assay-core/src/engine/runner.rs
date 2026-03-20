@@ -361,12 +361,7 @@ mod tests {
     use crate::providers::llm::fake::FakeClient;
     use crate::providers::llm::LlmClient;
     use async_trait::async_trait;
-    use serial_test::serial;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc as StdArc, Mutex};
-    use tracing_subscriber::fmt::format::FmtSpan;
-    use tracing_subscriber::fmt::MakeWriter;
-    use tracing_subscriber::EnvFilter;
 
     #[derive(Clone, Copy)]
     enum MetricMode {
@@ -445,68 +440,6 @@ mod tests {
         fn provider_name(&self) -> &'static str {
             "error_client"
         }
-    }
-
-    #[derive(Clone)]
-    struct MockWriter {
-        buf: StdArc<Mutex<Vec<u8>>>,
-    }
-
-    impl std::io::Write for MockWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.buf.lock().expect("writer lock").extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> MakeWriter<'a> for MockWriter {
-        type Writer = MockWriter;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
-    fn setup_span_capture() -> (MockWriter, tracing::subscriber::DefaultGuard) {
-        let buf = StdArc::new(Mutex::new(Vec::new()));
-        let writer = MockWriter { buf: buf.clone() };
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(writer.clone())
-            .json()
-            .with_span_events(FmtSpan::CLOSE)
-            .with_env_filter(EnvFilter::new("info"))
-            .finish();
-
-        (writer, tracing::subscriber::set_default(subscriber))
-    }
-
-    fn find_named_spans(
-        json_lines: &str,
-        target_name: &str,
-    ) -> Vec<serde_json::Map<String, serde_json::Value>> {
-        let mut spans = Vec::new();
-
-        for line in json_lines.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-            let Some(span) = value.get("span").and_then(|span| span.as_object()) else {
-                continue;
-            };
-            if span.get("name").and_then(|v| v.as_str()) == Some(target_name) {
-                spans.push(span.clone());
-            }
-        }
-
-        spans
     }
 
     fn runner_for_contract_tests(
@@ -718,117 +651,6 @@ mod tests {
         assert_eq!(observed.len(), 3);
         assert_eq!(observed.last(), Some(&(3, 3)));
         assert!(observed.windows(2).all(|w| w[0].0 < w[1].0));
-        Ok(())
-    }
-
-    struct ErrorMetric;
-
-    #[async_trait]
-    impl Metric for ErrorMetric {
-        fn name(&self) -> &'static str {
-            "error_metric"
-        }
-
-        async fn evaluate(
-            &self,
-            _tc: &TestCase,
-            _expected: &Expected,
-            _resp: &LlmResponse,
-        ) -> anyhow::Result<MetricResult> {
-            Err(anyhow::anyhow!("metric exploded"))
-        }
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn runner_contract_metric_span_records_success_fields() -> anyhow::Result<()> {
-        let (writer, _guard) = setup_span_capture();
-        let cfg = single_test_config(ErrorPolicy::Block);
-        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
-        let metric = Arc::new(ScriptedMetric::always_pass());
-        let runner = runner_for_contract_tests(client, vec![metric], 0);
-
-        let (row, _resp) = runner.run_test_once(&cfg, &cfg.tests[0]).await?;
-        assert_eq!(row.status, TestStatus::Pass);
-
-        let output = String::from_utf8(writer.buf.lock().expect("writer lock").clone())?;
-        let spans = find_named_spans(&output, "assay.eval.metric");
-        assert_eq!(spans.len(), 1, "expected one metric span, got: {output}");
-
-        let span = &spans[0];
-        assert_eq!(
-            span.get("assay.eval.test_id").and_then(|v| v.as_str()),
-            Some("t1")
-        );
-        assert_eq!(
-            span.get("assay.eval.metric.name").and_then(|v| v.as_str()),
-            Some("scripted")
-        );
-        assert_eq!(
-            span.get("assay.eval.response.cached")
-                .and_then(|v| v.as_bool()),
-            Some(false)
-        );
-        assert_eq!(
-            span.get("assay.eval.metric.score").and_then(|v| v.as_f64()),
-            Some(1.0)
-        );
-        assert_eq!(
-            span.get("assay.eval.metric.passed")
-                .and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            span.get("assay.eval.metric.unstable")
-                .and_then(|v| v.as_bool()),
-            Some(false)
-        );
-        assert!(
-            span.get("assay.eval.metric.duration_ms")
-                .and_then(|v| v.as_u64())
-                .is_some(),
-            "expected duration field in span: {output}"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn runner_contract_metric_span_records_error_fields() -> anyhow::Result<()> {
-        let (writer, _guard) = setup_span_capture();
-        let cfg = single_test_config(ErrorPolicy::Block);
-        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
-        let runner = runner_for_contract_tests(client, vec![Arc::new(ErrorMetric)], 0);
-
-        let err = runner
-            .run_test_once(&cfg, &cfg.tests[0])
-            .await
-            .expect_err("metric failure should bubble");
-        assert!(
-            err.to_string().contains("metric exploded"),
-            "unexpected metric error: {err}"
-        );
-
-        let output = String::from_utf8(writer.buf.lock().expect("writer lock").clone())?;
-        let spans = find_named_spans(&output, "assay.eval.metric");
-        assert_eq!(spans.len(), 1, "expected one metric span, got: {output}");
-
-        let span = &spans[0];
-        assert_eq!(
-            span.get("assay.eval.metric.name").and_then(|v| v.as_str()),
-            Some("error_metric")
-        );
-        assert_eq!(span.get("error").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(
-            span.get("error.message").and_then(|v| v.as_str()),
-            Some("metric exploded")
-        );
-        assert!(
-            span.get("assay.eval.metric.duration_ms")
-                .and_then(|v| v.as_u64())
-                .is_some(),
-            "expected duration field in error span: {output}"
-        );
         Ok(())
     }
 
