@@ -1,10 +1,15 @@
 use crate::events::{self, EventStream};
-use crate::MonitorError;
-use assay_common::KEY_MONITOR_ALL;
+use crate::{MonitorError, MonitorStatsSnapshot};
+use assay_common::{
+    KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+    SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
+    SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
+};
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
-    maps::{HashMap as AyaHashMap, LpmTrie, RingBuf},
+    maps::{Array as AyaArray, HashMap as AyaHashMap, LpmTrie, RingBuf},
     programs::{Lsm, TracePoint},
     Btf, Ebpf,
 };
@@ -295,6 +300,36 @@ impl LinuxMonitor {
     ) -> Result<(), MonitorError> {
         // Stub for compatibility
         Ok(())
+    }
+
+    pub fn snapshot_stats(&mut self) -> Result<MonitorStatsSnapshot, MonitorError> {
+        let bpf = self.bpf.lock().unwrap();
+        let mut stats = MonitorStatsSnapshot::default();
+
+        if let Some(map) = bpf.map("STATS") {
+            let array: AyaArray<_, u32> = AyaArray::try_from(map)?;
+            stats.tracepoint_events_emitted = array
+                .get(&MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, 0)
+                .unwrap_or(0);
+            stats.tracepoint_ringbuf_dropped = array
+                .get(&MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, 0)
+                .unwrap_or(0);
+            stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
+            stats.lsm_ringbuf_dropped =
+                array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
+        }
+
+        if let Some(map) = bpf.map("SOCKET_STATS") {
+            let array: AyaArray<_, u64> = AyaArray::try_from(map)?;
+            stats.socket_checks = array.get(&SOCKET_STAT_CHECKS, 0).unwrap_or(0);
+            stats.socket_blocked_cidr = array.get(&SOCKET_STAT_BLOCKED_CIDR, 0).unwrap_or(0);
+            stats.socket_blocked_port = array.get(&SOCKET_STAT_BLOCKED_PORT, 0).unwrap_or(0);
+            stats.socket_allowed = array.get(&SOCKET_STAT_ALLOWED, 0).unwrap_or(0);
+            stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
+            stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
+        }
+
+        Ok(stats)
     }
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {

@@ -1,3 +1,7 @@
+use assay_common::{
+    SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT,
+    SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
+};
 use aya_ebpf::{
     bindings::bpf_sock_addr,
     helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_ktime_get_ns},
@@ -31,12 +35,7 @@ static ALLOW_PORTS: HashMap<u16, u8> = HashMap::with_max_entries(MAX_PORT_RULES,
 static SOCKET_EVENTS: RingBuf = RingBuf::with_byte_size(128 * 1024, 0);
 
 #[map]
-static SOCKET_STATS: Array<u64> = Array::with_max_entries(8, 0);
-
-const STAT_CHECKS: u32 = 0;
-const STAT_BLOCKED_CIDR: u32 = 1;
-const STAT_BLOCKED_PORT: u32 = 2;
-const STAT_ALLOWED: u32 = 3;
+static SOCKET_STATS: Array<u64> = Array::with_max_entries(SOCKET_STATS_LEN, 0);
 
 #[repr(C)]
 struct SocketEvent {
@@ -68,7 +67,7 @@ pub fn connect4_hook(ctx: SockAddrContext) -> i32 {
 
 #[inline(always)]
 fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
-    inc_stat(STAT_CHECKS);
+    inc_stat(SOCKET_STAT_CHECKS);
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
     let sock_addr = unsafe { &*(ctx.as_ptr() as *const bpf_sock_addr) };
@@ -85,12 +84,12 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
             rule_id,
             0,
         );
-        inc_stat(STAT_BLOCKED_PORT);
+        inc_stat(SOCKET_STAT_BLOCKED_PORT);
         return Ok(false);
     }
 
     if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
-        inc_stat(STAT_ALLOWED);
+        inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
 
@@ -143,13 +142,13 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
                 action, // Use the value from map as rule_id (assuming we change map to store rule_id)
                 0,
             );
-            inc_stat(STAT_BLOCKED_CIDR);
+            inc_stat(SOCKET_STAT_BLOCKED_CIDR);
             return Ok(false);
         }
     }
 
     // Correctly close try_connect4
-    inc_stat(STAT_ALLOWED);
+    inc_stat(SOCKET_STAT_ALLOWED);
     Ok(true)
 }
 
@@ -169,7 +168,7 @@ pub fn connect6_hook(ctx: SockAddrContext) -> i32 {
 
 #[inline(always)]
 fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
-    inc_stat(STAT_CHECKS);
+    inc_stat(SOCKET_STAT_CHECKS);
 
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
     let sock_addr = unsafe { &*(ctx.as_ptr() as *const bpf_sock_addr) };
@@ -187,12 +186,12 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
             rule_id,
             0,
         );
-        inc_stat(STAT_BLOCKED_PORT);
+        inc_stat(SOCKET_STAT_BLOCKED_PORT);
         return Ok(false);
     }
 
     if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
-        inc_stat(STAT_ALLOWED);
+        inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
 
@@ -210,12 +209,12 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
                 action, // Use rule_id
                 0,
             );
-            inc_stat(STAT_BLOCKED_CIDR);
+            inc_stat(SOCKET_STAT_BLOCKED_CIDR);
             return Ok(false);
         }
     }
 
-    inc_stat(STAT_ALLOWED);
+    inc_stat(SOCKET_STAT_ALLOWED);
     Ok(true)
 }
 
@@ -253,5 +252,8 @@ fn emit_socket_event(
             ev.addr_v6[i] = addr_v6[i];
         }
         event.submit(0);
+        inc_stat(SOCKET_STAT_EVENTS_EMITTED);
+    } else {
+        inc_stat(SOCKET_STAT_RINGBUF_DROPPED);
     }
 }
