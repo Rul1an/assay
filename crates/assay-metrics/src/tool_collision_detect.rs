@@ -38,12 +38,18 @@ impl Metric for ToolCollisionDetectMetric {
         }
 
         // Build: tool_name → list of server_ids that registered it.
+        // Prefer `tool_identity.server_id` (injected by MCP proxy Phase 9) over
+        // the top-level `server_id` field, so detection works with proxy-augmented traces.
         let mut by_name: HashMap<&str, Vec<Option<&str>>> = HashMap::new();
         for def in &defs {
             let Some(name) = def.get("name").and_then(|n| n.as_str()) else {
                 continue;
             };
-            let server = def.get("server_id").and_then(|s| s.as_str());
+            let server = def
+                .get("tool_identity")
+                .and_then(|id| id.get("server_id"))
+                .and_then(|s| s.as_str())
+                .or_else(|| def.get("server_id").and_then(|s| s.as_str()));
             by_name.entry(name).or_default().push(server);
         }
 
