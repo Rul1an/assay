@@ -163,11 +163,44 @@ pub enum Expected {
     ToolBlocklist {
         blocked: Vec<String>,
     },
+    /// Detect rug-pull attacks: verify tool descriptions/schemas match pinned expectations
+    /// or remain consistent across multiple tool-list snapshots in the same trace.
+    ToolDescriptionIntegrity {
+        /// Pin specific tool definitions. If empty, snapshot-based mutation detection is used.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pinned_tools: Vec<PinnedTool>,
+    },
+    /// Validate tool call outputs against per-tool JSON schemas.
+    ToolOutputValid {
+        /// Map of tool_name → JSON Schema for the output. Only tools with a schema are checked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schemas: Option<serde_json::Value>,
+    },
+    /// Detect tool shadowing: same tool name registered by multiple servers.
+    ToolCollisionDetect {
+        /// Only flag collisions involving servers outside this list.
+        /// Empty = flag all duplicate tool names regardless of server.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        trusted_servers: Vec<String>,
+    },
     // For migration/legacy support
     #[serde(rename = "$ref")]
     Reference {
         path: String,
     },
+}
+
+/// A pinned tool definition for `ToolDescriptionIntegrity`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinnedTool {
+    /// Tool name to match.
+    pub name: String,
+    /// Expected description (exact string match).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Expected SHA-256 hex of the canonical JSON-serialized `input_schema`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_sha256: Option<String>,
 }
 
 impl Default for Expected {

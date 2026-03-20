@@ -14,6 +14,9 @@ mod tool_calls;
 pub mod args_valid;
 pub mod sequence_valid;
 pub mod tool_blocklist;
+pub mod tool_collision_detect;
+pub mod tool_description_integrity;
+pub mod tool_output_valid;
 pub mod usage;
 
 pub fn default_metrics() -> Vec<Arc<dyn Metric>> {
@@ -28,5 +31,8 @@ pub fn default_metrics() -> Vec<Arc<dyn Metric>> {
         Arc::new(args_valid::ArgsValidMetric),
         Arc::new(sequence_valid::SequenceValidMetric),
         Arc::new(tool_blocklist::ToolBlocklistMetric),
+        Arc::new(tool_description_integrity::ToolDescriptionIntegrityMetric),
+        Arc::new(tool_output_valid::ToolOutputValidMetric),
+        Arc::new(tool_collision_detect::ToolCollisionDetectMetric),
     ]
 }

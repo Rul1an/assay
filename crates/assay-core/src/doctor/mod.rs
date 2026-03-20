@@ -165,6 +165,9 @@ fn summarize_config(cfg: &EvalConfig) -> ConfigSummary {
             Expected::ArgsValid { .. } => "args_valid",
             Expected::SequenceValid { .. } => "sequence_valid",
             Expected::ToolBlocklist { .. } => "tool_blocklist",
+            Expected::ToolDescriptionIntegrity { .. } => "tool_description_integrity",
+            Expected::ToolOutputValid { .. } => "tool_output_valid",
+            Expected::ToolCollisionDetect { .. } => "tool_collision_detect",
             Expected::Reference { .. } => "reference",
         }
         .to_string();
