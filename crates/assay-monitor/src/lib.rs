@@ -14,6 +14,32 @@ use assay_common::MonitorEvent;
 // We use the alias from events, or define it here.
 pub type EventStream = tokio_stream::wrappers::ReceiverStream<Result<MonitorEvent, MonitorError>>;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MonitorStatsSnapshot {
+    pub tracepoint_events_emitted: u32,
+    pub tracepoint_ringbuf_dropped: u32,
+    pub lsm_events_emitted: u32,
+    pub lsm_ringbuf_dropped: u32,
+    pub socket_checks: u64,
+    pub socket_blocked_cidr: u64,
+    pub socket_blocked_port: u64,
+    pub socket_allowed: u64,
+    pub socket_events_emitted: u64,
+    pub socket_ringbuf_dropped: u64,
+}
+
+impl MonitorStatsSnapshot {
+    pub fn total_ringbuf_dropped(&self) -> u64 {
+        u64::from(self.tracepoint_ringbuf_dropped)
+            + u64::from(self.lsm_ringbuf_dropped)
+            + self.socket_ringbuf_dropped
+    }
+
+    pub fn has_ringbuf_pressure(&self) -> bool {
+        self.total_ringbuf_dropped() > 0
+    }
+}
+
 pub struct Monitor {
     #[cfg(target_os = "linux")]
     inner: loader::LinuxMonitor,
@@ -150,5 +176,31 @@ impl Monitor {
 
         #[cfg(not(target_os = "linux"))]
         Err(MonitorError::NotSupported)
+    }
+
+    pub fn snapshot_stats(&mut self) -> Result<MonitorStatsSnapshot, MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.snapshot_stats();
+
+        #[cfg(not(target_os = "linux"))]
+        Err(MonitorError::NotSupported)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MonitorStatsSnapshot;
+
+    #[test]
+    fn monitor_stats_snapshot_reports_ringbuf_pressure() {
+        let stats = MonitorStatsSnapshot {
+            tracepoint_ringbuf_dropped: 2,
+            lsm_ringbuf_dropped: 1,
+            socket_ringbuf_dropped: 3,
+            ..Default::default()
+        };
+
+        assert!(stats.has_ringbuf_pressure());
+        assert_eq!(stats.total_ringbuf_dropped(), 6);
     }
 }

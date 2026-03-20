@@ -20,6 +20,20 @@ pub const EVENT_CONNECT_BLOCKED: u32 = 20;
 
 pub const DATA_LEN: usize = 512;
 
+pub const MONITOR_STATS_LEN: u32 = 10;
+pub const MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED: u32 = 0;
+pub const MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED: u32 = 1;
+pub const MONITOR_STAT_LSM_EVENTS_EMITTED: u32 = 2;
+pub const MONITOR_STAT_LSM_RINGBUF_DROPPED: u32 = 3;
+
+pub const SOCKET_STATS_LEN: u32 = 8;
+pub const SOCKET_STAT_CHECKS: u32 = 0;
+pub const SOCKET_STAT_BLOCKED_CIDR: u32 = 1;
+pub const SOCKET_STAT_BLOCKED_PORT: u32 = 2;
+pub const SOCKET_STAT_ALLOWED: u32 = 3;
+pub const SOCKET_STAT_EVENTS_EMITTED: u32 = 4;
+pub const SOCKET_STAT_RINGBUF_DROPPED: u32 = 5;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MonitorEvent {

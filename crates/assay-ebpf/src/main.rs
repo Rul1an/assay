@@ -14,7 +14,10 @@ pub mod socket_lsm;
 #[allow(clippy::all)]
 pub mod vmlinux;
 
-use assay_common::{MonitorEvent, EVENT_CONNECT, KEY_MONITOR_ALL};
+use assay_common::{
+    MonitorEvent, EVENT_CONNECT, KEY_MONITOR_ALL, MONITOR_STATS_LEN,
+    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+};
 use aya_ebpf::{
     helpers::{
         bpf_get_current_ancestor_cgroup_id, bpf_get_current_cgroup_id, bpf_get_current_pid_tgid,
@@ -27,6 +30,13 @@ use aya_ebpf::{
 #[inline(always)]
 fn current_tgid() -> u32 {
     (bpf_get_current_pid_tgid() >> 32) as u32
+}
+
+#[inline(always)]
+fn inc_stat(index: u32) {
+    if let Some(val) = STATS.get_ptr_mut(index) {
+        unsafe { *val += 1 };
+    }
 }
 
 #[map]
@@ -65,7 +75,7 @@ pub static DENY_INO: HashMap<assay_common::InodeKeyMap, u32> = HashMap::with_max
 pub static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 #[map]
-pub static STATS: Array<u32> = Array::with_max_entries(10, 0);
+pub static STATS: Array<u32> = Array::with_max_entries(MONITOR_STATS_LEN, 0);
 
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
@@ -218,6 +228,9 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
             core::ptr::copy_nonoverlapping(raw_sockaddr.as_ptr(), data_ptr, n);
         }
         entry.submit(0);
+        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
+    } else {
+        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
     }
 
     Ok(0)
@@ -267,6 +280,9 @@ fn try_fork(ctx: TracePointContext) -> Result<u32, u32> {
             core::ptr::write(data_ptr as *mut u32, child_pid);
         }
         entry.submit(0);
+        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
+    } else {
+        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
     }
 
     Ok(0)

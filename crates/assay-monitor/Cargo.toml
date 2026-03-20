@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-assay-common = { workspace = true }
+assay-common = { workspace = true, features = ["std"] }
 assay-policy.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true

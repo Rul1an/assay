@@ -365,5 +365,37 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
+    match monitor.snapshot_stats() {
+        Ok(stats) => {
+            emit_err!("Monitor summary:");
+            emit_err!(
+                "  • Tracepoint ringbuf: emitted={} dropped={}",
+                stats.tracepoint_events_emitted,
+                stats.tracepoint_ringbuf_dropped
+            );
+            emit_err!(
+                "  • LSM ringbuf:        emitted={} dropped={}",
+                stats.lsm_events_emitted,
+                stats.lsm_ringbuf_dropped
+            );
+            emit_err!(
+                "  • Socket policy:      checks={} blocked_cidr={} blocked_port={} allowed={} emitted={} dropped={}",
+                stats.socket_checks,
+                stats.socket_blocked_cidr,
+                stats.socket_blocked_port,
+                stats.socket_allowed,
+                stats.socket_events_emitted,
+                stats.socket_ringbuf_dropped
+            );
+            if stats.has_ringbuf_pressure() {
+                emit_err!(
+                    "  ⚠️  Ring buffer pressure detected: {} dropped event(s)",
+                    stats.total_ringbuf_dropped()
+                );
+            }
+        }
+        Err(e) => emit_err!("Warning: Failed to read monitor stats: {}", e),
+    }
+
     Ok(exit_codes::OK)
 }
