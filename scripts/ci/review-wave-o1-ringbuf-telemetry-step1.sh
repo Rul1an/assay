@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_REF="${BASE_REF:-origin/codex/codebase-analysis-followups}"
+BASE_REF_WAS_SET="${BASE_REF+yes}"
+: "${BASE_REF:=origin/main}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-git rev-parse --verify "$BASE_REF" >/dev/null
+if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
+  if [[ "$BASE_REF_WAS_SET" != "yes" ]] && git rev-parse --verify origin/main >/dev/null 2>&1; then
+    BASE_REF="origin/main"
+  else
+    echo "ERROR: base ref '$BASE_REF' does not exist. Set BASE_REF to a valid git ref."
+    exit 1
+  fi
+fi
 
 ALLOWLIST=(
   "crates/assay-common/src/lib.rs"

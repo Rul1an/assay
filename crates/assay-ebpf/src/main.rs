@@ -33,7 +33,7 @@ fn current_tgid() -> u32 {
 }
 
 #[inline(always)]
-fn inc_stat(index: u32) {
+pub(crate) fn inc_stat(index: u32) {
     if let Some(val) = STATS.get_ptr_mut(index) {
         unsafe { *val += 1 };
     }
