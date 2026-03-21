@@ -124,6 +124,7 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 ## Next Steps
 
 - [**Getting Started**](getting-started/index.md)
+- [**Operator Proof Flow**](guides/operator-proof-flow.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
 - [**OpenTelemetry & Langfuse**](guides/otel-langfuse.md)
 - [**CLI Reference**](reference/cli/index.md)

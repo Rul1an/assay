@@ -10,6 +10,7 @@ This guide covers:
 2. [**Quick Start**](quickstart.md) — Import a trace and run your first test
 3. [**Your First Test**](first-test.md) — Write a custom policy from scratch
 4. [**CI Integration**](ci-integration.md) — Add Assay to GitHub Actions / GitLab CI
+5. [**Operator Proof Flow**](../guides/operator-proof-flow.md) — See trace ingest, shipped control-evidence linting, and proof-kit verification as one flow
 
 ---
 
@@ -73,5 +74,13 @@ By the end of this guide, you'll understand:
     Run your first test in 60 seconds.
 
     [:octicons-arrow-right-24: Quick start](quickstart.md)
+
+-   :material-shield-search:{ .lg .middle } __Operator Proof Flow__
+
+    ---
+
+    See one compact operator story: import, shipped pack evaluation, and offline release verification.
+
+    [:octicons-arrow-right-24: Operator proof flow](../guides/operator-proof-flow.md)
 
 </div>
