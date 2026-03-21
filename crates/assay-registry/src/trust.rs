@@ -96,8 +96,7 @@ impl TrustStore {
 
     /// Create a trust store with the default production roots.
     pub fn from_production_roots() -> RegistryResult<Self> {
-        let roots = parse_pinned_roots_json_impl(PRODUCTION_TRUST_ROOTS_JSON)?;
-        Self::from_pinned_roots(roots)
+        load_production_roots_impl(PRODUCTION_TRUST_ROOTS_JSON)
     }
 
     /// Create a trust store with the default production roots.
@@ -379,6 +378,21 @@ fn parse_pinned_roots_json_impl(raw: &str) -> RegistryResult<Vec<TrustedKey>> {
     Ok(roots)
 }
 
+fn load_production_roots_impl(raw: &str) -> RegistryResult<TrustStore> {
+    let roots = parse_pinned_roots_json_impl(raw)?;
+    let mut inner = TrustStore::empty_inner();
+
+    for root in &roots {
+        insert_pinned_key(&mut inner, root).map_err(|err| RegistryError::Config {
+            message: format!("invalid production trust root {}: {}", root.key_id, err),
+        })?;
+    }
+
+    Ok(TrustStore {
+        inner: Arc::new(RwLock::new(inner)),
+    })
+}
+
 fn insert_pinned_key(inner: &mut TrustStoreInner, key: &TrustedKey) -> RegistryResult<()> {
     let verifying_key = decode_verifying_key(&key.public_key)?;
     let computed_id = compute_key_id(&decode_public_key_bytes(&key.public_key)?);
@@ -494,6 +508,24 @@ mod tests {
             parse_pinned_roots_json_impl(duplicate),
             Err(RegistryError::Config { .. })
         ));
+    }
+
+    #[test]
+    fn test_load_production_roots_maps_key_mismatch_to_config() {
+        let mismatched = r#"[
+            {
+                "key_id": "sha256:not-the-real-key-id",
+                "algorithm": "Ed25519",
+                "public_key": "MCowBQYDK2VwAyEAykCN7Cf9EQAB4UPonG5AtKfTVny0H4xaKpPI6wIGBwE=",
+                "revoked": false
+            }
+        ]"#;
+
+        let err = load_production_roots_impl(mismatched).unwrap_err();
+        assert!(matches!(err, RegistryError::Config { .. }));
+        assert!(err
+            .to_string()
+            .contains("invalid production trust root sha256:not-the-real-key-id"));
     }
 
     #[tokio::test]
