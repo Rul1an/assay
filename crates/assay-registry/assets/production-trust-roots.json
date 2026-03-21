@@ -1,0 +1,11 @@
+[
+  {
+    "key_id": "sha256:3a64307d5655ba86fa3c95118ed8fe9665ef6bd37c752ca93f3bbe8f16e83a7f",
+    "algorithm": "Ed25519",
+    "public_key": "MCowBQYDK2VwAyEAykCN7Cf9EQAB4UPonG5AtKfTVny0H4xaKpPI6wIGBwE=",
+    "description": "Assay Registry bootstrap root (2026-03)",
+    "added_at": "2026-03-21T00:00:00Z",
+    "expires_at": null,
+    "revoked": false
+  }
+]

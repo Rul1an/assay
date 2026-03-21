@@ -6,7 +6,7 @@
 //! - Configuration file
 //! - Remote keys manifest (fetched from registry)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -20,6 +20,7 @@ use crate::verify::compute_key_id;
 
 /// Default cache TTL for keys manifest (24 hours).
 const DEFAULT_KEYS_TTL_SECS: i64 = 24 * 60 * 60;
+const PRODUCTION_TRUST_ROOTS_JSON: &str = include_str!("../assets/production-trust-roots.json");
 
 /// Trust store for signing keys.
 #[derive(Debug, Clone)]
@@ -68,32 +69,39 @@ impl TrustStore {
     /// Create an empty trust store.
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(TrustStoreInner {
-                keys: HashMap::new(),
-                metadata: HashMap::new(),
-                pinned_roots: Vec::new(),
-                manifest_fetched_at: None,
-                manifest_expires_at: None,
-            })),
+            inner: Arc::new(RwLock::new(Self::empty_inner())),
         }
     }
 
     /// Create a trust store with pinned root keys.
     ///
     /// Pinned roots are always trusted and cannot be revoked remotely.
-    pub async fn with_pinned_roots(roots: Vec<TrustedKey>) -> RegistryResult<Self> {
-        let store = Self::new();
-        for root in roots {
-            store.add_pinned_key(&root).await?;
+    pub fn from_pinned_roots(roots: Vec<TrustedKey>) -> RegistryResult<Self> {
+        let mut inner = Self::empty_inner();
+        for root in &roots {
+            insert_pinned_key(&mut inner, root)?;
         }
-        Ok(store)
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(inner)),
+        })
+    }
+
+    /// Create a trust store with pinned root keys.
+    ///
+    /// Pinned roots are always trusted and cannot be revoked remotely.
+    pub async fn with_pinned_roots(roots: Vec<TrustedKey>) -> RegistryResult<Self> {
+        Self::from_pinned_roots(roots)
+    }
+
+    /// Create a trust store with the default production roots.
+    pub fn from_production_roots() -> RegistryResult<Self> {
+        load_production_roots_impl(PRODUCTION_TRUST_ROOTS_JSON)
     }
 
     /// Create a trust store with the default production roots.
     pub async fn with_production_roots() -> RegistryResult<Self> {
-        // In production, these would be real keys compiled into the binary.
-        // For now, return an empty store that will fetch keys from the registry.
-        Ok(Self::new())
+        Self::from_production_roots()
     }
 
     /// Add a pinned root key.
@@ -123,7 +131,9 @@ impl TrustStore {
                 is_pinned: true,
             },
         );
-        inner.pinned_roots.push(key.key_id.clone());
+        if !inner.pinned_roots.contains(&key.key_id) {
+            inner.pinned_roots.push(key.key_id.clone());
+        }
 
         Ok(())
     }
@@ -292,6 +302,16 @@ impl TrustStore {
         inner.manifest_fetched_at = None;
         inner.manifest_expires_at = None;
     }
+
+    fn empty_inner() -> TrustStoreInner {
+        TrustStoreInner {
+            keys: HashMap::new(),
+            metadata: HashMap::new(),
+            pinned_roots: Vec::new(),
+            manifest_fetched_at: None,
+            manifest_expires_at: None,
+        }
+    }
 }
 
 impl Default for TrustStore {
@@ -318,6 +338,90 @@ fn decode_public_key_bytes(b64: &str) -> RegistryResult<Vec<u8>> {
     BASE64.decode(b64).map_err(|e| RegistryError::Config {
         message: format!("invalid base64 public key: {}", e),
     })
+}
+
+fn parse_pinned_roots_json_impl(raw: &str) -> RegistryResult<Vec<TrustedKey>> {
+    let roots: Vec<TrustedKey> = serde_json::from_str(raw).map_err(|e| RegistryError::Config {
+        message: format!("invalid production trust roots: {}", e),
+    })?;
+
+    if roots.is_empty() {
+        return Err(RegistryError::Config {
+            message: "production trust roots are empty".to_string(),
+        });
+    }
+
+    let mut seen = HashSet::new();
+    for root in &roots {
+        if root.algorithm != "Ed25519" {
+            return Err(RegistryError::Config {
+                message: format!(
+                    "production trust root {} uses unsupported algorithm {}",
+                    root.key_id, root.algorithm
+                ),
+            });
+        }
+
+        if root.revoked {
+            return Err(RegistryError::Config {
+                message: format!("production trust root {} is revoked", root.key_id),
+            });
+        }
+
+        if !seen.insert(root.key_id.clone()) {
+            return Err(RegistryError::Config {
+                message: format!("duplicate production trust root {}", root.key_id),
+            });
+        }
+    }
+
+    Ok(roots)
+}
+
+fn load_production_roots_impl(raw: &str) -> RegistryResult<TrustStore> {
+    let roots = parse_pinned_roots_json_impl(raw)?;
+    let mut inner = TrustStore::empty_inner();
+
+    for root in &roots {
+        insert_pinned_key(&mut inner, root).map_err(|err| RegistryError::Config {
+            message: format!("invalid production trust root {}: {}", root.key_id, err),
+        })?;
+    }
+
+    Ok(TrustStore {
+        inner: Arc::new(RwLock::new(inner)),
+    })
+}
+
+fn insert_pinned_key(inner: &mut TrustStoreInner, key: &TrustedKey) -> RegistryResult<()> {
+    let verifying_key = decode_verifying_key(&key.public_key)?;
+    let computed_id = compute_key_id(&decode_public_key_bytes(&key.public_key)?);
+
+    if computed_id != key.key_id {
+        return Err(RegistryError::SignatureInvalid {
+            reason: format!(
+                "key_id mismatch: claimed {}, computed {}",
+                key.key_id, computed_id
+            ),
+        });
+    }
+
+    inner.keys.insert(key.key_id.clone(), verifying_key);
+    inner.metadata.insert(
+        key.key_id.clone(),
+        KeyMetadata {
+            description: key.description.clone(),
+            added_at: key.added_at,
+            expires_at: key.expires_at,
+            revoked: false,
+            is_pinned: true,
+        },
+    );
+    if !inner.pinned_roots.contains(&key.key_id) {
+        inner.pinned_roots.push(key.key_id.clone());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -352,6 +456,76 @@ mod tests {
         let store = TrustStore::new();
         let result = store.get_key_async("sha256:unknown").await;
         assert!(matches!(result, Err(RegistryError::KeyNotTrusted { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_with_production_roots_loads_embedded_roots() -> RegistryResult<()> {
+        let store = TrustStore::with_production_roots().await?;
+        let keys = store.list_keys().await;
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys[0],
+            "sha256:3a64307d5655ba86fa3c95118ed8fe9665ef6bd37c752ca93f3bbe8f16e83a7f"
+        );
+
+        let meta = store
+            .get_metadata(&keys[0])
+            .await
+            .ok_or_else(|| RegistryError::Config {
+                message: "embedded production root metadata missing".to_string(),
+            })?;
+        assert!(meta.is_pinned);
+        assert!(!meta.revoked);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pinned_roots_json_rejects_empty_rootset() {
+        assert!(matches!(
+            parse_pinned_roots_json_impl("[]"),
+            Err(RegistryError::Config { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_pinned_roots_json_rejects_duplicate_key_ids() {
+        let duplicate = r#"[
+            {
+                "key_id": "sha256:dup",
+                "algorithm": "Ed25519",
+                "public_key": "MCowBQYDK2VwAyEAykCN7Cf9EQAB4UPonG5AtKfTVny0H4xaKpPI6wIGBwE=",
+                "revoked": false
+            },
+            {
+                "key_id": "sha256:dup",
+                "algorithm": "Ed25519",
+                "public_key": "MCowBQYDK2VwAyEAykCN7Cf9EQAB4UPonG5AtKfTVny0H4xaKpPI6wIGBwE=",
+                "revoked": false
+            }
+        ]"#;
+
+        assert!(matches!(
+            parse_pinned_roots_json_impl(duplicate),
+            Err(RegistryError::Config { .. })
+        ));
+    }
+
+    #[test]
+    fn test_load_production_roots_maps_key_mismatch_to_config() {
+        let mismatched = r#"[
+            {
+                "key_id": "sha256:not-the-real-key-id",
+                "algorithm": "Ed25519",
+                "public_key": "MCowBQYDK2VwAyEAykCN7Cf9EQAB4UPonG5AtKfTVny0H4xaKpPI6wIGBwE=",
+                "revoked": false
+            }
+        ]"#;
+
+        let err = load_production_roots_impl(mismatched).unwrap_err();
+        assert!(matches!(err, RegistryError::Config { .. }));
+        assert!(err
+            .to_string()
+            .contains("invalid production trust root sha256:not-the-real-key-id"));
     }
 
     #[tokio::test]

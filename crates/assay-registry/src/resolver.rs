@@ -139,7 +139,7 @@ impl PackResolver {
     pub fn with_config(config: ResolverConfig) -> RegistryResult<Self> {
         let client = RegistryClient::new(config.registry.clone())?;
         let cache = PackCache::new()?;
-        let trust_store = TrustStore::new();
+        let trust_store = TrustStore::from_production_roots()?;
 
         Ok(Self {
             client,
@@ -556,6 +556,14 @@ mod tests {
 
         assert!(matches!(result.source, ResolveSource::Bundled(_)));
         assert!(result.content.contains("name: my-pack"));
+    }
+
+    #[tokio::test]
+    async fn test_with_config_bootstraps_embedded_production_roots() -> RegistryResult<()> {
+        let resolver = PackResolver::with_config(ResolverConfig::default().allow_unsigned())?;
+        let keys = resolver.trust_store().list_keys().await;
+        assert!(!keys.is_empty());
+        Ok(())
     }
 
     #[test]
