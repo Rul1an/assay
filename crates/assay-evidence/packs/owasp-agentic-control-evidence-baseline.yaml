@@ -1,0 +1,84 @@
+name: owasp-agentic-control-evidence-baseline
+version: "1.0.0"
+kind: security
+description: OWASP Agentic ASI01/ASI03/ASI05 control-evidence subset baseline
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack verifies only baseline control-evidence presence for a narrow subset
+  of OWASP Agentic ASI01, ASI03, and ASI05.
+  Passing these checks does NOT prove exploit detection, preventive enforcement,
+  execution authorization, containment, or sandboxing.
+
+requires:
+  assay_min_version: ">=3.2.2"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A1-002
+    severity: warning
+    description: Decision events include governance rationale fields.
+    article_ref: "ASI01"
+    help_markdown: |
+      ## ASI01 Agent Goal Hijack - Governance Rationale Control Evidence
+
+      This rule verifies that at least one governance-rationale field is present
+      on an `assay.tool.decision` event.
+
+      **What this checks:**
+      - At least one decision event contains `reason_code` or `approval_state`
+
+      **What this does not prove:**
+      - Behavioral anomaly detection
+      - Deceptive tool-output analysis
+      - Multi-step drift analysis
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/reason_code
+        - /data/approval_state
+
+  - id: A3-001
+    severity: warning
+    description: Decision events capture authorization context.
+    article_ref: "ASI03"
+    help_markdown: |
+      ## ASI03 Identity & Privilege Abuse - Authorization Context Evidence
+
+      This rule verifies that at least one authorization-context field is present
+      on an `assay.tool.decision` event.
+
+      **What this checks:**
+      - At least one decision event contains `principal` or `approval_state`
+
+      **What this does not prove:**
+      - Linkage enforcement
+      - Delegation visibility
+      - Approval validity enforcement
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/principal
+        - /data/approval_state
+
+  - id: A5-001
+    severity: warning
+    description: Process execution evidence is present in the baseline flow.
+    article_ref: "ASI05"
+    help_markdown: |
+      ## ASI05 Unexpected Code Execution - Execution Evidence Presence
+
+      This rule verifies that the baseline evidence flow records an
+      `assay.process.exec` event.
+
+      **What this checks:**
+      - At least one event matches `assay.process.exec`
+
+      **What this does not prove:**
+      - Execution authorization
+      - Containment
+      - Sandboxing
+    check:
+      type: event_type_exists
+      pattern: assay.process.exec
