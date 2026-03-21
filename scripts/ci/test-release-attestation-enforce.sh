@@ -27,6 +27,16 @@ if [ "$#" -lt 3 ] || [ "$1" != "attestation" ] || [ "$2" != "verify" ]; then
   exit 1
 fi
 
+if [ -n "${FAKE_GH_COUNTDOWN_FILE:-}" ] && [ -f "$FAKE_GH_COUNTDOWN_FILE" ]; then
+  current_count="$(cat "$FAKE_GH_COUNTDOWN_FILE")"
+  if [ "$current_count" -gt 0 ]; then
+    next_count=$((current_count - 1))
+    printf '%s\n' "$next_count" > "$FAKE_GH_COUNTDOWN_FILE"
+    echo "simulated gh failure" >&2
+    exit 1
+  fi
+fi
+
 cat "$FAKE_GH_JSON"
 EOF
   chmod +x "$path"
@@ -160,6 +170,44 @@ run_success_case() {
   grep -F -- '--deny-self-hosted-runners' "$log" >/dev/null
 }
 
+run_retry_success_case() {
+  local temp_dir="$1"
+  local assets_dir="$temp_dir/assets-retry-success"
+  local raw_dir="$temp_dir/raw-retry-success"
+  local summary="$temp_dir/summary-retry-success.json"
+  local stderr_file="$temp_dir/retry-success.stderr"
+  local log="$temp_dir/gh-retry-success.log"
+  local json="$temp_dir/gh-retry-success.json"
+  local countdown_file="$temp_dir/gh-retry-success.countdown"
+  local fake_gh="$temp_dir/fake-gh-retry-success"
+
+  mkdir -p "$assets_dir" "$raw_dir"
+  printf 'release bytes\n' > "$assets_dir/test-asset.tar.gz"
+  local digest
+  digest="$(compute_sha256 "$assets_dir/test-asset.tar.gz")"
+  write_success_json "$json" "$digest"
+  make_fake_gh "$fake_gh"
+  printf '1\n' > "$countdown_file"
+
+  FAKE_GH_JSON="$json" \
+  FAKE_GH_LOG="$log" \
+  FAKE_GH_COUNTDOWN_FILE="$countdown_file" \
+  GH_BIN="$fake_gh" \
+  ASSETS_DIR="$assets_dir" \
+  OUT_SUMMARY="$summary" \
+  OUT_RAW_DIR="$raw_dir" \
+  REPO="Rul1an/assay" \
+  SIGNER_WORKFLOW="Rul1an/assay/.github/workflows/release.yml" \
+  SOURCE_REF="refs/tags/v9.9.9" \
+  SOURCE_DIGEST="abc123" \
+  ATTESTATION_VERIFY_MAX_RETRIES=2 \
+  ATTESTATION_VERIFY_RETRY_DELAY_SECONDS=0 \
+  bash "$SCRIPT" 2>"$stderr_file"
+
+  grep -F 'retrying in 0s' "$stderr_file" >/dev/null
+  jq -e '.assets[0].verified_attestations == 1' "$summary" >/dev/null
+}
+
 run_missing_witness_case() {
   local temp_dir="$1"
   local assets_dir="$temp_dir/assets-missing-witness"
@@ -272,6 +320,7 @@ main() {
   trap cleanup EXIT
 
   run_success_case "$TEST_TEMP_DIR"
+  run_retry_success_case "$TEST_TEMP_DIR"
   run_missing_attestation_case "$TEST_TEMP_DIR"
   run_missing_witness_case "$TEST_TEMP_DIR"
   run_digest_mismatch_case "$TEST_TEMP_DIR"

@@ -12,6 +12,8 @@ SOURCE_REF="${SOURCE_REF:?SOURCE_REF is required}"
 SOURCE_DIGEST="${SOURCE_DIGEST:?SOURCE_DIGEST is required}"
 CERT_OIDC_ISSUER="${CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 PREDICATE_TYPE="${PREDICATE_TYPE:-https://slsa.dev/provenance/v1}"
+ATTESTATION_VERIFY_MAX_RETRIES="${ATTESTATION_VERIFY_MAX_RETRIES:-5}"
+ATTESTATION_VERIFY_RETRY_DELAY_SECONDS="${ATTESTATION_VERIFY_RETRY_DELAY_SECONDS:-5}"
 
 compute_sha256() {
   local file="$1"
@@ -55,16 +57,33 @@ for asset in "${assets[@]}"; do
   asset_name="$(basename "$asset")"
   raw_file="$OUT_RAW_DIR/${asset_name}.attestation.json"
   asset_sha256="$(compute_sha256 "$asset")"
+  verify_json=""
+  attempt=1
+  delay_seconds="$ATTESTATION_VERIFY_RETRY_DELAY_SECONDS"
 
-  verify_json="$("$GH_BIN" attestation verify "$asset" \
-    --repo "$REPO" \
-    --signer-workflow "$SIGNER_WORKFLOW" \
-    --cert-oidc-issuer "$CERT_OIDC_ISSUER" \
-    --predicate-type "$PREDICATE_TYPE" \
-    --source-digest "$SOURCE_DIGEST" \
-    --source-ref "$SOURCE_REF" \
-    --deny-self-hosted-runners \
-    --format json)"
+  while :; do
+    if verify_json="$("$GH_BIN" attestation verify "$asset" \
+      --repo "$REPO" \
+      --signer-workflow "$SIGNER_WORKFLOW" \
+      --cert-oidc-issuer "$CERT_OIDC_ISSUER" \
+      --predicate-type "$PREDICATE_TYPE" \
+      --source-digest "$SOURCE_DIGEST" \
+      --source-ref "$SOURCE_REF" \
+      --deny-self-hosted-runners \
+      --format json)"; then
+      break
+    fi
+
+    if [ "$attempt" -ge "$ATTESTATION_VERIFY_MAX_RETRIES" ]; then
+      echo "Attestation verification failed for ${asset_name} after ${ATTESTATION_VERIFY_MAX_RETRIES} attempts" >&2
+      exit 1
+    fi
+
+    echo "Attestation verify failed for ${asset_name} (attempt ${attempt}/${ATTESTATION_VERIFY_MAX_RETRIES}); retrying in ${delay_seconds}s..." >&2
+    sleep "$delay_seconds"
+    attempt=$((attempt + 1))
+    delay_seconds=$((delay_seconds * 2))
+  done
 
   printf '%s\n' "$verify_json" > "$raw_file"
 
@@ -96,9 +115,9 @@ for asset in "${assets[@]}"; do
         sha256: $sha256,
         raw_attestation_file: $raw_file,
         verified_attestations: length,
-        predicate_types: ([.[].verificationResult.statement.predicateType // empty] | unique | sort),
+        predicate_types: ([.[].verificationResult.statement.predicateType // empty] | sort | unique),
         verified_timestamp_count: ([.[].verificationResult.verifiedTimestamps[]?] | length),
-        subjects: ([.[].verificationResult.statement.subject[]? | {name, digest}] | unique)
+        subjects: ([.[].verificationResult.statement.subject[]? | {name, digest}] | sort_by(.name, (.digest | tostring)) | unique_by(.name, .digest))
       }
     ' >> "$asset_summaries_jsonl"
 done
