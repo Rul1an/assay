@@ -109,8 +109,8 @@ does not verify privilege abuse, and it does not prove sandboxing.
 ### Run A Real Failing Example
 
 This repository includes a small evidence bundle fixture that already contains
-`assay.process.exec`, but does **not** contain the decision-context fields that
-`A1-002` and `A3-001` expect.
+`assay.process.exec`, but does **not** contain the governance/authz fields that
+`A1-002` and `A3-001` check for, typically on `assay.tool.decision`.
 
 Run:
 
@@ -144,8 +144,10 @@ Relevant output fragment:
 
 Why only two findings appear:
 
-- `A1-002` fails because no decision event has `reason_code` or `approval_state`
-- `A3-001` fails because no decision event has `principal` or `approval_state`
+- `A1-002` fails because no event in the bundle contains `reason_code` or
+  `approval_state`
+- `A3-001` fails because no event in the bundle contains `principal` or
+  `approval_state`
 - `A5-001` **passes** because the bundle already contains `assay.process.exec`
 
 ### Minimal Passing Shape
@@ -160,10 +162,10 @@ below:
 
 That is enough for the shipped rules because:
 
-- `A1-002` passes when **at least one** decision event contains `reason_code`
-  or `approval_state`
-- `A3-001` passes when **at least one** decision event contains `principal`
-  or `approval_state`
+- `A1-002` passes when **at least one** event contains `reason_code` or
+  `approval_state`, typically on `assay.tool.decision`
+- `A3-001` passes when **at least one** event contains `principal` or
+  `approval_state`, typically on `assay.tool.decision`
 - `A5-001` passes when **at least one** event matches `assay.process.exec`
 
 What the pack proves:
