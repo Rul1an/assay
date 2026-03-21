@@ -33,6 +33,10 @@ pub static BUILTIN_PACKS: &[(&str, &str)] = &[
         include_str!("../../../packs/mandate-baseline.yaml"),
     ),
     (
+        "owasp-agentic-control-evidence-baseline",
+        include_str!("../../../packs/owasp-agentic-control-evidence-baseline.yaml"),
+    ),
+    (
         "soc2-baseline",
         include_str!("../../../packs/soc2-baseline.yaml"),
     ),
