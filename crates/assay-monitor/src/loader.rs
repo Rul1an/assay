@@ -306,28 +306,29 @@ impl LinuxMonitor {
         let bpf = self.bpf.lock().unwrap();
         let mut stats = MonitorStatsSnapshot::default();
 
-        if let Some(map) = bpf.map("STATS") {
-            let array: AyaArray<_, u32> = AyaArray::try_from(map)?;
-            stats.tracepoint_events_emitted = array
-                .get(&MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, 0)
-                .unwrap_or(0);
-            stats.tracepoint_ringbuf_dropped = array
-                .get(&MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, 0)
-                .unwrap_or(0);
-            stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
-            stats.lsm_ringbuf_dropped =
-                array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
-        }
+        let map = bpf
+            .map("STATS")
+            .ok_or(MonitorError::MapNotFound { name: "STATS" })?;
+        let array: AyaArray<_, u32> = AyaArray::try_from(map)?;
+        stats.tracepoint_events_emitted = array
+            .get(&MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.tracepoint_ringbuf_dropped = array
+            .get(&MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
+        stats.lsm_ringbuf_dropped = array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
 
-        if let Some(map) = bpf.map("SOCKET_STATS") {
-            let array: AyaArray<_, u64> = AyaArray::try_from(map)?;
-            stats.socket_checks = array.get(&SOCKET_STAT_CHECKS, 0).unwrap_or(0);
-            stats.socket_blocked_cidr = array.get(&SOCKET_STAT_BLOCKED_CIDR, 0).unwrap_or(0);
-            stats.socket_blocked_port = array.get(&SOCKET_STAT_BLOCKED_PORT, 0).unwrap_or(0);
-            stats.socket_allowed = array.get(&SOCKET_STAT_ALLOWED, 0).unwrap_or(0);
-            stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
-            stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
-        }
+        let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
+            name: "SOCKET_STATS",
+        })?;
+        let array: AyaArray<_, u64> = AyaArray::try_from(map)?;
+        stats.socket_checks = array.get(&SOCKET_STAT_CHECKS, 0).unwrap_or(0);
+        stats.socket_blocked_cidr = array.get(&SOCKET_STAT_BLOCKED_CIDR, 0).unwrap_or(0);
+        stats.socket_blocked_port = array.get(&SOCKET_STAT_BLOCKED_PORT, 0).unwrap_or(0);
+        stats.socket_allowed = array.get(&SOCKET_STAT_ALLOWED, 0).unwrap_or(0);
+        stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
+        stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
 
         Ok(stats)
     }

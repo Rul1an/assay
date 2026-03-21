@@ -1,6 +1,6 @@
 use crate::vmlinux::{file, inode, super_block};
 use crate::{
-    CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS, STATS,
+    inc_stat, CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS,
 };
 use assay_common::{
     KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
@@ -19,13 +19,6 @@ const FILE_BLOCKED_DEV_OFFSET: usize = 0;
 const FILE_BLOCKED_INO_OFFSET: usize = 8;
 const FILE_BLOCKED_CGROUP_OFFSET: usize = 16;
 const FILE_BLOCKED_RULE_ID_OFFSET: usize = 24;
-
-#[inline(always)]
-fn inc_stat(index: u32) {
-    if let Some(val) = STATS.get_ptr_mut(index) {
-        unsafe { *val += 1 };
-    }
-}
 
 #[map]
 static DENY_PATHS_EXACT: HashMap<u64, u32> = HashMap::with_max_entries(MAX_DENY_PATHS, 0);
