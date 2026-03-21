@@ -559,11 +559,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_with_config_bootstraps_embedded_production_roots() {
-        let resolver =
-            PackResolver::with_config(ResolverConfig::default().allow_unsigned()).unwrap();
+    async fn test_with_config_bootstraps_embedded_production_roots() -> RegistryResult<()> {
+        let resolver = PackResolver::with_config(ResolverConfig::default().allow_unsigned())?;
         let keys = resolver.trust_store().list_keys().await;
         assert!(!keys.is_empty());
+        Ok(())
     }
 
     #[test]

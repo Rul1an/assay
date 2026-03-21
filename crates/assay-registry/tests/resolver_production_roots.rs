@@ -38,17 +38,18 @@ fn resolver_with_production_roots(
     ))
 }
 
-fn envelope_with_key_id(key_id: &str) -> String {
-    let bytes = BASE64.decode(ROOTED_TRUST_SIGNATURE_B64).unwrap();
-    let mut envelope: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+fn envelope_with_key_id(key_id: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = BASE64.decode(ROOTED_TRUST_SIGNATURE_B64)?;
+    let mut envelope: serde_json::Value = serde_json::from_slice(&bytes)?;
     envelope["signatures"][0]["keyid"] = serde_json::Value::String(key_id.to_string());
-    BASE64.encode(serde_json::to_vec(&envelope).unwrap())
+    Ok(BASE64.encode(serde_json::to_vec(&envelope)?))
 }
 
 #[tokio::test]
-async fn resolver_accepts_signed_pack_with_embedded_production_root() {
+async fn resolver_accepts_signed_pack_with_embedded_production_root(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mock_server = MockServer::start().await;
-    let cache_dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new()?;
     let digest = compute_digest(ROOTED_TRUST_CONTENT);
 
     Mock::given(method("GET"))
@@ -63,20 +64,25 @@ async fn resolver_accepts_signed_pack_with_embedded_production_root() {
         .mount(&mock_server)
         .await;
 
-    let resolver = resolver_with_production_roots(&mock_server, &cache_dir).unwrap();
-    let resolved = resolver.resolve("rooted-trust@1.0.0").await.unwrap();
+    let resolver = resolver_with_production_roots(&mock_server, &cache_dir)?;
+    let resolved = resolver.resolve("rooted-trust@1.0.0").await?;
 
     assert!(matches!(resolved.source, ResolveSource::Registry(_)));
-    let verification = resolved.verification.expect("signed pack should verify");
+    let verification = match resolved.verification {
+        Some(verification) => verification,
+        None => return Err("signed pack should verify".into()),
+    };
     assert_eq!(verification.key_id.as_deref(), Some(ROOT_KEY_ID));
     assert_eq!(verification.digest, digest);
+    Ok(())
 }
 
 #[tokio::test]
-async fn resolver_rejects_signed_pack_with_untrusted_key_id() {
+async fn resolver_rejects_signed_pack_with_untrusted_key_id(
+) -> Result<(), Box<dyn std::error::Error>> {
     let mock_server = MockServer::start().await;
-    let cache_dir = TempDir::new().unwrap();
-    let untrusted_signature = envelope_with_key_id("sha256:deadbeef");
+    let cache_dir = TempDir::new()?;
+    let untrusted_signature = envelope_with_key_id("sha256:deadbeef")?;
 
     Mock::given(method("GET"))
         .and(path("/packs/rooted-trust/1.0.0"))
@@ -93,8 +99,12 @@ async fn resolver_rejects_signed_pack_with_untrusted_key_id() {
         .mount(&mock_server)
         .await;
 
-    let resolver = resolver_with_production_roots(&mock_server, &cache_dir).unwrap();
-    let err = resolver.resolve("rooted-trust@1.0.0").await.unwrap_err();
+    let resolver = resolver_with_production_roots(&mock_server, &cache_dir)?;
+    let err = match resolver.resolve("rooted-trust@1.0.0").await {
+        Ok(_) => return Err("untrusted key id should fail".into()),
+        Err(err) => err,
+    };
 
     assert!(matches!(err, RegistryError::KeyNotTrusted { .. }));
+    Ok(())
 }

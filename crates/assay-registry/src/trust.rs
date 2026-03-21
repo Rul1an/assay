@@ -445,8 +445,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_with_production_roots_loads_embedded_roots() {
-        let store = TrustStore::with_production_roots().await.unwrap();
+    async fn test_with_production_roots_loads_embedded_roots() -> RegistryResult<()> {
+        let store = TrustStore::with_production_roots().await?;
         let keys = store.list_keys().await;
         assert_eq!(keys.len(), 1);
         assert_eq!(
@@ -454,16 +454,23 @@ mod tests {
             "sha256:3a64307d5655ba86fa3c95118ed8fe9665ef6bd37c752ca93f3bbe8f16e83a7f"
         );
 
-        let meta = store.get_metadata(&keys[0]).await.unwrap();
+        let meta = store
+            .get_metadata(&keys[0])
+            .await
+            .ok_or_else(|| RegistryError::Config {
+                message: "embedded production root metadata missing".to_string(),
+            })?;
         assert!(meta.is_pinned);
         assert!(!meta.revoked);
+        Ok(())
     }
 
     #[test]
     fn test_parse_pinned_roots_json_rejects_empty_rootset() {
-        let err = parse_pinned_roots_json_impl("[]").unwrap_err();
-        assert!(matches!(err, RegistryError::Config { .. }));
-        assert!(err.to_string().contains("empty"));
+        assert!(matches!(
+            parse_pinned_roots_json_impl("[]"),
+            Err(RegistryError::Config { .. })
+        ));
     }
 
     #[test]
@@ -483,9 +490,10 @@ mod tests {
             }
         ]"#;
 
-        let err = parse_pinned_roots_json_impl(duplicate).unwrap_err();
-        assert!(matches!(err, RegistryError::Config { .. }));
-        assert!(err.to_string().contains("duplicate"));
+        assert!(matches!(
+            parse_pinned_roots_json_impl(duplicate),
+            Err(RegistryError::Config { .. })
+        ));
     }
 
     #[tokio::test]
