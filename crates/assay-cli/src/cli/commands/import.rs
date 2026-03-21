@@ -9,11 +9,8 @@ use std::path::Path;
 
 pub fn cmd_import(args: ImportArgs) -> Result<i32> {
     let input_path = args.input;
-    let format_enum = match args.format.as_str() {
-        "inspector" | "mcp-inspector" | "mcp-inspector@v1" => McpInputFormat::Inspector,
-        "jsonrpc" => McpInputFormat::JsonRpc,
-        other => anyhow::bail!("unknown format: {}", other),
-    };
+    let format_enum = McpInputFormat::from_cli_label(&args.format)
+        .ok_or_else(|| anyhow::anyhow!("unknown format: {}", args.format))?;
 
     println!("Importing MCP transcript from: {:?}", input_path);
     let text = fs::read_to_string(&input_path)

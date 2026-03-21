@@ -118,7 +118,7 @@ pub enum TraceSub {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Import an MCP transcript (Inspector/JSON-RPC) and convert to Assay V2 trace
+    /// Import an MCP transcript and convert to Assay V2 trace
     ImportMcp {
         #[arg(long)]
         input: PathBuf,
@@ -126,7 +126,7 @@ pub enum TraceSub {
         #[arg(long)]
         out_trace: PathBuf,
 
-        /// Input format: inspector | jsonrpc
+        /// Input format: inspector | jsonrpc | streamable-http | http-sse | sse-legacy (alias for http-sse)
         #[arg(long, default_value = "inspector")]
         format: String,
 

@@ -1,268 +1,271 @@
 # Import Formats
 
-Supported log formats for importing traces into Assay.
+Supported MCP transcript formats for importing traces into Assay.
 
 ---
 
 ## Overview
 
-Assay can import agent sessions from various sources:
+Assay can import MCP sessions from these sources:
 
 | Format | Source | Status |
 |--------|--------|--------|
-| `inspector` | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | ✅ Supported |
-| `jsonrpc` | Raw JSON-RPC 2.0 messages | ✅ Supported |
-| `langchain` | LangChain traces | 🔜 Coming soon |
-| `llamaindex` | LlamaIndex traces | 🔜 Coming soon |
+| `inspector` | [MCP Inspector](https://github.com/modelcontextprotocol/inspector) | Supported |
+| `jsonrpc` | Raw JSON-RPC 2.0 messages | Supported |
+| `streamable-http` | Modern MCP Streamable HTTP transcript capture | Supported |
+| `http-sse` | Assay import label for deprecated MCP HTTP+SSE captures | Supported |
+
+`streamable-http` is the modern HTTP baseline in the MCP transports specification.
+`http-sse` is an Assay compatibility label for the deprecated legacy HTTP+SSE transport family.
+Assay also accepts `sse-legacy` as a CLI alias for `http-sse`, but only `http-sse` is documented as the canonical import label.
 
 ---
 
-## MCP Inspector
+## CLI Usage
 
-The primary format for MCP-based agents.
-
-### Export from MCP Inspector
-
-1. Run your agent session in MCP Inspector
-2. **File → Export Session → JSON**
-3. Save as `session.json`
-
-### Import
+Two CLI surfaces accept the same MCP import formats:
 
 ```bash
-assay import --format inspector session.json
+assay import session.json --format streamable-http --out-trace session.trace.jsonl
+assay trace import-mcp --input session.json --format http-sse --out-trace session.trace.jsonl
 ```
 
-### Format Structure
+Supported values:
+
+- `inspector`
+- `jsonrpc`
+- `streamable-http`
+- `http-sse`
+
+Compatibility alias:
+
+- `sse-legacy` maps to `http-sse`
+
+---
+
+## Canonical Transport Envelope
+
+Assay uses one canonical JSON envelope for both HTTP-based transcript imports.
+The CLI labels stay kebab-case, and the envelope `transport` field uses the same kebab-case values.
 
 ```json
 {
-  "messages": [
+  "transport": "streamable-http",
+  "transport_context": {
+    "headers": {
+      "MCP-Protocol-Version": "2025-06-18",
+      "Mcp-Session-Id": "session-123"
+    }
+  },
+  "entries": [
     {
-      "jsonrpc": "2.0",
-      "id": 1,
-      "method": "tools/call",
-      "params": {
-        "name": "get_customer",
-        "arguments": { "id": "cust_123" }
+      "timestamp_ms": 1000,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "tools/call",
+        "params": {
+          "name": "lookup_customer",
+          "arguments": { "id": "cust_123" }
+        }
       }
     },
     {
-      "jsonrpc": "2.0",
-      "id": 1,
-      "result": {
-        "content": [
-          { "type": "text", "text": "{\"name\": \"Alice\"}" }
-        ],
-        "isError": false
+      "timestamp_ms": 1001,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": { "name": "Alice" }
+      }
+    },
+    {
+      "timestamp_ms": 1002,
+      "transport_context": {
+        "headers": {
+          "Last-Event-ID": "evt-9"
+        }
+      },
+      "sse": {
+        "event": "message",
+        "id": "evt-10",
+        "data": {
+          "jsonrpc": "2.0",
+          "method": "notifications/progress",
+          "params": { "progress": 50 }
+        }
       }
     }
   ]
 }
 ```
 
-### Field Mapping
+Rules:
 
-| MCP Inspector | Assay Trace |
-|---------------|-------------|
-| `params.name` | `tool` |
-| `params.arguments` | `arguments` |
-| `result.content` | `result` |
-| `id` | Links call to result |
-
----
-
-## JSON-RPC 2.0
-
-Raw JSON-RPC messages, useful for custom MCP implementations.
-
-### Import
-
-```bash
-assay import --format jsonrpc messages.json
-```
-
-### Format Structure
-
-```json
-[
-  {
-    "jsonrpc": "2.0",
-    "id": "call_001",
-    "method": "tools/call",
-    "params": {
-      "name": "apply_discount",
-      "arguments": { "percent": 25 }
-    }
-  },
-  {
-    "jsonrpc": "2.0",
-    "id": "call_001",
-    "result": { "success": true }
-  }
-]
-```
-
-### Notes
-
-- Array of messages (not wrapped in `messages` object)
-- `id` field links requests to responses
-- Only `tools/call` method is processed
+- Each `entries[]` item must contain exactly one of `request`, `response`, or `sse`.
+- `request` is one client-to-server JSON-RPC message.
+- `response` is one server-to-client JSON-RPC message delivered in an HTTP body.
+- `sse.data` may be an object or a string. If it carries a JSON-RPC message, Assay normalizes it through the same JSON-RPC path as `request` and `response`.
+- `sse.event == "message"` may contribute MCP semantics.
+- Legacy control events such as `endpoint`, keepalives, and other transport-only SSE events are ignored for tool/evidence semantics.
+- `transport_context`, `headers`, `MCP-Protocol-Version`, `Mcp-Session-Id`, and `Last-Event-ID` remain transport context in T1. They are accepted in the envelope, but are not promoted into V2 trace fields and do not change semantic equivalence assertions.
 
 ---
 
-## LangChain (Coming Soon)
+## Semantic Normalization Contract
 
-Import from LangChain's tracing format.
+T1 is a transcript compatibility wave. Its goal is canonical semantic equivalence:
 
-### Current Status
+- event count
+- event kind order
+- request/response correlation by JSON-RPC `id`
+- tool name
+- tool arguments
+- tool result or error
+- orphan response behavior
 
-`assay import` currently supports only `inspector` and `jsonrpc` formats.
-For LangChain traces, convert to JSON-RPC first, then run:
+Equivalent sessions imported from `jsonrpc`, `streamable-http`, or `http-sse` should normalize to the same MCP tool semantics and the same Assay V2 tool-call meaning.
 
-```bash
-assay import --format jsonrpc converted.json
-```
+---
 
-### Format (Preview)
+## Streamable HTTP
+
+Use `streamable-http` for captures based on the modern MCP HTTP transport model.
+
+### JSON Response Example
 
 ```json
 {
-  "runs": [
+  "transport": "streamable-http",
+  "entries": [
     {
-      "id": "run_abc123",
-      "name": "Tool",
-      "inputs": {
-        "tool": "get_customer",
-        "tool_input": { "id": "cust_123" }
-      },
-      "outputs": {
-        "output": { "name": "Alice" }
+      "timestamp_ms": 1000,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "call-1",
+        "method": "tools/call",
+        "params": {
+          "name": "Calculator",
+          "arguments": { "a": 1, "b": 2 }
+        }
+      }
+    },
+    {
+      "timestamp_ms": 1001,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": "call-1",
+        "result": { "sum": 3 }
       }
     }
   ]
 }
 ```
 
-### Status
+### SSE Response Example
 
-Currently in development. Track progress at [GitHub Issue #42](https://github.com/Rul1an/assay/issues/42).
-
----
-
-## LlamaIndex (Coming Soon)
-
-Import from LlamaIndex's instrumentation.
-
-### Current Status
-
-`assay import` currently supports only `inspector` and `jsonrpc` formats.
-For LlamaIndex traces, convert to JSON-RPC first, then run:
-
-```bash
-assay import --format jsonrpc converted.json
-```
-
-### Status
-
-Planned for v1.1. Track progress at [GitHub Issue #43](https://github.com/Rul1an/assay/issues/43).
-
----
-
-## Output Format
-
-All imports produce Assay's normalized trace format:
-
-```jsonl
-{"type":"tool_call","id":"1","tool":"get_customer","arguments":{"id":"cust_123"},"timestamp":"2025-12-27T10:00:00Z"}
-{"type":"tool_result","id":"1","result":{"name":"Alice"},"timestamp":"2025-12-27T10:00:01Z"}
-```
-
-### Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | `tool_call` or `tool_result` |
-| `id` | string | Links call to result |
-| `tool` | string | Tool name (calls only) |
-| `arguments` | object | Tool arguments (calls only) |
-| `result` | any | Tool response (results only) |
-| `timestamp` | string | ISO 8601 timestamp |
-
----
-
-## Custom Formats
-
-For unsupported formats, convert to JSON-RPC manually:
-
-```python
-import json
-
-def convert_custom_to_jsonrpc(custom_log):
-    messages = []
-    for i, entry in enumerate(custom_log):
-        # Request
-        messages.append({
-            "jsonrpc": "2.0",
-            "id": str(i),
-            "method": "tools/call",
-            "params": {
-                "name": entry["tool_name"],
-                "arguments": entry["inputs"]
-            }
-        })
-        # Response
-        messages.append({
-            "jsonrpc": "2.0",
-            "id": str(i),
-            "result": entry["outputs"]
-        })
-    return messages
-
-# Save and import
-with open("converted.json", "w") as f:
-    json.dump(convert_custom_to_jsonrpc(my_log), f)
-```
-
-Then import:
-
-```bash
-assay import --format jsonrpc converted.json
+```json
+{
+  "transport": "streamable-http",
+  "entries": [
+    {
+      "timestamp_ms": 1000,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "call-1",
+        "method": "tools/call",
+        "params": {
+          "name": "Calculator",
+          "arguments": { "a": 1, "b": 2 }
+        }
+      }
+    },
+    {
+      "timestamp_ms": 1001,
+      "sse": {
+        "event": "message",
+        "id": "evt-1",
+        "data": {
+          "jsonrpc": "2.0",
+          "id": "call-1",
+          "result": { "sum": 3 }
+        }
+      }
+    }
+  ]
+}
 ```
 
 ---
 
-## Troubleshooting
+## Legacy HTTP+SSE
 
-### "No tool calls found"
+Use `http-sse` for captured sessions from the deprecated MCP HTTP+SSE transport family.
+This is an import compatibility label in Assay, not the modern transport name from the current MCP specification.
 
-The session might not contain `tools/call` messages:
-
-```bash
-# Check what methods are in the file
-cat session.json | jq '.messages[].method' | sort | uniq
+```json
+{
+  "transport": "http-sse",
+  "entries": [
+    {
+      "timestamp_ms": 999,
+      "sse": {
+        "event": "endpoint",
+        "id": "evt-0",
+        "data": "/mcp/messages?session=legacy-session"
+      }
+    },
+    {
+      "timestamp_ms": 1000,
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "call-1",
+        "method": "tools/call",
+        "params": {
+          "name": "Calculator",
+          "arguments": { "a": 1, "b": 2 }
+        }
+      }
+    },
+    {
+      "timestamp_ms": 1001,
+      "sse": {
+        "event": "message",
+        "id": "evt-1",
+        "data": "{\"jsonrpc\":\"2.0\",\"id\":\"call-1\",\"result\":{\"sum\":3}}"
+      }
+    }
+  ]
+}
 ```
 
-### "Invalid JSON"
-
-Validate the file:
-
-```bash
-jq . session.json > /dev/null
-# If no output, JSON is valid
-# If error, fix the syntax
-```
-
-### "Missing required field"
-
-Check that each call has:
-- `params.name` (tool name)
-- `params.arguments` (can be empty `{}`)
+The legacy `endpoint` event is treated as transport-only context and does not affect normalized tool semantics.
 
 ---
 
-## See Also
+## JSON-RPC
 
-- [assay import](../reference/cli/import.md)
-- [Traces](../concepts/traces.md)
-- [MCP Quick Start](quickstart.md)
+`jsonrpc` remains the simplest raw import format for one-message-per-line JSON-RPC captures.
+
+```json
+{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"Calculator","arguments":{"a":1,"b":2}}}
+{"jsonrpc":"2.0","id":"call-1","result":{"sum":3}}
+```
+
+Assay correlates requests and responses by JSON-RPC `id`, just like the HTTP transcript formats.
+
+---
+
+## Out Of Scope In T1
+
+T1 intentionally covers transcript compatibility only.
+It does not implement or validate:
+
+- live HTTP client/server behavior
+- session lifecycle validation
+- `Mcp-Session-Id` semantics
+- `Last-Event-ID` replay or resumability semantics
+- multi-stream SSE delivery correctness
+- DELETE-based session termination
+- origin, auth, or runtime security checks for live transports
+
+Those concerns remain future transport/runtime work.
