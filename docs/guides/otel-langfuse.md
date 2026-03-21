@@ -66,6 +66,24 @@ Now you have both:
 - observability in your existing stack
 - a replayable, verifiable evidence artifact in Assay
 
+## Assay-Native Metric Spans
+
+When you run Assay directly, the runner now emits one `assay.eval.metric` span per metric evaluation. That span is additive to any upstream agent traces you already collect and gives you a stable place to inspect policy latency and result state.
+
+Fields recorded on `assay.eval.metric`:
+
+- `assay.eval.test_id`
+- `assay.eval.metric.name`
+- `assay.eval.response.cached`
+- `assay.eval.metric.score`
+- `assay.eval.metric.passed`
+- `assay.eval.metric.unstable`
+- `assay.eval.metric.duration_ms`
+- `error`
+- `error.message`
+
+This span intentionally records evaluation metadata, not raw prompts or tool arguments, so it stays useful for latency triage without widening the observability payload surface.
+
 ## Langfuse Positioning
 
 Langfuse is great for tracing, prompts, and production observability.

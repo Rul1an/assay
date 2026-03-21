@@ -71,5 +71,15 @@ The monitor requires `CAP_BPF` and `CAP_PERFMON` (or `sudo`).
 sudo assay monitor --ebpf ./target/assay-ebpf.o --policy policy.yaml
 ```
 
+### Operator Output
+
+Blocked-file denials are rendered as structured fields so operators can correlate the kernel event with the exact deny rule:
+
+```text
+[PID 4242] 🛡️ BLOCKED FILE: dev=2050 ino=918273 cgroup=4026532987 rule_id=7
+```
+
+At the end of a run, `assay monitor` also prints a summary of emitted and dropped ring-buffer events for the tracepoint, LSM, and socket paths. If any drop counter is non-zero, the CLI prints a `Ring buffer pressure detected` warning so an operator can distinguish "no events" from "events were dropped under load".
+
 > [!IMPORTANT]
 > Ensure your kernel is booted with `lsm=...,bpf` in the command line parameters to enable BPF LSM support.
