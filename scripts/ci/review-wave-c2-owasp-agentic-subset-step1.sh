@@ -18,7 +18,7 @@ if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
   exit 1
 fi
 
-rg_bin="$(command -v rg)"
+rg_bin="$(command -v rg || true)"
 if [[ -z "$rg_bin" ]]; then
   echo "rg is required for reviewer anchors" >&2
   exit 1
@@ -132,6 +132,8 @@ grep -Fq "this pack proves only that process-execution evidence is present in th
 "$rg_bin" -n -F 'fn c2_pack_contains_no_skip_prone_checks(' "$test_file" >/dev/null
 "$rg_bin" -n -F 'fn c2_readme_explicitly_states_non_goals(' "$test_file" >/dev/null
 "$rg_bin" -n -F 'fn c2_pack_wording_stays_control_evidence_only(' "$test_file" >/dev/null
+"$rg_bin" -n -F 'fn c2_a1_any_of_fields_accept_single_governance_field(' "$test_file" >/dev/null
+"$rg_bin" -n -F 'fn c2_a3_any_of_fields_accept_single_authz_field(' "$test_file" >/dev/null
 
 cargo fmt --check
 cargo clippy -q -p assay-evidence --all-targets -- -D warnings

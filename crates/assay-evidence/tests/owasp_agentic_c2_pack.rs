@@ -136,6 +136,30 @@ fn bundle_missing_a1_fields() -> Vec<u8> {
     ])
 }
 
+fn bundle_a1_with_single_governance_field() -> Vec<u8> {
+    make_bundle(vec![
+        make_event(
+            "assay.tool.decision",
+            "run_c2_a1_single",
+            0,
+            json!({
+                "tool": "tool.commit",
+                "decision": "allow",
+                "approval_state": "granted",
+                "principal": "user:alice"
+            }),
+        ),
+        make_event(
+            "assay.process.exec",
+            "run_c2_a1_single",
+            1,
+            json!({
+                "hits": 1
+            }),
+        ),
+    ])
+}
+
 fn bundle_missing_a3_fields() -> Vec<u8> {
     make_bundle(vec![
         make_event(
@@ -151,6 +175,30 @@ fn bundle_missing_a3_fields() -> Vec<u8> {
         make_event(
             "assay.process.exec",
             "run_c2_a3_missing",
+            1,
+            json!({
+                "hits": 1
+            }),
+        ),
+    ])
+}
+
+fn bundle_a3_with_single_authz_field() -> Vec<u8> {
+    make_bundle(vec![
+        make_event(
+            "assay.tool.decision",
+            "run_c2_a3_single",
+            0,
+            json!({
+                "tool": "tool.commit",
+                "decision": "allow",
+                "reason_code": "ALLOW_BY_POLICY",
+                "approval_state": "granted"
+            }),
+        ),
+        make_event(
+            "assay.process.exec",
+            "run_c2_a3_single",
             1,
             json!({
                 "hits": 1
@@ -386,6 +434,18 @@ fn c2_missing_governance_rationale_fails_a1_002() {
 }
 
 #[test]
+fn c2_a1_any_of_fields_accept_single_governance_field() {
+    let result = lint_with_pack(
+        load_builtin_pack(),
+        &bundle_a1_with_single_governance_field(),
+    );
+    assert!(
+        !has_rule_finding(&result, "owasp-agentic-control-evidence-baseline", "A1-002"),
+        "A1-002 should pass when one governance field is present"
+    );
+}
+
+#[test]
 fn c2_missing_authorization_context_fails_a3_001() {
     let result = lint_with_pack(load_builtin_pack(), &bundle_missing_a3_fields());
     assert!(has_rule_finding(
@@ -393,6 +453,15 @@ fn c2_missing_authorization_context_fails_a3_001() {
         "owasp-agentic-control-evidence-baseline",
         "A3-001"
     ));
+}
+
+#[test]
+fn c2_a3_any_of_fields_accept_single_authz_field() {
+    let result = lint_with_pack(load_builtin_pack(), &bundle_a3_with_single_authz_field());
+    assert!(
+        !has_rule_finding(&result, "owasp-agentic-control-evidence-baseline", "A3-001"),
+        "A3-001 should pass when one authorization field is present"
+    );
 }
 
 #[test]
