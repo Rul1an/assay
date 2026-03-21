@@ -35,11 +35,13 @@ This document outlines the canonical checklist for releasing new versions of Ass
   ```
 - [ ] **Watch CI**: Monitor the `release.yml` workflow.
   - Step: `Publish to Crates.io` (uses `scripts/ci/publish_idempotent.sh`).
-  - Step: `Create GitHub Release` (upload binaries).
+  - Step: `Create GitHub Release` (upload binaries and release assets).
+  - Step: `Generate CycloneDX SBOM bundle` (produces `release/assay-${VERSION}-sbom-cyclonedx.tar.gz` plus `.sha256`).
 
 ### 4. Verification
 - [ ] **Install Check**: `cargo install assay-cli --version 2.2.3`
 - [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag v2.2.3`.
+- [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
 
 ## Troubleshooting
 

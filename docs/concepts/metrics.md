@@ -22,7 +22,9 @@ Metrics are:
 
 ## Built-in Metrics
 
-Assay ships with three core metrics:
+Assay ships with deterministic metrics for both classic eval checks and MCP-specific integrity checks.
+
+### Core Eval Metrics
 
 | Metric | Validates | Output |
 |--------|-----------|--------|
@@ -31,6 +33,65 @@ Assay ships with three core metrics:
 | `tool_blocklist` | Forbidden tools weren't called | Pass/Fail (count) |
 
 All three are **deterministic** — no floats, no subjective thresholds, no LLM-as-judge.
+
+### MCP Integrity Metrics
+
+These metrics are useful when your traces include MCP tool-definition metadata from a proxy or trace capture layer.
+
+| Metric | Validates | Key config |
+|--------|-----------|------------|
+| `tool_description_integrity` | Tool descriptions and input schemas stay pinned or unchanged across snapshots | `pinned_tools` |
+| `tool_output_valid` | Tool results match per-tool JSON Schemas | `schemas` |
+| `tool_collision_detect` | The same tool name is not registered by multiple MCP servers unless explicitly trusted | `trusted_servers` |
+
+#### `tool_description_integrity`
+
+Use pinned mode when you want to compare a trace against operator-approved tool definitions:
+
+```yaml
+tests:
+  - id: tool_pins
+    expected:
+      type: tool_description_integrity
+      pinned_tools:
+        - name: read_file
+          description: Reads a file from disk
+          schema_sha256: "4d8d8f0d7d4a0f4b9f47d59a3cce5d6e8f4e2b5a1a5ef9e8e2b5e8c6d2a4d901"
+```
+
+Leave `pinned_tools` empty to switch to snapshot mode. In that mode, Assay compares multiple `tools/list` snapshots in the same trace and flags mid-session mutations.
+
+#### `tool_output_valid`
+
+`tool_output_valid` complements `args_valid`: it validates what the tool returns, not just what the agent sent.
+
+```yaml
+tests:
+  - id: tool_outputs
+    expected:
+      type: tool_output_valid
+      schemas:
+        exec:
+          type: object
+          required: [exit_code]
+          properties:
+            exit_code: { type: integer }
+            stdout: { type: string }
+```
+
+#### `tool_collision_detect`
+
+Use `trusted_servers` when duplicate tool names are expected only inside a known MCP cluster.
+
+```yaml
+tests:
+  - id: no_tool_shadowing
+    expected:
+      type: tool_collision_detect
+      trusted_servers:
+        - trusted-fileserver
+        - trusted-search
+```
 
 ---
 

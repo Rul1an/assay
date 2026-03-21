@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### MCP Security
+
+- **New MCP integrity metrics**: Added `tool_description_integrity`, `tool_output_valid`, and `tool_collision_detect` to cover tool-definition drift, output-schema contracts, and cross-server tool shadowing.
+
+### Observability
+
+- **Runtime monitor output**: `assay monitor` blocked-file events now print structured `dev`, `ino`, `cgroup`, and `rule_id` fields instead of raw payload text.
+- **Ring buffer pressure summary**: `assay monitor` now reports emitted and dropped ring-buffer counters for tracepoint, LSM, and socket monitor paths at the end of a run.
+- **Metric evaluation spans**: The runner now emits one `assay.eval.metric` span per metric evaluation with stable fields for latency, cached status, pass/fail, unstable state, and error reporting.
+
+### Supply Chain
+
+- **CycloneDX release asset**: Release builds now publish `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256` alongside the existing binaries.
+
 ---
 
 ## [v3.2.2] - 2026-03-17
