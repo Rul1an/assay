@@ -14,6 +14,8 @@ CERT_OIDC_ISSUER="${CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.co
 PREDICATE_TYPE="${PREDICATE_TYPE:-https://slsa.dev/provenance/v1}"
 ATTESTATION_VERIFY_MAX_RETRIES="${ATTESTATION_VERIFY_MAX_RETRIES:-5}"
 ATTESTATION_VERIFY_RETRY_DELAY_SECONDS="${ATTESTATION_VERIFY_RETRY_DELAY_SECONDS:-5}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INVENTORY_SCRIPT="${INVENTORY_SCRIPT:-${SCRIPT_DIR}/release_archive_inventory.sh}"
 
 compute_sha256() {
   local file="$1"
@@ -34,6 +36,7 @@ require_bin() {
 
 require_bin "$GH_BIN"
 require_bin "$JQ_BIN"
+require_bin "$INVENTORY_SCRIPT"
 
 mkdir -p "$OUT_RAW_DIR"
 mkdir -p "$(dirname "$OUT_SUMMARY")"
@@ -41,7 +44,7 @@ mkdir -p "$(dirname "$OUT_SUMMARY")"
 assets=()
 while IFS= read -r asset; do
   assets+=("$asset")
-done < <(find "$ASSETS_DIR" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print | sort)
+done < <("$INVENTORY_SCRIPT" "$ASSETS_DIR")
 
 if [ "${#assets[@]}" -eq 0 ]; then
   echo "No release archives found for attestation verification" >&2

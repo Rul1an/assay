@@ -354,6 +354,20 @@ jobs:
           bash scripts/ci/release_attestation_enforce.sh
           shasum -a 256 "${OUT_SUMMARY}" > "${OUT_SUMMARY}.sha256"
 
+      - name: Build release proof kit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSETS_DIR: release
+          PROVENANCE_SUMMARY: release/assay-${{ steps.version.outputs.version }}-release-provenance.json
+          PROVENANCE_SUMMARY_SHA256: release/assay-${{ steps.version.outputs.version }}-release-provenance.json.sha256
+          OUT_ARCHIVE: release/assay-${{ steps.version.outputs.version }}-release-proof-kit.tar.gz
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/release_proof_kit_build.sh
+          shasum -a 256 "${OUT_ARCHIVE}" > "${OUT_ARCHIVE}.sha256"
+
       - name: Upload release provenance evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
