@@ -18,7 +18,7 @@ without overclaiming?
 - Unsupported checks, including `conditional`, are skipped for `security`
   packs. That behavior is a release risk for any future `C2` pack and is
   covered by a mandatory test in
-  [owasp_agentic_c1_mapping.rs](/private/tmp/assay-wave-c1/crates/assay-evidence/tests/owasp_agentic_c1_mapping.rs).
+  [owasp_agentic_c1_mapping.rs](../../crates/assay-evidence/tests/owasp_agentic_c1_mapping.rs).
 - `event_types` exists in the pack schema, but `C1` treats it as metadata only.
   This wave does not rely on it for executable scoping.
 - A `signal gap` in this document is not based on repo search alone. It must be

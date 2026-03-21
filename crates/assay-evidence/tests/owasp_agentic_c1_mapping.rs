@@ -15,8 +15,8 @@ fn fixture_pack(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn load_probe_pack(name: &str) -> LoadedPack {
-    load_pack_from_file(&fixture_pack(name)).expect("probe pack should load")
+fn load_probe_pack(pack_file: &str) -> LoadedPack {
+    load_pack_from_file(&fixture_pack(pack_file)).expect("probe pack should load")
 }
 
 fn make_event(type_: &str, run_id: &str, seq: u64, payload: serde_json::Value) -> EvidenceEvent {
@@ -35,8 +35,8 @@ fn make_bundle(events: Vec<EvidenceEvent>) -> Vec<u8> {
     buffer
 }
 
-fn lint_with_pack(pack_name: &str, bundle: &[u8]) -> LintReportWithPacks {
-    let pack = load_probe_pack(pack_name);
+fn lint_with_pack(pack_file: &str, bundle: &[u8]) -> LintReportWithPacks {
+    let pack = load_probe_pack(pack_file);
     let options = LintOptions {
         packs: vec![pack],
         max_results: Some(500),
