@@ -1,0 +1,47 @@
+name: owasp-agentic-a3-probe
+version: "1.0.0"
+kind: security
+description: C1 feasibility probe for OWASP ASI03 identity and privilege abuse controls
+author: Assay Team
+license: Apache-2.0
+
+requires:
+  assay_min_version: ">=2.0.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A3-001
+    severity: warning
+    description: decision events capture authorization context
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/principal
+        - /data/approval_state
+        - /data/mandate_id
+
+  - id: A3-002
+    severity: error
+    description: allow decisions should require mandate linkage
+    check:
+      type: conditional
+      condition:
+        all:
+          - path: /data/decision
+            equals: allow
+      then:
+        type: json_path_exists
+        paths:
+          - /data/mandate_id
+    engine_min_version: "1.1"
+
+  - id: A3-003
+    severity: warning
+    description: decision events capture delegated identity chain evidence
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/delegated_from
+        - /data/actor_chain
+        - /data/inherited_scopes
+        - /data/delegation_depth

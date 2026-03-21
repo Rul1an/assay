@@ -1,0 +1,29 @@
+name: owasp-agentic-a1-probe
+version: "1.0.0"
+kind: security
+description: C1 feasibility probe for OWASP ASI01 goal-governance control evidence
+author: Assay Team
+license: Apache-2.0
+
+requires:
+  assay_min_version: ">=2.0.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A1-001
+    severity: warning
+    description: decision events are emitted for governed actions
+    check:
+      type: event_type_exists
+      pattern: assay.tool.decision
+
+  - id: A1-002
+    severity: warning
+    description: decision events include governance rationale fields
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/reason_code
+        - /data/policy_deny
+        - /data/fail_closed_deny
+        - /data/approval_state
