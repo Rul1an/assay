@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
@@ -7,6 +5,7 @@ use std::path::Path;
 use tempfile::tempdir;
 
 #[test]
+#[allow(deprecated)]
 fn contract_import_streamable_http_writes_trace() {
     let dir = tempdir().expect("tempdir");
     let input = dir.path().join("streamable-http.json");
@@ -28,6 +27,7 @@ fn contract_import_streamable_http_writes_trace() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn contract_import_http_sse_writes_trace() {
     let dir = tempdir().expect("tempdir");
     let input = dir.path().join("http-sse.json");
@@ -49,6 +49,7 @@ fn contract_import_http_sse_writes_trace() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn contract_trace_import_mcp_streamable_http_writes_trace() {
     let dir = tempdir().expect("tempdir");
     let input = dir.path().join("streamable-http.json");
@@ -72,6 +73,7 @@ fn contract_trace_import_mcp_streamable_http_writes_trace() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn contract_trace_import_mcp_sse_legacy_alias_writes_trace() {
     let dir = tempdir().expect("tempdir");
     let input = dir.path().join("http-sse.json");

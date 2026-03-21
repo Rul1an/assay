@@ -126,7 +126,7 @@ pub enum TraceSub {
         #[arg(long)]
         out_trace: PathBuf,
 
-        /// Input format: inspector | jsonrpc | streamable-http | http-sse
+        /// Input format: inspector | jsonrpc | streamable-http | http-sse | sse-legacy (alias for http-sse)
         #[arg(long, default_value = "inspector")]
         format: String,
 
