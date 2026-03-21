@@ -37,11 +37,14 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Publish to Crates.io` (uses `scripts/ci/publish_idempotent.sh`).
   - Step: `Create GitHub Release` (upload binaries and release assets).
   - Step: `Generate CycloneDX SBOM bundle` (produces `release/assay-${VERSION}-sbom-cyclonedx.tar.gz` plus `.sha256`).
+  - Step: `Enforce release attestation policy` (produces `release/assay-${VERSION}-release-provenance.json` plus `.sha256` and uploads raw attestation verification evidence as a workflow artifact).
 
 ### 4. Verification
 - [ ] **Install Check**: `cargo install assay-cli --version 2.2.3`
 - [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag v2.2.3`.
 - [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
+- [ ] **Provenance Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-provenance.json` and `assay-${VERSION}-release-provenance.json.sha256`.
+- [ ] **Workflow Evidence Check**: Confirm the workflow artifacts include `release-provenance-evidence` with the raw `gh attestation verify --format json` results for each release archive.
 
 ## Troubleshooting
 
