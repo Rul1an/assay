@@ -5,6 +5,20 @@ use serde::{Deserialize, Serialize};
 pub enum McpInputFormat {
     Inspector,
     JsonRpc,
+    StreamableHttp,
+    HttpSse,
+}
+
+impl McpInputFormat {
+    pub fn from_cli_label(label: &str) -> Option<Self> {
+        match label {
+            "inspector" | "mcp-inspector" | "mcp-inspector@v1" => Some(Self::Inspector),
+            "jsonrpc" => Some(Self::JsonRpc),
+            "streamable-http" => Some(Self::StreamableHttp),
+            "http-sse" | "sse-legacy" => Some(Self::HttpSse),
+            _ => None,
+        }
+    }
 }
 
 /// Minimal MCP tool definition (enough for tools/list).

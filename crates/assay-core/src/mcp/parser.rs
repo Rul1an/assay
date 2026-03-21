@@ -1,11 +1,14 @@
 use crate::mcp::types::*;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 
 /// Parse MCP transcript file contents into normalized McpEvents.
 pub fn parse_mcp_transcript(text: &str, format: McpInputFormat) -> Result<Vec<McpEvent>> {
     match format {
         McpInputFormat::JsonRpc => parse_jsonrpc_jsonl(text),
         McpInputFormat::Inspector => parse_inspector_best_effort(text),
+        McpInputFormat::StreamableHttp => parse_streamable_http_transcript(text),
+        McpInputFormat::HttpSse => parse_http_sse_transcript(text),
     }
 }
 
@@ -21,7 +24,7 @@ fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
         let v: serde_json::Value = serde_json::from_str(line)
             .with_context(|| format!("invalid JSON on line {}", lineno + 1))?;
 
-        let event = parse_single_event(v, (lineno + 1) as u64)?;
+        let event = parse_jsonrpc_message(v, (lineno + 1) as u64, None)?;
         out.push(event);
     }
 
@@ -44,15 +47,100 @@ fn parse_inspector_best_effort(text: &str) -> Result<Vec<McpEvent>> {
     let mut out = Vec::new();
     for (idx, item) in arr.into_iter().enumerate() {
         // Use array index as source_line for sorting stability
-        let event = parse_single_event(item, (idx + 1) as u64)?;
+        let event = parse_jsonrpc_message(item, (idx + 1) as u64, None)?;
         out.push(event);
     }
 
     Ok(out)
 }
 
-fn parse_single_event(v: serde_json::Value, source_line: u64) -> Result<McpEvent> {
-    let ts_ms = extract_ts_ms(&v);
+fn parse_streamable_http_transcript(text: &str) -> Result<Vec<McpEvent>> {
+    parse_transport_transcript(text, "streamable-http", "streamable-http transcript", false)
+}
+
+fn parse_http_sse_transcript(text: &str) -> Result<Vec<McpEvent>> {
+    parse_transport_transcript(text, "http-sse", "http-sse transcript", true)
+}
+
+fn parse_transport_transcript(
+    text: &str,
+    expected_transport: &str,
+    source_label: &str,
+    allow_endpoint_event: bool,
+) -> Result<Vec<McpEvent>> {
+    let transcript: TransportTranscript =
+        serde_json::from_str(text).with_context(|| format!("invalid {}", source_label))?;
+
+    let actual_transport = transcript.transport.as_deref().unwrap_or("missing");
+    if actual_transport != expected_transport {
+        bail!(
+            "{} transport must be {:?}, found {:?}",
+            source_label,
+            expected_transport,
+            actual_transport
+        );
+    }
+
+    let mut out = Vec::new();
+    for (idx, entry) in transcript.entries.into_iter().enumerate() {
+        let source_line = (idx + 1) as u64;
+        let present = usize::from(entry.request.is_some())
+            + usize::from(entry.response.is_some())
+            + usize::from(entry.sse.is_some());
+
+        if present != 1 {
+            bail!(
+                "{} entry {} must contain exactly one of request, response, or sse",
+                source_label,
+                source_line
+            );
+        }
+
+        if let Some(request) = entry.request {
+            out.push(parse_jsonrpc_message(
+                request,
+                source_line,
+                entry.timestamp_ms,
+            )?);
+            continue;
+        }
+
+        if let Some(response) = entry.response {
+            out.push(parse_jsonrpc_message(
+                response,
+                source_line,
+                entry.timestamp_ms,
+            )?);
+            continue;
+        }
+
+        if let Some(sse) = entry.sse {
+            if let Some(jsonrpc) = extract_jsonrpc_from_sse(&sse, allow_endpoint_event) {
+                out.push(parse_jsonrpc_message(
+                    jsonrpc,
+                    source_line,
+                    entry.timestamp_ms,
+                )?);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_jsonrpc_message(
+    v: serde_json::Value,
+    source_line: u64,
+    timestamp_ms_override: Option<u64>,
+) -> Result<McpEvent> {
+    if !v.is_object() {
+        bail!(
+            "MCP event at source line {} must be a JSON object",
+            source_line
+        );
+    }
+
+    let ts_ms = timestamp_ms_override.or_else(|| extract_ts_ms(&v));
 
     // JSON-RPC ID extraction
     let id_str = v
@@ -125,6 +213,39 @@ fn parse_single_event(v: serde_json::Value, source_line: u64) -> Result<McpEvent
     })
 }
 
+fn extract_jsonrpc_from_sse(
+    sse: &TransportSseEnvelope,
+    allow_endpoint_event: bool,
+) -> Option<serde_json::Value> {
+    let event_name = sse.event.as_deref().unwrap_or("message");
+    if event_name == "endpoint" && allow_endpoint_event {
+        return None;
+    }
+
+    if event_name != "message" {
+        return None;
+    }
+
+    extract_jsonrpc_like_value(&sse.data)
+}
+
+fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map)
+            if map.contains_key("method")
+                || map.contains_key("result")
+                || map.contains_key("error")
+                || map.contains_key("jsonrpc") =>
+        {
+            Some(value.clone())
+        }
+        serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|parsed| extract_jsonrpc_like_value(&parsed)),
+        _ => None,
+    }
+}
+
 fn extract_ts_ms(v: &serde_json::Value) -> Option<u64> {
     // Try standard keys.
     if let Some(t) = v.get("timestamp_ms").and_then(|t| t.as_u64()) {
@@ -176,4 +297,45 @@ fn parse_tools_list_result(v: &serde_json::Value) -> Result<Vec<McpToolDef>> {
         });
     }
     Ok(out)
+}
+
+#[derive(Debug, Deserialize)]
+struct TransportTranscript {
+    transport: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    transport_context: Option<serde_json::Value>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    headers: Option<serde_json::Value>,
+    #[serde(default)]
+    entries: Vec<TransportTranscriptEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransportTranscriptEntry {
+    #[serde(default)]
+    timestamp_ms: Option<u64>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    transport_context: Option<serde_json::Value>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    headers: Option<serde_json::Value>,
+    #[serde(default)]
+    request: Option<serde_json::Value>,
+    #[serde(default)]
+    response: Option<serde_json::Value>,
+    #[serde(default)]
+    sse: Option<TransportSseEnvelope>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransportSseEnvelope {
+    #[serde(default)]
+    event: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    id: Option<String>,
+    data: serde_json::Value,
 }

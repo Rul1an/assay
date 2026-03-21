@@ -43,7 +43,7 @@ pub struct ImportArgs {
     /// Input file (MCP transcript or Inspector JSON)
     pub input: std::path::PathBuf,
 
-    /// Input format: inspector | jsonrpc
+    /// Input format: inspector | jsonrpc | streamable-http | http-sse
     #[arg(long, default_value = "inspector")]
     pub format: String,
 
