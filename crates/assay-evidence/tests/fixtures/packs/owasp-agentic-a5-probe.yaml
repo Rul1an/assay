@@ -1,0 +1,25 @@
+name: owasp-agentic-a5-probe
+version: "1.0.0"
+kind: security
+description: C1 feasibility probe for OWASP ASI05 unexpected code execution evidence
+author: Assay Team
+license: Apache-2.0
+
+requires:
+  assay_min_version: ">=2.0.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A5-001
+    severity: warning
+    description: process execution evidence exists in the current baseline flow
+    check:
+      type: event_type_exists
+      pattern: assay.process.exec
+
+  - id: A5-002
+    severity: warning
+    description: sandbox degradation evidence exists when containment weakens
+    check:
+      type: event_type_exists
+      pattern: assay.sandbox.degraded
