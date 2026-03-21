@@ -253,6 +253,24 @@ The legacy `endpoint` event is treated as transport-only context and does not af
 
 Assay correlates requests and responses by JSON-RPC `id`, just like the HTTP transcript formats.
 
+### JSON-RPC `id` Normalization
+
+For MCP import and correlation:
+
+- string `id` values are accepted as-is
+- numeric `id` values are accepted and normalized to strings
+- `null` `id` values normalize to no correlation id
+- missing `id` values also normalize to no correlation id
+- JSON `null` is not treated as the literal string `"null"`
+- boolean, object, and array `id` values are rejected as invalid input
+
+Correlation notes:
+
+- requests without a correlation id do not bind later responses
+- the first matching response binds a request
+- later responses with the same `id` stay orphan and do not overwrite the earlier match
+- duplicate `tools/call` request ids in one transcript fail at parse time
+
 ---
 
 ## Out Of Scope In T1

@@ -1,15 +1,18 @@
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use std::collections::HashSet;
 
 /// Parse MCP transcript file contents into normalized McpEvents.
 pub fn parse_mcp_transcript(text: &str, format: McpInputFormat) -> Result<Vec<McpEvent>> {
-    match format {
+    let events = match format {
         McpInputFormat::JsonRpc => parse_jsonrpc_jsonl(text),
         McpInputFormat::Inspector => parse_inspector_best_effort(text),
         McpInputFormat::StreamableHttp => parse_streamable_http_transcript(text),
         McpInputFormat::HttpSse => parse_http_sse_transcript(text),
-    }
+    }?;
+    validate_mcp_events(&events)?;
+    Ok(events)
 }
 
 fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
@@ -143,9 +146,7 @@ fn parse_jsonrpc_message(
     let ts_ms = timestamp_ms_override.or_else(|| extract_ts_ms(&v));
 
     // JSON-RPC ID extraction
-    let id_str = v
-        .get("id")
-        .map(|x| x.to_string().trim_matches('"').to_string());
+    let id_str = normalize_jsonrpc_id(v.get("id"), source_line)?;
 
     // Check for JSON-RPC Request (has method)
     let method = v
@@ -211,6 +212,55 @@ fn parse_jsonrpc_message(
         jsonrpc_id: id_str,
         payload,
     })
+}
+
+fn normalize_jsonrpc_id(
+    raw_id: Option<&serde_json::Value>,
+    source_line: u64,
+) -> Result<Option<String>> {
+    match raw_id {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(id)) => Ok(Some(id.clone())),
+        Some(serde_json::Value::Number(id)) => Ok(Some(id.to_string())),
+        Some(serde_json::Value::Bool(_)) => {
+            bail!(
+                "JSON-RPC id on source line {} must not be a boolean",
+                source_line
+            )
+        }
+        Some(serde_json::Value::Array(_)) => {
+            bail!(
+                "JSON-RPC id on source line {} must not be an array",
+                source_line
+            )
+        }
+        Some(serde_json::Value::Object(_)) => {
+            bail!(
+                "JSON-RPC id on source line {} must not be an object",
+                source_line
+            )
+        }
+    }
+}
+
+fn validate_mcp_events(events: &[McpEvent]) -> Result<()> {
+    let mut seen_tool_call_request_ids = HashSet::new();
+
+    for event in events {
+        if matches!(&event.payload, McpPayload::ToolCallRequest { .. }) {
+            if let Some(id) = &event.jsonrpc_id {
+                if !seen_tool_call_request_ids.insert(id.clone()) {
+                    bail!(
+                        "duplicate tools/call request id {:?} at source line {}",
+                        id,
+                        event.source_line
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn extract_jsonrpc_from_sse(
