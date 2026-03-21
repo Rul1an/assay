@@ -11,6 +11,7 @@ use std::time::Instant;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
+use tracing::instrument::WithSubscriber;
 
 pub(crate) async fn run_suite_impl(
     runner: &Runner,
@@ -47,10 +48,13 @@ pub(crate) async fn run_suite_impl(
         clone_overhead_ms = clone_overhead_ms.saturating_add(clone_started.elapsed().as_millis());
         let cfg = cfg.clone();
         let tc = tc.clone();
-        join_set.spawn(async move {
-            let _permit = permit;
-            run_test_with_policy_impl(&this, &cfg, &tc, run_id).await
-        });
+        join_set.spawn(
+            async move {
+                let _permit = permit;
+                run_test_with_policy_impl(&this, &cfg, &tc, run_id).await
+            }
+            .with_current_subscriber(),
+        );
     }
 
     let mut rows = Vec::new();

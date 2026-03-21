@@ -8,6 +8,7 @@ use crate::report::progress::ProgressSink;
 use crate::report::RunArtifacts;
 use crate::storage::store::Store;
 use std::sync::Arc;
+use tracing::{info_span, Instrument};
 
 #[path = "runner_next/mod.rs"]
 mod runner_next;
@@ -216,8 +217,42 @@ impl Runner {
         let mut details = serde_json::json!({ "metrics": {} });
 
         for m in &self.metrics {
-            let r = m.evaluate(tc, &tc.expected, &resp).await?;
-            details["metrics"][m.name()] = serde_json::json!({
+            let metric_name = m.name();
+            let metric_span = info_span!(
+                "assay.eval.metric",
+                "assay.eval.test_id" = tc.id.as_str(),
+                "assay.eval.metric.name" = metric_name,
+                "assay.eval.response.cached" = resp.cached,
+                "assay.eval.metric.score" = tracing::field::Empty,
+                "assay.eval.metric.passed" = tracing::field::Empty,
+                "assay.eval.metric.unstable" = tracing::field::Empty,
+                "assay.eval.metric.duration_ms" = tracing::field::Empty,
+                "error" = tracing::field::Empty,
+                "error.message" = tracing::field::Empty
+            );
+            let metric_start = std::time::Instant::now();
+            let metric_result = async { m.evaluate(tc, &tc.expected, &resp).await }
+                .instrument(metric_span.clone())
+                .await;
+            let metric_duration_ms = metric_start.elapsed().as_millis() as u64;
+            metric_span.record("assay.eval.metric.duration_ms", metric_duration_ms);
+
+            let r = match metric_result {
+                Ok(result) => {
+                    metric_span.record("assay.eval.metric.score", result.score);
+                    metric_span.record("assay.eval.metric.passed", result.passed);
+                    metric_span.record("assay.eval.metric.unstable", result.unstable);
+                    result
+                }
+                Err(err) => {
+                    let error_message = err.to_string();
+                    metric_span.record("error", true);
+                    metric_span.record("error.message", error_message.as_str());
+                    return Err(err);
+                }
+            };
+
+            details["metrics"][metric_name] = serde_json::json!({
                 "score": r.score, "passed": r.passed, "unstable": r.unstable, "details": r.details
             });
             final_score = Some(r.score);
@@ -225,12 +260,12 @@ impl Runner {
             if r.unstable {
                 // gate stability first: treat unstable as warn in MVP
                 final_status = TestStatus::Warn;
-                msg = format!("unstable metric: {}", m.name());
+                msg = format!("unstable metric: {}", metric_name);
                 break;
             }
             if !r.passed {
                 final_status = TestStatus::Fail;
-                msg = format!("failed: {}", m.name());
+                msg = format!("failed: {}", metric_name);
                 break;
             }
         }
