@@ -61,6 +61,7 @@ impl ProfileReport {
         run_id: &str,
     ) -> crate::cli::commands::profile_types::Profile {
         use crate::cli::commands::profile_types::{Profile, ProfileEntry};
+        use std::collections::BTreeMap;
 
         let mut profile = Profile::new(name, None);
         let now = chrono::Utc::now().to_rfc3339();
@@ -69,13 +70,15 @@ impl ProfileReport {
         profile.total_runs = 1;
         profile.run_ids.push_back(run_id.to_string());
 
+        let mut file_hits: BTreeMap<String, u64> = BTreeMap::new();
         for (_, path, _) in &self.agg.fs {
-            let entry = profile.entries.files.entry(path.clone()).or_default();
-            if entry.runs_seen == 0 {
-                *entry = ProfileEntry::new(0, 1);
-            } else {
-                entry.merge_run(0, 1);
-            }
+            *file_hits.entry(path.clone()).or_default() += 1;
+        }
+        for (path, hits) in file_hits {
+            profile
+                .entries
+                .files
+                .insert(path, ProfileEntry::new(0, hits));
         }
 
         for (argv0, hits) in &self.agg.execs {
@@ -236,6 +239,38 @@ mod tests {
 
         let report = c.finish();
         assert_eq!(report.agg.sandbox_degradations.len(), 1);
+    }
+
+    #[test]
+    fn evidence_profile_keeps_single_run_cardinality_for_repeated_fs_paths() {
+        let cfg = ProfileConfig {
+            cwd: PathBuf::from("/repo"),
+            home: None,
+            assay_tmp: None,
+        };
+        let c = ProfileCollector::new(cfg);
+
+        c.record(ProfileEvent::FsObserved {
+            op: FsOp::Read,
+            path: "/repo/data.txt".into(),
+            backend: BackendHint::Injected,
+        });
+        c.record(ProfileEvent::FsObserved {
+            op: FsOp::Read,
+            path: "/repo/data.txt".into(),
+            backend: BackendHint::Injected,
+        });
+
+        let report = c.finish();
+        let profile = report.to_evidence_profile("sandbox", "run123");
+        let entry = profile
+            .entries
+            .files
+            .get("/repo/data.txt")
+            .expect("expected file entry");
+
+        assert_eq!(entry.runs_seen, 1);
+        assert_eq!(entry.hits_total, 2);
     }
 
     fn normalize(s: &str) -> String {

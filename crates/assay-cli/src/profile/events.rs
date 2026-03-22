@@ -70,6 +70,17 @@ impl FsOp {
     }
 }
 
+impl BackendHint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BackendHint::Injected => "injected",
+            BackendHint::Landlock => "landlock",
+            BackendHint::Ptrace => "ptrace",
+            BackendHint::Ebpf => "ebpf",
+        }
+    }
+}
+
 // Optional parsing logic for test hooks
 #[cfg(any(test, feature = "profile-test-hook"))]
 pub fn try_load_test_events() -> Option<Vec<ProfileEvent>> {

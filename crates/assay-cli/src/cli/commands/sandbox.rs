@@ -14,6 +14,7 @@ use crate::profile::{events::ProfileEvent, ProfileCollector, ProfileConfig};
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let mut profiler: Option<ProfileCollector> = None;
+    let mut deferred_profile_events: Vec<ProfileEvent> = Vec::new();
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
 
@@ -37,14 +38,12 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             eprintln!("ERROR: Active enforcement requested (--enforce) but no containment backend available.");
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
-        if let Some(p) = &profiler {
-            p.record(ProfileEvent::AuditFallback {
-                reason: "landlock backend unavailable (degraded to audit)".to_string(),
-                detail: None,
-            });
-            if let Some(payload) = backend_unavailable_degradation(&args, &backend) {
-                p.record(ProfileEvent::SandboxDegraded { payload });
-            }
+        deferred_profile_events.push(ProfileEvent::AuditFallback {
+            reason: "landlock backend unavailable (degraded to audit)".to_string(),
+            detail: None,
+        });
+        if let Some(payload) = backend_unavailable_degradation(&args, &backend) {
+            deferred_profile_events.push(ProfileEvent::SandboxDegraded { payload });
         }
         eprintln!(
             "WARN: Active enforcement requested but not supported. Falling back to Audit mode."
@@ -163,6 +162,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     // PR7: Initialize profiler if requested (passing tmp_dir for generalization)
     profiler = maybe_profile_begin(&args, Some(&tmp_dir));
+    if let Some(p) = &profiler {
+        for event in deferred_profile_events.drain(..) {
+            p.record(event);
+        }
+    }
 
     if !args.quiet {
         eprintln!("Tmp:     {}", tmp_dir.display());
@@ -248,8 +252,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
             "WARN: Degrading to Audit mode (no containment). use --fail-closed to make this fatal."
         );
         metrics::increment("degraded_to_audit_conflict");
-        let _ = false; // actual_enforcement value is ignored in degraded mode
+        actual_enforcement = false;
     }
+
+    #[cfg(not(target_os = "linux"))]
+    let _ = actual_enforcement;
 
     let mut cmd = tokio::process::Command::new(cmd_name);
 
@@ -587,13 +594,21 @@ fn evidence_profile_run_id(args: &SandboxArgs, report: &crate::profile::ProfileR
         hasher.update(argv0.as_bytes());
         hasher.update(hits.to_string().as_bytes());
     }
-    for (op, path, backend) in &report.agg.fs {
+    let mut fs_entries = report.agg.fs.clone();
+    fs_entries.sort();
+    for (op, path, backend) in fs_entries {
         hasher.update(op.as_str().as_bytes());
         hasher.update(path.as_bytes());
-        hasher.update(format!("{backend:?}").as_bytes());
+        hasher.update(backend.as_str().as_bytes());
     }
-    for degradation in &report.agg.sandbox_degradations {
-        hasher.update(format!("{degradation:?}").as_bytes());
+    let mut degradations = report.agg.sandbox_degradations.clone();
+    degradations.sort();
+    for degradation in degradations {
+        hasher.update(
+            serde_json::to_string(&degradation)
+                .expect("sandbox degradation payload should serialize deterministically")
+                .as_bytes(),
+        );
     }
 
     let digest = hex::encode(hasher.finalize());
@@ -682,5 +697,83 @@ mod tests {
             )],
         };
         assert!(policy_conflict_degradation(&args, true, &compat).is_none());
+    }
+
+    #[test]
+    fn evidence_profile_run_id_is_stable_across_equivalent_orderings() {
+        use crate::profile::events::{BackendHint, FsOp};
+        use crate::profile::{ProfileAgg, ProfileConfig, ProfileReport};
+        use std::collections::BTreeMap;
+        use std::path::PathBuf;
+
+        let args = sandbox_args();
+        let cfg = ProfileConfig {
+            cwd: PathBuf::from("/repo"),
+            home: None,
+            assay_tmp: None,
+        };
+
+        let report_a = ProfileReport {
+            version: 1,
+            config: cfg.clone(),
+            agg: ProfileAgg {
+                counters: BTreeMap::new(),
+                env_provided: BTreeMap::new(),
+                execs: BTreeMap::from([(String::from("/usr/bin/true"), 1)]),
+                fs: vec![
+                    (FsOp::Write, "/tmp/b".into(), BackendHint::Landlock),
+                    (FsOp::Read, "/tmp/a".into(), BackendHint::Injected),
+                ],
+                notes: vec!["audit_fallback: landlock policy conflict".into()],
+                sandbox_degradations: vec![
+                    PayloadSandboxDegraded {
+                        reason_code: SandboxDegradationReasonCode::PolicyConflict,
+                        degradation_mode: SandboxDegradationMode::AuditFallback,
+                        component: SandboxDegradationComponent::Landlock,
+                        detail: None,
+                    },
+                    PayloadSandboxDegraded {
+                        reason_code: SandboxDegradationReasonCode::BackendUnavailable,
+                        degradation_mode: SandboxDegradationMode::AuditFallback,
+                        component: SandboxDegradationComponent::Landlock,
+                        detail: Some("safe-context".into()),
+                    },
+                ],
+            },
+        };
+
+        let report_b = ProfileReport {
+            version: 1,
+            config: cfg,
+            agg: ProfileAgg {
+                counters: BTreeMap::new(),
+                env_provided: BTreeMap::new(),
+                execs: BTreeMap::from([(String::from("/usr/bin/true"), 1)]),
+                fs: vec![
+                    (FsOp::Read, "/tmp/a".into(), BackendHint::Injected),
+                    (FsOp::Write, "/tmp/b".into(), BackendHint::Landlock),
+                ],
+                notes: vec!["audit_fallback: landlock policy conflict".into()],
+                sandbox_degradations: vec![
+                    PayloadSandboxDegraded {
+                        reason_code: SandboxDegradationReasonCode::BackendUnavailable,
+                        degradation_mode: SandboxDegradationMode::AuditFallback,
+                        component: SandboxDegradationComponent::Landlock,
+                        detail: Some("safe-context".into()),
+                    },
+                    PayloadSandboxDegraded {
+                        reason_code: SandboxDegradationReasonCode::PolicyConflict,
+                        degradation_mode: SandboxDegradationMode::AuditFallback,
+                        component: SandboxDegradationComponent::Landlock,
+                        detail: None,
+                    },
+                ],
+            },
+        };
+
+        assert_eq!(
+            evidence_profile_run_id(&args, &report_a),
+            evidence_profile_run_id(&args, &report_b)
+        );
     }
 }
