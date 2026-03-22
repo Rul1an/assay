@@ -64,25 +64,29 @@ Interpretation:
 
 ## ASI03 Identity & Privilege Abuse
 
-For `ASI03`, the current engine can prove authorization-context presence and a
-narrow conditional mandate-context requirement on allow decisions, but not
-strong event-to-event mandate reference integrity or temporal re-authorization
-semantics.
+For `ASI03`, the current engine can prove authorization-context presence, a
+narrow conditional mandate-context requirement on allow decisions, and explicit
+delegation-context visibility for supported tool-call flows. It still cannot
+prove strong event-to-event mandate reference integrity, delegation-chain
+completeness or integrity, inherited-scope correctness, or temporal
+re-authorization semantics.
 
 | Candidate Rule | Candidate Check | Evidence Signals | Target Assurance | Max Provable Level | Outcome |
 | --- | --- | --- | --- | --- | --- |
 | `A3-001` Authorization context fields exist on decisions | `event_field_present(paths_any_of=/data/principal,/data/approval_state,/data/mandate_id)` | `assay.tool.decision` authz fields | `Field Presence` | `Field Presence` | `yaml-only` |
 | `A3-002` Allow decisions must carry mandate context | `conditional(if decision=allow then mandate_id exists on same event)` | `assay.tool.decision`, mandate context on allow decisions | `Field Presence` | `Field Presence` | `yaml-only` |
-| `A3-003` Delegation or inherited-privilege chain is visible in evidence | `event_field_present(paths_any_of=/data/delegated_from,/data/actor_chain,/data/inherited_scopes,/data/delegation_depth)` | Delegation-chain fields on `assay.tool.decision` | `Field Presence` | `Field Presence` | `signal gap` |
+| `A3-003` Delegation or inherited-privilege chain is visible in evidence | `event_field_present(paths_any_of=/data/delegated_from,/data/actor_chain,/data/inherited_scopes,/data/delegation_depth)` | Supported decision flows can surface explicit delegation fields on `assay.tool.decision` | `Field Presence` | `Field Presence` | `yaml-only` |
 
 Interpretation:
 - `A3-001` is a valid yaml-only control-evidence rule.
 - `A3-002` is now executable because engine `1.1` supports a narrow typed
   conditional-presence shape on the same event. It still does not prove mandate
   reference integrity or broader linkage semantics.
-- `A3-003` is a signal gap in the current probe fixture. The engine can express
-  field presence, but the current evidence flow does not supply the needed
-  delegation-chain signal.
+- `A3-003` is no longer a pure signal gap. Supported tool-call flows can
+  surface explicit `_meta.delegation` context as `delegated_from` and optional
+  `delegation_depth` on `assay.tool.decision`. This does not prove delegation
+  chain completeness, integrity, inherited-scope correctness, or temporal
+  validity.
 
 ## ASI05 Unexpected Code Execution
 
@@ -119,6 +123,6 @@ rules yet. The honest next step is narrower:
 | `A1-002` | `Field Presence` | `Yes` | Can ship only as control evidence for goal governance fields. |
 | `A3-001` | `Field Presence` | `Yes` | Can ship only as authorization-context capture evidence. |
 | `A3-002` | `Field Presence` | `No` | Engine `1.1` can execute this narrow conditional-presence form, but it remains outside the current shipped subset and does not prove mandate reference integrity. |
-| `A3-003` | `Field Presence` | `No` | Current probe fixture does not show delegation-chain evidence. |
+| `A3-003` | `Field Presence` | `No` | Supported flows can now surface explicit delegation context on decision evidence, but this remains outside the current shipped subset and does not validate chain completeness or integrity. |
 | `A5-001` | `Presence` | `Yes` | Can ship only as process-execution evidence presence. |
 | `A5-002` | `Presence` | `No` | Supported fallback paths now emit the signal, but it remains outside the current shipped subset and only proves degraded containment while execution continued. |
