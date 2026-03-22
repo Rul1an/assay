@@ -172,6 +172,8 @@ pub struct PolicyMatchMetadata {
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
+    pub delegated_from: Option<String>,
+    pub delegation_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -38,6 +38,8 @@ pub(super) struct ToolMatchMetadata {
     pub(super) lane: Option<String>,
     pub(super) principal: Option<String>,
     pub(super) auth_context_summary: Option<String>,
+    pub(super) delegated_from: Option<String>,
+    pub(super) delegation_depth: Option<u32>,
 }
 
 impl ToolMatchMetadata {
@@ -102,6 +104,8 @@ impl ToolMatchMetadata {
             lane: metadata.lane.clone(),
             principal: metadata.principal.clone(),
             auth_context_summary: metadata.auth_context_summary.clone(),
+            delegated_from: metadata.delegated_from.clone(),
+            delegation_depth: metadata.delegation_depth,
         }
     }
 
@@ -136,6 +140,8 @@ impl ToolMatchMetadata {
             lane: self.lane.clone(),
             principal: self.principal.clone(),
             auth_context_summary: self.auth_context_summary.clone(),
+            delegated_from: self.delegated_from.clone(),
+            delegation_depth: self.delegation_depth,
         }
     }
 }

@@ -158,6 +158,8 @@ pub struct PolicyDecisionEventContext {
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
+    pub delegated_from: Option<String>,
+    pub delegation_depth: Option<u32>,
 }
 
 /// A tool decision event (CloudEvents compliant).
@@ -396,6 +398,12 @@ pub struct DecisionData {
     /// Authentication context summary (non-sensitive, compact)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_context_summary: Option<String>,
+    /// Upstream delegated authority identifier, when explicitly carried by the supported flow
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegated_from: Option<String>,
+    /// Explicit delegation depth reported by the supported flow
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_depth: Option<u32>,
     /// Decision outcome
     pub decision: Decision,
     /// Machine-parseable reason code (MUST)
@@ -654,6 +662,8 @@ impl DecisionEvent {
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
+                delegated_from: None,
+                delegation_depth: None,
                 decision: Decision::Error, // Default to error, will be set
                 reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
                 reason: Some("Decision not finalized (guard dropped without emit)".to_string()),
@@ -784,6 +794,8 @@ impl DecisionEvent {
             lane,
             principal,
             auth_context_summary,
+            delegated_from,
+            delegation_depth,
         } = context;
 
         self.data.typed_decision = typed_decision;
@@ -831,6 +843,8 @@ impl DecisionEvent {
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
+        self.data.delegated_from = delegated_from;
+        self.data.delegation_depth = delegation_depth;
         refresh_fulfillment_normalization(&mut self.data);
         self
     }
@@ -1002,6 +1016,8 @@ impl DecisionEmitterGuard {
                 lane,
                 principal,
                 auth_context_summary,
+                delegated_from,
+                delegation_depth,
             } = context;
 
             event.data.typed_decision = typed_decision;
@@ -1049,6 +1065,8 @@ impl DecisionEmitterGuard {
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;
+            event.data.delegated_from = delegated_from;
+            event.data.delegation_depth = delegation_depth;
             refresh_fulfillment_normalization(&mut event.data);
         }
     }
@@ -1333,6 +1351,45 @@ mod tests {
             ]
         );
         assert!(event.data.missing_context_fields.is_empty());
+    }
+
+    #[test]
+    fn test_with_policy_context_sets_delegation_fields() {
+        let context = PolicyDecisionEventContext {
+            delegated_from: Some("agent:planner".to_string()),
+            delegation_depth: Some(1),
+            ..PolicyDecisionEventContext::default()
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_008".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(context);
+
+        assert_eq!(event.data.delegated_from.as_deref(), Some("agent:planner"));
+        assert_eq!(event.data.delegation_depth, Some(1));
+    }
+
+    #[test]
+    fn test_decision_event_omits_delegation_fields_when_absent() {
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_compat".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW);
+
+        let value = serde_json::to_value(event).expect("decision event should serialize");
+        let data = value
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .expect("decision event data should be an object");
+
+        assert!(!data.contains_key("delegated_from"));
+        assert!(!data.contains_key("delegation_depth"));
     }
 
     #[test]

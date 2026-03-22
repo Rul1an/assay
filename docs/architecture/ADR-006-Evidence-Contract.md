@@ -56,16 +56,24 @@ Records the start of an attestation run.
 }
 ```
 
-#### B. `tool.decision` (Policy Enforcement)
+#### B. `assay.tool.decision` (Policy Enforcement)
 Records authorization decisions (HITL-ready, protocol-based).
 ```json
 {
   "tool": "read_file",
   "decision": "allow|deny|requires_approval",
   "reason_code": "E_POLICY_DENY",
-  "args_schema_hash": "sha256:..."
+  "args_schema_hash": "sha256:...",
+  "delegated_from": "agent:planner",
+  "delegation_depth": 1
 }
 ```
+
+`delegated_from` and `delegation_depth` are additive optional fields. They are
+surfaced only when a supported decision flow carries explicit
+`_meta.delegation` context. They do not imply delegation-chain completeness or
+integrity, inherited-scope validation, or temporal correctness.
+
 
 #### C. `sandbox.degraded` (Operational Integrity)
 Records when stronger-than-audit containment was requested, weaker containment
