@@ -200,6 +200,7 @@ That gives you replayable Assay traces you can reuse in your assertions pipeline
 
 ## Next Steps
 
+- [Operator Proof Flow](../guides/operator-proof-flow.md)
 - [CI Integration Guide](../guides/github-action.md)
 - [OpenTelemetry & Langfuse](../guides/otel-langfuse.md)
 - [Evidence Store Setup](../guides/evidence-store-aws-s3.md)

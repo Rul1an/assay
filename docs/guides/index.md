@@ -4,6 +4,7 @@ Technical implementation guides and architectural patterns for Assay.
 
 ## Operational Patterns
 
+*   [**Operator Proof Flow**](operator-proof-flow.md): Follow one compact path from MCP transcript ingest to shipped `C2` pack evaluation to offline release verification.
 *   [**Gateway Pattern**](gateway-pattern.md): Reference architecture for deploying Assay as a runtime policy enforcement point (PEP) or sidecar. Use this for production traffic filtering.
 
 ## Integration Guides
