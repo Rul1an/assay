@@ -1,0 +1,68 @@
+name: owasp-agentic-a3-a5-signal-followup
+version: "1.0.0"
+kind: security
+description: OWASP Agentic ASI03/ASI05 signal-aware evidence follow-up for supported delegated flows and supported containment fallback paths
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack verifies only supported delegation-context visibility and supported
+  containment degradation evidence for a narrow OWASP Agentic ASI03/ASI05
+  follow-up surface.
+  Passing these checks does NOT prove delegation validity, delegation-chain
+  integrity, inherited-scope correctness, temporal delegation correctness,
+  sandbox correctness, or full containment-failure coverage.
+
+requires:
+  assay_min_version: ">=3.2.2"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A3-003
+    severity: warning
+    description: Decision evidence surfaces delegated authority context for supported delegated flows.
+    article_ref: "ASI03"
+    help_markdown: |
+      ## ASI03 Identity & Privilege Abuse - Delegation Context Evidence
+
+      This rule verifies that at least one `assay.tool.decision` event for
+      supported delegated flows contains `delegated_from`.
+
+      **What this checks:**
+      - At least one supported decision event contains `delegated_from`
+      - `delegation_depth` may appear as optional supporting context, but it is
+        not required
+
+      **What this does not prove:**
+      - Delegation validity
+      - Delegation chain integrity
+      - Inherited-scope correctness
+      - Temporal delegation correctness
+    event_types:
+      - assay.tool.decision
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/delegated_from
+
+  - id: A5-002
+    severity: warning
+    description: Evidence records supported containment degradation fallback paths.
+    article_ref: "ASI05"
+    help_markdown: |
+      ## ASI05 Unexpected Code Execution - Containment Degradation Evidence
+
+      This rule verifies that the evidence bundle contains an
+      `assay.sandbox.degraded` event from a supported weaker-than-requested
+      containment fallback path.
+
+      **What this checks:**
+      - At least one event matches `assay.sandbox.degraded`
+
+      **What this does not prove:**
+      - Sandbox correctness
+      - Execution authorization
+      - All containment failures detected
+    check:
+      type: event_type_exists
+      pattern: assay.sandbox.degraded
