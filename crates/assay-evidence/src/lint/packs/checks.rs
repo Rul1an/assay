@@ -185,7 +185,7 @@ fn check_event_count(rule: &PackRule, ctx: &CheckContext<'_>, min: usize) -> Che
             finding: Some(create_finding(
                 rule,
                 ctx,
-                format!("Bundle contains {} events (minimum: {})", count, min),
+                scoped_event_count_message(rule, count, min),
                 None,
             )),
         }
@@ -536,6 +536,18 @@ fn scoped_events<'a>(rule: &PackRule, ctx: &'a CheckContext<'a>) -> Vec<&'a Evid
             .filter(|event| event_types.iter().any(|expected| expected == &event.type_))
             .collect(),
         _ => ctx.events.iter().collect(),
+    }
+}
+
+fn scoped_event_count_message(rule: &PackRule, count: usize, min: usize) -> String {
+    match &rule.event_types {
+        Some(event_types) if !event_types.is_empty() => format!(
+            "Scoped events for event_types [{}] contain {} events (minimum: {})",
+            event_types.join(", "),
+            count,
+            min
+        ),
+        _ => format!("Bundle contains {} events (minimum: {})", count, min),
     }
 }
 

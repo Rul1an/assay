@@ -79,7 +79,7 @@ done < <(git diff --name-only "${base_ref}...HEAD")
 "$rg_bin" -n '^    description: Allow tool decisions must include mandate context$' "$mandate_pack" >/dev/null
 "$rg_bin" -n '^    engine_min_version: "1\.2"$' "$mandate_pack" >/dev/null
 
-count_12="$(grep -c '^    engine_min_version: "1.2"$' "$mandate_pack")"
+count_12="$(grep -Fc '    engine_min_version: "1.2"' "$mandate_pack")"
 [[ "$count_12" == "4" ]] || {
   echo "ERROR: expected exactly 4 future mandate rules gated to v1.2, found $count_12" >&2
   exit 1

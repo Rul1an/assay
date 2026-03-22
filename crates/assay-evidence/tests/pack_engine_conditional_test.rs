@@ -68,7 +68,8 @@ fn make_test_pack(name: &str, kind: PackKind, rules: Vec<PackRule>) -> LoadedPac
             author: "Assay Team".to_string(),
             license: "Apache-2.0".to_string(),
             source_url: None,
-            disclaimer: None,
+            disclaimer: (kind == PackKind::Compliance)
+                .then(|| "Test-only compliance disclaimer".to_string()),
             requires: PackRequirements {
                 assay_min_version: ">=0.0.0".to_string(),
                 evidence_schema_version: None,

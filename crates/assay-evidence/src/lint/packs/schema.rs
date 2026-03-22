@@ -385,9 +385,41 @@ impl CheckDefinition {
                     });
                 }
             }
-            CheckDefinition::Conditional { .. } => {
-                // Conditional subset support is determined at execution time so
-                // unsupported shapes can preserve pack-kind-specific behavior.
+            CheckDefinition::Conditional {
+                condition,
+                then_check,
+            } => {
+                let condition =
+                    condition
+                        .as_ref()
+                        .ok_or_else(|| PackValidationError::InvalidCheck {
+                            pack: pack_name.to_string(),
+                            rule: rule_id.to_string(),
+                            reason: "conditional requires a condition object".to_string(),
+                        })?;
+                if !condition.is_object() {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "conditional.condition must be an object".to_string(),
+                    });
+                }
+
+                let then_check =
+                    then_check
+                        .as_ref()
+                        .ok_or_else(|| PackValidationError::InvalidCheck {
+                            pack: pack_name.to_string(),
+                            rule: rule_id.to_string(),
+                            reason: "conditional requires a then object".to_string(),
+                        })?;
+                if !then_check.is_object() {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "conditional.then must be an object".to_string(),
+                    });
+                }
             }
             CheckDefinition::Unsupported => {
                 // Unknown check types - validation handled by engine version check
@@ -652,5 +684,95 @@ mod tests {
             .expect_err("multiple then paths should remain unsupported");
         assert!(error.contains("exactly one required path"));
         assert!(check.is_unsupported());
+    }
+
+    #[test]
+    fn test_conditional_validation_requires_condition_object() {
+        let pack = PackDefinition {
+            name: "conditional-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "COND-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::Conditional {
+                    condition: None,
+                    then_check: Some(serde_json::json!({
+                        "type": "json_path_exists",
+                        "paths": ["/data/mandate_id"]
+                    })),
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("missing conditional condition should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "conditional requires a condition object"
+        ));
+    }
+
+    #[test]
+    fn test_conditional_validation_requires_then_object() {
+        let pack = PackDefinition {
+            name: "conditional-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "COND-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::Conditional {
+                    condition: Some(serde_json::json!({
+                        "all": [
+                            {
+                                "path": "/data/decision",
+                                "equals": "allow"
+                            }
+                        ]
+                    })),
+                    then_check: None,
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("missing conditional then should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "conditional requires a then object"
+        ));
     }
 }
