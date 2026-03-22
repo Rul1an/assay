@@ -382,4 +382,4 @@ The sandbox protects against:
 - [Sandbox Security Guide](../../guides/sandbox-security.md)
 - [Environment Filtering Reference](../sandbox-env.md)
 - [Sandbox Policies Reference](../sandbox-policies.md)
-- [assay doctor](../doctor.md)
+- [assay doctor](./doctor.md)
