@@ -75,7 +75,7 @@ re-authorization semantics.
 | --- | --- | --- | --- | --- | --- |
 | `A3-001` Authorization context fields exist on decisions | `event_field_present(paths_any_of=/data/principal,/data/approval_state,/data/mandate_id)` | `assay.tool.decision` authz fields | `Field Presence` | `Field Presence` | `yaml-only` |
 | `A3-002` Allow decisions must carry mandate context | `conditional(if decision=allow then mandate_id exists on same event)` | `assay.tool.decision`, mandate context on allow decisions | `Field Presence` | `Field Presence` | `yaml-only` |
-| `A3-003` Delegation or inherited-privilege chain is visible in evidence | `event_field_present(paths_any_of=/data/delegated_from,/data/actor_chain,/data/inherited_scopes,/data/delegation_depth)` | Supported decision flows can surface explicit delegation fields on `assay.tool.decision` | `Field Presence` | `Field Presence` | `yaml-only` |
+| `A3-003` Delegated authority context is visible in decision evidence for supported delegated flows | `event_field_present(paths_any_of=/data/delegated_from)` | Supported decision flows can surface explicit `delegated_from` on `assay.tool.decision`; `delegation_depth` may appear as optional context | `Field Presence` | `Field Presence` | `yaml-only` |
 
 Interpretation:
 - `A3-001` is a valid yaml-only control-evidence rule.
@@ -84,9 +84,10 @@ Interpretation:
   reference integrity or broader linkage semantics.
 - `A3-003` is no longer a pure signal gap. Supported tool-call flows can
   surface explicit `_meta.delegation` context as `delegated_from` and optional
-  `delegation_depth` on `assay.tool.decision`. This does not prove delegation
-  chain completeness, integrity, inherited-scope correctness, or temporal
-  validity.
+  `delegation_depth` on `assay.tool.decision`. The companion pack
+  `owasp-agentic-a3-a5-signal-followup` ships this rule only for supported
+  delegated flows. This does not prove delegation chain completeness,
+  integrity, inherited-scope correctness, or temporal validity.
 
 ## ASI05 Unexpected Code Execution
 
@@ -103,8 +104,10 @@ Interpretation:
 - `A5-001` can honestly claim only execution evidence presence.
 - `A5-002` is no longer a pure signal gap. Supported weaker-than-requested
   containment fallback paths can now emit `assay.sandbox.degraded` while
-  execution continues. Clean baseline fixtures still omit the event by design,
-  and the signal does not prove sandbox correctness or execution authorization.
+  execution continues. The companion pack `owasp-agentic-a3-a5-signal-followup`
+  ships this rule only in that presence-only form. Clean baseline fixtures
+  still omit the event by design, and the signal does not prove sandbox
+  correctness or execution authorization.
 
 ## C2 Go / No-Go Summary
 
@@ -115,6 +118,10 @@ rules yet. The honest next step is narrower:
 - no rule that depends on unsupported `conditional` behavior
 - no rule that depends on signals missing from the tested evidence flow
 
+The baseline pack remains narrow. The signal-aware companion pack
+`owasp-agentic-a3-a5-signal-followup` is the shipped follow-up surface for
+`A3-003` and `A5-002`.
+
 ## Candidate Summary Table
 
 | Candidate Rule | Max Provable Level | Ship in C2? | Reason |
@@ -123,6 +130,6 @@ rules yet. The honest next step is narrower:
 | `A1-002` | `Field Presence` | `Yes` | Can ship only as control evidence for goal governance fields. |
 | `A3-001` | `Field Presence` | `Yes` | Can ship only as authorization-context capture evidence. |
 | `A3-002` | `Field Presence` | `No` | Engine `1.1` can execute this narrow conditional-presence form, but it remains outside the current shipped subset and does not prove mandate reference integrity. |
-| `A3-003` | `Field Presence` | `No` | Supported flows can now surface explicit delegation context on decision evidence, but this remains outside the current shipped subset and does not validate chain completeness or integrity. |
+| `A3-003` | `Field Presence` | `No` | Shipped in the signal-aware companion pack for supported delegated flows; it does not validate chain completeness or integrity. |
 | `A5-001` | `Presence` | `Yes` | Can ship only as process-execution evidence presence. |
-| `A5-002` | `Presence` | `No` | Supported fallback paths now emit the signal, but it remains outside the current shipped subset and only proves degraded containment while execution continued. |
+| `A5-002` | `Presence` | `No` | Shipped in the signal-aware companion pack for supported fallback paths; it only proves degraded containment while execution continued. |
