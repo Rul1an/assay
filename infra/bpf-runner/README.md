@@ -7,6 +7,7 @@ Setup and maintenance for the GitHub Actions self-hosted runner used by Kernel M
 - **New VM (Mac):** `./setup_local_multipass.sh` then register the runner (see script output).
 - **Cloud/VM:** `./setup.sh` (requires `GITHUB_TOKEN`, `RUNNER_NAME`, `REPO_URL`).
 - **Auto-recovery:** `./health_check.sh --install-cron` (monitors every 5 minutes).
+- **Unattended auth:** set `GH_TOKEN_FILE=/path/to/token` before `--install-cron` if cron should recover runners non-interactively.
 
 ## Health Check & Auto-Recovery
 
@@ -35,8 +36,13 @@ The `health_check.sh` script monitors the runner and auto-recovers from common f
 **What it auto-fixes:**
 - VM clock drift (NTP sync) — most common cause of "token expired"
 - Expired registration tokens (generates new token via `gh` CLI)
+- Deleted runner registrations on GitHub (fresh config + service reinstall)
 - Stopped services (restarts runner service)
 - Stale configuration (full reconfiguration if needed)
+
+**Label contract:**
+- Configure only the custom labels: `bpf-lsm,assay-bpf-runner`
+- GitHub adds read-only labels such as `self-hosted`, `Linux`, and the current architecture automatically
 
 **GitHub Actions backup:** A workflow (`runner-health.yml`) runs every 15 minutes and creates a GitHub issue if the runner is offline with queued jobs.
 

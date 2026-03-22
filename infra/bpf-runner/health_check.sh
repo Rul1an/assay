@@ -28,9 +28,11 @@ REPO="${REPO:-Rul1an/assay}"
 RUNNER_NAME="${RUNNER_NAME:-assay-bpf-runner}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
 RUNNER_USER="${RUNNER_USER:-github-runner}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,bpf-lsm,assay-bpf-runner}"
+RUNNER_LABELS="${RUNNER_LABELS:-bpf-lsm,assay-bpf-runner}"
+GH_TOKEN_FILE="${GH_TOKEN_FILE:-${GITHUB_TOKEN_FILE:-}}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
+RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted from the server|Failed to create a session|token expired|Authentication failed}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -79,8 +81,21 @@ check_gh_auth() {
     # Export GH path for use in other functions
     export GH_CMD="$gh_cmd"
 
+    if [[ -z "${GH_TOKEN:-}" ]] && [[ -n "$GH_TOKEN_FILE" ]] && [[ -r "$GH_TOKEN_FILE" ]]; then
+        export GH_TOKEN
+        GH_TOKEN=$(tr -d '\r\n' < "$GH_TOKEN_FILE")
+    fi
+
+    if [[ -n "${GH_TOKEN:-}" ]]; then
+        if ! $gh_cmd api user &>/dev/null; then
+            log_error "gh CLI token auth failed. Refresh GH_TOKEN or GH_TOKEN_FILE."
+            return 1
+        fi
+        return 0
+    fi
+
     if ! $gh_cmd auth status &>/dev/null; then
-        log_error "gh CLI not authenticated. Run: gh auth login"
+        log_error "gh CLI not authenticated. Run: gh auth login or set GH_TOKEN_FILE."
         return 1
     fi
     return 0
@@ -166,16 +181,27 @@ cancel_stale_jobs() {
     return 0
 }
 
-# Cancel superseded runs (older runs for same branch)
+# Cancel superseded runs (older queued runs for the same workflow/branch/event)
 cancel_superseded_runs() {
     local gh="${GH_CMD:-gh}"
 
     log_info "Checking for superseded queued runs..."
 
-    # Get all queued runs, group by branch, cancel all but newest
+    # Group by workflow + branch + event so distinct queued workflows on the same
+    # branch are not cancelled accidentally.
     local superseded
-    superseded=$($gh run list --repo "$REPO" --status queued --limit 50 --json databaseId,headBranch,createdAt 2>/dev/null | \
-        jq -r 'group_by(.headBranch) | .[] | select(length > 1) | sort_by(.createdAt) | .[:-1] | .[].databaseId' || echo "")
+    superseded=$($gh run list --repo "$REPO" --status queued --limit 50 \
+        --json databaseId,workflowName,headBranch,event,createdAt 2>/dev/null | \
+        jq -r '
+            map(. + {group_key: ((.workflowName // "") + "|" + (.headBranch // "") + "|" + (.event // ""))})
+            | sort_by([.group_key, .createdAt])
+            | group_by(.group_key)
+            | .[]
+            | select(length > 1)
+            | sort_by(.createdAt)
+            | .[:-1]
+            | .[].databaseId
+        ' || echo "")
 
     if [[ -z "$superseded" ]]; then
         log_info "No superseded runs found"
@@ -246,16 +272,33 @@ get_runner_status() {
     echo "$status"
 }
 
+runner_service_name() {
+    echo "actions.runner.${REPO/\//-}.$RUNNER_NAME.service"
+}
+
 # Check if runner service is running in VM
 check_runner_service() {
     local service_status
     # Use timeout to prevent hanging
     service_status=$(timeout 10 multipass exec "$VM_NAME" -- \
-        sudo systemctl is-active "actions.runner.${REPO/\//-}.$RUNNER_NAME.service" 2>/dev/null || echo "inactive")
+        sudo systemctl is-active "$(runner_service_name)" 2>/dev/null || echo "inactive")
 
     if [[ "$service_status" == "active" ]]; then
         return 0
     fi
+    return 1
+}
+
+runner_log_has_fatal_session_error() {
+    local service_name
+    service_name=$(runner_service_name)
+
+    if multipass exec "$VM_NAME" -- \
+        sudo journalctl -u "$service_name" -n 200 --no-pager 2>/dev/null | \
+        grep -Eiq "$RUNNER_FATAL_PATTERNS"; then
+        return 0
+    fi
+
     return 1
 }
 
@@ -315,6 +358,12 @@ cleanup_runner_config() {
         "$RUNNER_DIR/.credentials" \
         "$RUNNER_DIR/.credentials_rsaparams" \
         "$RUNNER_DIR/.service" \
+        "$RUNNER_DIR/.runner_migrated" \
+        2>/dev/null || true
+
+    multipass exec "$VM_NAME" -- sudo chown -R \
+        "$RUNNER_USER:$RUNNER_USER" \
+        "$RUNNER_DIR" \
         2>/dev/null || true
 
     log_ok "Runner configuration cleaned"
@@ -327,14 +376,18 @@ configure_runner() {
     log_info "Configuring runner with new token..."
 
     local result
-    result=$(multipass exec "$VM_NAME" -- sudo -u "$RUNNER_USER" \
-        "$RUNNER_DIR/config.sh" \
-        --url "https://github.com/$REPO" \
-        --token "$token" \
-        --labels "$RUNNER_LABELS" \
-        --name "$RUNNER_NAME" \
-        --unattended \
-        --replace 2>&1)
+    result=$(multipass exec "$VM_NAME" -- bash -lc "
+        set -euo pipefail
+        cd '$RUNNER_DIR'
+        sudo chown -R '$RUNNER_USER:$RUNNER_USER' '$RUNNER_DIR'
+        sudo -u '$RUNNER_USER' ./config.sh \
+            --url 'https://github.com/$REPO' \
+            --token '$token' \
+            --labels '$RUNNER_LABELS' \
+            --name '$RUNNER_NAME' \
+            --unattended \
+            --replace
+    " 2>&1)
 
     # Check for success indicators (handles both fresh install and replacement)
     if echo "$result" | grep -qE "(Successfully|Settings Saved)"; then
@@ -561,6 +614,14 @@ health_check() {
         return 0
     fi
 
+    # Runner is not online - recover immediately for known fatal
+    # registration/session failures, even if the queue is currently empty.
+    if runner_log_has_fatal_session_error; then
+        log_warn "Runner logs show fatal registration/session failure - attempting recovery"
+        recover_runner
+        return $?
+    fi
+
     # Runner is not online - check if there are queued jobs
     if check_queued_jobs; then
         log_warn "Runner offline with queued jobs - attempting recovery"
@@ -575,7 +636,7 @@ health_check() {
         return $?
     fi
 
-    log_warn "Runner offline but no queued jobs - skipping recovery"
+    log_warn "Runner offline but no queued jobs and no fatal service signal detected - skipping recovery"
     return 0
 }
 
@@ -583,7 +644,17 @@ health_check() {
 install_cron() {
     local script_path
     script_path=$(realpath "$0")
-    local cron_entry="*/5 * * * * $script_path >> $LOG_FILE 2>&1"
+    local env_prefix=""
+    local escaped_script_path
+    local escaped_log_file
+    printf -v escaped_script_path '%q' "$script_path"
+    printf -v escaped_log_file '%q' "$LOG_FILE"
+    if [[ -n "$GH_TOKEN_FILE" ]]; then
+        local escaped_gh_token_file
+        printf -v escaped_gh_token_file '%q' "$GH_TOKEN_FILE"
+        env_prefix="GH_TOKEN_FILE=${escaped_gh_token_file} "
+    fi
+    local cron_entry="*/5 * * * * ${env_prefix}${escaped_script_path} >> ${escaped_log_file} 2>&1"
 
     if crontab -l 2>/dev/null | grep -q "health_check.sh"; then
         echo "Cron job already installed"
@@ -591,6 +662,9 @@ install_cron() {
     else
         (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
         echo "Cron job installed: $cron_entry"
+        if [[ -z "$GH_TOKEN_FILE" ]]; then
+            echo "⚠️  No GH_TOKEN_FILE set; cron runs rely on interactive gh auth state."
+        fi
     fi
 }
 
@@ -617,6 +691,12 @@ show_status() {
         echo "Service: active"
     else
         echo "Service: inactive"
+    fi
+
+    if runner_log_has_fatal_session_error 2>/dev/null; then
+        echo "Runner Log Health: fatal registration/session error detected"
+    else
+        echo "Runner Log Health: no fatal registration/session error detected"
     fi
 
     echo ""
@@ -739,6 +819,7 @@ case "${1:-}" in
         echo "Environment Variables:"
         echo "  STALE_JOB_HOURS           Hours before queued job is considered stale (default: 4)"
         echo "  ACTIONS_CACHE_MAX_AGE_DAYS Days before cache entry is stale (default: 7)"
+        echo "  GH_TOKEN_FILE             Optional file containing a GitHub token for non-interactive cron auth"
         echo ""
         echo "  --help          Show this help"
         ;;

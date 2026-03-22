@@ -62,6 +62,7 @@ The health check script (`health_check.sh`) provides self-healing capabilities:
 | **Cache Corruption** | "Can't find action.yml" errors | Clear cache, rerun jobs |
 | **Runner Offline** | Status != online with queued jobs | Full recovery |
 | **Clock Drift** | Time difference >60s | NTP sync |
+| **Deleted Registration** | Service installed but GitHub registration removed | Reconfigure runner from fresh token |
 
 ### Health Check Commands
 
@@ -96,6 +97,7 @@ The health check script (`health_check.sh`) provides self-healing capabilities:
 | `VM_NAME` | assay-bpf-runner | Multipass VM name |
 | `RUNNER_NAME` | assay-bpf-runner | GitHub runner name |
 | `RUNNER_DIR` | /opt/actions-runner | Runner installation path |
+| `GH_TOKEN_FILE` | unset | Optional token file for non-interactive cron auth |
 
 ### Cron Setup
 
@@ -105,6 +107,10 @@ The health check runs every 5 minutes:
 # Install cron job
 ./health_check.sh --install-cron
 ```
+
+For reliable unattended recovery on macOS cron, set `GH_TOKEN_FILE=/path/to/token`
+before installing the cron entry so the script can authenticate without an
+interactive `gh auth` session.
 
 This adds:
 ```cron
@@ -259,6 +265,7 @@ Error: Can't find 'action.yml', 'action.yaml' or 'Dockerfile' under
 - Runner status is "offline" on GitHub
 - Queued jobs are waiting
 - Runner service is not active
+- Runner service logs show fatal registration/session errors
 
 ### Recovery Steps
 
@@ -282,7 +289,8 @@ sudo ./svc.sh stop
 sudo ./svc.sh uninstall
 ./config.sh remove
 # Get new token from GitHub
-./config.sh --url https://github.com/Rul1an/assay --token <TOKEN> --labels self-hosted,linux,x64,bpf-lsm,assay-bpf-runner --unattended --replace
+rm -f .runner .credentials .credentials_rsaparams .service .runner_migrated
+./config.sh --url https://github.com/Rul1an/assay --token <TOKEN> --labels bpf-lsm,assay-bpf-runner --unattended --replace
 sudo ./svc.sh install
 sudo ./svc.sh start
 ```
@@ -346,7 +354,8 @@ The health check automatically:
 ### Runner Not Picking Up Jobs
 
 1. Check status: `./health_check.sh --status`
-2. Verify labels match workflow: `self-hosted,linux,x64,bpf-lsm,assay-bpf-runner`
+2. Verify custom labels match workflow: `bpf-lsm,assay-bpf-runner`
+   GitHub also adds read-only labels such as `self-hosted`, `Linux`, and the current architecture.
 3. Check runner is online in GitHub Settings > Actions > Runners
 4. Run recovery: `./health_check.sh --recover`
 
