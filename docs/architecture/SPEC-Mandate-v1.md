@@ -1294,41 +1294,39 @@ Lint provides post-hoc verification complementing runtime enforcement.
 
 | Rule ID | Check | Severity | Scope | Engine Support |
 |---------|-------|----------|-------|----------------|
-| MANDATE-001 | `decision=allow` for `commit` tools MUST have `mandate_id` | error | commit tools only | v1 (conditional) |
-| MANDATE-002 | `mandate_id` MUST reference existing `assay.mandate.v1` | error | all | v1.1 (reference_exists) |
-| MANDATE-003 | Tool decision time within mandate validity window | error | all | v1.1 (temporal_range) |
-| MANDATE-004 | `single_use`/`max_uses` mandate has valid receipt count | error | all | v1.1 (use_count_valid) |
-| MANDATE-005 | `commit` tools require `mandate_kind=transaction` | warning | commit tools | v1.1 (mandate_kind_check) |
+| MANDATE-001 | `decision=allow` tool decisions MUST carry `mandate_id` on the same event | error | allow decisions on `assay.tool.decision` | v1.1 (conditional presence) |
+| MANDATE-002 | `mandate_id` MUST reference existing `assay.mandate.v1` | error | all | v1.2 (reference_exists) |
+| MANDATE-003 | Tool decision time within mandate validity window | error | all | v1.2 (temporal_range) |
+| MANDATE-004 | `single_use`/`max_uses` mandate has valid receipt count | error | all | v1.2 (use_count_valid) |
+| MANDATE-005 | `commit` tools require `mandate_kind=transaction` | warning | commit tools | v1.2 (mandate_kind_check) |
 
 **Engine capability requirements:**
 
 | Check Type | Minimum Engine Version | Status |
 |------------|------------------------|--------|
-| `conditional` | v1.0 | Implemented |
+| `conditional` | v1.1 | Implemented only for the conditional-presence subset |
 | `json_path_exists` | v1.0 | Implemented |
-| `reference_exists` | v1.1 | Planned |
-| `temporal_range` | v1.1 | Planned |
-| `use_count_valid` | v1.1 | Planned |
-| `mandate_kind_check` | v1.1 | Planned |
+| `reference_exists` | v1.2 | Planned |
+| `temporal_range` | v1.2 | Planned |
+| `use_count_valid` | v1.2 | Planned |
+| `mandate_kind_check` | v1.2 | Planned |
 
-**Note:** Rules requiring v1.1 check types will be skipped with a warning on v1.0 engines. The `mandate-baseline.yaml` pack will be published when engine v1.1 is available.
+**Note:** Engine `v1.1` supports only the narrow conditional-presence subset: per-event `condition.all[path, equals]` plus `then: json_path_exists` with a single required path. Rules that need reference, temporal, kind, or broader conditional semantics remain version-gated to `v1.2`.
 
-**Note on MANDATE-001 scope:** To prevent false positives in discovery flows, this rule only applies to tools classified as `commit` (per `mandate_trust.commit_tools`). Read-only discovery operations do not require mandate linkage.
+**Note on MANDATE-001 scope:** `v1.1` proves only that allow decisions carry mandate context on the same event. Commit-tool classification and mandate reference integrity remain future work.
 
 ### 8.2 Rule Definitions
 
 ```yaml
 rules:
   - id: MANDATE-001
-    description: "Commit tool decisions must have mandate authorization"
+    description: "Allow tool decisions must include mandate context"
     check:
       type: conditional
       condition:
         all:
           - path: "/data/decision"
             equals: "allow"
-          - path: "/data/tool"
-            matches_any: "${mandate_trust.commit_tools}"
       then:
         type: json_path_exists
         paths: ["/data/mandate_id"]

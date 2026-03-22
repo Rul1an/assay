@@ -187,6 +187,45 @@ check:
   required: bool            # If true, missing = error; if false, missing = warning
 ```
 
+#### `json_path_exists`
+
+Verify at least one scoped event contains one of the specified JSON Pointer
+paths.
+
+```yaml
+check:
+  type: json_path_exists
+  paths: [string]
+```
+
+#### `conditional` (v1.1 conditional-presence subset)
+
+Engine `v1.1` supports only a narrow typed conditional subset:
+
+- `condition.all` with one or more `{ path, equals }` clauses
+- `then.type = json_path_exists`
+- `then.paths` must contain exactly one required path
+- evaluation is per-event, not bundle-join based
+
+```yaml
+check:
+  type: conditional
+  condition:
+    all:
+      - path: /data/decision
+        equals: allow
+  then:
+    type: json_path_exists
+    paths:
+      - /data/mandate_id
+```
+
+Unsupported conditional shapes remain unsupported and follow existing
+pack-kind behavior:
+
+- `compliance`: hard fail
+- `security` / `quality`: warning + skip
+
 ### Example Pack
 
 ```yaml
@@ -620,6 +659,10 @@ pub struct PackRule {
     #[serde(default)]
     pub help_markdown: Option<String>,
     pub check: CheckDefinition,
+    #[serde(default)]
+    pub engine_min_version: Option<String>,
+    #[serde(default)]
+    pub event_types: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -630,6 +673,8 @@ pub enum CheckDefinition {
     EventFieldPresent { any_of: Vec<String>, #[serde(default)] in_data: bool },
     EventTypeExists { pattern: String },
     ManifestField { field: String, #[serde(default)] required: bool },
+    JsonPathExists { paths: Vec<String> },
+    Conditional { /* typed subset or unsupported future shape */ },
 }
 
 // loader.rs

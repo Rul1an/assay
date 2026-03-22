@@ -22,7 +22,7 @@ rules:
 
   - id: A3-002
     severity: error
-    description: allow decisions should require mandate linkage
+    description: allow decisions should require mandate context
     check:
       type: conditional
       condition:

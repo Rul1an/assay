@@ -467,13 +467,13 @@ impl MandateStore {
 
 | Rule ID | Check | Severity | Scope |
 |---------|-------|----------|-------|
-| `MANDATE-001` | `decision=allow` for commit tools MUST have `mandate_id` | error | `commit_tools` only |
+| `MANDATE-001` | `decision=allow` tool decisions MUST carry `mandate_id` on the same event | error | allow decisions on `assay.tool.decision` |
 | `MANDATE-002` | `mandate_id` MUST reference existing `assay.mandate.v1` in bundle | error | all |
 | `MANDATE-003` | Tool call timestamp within `not_before`..`expires_at` | error | all |
 | `MANDATE-004` | `single_use`/`max_uses` mandate has valid receipt count | error | all |
 | `MANDATE-005` | `mandate_kind=transaction` required for commit tools | warning | `commit_tools` |
 
-**Note on false positive minimization:** MANDATE-001 only applies to tools classified as `commit` (via `mandate_trust.commit_tools` config). Read-only discovery flows do not require mandate linkage, preventing adoption friction.
+**Note on v1.1 scope:** `MANDATE-001` in engine `v1.1` proves only that allow decisions carry mandate context on the same event. Commit-tool classification and mandate reference integrity remain future work.
 
 ### Tool Classification Config
 

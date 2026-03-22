@@ -1,5 +1,5 @@
 name: mandate-baseline
-version: "1.0.0"
+version: "1.1.0"
 kind: security
 description: Mandate evidence validation rules for AI agent authorization
 author: Assay Team
@@ -21,25 +21,25 @@ requires:
 rules:
   - id: MANDATE-001
     severity: error
-    description: Commit tool decisions must have mandate authorization
+    description: Allow tool decisions must include mandate context
     help_markdown: |
-      ## MANDATE-001: Mandate Required for Commit Operations
+      ## MANDATE-001: Mandate Context Required On Allow Decisions
 
-      Tool decisions that allow commit operations (financial transactions,
-      irreversible actions) MUST be linked to a valid mandate.
+      Tool decisions that resolve to `decision=allow` MUST carry mandate
+      context on the same event.
 
       **What this checks:**
       - `assay.tool.decision` events with `decision=allow`
-      - For tools matching commit_tools patterns
       - Must have a `mandate_id` field
 
-      **Configuration:**
-      Configure `mandate_trust.commit_tools` in your policy to specify
-      which tools are considered commit operations.
+      **What this does not check:**
+      - Whether the `mandate_id` references an existing mandate event
+      - Whether the mandate is valid for the operation time window
+      - Whether the mandate kind matches the operation class
 
       **Example fix:**
-      Ensure the agent requests user authorization before allowing
-      commit operations, and link the mandate_id to the tool decision.
+      Ensure the agent records `mandate_id` on the allow decision event when
+      mandate context is available for the operation.
     check:
       type: conditional
       condition:
@@ -52,8 +52,9 @@ rules:
           - /data/mandate_id
     event_types:
       - assay.tool.decision
-    # Note: Full implementation requires commit_tools pattern matching
-    # which is configured via mandate_trust.commit_tools in policy
+    # Note: This v1.1 rule only checks mandate context presence on allow
+    # decisions. Commit-tool classification and mandate reference integrity
+    # require future engine features.
 
   - id: MANDATE-002
     severity: error
@@ -73,15 +74,15 @@ rules:
       - Incorrect mandate_id value
       - Mandate was generated in a different session
 
-      **Note:** This check requires engine v1.1 (reference_exists).
+      **Note:** This check requires engine v1.2 (reference_exists).
     check:
-      # Requires engine v1.1: reference_exists check type
+      # Requires engine v1.2: reference_exists check type
       type: json_path_exists
       paths:
         - /data/mandate_id
     event_types:
       - assay.tool.decision
-    engine_min_version: "1.1"
+    engine_min_version: "1.2"
 
   - id: MANDATE-003
     severity: error
@@ -101,15 +102,15 @@ rules:
       Configure `mandate_trust.clock_skew_tolerance_seconds` to allow
       for reasonable clock differences. Reports include skew applied.
 
-      **Note:** This check requires engine v1.1 (temporal_range).
+      **Note:** This check requires engine v1.2 (temporal_range).
     check:
-      # Requires engine v1.1: temporal_range check type
+      # Requires engine v1.2: temporal_range check type
       type: json_path_exists
       paths:
         - /data/mandate_id
     event_types:
       - assay.tool.decision
-    engine_min_version: "1.1"
+    engine_min_version: "1.2"
 
   - id: MANDATE-004
     severity: error
@@ -129,16 +130,16 @@ rules:
       - Runtime: Atomic check prevents concurrent violations
       - Lint: Post-hoc detection via use receipt analysis
 
-      **Note:** This check requires engine v1.1 (use_count_valid).
+      **Note:** This check requires engine v1.2 (use_count_valid).
     check:
-      # Requires engine v1.1: use_count_valid check type
+      # Requires engine v1.2: use_count_valid check type
       type: json_path_exists
       paths:
         - /data/constraints/single_use
         - /data/constraints/max_uses
     event_types:
       - assay.mandate.v1
-    engine_min_version: "1.1"
+    engine_min_version: "1.2"
 
   - id: MANDATE-005
     severity: warning
@@ -157,12 +158,12 @@ rules:
       - Tool decisions for commit tools
       - Referenced mandate must have `mandate_kind: transaction`
 
-      **Note:** This check requires engine v1.1 (mandate_kind_check).
+      **Note:** This check requires engine v1.2 (mandate_kind_check).
     check:
-      # Requires engine v1.1: mandate_kind_check
+      # Requires engine v1.2: mandate_kind_check
       type: json_path_exists
       paths:
         - /data/mandate_id
     event_types:
       - assay.tool.decision
-    engine_min_version: "1.1"
+    engine_min_version: "1.2"
