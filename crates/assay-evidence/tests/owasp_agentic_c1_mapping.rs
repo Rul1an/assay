@@ -148,6 +148,49 @@ fn current_profile_baseline_bundle() -> Vec<u8> {
     ])
 }
 
+fn supported_degraded_profile_bundle() -> Vec<u8> {
+    make_bundle(vec![
+        make_event(
+            "assay.profile.started",
+            "run_profile_degraded",
+            0,
+            json!({
+                "profile_name": "g1-supported-degraded",
+                "profile_version": "1.0.0",
+                "total_runs_aggregated": 1
+            }),
+        ),
+        make_event(
+            "assay.sandbox.degraded",
+            "run_profile_degraded",
+            1,
+            json!({
+                "reason_code": "policy_conflict",
+                "degradation_mode": "audit_fallback",
+                "component": "landlock"
+            }),
+        ),
+        make_event(
+            "assay.process.exec",
+            "run_profile_degraded",
+            2,
+            json!({
+                "hits": 1
+            }),
+        ),
+        make_event(
+            "assay.profile.finished",
+            "run_profile_degraded",
+            3,
+            json!({
+                "processes_count": 1,
+                "sandbox_degradation_count": 1,
+                "integrity_scope": "observed"
+            }),
+        ),
+    ])
+}
+
 #[test]
 fn a1_probe_executes_without_unsupported_checks() {
     let pack = load_probe_pack("owasp-agentic-a1-probe.yaml");
@@ -240,6 +283,19 @@ fn a5_sandbox_rule_is_signal_gap_in_current_baseline_fixture() {
     assert!(
         has_rule_finding(&result, "owasp-agentic-a5-probe", "A5-002"),
         "sandbox degradation probe should fail against current baseline fixture"
+    );
+}
+
+#[test]
+fn a5_sandbox_signal_exists_for_supported_degraded_flow() {
+    let result = lint_with_pack(
+        "owasp-agentic-a5-probe.yaml",
+        &supported_degraded_profile_bundle(),
+    );
+
+    assert!(
+        !has_rule_finding(&result, "owasp-agentic-a5-probe", "A5-002"),
+        "sandbox degradation probe should pass when supported degraded evidence is present"
     );
 }
 

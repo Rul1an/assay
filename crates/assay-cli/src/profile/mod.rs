@@ -4,6 +4,7 @@ pub mod suggest;
 pub mod writer;
 
 use self::events::{BackendHint, FsOp, ProfileEvent};
+use assay_evidence::types::PayloadSandboxDegraded;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -36,6 +37,9 @@ pub struct ProfileAgg {
 
     /// Degradations / Warnings
     pub notes: Vec<String>,
+
+    /// Structured containment degradations that weakened enforcement while execution continued.
+    pub sandbox_degradations: Vec<PayloadSandboxDegraded>,
 }
 
 /// Finished profile report ready for suggestion generation.
@@ -49,6 +53,40 @@ pub struct ProfileReport {
 impl ProfileReport {
     pub fn to_suggestion(&self, cfg: suggest::SuggestConfig) -> suggest::PolicySuggestion {
         suggest::build_policy_suggestion(self, cfg)
+    }
+
+    pub fn to_evidence_profile(
+        &self,
+        name: &str,
+        run_id: &str,
+    ) -> crate::cli::commands::profile_types::Profile {
+        use crate::cli::commands::profile_types::{Profile, ProfileEntry};
+
+        let mut profile = Profile::new(name, None);
+        let now = chrono::Utc::now().to_rfc3339();
+        profile.created_at = now.clone();
+        profile.updated_at = now;
+        profile.total_runs = 1;
+        profile.run_ids.push_back(run_id.to_string());
+
+        for (_, path, _) in &self.agg.fs {
+            let entry = profile.entries.files.entry(path.clone()).or_default();
+            if entry.runs_seen == 0 {
+                *entry = ProfileEntry::new(0, 1);
+            } else {
+                entry.merge_run(0, 1);
+            }
+        }
+
+        for (argv0, hits) in &self.agg.execs {
+            profile
+                .entries
+                .processes
+                .insert(argv0.clone(), ProfileEntry::new(0, *hits));
+        }
+
+        profile.sandbox_degradations = self.agg.sandbox_degradations.clone();
+        profile
     }
 }
 
@@ -91,6 +129,16 @@ impl ProfileCollector {
                 *agg.counters
                     .entry("sandbox.audit_fallback".to_string())
                     .or_default() += 1;
+            }
+            ProfileEvent::SandboxDegraded { payload } => {
+                let exists = agg.sandbox_degradations.iter().any(|existing| {
+                    existing.component == payload.component
+                        && existing.reason_code == payload.reason_code
+                });
+                if !exists {
+                    agg.sandbox_degradations.push(payload);
+                    agg.sandbox_degradations.sort();
+                }
             }
             ProfileEvent::EnforcementFailed { reason, detail: _ } => {
                 agg.notes.push(format!("enforcement_failed: {}", reason));
@@ -163,6 +211,31 @@ mod tests {
 
         let expected = include_str!("../../tests/golden/profile_basic.yaml");
         assert_eq!(normalize(&got), normalize(expected));
+    }
+
+    #[test]
+    fn collector_suppresses_duplicate_sandbox_degradations_per_component_reason() {
+        let cfg = ProfileConfig {
+            cwd: PathBuf::from("/repo"),
+            home: None,
+            assay_tmp: None,
+        };
+        let c = ProfileCollector::new(cfg);
+
+        let payload = PayloadSandboxDegraded {
+            reason_code: assay_evidence::types::SandboxDegradationReasonCode::PolicyConflict,
+            degradation_mode: assay_evidence::types::SandboxDegradationMode::AuditFallback,
+            component: assay_evidence::types::SandboxDegradationComponent::Landlock,
+            detail: Some("safe-detail".into()),
+        };
+
+        c.record(ProfileEvent::SandboxDegraded {
+            payload: payload.clone(),
+        });
+        c.record(ProfileEvent::SandboxDegraded { payload });
+
+        let report = c.finish();
+        assert_eq!(report.agg.sandbox_degradations.len(), 1);
     }
 
     fn normalize(s: &str) -> String {

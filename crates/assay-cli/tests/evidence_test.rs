@@ -204,3 +204,64 @@ fn test_evidence_verify_fail_on_extra_file() {
         .failure()
         .stderr(predicate::str::is_match("(?i)(extra|disallowed|unexpected)").unwrap());
 }
+
+#[test]
+fn test_evidence_export_includes_sandbox_degraded_event_when_profile_contains_degradation() {
+    let dir = tempdir().unwrap();
+    let profile_path = dir.path().join("degraded-profile.yaml");
+    let bundle_path = dir.path().join("degraded-bundle.tar.gz");
+
+    let profile_content = r#"
+version: "1.0"
+name: degraded-flow
+created_at: "2026-01-26T23:00:00Z"
+updated_at: "2026-01-26T23:00:00Z"
+total_runs: 1
+run_ids: ["degraded_run_123"]
+entries:
+  processes:
+    "/usr/bin/true":
+      first_seen: 100
+      last_seen: 100
+      runs_seen: 1
+      hits_total: 1
+sandbox_degradations:
+  - reason_code: policy_conflict
+    degradation_mode: audit_fallback
+    component: landlock
+"#;
+    fs::write(&profile_path, profile_content).unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("export")
+        .arg("--profile")
+        .arg(&profile_path)
+        .arg("--out")
+        .arg(&bundle_path)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("show")
+        .arg(&bundle_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let events = json["events"].as_array().unwrap();
+    let degraded = events
+        .iter()
+        .find(|event| event["type"] == "assay.sandbox.degraded")
+        .expect("expected sandbox degradation event");
+    assert_eq!(degraded["subject"], "landlock");
+    assert_eq!(degraded["data"]["reason_code"], "policy_conflict");
+    assert_eq!(degraded["data"]["degradation_mode"], "audit_fallback");
+    assert_eq!(degraded["data"]["component"], "landlock");
+}

@@ -3,6 +3,7 @@
 //! A Profile accumulates observations across multiple runs to determine
 //! which artifacts are stable (consistently observed) vs noise (sporadic).
 
+use assay_evidence::types::PayloadSandboxDegraded;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
@@ -38,6 +39,9 @@ pub struct Profile {
     pub run_id_digests: VecDeque<String>,
 
     pub entries: ProfileEntries,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sandbox_degradations: Vec<PayloadSandboxDegraded>,
 }
 
 impl Profile {
@@ -53,6 +57,7 @@ impl Profile {
             run_ids: VecDeque::new(),
             run_id_digests: VecDeque::new(),
             entries: ProfileEntries::default(),
+            sandbox_degradations: Vec::new(),
         }
     }
 

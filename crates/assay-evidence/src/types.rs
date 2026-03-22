@@ -273,10 +273,32 @@ pub struct PayloadExecObserved {
     pub env_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxDegradationReasonCode {
+    BackendUnavailable,
+    PolicyConflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxDegradationMode {
+    AuditFallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxDegradationComponent {
+    Landlock,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PayloadSandboxDegraded {
-    pub reason_code: String,
-    pub message: String,
+    pub reason_code: SandboxDegradationReasonCode,
+    pub degradation_mode: SandboxDegradationMode,
+    pub component: SandboxDegradationComponent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -329,5 +351,25 @@ mod tests {
         assert_eq!(event.id, "run_123:42");
         assert_eq!(event.run_id, "run_123");
         assert_eq!(event.seq, 42);
+    }
+
+    #[test]
+    fn sandbox_degraded_payload_serde_shape_is_stable() {
+        let payload = PayloadSandboxDegraded {
+            reason_code: SandboxDegradationReasonCode::BackendUnavailable,
+            degradation_mode: SandboxDegradationMode::AuditFallback,
+            component: SandboxDegradationComponent::Landlock,
+            detail: None,
+        };
+
+        let value = serde_json::to_value(&payload).expect("payload should serialize");
+        assert_eq!(value["reason_code"], "backend_unavailable");
+        assert_eq!(value["degradation_mode"], "audit_fallback");
+        assert_eq!(value["component"], "landlock");
+        assert!(value.get("detail").is_none(), "detail should stay optional");
+
+        let roundtrip: PayloadSandboxDegraded =
+            serde_json::from_value(value).expect("payload should deserialize");
+        assert_eq!(roundtrip, payload);
     }
 }

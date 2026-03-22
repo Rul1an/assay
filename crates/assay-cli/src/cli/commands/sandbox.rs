@@ -3,6 +3,10 @@ use crate::cli::args::SandboxArgs;
 use crate::env_filter::EnvFilter;
 use crate::exit_codes;
 use crate::metrics;
+use assay_evidence::types::{
+    PayloadSandboxDegraded, SandboxDegradationComponent, SandboxDegradationMode,
+    SandboxDegradationReasonCode,
+};
 use std::process::Stdio;
 use tokio::time::Duration;
 
@@ -32,6 +36,15 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         if args.fail_closed {
             eprintln!("ERROR: Active enforcement requested (--enforce) but no containment backend available.");
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
+        }
+        if let Some(p) = &profiler {
+            p.record(ProfileEvent::AuditFallback {
+                reason: "landlock backend unavailable (degraded to audit)".to_string(),
+                detail: None,
+            });
+            if let Some(payload) = backend_unavailable_degradation(&args, &backend) {
+                p.record(ProfileEvent::SandboxDegraded { payload });
+            }
         }
         eprintln!(
             "WARN: Active enforcement requested but not supported. Falling back to Audit mode."
@@ -225,6 +238,9 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 reason: "landlock policy conflict (degraded to audit)".to_string(),
                 detail: None,
             });
+            if let Some(payload) = policy_conflict_degradation(&args, actual_enforcement, &compat) {
+                p.record(ProfileEvent::SandboxDegraded { payload });
+            }
         }
 
         eprintln!("WARN: Landlock policy conflict detected (Deny rule inside Allow root).");
@@ -460,6 +476,16 @@ fn maybe_profile_finish(
     // Atomic Write
     crate::profile::writer::save_atomic(out_path, &content)?;
 
+    let evidence_profile_path = evidence_profile_path(out_path, &args.profile_format);
+    let run_id = evidence_profile_run_id(args, &report);
+    let evidence_profile_name = out_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("assay-sandbox")
+        .to_string();
+    let evidence_profile = report.to_evidence_profile(&evidence_profile_name, &run_id);
+    crate::cli::commands::profile_types::save_profile(&evidence_profile, &evidence_profile_path)?;
+
     // Optional report
     let report_path = args.profile_report.clone().unwrap_or_else(|| {
         let mut p = out_path.clone();
@@ -491,7 +517,170 @@ fn maybe_profile_finish(
             out_path.display(),
             report_path.display()
         );
+        eprintln!("Evidence Profile: {}", evidence_profile_path.display());
     }
 
     Ok(())
+}
+
+fn backend_unavailable_degradation(
+    args: &SandboxArgs,
+    backend: &BackendType,
+) -> Option<PayloadSandboxDegraded> {
+    if !args.enforce || args.fail_closed || matches!(backend, BackendType::Landlock) {
+        return None;
+    }
+
+    Some(PayloadSandboxDegraded {
+        reason_code: SandboxDegradationReasonCode::BackendUnavailable,
+        degradation_mode: SandboxDegradationMode::AuditFallback,
+        component: SandboxDegradationComponent::Landlock,
+        detail: None,
+    })
+}
+
+fn policy_conflict_degradation(
+    args: &SandboxArgs,
+    actual_enforcement: bool,
+    compat: &crate::landlock_check::LandlockCompatReport,
+) -> Option<PayloadSandboxDegraded> {
+    if !args.enforce || args.fail_closed || !actual_enforcement || compat.is_compatible() {
+        return None;
+    }
+
+    Some(PayloadSandboxDegraded {
+        reason_code: SandboxDegradationReasonCode::PolicyConflict,
+        degradation_mode: SandboxDegradationMode::AuditFallback,
+        component: SandboxDegradationComponent::Landlock,
+        detail: None,
+    })
+}
+
+fn evidence_profile_path(out_path: &std::path::Path, profile_format: &str) -> std::path::PathBuf {
+    let ext = if profile_format == "json" {
+        "evidence.json"
+    } else {
+        "evidence.yaml"
+    };
+    let mut path = out_path.to_path_buf();
+    let stem = out_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("assay-sandbox");
+    path.set_file_name(format!("{stem}.{ext}"));
+    path
+}
+
+fn evidence_profile_run_id(args: &SandboxArgs, report: &crate::profile::ProfileReport) -> String {
+    use sha2::Digest;
+
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(args.command.join("\0").as_bytes());
+    for (name, count) in &report.agg.counters {
+        hasher.update(name.as_bytes());
+        hasher.update(count.to_string().as_bytes());
+    }
+    for note in &report.agg.notes {
+        hasher.update(note.as_bytes());
+    }
+    for (argv0, hits) in &report.agg.execs {
+        hasher.update(argv0.as_bytes());
+        hasher.update(hits.to_string().as_bytes());
+    }
+    for (op, path, backend) in &report.agg.fs {
+        hasher.update(op.as_str().as_bytes());
+        hasher.update(path.as_bytes());
+        hasher.update(format!("{backend:?}").as_bytes());
+    }
+    for degradation in &report.agg.sandbox_degradations {
+        hasher.update(format!("{degradation:?}").as_bytes());
+    }
+
+    let digest = hex::encode(hasher.finalize());
+    format!("sandbox_{}", &digest[..16])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sandbox_args() -> SandboxArgs {
+        SandboxArgs {
+            command: vec!["true".into()],
+            policy: None,
+            workdir: None,
+            timeout: None,
+            enforce: true,
+            dry_run: false,
+            fail_closed: false,
+            env_strict: false,
+            env_strip_exec: false,
+            env_allow: None,
+            env_passthrough: false,
+            env_safe_path: false,
+            profile: None,
+            profile_format: "yaml".into(),
+            profile_report: None,
+            verbose: false,
+            quiet: true,
+        }
+    }
+
+    #[test]
+    fn backend_unavailable_emits_degradation_when_enforcement_requested_and_run_continues() {
+        let args = sandbox_args();
+        let payload = backend_unavailable_degradation(&args, &BackendType::NoopAudit)
+            .expect("expected degradation payload");
+        assert_eq!(
+            payload.reason_code,
+            SandboxDegradationReasonCode::BackendUnavailable
+        );
+        assert_eq!(payload.detail, None);
+    }
+
+    #[test]
+    fn intentional_permissive_mode_does_not_emit_degradation() {
+        let mut args = sandbox_args();
+        args.enforce = false;
+        assert!(backend_unavailable_degradation(&args, &BackendType::NoopAudit).is_none());
+    }
+
+    #[test]
+    fn fail_closed_backend_unavailable_does_not_emit_degradation() {
+        let mut args = sandbox_args();
+        args.fail_closed = true;
+        assert!(backend_unavailable_degradation(&args, &BackendType::NoopAudit).is_none());
+    }
+
+    #[test]
+    fn policy_conflict_emits_degradation_only_when_execution_continues() {
+        let args = sandbox_args();
+        let compat = crate::landlock_check::LandlockCompatReport {
+            allowed_roots: Vec::new(),
+            conflicts: vec![(
+                std::path::PathBuf::from("/allow"),
+                std::path::PathBuf::from("/allow/deny"),
+            )],
+        };
+        let payload = policy_conflict_degradation(&args, true, &compat)
+            .expect("expected degradation payload");
+        assert_eq!(
+            payload.reason_code,
+            SandboxDegradationReasonCode::PolicyConflict
+        );
+    }
+
+    #[test]
+    fn fail_closed_policy_conflict_does_not_emit_degradation() {
+        let mut args = sandbox_args();
+        args.fail_closed = true;
+        let compat = crate::landlock_check::LandlockCompatReport {
+            allowed_roots: Vec::new(),
+            conflicts: vec![(
+                std::path::PathBuf::from("/allow"),
+                std::path::PathBuf::from("/allow/deny"),
+            )],
+        };
+        assert!(policy_conflict_degradation(&args, true, &compat).is_none());
+    }
 }
