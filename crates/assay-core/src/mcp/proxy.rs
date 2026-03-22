@@ -551,6 +551,8 @@ impl McpProxy {
         event.data.lane = metadata.lane.clone();
         event.data.principal = metadata.principal.clone();
         event.data.auth_context_summary = metadata.auth_context_summary.clone();
+        event.data.delegated_from = metadata.delegated_from.clone();
+        event.data.delegation_depth = metadata.delegation_depth;
         refresh_contract_projections(&mut event.data);
         emitter.emit(&event);
     }

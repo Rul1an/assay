@@ -264,6 +264,10 @@ pub struct PayloadToolDecision {
     pub decision: String,
     pub reason_code: Option<String>,
     pub args_schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -337,6 +341,36 @@ mod tests {
 
         let meta_no_git = ProducerMeta::new("assay-cli", "2.6.0");
         assert_eq!(meta_no_git.to_string_compact(), "assay-cli/2.6.0");
+    }
+
+    #[test]
+    fn tool_decision_payload_delegation_fields_are_additive() {
+        let without = serde_json::json!({
+            "tool": "deploy_service",
+            "decision": "allow",
+            "reason_code": "P_POLICY_ALLOW",
+            "args_schema_hash": null
+        });
+        let without_payload: PayloadToolDecision =
+            serde_json::from_value(without).expect("legacy payload should deserialize");
+        assert_eq!(without_payload.delegated_from, None);
+        assert_eq!(without_payload.delegation_depth, None);
+
+        let with = serde_json::json!({
+            "tool": "deploy_service",
+            "decision": "allow",
+            "reason_code": "P_POLICY_ALLOW",
+            "args_schema_hash": null,
+            "delegated_from": "agent:planner",
+            "delegation_depth": 1
+        });
+        let with_payload: PayloadToolDecision =
+            serde_json::from_value(with).expect("delegation payload should deserialize");
+        assert_eq!(
+            with_payload.delegated_from.as_deref(),
+            Some("agent:planner")
+        );
+        assert_eq!(with_payload.delegation_depth, Some(1));
     }
 
     #[test]

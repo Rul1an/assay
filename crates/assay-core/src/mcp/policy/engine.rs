@@ -21,6 +21,7 @@ pub(super) fn evaluate_with_metadata(
         tool_classes: tool_classes_vec,
         ..PolicyMatchMetadata::default()
     };
+    apply_delegation_context(args, &mut metadata);
 
     // 0. Tool Integrity Check (Phase 9)
     if let Some(pinned) = policy.tool_pins.get(tool_name) {
@@ -466,6 +467,43 @@ fn default_redact_args_contract() -> RedactArgsContract {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DelegationEvidenceContext {
+    delegated_from: String,
+    delegation_depth: Option<u32>,
+}
+
+fn apply_delegation_context(args: &Value, metadata: &mut PolicyMatchMetadata) {
+    let Some(context) = parse_delegation_context(args) else {
+        return;
+    };
+
+    metadata.delegated_from = Some(context.delegated_from);
+    metadata.delegation_depth = context.delegation_depth;
+}
+
+fn parse_delegation_context(args: &Value) -> Option<DelegationEvidenceContext> {
+    let delegation = args.get("_meta")?.get("delegation")?.as_object()?;
+
+    let delegated_from = delegation
+        .get("delegated_from")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+
+    let delegation_depth = delegation
+        .get("delegation_depth")
+        .and_then(Value::as_u64)
+        .filter(|depth| *depth >= 1 && *depth <= u32::MAX as u64)
+        .map(|depth| depth as u32);
+
+    Some(DelegationEvidenceContext {
+        delegated_from,
+        delegation_depth,
+    })
+}
+
 fn evaluate_restrict_scope_contract(
     contract: &RestrictScopeContract,
     tool_name: &str,
@@ -706,5 +744,56 @@ fn matched_rule_name(
         MatchBasis::Name => name_field.to_string(),
         MatchBasis::Class => class_field.to_string(),
         MatchBasis::None => name_field.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_delegation_context;
+    use serde_json::json;
+
+    #[test]
+    fn parse_delegation_context_requires_explicit_delegated_from() {
+        let args = json!({
+            "_meta": {
+                "delegation": {
+                    "note": "planner forwarded the request"
+                }
+            }
+        });
+
+        assert!(parse_delegation_context(&args).is_none());
+    }
+
+    #[test]
+    fn parse_delegation_context_uses_explicit_depth_only() {
+        let args = json!({
+            "_meta": {
+                "delegation": {
+                    "delegated_from": "agent:planner",
+                    "delegation_depth": 1
+                }
+            }
+        });
+
+        let parsed = parse_delegation_context(&args).expect("expected delegation context");
+        assert_eq!(parsed.delegated_from, "agent:planner");
+        assert_eq!(parsed.delegation_depth, Some(1));
+    }
+
+    #[test]
+    fn parse_delegation_context_does_not_infer_depth_from_invalid_value() {
+        let args = json!({
+            "_meta": {
+                "delegation": {
+                    "delegated_from": "agent:planner",
+                    "delegation_depth": "1"
+                }
+            }
+        });
+
+        let parsed = parse_delegation_context(&args).expect("expected delegation context");
+        assert_eq!(parsed.delegated_from, "agent:planner");
+        assert_eq!(parsed.delegation_depth, None);
     }
 }
