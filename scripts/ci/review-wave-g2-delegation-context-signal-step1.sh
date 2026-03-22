@@ -35,6 +35,12 @@ evidence_types="crates/assay-evidence/src/types.rs"
 adr_doc="docs/architecture/ADR-006-Evidence-Contract.md"
 c1_doc="docs/security/OWASP-AGENTIC-A1-A3-A5-C1-MAPPING.md"
 
+require_fixed_pattern() {
+  local pattern="$1"
+  local file="$2"
+  "$rg_bin" -n -F "$pattern" "$file" >/dev/null
+}
+
 while IFS= read -r file; do
   [[ -n "$file" ]] || continue
   case "$file" in
@@ -69,10 +75,20 @@ while IFS= read -r file; do
   esac
 done < <(git diff --name-only "${base_ref}...HEAD")
 
-"$rg_bin" -n 'pub delegated_from: Option<String>' "$policy_mod" "$emit_file" "$decision_file" "$evidence_types" >/dev/null
-"$rg_bin" -n 'pub delegation_depth: Option<u32>' "$policy_mod" "$emit_file" "$decision_file" "$evidence_types" >/dev/null
+require_fixed_pattern 'pub delegated_from: Option<String>' "$policy_mod"
+require_fixed_pattern 'pub delegation_depth: Option<u32>' "$policy_mod"
+require_fixed_pattern 'pub(super) delegated_from: Option<String>' "$emit_file"
+require_fixed_pattern 'pub(super) delegation_depth: Option<u32>' "$emit_file"
+require_fixed_pattern 'pub delegated_from: Option<String>' "$decision_file"
+require_fixed_pattern 'pub delegation_depth: Option<u32>' "$decision_file"
+require_fixed_pattern 'event.data.delegated_from = metadata.delegated_from.clone();' "$proxy_file"
+require_fixed_pattern 'event.data.delegation_depth = metadata.delegation_depth;' "$proxy_file"
+require_fixed_pattern 'pub delegated_from: Option<String>' "$evidence_types"
+require_fixed_pattern 'pub delegation_depth: Option<u32>' "$evidence_types"
 "$rg_bin" -n 'fn parse_delegation_context\(' "$policy_engine" >/dev/null
-"$rg_bin" -n '"delegation"' "$policy_engine" "$tool_tests" "$decision_invariant" >/dev/null
+require_fixed_pattern '"delegation"' "$policy_engine"
+require_fixed_pattern '"delegation"' "$tool_tests"
+require_fixed_pattern '"delegation"' "$decision_invariant"
 
 for required_test in \
   'fn delegated_context_emits_typed_fields_for_supported_flow(' \
@@ -114,7 +130,7 @@ done
 while IFS= read -r file; do
   [[ -n "$file" ]] || continue
   case "$file" in
-    crates/assay-evidence/packs/*|packs/open/*)
+    crates/assay-evidence/packs/*|packs/open/*/pack.yaml)
       echo "ERROR: G2 must not change shipped pack YAMLs: $file" >&2
       exit 1
       ;;
