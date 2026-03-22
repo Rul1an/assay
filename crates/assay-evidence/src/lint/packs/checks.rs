@@ -2,7 +2,7 @@
 //!
 //! Each check type from SPEC-Pack-Engine-v1 has a corresponding implementation here.
 
-use super::schema::{CheckDefinition, PackRule, Severity};
+use super::schema::{CheckDefinition, PackRule, Severity, SupportedConditionalCheck};
 use crate::bundle::writer::Manifest;
 use crate::lint::{EventLocation, LintFinding};
 use crate::types::EvidenceEvent;
@@ -36,7 +36,7 @@ pub struct CheckResult {
 }
 
 /// Current pack engine version.
-pub const ENGINE_VERSION: &str = "1.0";
+pub const ENGINE_VERSION: &str = "1.1";
 
 /// Execute a pack rule check.
 ///
@@ -73,9 +73,14 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
             check_manifest_field(rule, ctx, path, *required)
         }
         CheckDefinition::JsonPathExists { paths } => check_json_path_exists(rule, ctx, paths),
-        CheckDefinition::Conditional { .. } => {
-            handle_unsupported_check(rule, ctx, "Conditional checks require engine v1.1")
-        }
+        CheckDefinition::Conditional { .. } => match rule.check.supported_conditional() {
+            Ok(conditional) => check_conditional(rule, ctx, &conditional),
+            Err(reason) => handle_unsupported_check(
+                rule,
+                ctx,
+                &format!("Unsupported conditional shape for engine v1.1: {reason}"),
+            ),
+        },
         CheckDefinition::Unsupported => handle_unsupported_check(
             rule,
             ctx,
@@ -139,7 +144,7 @@ fn check_json_path_exists(
     ctx: &CheckContext<'_>,
     paths: &[String],
 ) -> CheckResult {
-    for event in ctx.events {
+    for event in scoped_events(rule, ctx) {
         let json = match serde_json::to_value(event) {
             Ok(v) => v,
             Err(_) => continue,
@@ -168,7 +173,7 @@ fn check_json_path_exists(
 
 /// Check: bundle contains minimum number of events.
 fn check_event_count(rule: &PackRule, ctx: &CheckContext<'_>, min: usize) -> CheckResult {
-    let count = ctx.events.len();
+    let count = scoped_events(rule, ctx).len();
     if count >= min {
         CheckResult {
             passed: true,
@@ -180,7 +185,7 @@ fn check_event_count(rule: &PackRule, ctx: &CheckContext<'_>, min: usize) -> Che
             finding: Some(create_finding(
                 rule,
                 ctx,
-                format!("Bundle contains {} events (minimum: {})", count, min),
+                scoped_event_count_message(rule, count, min),
                 None,
             )),
         }
@@ -224,8 +229,13 @@ fn check_event_pairs(
         }
     };
 
-    let has_start = ctx.events.iter().any(|e| start_matcher.is_match(&e.type_));
-    let has_finish = ctx.events.iter().any(|e| finish_matcher.is_match(&e.type_));
+    let scoped_events = scoped_events(rule, ctx);
+    let has_start = scoped_events
+        .iter()
+        .any(|e| start_matcher.is_match(&e.type_));
+    let has_finish = scoped_events
+        .iter()
+        .any(|e| finish_matcher.is_match(&e.type_));
 
     if has_start && has_finish {
         CheckResult {
@@ -255,7 +265,7 @@ fn check_event_field_present(
     ctx: &CheckContext<'_>,
     paths: &[String],
 ) -> CheckResult {
-    for event in ctx.events {
+    for event in scoped_events(rule, ctx) {
         // Serialize once per event, then check all paths
         let json = match serde_json::to_value(event) {
             Ok(v) => v,
@@ -303,7 +313,10 @@ fn check_event_type_exists(rule: &PackRule, ctx: &CheckContext<'_>, pattern: &st
         }
     };
 
-    if ctx.events.iter().any(|e| matcher.is_match(&e.type_)) {
+    if scoped_events(rule, ctx)
+        .into_iter()
+        .any(|e| matcher.is_match(&e.type_))
+    {
         CheckResult {
             passed: true,
             finding: None,
@@ -318,6 +331,77 @@ fn check_event_type_exists(rule: &PackRule, ctx: &CheckContext<'_>, pattern: &st
                 None,
             )),
         }
+    }
+}
+
+/// Check: if matching events satisfy a narrow condition, required path must
+/// exist on the same event.
+fn check_conditional(
+    rule: &PackRule,
+    ctx: &CheckContext<'_>,
+    conditional: &SupportedConditionalCheck,
+) -> CheckResult {
+    let mut matched_events = 0usize;
+    let mut missing_required_path = 0usize;
+    let mut first_missing_event: Option<&EvidenceEvent> = None;
+
+    for event in scoped_events(rule, ctx) {
+        let json = match serde_json::to_value(event) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if !conditional
+            .clauses
+            .iter()
+            .all(|clause| value_pointer(&json, &clause.path) == Some(&clause.equals))
+        {
+            continue;
+        }
+
+        matched_events += 1;
+
+        if value_pointer(&json, &conditional.required_path).is_none() {
+            missing_required_path += 1;
+            if first_missing_event.is_none() {
+                first_missing_event = Some(event);
+            }
+        }
+    }
+
+    if matched_events == 0 || missing_required_path == 0 {
+        return CheckResult {
+            passed: true,
+            finding: None,
+        };
+    }
+
+    let matched_label = if matched_events == 1 {
+        "event"
+    } else {
+        "events"
+    };
+    let missing_label = if missing_required_path == 1 {
+        "matching event was"
+    } else {
+        "matching events were"
+    };
+
+    CheckResult {
+        passed: false,
+        finding: Some(create_finding(
+            rule,
+            ctx,
+            format!(
+                "{} {} matched the condition, but {} {} missing required path: {}",
+                matched_events,
+                matched_label,
+                missing_required_path,
+                missing_label,
+                conditional.required_path
+            ),
+            first_missing_event.map(event_location),
+        )),
     }
 }
 
@@ -442,6 +526,37 @@ fn create_finding_with_severity(
 /// Compile a glob pattern.
 fn compile_glob(pattern: &str) -> Option<GlobMatcher> {
     Glob::new(pattern).ok().map(|g| g.compile_matcher())
+}
+
+fn scoped_events<'a>(rule: &PackRule, ctx: &'a CheckContext<'a>) -> Vec<&'a EvidenceEvent> {
+    match &rule.event_types {
+        Some(event_types) if !event_types.is_empty() => ctx
+            .events
+            .iter()
+            .filter(|event| event_types.iter().any(|expected| expected == &event.type_))
+            .collect(),
+        _ => ctx.events.iter().collect(),
+    }
+}
+
+fn scoped_event_count_message(rule: &PackRule, count: usize, min: usize) -> String {
+    match &rule.event_types {
+        Some(event_types) if !event_types.is_empty() => format!(
+            "Scoped events for event_types [{}] contain {} events (minimum: {})",
+            event_types.join(", "),
+            count,
+            min
+        ),
+        _ => format!("Bundle contains {} events (minimum: {})", count, min),
+    }
+}
+
+fn event_location(event: &EvidenceEvent) -> EventLocation {
+    EventLocation {
+        seq: event.seq as usize,
+        line: event.seq as usize + 1,
+        event_type: Some(event.type_.clone()),
+    }
 }
 
 fn value_pointer<'a>(value: &'a serde_json::Value, pointer: &str) -> Option<&'a serde_json::Value> {

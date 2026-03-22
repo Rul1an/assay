@@ -183,6 +183,17 @@ impl PackRule {
                 pack: pack_name.to_string(),
             });
         }
+        if let Some(event_types) = &self.event_types {
+            if event_types.is_empty() || event_types.iter().any(|event_type| event_type.is_empty())
+            {
+                return Err(PackValidationError::InvalidCheck {
+                    pack: pack_name.to_string(),
+                    rule: self.id.clone(),
+                    reason: "event_types must contain at least one non-empty event type"
+                        .to_string(),
+                });
+            }
+        }
         self.check.validate(pack_name, &self.id)?;
         Ok(())
     }
@@ -250,8 +261,14 @@ pub enum CheckDefinition {
         paths: Vec<String>,
     },
 
-    /// Conditional check (requires engine v1.1).
-    /// Captured but not executed in current engine version.
+    /// Conditional check.
+    ///
+    /// Engine v1.1 supports a narrow typed subset:
+    /// - `condition.all` with `{ path, equals }` clauses
+    /// - `then: { type: json_path_exists, paths: [single-path] }`
+    ///
+    /// Other conditional shapes remain unsupported and are handled according to
+    /// pack kind (skip for security/quality, fail for compliance).
     #[serde(rename = "conditional")]
     Conditional {
         /// Condition definition (opaque for now).
@@ -266,6 +283,39 @@ pub enum CheckDefinition {
     /// Captured when deserializing unknown check types.
     #[serde(other)]
     Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupportedConditionalCheck {
+    pub clauses: Vec<SupportedConditionalClause>,
+    pub required_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupportedConditionalClause {
+    pub path: String,
+    pub equals: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConditionalCondition {
+    all: Vec<RawConditionalClause>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConditionalClause {
+    path: String,
+    equals: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConditionalThen {
+    #[serde(rename = "type")]
+    type_name: String,
+    paths: Vec<String>,
 }
 
 impl CheckDefinition {
@@ -335,9 +385,41 @@ impl CheckDefinition {
                     });
                 }
             }
-            CheckDefinition::Conditional { .. } => {
-                // Conditional checks are captured but validation is deferred to execution
-                // (requires engine v1.1)
+            CheckDefinition::Conditional {
+                condition,
+                then_check,
+            } => {
+                let condition =
+                    condition
+                        .as_ref()
+                        .ok_or_else(|| PackValidationError::InvalidCheck {
+                            pack: pack_name.to_string(),
+                            rule: rule_id.to_string(),
+                            reason: "conditional requires a condition object".to_string(),
+                        })?;
+                if !condition.is_object() {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "conditional.condition must be an object".to_string(),
+                    });
+                }
+
+                let then_check =
+                    then_check
+                        .as_ref()
+                        .ok_or_else(|| PackValidationError::InvalidCheck {
+                            pack: pack_name.to_string(),
+                            rule: rule_id.to_string(),
+                            reason: "conditional requires a then object".to_string(),
+                        })?;
+                if !then_check.is_object() {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "conditional.then must be an object".to_string(),
+                    });
+                }
             }
             CheckDefinition::Unsupported => {
                 // Unknown check types - validation handled by engine version check
@@ -348,10 +430,71 @@ impl CheckDefinition {
 
     /// Check if this is an unsupported/future check type.
     pub fn is_unsupported(&self) -> bool {
-        matches!(
-            self,
-            CheckDefinition::Unsupported | CheckDefinition::Conditional { .. }
+        matches!(self, CheckDefinition::Unsupported)
+            || matches!(self, CheckDefinition::Conditional { .. } if self.supported_conditional().is_err())
+    }
+
+    /// Parse the narrow conditional subset supported in engine v1.1.
+    pub fn supported_conditional(&self) -> Result<SupportedConditionalCheck, String> {
+        let (condition, then_check) = match self {
+            CheckDefinition::Conditional {
+                condition,
+                then_check,
+            } => (condition.as_ref(), then_check.as_ref()),
+            _ => return Err("check is not conditional".to_string()),
+        };
+
+        let raw_condition: RawConditionalCondition = serde_json::from_value(
+            condition
+                .cloned()
+                .ok_or_else(|| "missing condition".to_string())?,
         )
+        .map_err(|err| format!("unsupported condition shape: {err}"))?;
+
+        if raw_condition.all.is_empty() {
+            return Err("condition.all must contain at least one clause".to_string());
+        }
+
+        let mut clauses = Vec::with_capacity(raw_condition.all.len());
+        for clause in raw_condition.all {
+            if clause.path.is_empty() {
+                return Err("conditional clause path cannot be empty".to_string());
+            }
+            if clause.equals.is_array() || clause.equals.is_object() {
+                return Err("conditional clause equals must be a JSON scalar or null".to_string());
+            }
+            clauses.push(SupportedConditionalClause {
+                path: clause.path,
+                equals: clause.equals,
+            });
+        }
+
+        let raw_then: RawConditionalThen = serde_json::from_value(
+            then_check
+                .cloned()
+                .ok_or_else(|| "missing then check".to_string())?,
+        )
+        .map_err(|err| format!("unsupported then shape: {err}"))?;
+
+        if raw_then.type_name != "json_path_exists" {
+            return Err("conditional then must use json_path_exists".to_string());
+        }
+        if raw_then.paths.len() != 1 {
+            return Err(
+                "conditional then json_path_exists must contain exactly one required path"
+                    .to_string(),
+            );
+        }
+
+        let required_path = raw_then.paths.into_iter().next().unwrap_or_default();
+        if required_path.is_empty() {
+            return Err("conditional then path cannot be empty".to_string());
+        }
+
+        Ok(SupportedConditionalCheck {
+            clauses,
+            required_path,
+        })
     }
 
     /// Get the check type name for error messages.
@@ -490,5 +633,146 @@ mod tests {
             in_data: true,
         };
         assert_eq!(check.get_field_paths(), vec!["/data/traceparent"]);
+    }
+
+    #[test]
+    fn test_supported_conditional_shape_parses() {
+        let check = CheckDefinition::Conditional {
+            condition: Some(serde_json::json!({
+                "all": [
+                    {
+                        "path": "/data/decision",
+                        "equals": "allow"
+                    }
+                ]
+            })),
+            then_check: Some(serde_json::json!({
+                "type": "json_path_exists",
+                "paths": ["/data/mandate_id"]
+            })),
+        };
+
+        let conditional = check
+            .supported_conditional()
+            .expect("conditional subset should parse");
+        assert_eq!(conditional.clauses.len(), 1);
+        assert_eq!(conditional.clauses[0].path, "/data/decision");
+        assert_eq!(conditional.clauses[0].equals, serde_json::json!("allow"));
+        assert_eq!(conditional.required_path, "/data/mandate_id");
+        assert!(!check.is_unsupported());
+    }
+
+    #[test]
+    fn test_conditional_with_multiple_then_paths_is_unsupported() {
+        let check = CheckDefinition::Conditional {
+            condition: Some(serde_json::json!({
+                "all": [
+                    {
+                        "path": "/data/decision",
+                        "equals": "allow"
+                    }
+                ]
+            })),
+            then_check: Some(serde_json::json!({
+                "type": "json_path_exists",
+                "paths": ["/data/mandate_id", "/data/approval_state"]
+            })),
+        };
+
+        let error = check
+            .supported_conditional()
+            .expect_err("multiple then paths should remain unsupported");
+        assert!(error.contains("exactly one required path"));
+        assert!(check.is_unsupported());
+    }
+
+    #[test]
+    fn test_conditional_validation_requires_condition_object() {
+        let pack = PackDefinition {
+            name: "conditional-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "COND-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::Conditional {
+                    condition: None,
+                    then_check: Some(serde_json::json!({
+                        "type": "json_path_exists",
+                        "paths": ["/data/mandate_id"]
+                    })),
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("missing conditional condition should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "conditional requires a condition object"
+        ));
+    }
+
+    #[test]
+    fn test_conditional_validation_requires_then_object() {
+        let pack = PackDefinition {
+            name: "conditional-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "COND-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::Conditional {
+                    condition: Some(serde_json::json!({
+                        "all": [
+                            {
+                                "path": "/data/decision",
+                                "equals": "allow"
+                            }
+                        ]
+                    })),
+                    then_check: None,
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("missing conditional then should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "conditional requires a then object"
+        ));
     }
 }

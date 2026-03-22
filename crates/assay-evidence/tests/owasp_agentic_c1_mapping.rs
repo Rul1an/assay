@@ -180,7 +180,7 @@ fn a1_only_proves_goal_governance_control_evidence() {
 }
 
 #[test]
-fn a3_presence_rule_is_yaml_only_but_linkage_rule_is_engine_gap() {
+fn a3_conditional_presence_rule_is_supported_in_engine_v1_1() {
     let pack = load_probe_pack("owasp-agentic-a3-probe.yaml");
 
     assert!(matches!(
@@ -194,6 +194,10 @@ fn a3_presence_rule_is_yaml_only_but_linkage_rule_is_engine_gap() {
         CheckDefinition::Conditional { .. }
     ));
     assert_eq!(linkage_rule.engine_min_version.as_deref(), Some("1.1"));
+    assert!(
+        !linkage_rule.check.is_unsupported(),
+        "typed conditional presence rule should be supported in engine v1.1"
+    );
 }
 
 #[test]
@@ -240,7 +244,7 @@ fn a5_sandbox_rule_is_signal_gap_in_current_baseline_fixture() {
 }
 
 #[test]
-fn security_pack_with_unsupported_check_skips_and_blocks_c2_claim() {
+fn a3_conditional_presence_rule_fails_without_mandate_context() {
     let pack = load_probe_pack("owasp-agentic-a3-probe.yaml");
     assert_eq!(pack.definition.kind, PackKind::Security);
 
@@ -258,7 +262,28 @@ fn security_pack_with_unsupported_check_skips_and_blocks_c2_claim() {
         "delegation signal rule should pass once delegation fields are present"
     );
     assert!(
+        has_rule_finding(&result, "owasp-agentic-a3-probe", "A3-002"),
+        "conditional presence rule should fail when allow decisions lack mandate context"
+    );
+}
+
+#[test]
+fn a3_conditional_presence_rule_passes_with_mandate_context() {
+    let result = lint_with_pack(
+        "owasp-agentic-a3-probe.yaml",
+        &authorization_bundle(true, true),
+    );
+
+    assert!(
+        !has_rule_finding(&result, "owasp-agentic-a3-probe", "A3-001"),
+        "authorization presence rule should pass"
+    );
+    assert!(
+        !has_rule_finding(&result, "owasp-agentic-a3-probe", "A3-003"),
+        "delegation signal rule should pass once delegation fields are present"
+    );
+    assert!(
         !has_rule_finding(&result, "owasp-agentic-a3-probe", "A3-002"),
-        "unsupported conditional should skip in security packs, which blocks a C2 claim"
+        "conditional presence rule should pass once mandate context is present"
     );
 }
