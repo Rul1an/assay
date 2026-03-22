@@ -58,6 +58,18 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 | `--verbose`, `-v` | Show detailed sandbox setup |
 | `--quiet`, `-q` | Suppress banner output |
 
+### Profiling Output
+
+When you use `--profile`, Assay now writes three related artifacts:
+
+- the existing policy suggestion at the path you requested
+- the human-readable report (`*.report.md` by default)
+- a machine-readable evidence profile sidecar (`*.evidence.yaml` or `*.evidence.json`)
+
+That evidence profile sidecar is the canonical input for `assay evidence export`
+when you want bundle evidence from a sandboxed run, including
+`assay.sandbox.degraded` for supported weaker-than-requested fallback paths.
+
 ---
 
 ## Environment Scrubbing
@@ -200,6 +212,11 @@ assay sandbox --fail-closed --policy conflict.yaml -- ./cmd
 # ERROR: Policy cannot be fully enforced
 # exit 2
 ```
+
+When degraded execution continues and profiling is enabled, the evidence profile
+sidecar can carry a typed `assay.sandbox.degraded` signal for the supported
+fallback paths. Intentional audit/permissive runs and fail-closed aborts do not
+emit that signal.
 
 ---
 
@@ -365,4 +382,4 @@ The sandbox protects against:
 - [Sandbox Security Guide](../../guides/sandbox-security.md)
 - [Environment Filtering Reference](../sandbox-env.md)
 - [Sandbox Policies Reference](../sandbox-policies.md)
-- [assay doctor](../doctor.md)
+- [assay doctor](./doctor.md)

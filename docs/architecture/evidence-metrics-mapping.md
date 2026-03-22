@@ -30,7 +30,7 @@ Metrics related to process execution and containment.
 | :--- | :--- | :--- | :--- |
 | **Unsafe Executions** | `assay.exec.observed` | `argv0` | Detect dangerous binaries (e.g. `nc`, `curl`, `bash` -c). |
 | **Argument Drift** | `assay.exec.observed` | `args_hash` | Detect deviation from expected argument fingerprints. |
-| **Containment Breach** | `assay.sandbox.degraded` | `reason_code` | Any event here indicates containment failure/fallback. |
+| **Containment Breach** | `assay.sandbox.degraded` | `reason_code` | Supported weaker-than-requested containment fell back to audit while execution continued. |
 
 ## 4. Operational Health
 Metrics related to the runtime itself.

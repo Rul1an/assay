@@ -1,6 +1,6 @@
 use crate::cli::commands::profile_types::{Profile, ProfileEntry};
 use anyhow::Result;
-use assay_evidence::types::EvidenceEvent;
+use assay_evidence::types::{EvidenceEvent, PayloadSandboxDegraded, SandboxDegradationComponent};
 use chrono::{DateTime, Utc};
 
 /// Level of detail to include in the evidence bundle.
@@ -70,6 +70,8 @@ impl EvidenceMapper {
             export_time,
         ));
 
+        self.map_sandbox_degradations(&mut events, &profile.sandbox_degradations, export_time)?;
+
         // 2. Observed Events (if requested)
         if detail != DetailLevel::Summary {
             // Note: BTreeMap keys are already sorted in Rust.
@@ -107,12 +109,29 @@ impl EvidenceMapper {
                 "files_count": profile.entries.files.len(),
                 "network_count": profile.entries.network.len(),
                 "processes_count": profile.entries.processes.len(),
+                "sandbox_degradation_count": profile.sandbox_degradations.len(),
                 "integrity_scope": profile.scope,
             }),
             export_time,
         ));
 
         Ok(events)
+    }
+
+    fn map_sandbox_degradations(
+        &mut self,
+        events: &mut Vec<EvidenceEvent>,
+        degradations: &[PayloadSandboxDegraded],
+        export_time: DateTime<Utc>,
+    ) -> Result<()> {
+        for degradation in degradations {
+            let subject = match degradation.component {
+                SandboxDegradationComponent::Landlock => "landlock",
+            };
+            let payload = serde_json::to_value(degradation)?;
+            events.push(self.create_event("assay.sandbox.degraded", subject, payload, export_time));
+        }
+        Ok(())
     }
 
     fn map_entries(
@@ -310,11 +329,45 @@ mod tests {
             run_id_digests: VecDeque::new(),
             scope: None,
             entries: Default::default(),
+            sandbox_degradations: Vec::new(),
         };
 
         let events = mapper.map_profile(&profile, DetailLevel::Summary).unwrap();
         for ev in events {
             assert_eq!(ev.time.to_rfc3339(), "2026-01-26T23:00:00+00:00");
         }
+    }
+
+    #[test]
+    fn sandbox_degradation_observation_maps_to_evidence_event() {
+        let mut mapper = EvidenceMapper::new(Some("run_degraded".into()), "degraded");
+        let profile = Profile {
+            version: "1.0".into(),
+            name: "degraded".into(),
+            created_at: "2026-01-26T23:00:00Z".into(),
+            updated_at: "2026-01-26T23:00:00Z".into(),
+            total_runs: 1,
+            run_ids: VecDeque::from(vec!["run_degraded".into()]),
+            run_id_digests: VecDeque::new(),
+            scope: None,
+            entries: Default::default(),
+            sandbox_degradations: vec![PayloadSandboxDegraded {
+                reason_code: assay_evidence::types::SandboxDegradationReasonCode::PolicyConflict,
+                degradation_mode: assay_evidence::types::SandboxDegradationMode::AuditFallback,
+                component: SandboxDegradationComponent::Landlock,
+                detail: None,
+            }],
+        };
+
+        let events = mapper.map_profile(&profile, DetailLevel::Summary).unwrap();
+        let degraded = events
+            .iter()
+            .find(|event| event.type_ == "assay.sandbox.degraded")
+            .expect("expected sandbox degradation event");
+        assert_eq!(degraded.subject.as_deref(), Some("landlock"));
+        assert_eq!(degraded.payload["reason_code"], "policy_conflict");
+        assert_eq!(degraded.payload["degradation_mode"], "audit_fallback");
+        assert_eq!(degraded.payload["component"], "landlock");
+        assert!(degraded.payload.get("detail").is_none());
     }
 }

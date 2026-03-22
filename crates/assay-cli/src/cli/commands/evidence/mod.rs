@@ -40,7 +40,7 @@ pub enum EvidenceCmd {
 
 #[derive(Debug, Args, Clone)]
 pub struct EvidenceExportArgs {
-    /// Input Profile trace (YAML/JSON)
+    /// Input profile (multi-run profile or sandbox evidence sidecar, YAML/JSON)
     #[arg(long, alias = "input")]
     pub profile: std::path::PathBuf,
 

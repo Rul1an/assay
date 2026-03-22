@@ -1,3 +1,5 @@
+use assay_evidence::types::PayloadSandboxDegraded;
+
 /// Profile events tracked during sandbox execution.
 #[derive(Debug, Clone)]
 pub enum ProfileEvent {
@@ -28,6 +30,9 @@ pub enum ProfileEvent {
         /// Detailed context (may be redacted later)
         detail: Option<String>,
     },
+
+    /// Structured containment degradation that continued execution.
+    SandboxDegraded { payload: PayloadSandboxDegraded },
 
     /// Enforcement failure (e.g., fail-closed triggered)
     EnforcementFailed {
@@ -61,6 +66,17 @@ impl FsOp {
             FsOp::Read => "read",
             FsOp::Write => "write",
             FsOp::Exec => "exec",
+        }
+    }
+}
+
+impl BackendHint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BackendHint::Injected => "injected",
+            BackendHint::Landlock => "landlock",
+            BackendHint::Ptrace => "ptrace",
+            BackendHint::Ebpf => "ebpf",
         }
     }
 }
@@ -120,6 +136,10 @@ pub fn try_load_test_events() -> Option<Vec<ProfileEvent>> {
             out.push(ProfileEvent::AuditFallback {
                 reason: d.get("reason")?.as_str()?.to_string(),
                 detail: d.get("detail").and_then(|v| v.as_str()).map(String::from),
+            });
+        } else if let Some(d) = obj.get("SandboxDegraded") {
+            out.push(ProfileEvent::SandboxDegraded {
+                payload: serde_json::from_value(d.clone()).ok()?,
             });
         } else if let Some(d) = obj.get("EnforcementFailed") {
             let d = d.as_object()?;

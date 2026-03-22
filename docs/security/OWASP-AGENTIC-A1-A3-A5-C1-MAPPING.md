@@ -93,12 +93,14 @@ are emitted or that execution is safely authorized.
 | Candidate Rule | Candidate Check | Evidence Signals | Target Assurance | Max Provable Level | Outcome |
 | --- | --- | --- | --- | --- | --- |
 | `A5-001` Process execution evidence exists | `event_type_exists(pattern=assay.process.exec)` | `assay.process.exec` from profile evidence mapping | `Presence` | `Presence` | `yaml-only` |
-| `A5-002` Sandbox degradation evidence exists when containment weakens | `event_type_exists(pattern=assay.sandbox.degraded)` | `assay.sandbox.degraded` | `Presence` | `Presence` | `signal gap` |
+| `A5-002` Sandbox degradation evidence exists when containment weakens | `event_type_exists(pattern=assay.sandbox.degraded)` | `assay.sandbox.degraded` from supported weaker-than-requested fallback paths | `Presence` | `Presence` | `yaml-only` |
 
 Interpretation:
 - `A5-001` can honestly claim only execution evidence presence.
-- `A5-002` is blocked by a current signal gap in the baseline fixture and must
-  not be shipped as if sandbox degradation is already observable.
+- `A5-002` is no longer a pure signal gap. Supported weaker-than-requested
+  containment fallback paths can now emit `assay.sandbox.degraded` while
+  execution continues. Clean baseline fixtures still omit the event by design,
+  and the signal does not prove sandbox correctness or execution authorization.
 
 ## C2 Go / No-Go Summary
 
@@ -119,4 +121,4 @@ rules yet. The honest next step is narrower:
 | `A3-002` | `Field Presence` | `No` | Engine `1.1` can execute this narrow conditional-presence form, but it remains outside the current shipped subset and does not prove mandate reference integrity. |
 | `A3-003` | `Field Presence` | `No` | Current probe fixture does not show delegation-chain evidence. |
 | `A5-001` | `Presence` | `Yes` | Can ship only as process-execution evidence presence. |
-| `A5-002` | `Presence` | `No` | Current baseline fixture does not emit sandbox degradation evidence. |
+| `A5-002` | `Presence` | `No` | Supported fallback paths now emit the signal, but it remains outside the current shipped subset and only proves degraded containment while execution continued. |
