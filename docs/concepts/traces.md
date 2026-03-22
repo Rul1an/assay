@@ -43,6 +43,12 @@ assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
 assay evidence diff baseline.tar.gz current.tar.gz
 ```
 
+For sandboxed runs, `assay sandbox --profile out.yaml` also writes a sibling
+evidence profile sidecar such as `out.evidence.yaml`. That sidecar is the
+machine-readable input for `assay evidence export` when you want bundle evidence
+from the sandbox profiling flow, including supported
+`assay.sandbox.degraded` events.
+
 ### Bundle ID
 
 Each bundle has a content-addressed ID:

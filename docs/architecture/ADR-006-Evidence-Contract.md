@@ -68,11 +68,14 @@ Records authorization decisions (HITL-ready, protocol-based).
 ```
 
 #### C. `sandbox.degraded` (Operational Integrity)
-Records when security guarantees are weakened.
+Records when stronger-than-audit containment was requested, weaker containment
+became effective, and execution continued.
 ```json
 {
-  "reason_code": "E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE",
-  "message": "Degrading to Audit mode due to conflict on non-Linux platform."
+  "reason_code": "policy_conflict",
+  "degradation_mode": "audit_fallback",
+  "component": "landlock",
+  "detail": "optional, redacted operator context"
 }
 ```
 
