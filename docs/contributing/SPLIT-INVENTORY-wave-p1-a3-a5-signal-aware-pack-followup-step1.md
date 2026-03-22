@@ -2,7 +2,7 @@
 
 ## Goal
 
-Ship a small companion pack that lets `G1` and `G2` land productmatig without
+Ship a small companion pack that lets `G1` and `G2` land pragmatically without
 broadening the baseline pack:
 
 - `A3-003` for supported delegated flows
