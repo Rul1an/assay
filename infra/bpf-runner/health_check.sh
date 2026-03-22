@@ -194,7 +194,7 @@ cancel_superseded_runs() {
         --json databaseId,workflowName,headBranch,event,createdAt 2>/dev/null | \
         jq -r '
             map(. + {group_key: ((.workflowName // "") + "|" + (.headBranch // "") + "|" + (.event // ""))})
-            | sort_by(.group_key, .createdAt)
+            | sort_by([.group_key, .createdAt])
             | group_by(.group_key)
             | .[]
             | select(length > 1)
@@ -645,10 +645,16 @@ install_cron() {
     local script_path
     script_path=$(realpath "$0")
     local env_prefix=""
+    local escaped_script_path
+    local escaped_log_file
+    printf -v escaped_script_path '%q' "$script_path"
+    printf -v escaped_log_file '%q' "$LOG_FILE"
     if [[ -n "$GH_TOKEN_FILE" ]]; then
-        env_prefix="GH_TOKEN_FILE=$GH_TOKEN_FILE "
+        local escaped_gh_token_file
+        printf -v escaped_gh_token_file '%q' "$GH_TOKEN_FILE"
+        env_prefix="GH_TOKEN_FILE=${escaped_gh_token_file} "
     fi
-    local cron_entry="*/5 * * * * ${env_prefix}$script_path >> $LOG_FILE 2>&1"
+    local cron_entry="*/5 * * * * ${env_prefix}${escaped_script_path} >> ${escaped_log_file} 2>&1"
 
     if crontab -l 2>/dev/null | grep -q "health_check.sh"; then
         echo "Cron job already installed"

@@ -82,7 +82,9 @@ multipass exec "$VM" -- sudo bash -c '
 '
 
 # 1. Configure (Unattended)
-# Note: only custom labels are configured here; GitHub adds self-hosted/Linux/ARM64 automatically.
+# Note: only custom labels are configured here; GitHub automatically adds
+# self-hosted/Linux plus the appropriate architecture label (for example ARM64
+# or X64).
 multipass exec "$VM" -- sudo bash -c '
     rm -f /opt/actions-runner/.runner \
           /opt/actions-runner/.credentials \
