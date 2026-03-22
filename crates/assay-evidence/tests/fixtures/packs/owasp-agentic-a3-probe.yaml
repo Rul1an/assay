@@ -37,11 +37,8 @@ rules:
 
   - id: A3-003
     severity: warning
-    description: decision events capture delegated identity chain evidence
+    description: decision evidence surfaces delegated authority context for supported delegated flows
     check:
       type: event_field_present
       paths_any_of:
         - /data/delegated_from
-        - /data/actor_chain
-        - /data/inherited_scopes
-        - /data/delegation_depth

@@ -104,7 +104,6 @@ fn authorization_bundle(include_mandate: bool, include_delegation_fields: bool) 
 
     if include_delegation_fields {
         payload["delegated_from"] = json!("service-account:runner");
-        payload["actor_chain"] = json!(["user:alice", "service-account:runner"]);
         payload["delegation_depth"] = json!(1);
     }
 
