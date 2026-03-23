@@ -92,7 +92,31 @@ Per claim in `T1a`:
 - `boundary`
 - `note`
 
-### 4.3 Determinism Rules
+### 4.3 Source Vocabulary (Frozen v1)
+
+`source` must use a small fixed vocabulary in `T1a`:
+
+- `bundle_verification`
+- `bundle_proof_surface`
+- `canonical_decision_evidence`
+- `canonical_event_presence`
+- `pack_execution_results`
+
+No free-form `source` strings in `T1a`.
+
+### 4.4 Boundary Vocabulary (Frozen v1)
+
+`boundary` must use a small fixed vocabulary in `T1a`:
+
+- `bundle-wide`
+- `supported-delegated-flows-only`
+- `supported-containment-fallback-paths-only`
+- `proof-surfaces-only`
+- `pack-execution-only`
+
+No free-form `boundary` strings in `T1a`.
+
+### 4.5 Determinism Rules
 
 The canonical artifact must:
 
@@ -101,6 +125,7 @@ The canonical artifact must:
 - avoid wall-clock timestamps in canonical output
 - avoid host-specific or environment-specific volatile fields
 - remain diff-friendly by default
+- treat canonical serialization format itself as part of the contract
 
 ## 5) Claim Key Freeze (T1a v1)
 
@@ -118,6 +143,7 @@ Rules for this freeze:
 - no additional claim keys in `T1a`
 - no renames in the same wave
 - no grouped theme-first JSON structure ahead of claim-first output
+- all frozen claim keys must always be present in `trust-basis.json`, even when their `level` is `absent`
 
 ## 6) Claim Classification Rules (Initial)
 
@@ -137,10 +163,12 @@ Initial claim rules:
 
 ### `signing_evidence_present`
 - only classify above `absent` when direct signing/proof evidence already exists in canonical bundle/proof surfaces
+- minimum positive evidence in v1: a verified bundle contains explicit signing/proof material in existing bundle proof surfaces; naming, origin text, or unsigned metadata never count
 - do not infer from naming, origin text, or unrelated metadata
 
 ### `provenance_backed_claims_present`
 - only classify above `absent` when existing canonical/proof surfaces directly support provenance-backed interpretation
+- minimum positive evidence in v1: existing bundle proof surfaces explicitly back provenance-oriented interpretation for the relevant subject or claim set; descriptive text alone never counts
 - do not imply SLSA-style provenance hardness for runtime behavior
 
 ### `delegation_context_visible`
@@ -157,6 +185,7 @@ Initial claim rules:
 
 ### `applied_pack_findings_present`
 - classify only from explicit lint/pack execution results
+- semantic freeze in v1: explicit lint execution recorded at least one finding from applied packs
 - do not reconstruct from SARIF prose or markdown summaries
 
 ## 7) CLI And Product Surface Posture
@@ -165,7 +194,8 @@ Initial claim rules:
 
 Recommended posture:
 
-- `trust-basis.json` may be exposed as a real CLI output
+- `trust-basis.json` should be exposable as a low-level CLI artifact
+- preferred shape for the first explicit interface is a low-level command such as `assay trust-basis generate <bundle>`
 - but `T1a` does not need to optimize for polished end-user presentation yet
 - `T1b` is the first wave that should expose the iconic user-facing Trust Card command
 - Trust Card rendering remains one-way derivation from `trust-basis.json`
@@ -203,7 +233,9 @@ Expected no-touch zones:
 - verified bundle produces deterministic `trust-basis.json`
 - same bundle regenerates byte-stable canonical JSON
 - claim ordering is stable
+- all frozen claims are present even when classified as `absent`
 - no wall-clock fields appear in canonical artifact
+- `source` and `boundary` stay inside their frozen vocabularies
 
 ### Semantics Tests
 
