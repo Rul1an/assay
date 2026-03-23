@@ -24,6 +24,7 @@ Always enforce:
 - the canonical evidence layer remains the truth substrate; raw OTel never becomes the claim authority
 - `trust-basis.json` is the canonical compiler output
 - `trustcard.json` and `trustcard.md` are follow-on rendering artifacts and must not appear in `T1a`
+- no claim may be classified directly from raw OTel or raw upstream protocol material; classification must operate on canonical evidence present in a verified bundle
 - no new signals, packs, or engine semantics are introduced in the same wave
 - no aggregate trust score, safe/unsafe badge, or maturity badge appears anywhere in the output contract
 
@@ -59,10 +60,11 @@ The plan should stay anchored to shipped surfaces already on `main`:
 
 `trust-basis.json` is:
 
-- the canonical compiler output
+- the canonical v1 compiler output
 - derived from a verified bundle
 - machine-readable and diff-friendly
 - deterministic across regeneration from the same verified bundle
+- intended to evolve additively/versionedly rather than as a throwaway MVP artifact
 
 ### 4.2 Minimal Shape
 
@@ -166,11 +168,13 @@ Recommended posture:
 - `trust-basis.json` may be exposed as a real CLI output
 - but `T1a` does not need to optimize for polished end-user presentation yet
 - `T1b` is the first wave that should expose the iconic user-facing Trust Card command
+- Trust Card rendering remains one-way derivation from `trust-basis.json`
 
 In other words:
 
 - `T1a` optimizes for canonicality and CI usefulness
 - `T1b` optimizes for artifact legibility
+- `T1a` owns claim classification; later Trust Card surfaces must not invent new claim semantics
 
 ## 8) Implementation Boundaries
 
@@ -195,6 +199,7 @@ Expected no-touch zones:
 
 ### Contract Tests
 
+- golden fixture proves byte-stable regeneration of `trust-basis.json`
 - verified bundle produces deterministic `trust-basis.json`
 - same bundle regenerates byte-stable canonical JSON
 - claim ordering is stable
@@ -212,6 +217,7 @@ Expected no-touch zones:
 - no raw OTel-only fixture can produce claim classification without canonical evidence mapping
 - no trust score or badge appears anywhere in compiler output
 - no claim key outside the frozen set appears in v1
+- Trust Card rendering fixtures must not be required for `T1a` correctness
 
 ## 10) Reviewer Gate
 
