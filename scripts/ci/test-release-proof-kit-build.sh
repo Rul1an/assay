@@ -220,6 +220,39 @@ run_success_case() {
   grep -F -- '--source-digest abc123def456' "$verify_log" >/dev/null
   grep -F -- '--predicate-type https://slsa.dev/provenance/v1' "$verify_log" >/dev/null
   grep -F -- '--deny-self-hosted-runners' "$verify_log" >/dev/null
+  grep -F "attestation download ${SUCCESS_ASSETS_DIR}/${SUCCESS_ASSET_NAME}" "$SUCCESS_GH_LOG" >/dev/null
+}
+
+# Relative ASSETS_DIR must be resolved to an absolute path before per-asset scratch
+# dirs run `gh attestation download` (see release_proof_kit_build.sh). A log grep
+# against an already-absolute mktemp path does not catch missing normalization.
+run_relative_assets_dir_normalization_case() {
+  local temp_dir="$1"
+  setup_success_fixture "$temp_dir"
+  local out_archive="$temp_dir/release/relative-assets-proof-kit.tar.gz"
+  mkdir -p "$(dirname "$out_archive")"
+
+  : >"$SUCCESS_GH_LOG"
+  (
+    cd "$temp_dir"
+    FAKE_GH_LOG="$SUCCESS_GH_LOG" \
+      FAKE_TRUSTED_ROOT_CONTENT="$SUCCESS_TRUSTED_ROOT" \
+      FAKE_DOWNLOAD_CONTENT="$SUCCESS_BUNDLE" \
+      FAKE_DOWNLOAD_FILENAME="sha256:1234.jsonl" \
+      FAKE_DOWNLOAD_MODE="single" \
+      GH_BIN="$SUCCESS_FAKE_GH" \
+      ASSETS_DIR="assets" \
+      PROVENANCE_SUMMARY="$SUCCESS_SUMMARY" \
+      PROVENANCE_SUMMARY_SHA256="$SUCCESS_SUMMARY_SHA" \
+      OUT_ARCHIVE="$out_archive" \
+      VERSION="v9.9.9" \
+      bash "$SCRIPT"
+  )
+
+  test -f "$out_archive"
+  local expected_asset_path
+  expected_asset_path="$(cd "$temp_dir/assets" && pwd)/$SUCCESS_ASSET_NAME"
+  grep -F "attestation download ${expected_asset_path}" "$SUCCESS_GH_LOG" >/dev/null
 }
 
 run_asset_set_mismatch_case() {
@@ -307,6 +340,7 @@ main() {
   trap cleanup EXIT
 
   run_success_case "$TEST_TEMP_DIR"
+  run_relative_assets_dir_normalization_case "$TEST_TEMP_DIR"
   run_asset_set_mismatch_case "$TEST_TEMP_DIR"
   run_missing_bundle_case "$TEST_TEMP_DIR"
   run_trusted_root_failure_case "$TEST_TEMP_DIR"
