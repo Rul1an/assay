@@ -1,7 +1,7 @@
 use crate::bundle::{BundleReader, VerifyLimits};
 use crate::lint::engine::{lint_bundle_with_options, LintOptions, LintReportWithPacks};
 use crate::types::EvidenceEvent;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
 
@@ -70,8 +70,14 @@ pub fn generate_trust_basis<R: Read>(
     options: TrustBasisOptions,
 ) -> Result<TrustBasis> {
     let mut bundle_data = Vec::new();
-    let mut reader = reader;
-    reader.read_to_end(&mut bundle_data)?;
+    let mut limited_reader = reader.take(limits.max_bundle_bytes.saturating_add(1));
+    limited_reader.read_to_end(&mut bundle_data)?;
+    if bundle_data.len() as u64 > limits.max_bundle_bytes {
+        bail!(
+            "trust basis bundle exceeds compressed input limit of {} bytes",
+            limits.max_bundle_bytes
+        );
+    }
 
     let bundle_reader = BundleReader::open_with_limits(Cursor::new(&bundle_data), limits)?;
     let events = bundle_reader.events_vec()?;
@@ -456,6 +462,35 @@ mod tests {
         assert_eq!(
             claim(&trust_basis, TrustClaimId::AppliedPackFindingsPresent).level,
             TrustClaimLevel::Verified
+        );
+    }
+
+    #[test]
+    fn trust_basis_respects_max_bundle_bytes_before_verification() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.tool.decision",
+            "run_size_limit",
+            0,
+            json!({
+                "tool": "tool.commit",
+                "decision": "allow"
+            }),
+        )]);
+
+        let err = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits {
+                max_bundle_bytes: 8,
+                ..VerifyLimits::default()
+            },
+            TrustBasisOptions::default(),
+        )
+        .expect_err("trust basis generation should fail when compressed input exceeds limit");
+
+        assert!(
+            err.to_string()
+                .contains("trust basis bundle exceeds compressed input limit"),
+            "unexpected error: {err}"
         );
     }
 }
