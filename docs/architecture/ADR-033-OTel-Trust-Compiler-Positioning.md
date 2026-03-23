@@ -72,6 +72,8 @@ Those may be easier to explain, but they are weaker wedges for Assay. The strong
 
 Assay is positioned as an **OTel-native trust compiler for agent systems**.
 
+Trust compiler describes the product category; OTel-native describes the preferred ingest and ecosystem posture.
+
 The product model is:
 
 - **Input**: OTel spans, protocol/runtime events, Assay traces, and bundle artifacts
@@ -92,6 +94,7 @@ The following constraints are normative for roadmap and product decisions unless
    OTel, protocol adapters, and other sources are ingest paths. Trust claims must be grounded in Assay's canonical evidence contract and offline-verifiable bundle reality.
 
    Operational rule: new ingest paths may be additive or translational, but they must not replace the canonical evidence layer as the semantic authority for claim classification.
+   Any upstream OTel or protocol mapping change that could affect claim semantics must be covered by canonical evidence mapping tests before adoption.
 
 3. **Trust Card over trust score**
    The iconic artifact is a Trust Card that shows what is `verified`, `self_reported`, `inferred`, or `absent`. A scalar trust score or binary `trusted/untrusted` output must not become the primary interface.
@@ -99,7 +102,7 @@ The following constraints are normative for roadmap and product decisions unless
    MVP rule: no aggregate trust score, no `safe/unsafe` badge, and no maturity badge as the primary artifact.
 
 4. **Fixed execution order**
-   The preferred next order is `T1a -> T1b -> G3 -> P2`, then only later heavier semantics such as reference existence, temporal validity, or capability attestation.
+   The default execution order is `T1a -> T1b -> G3 -> P2`, then only later heavier semantics such as reference existence, temporal validity, or capability attestation, unless a later ADR explicitly supersedes it.
 
 5. **No premature correctness claims**
    Delegation validation, chain integrity/completeness, sandbox correctness, inherited-scope correctness, and temporal correctness remain out of scope until dedicated signals and semantics exist.
@@ -129,10 +132,11 @@ The first product artifact of this compiler direction is a **Trust Card**:
 - potentially signable / attestable later
 
 The Trust Card is an output of the compiler, not a separate dashboard product.
+The Trust Card is a portable manifestation of compiler output, not the full product category.
 
-### Protocol Claim Packs Become A Product Line
+### Protocol Claim Packs Are The Preferred Downstream Productization Path
 
-After the compiler and Trust Card surfaces exist, Assay should extend via **small protocol claim packs**, not via broad compliance theater.
+After the compiler and Trust Card surfaces stabilize, Assay should extend via **small protocol claim packs**, not via broad compliance theater.
 
 Examples:
 
@@ -199,6 +203,7 @@ Mitigation:
 - Assay intentionally does less in categories where competitors are already strong, such as experiments, dashboards, or generic eval UX.
 - Claim discipline must remain strict; overclaiming would undermine the entire positioning.
 - The first deliverables need careful wording so the compiler story does not sound like a full identity-validation or protocol-verification engine.
+- This positioning is less immediately legible than dashboard/eval categories and therefore depends on concrete artifacts and examples to remain understandable.
 
 ### Neutral
 
