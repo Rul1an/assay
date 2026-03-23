@@ -94,7 +94,7 @@ If any of these answers turns into "no", the default action is to stop a broader
 
 ## Strategic Positioning: Protocol-Agnostic Governance
 
-The protocol landscape table below is a planning snapshot (hypothesis-driven) and is revisited as specs/programs evolve.
+The protocol landscape table below is a planning snapshot (hypothesis-driven) and is revisited as specs/programs evolve. It is a monitoring frame for protocol-agnostic governance, not a commitment matrix that Assay will pursue every protocol surface equally or simultaneously.
 
 The agentic commerce/interop space is fragmenting (Jan 2026):
 
@@ -132,7 +132,7 @@ The CI/CD-for-agents market is validating Assay's core assumptions:
 - **Fleet-of-small-agents pattern**: The dominant deployment pattern is many small specialized agents, not one generalist. More agents = more policies = more Assay usage per repo.
 - **Gartner risk signal**: >40% of agentic AI projects will be cancelled by end 2027 due to costs, unclear value, or inadequate risk controls. Governance tooling is a prerequisite, not a nice-to-have.
 
-**Competitive differentiation**: Agent CI (eval-as-service), Langfuse/LangSmith (observability), Dagger (agentic runtime) cover adjacent layers. None offers deterministic replay, evidence bundles with integrity guarantees, or compliance packs. Assay's unique position: governance + audit, not observability or eval-as-service.
+**Competitive differentiation**: Agent CI (eval-as-service), Langfuse/LangSmith (observability), and agent runtimes such as Dagger cover adjacent layers. Assay's differentiator is the combination of deterministic replay, integrity-bearing evidence bundles, and bounded claim packs. The unique position is governance + audit, not observability or eval-as-service.
 
 See [RESEARCH-ci-cd-ai-agents-feb2026.md](architecture/RESEARCH-ci-cd-ai-agents-feb2026.md) for detailed analysis
 
@@ -151,11 +151,10 @@ The **Evidence Contract v1** is production-ready.
 
 **Architecture Note:** The current pipeline follows the OTel Collector pattern (native format emission → transformation layer → canonical export). This is the recommended SOTA approach per OpenTelemetry best practices. See [ADR-008: Evidence Streaming](./architecture/ADR-008-Evidence-Streaming.md) for the decision to keep CloudEvents construction out of the hot path.
 
-### 🎯 Immediate Next Steps (Q1 Close-out)
-
-1. **v1 Contract Freeze** — Publish versioning policy, deprecation rules, golden bundle fixtures
-2. **Compatibility Tests** — No new event types without schema + tests
-3. **Docs Positioning** — "Assay Evidence = CloudEvents + Trace Context + Deterministic Bundle"
+Historical close-out note:
+- Q1 close-out is complete on `main`
+- the active product lane is now the trust-compiler line described above
+- detailed historical delivery status lives in the relevant ADRs and supporting docs rather than in the roadmap head
 
 ---
 
@@ -219,272 +218,27 @@ Work that primarily improves dashboarding, generic observability UX, or score-fi
 
 ---
 
-## Q1 2026: Trust & Telemetry ✅ Complete
+## Delivered Foundation (Historical)
 
-**Objective:** Establish Assay as the standard for agent auditability.
+The roadmap above is the live decision path. Historical delivery detail remains important, but it no longer belongs in the main decision flow.
 
-### Evidence Core
-- [x] Schema v1 (`assay.evidence.event.v1`) definitions
-- [x] JCS (RFC 8785) canonicalization
-- [x] Content-addressed ID generation (`sha256(canonical)`)
-- [x] CLI: export, verify, show
+Closed lines on `main`:
 
-### Evidence DX (Lint/Diff/Explore)
-- [x] **Linting**: Rule registry, SARIF output with `partialFingerprints`, `--fail-on` threshold
-- [x] **SARIF identity contract**: stable, unique `automationDetails.id` per tool/run lineage for deterministic dedupe and traceability
-- [x] **Diff**: Semantic comparison (hosts, file access), baseline support
-- [x] **Explore**: TUI viewer with ANSI/control char sanitization (`tui` feature flag)
+- **Evidence Contract v1**: canonical evidence, offline verification, SARIF, diff/explore, and OTel trace context are shipped
+- **OTel ingest and evidence pipeline**: `trace ingest-otel` plus the `ProfileCollector -> EvidenceMapper -> EvidenceEvent` collector-style pipeline are shipped
+- **Supply chain and governance surfaces**: BYOS Phase 1, tool signing, GitHub Action v2/v2.1, mandate evidence, and starter/baseline pack infrastructure are shipped
+- **Evidence-as-a-product**: soak, closure, completeness, and the OTel bridge slices from ADR-025 are shipped
+- **Bounded claim waves**: `E1`, `G1`, `G2`, `P1`, and the `3.2.3` release-line truth fix are shipped
 
-### Hardening (Chaos/Differential Testing)
-- [x] IO chaos (intermittent failures, short reads, `Interrupted`/`WouldBlock`)
-- [x] Stream chaos (partial writes, truncation)
-- [x] Differential verification (reference parity, spec drift, platform matrix)
+For detailed historical delivery records, see the relevant ADRs and companion docs:
 
-### Telemetry
-- [x] OTel Trace/Span context on all events
-- [x] OTel trace ingest (`assay trace ingest-otel`)
-- [x] OTel export in test results
-
----
-
-## Q2 2026: Supply Chain Security
-
-**Objective:** Launch compliance and signing features with zero infrastructure cost.
-
-**Strategy:** BYOS-first (Bring Your Own Storage) per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md). Users provide their own S3-compatible storage. Managed infrastructure deferred until PMF.
-
-### Prioritized Deliverables
-
-| Priority | Item | Effort | Value | Status |
-|----------|------|--------|-------|--------|
-| **P0** | GitHub Action v2 | Medium | High | ✅ Complete |
-| **P0** | Exit Codes (V2) | Low | High | ✅ Complete (v2.12.0) |
-| **P0** | Report IO Robustness (Warnings) | Low | High | ✅ Complete (v2.12.0) |
-| **P1** | BYOS CLI Commands | Low | High | ✅ Complete (Phase 1: `push/pull/list/store-status`, `.assay/store.yaml` config, provider docs) |
-| **P1** | Tool Signing (`x-assay-sig`) | Medium | High | ✅ Complete (v2.9.0) |
-| **P2** | Pack Engine (OSS) | Medium | High | ✅ Complete (v2.10.0) |
-| **P2** | EU AI Act Baseline Pack (OSS) | Low | High | ✅ Complete (v2.10.0) |
-| **P2** | Mandate/Intent Evidence | Medium | High | ✅ Complete (v2.11.0) |
-| **P1** | Judge Reliability (SOTA E7) | High | High | ✅ Complete (Audit Grade) |
-| **P1** | Progress N/M (E4.3) | Low | High | ✅ Complete (PR #164) |
-| **P2** | GitHub Action v2.1 | Low | Medium | ✅ Complete (PR #185) |
-| **P1** | Golden path (<30 min first signal) | Medium | High | ✅ Complete (PR #187, `init --hello-trace --ci`) |
-| **P1** | Drift-aware feedback (`explain` + policy/tool diffs) | Medium | High | ✅ Complete (`generate --diff` PR #177, `explain` PR #179) |
-| **P1** | CLI debt reduction (Wave A/B: typed errors, pipeline, config) | Medium | High | ✅ Delivered on `main`; Wave C remains explicitly data-gated |
-| **P1** | Starter packs (OSS) | Low | High | ✅ Complete (ADR-023) |
-| **P1** | Audit Kit (Manifest/Provenance) (ADR-025) | Low | High | ✅ Complete (I1 closed-loop) |
-| **P1** | Soak Testing & Pass^k (ADR-025) | Medium | High | ✅ Complete (I1 closed-loop) |
-| **P2** | Closure Score & Completeness (ADR-025) | Medium | High | ✅ Complete (I2/I3 closed-loop) |
-| **P2** | Sim Engine Hardening (limits + budget) | Low | Medium | Superseded by ADR-025 Soak |
-| **P3** | Sigstore Keyless (Enterprise) | Medium | Medium | Pending |
-| **Defer** | Managed Evidence Store | High | Medium | Q3+ if demand |
-| **Defer** | Dashboard | High | Medium | Q3+ |
-
-See ADRs: [ADR-011 (Signing)](./architecture/ADR-011-Tool-Signing.md), [ADR-013 (EU AI Act)](./architecture/ADR-013-EU-AI-Act-Pack.md), [ADR-014 (Action)](./architecture/ADR-014-GitHub-Action-v2.md), [ADR-015 (BYOS)](./architecture/ADR-015-BYOS-Storage-Strategy.md), [ADR-016 (Pack Taxonomy)](./architecture/ADR-016-Pack-Taxonomy.md)
-See Spec: [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md)
-See Debt: [RFC-001 DX/UX Governance](./architecture/RFC-001-dx-ux-governance.md) (historical governance RFC: Wave A/B delivered, Wave C remains performance-only and data-gated)
-
-### GitHub Action v2 ✅ Complete
-
-Published to GitHub Marketplace: [assay-ai-agent-security](https://github.com/marketplace/actions/assay-ai-agent-security)
-
-```yaml
-- uses: Rul1an/assay-action@v2
-```
-
-Features:
-- Zero-config evidence bundle discovery
-- SARIF integration with GitHub Security tab
-- PR comments (only when findings)
-- Baseline comparison via cache
-- Job Summary reports
-
-### A. BYOS CLI Commands ✅ Complete (Phase 1)
-
-Per [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md), evidence storage uses user-provided S3-compatible buckets:
-
-```bash
-# CLI commands (--store optional when .assay/store.yaml is present)
-assay evidence push bundle.tar.gz
-assay evidence pull --bundle-id sha256:...
-assay evidence list --run-id run_123
-assay evidence store-status
-```
-
-- [x] **Generic S3 Client**: Using `object_store` crate
-- [x] **push command**: Upload verified bundle with immutability-safe writes
-- [x] **pull command**: Download bundle by ID or run
-- [x] **list command**: List bundles with filtering, JSON/table/plain output
-- [x] **store-status command**: Connectivity/access/inventory diagnostics (JSON/table/plain)
-- [x] **Conditional writes**: `If-None-Match: "*"` for immutability
-- [x] **Content-addressed keys**: SHA-256 bundle_id as source of truth
-- [x] **Structured config**: `.assay/store.yaml` with frozen precedence chain
-- [x] **Provider quickstart docs**: [AWS S3](guides/evidence-store-aws-s3.md), [Backblaze B2](guides/evidence-store-backblaze-b2.md), [MinIO](guides/evidence-store-minio.md)
-
-Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, local filesystem (via S3-compatible endpoint or `file://`)
-
-### B. Tool Signing ✅ Complete
-
-Per [SPEC-Tool-Signing-v1](./architecture/SPEC-Tool-Signing-v1.md):
-
-```bash
-assay tool keygen --out ~/.assay/keys/      # Generate PKCS#8/SPKI keypair
-assay tool sign tool.json --key priv.pem --out signed.json
-assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untrusted, 4=invalid
-```
-
-- [x] **`x-assay-sig` field**: Ed25519 + DSSE PAE encoding
-- [x] **JCS canonicalization**: RFC 8785 deterministic JSON
-- [x] **key_id trust model**: SHA-256 of SPKI bytes
-- [x] **Trust policies**: `require_signed`, `trusted_key_ids`
-- [ ] **Keyless (Enterprise)**: Sigstore Fulcio + Rekor integration
-
-### C. Mandate/Intent Evidence (P2) ✅ Complete (v2.11.0)
-
-Full mandate evidence implementation per [SPEC-Mandate-v1.0.5](./architecture/SPEC-Mandate-v1.md):
-
-- [x] **Evidence types**: Mandate content (intent/transaction), signed envelopes, lifecycle events
-- [x] **Runtime enforcement**: MandateStore (SQLite), 7-step Authorizer flow, revocation support
-- [x] **CloudEvents**: `mandate.used`, `mandate.revoked`, `tool.decision` lifecycle events
-- [x] **CLI integration**: `--audit-log`, `--decision-log`, `--event-source` flags
-- [x] **Idempotent retries**: Deterministic `use_id` + `was_new` flag for audit-log deduplication
-- [x] **Revocation**: Hard cutoff (no clock skew tolerance) per SPEC §7.6
-
-See [ADR-017](./architecture/ADR-017-Mandate-Evidence.md) for architecture decision.
-
-This strengthens EU AI Act Articles 12 & 14 compliance for commerce workflows.
-
-### C. Compliance Packs (P2) — Semgrep Model
-
-Per [ADR-016](./architecture/ADR-016-Pack-Taxonomy.md), we follow the Semgrep open core pattern:
-- **Engine + Baseline packs** = Open Source (Apache 2.0)
-- **Pro packs + Managed workflows** = Enterprise (Commercial)
-
-#### Pack Engine (OSS) ✅ Complete (v2.10.0)
-
-```bash
-assay evidence lint --pack eu-ai-act-baseline        # Single pack
-assay evidence lint --pack eu-ai-act-baseline,soc2   # Composition
-assay evidence lint --pack ./custom-pack.yaml        # Custom pack
-```
-
-- [x] **Pack loader**: YAML schema with `pack_kind` (compliance/security/quality)
-- [x] **Rule ID namespacing**: `{pack}@{version}:{rule_id}` for collision handling
-- [x] **Pack composition**: `--pack a,b` with deterministic merge
-- [x] **Version resolution**: `assay_min_version` + `evidence_schema_version`
-- [x] **Pack digest**: SHA256 (JCS RFC 8785) for supply chain integrity
-- [x] **SARIF output**: Pack metadata in `properties` bags (GitHub Code Scanning compatible)
-- [x] **Disclaimer enforcement**: `pack_kind == compliance` requires disclaimer
-- [x] **GitHub dedup**: `primaryLocationLineHash` fingerprint
-- [x] **Truncation**: `--max-results` for SARIF size limits
-
-#### EU AI Act Baseline Pack (OSS) ✅ Complete (v2.10.0)
-
-Direct Article 12(1) + 12(2)(a)(b)(c) mapping:
-
-| Rule ID | Article | Check | Status |
-|---------|---------|-------|--------|
-| EU12-001 | 12(1) | Evidence bundle contains automatically recorded events | ✅ |
-| EU12-002 | 12(2)(c) | Events include lifecycle fields for operation monitoring | ✅ |
-| EU12-003 | 12(2)(b) | Events include correlation IDs for post-market monitoring | ✅ |
-| EU12-004 | 12(2)(a) | Events include fields for risk situation identification | ✅ |
-
-See [ADR-013](./architecture/ADR-013-EU-AI-Act-Pack.md) for detailed mapping and [SPEC-Pack-Engine-v1](./architecture/SPEC-Pack-Engine-v1.md) for implementation spec.
-
-#### EU AI Act Pro Pack (Enterprise)
-
-- [ ] Biometric-specific rules (Article 12(3))
-- [ ] Retention policy validation
-- [ ] Advanced risk scoring
-- [ ] Org-specific exception workflows
-- [ ] PDF audit report generation
-
-#### Additional Packs (Future)
-
-- [ ] **Commerce Pack**: Mandate/intent required, signed-tools required (enabled by v2.11.0 mandate support)
-- [x] **SOC2 Baseline (OSS)**: Common Criteria mapping delivered (see ADR-022, pack in `packs/open/soc2-baseline/`)
-- [ ] **SOC2 Pro (Enterprise)**: assurance-depth mappings and workflow integrations
-- [x] **Starter packs (OSS)**: CICD hygiene, minimal traceability — compatibility floor; see §F
-- [x] **Pack Registry**: Local packs in `~/.assay/packs/` (ADR-021, implemented in PR #287)
-
-### E. GitHub Action v2.1 ✅ Complete
-
-Per [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md):
-
-| Priority | Feature | Rationale |
-|----------|---------|-----------|
-| **P1** | Compliance pack support | EU AI Act compliance story |
-| **P2** | BYOS push with OIDC | Zero-credential enterprise posture |
-| **P3** | Artifact attestation | Supply chain integrity |
-| **P4** | Coverage badge | Developer DX |
-
-**Key design decisions:**
-- Write operations (push, attest, badge) only on `push` to main (fork PR threat model)
-- OIDC authentication per provider (explicit, not auto-detect)
-- Attestations provide "SLSA-aligned provenance" (no specific level claims)
-- Attestation lifecycle is staged: produce on push-to-main, verify in release/promote lanes, and keep fail-closed semantics scoped to release artifacts until stability is proven
-- EU AI Act timeline is treated as phased guidance (legal mapping source remains EUR-Lex text and versioned pack mappings)
-
-See [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md) for full specification.
-
-### F. Starter Packs (OSS) (P1) ✅ Complete
-
-CICD-hygiene pack as compatibility floor for adoption—minimal traceability so teams get first value from `assay evidence lint` with minimal config. See [ADR-023](./architecture/ADR-023-CICD-Starter-Pack.md). Merged PR #289.
-
-```bash
-assay evidence lint --pack cicd-starter bundle.tar.gz
-assay evidence lint --pack cicd-starter,eu-ai-act-baseline bundle.tar.gz
-```
-
-**Status per step (codebase-check):**
-
-| Check | Status |
-|-------|--------|
-| `cicd-starter` or similar pack | ✅ Present (packs/open + vendored) |
-| Pack in `packs/open/` or `BUILTIN_PACKS` | ✅ cicd-starter in both |
-| CICD-hygiene rules | ✅ CICD-001..004 in pack |
-
-**Scope:**
-- [x] **Pack**: `cicd-starter` (kind: quality), in `packs/open/cicd-starter/`
-- [x] **Default**: cicd-starter when no `--pack` specified (PLG)
-- [x] **Rules**: CICD-001 (event count); CICD-002 (`assay.profile.started`/`.finished`); CICD-003 (traceparent/tracestate/run_id); CICD-004 (build_id/version, info)
-- [x] **BUILTIN_PACKS** + vendoring: packs/open vendored to crates/assay-evidence/packs/
-- [x] **Docs**: README per ADR-023 Appendix A; pinned GH Action; `--fail-on warning`; Next steps (follow-up)
-
-**Design decisions:**
-- `kind: quality` (no disclaimer; distinct from compliance packs)
-- Light rules only—reuse existing check types: `event_count`, `event_pairs`, `event_field_present`
-- Composable with eu-ai-act-baseline for teams graduating to compliance
-
-### G. Reliability Surface & Soak (P1) [ADR-025]
-
-Pivot from generic "simulation" to **Policy Soak Testing** as a reliability product. See [ADR-025](./architecture/ADR-025-Evidence-as-a-Product.md).
-
-```bash
-assay sim soak --iterations 100 --seed 42 --target bundle.tar.gz --report soak.json
-```
-
-**Scope (Iteration 1):**
-- [x] **CLI**: `assay sim soak` subcommand with `pass^k` semantics (pass_all, pass_rate)
-- [x] **Report**: `soak-report-v1` strict JSON schema (decision_policy, violations_by_rule)
-- [x] **Determinism**: Seeded execution for reproducible reliability
-- [x] **Limits**: Time budget and resource limits (inherited from ADR-024 work)
-
-**Design decisions:**
-- **Pass condition**: "Pass All K" is the gold standard for Agentic CI
-- **Evidence**: The *Soak Report* itself is an artifact in the evidence bundle
-- **Step3 rollout status**: informational nightly soak + informational readiness aggregation are active; no PR required-check impact in Step3
-- **Step4 rollout status**: fail-closed enforcement is active in release lane only (policy v1 + readiness enforcement script); PR lanes remain unchanged
-
-### H. Audit Kit & Closure (P2) [ADR-025] ✅ Complete
-
-Formalize "Evidence-as-a-Product" with provenance and replayability scores.
-
-**Scope (Iteration 1, 2, 3):**
-- [x] **Manifest Extensions**: `x-assay.packs_applied` and `mappings` for provenance (I2)
-- [x] **Completeness**: Pack-relative signal gaps (`required` vs `captured`) (I2)
-- [x] **Closure Score**: Replay-relative score (0.0-1.0) for hermetic replay readiness (I2)
-- [x] **OTEL Bridge**: Export Assay events to OTLP/GenAI SemConv (Iteration 3)
+- [ADR-015](./architecture/ADR-015-BYOS-Storage-Strategy.md)
+- [ADR-017](./architecture/ADR-017-Mandate-Evidence.md)
+- [ADR-018](./architecture/ADR-018-GitHub-Action-v2.1.md)
+- [ADR-023](./architecture/ADR-023-CICD-Starter-Pack.md)
+- [ADR-025](./architecture/ADR-025-Evidence-as-a-Product.md)
+- [ADR-026](./architecture/ADR-026-Protocol-Adapters.md)
+- [ADR-032](./architecture/ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md)
 
 ---
 
@@ -505,6 +259,22 @@ March 2026 evidence and signal waves change the ordering inside Q3. The next pro
 | **P2** | Collector processor / sidecar form factor | This is the "outside-the-box" deployment surface that competitors are not targeting. | OTel-native compile path that emits canonical evidence, not a dashboard. |
 
 These items outrank growth-only work because Assay's strongest differentiator is now trace -> evidence -> claim -> proof, not surface-area expansion.
+
+### T1 MVP Non-Goals
+
+For `T1a` and `T1b`, the roadmap stays explicit about what the MVP does **not** do:
+
+- no aggregate trust score
+- no `safe/unsafe` badge
+- no direct claim classification from raw OTel spans
+- no protocol-wide correctness claims
+- no dashboard-first product surface
+
+### T1 Mapping Rule
+
+- canonical evidence schema remains the stable product contract
+- OTel and protocol mappings are version-pinned bridges into that contract
+- every upstream semconv or protocol mapping bump must come with explicit mapping tests
 
 ### A. Protocol Adapters (Adapter-First Strategy)
 
