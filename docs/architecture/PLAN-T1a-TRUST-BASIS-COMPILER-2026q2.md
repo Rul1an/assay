@@ -1,6 +1,6 @@
 # PLAN — T1a Trust Basis Compiler MVP (2026q2)
 
-> Status: Proposed
+> Status: Implemented on `main` (March 2026)
 > Date: 2026-03-23
 > Scope: first bounded implementation wave under [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) and [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
 > Constraint: claim-first, canonical evidence first, no score/badge surface, no new signals in the same wave

@@ -5,8 +5,8 @@
 > Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
 > **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
-> `E1`, `G1`, `G2`, and `P1` are merged on `main`, and the only post-`P1` release-line nuance is closed: workspace version is now `3.2.3`, and the OWASP signal-aware pack floors align to `>=3.2.3`.
-> Next product priorities: `T1a` OTel-native Trust Compiler MVP, `T1b` Trust Card MVP, then `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs.
+> `E1`, `G1`, `G2`, `P1`, and `T1a` are merged on `main`, and the only post-`P1` release-line nuance is closed: workspace version is now `3.2.3`, and the OWASP signal-aware pack floors align to `>=3.2.3`.
+> Next product priorities: `T1b` Trust Card MVP, then `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs.
 
 **Strategic Focus:** Agent Runtime Evidence, Trust Compilation & Control Plane.
 **Core Value:** Verifiable Evidence + Claims-as-Code for Agent Systems.
@@ -51,6 +51,7 @@ This is the line that recent bounded waves now support on `main`:
 - `G2` made explicit delegation context visible on supported decision evidence.
 - `P1` productized those signals in a companion pack without broadening the baseline.
 - `R2` closed the only post-`P1` release-line mismatch by moving the workspace and OWASP pack floors to `3.2.3`.
+- `T1a` now ships the first canonical trust-basis compiler output on `main` as deterministic `trust-basis.json` derived from verified bundles.
 
 See [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) for the product-positioning decision and [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) for the bounded MVP execution frame.
 
@@ -208,8 +209,8 @@ The current substrate on `main` is strong enough to shift from "more packs" towa
 
 | Order | Lane | Why now | Boundary |
 |-------|------|---------|----------|
-| **1** | `T1a` OTel-native Trust Compiler MVP | The evidence pipeline already follows the OTel Collector pattern and ships `trace ingest-otel`; the next step is to productize trace -> evidence -> claim compilation. | No dashboard, no new packs in the same slice, no broad scoring model. |
-| **2** | `T1b` Trust Card MVP | Assay needs a visible, portable output artifact for its claim model. | Trust Card stays evidence-classified, signed/attested later, and does not become a generic risk score. |
+| **1** | `T1a` OTel-native Trust Compiler MVP | ✅ Merged on `main`: verified bundle -> deterministic `trust-basis.json` with bounded claim classification. | Kept small: no Trust Card rendering, no new signals, no packs, no score-first surface. |
+| **2** | `T1b` Trust Card MVP | Assay now has a canonical trust basis; the next step is to render that into a visible, portable artifact. | Trust Card stays evidence-classified, signed/attested later, and does not become a generic risk score. |
 | **3** | `G3` Authorization Evidence Signal | MCP auth extensions and identity/authz standards make auth context the cleanest next signal seam. | Supported flows only; no auth validation or cryptographic chain semantics. |
 | **4** | `P2` Protocol Claim Packs | After `G3`, protocol-aware claim packs become honest product surfaces. | Small MCP/A2A claim packs, not broad compliance theater. |
 | **Later** | Reference/temporal/capability attestation | These semantics are valuable but heavier. | Ship only after the claim product line is stable. |
