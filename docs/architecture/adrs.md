@@ -33,6 +33,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Coverage + Wrap DX Polish | Accepted | **P2** |
 | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Coverage v1.1 DX Polish | Accepted | **P2** |
 | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | MCP Policy Enforcement, Obligations, and Evidence v2 | Accepted | **P1** |
+| [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) | OTel-Native Trust Compiler Positioning | Accepted | **P1** |
 | [ADR-020](./ADR-020-Dependency-Governance.md) | Dependency Governance | Accepted | - |
 
 ## Q2 2026 Priorities
@@ -55,6 +56,7 @@ This directory contains Architecture Decision Records (ADRs) for the Assay proje
 | **P2** | [ADR-030](./ADR-030-Coverage-Wrap-DX-Polish.md) | Accepted | Implemented on `main` via PRs #578, #580, and #582 (coverage markdown/file input + wrap export log consistency + closure) |
 | **P2** | [ADR-031](./ADR-031-Coverage-v1.1-DX-Polish.md) | Accepted | Implemented on `main` via PRs #585, #587, and #588 (`--out-md`, `--routes-top`, and closure docs/gates) |
 | **P1** | [ADR-032](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) | Accepted | Wave24-Wave42 merged on `main`; see overview + plan for capability grouping and historical rollout |
+| **P1** | [ADR-033](./ADR-033-OTel-Trust-Compiler-Positioning.md) | Accepted | Product direction after `P1`: Trust Compiler MVP, Trust Card, then auth signals and protocol claim packs |
 | **P2** | [ADR-013](./ADR-013-EU-AI-Act-Pack.md) | Accepted | Article 12 mapping, `--pack` flag |
 | **P3** | [ADR-012](./ADR-012-Transparency-Log.md) | Proposed | Builds on ADR-011 |
 | Deferred | [ADR-009](./ADR-009-WORM-Storage.md) | Deferred | Managed WORM → Q3+ if demand |

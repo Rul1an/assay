@@ -15,6 +15,8 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [ADR-032 Obsidian View Layer Recommendations (Q2 2026)](./OBSIDIAN-ADR-032-VIEW-LAYER-2026q2.md) — recommended internal view-layer setup
 - [ADR-032 Documentation Maturity Gap Analysis (Q2 2026)](./GAP-ADR-032-MCP-POLICY-DOCS-MATURITY-2026q2.md) — current-state gap analysis and follow-up posture
 - [ADR-032 Execution Plan (Q2 2026)](./PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md) — MCP policy/obligation rollout status
+- [ADR-033 Trust Compiler Positioning (Q2 2026)](./ADR-033-OTel-Trust-Compiler-Positioning.md) — product north star for Assay as an OTel-native trust compiler
+- [RFC-005 Trust Compiler MVP (Q2 2026)](./RFC-005-trust-compiler-mvp-2026q2.md) — bounded plan for `T1a` compiler and `T1b` Trust Card
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
@@ -25,6 +27,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 | [RFC-002: Code Health Remediation](./RFC-002-code-health-remediation-q1-2026.md) | Complete (E1–E4 merged, E5→RFC-003) | Store, metrics, registry, comment cleanup |
 | [RFC-003: Generate Decomposition](./RFC-003-generate-decomposition-q1-2026.md) | Complete (G1–G6 merged) | `generate.rs` split into focused modules |
 | [RFC-004: Open Items Convergence](./RFC-004-open-items-convergence-q1-2026.md) | Closed (O1–O6 merged on `main`) | Historical closure ledger for the Q1 convergence line |
+| [RFC-005: Trust Compiler MVP](./RFC-005-trust-compiler-mvp-2026q2.md) | Proposed | Bounded plan for the trust-compiler and Trust Card line |
 
 ## Architecture Decision Records
 
@@ -36,6 +39,7 @@ Key ADRs:
 - [ADR-014: GitHub Action v2](./ADR-014-GitHub-Action-v2.md) — CI integration
 - [ADR-015: BYOS Strategy](./ADR-015-BYOS-Storage-Strategy.md) — bring your own storage
 - [ADR-032: MCP Policy Enforcement v2](./ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md) — typed decisions + obligations + evidence
+- [ADR-033: Trust Compiler Positioning](./ADR-033-OTel-Trust-Compiler-Positioning.md) — claims-as-code north star and Trust Card wedge
 
 ## Reference
 
