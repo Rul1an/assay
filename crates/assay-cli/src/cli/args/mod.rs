@@ -97,7 +97,8 @@ pub enum Command {
     #[command(name = "trust-basis")]
     TrustBasis(TrustBasisArgs),
     /// Generate trust card artifacts (trustcard.json + trustcard.md) from verified bundles
-    Trustcard(TrustCardArgs),
+    #[command(name = "trustcard")]
+    TrustCard(TrustCardArgs),
 }
 
 #[derive(Parser, Debug)]

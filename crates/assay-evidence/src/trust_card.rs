@@ -57,7 +57,10 @@ fn serde_cell_string<T: Serialize>(value: &T) -> String {
 }
 
 fn md_cell(raw: &str) -> String {
-    raw.replace('|', "\\|").replace('\n', " ")
+    raw.replace('|', "\\|")
+        .chars()
+        .map(|c| if matches!(c, '\r' | '\n') { ' ' } else { c })
+        .collect()
 }
 
 fn note_markdown(note: &Option<String>) -> String {
@@ -108,7 +111,8 @@ mod tests {
     use crate::bundle::BundleWriter;
     use crate::bundle::VerifyLimits;
     use crate::trust_basis::{
-        generate_trust_basis, to_canonical_json_bytes, TrustBasisOptions, TrustClaimId,
+        generate_trust_basis, to_canonical_json_bytes, TrustBasisClaim, TrustBasisOptions,
+        TrustClaimBoundary, TrustClaimId, TrustClaimLevel, TrustClaimSource,
     };
     use crate::types::EvidenceEvent;
     use chrono::{TimeZone, Utc};
@@ -181,6 +185,29 @@ mod tests {
         }
         writer.finish().expect("bundle should finish");
         buffer
+    }
+
+    #[test]
+    fn trust_card_markdown_note_strips_crlf_for_single_line_cell() {
+        let card = TrustCard {
+            schema_version: TRUST_CARD_SCHEMA_VERSION,
+            claims: vec![TrustBasisClaim {
+                id: TrustClaimId::BundleVerified,
+                level: TrustClaimLevel::Verified,
+                source: TrustClaimSource::BundleVerification,
+                boundary: TrustClaimBoundary::BundleWide,
+                note: Some("a\r\nb".to_string()),
+            }],
+            non_goals: TRUST_CARD_NON_GOALS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        };
+        let md = trust_card_to_markdown(&card);
+        assert!(
+            !md.contains('\r'),
+            "markdown table must not contain raw carriage returns"
+        );
     }
 
     #[test]
