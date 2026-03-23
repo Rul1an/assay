@@ -98,6 +98,8 @@ This RFC does not include:
 
 ## 4. T1a — OTel-Native Trust Compiler MVP
 
+Detailed execution framing for the first wave lives in [PLAN — T1a Trust Basis Compiler MVP](./PLAN-T1a-TRUST-BASIS-COMPILER-2026q2.md).
+
 ### 4.1 Objective
 
 Make the compiler model explicit:
