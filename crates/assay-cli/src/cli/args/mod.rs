@@ -12,6 +12,7 @@ pub mod replay;
 pub mod run;
 pub mod runtime;
 pub mod sim;
+pub mod trust_basis;
 
 pub use baseline::*;
 pub use bundle::*;
@@ -25,6 +26,7 @@ pub use replay::*;
 pub use run::*;
 pub use runtime::*;
 pub use sim::*;
+pub use trust_basis::*;
 
 #[derive(Parser)]
 #[command(
@@ -89,6 +91,9 @@ pub enum Command {
     Setup(SetupArgs),
     /// Tool signing and verification
     Tool(ToolArgs),
+    /// Generate canonical trust-basis artifacts from verified evidence bundles
+    #[command(name = "trust-basis")]
+    TrustBasis(TrustBasisArgs),
 }
 
 #[derive(Parser, Debug)]

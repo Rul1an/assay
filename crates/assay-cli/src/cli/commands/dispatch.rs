@@ -46,6 +46,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Sim(args) => super::sim::run(args),
         Command::Setup(args) => super::setup::run(args).await,
         Command::Tool(args) => Ok(super::tool::cmd_tool(args.cmd)),
+        Command::TrustBasis(args) => super::trust_basis::run(args),
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(EXIT_SUCCESS)

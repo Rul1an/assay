@@ -44,6 +44,7 @@ pub mod setup;
 #[cfg(feature = "sim")]
 pub mod sim;
 pub mod tool;
+pub mod trust_basis;
 pub mod validate;
 pub mod watch;
 pub use dispatch::dispatch;
