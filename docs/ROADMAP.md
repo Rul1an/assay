@@ -1,18 +1,21 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-03-15):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
+> **Status sync (2026-03-23):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
 > Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
 > Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
 > **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
-> Next repo-level priorities: release/changelog hygiene, then ADR-015 Phase 2 (GitHub Action integration) or next bounded wave.
+> `E1`, `G1`, `G2`, and `P1` are merged on `main`, and the only post-`P1` release-line nuance is closed: workspace version is now `3.2.3`, and the OWASP signal-aware pack floors align to `>=3.2.3`.
+> Next product priorities: `T1a` OTel-native Trust Compiler MVP, `T1b` Trust Card MVP, then `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs.
 
-**Strategic Focus:** Agent Runtime Evidence & Control Plane.
-**Core Value:** Verifiable Evidence (Open Standard) + Governance Platform.
+**Strategic Focus:** Agent Runtime Evidence, Trust Compilation & Control Plane.
+**Core Value:** Verifiable Evidence + Claims-as-Code for Agent Systems.
 
 ## Executive Summary
 
-Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, machine-readable audit trails that integrate with existing security/observability stacks. Assay aims to become the **standard evidence lint runtime** for agentic CI, with open engine + baseline packs and strong CI/SARIF integration as the adoption motor.
+Assay is evolving from an evidence recorder into an **OTel-native trust compiler for agent systems**. The product thesis is no longer "help teams inspect traces better"; it is "compile agent runtime truth into verifiable security claims with explicit evidence levels." Assay turns traces, protocol events, and bundle artifacts into canonical evidence, signal-aware packs, SARIF findings, offline-verifiable bundles, and future trust artifacts such as a signed Trust Card.
+
+This keeps Assay out of the wrong competitive lane. Promptfoo, Langfuse, LangSmith, and vendor eval platforms already own large parts of evals, dashboards, and red-team loops. Assay's moat is different: **claim provenance, bounded security semantics, and portable proof-bearing outputs**.
 
 **Standards Alignment:**
 - **CloudEvents v1.0** envelope — lingua franca for event routers and SIEM pipelines
@@ -21,6 +24,71 @@ Assay is the "Evidence Recorder" for agentic workflows. We create verifiable, ma
 - **EU AI Act Article 12** — record-keeping requirements make "evidence" commercially relevant; pack mappings are pinned to EUR-Lex text, and phased dates are treated as guidance
 - **OTel GenAI Semantic Conventions** — vendor-agnostic observability bridge for LLM/agent workloads; conventions are evolving, so integrations are version-pinned with mapping tests
 - **ENISA / SBOM / SLSA** — Supply-chain assurance (SBOM, provenance, attestation) aligns with ENISA priorities; SLSA-aligned attestation per ADR-018
+
+### 2026 Product Thesis: Claims-as-Code For Agent Systems
+
+Assay should be understood as:
+
+- **Input**: OTel spans, protocol events, Assay traces, and proof-bearing bundle artifacts
+- **Compile**: canonical evidence + bounded claim classification + pack evaluation
+- **Output**: findings, SARIF, verifiable bundles, and eventually a signed Trust Card
+
+`OTel-native` does **not** mean "OTel semconv is the only truth." The stable truth layer remains Assay's canonical evidence contract. OTel is a first-class ingest path and ecosystem bridge, but it must compile into Assay's own evidence model before stronger trust claims are made.
+
+The core differentiator is not "more detections." It is **better claim epistemology**:
+
+| Evidence Level | Meaning |
+|----------------|---------|
+| `verified` | Backed by direct evidence or offline verification in the bundle/runtime path |
+| `self_reported` | Emitted by the system itself without stronger independent corroboration |
+| `inferred` | Derived from bounded, documented interpretation rules |
+| `absent` | No trustworthy evidence currently supports the claim |
+
+This is the line that recent bounded waves now support on `main`:
+
+- `E1` unlocked a small, typed engine seam rather than a broad policy language.
+- `G1` made supported weaker-than-requested containment fallback visible in evidence.
+- `G2` made explicit delegation context visible on supported decision evidence.
+- `P1` productized those signals in a companion pack without broadening the baseline.
+- `R2` closed the only post-`P1` release-line mismatch by moving the workspace and OWASP pack floors to `3.2.3`.
+
+See [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) for the product-positioning decision and [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) for the bounded MVP execution frame.
+
+### North Star Guardrails
+
+- **Claim-first, not dashboard-first**: a prettier trace UI is not the product wedge. The wedge is evidence-classified trust claims.
+- **Canonical evidence first**: OTel is an ingest bridge, not the sole semantic authority.
+- **Canonical evidence wins operationally**: new ingest paths may enrich or map into canonical evidence, but they must not semantically override claim classification directly from raw upstream formats.
+- **Trust Card, not trust score**: the primary artifact must show what is `verified`, `self_reported`, `inferred`, or `absent`, not collapse into `trusted/untrusted`.
+- **No aggregate trust score in MVP**: no primary scalar trust score, no `safe/unsafe` badge, and no maturity badge as the main output.
+- **Fixed order**: `T1a -> T1b -> G3 -> P2` stays ahead of dashboard work, broad pack expansion, or heavier reference/temporal semantics.
+- **No broad correctness claims**: delegation validation, chain integrity, sandbox correctness, and temporal correctness remain out of scope until dedicated evidence and semantics exist.
+- **Anti-scope rule**: Assay is not a tracing platform, eval platform, or observability dashboard. Those may be integration surfaces, but not the product category.
+
+### Strategic Fit Test
+
+This direction should continue only if all three answers stay "yes":
+
+1. **External demand fit**
+   The external line in 2026 is identity/authz, auditability, protocol-level defenses, and bounded deployment controls for agents. Assay fits that line better as a trust compiler than as a generic eval or observability tool.
+
+2. **Repo capability fit**
+   Assay already ships the substrate this direction needs: canonical evidence, offline verification, signal-aware packs, proof-bearing bundles, OTel ingest, delegation context, and containment degradation signals.
+
+3. **Wedge fit vs alternatives**
+   A Trust Card and trust-compiler story differentiate Assay better than another pack wave, another engine feature, or a broader dashboard surface. Those alternatives are easier to explain, but they are also where the category is more crowded and Assay is less structurally unique.
+
+If any of these answers turns into "no", the default action is to stop a broader product-positioning wave:
+
+- if **external demand fit** is weak, do not broaden packaging or positioning
+- if **repo capability fit** is weak, close the missing signal/engine seam first
+- if **wedge fit** is weak, do not start a new product lane until the differentiator is sharper
+
+### Primary Risks
+
+- **Abstract product story**: "trust compiler" is less immediately legible than "eval" or "observability." The Trust Card is the required wedge that makes the compiler story tangible.
+- **Category confusion**: if Assay is marketed as a tracing platform, dashboard, firewall, or generic eval suite, it loses the category it is best positioned to own.
+- **Standards churn**: OTel GenAI and agent semantic conventions are still evolving. Assay must keep its canonical evidence layer stable and treat OTel as ingest, not truth.
 
 ---
 
@@ -133,6 +201,21 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 - **Not agent-building**: Dagger, Zencoder build agents. Assay validates them. Complementary, not competitive.
 - **Not universal semantic-hijacking detection**: LLM-as-judge or probabilistic semantic gates are not the core enforcement model. Assay stays deterministic and evidence-first.
 - **Not a full outbound egress firewall (yet)**: raw network containment belongs to OS/runtime isolation layers. Assay governs tool routes and records policy decisions; it does not replace platform egress controls as an MVP.
+- **Not a magic trust score**: primary outputs should stay evidence-classified (`verified`, `self_reported`, `inferred`, `absent`), not collapse into a single opaque number.
+
+## Post-P1 Product Lane (March 2026)
+
+The current substrate on `main` is strong enough to shift from "more packs" toward a clearer product line:
+
+| Order | Lane | Why now | Boundary |
+|-------|------|---------|----------|
+| **1** | `T1a` OTel-native Trust Compiler MVP | The evidence pipeline already follows the OTel Collector pattern and ships `trace ingest-otel`; the next step is to productize trace -> evidence -> claim compilation. | No dashboard, no new packs in the same slice, no broad scoring model. |
+| **2** | `T1b` Trust Card MVP | Assay needs a visible, portable output artifact for its claim model. | Trust Card stays evidence-classified, signed/attested later, and does not become a generic risk score. |
+| **3** | `G3` Authorization Evidence Signal | MCP auth extensions and identity/authz standards make auth context the cleanest next signal seam. | Supported flows only; no auth validation or cryptographic chain semantics. |
+| **4** | `P2` Protocol Claim Packs | After `G3`, protocol-aware claim packs become honest product surfaces. | Small MCP/A2A claim packs, not broad compliance theater. |
+| **Later** | Reference/temporal/capability attestation | These semantics are valuable but heavier. | Ship only after the claim product line is stable. |
+
+Work that primarily improves dashboarding, generic observability UX, or score-first reporting should be treated as secondary until this sequence is complete.
 
 ---
 
@@ -405,25 +488,23 @@ Formalize "Evidence-as-a-Product" with provenance and replayability scores.
 
 ---
 
-## Q3 2026: Enterprise Scale (Growth)
+## Q3 2026: Trust Compiler Productization
 
-**Objective:** Integration with the broader security ecosystem + agentic protocol support, led by route-governance primitives rather than broader surface area.
+**Objective:** Productize Assay as an OTel-native trust compiler and make protocol-aware claims portable before expanding dashboards or broader enterprise surfaces.
 
-### Route Governance Core (Highest Priority)
+### Trust Compiler Core (Highest Priority)
 
-March 2026 experiment evidence changes the ordering inside Q3. Before expanding adapter breadth or managed surfaces, Assay should close the product gap between experiment-only route governance and reusable platform primitives.
+March 2026 evidence and signal waves change the ordering inside Q3. The next product gap is not "more observability" or "more packs"; it is turning the existing OTel-collector-style evidence path into a first-class claims compiler with a portable output artifact.
 
 | Priority | Capability | Why now | MVP boundary |
 |----------|------------|---------|--------------|
-| **P0** | Tool taxonomy as first-class classes | Second-sink and tool-hopping results show raw tool names are brittle. | Source/sink/store/exec class map, policies written on classes, evidence logs record matched class. |
-| **P0** | Session identity + state store contract | Cross-session decay shows route memory is required beyond a single run. | Explicit session key, replayable state store interface, TTL/window semantics, evidence export/import. |
-| **P1** | Coverage/completeness reports | Governance without visibility into unknown tools and untested routes creates blind spots. | JSON + SARIF informational report for tools seen vs declared, unknown tools, and route coverage gaps. |
-| **P1** | Machine-readable decision logs | Enterprises need debugging without log archaeology. | JSONL decision events with `rule_id`, `reason_code`, `matched_fields`, `decision_path`, `policy_version`, `latency`. |
-| **P1** | Replay with state snapshots | The product claim is verifiability, not just blocking. | Replay tool-call logs plus policy + state snapshot, with decision diffs on policy/state changes. |
-| **P2** | Hardening defaults for ingest/proxy | Inline governance inherits parser attack surface. | Default caps, fuzz/property tests, and consistent fail-closed semantics. |
-| **P2** | Evidence-first interop bridges | OTel/MCP interop is useful only if enforcement and evidence stay first-class. | Lossiness-accounted bridges, adapter metadata everywhere, no LLM-judge in core enforcement. |
+| **P0** | `T1a` OTel-native Trust Compiler MVP | `trace ingest-otel`, `ProfileCollector -> EvidenceMapper -> EvidenceEvent`, and signal-aware packs already exist on `main`. | Official compiler inputs/outputs, claim basis export, no dashboard, no new semantics. |
+| **P0** | `T1b` Trust Card MVP | The trust-compiler thesis needs a product artifact that non-authors can review and diff. | `trustcard.json` + `trustcard.md`, evidence-level classification, no opaque global score. |
+| **P1** | `G3` Authorization Evidence Signal | MCP auth extensions and NIST/OWASP identity guidance make auth context the cleanest next supported signal seam. | Supported flows only; no cryptographic or temporal auth-validation semantics. |
+| **P1** | `P2` Protocol Claim Packs | Once auth context is visible, protocol claim packs become honest follow-ons. | MCP/A2A claim packs with bounded wording; no broad compliance theater. |
+| **P2** | Collector processor / sidecar form factor | This is the "outside-the-box" deployment surface that competitors are not targeting. | OTel-native compile path that emits canonical evidence, not a dashboard. |
 
-These items outrank additional dashboard and growth-only work because the experiment ladder shows Assay wins on route/state governance, not on content filtering or surface-area expansion alone.
+These items outrank growth-only work because Assay's strongest differentiator is now trace -> evidence -> claim -> proof, not surface-area expansion.
 
 ### A. Protocol Adapters (Adapter-First Strategy)
 
@@ -458,10 +539,10 @@ Status on `main`:
 - [ ] **GitLab CI**: Native integration
 - [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — conventions still experimental but Pydantic AI already follows them; monitor for stability before building bridge
 
-### C. Additional Compliance Packs
-- [ ] **SOC 2 Pack**: Control mapping for Type II audits
-- [ ] **MCPTox**: Regression testing against jailbreak/poisoning patterns
-- [ ] **Industry Packs**: Healthcare (HIPAA), Finance (PCI-DSS)
+### C. Protocol Claim Packs (Post-T1)
+- [ ] **MCP Claim Pack**: protocol-aware, signal-bounded authz and telemetry claims
+- [ ] **A2A Claim Pack**: capability/delegation/provenance claim surfaces for supported flows
+- [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
 
 ### D. Managed Evidence Store (Evaluate)
 
