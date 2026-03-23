@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Trust Compiler
+
+- **T1a Trust Basis Compiler MVP**: Assay now ships a canonical `trust-basis.json` compiler surface on `main`, derived from verified bundles with fixed claim keys, fixed evidence vocabularies, and deterministic regeneration.
+- **Low-level trust compiler CLI**: Repository builds now expose `assay trust-basis generate <bundle>` for advanced CI, diffing, and review workflows.
+
+### Notes
+
+- **Claim-first boundary**: `T1a` ships claim classification in the compiler layer, not in a Trust Card renderer.
+- **Deliberate non-goals**: This wave does not yet ship `trustcard.json`, `trustcard.md`, a trust score, a `safe/unsafe` badge, or new signal/pack/engine semantics.
+
 ### MCP Security
 
 - **New MCP integrity metrics**: Added `tool_description_integrity`, `tool_output_valid`, and `tool_collision_detect` to cover tool-definition drift, output-schema contracts, and cross-server tool shadowing.

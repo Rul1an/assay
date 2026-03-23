@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>The firewall for MCP tool calls — with a replayable audit trail.</strong>
+    <strong>Claim-first runtime governance and trust compilation for agent systems.</strong>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -18,9 +18,9 @@
 
 ---
 
-Your MCP agent calls `read_file`, `exec`, `web_search` — but should it?
+Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and what can you honestly prove about that run afterward?
 
-Assay sits between your agent and its tools. It intercepts every MCP tool call, checks it against your policy, and blocks what shouldn't happen. Every decision produces an evidence trail you can audit, diff, and replay.
+Assay sits between your agent and its tools. It intercepts every MCP tool call, checks it against your policy, and blocks what shouldn't happen. Every decision produces an evidence trail you can audit, diff, replay, and compile into bounded trust claims.
 
 ```
   Agent ──► Assay ──► MCP Server
@@ -62,17 +62,35 @@ assay evidence show demo/fixtures/bundle.tar.gz
 
 The bundle is tamper-evident and cryptographically verifiable. If your run includes signed mandate events, the same bundle also carries the Ed25519-backed authorization trail for high-risk actions.
 
+Repository builds on `main` also expose the first low-level trust-compiler artifact:
+
+```bash
+assay trust-basis generate demo/fixtures/bundle.tar.gz > trust-basis.json
+```
+
+`trust-basis.json` is the canonical compiler output for the current Trust Compiler MVP. It emits a fixed, deterministic claim set such as:
+
+- `bundle_verified`
+- `signing_evidence_present`
+- `provenance_backed_claims_present`
+- `delegation_context_visible`
+- `containment_degradation_observed`
+- `applied_pack_findings_present`
+
+This is intentionally an advanced artifact, not a Trust Card and not a trust score. The Trust Card surface comes later; `T1a` keeps claim classification in the compiler layer.
+
 ## Is This For Me?
 
 **Yes, if you:**
 - Build with Claude Desktop, Cursor, Windsurf, or any MCP client
 - Ship agents that call tools and you need to control which ones
 - Want a CI gate that catches tool-call regressions before production
-- Need a deterministic audit trail, not sampled observability
+- Need a deterministic audit trail and bounded trust claims, not sampled observability
 
 **Not yet, if you:**
 - Don't use MCP (Assay is MCP-native; other protocols are on the roadmap)
 - Need a hosted dashboard (Assay is CLI-first and offline)
+- Want a magic trust score or badge as the main output
 
 ## Add to Cursor in 30 Seconds
 
@@ -142,7 +160,7 @@ assay init --from-trace trace.jsonl
 
 See [Policy Files](docs/reference/config/policies.md) for the full YAML schema.
 
-## OpenTelemetry In, Evidence Out
+## OpenTelemetry In, Canonical Evidence Out
 
 Already tracing with Langfuse or an OTel-enabled agent stack? Keep that pipeline. Assay ingests OpenTelemetry JSONL, turns it into replayable traces, and gives you deterministic policy gates plus exportable evidence bundles.
 
@@ -153,7 +171,7 @@ assay trace ingest-otel \
   --out-trace traces/otel.v2.jsonl
 ```
 
-Then run `assay ci` on the converted trace or export an Evidence Bundle for audit handoff. See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
+Then run `assay ci` on the converted trace, export an Evidence Bundle for audit handoff, or compile a low-level trust basis from a verified bundle. See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
 
 ## Add to CI
 
@@ -203,6 +221,7 @@ The agent protocol landscape is fragmenting (ACP, A2A, UCP, AP2, x402). Assay's 
 | **Deterministic** | Same input, same decision, every time. Not probabilistic. |
 | **MCP-native** | Built for MCP tool calls. Adapters for ACP, A2A, UCP. |
 | **Evidence trail** | Every decision is auditable, diffable, replayable. |
+| **Trust compiler** | Verified bundles can be compiled into bounded trust claims without collapsing into a single score. |
 | **Offline-first** | No backend, no API keys. Runs on your machine. |
 | **Measured** | `0.771ms` p50 / `1.913ms` p95 in the main M1 Pro/macOS tool-decision harness. |
 | **Tested** | [3 security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md), 12 attack vectors, 0 false positives. |

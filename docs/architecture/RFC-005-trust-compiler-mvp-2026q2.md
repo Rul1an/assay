@@ -1,6 +1,6 @@
 # RFC-005: Trust Compiler MVP and Trust Card (Q2 2026)
 
-- Status: Proposed
+- Status: Active (`T1a` merged on `main`; `T1b` pending)
 - Date: 2026-03-23
 - Owner: Evidence / Product
 - Scope: bounded execution framing for `T1a` and `T1b`
@@ -28,6 +28,11 @@ This RFC defines that bridge in two steps:
 
 1. `T1a` — make the evidence compiler line explicit and bounded
 2. `T1b` — generate a Trust Card as the first iconic output artifact
+
+Current delivery status on `main`:
+
+- `T1a` is merged on `main` as the canonical `trust-basis.json` compiler output and low-level `assay trust-basis generate` surface
+- `T1b` remains pending and must stay a rendering/artifact wave above the trust basis rather than a second semantic layer
 
 ## 1.5 Why This Wedge And Not The Alternatives
 
