@@ -104,7 +104,10 @@ Make the compiler model explicit:
 
 - **inputs**: OTel exports, Assay traces, protocol/runtime evidence
 - **compiler stage**: canonicalization, mapping, bounded claim basis
-- **outputs**: verifiable bundles plus machine-readable trust-basis data for higher-level artifacts
+- **outputs**: verifiable bundles plus a bounded machine-readable trust basis for higher-level artifacts
+
+`T1a` should produce a concrete intermediate artifact derived from a verified bundle.
+Working name for planning: `trust-basis.json`.
 
 ### 4.2 In Scope
 
@@ -114,6 +117,7 @@ Make the compiler model explicit:
 - keep the existing `ProfileCollector -> EvidenceMapper -> EvidenceEvent` architecture as the base path
 - treat OTel exports as inputs that map into Assay's canonical evidence layer rather than as the final truth contract
 - ensure new ingest paths are additive/translational and cannot semantically overrule claim classification outside canonical evidence
+- make the trust basis the place where claim classification happens, rather than in later rendering layers
 
 ### 4.3 Out of Scope
 
@@ -127,9 +131,35 @@ Make the compiler model explicit:
 `T1a` is successful if:
 
 - Assay has a documented trust-compiler contract grounded in existing evidence surfaces
-- a verified bundle can produce a bounded machine-readable trust basis
+- a verified bundle can produce a deterministic bounded machine-readable trust basis artifact
 - the trust basis uses evidence-level classifications instead of a single scalar score
 - existing bundle verification and lint flows remain the source of truth for lower-level evidence
+
+### 4.5 Trust Basis Shape (MVP Planning Freeze)
+
+`T1a` does not need a final schema in this RFC, but it should converge on a small claim-first shape such as:
+
+```json
+{
+  "claims": [
+    {
+      "id": "bundle_verified",
+      "level": "verified",
+      "source": "bundle_verification",
+      "boundary": "bundle-wide",
+      "note": null
+    }
+  ]
+}
+```
+
+Planning constraints for the trust basis:
+
+- each item has a stable claim key / `id`
+- claim classification uses `verified`, `self_reported`, `inferred`, or `absent`
+- each claim identifies its evidence source
+- each claim identifies its supported-flow or scope boundary
+- free-form notes remain optional and non-authoritative
 
 ## 5. T1b — Trust Card MVP
 
@@ -148,17 +178,22 @@ Suggested outputs:
 - `trustcard.json`
 - `trustcard.md`
 
-### 5.2 Trust Card Sections
+`trustcard.json` is the canonical Trust Card artifact. `trustcard.md` is a deterministic human-readable rendering of the same claim set.
 
-The first Trust Card should stay small and explicitly bounded. It should summarize whether the bundle:
+### 5.2 Trust Card Claim Set
 
-- verifies offline
-- carries signing / trust-domain evidence
-- distinguishes provenance-backed vs provenance-absent claims
-- surfaces delegation context for supported flows
-- surfaces containment degradation for supported fallback paths
-- records applied packs and their bounded findings
-- declares supported-flow boundaries and non-goals
+Trust Card rendering must not invent new claim semantics. Claim classification happens in the trust basis / compiler stage, not in Markdown rendering.
+
+The first Trust Card should stay small and explicitly bounded. A minimal v1 claim set should be close to:
+
+- `bundle_verified`
+- `signing_evidence_present`
+- `provenance_backed_claims_present`
+- `delegation_context_visible`
+- `containment_degradation_observed`
+- `applied_pack_findings_present`
+
+These claims may then be rendered into grouped sections for human readability, but the claim set should come first.
 
 ### 5.3 Trust Card Evidence Levels
 
@@ -189,6 +224,7 @@ The Trust Card must not:
 - the language remains bounded and non-goal-aware
 - the Trust Card can be regenerated deterministically from the same verified bundle
 - the Trust Card does not reduce the primary result to a scalar score or binary `trusted/untrusted` label
+- `trustcard.json` remains the canonical artifact and `trustcard.md` remains a deterministic rendering of the same claim set
 
 ## 6. Follow-On Sequencing
 
@@ -216,3 +252,4 @@ Future implementation slices under this RFC should hard-fail review if they:
 - What is the smallest stable machine-readable "trust basis" schema that can sit between bundle verification and Trust Card generation?
 - Should the first collector-native deployment form factor be a CLI compiler only, or a sidecar/processor once the trust basis contract is stable?
 - Which minimal claim sections should be mandatory for `trustcard.json` v1?
+- What is the minimal stable claim key set for Trust Card v1?
