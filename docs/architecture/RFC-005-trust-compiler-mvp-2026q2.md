@@ -106,7 +106,7 @@ Make the compiler model explicit:
 - **compiler stage**: canonicalization, mapping, bounded claim basis
 - **outputs**: verifiable bundles plus a bounded machine-readable trust basis for higher-level artifacts
 
-`T1a` should produce a concrete intermediate artifact derived from a verified bundle.
+`T1a` should produce a concrete canonical compiler-output artifact derived from a verified bundle.
 Working name for planning: `trust-basis.json`.
 
 ### 4.2 In Scope
@@ -118,6 +118,7 @@ Working name for planning: `trust-basis.json`.
 - treat OTel exports as inputs that map into Assay's canonical evidence layer rather than as the final truth contract
 - ensure new ingest paths are additive/translational and cannot semantically overrule claim classification outside canonical evidence
 - make the trust basis the place where claim classification happens, rather than in later rendering layers
+- keep `trust-basis.json` as the canonical compiler output that later Trust Card artifacts derive from
 
 ### 4.3 Out of Scope
 
@@ -134,6 +135,7 @@ Working name for planning: `trust-basis.json`.
 - a verified bundle can produce a deterministic bounded machine-readable trust basis artifact
 - the trust basis uses evidence-level classifications instead of a single scalar score
 - existing bundle verification and lint flows remain the source of truth for lower-level evidence
+- `trust-basis.json` is treated as the canonical compiler output rather than an incidental intermediate file
 
 ### 4.5 Trust Basis Shape (MVP Planning Freeze)
 
@@ -160,6 +162,9 @@ Planning constraints for the trust basis:
 - each claim identifies its evidence source
 - each claim identifies its supported-flow or scope boundary
 - free-form notes remain optional and non-authoritative
+- canonical JSON output should use stable ordering and deterministic regeneration
+- the canonical artifact should not include wall-clock timestamps or other host-specific volatile fields
+- the canonical artifact should remain diff-friendly by default
 
 ## 5. T1b — Trust Card MVP
 
@@ -178,7 +183,7 @@ Suggested outputs:
 - `trustcard.json`
 - `trustcard.md`
 
-`trustcard.json` is the canonical Trust Card artifact. `trustcard.md` is a deterministic human-readable rendering of the same claim set.
+`trustcard.json` is the canonical Trust Card artifact derived from `trust-basis.json`. `trustcard.md` is a deterministic human-readable rendering of the same claim set.
 
 ### 5.2 Trust Card Claim Set
 
