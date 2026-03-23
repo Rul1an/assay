@@ -122,6 +122,19 @@ The primary evidence levels are:
 
 These evidence levels are the preferred external framing for future trust artifacts. Assay should not collapse them into a primary opaque trust score.
 
+### Adjacent Models We Borrow From, And What We Reject
+
+Assay does not invent this direction from nothing, but it also does not fit neatly into any one existing category.
+
+- from SLSA / in-toto style attestations, Assay borrows machine-readable, signable claim discipline
+- from GUAC-style metadata synthesis, Assay borrows ingest -> normalize -> synthesize separation
+- from AIBOM and card-style transparency artifacts, Assay borrows portable, reviewable output
+- from OTel, Assay borrows ingest and ecosystem fit
+
+Assay explicitly does **not** copy the hard provenance assumptions of supply-chain attestations into runtime claims, does **not** become a graph-first metadata lake before a bounded Trust Card exists, and does **not** adopt score-first output as the primary product surface.
+
+In practice, this means Assay should borrow the attestation model, not provenance hardness; borrow the compiler pattern, not the graph as the product; borrow the card metaphor, not self-reported capability theater; and borrow OTel interoperability, not upstream semantic authority.
+
 ### Trust Card Is The First Iconic Artifact
 
 The first product artifact of this compiler direction is a **Trust Card**:
