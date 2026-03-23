@@ -14,7 +14,7 @@ disclaimer: |
   sandbox correctness, or full containment-failure coverage.
 
 requires:
-  assay_min_version: ">=3.2.2"
+  assay_min_version: ">=3.2.3"
   evidence_schema_version: "1.0"
 
 rules:
