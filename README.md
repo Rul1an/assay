@@ -62,7 +62,19 @@ assay evidence show demo/fixtures/bundle.tar.gz
 
 The bundle is tamper-evident and cryptographically verifiable. If your run includes signed mandate events, the same bundle also carries the Ed25519-backed authorization trail for high-risk actions.
 
-Repository builds on `main` also expose the first low-level trust-compiler artifact:
+Repository builds on `main` also expose the first low-level trust-compiler artifact. If you want to try it before the next crates.io line ships, install from source or from the GitHub repo:
+
+```bash
+cargo install --git https://github.com/Rul1an/assay assay-cli
+```
+
+or from a local checkout:
+
+```bash
+cargo install --path crates/assay-cli
+```
+
+Then generate the trust basis:
 
 ```bash
 assay trust-basis generate demo/fixtures/bundle.tar.gz > trust-basis.json
