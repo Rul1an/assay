@@ -220,6 +220,7 @@ run_success_case() {
   grep -F -- '--source-digest abc123def456' "$verify_log" >/dev/null
   grep -F -- '--predicate-type https://slsa.dev/provenance/v1' "$verify_log" >/dev/null
   grep -F -- '--deny-self-hosted-runners' "$verify_log" >/dev/null
+  grep -F "attestation download ${SUCCESS_ASSETS_DIR}/${SUCCESS_ASSET_NAME}" "$SUCCESS_GH_LOG" >/dev/null
 }
 
 run_asset_set_mismatch_case() {

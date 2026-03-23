@@ -293,6 +293,12 @@ require_bin "$INVENTORY_SCRIPT"
   echo "provenance summary checksum not found: $PROVENANCE_SUMMARY_SHA256" >&2
   exit 1
 }
+[ -d "$ASSETS_DIR" ] || {
+  echo "assets directory not found: $ASSETS_DIR" >&2
+  exit 1
+}
+
+ASSETS_DIR="$(cd "$ASSETS_DIR" && pwd)"
 
 repo="$(json_get '.verification_policy.repo')"
 predicate_type="$(json_get '.verification_policy.predicate_type')"
