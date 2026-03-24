@@ -19,7 +19,7 @@ Discovery is recorded in the working plan annex and adapter sources; summary:
 - **Delegation / handoff:** no smaller typed canonical field than generic task metadata was identified for a bounded handoff rule — **no** A2A handoff rule in v1 (and not inferred from `task.kind` alone).
 - **Containment degradation** (`assay.sandbox.degraded`) is protocol-agnostic; it does **not** add A2A-specific value — **not** in this pack (same rationale as discovery: avoid MCP-003 repetition without A2A signal).
 
-Full matrix and payload notes: [.cursor/plans/p2b_a2a_claim_pack_a7601fe9.plan.md](../../.cursor/plans/p2b_a2a_claim_pack_a7601fe9.plan.md).
+Extended discovery notes may live in a **local-only** Cursor plan under `.cursor/plans/` (not versioned here). **Shipped adapter truth** for mapping and payloads: [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) (`mapping.rs`, `payload.rs`, `convert.rs`, `version.rs`).
 
 ## Phase 1 — Pack freeze (v1)
 
