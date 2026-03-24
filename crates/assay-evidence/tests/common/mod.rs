@@ -33,7 +33,6 @@ pub fn make_event(
     event_with_payload(type_, run_id, seq, payload)
 }
 
-#[allow(dead_code)]
 pub fn make_bundle(events: Vec<EvidenceEvent>) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut writer = BundleWriter::new(&mut buffer);
