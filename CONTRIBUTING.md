@@ -77,6 +77,11 @@ cargo test -p assay-cli --test evidence_test
 cd assay-python-sdk && pytest
 ```
 
+## Community
+
+- [GitHub Discussions](https://github.com/Rul1an/assay/discussions) — roadmap and “what Assay is” Q&A.
+- Suggested **pinned** topic seeds for maintainers: [docs/community/DISCUSSIONS.md](docs/community/DISCUSSIONS.md).
+
 ## Pull Requests
 
 1. Branch: `feat/description` or `fix/description`
