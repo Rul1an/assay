@@ -70,6 +70,16 @@ Filled from **code inspection** of [`assay-adapter-a2a`](../../crates/assay-adap
 | **Agent Card URL / discovery document / signature blobs** | Not extracted in adapter | **No** — at best inside `attributes` or extra top-level keys | **No** — would be speculative | **No** for v1 unless Phase 1 freezes **explicit** upstream shapes to map |
 | **Unmapped top-level field count** | Non-reserved keys at packet root | **Yes** — `unmapped_fields_count` | **Yes** — lossiness / “extra stuff present” | **Support** — not a card/discovery semantic |
 
+**Critical distinction (avoid over-reading Matrix A):** `payload.agent.capabilities` is **strong discovery-adjacent** typed evidence, but it is **not by itself** a first-class **Agent Card** or **discovery-document** seam. “Capabilities visible” ≠ “card/discovery surface fully covered in evidence.”
+
+**Mechanical classification for review:**
+
+| Bucket | Items |
+|--------|--------|
+| **Primary G4 v1 candidate (discovery-adjacent, already typed)** | **`agent.capabilities`** — only row tagged **Yes** for G4 v1 candidate in the matrix sense; any G4 v1 work may still add **docs/tests** without new keys (path **B**) or **new** fields (path **A**). |
+| **Supporting context** | Agent id / name / role, `protocol_version`, upstream + canonical event routing, `unmapped_fields_count` — useful context, not card/discovery-specific seams. |
+| **Explicit non-candidates (v1 without Phase 1 seam work)** | **`attributes`** as a discovery/card **signal**; **Agent Card URL / discovery document / signature blobs** as typed first-class fields — **out** unless Phase 1 freezes explicit mapping (path **A**) or stays blob-only. |
+
 ### Matrix B — Field properties (existing typed surfaces)
 
 | Field (working name) | Type (intended) | Redaction needed? | Stability risk | Bounded meaning (one line) |
@@ -89,9 +99,11 @@ Filled from **code inspection** of [`assay-adapter-a2a`](../../crates/assay-adap
 
 3. **Presence / visibility only?** **`attributes`** content, **generic** `assay.adapter.a2a.message` fallback, and **unmapped** keys are **visibility / lossiness** signals unless Phase 1 assigns a schema.
 
-4. **Explicitly not G4 v1 without new work:** Typed **Agent Card document**, **discovery URL**, **signature verification**, **issuer trust** — see [Explicitly out of G4 v1](#explicitly-out-of-g4-v1). **Promoting** arbitrary **`attributes`** keys to first-class card/discovery fields is **out** until a **Phase 1 freeze** names producer-stable paths.
+4. **`attributes` anti-scope:** **No** key under **`attributes`** may be treated as a G4 v1 **signal** without an explicit Phase 1 freeze on **path**, **type**, **redaction**, and **bounded meaning** (and tests). Until then, **`attributes`** remains an **opaque blob** in discovery terms.
 
-5. **Spec vs adapter (`>=0.2 <1.0`)?** Capabilities advertise **`SUPPORTED_SPEC_VERSION_RANGE`** as `>=0.2 <1.0`. **Runtime validation** (`version.rs`) accepts **0.2+** (major `0`, minor ≥ `2`). That matches the P2b story: **shipped line is 0.x**, not a marketing claim of full **A2A v1.0** coverage. No code change required for this Phase 0 answer.
+5. **Explicitly not G4 v1 without new work:** Typed **Agent Card document**, **discovery URL**, **signature verification**, **issuer trust** — see [Explicitly out of G4 v1](#explicitly-out-of-g4-v1). **Promoting** arbitrary **`attributes`** keys to first-class card/discovery fields is **out** until a **Phase 1 freeze** names producer-stable paths.
+
+6. **Spec vs adapter (`>=0.2 <1.0`)?** Capabilities advertise **`SUPPORTED_SPEC_VERSION_RANGE`** as `>=0.2 <1.0`. **Runtime validation** (`version.rs`) accepts **0.2+** (major `0`, minor ≥ `2`). That matches the P2b story: **shipped line is 0.x**, not a marketing claim of full **A2A v1.0** coverage. No code change required for this Phase 0 answer.
 
 **Phase 0 gate:** Discovery matrices + record above are **complete for the adapter codebase snapshot**. **Phase 1 must not start** until Evidence/Product **reviews and accepts** this record (and any amendment to how [Acceptance criteria](#acceptance-criteria-g4-done) §1 / §6 apply — see below).
 
@@ -104,8 +116,11 @@ The adapter **already** emits typed **`agent.capabilities`**. [Acceptance criter
 | **What ships** | **New** first-class field(s) or subobject in canonical emitted evidence (adapter mapping change). | **Hardening / clarification** on **existing** first-class `payload` — new **bounded meaning**, tests, examples; **no** new typed keys. |
 | **Evidence-wave read** | Stronger fit for “G4 = evidence-wave” as **new** observable seam. | Legitimate, but G4 reads as **interpretation / documentation** on existing adapter output rather than a new evidence seam. |
 | **Phase 1** | Map agreed upstream or `attributes` paths; adapter + tests. | Docs + tests + examples only; adapter unchanged unless fixes are needed for unrelated reasons. |
+| **Constraint** | — | **Option B must not** rename, market, or reframe existing typed payload as if a **new** discovery/card **seam** had been created. **B** is **bounded clarification** of observed meaning (docs / tests / examples), **not** a materially new evidence seam. |
 
 **(A)** Phase 1 adds **new** first-class field(s) mapped from agreed upstream/`attributes` shapes. **(B)** G4 v1 treats **capability + identity visibility** as the **discovery-adjacent** wave and satisfies acceptance via **new bounded-meaning documentation, tests, and examples** on **existing** fields — **only if** product accepts **B** and applies the **§1 / §6** rows for **Option B** in [Acceptance criteria](#acceptance-criteria-g4-done).
+
+**Reviewer / product note:** If G4 is positioned as a **materially new evidence-wave**, **A** is typically the stronger fit (the card/discovery-specific seam is **not** yet first-class in typed evidence). **B** is defensible for a **smaller** wave but must use **narrower outward wording** — **bounded semantics / clarification**, not “new seam.” Record **A** or **B** explicitly in the Phase 1 freeze so §1 / §6 are not argued twice in implementation.
 
 ## Phase 1 — Signal freeze
 
