@@ -321,7 +321,7 @@ Status on `main`:
 - [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b** — ✅ shipped)
 - [x] **`a2a-signal-followup` (P2b)**: built-in pack A2A-001..003 — bounded presence on shipped `assay.adapter.a2a.*` — [PLAN-P2b](architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md); ships in **v3.3.0**
 - [ ] **`G4` — A2A discovery / card evidence signal**: evidence-wave in [`assay-adapter-a2a`](../crates/assay-adapter-a2a/) before the next A2A pack slice — [PLAN-G4](architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md) (sequencing only here; signal hypotheses live in the plan)
-- [ ] **`P2c` — A2A discovery/card follow-up pack**: productization **after** G4 — companion pack rules aligned to G4 evidence (not concurrent with G4 evidence work)
+- [ ] **`P2c` — A2A discovery/card follow-up pack** (sequencing label; detailed scope in a future plan after G4): productization **after** G4 — **not** concurrent with G4 evidence work; pack rules **not** frozen here
 - [ ] **Further MCP / A2A protocol packs** (beyond P2b / P2c): broader capability/delegation/provenance claims only with first-class evidence
 - [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
 

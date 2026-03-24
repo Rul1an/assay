@@ -4,6 +4,8 @@
 - **Date:** 2026-03-24
 - **Owner:** Evidence / Product
 
+This PLAN defines **gates**, **hypotheses**, and **acceptance** for G4; it does **not** freeze final signal shapes by virtue of being written—those follow Phase 0/1 review.
+
 This wave starts with a **discovery gate** (Phase 0). **Phase 1 must not start until Phase 0 discovery outputs are reviewed and accepted.**
 
 ## North star
@@ -138,8 +140,8 @@ G4 implementation is complete when:
 
 ## References
 
-- [PLAN-P2b — A2A Signal Follow-Up Claim Pack](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) (P2b boundary; **Adapter & protocol version reality** section for 0.x line).
+- [PLAN-P2b — A2A Signal Follow-Up Claim Pack](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) — P2b boundary; read the section **Adapter & protocol version reality (0.x)** in that document for the version gate.
 - [RFC-005 — Trust compiler MVP](RFC-005-trust-compiler-mvp-2026q2.md) §6 sequencing.
-- [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — if trust or evidence contract floors change.
-- [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) — engine bump discipline.
-- [ROADMAP](../ROADMAP.md) — sequencing (G4 before P2c).
+- [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — SSOT for consumer/version floors if G4 implies contract or `requires` changes.
+- [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) — consult before adding new pack check types in a follow-on **P2c** wave.
+- [ROADMAP](../ROADMAP.md) — high-level sequencing only (G4 before P2c); hypotheses stay in this PLAN.
