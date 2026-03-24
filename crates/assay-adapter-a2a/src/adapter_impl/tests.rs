@@ -56,6 +56,18 @@ fn assert_discovery_v1_defaults(payload: &Value) {
     assert_eq!(d["signature_material_visible"], Value::Bool(false));
 }
 
+/// Golden digests over `payload.discovery` via `digest_canonical_json` (sorted keys).
+/// If `discovery` shape or types change intentionally, update hashes and this comment.
+const G4_DISCOVERY_DIGEST_DEFAULT: &str =
+    "26b4d9c0105f4cc26d4b413e7b6b27effe5829f9f319a60b91ca490fd7776a13";
+const G4_DISCOVERY_DIGEST_AGENT_CARD_ATTR: &str =
+    "93f5c26d149e7400d38104c4479f332df4df23df0d1f4d25aef252aac87b9769";
+const G4_DISCOVERY_DIGEST_BOTH_FLAGS: &str =
+    "9d0f24e430e00ee3ec1bc595cb59e6e7d7d5b12c0c90e102ea4d26ad3890e665";
+/// Extended visibility only (`agent_card_source_kind` stays `unknown`).
+const G4_DISCOVERY_DIGEST_EXTENDED_ONLY: &str =
+    "13e23c6783de838b52ca92d787569bccd3cadc0f8900f1bf76b42262959f77ba";
+
 #[test]
 fn protocol_metadata_uses_exact_version_and_range_capability() {
     let adapter = A2aAdapter;
@@ -105,6 +117,10 @@ fn strict_agent_capabilities_fixture_emits_deterministic_event() {
         serde_json::json!(["agent.describe", "artifacts.share", "tasks.update"])
     );
     assert_discovery_v1_defaults(&first.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&first.events[0].payload["discovery"]),
+        G4_DISCOVERY_DIGEST_DEFAULT
+    );
 }
 
 #[test]
@@ -532,6 +548,34 @@ fn g4_attributes_driven_agent_card_sets_kind_attributes() {
     );
     assert_eq!(d["extended_card_access_visible"], Value::Bool(false));
     assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(
+        digest_canonical_json(d),
+        G4_DISCOVERY_DIGEST_AGENT_CARD_ATTR
+    );
+}
+
+#[test]
+fn g4_both_visibility_flags_true_fixture_shows_independence() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_both_visible.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let d = &batch.events[0].payload["discovery"];
+    assert_eq!(d["agent_card_visible"], Value::Bool(true));
+    assert_eq!(
+        d["agent_card_source_kind"],
+        Value::String("attributes".to_string())
+    );
+    assert_eq!(d["extended_card_access_visible"], Value::Bool(true));
+    assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(digest_canonical_json(d), G4_DISCOVERY_DIGEST_BOTH_FLAGS);
 }
 
 #[test]
@@ -555,6 +599,7 @@ fn g4_extended_access_visible_positive_fixture() {
     );
     assert_eq!(d["extended_card_access_visible"], Value::Bool(true));
     assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(digest_canonical_json(d), G4_DISCOVERY_DIGEST_EXTENDED_ONLY);
 }
 
 #[test]

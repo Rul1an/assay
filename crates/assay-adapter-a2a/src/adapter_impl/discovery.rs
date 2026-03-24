@@ -4,6 +4,9 @@
 //! **v1 rules never produce them** — no typed upstream card path and no unmapped-key rules are
 //! wired yet. Resolution still follows the §3 precedence order so future freezes can add sources
 //! without reordering.
+//!
+//! **Emitted v1 values for `agent_card_source_kind`:** only `"attributes"` or `"unknown"` — do not
+//! read `typed_payload` / `unmapped` as “supported today” until a later freeze wires matchers.
 
 use serde_json::{Map, Value};
 

@@ -58,6 +58,8 @@ This matches **defer unless proven** and avoids weakening the seam with a half-d
 
 **Reviewer note:** `extended_card_access_visible` uses a parallel `attributes` path; give it the **strictest** product review — if the path is not meaningful for your producers, defer tightening or keep default-only until a producer contract exists.
 
+**One-line semantics guardrail (all booleans):** When `true`, each visibility boolean means **only** that a producer placed JSON boolean `true` on the **frozen allowlisted path** with **valid nested-object shape**. It does **not** mean authentication **succeeded**, authorization **held**, access **completed**, the client was **trusted**, or any operation **succeeded** — unless a **later** freeze and evidence contract say otherwise.
+
 ---
 
 ## 3. Precedence rule (`agent_card_source_kind`)
@@ -134,9 +136,11 @@ Clarification: precedence row “unmapped” applies when a **frozen** rule name
 
 ---
 
-## 7. Two complete emitted JSON examples (full payload shape)
+## 7. Complete emitted JSON examples (full payload shape)
 
-Field order below follows the **logical** sibling set: adapter metadata, protocol, agent, task, …, `attributes`, **`discovery`**, `unmapped_fields_count` (exact key order in JSON may vary; canonical ordering is defined in implementation/tests).
+**Build note:** `adapter_version` in examples uses **`3.3.0` as an illustration**; **real** emission uses the crate’s `CARGO_PKG_VERSION` at build time. Normative for reviewers: **presence and shape** of top-level keys (including always-present `discovery` **before** `unmapped_fields_count`), and the **`discovery` object fields** — not the patch digit of `adapter_version`.
+
+Field order below follows the **logical** sibling set: adapter metadata, protocol, agent, task, …, `attributes`, **`discovery`**, `unmapped_fields_count` (exact key order in JSON may vary; canonical ordering is defined in implementation/tests and [`digest_canonical_json`](../../crates/assay-adapter-api/src/canonical.rs)).
 
 ### 7.1 Weak positive (attributes-driven)
 
@@ -205,6 +209,19 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 }
 ```
 
+### 7.3 Both visibility flags `true` (independence)
+
+Upstream with **both** allowlisted paths `true` shows that `agent_card_visible` and `extended_card_access_visible` move **independently** from single-flag fixtures (`*_g4_agent_card.json` vs `*_g4_extended.json`). Fixture: [a2a_happy_agent_capabilities_g4_both_visible.json](../../scripts/ci/fixtures/adr026/a2a/v0.2/a2a_happy_agent_capabilities_g4_both_visible.json). Emitted **`discovery`** (illustrative):
+
+```json
+{
+  "agent_card_visible": true,
+  "agent_card_source_kind": "attributes",
+  "extended_card_access_visible": true,
+  "signature_material_visible": false
+}
+```
+
 ---
 
 ## 8. Negative test matrix (minimum before merge of 1b)
@@ -232,8 +249,24 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 ## 10. Link to implementation
 
 - Implement **`attributes.assay_g4`** parsing only after `attributes` is read; validate shape; set `discovery` before `build_payload` inserts `unmapped_fields_count`.
-- **Fixtures:** §7.1 positive (`agent_card`), §7.2 default, §8 matrix, and **§8 extended positive** (`extended_card_access` = true).
+- **Fixtures:** §7.1 positive (`agent_card`), §7.2 default, §7.3 **both flags** (`a2a_happy_agent_capabilities_g4_both_visible.json`), §8 matrix, and **§8 extended positive** (`extended_card_access` = true).
 - **Precedence tests (minimum):** (1) **Unit-level** test for the precedence helper: when only attributes-path matches → `attributes`; when nothing matches → `unknown`. (2) **Integration** test that attributes-driven visibility yields `agent_card_source_kind: "attributes"` and that fixture without `assay_g4` yields `"unknown"`. It is acceptable that `typed_payload` / `unmapped` branches are covered only by unit tests with synthetic “would match if frozen” inputs **or** are asserted unreachable in v1 via a single doc-tested guard — but **attributes vs unknown** must be exercised.
+- **Canonical stability:** Integration tests should assert `digest_canonical_json` is **identical** for repeated conversion of the same upstream bytes (full batch), and **golden** digests for the emitted **`discovery` sub-object alone** (SHA-256 over [`canonical_json_bytes`](../../crates/assay-adapter-api/src/canonical.rs)) so accidental field renames or type changes fail CI.
+
+---
+
+## 11. Reviewer checklist (contract closure)
+
+Use this to close **strategy** review and focus on **contract** review:
+
+| # | Check | Where |
+|---|--------|--------|
+| 1 | **Bounded meaning** for all four `discovery` fields: what it may / must not imply | §2b |
+| 2 | **v1 honesty:** `typed_payload` / `unmapped` frozen but not emitted by v1 rules | §2 (enum reachability), §3, adapter `discovery.rs` module docs |
+| 3 | **Representative outputs:** default + weak positive + both-flags (`§7.1`, `§7.2`, `§7.3`); `adapter_version` illustrative only | §7 |
+| 4 | **Independence:** two single-flag fixtures + one **both `true`** fixture | §7.3, `a2a_happy_agent_capabilities_g4_both_visible.json` |
+| 5 | **Payload / digest:** `discovery` before `unmapped_fields_count`; deterministic full-batch digest; golden `discovery` object digest | `payload.rs`, tests in `adapter_impl/tests.rs` |
+| 6 | **Scope:** no `assay-evidence`, pack, or classification seam changes in the G4-A adapter PR | §9; verify `git diff main -- crates/assay-evidence packs/` empty |
 
 ---
 
@@ -243,3 +276,4 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 |------|--------|
 | 2026-03-25 | Initial executable freeze: Assay `attributes` contract, deferred `signature_material_visible`, defaults, precedence, JSON examples, negative matrix, assay-evidence line. |
 | 2026-03-25 | Review pass: contract honesty; v1 enum reachability; bounded-meaning table; stricter `extended_card_access`; N7 + extended positive fixture; precedence test minimums. |
+| 2026-03-25 | Review closure: one-line boolean semantics guardrail; §7 build note; §7.3 both-flags fixture; §11 reviewer checklist; canonical `discovery` golden digest expectation in §10. |
