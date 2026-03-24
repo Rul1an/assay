@@ -12,9 +12,10 @@ disclaimer: |
   OAuth at MCP initialize, or broad "MCP security."
   MCP-001 uses the same G3 v1 predicate as Trust Basis `authorization_context_visible`
   when verified: policy-projected fields on supported flows, not cryptographic verification.
-  assay_min_version matches the first workspace line with G3 + Trust Card schema 2 (tag v3.2.3).
+  assay_min_version tracks the first released Assay line that includes the G3 and Trust Card schema
+  prerequisites for this pack (v3.2.3 is the reference tag for that prerequisite availability).
   Built-in mcp-signal-followup and pack engine v1.2 ship with the Assay release that contains P2a;
-  align the floor with release notes when publishing.
+  confirm the exact tag and definitive version floor in release notes when publishing.
 
 requires:
   assay_min_version: ">=3.2.3"

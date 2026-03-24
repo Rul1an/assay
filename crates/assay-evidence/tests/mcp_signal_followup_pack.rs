@@ -301,3 +301,23 @@ fn mcp_readme_lists_non_goals() {
     assert!(readme.contains("## Non-Goals"));
     assert!(readme.contains("authorization validity"));
 }
+
+/// Writes two `.tar.gz` bundles under `target/mcp-lint-demo/` for manual CLI demos:
+/// `assay evidence lint <path> --pack mcp-signal-followup`
+#[test]
+#[ignore]
+fn write_mcp_lint_demo_bundles() {
+    let dir = repo_root().join("target").join("mcp-lint-demo");
+    fs::create_dir_all(&dir).expect("create dir");
+    fs::write(dir.join("g3_full_pass.tar.gz"), full_signal_bundle()).expect("write full");
+    fs::write(
+        dir.join("g3_principal_only_fail.tar.gz"),
+        g3_absent_principal_only_bundle(),
+    )
+    .expect("write fail");
+    eprintln!(
+        "Wrote:\n  {}\n  {}",
+        dir.join("g3_full_pass.tar.gz").display(),
+        dir.join("g3_principal_only_fail.tar.gz").display()
+    );
+}
