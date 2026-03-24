@@ -25,15 +25,27 @@ Productize G1/G2/G3 signals as a **small companion pack** (not baseline expansio
 
 - **`src/g3_authorization_context.rs`**: Shared G3 v1 predicate; `trust_basis::classify_authorization_context` delegates to `bundle_satisfies_g3_authorization_context_visible`.
 - **`CheckDefinition::G3AuthorizationContextPresent`**: YAML `type: g3_authorization_context_present`.
-- **Tests**: `crates/assay-evidence/tests/mcp_signal_followup_pack.rs` — open/built-in parity, Trust Basis verified/absent ↔ MCP-001 pass/fail, MCP-002/003 smoke tests.
+- **Tests**: `crates/assay-evidence/tests/mcp_signal_followup_pack.rs` — open/built-in parity; MCP-002/003 smoke tests; **MCP-001 alignment**: bundles for which Trust Basis sets `authorization_context_visible` to **`verified`** do **not** emit an MCP-001 finding; bundles for which that claim is **`absent`** **do** emit an MCP-001 finding (same synthetic bundles as Trust Basis tests — not a separate informal inverse).
 
 ## `assay_min_version` (pack `requires`)
 
-Set to `>=3.2.3` in the pack YAML (first workspace line that ships G3 + Trust Card schema 2). Adjust at release if the floor changes.
+Pack YAML uses `>=3.2.3` to match the **workspace line** that first shipped **G3 evidence + Trust Card schema 2 + seven claims** (git tag **v3.2.3** includes that substrate).
+
+**Release truth for the built-in pack:** Tag **v3.2.3** does **not** include `mcp-signal-followup`, pack engine **v1.2**, or `g3_authorization_context_present` — those land with the **P2a** change. At **crates.io / GitHub release** time, either:
+
+- bump the workspace version (e.g. to `3.2.4`) and set `assay_min_version` to **`>=3.2.4`** (or whatever version first tags P2a), **or**
+
+- keep `>=3.2.3` but document in release notes that the **built-in** `mcp-signal-followup` is only present in binaries from the commit range that includes P2a (the `requires` field then expresses **evidence contract** floor, not pack feature floor).
+
+Reviewers should confirm the chosen floor against the **first published** Assay version that embeds this pack.
 
 ## Non-goals
 
 - Authorization validity, issuer trust, correlation-only rules, A2A, engine-wide DSL expansion.
+
+## Semantics note
+
+P2a adds **no new trust-claim classification** in Trust Basis: it **consumes** the existing G3 kernel in the pack executor. Wording like “no new classifier wave” means **no new claim keys or classification rules** beyond factoring shared G3 logic into `g3_authorization_context.rs`.
 
 ## References
 

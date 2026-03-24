@@ -178,16 +178,16 @@ check:
 
 #### `g3_authorization_context_present` (engine v1.2+)
 
-True when at least one `assay.tool.decision` event satisfies the **same** G3 v1 predicate as Trust Basis
-`authorization_context_visible` (verified): allowlisted `auth_scheme`, `principal` and `auth_issuer` with G3 string
-discipline on one event. No extra YAML fields.
+**Domain-specific, not a generic auth DSL.** This check type exists so pack rules can reuse the **exact** G3 v1 predicate implemented in `assay-evidence` (same as Trust Basis `authorization_context_visible` when `verified`). It does **not** introduce new trust-claim semantics beyond that kernel.
+
+True when at least one `assay.tool.decision` event satisfies that predicate: allowlisted `auth_scheme`, `principal` and `auth_issuer` with G3 string discipline on one event. No YAML parameters (by design — avoids turning the pack engine into a configurable auth rule language).
 
 ```yaml
 check:
   type: g3_authorization_context_present
 ```
 
-Use for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). Not a substitute for authorization **validity**.
+Intended for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). Not a substitute for authorization **validity**, issuer trust, or scope correctness.
 
 #### `manifest_field`
 

@@ -261,8 +261,8 @@ pub enum CheckDefinition {
         paths: Vec<String>,
     },
 
-    /// G3 v1: policy-projected authorization context on `assay.tool.decision` — same predicate as
-    /// Trust Basis `authorization_context_visible` (verified).
+    /// G3 v1 (domain-specific): same predicate as Trust Basis `authorization_context_visible` (`verified`).
+    /// Not a generic pack-engine auth DSL — no parameters by design.
     #[serde(rename = "g3_authorization_context_present")]
     G3AuthorizationContextPresent,
 
