@@ -2,7 +2,7 @@
 
 **Canonical document (use this path everywhere):** [`MIGRATION-TRUST-COMPILER-3.2.md`](MIGRATION-TRUST-COMPILER-3.2.md) — do not introduce parallel migration filenames for the same contract line.
 
-**Single source of truth (SSOT)** for Trust Basis, Trust Card, pack engine, and `mcp-signal-followup` contract floors. Other docs (CHANGELOG, README, [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)) point here instead of duplicating version semantics.
+**Single source of truth (SSOT)** for Trust Basis, Trust Card, pack engine, and companion-pack contract floors (`mcp-signal-followup`, `a2a-signal-followup`). Other docs (CHANGELOG, README, [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)) point here instead of duplicating version semantics.
 
 For the hardening wave that introduced this document, see [PLAN-H1 — Trust Kernel Alignment & Release Hardening](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md).
 
@@ -37,6 +37,12 @@ For the hardening wave that introduced this document, see [PLAN-H1 — Trust Ker
 
 Details and options (bump floor vs document-only): [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md) § `assay_min_version`.
 
+## `a2a-signal-followup` built-in pack (P2b)
+
+- **Name / version:** `a2a-signal-followup` @ `1.0.0`
+- **Authoritative YAML:** `crates/assay-evidence/packs/a2a-signal-followup.yaml` — `requires.assay_min_version: ">=3.2.3"` (and `evidence_schema_version: "1.0"`). Same **meaning** as P2a: the floor tracks the **evidence substrate** line (G3 + Trust Card schema 2 + seven claims; **v3.2.3** reference tag), **not** automatically the first GitHub/crates.io release that embeds this built-in pack — state the latter in release notes ([PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) § `assay_min_version`).
+- **Rules:** A2A-001..003 — `event_type_exists` on canonical `assay.adapter.a2a.*` types; **no** G3 predicate; **no** `ENGINE_VERSION` bump for P2b.
+
 ## Release note checklist (copy for ship)
 
 Use when cutting a release that touches trust artifacts or packs:
@@ -45,7 +51,9 @@ Use when cutting a release that touches trust artifacts or packs:
 - [ ] **Claim count** (**7**) and **stable claim `id` values** listed or linked to this doc; remind consumers: **key by `id`**, not index.
 - [ ] **Pack engine** version (**1.2**) and mention of `g3_authorization_context_present` if relevant to users.
 - [ ] **First tag / version** that includes built-in `mcp-signal-followup` (if this release is the first).
+- [ ] **First tag / version** that includes built-in `a2a-signal-followup` (P2b; if this release is the first).
 - [ ] **`assay_min_version`** on `mcp-signal-followup`: prerequisite substrate vs first binary-with-pack — one sentence, consistent with [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
+- [ ] **`assay_min_version`** on `a2a-signal-followup`: same as above for P2b — consistent with [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
 
 ## Regenerating demo bundles (canonical demo path)
 

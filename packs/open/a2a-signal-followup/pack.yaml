@@ -1,0 +1,73 @@
+name: a2a-signal-followup
+version: "1.0.0"
+kind: security
+description: A2A companion pack — bounded presence on adapter-emitted canonical A2A evidence (capability discovery, task lifecycle, artifact exchange observed)
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack evaluates bounded, presence-only signals on canonical `assay.adapter.a2a.*` evidence
+  emitted by `assay-adapter-a2a`. Passing does NOT prove authorization validity, issuer trust,
+  Agent Card authenticity, signed-card provenance, delegation/handoff correctness, or broad
+  "A2A security." Rules do not reuse MCP G3 predicates; A2A authorization and signing surfaces
+  are out of scope unless future adapter versions emit first-class typed fields.
+  P2b v1 reflects Assay adapter evidence for supported upstream 0.x lines (see adapter
+  `SUPPORTED_SPEC_VERSION_RANGE` / version gate) — not full "A2A v1.0" protocol marketing coverage.
+  requires.assay_min_version is ">=3.2.3" (evidence-substrate floor; see MIGRATION-TRUST-COMPILER-3.2.md
+  and PLAN-P2b — confirm the first published Assay release that embeds this built-in pack).
+
+requires:
+  assay_min_version: ">=3.2.3"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A2A-001
+    severity: warning
+    description: Evidence includes at least one canonical agent-capabilities discovery event (adapter-emitted capability-discovery signal present).
+    help_markdown: |
+      ## Capability discovery evidence observed
+
+      **What this checks:**
+      - At least one event with type `assay.adapter.a2a.agent.capabilities` exists — i.e. the
+        adapter recorded an upstream `agent.capabilities` surface as canonical evidence.
+
+      **What this does not prove:**
+      - Richness or correctness of capability metadata, spoofing resistance, or Agent Card trustworthiness
+      - That `attributes` blobs are bounded or policy-aligned (not a v1 pack contract)
+    check:
+      type: event_type_exists
+      pattern: assay.adapter.a2a.agent.capabilities
+
+  - id: A2A-002
+    severity: warning
+    description: Evidence includes at least one canonical task lifecycle event (`task.requested` and/or `task.updated` from the adapter).
+    help_markdown: |
+      ## Task lifecycle observed
+
+      **What this checks:**
+      - At least one event whose type matches `assay.adapter.a2a.task.*` (glob), covering
+        `assay.adapter.a2a.task.requested` and `assay.adapter.a2a.task.updated`.
+
+      **What this does not prove:**
+      - Delegation or handoff semantics (including inferring handoff from `task.kind` alone)
+      - Task correctness, completion, or authorization
+    check:
+      type: event_type_exists
+      pattern: assay.adapter.a2a.task.*
+
+  - id: A2A-003
+    severity: warning
+    description: Evidence includes at least one canonical artifact.shared event (artifact exchange visibility on the adapter-emitted surface).
+    help_markdown: |
+      ## Artifact exchange visibility
+
+      **What this checks:**
+      - At least one event with type `assay.adapter.a2a.artifact.shared` (upstream `artifact.shared`
+        mapped to canonical evidence) — **shared artifact signal observed**.
+
+      **What this does not prove:**
+      - Artifact integrity, provenance, sandboxing, or “safe” sharing — only that the exchange
+        surface appears in the bundle as adapter-emitted evidence.
+    check:
+      type: event_type_exists
+      pattern: assay.adapter.a2a.artifact.shared
