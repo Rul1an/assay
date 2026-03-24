@@ -62,7 +62,7 @@ Extended discovery notes may live in a **local-only** Cursor plan under `.cursor
 | A2A-002 | `event_type_exists` | `assay.adapter.a2a.task.*` (requested / updated) |
 | A2A-003 | `event_type_exists` | `assay.adapter.a2a.artifact.shared` |
 
-**Optie A / B:** all **B** — presence-only; **no** kernel-sharing with MCP-001 / G3.
+**Option A / B:** all **B** — presence-only; **no** kernel-sharing with MCP-001 / G3.
 
 ## `assay_min_version` (pack `requires`) — release truth
 
