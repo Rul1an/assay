@@ -1,20 +1,26 @@
 # Migration & release truth — Trust Compiler 3.2 line
 
+**Canonical document (use this path everywhere):** [`MIGRATION-TRUST-COMPILER-3.2.md`](MIGRATION-TRUST-COMPILER-3.2.md) — do not introduce parallel migration filenames for the same contract line.
+
 **Single source of truth (SSOT)** for Trust Basis, Trust Card, pack engine, and `mcp-signal-followup` contract floors. Other docs (CHANGELOG, README, [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)) point here instead of duplicating version semantics.
 
 For the hardening wave that introduced this document, see [PLAN-H1 — Trust Kernel Alignment & Release Hardening](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md).
 
-## Consumer rule: key by `claim.id`, not position
+## Consumer contract (non-negotiable)
 
-**Downstream consumers must select trust claims by stable `id` (e.g. `authorization_context_visible`), not by row index or implicit “seventh row”.** Claim order and count may evolve with schema bumps; `id` is the stable contract.
+**Integrations must key trust claims by `claim.id`, not by table position, row index, or implicit row count.** Order and count can change when `schema_version` changes; stable `id` is the only portable selector. Treat “seven rows” or “row N” as documentation hints for **schema_version = 2** only, not API contracts.
 
-## Trust Card
+## Trust Card invariants (mechanical)
+
+- **Top-level JSON keys** stay limited to the frozen surface: `schema_version`, `claims`, `non_goals` — no parallel claim model or extra semantic layers.
+- For a given **`schema_version`**, **claim order, count, and id-set** match `generate_trust_basis` for that schema; the card **does not** reclassify or filter claims. A future schema version **may** change count and/or order — consumers still key by `id` only.
+- **Rendering** (`trust_basis_to_trust_card`, markdown table) **adds no claim classification** beyond copying `TrustBasis.claims` and attaching frozen non-goals text.
 
 | Field | Value |
 |-------|--------|
 | `schema_version` | **2** (adds G3 `authorization_context_visible` in the same row model as v1) |
-| Claim rows | **7** fixed `TrustBasisClaim` entries from `generate_trust_basis` |
-| Semantics | Trust Card adds **no** claim classification beyond Trust Basis: `trust_basis_to_trust_card` copies `claims` and adds frozen `non_goals` only. |
+| Claim rows | **7** `TrustBasisClaim` entries when `schema_version` is **2** (Trust Compiler 3.2 line); future versions may use a different count. |
+| Semantics | Copy-only from Trust Basis + frozen `non_goals` (see invariants above). |
 
 ## Pack engine (evidence lint)
 
