@@ -142,10 +142,14 @@ fn engine_version_satisfies(current: &str, required: &str) -> bool {
 }
 
 /// G3 v1: same predicate as Trust Basis `authorization_context_visible` (verified).
+///
+/// Honors `rule.event_types` like other checks: only scoped events are considered.
 fn check_g3_authorization_context_present(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
-    let passed = crate::g3_authorization_context::bundle_satisfies_g3_authorization_context_visible(
-        ctx.events,
-    );
+    let passed = scoped_events(rule, ctx).into_iter().any(|event| {
+        crate::g3_authorization_context::decision_event_satisfies_g3_authorization_context_visible(
+            event,
+        )
+    });
     if passed {
         CheckResult {
             passed: true,
@@ -636,6 +640,104 @@ impl LintFindingExt for LintFinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ProducerMeta;
+    use chrono::{TimeZone, Utc};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    use crate::lint::packs::schema::{CheckDefinition, PackKind, PackRule};
+    use crate::lint::Severity;
+    use crate::types::EvidenceEvent;
+
+    fn mk_g3_decision(seq: u64) -> EvidenceEvent {
+        let mut e = EvidenceEvent::new(
+            "assay.tool.decision",
+            "urn:assay:test",
+            "run1",
+            seq,
+            json!({
+                "tool": "t",
+                "decision": "allow",
+                "principal": "alice@example.com",
+                "auth_scheme": "jwt_bearer",
+                "auth_issuer": "https://issuer.example/"
+            }),
+        );
+        e.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
+        e
+    }
+
+    fn mk_fs_event(seq: u64) -> EvidenceEvent {
+        let mut e = EvidenceEvent::new(
+            "assay.fs.access",
+            "urn:assay:test",
+            "run1",
+            seq,
+            json!({ "path": "/tmp/x" }),
+        );
+        e.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
+        e
+    }
+
+    fn g3_test_rule(event_types: Option<Vec<String>>) -> PackRule {
+        PackRule {
+            id: "T-G3".into(),
+            severity: Severity::Warn,
+            description: "test".into(),
+            article_ref: None,
+            help_markdown: None,
+            check: CheckDefinition::G3AuthorizationContextPresent,
+            engine_min_version: Some("1.2".into()),
+            event_types,
+        }
+    }
+
+    fn g3_test_ctx<'a>(manifest: &'a Manifest, events: &'a [EvidenceEvent]) -> CheckContext<'a> {
+        CheckContext {
+            events,
+            manifest,
+            bundle_path: "t.tar.gz",
+            pack_name: "p",
+            pack_version: "1",
+            pack_digest: "d",
+            pack_kind: PackKind::Security,
+        }
+    }
+
+    #[test]
+    fn g3_authorization_check_uses_scoped_events_not_full_bundle() {
+        // G3-good decision + unrelated FS event; narrowing scope to FS only must not see the decision.
+        let events = vec![mk_g3_decision(0), mk_fs_event(1)];
+        let manifest = Manifest {
+            schema_version: 1,
+            bundle_id: "b".into(),
+            producer: ProducerMeta::new("test", "0"),
+            run_id: "r".into(),
+            event_count: events.len(),
+            run_root: "".into(),
+            algorithms: Default::default(),
+            files: BTreeMap::new(),
+        };
+        let ctx = g3_test_ctx(&manifest, &events);
+
+        let mut rule = g3_test_rule(Some(vec!["assay.fs.access".into()]));
+        let r = execute_check(&rule, &ctx);
+        assert!(
+            !r.passed,
+            "scoped to fs only: no G3 on assay.fs.access, must fail"
+        );
+
+        rule.event_types = Some(vec!["assay.tool.decision".into()]);
+        let r = execute_check(&rule, &ctx);
+        assert!(
+            r.passed,
+            "scoped to tool.decision: G3 event in scope, must pass"
+        );
+
+        rule.event_types = None;
+        let r = execute_check(&rule, &ctx);
+        assert!(r.passed, "unscoped: G3 satisfied somewhere in bundle");
+    }
 
     #[test]
     fn test_value_pointer() {
