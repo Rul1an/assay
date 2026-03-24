@@ -59,13 +59,13 @@ Phase 0 must produce all of the following before any Phase 1 signal freeze:
 
 | Candidate signal (working name) | Upstream / source today | First-class in canonical evidence today? | Typed without overclaim? | G4 v1 (yes/no) |
 |---------------------------------|-------------------------|------------------------------------------|---------------------------|----------------|
-| *(fill during discovery)* | | | | |
+| *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* |
 
 ### Matrix B — Field properties
 
 | Field (working name) | Type (intended) | Redaction needed? | Stability risk | Bounded meaning (one line) |
 |----------------------|-------------------|-------------------|------------------|----------------------------|
-| *(fill during discovery)* | | | | |
+| *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* | *(fill during discovery)* |
 
 ## Phase 1 — Signal freeze
 
