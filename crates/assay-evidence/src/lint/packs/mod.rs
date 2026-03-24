@@ -37,6 +37,10 @@ pub static BUILTIN_PACKS: &[(&str, &str)] = &[
         include_str!("../../../packs/mcp-signal-followup.yaml"),
     ),
     (
+        "a2a-signal-followup",
+        include_str!("../../../packs/a2a-signal-followup.yaml"),
+    ),
+    (
         "owasp-agentic-control-evidence-baseline",
         include_str!("../../../packs/owasp-agentic-control-evidence-baseline.yaml"),
     ),

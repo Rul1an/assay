@@ -1,0 +1,48 @@
+# A2A Signal Follow-Up (P2b)
+
+**License:** Apache-2.0
+**Version:** 1.0.0
+**Scope:** Companion pack for bounded **presence-only** checks on canonical A2A adapter evidence (`assay.adapter.a2a.*`), aligned with shipped `assay-adapter-a2a` — not external A2A spec completeness.
+
+## Overview
+
+This pack does **not** broaden baseline compliance packs. It checks that a bundle **observes** canonical adapter-emitted surfaces:
+
+- **A2A-001** — `assay.adapter.a2a.agent.capabilities`
+- **A2A-002** — `assay.adapter.a2a.task.*` (covers `task.requested` / `task.updated`)
+- **A2A-003** — `assay.adapter.a2a.artifact.shared`
+
+Uses standard pack checks (`event_type_exists`); **no** pack engine bump beyond existing **v1.2** line — rules do **not** add G3-style authorization predicates.
+
+## Rules
+
+| Rule ID | Severity | Description |
+| --- | --- | --- |
+| `A2A-001` | `warning` | Evidence includes at least one canonical A2A agent capabilities event from the adapter. |
+| `A2A-002` | `warning` | Evidence includes at least one canonical A2A task lifecycle event (requested or updated). |
+| `A2A-003` | `warning` | Evidence includes at least one canonical A2A artifact exchange event from the adapter. |
+
+## Non-Goals
+
+This pack does not prove:
+
+- authorization validity, issuer trust, or G3-equivalent decision semantics on A2A paths
+- signed Agent Card, verified provenance, or extended-card authentication
+- delegation/handoff correctness (including inferring handoff from `task.kind` alone)
+- artifact safety, integrity, or sandbox correctness
+- full coverage of an “A2A v1.0” marketing label — the adapter currently gates upstream `0.x` versions; see [PLAN-P2b](../../../docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)
+
+## Usage
+
+```bash
+assay evidence lint --pack a2a-signal-followup bundle.tar.gz
+```
+
+## Design Constraints
+
+- companion pack only; baselines unchanged
+- discovery-first: rules justified by adapter-emitted canonical types in [PLAN-P2b](../../../docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)
+
+## License
+
+Apache-2.0 — see [LICENSE](./LICENSE)

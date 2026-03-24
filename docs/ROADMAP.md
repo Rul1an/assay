@@ -318,8 +318,8 @@ Status on `main`:
 
 ### C. Protocol Claim Packs (`P2`) and kernel hardening (`H1`)
 - [x] **MCP companion pack (`mcp-signal-followup`, P2a)**: built-in pack MCP-001..003 — G3-aligned auth context check + delegation + containment degradation; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)
-- [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b**)
-- [ ] **Further MCP / A2A protocol packs** (P2b / beyond P2a): e.g. A2A capability/delegation/provenance claim surfaces for supported flows when ready
+- [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b** — ✅ **H1** shipped; **P2b** is next)
+- [ ] **Further MCP / A2A protocol packs** (P2b / beyond P2a): **`a2a-signal-followup`** (A2A-001..003) — bounded presence on shipped `assay.adapter.a2a.*` — [PLAN-P2b](architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md); broader capability/delegation/provenance claims only with first-class evidence
 - [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
 
 This section is the **`P2` execution surface**: ship small, honest packs first; defer broad compliance theater.

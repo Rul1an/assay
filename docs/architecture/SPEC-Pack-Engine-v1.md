@@ -187,7 +187,7 @@ check:
   type: g3_authorization_context_present
 ```
 
-Intended for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). Not a substitute for authorization **validity**, issuer trust, or scope correctness.
+Intended for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). A2A companion packs (e.g. `a2a-signal-followup`) use presence checks on `assay.adapter.a2a.*` instead — see [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md). Not a substitute for authorization **validity**, issuer trust, or scope correctness.
 
 #### `manifest_field`
 
