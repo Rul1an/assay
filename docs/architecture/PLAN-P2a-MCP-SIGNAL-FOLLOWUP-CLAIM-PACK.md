@@ -29,6 +29,8 @@ Productize G1/G2/G3 signals as a **small companion pack** (not baseline expansio
 
 ## `assay_min_version` (pack `requires`)
 
+**SSOT for version floors and release checklist:** [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) (do not duplicate semantics elsewhere).
+
 Pack YAML uses `>=3.2.3` to track the first released Assay line with **G3 evidence + Trust Card schema 2 + seven claims** (git tag **v3.2.3** is the reference for that prerequisite substrate; it is not the “first tag that contains this pack”).
 
 **Release truth for the built-in pack:** Tag **v3.2.3** does **not** include `mcp-signal-followup`, pack engine **v1.2**, or `g3_authorization_context_present` — those land with the **P2a** change. At **crates.io / GitHub release** time, either:

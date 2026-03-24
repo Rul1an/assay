@@ -245,8 +245,9 @@ The Trust Card must not:
 After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 
 1. `P2` — Protocol Claim Packs — **first slice `P2a`**: built-in companion pack `mcp-signal-followup` (MCP-001..003; MCP-001 shares G3 semantics with Trust Basis via `g3_authorization_context_present` in pack engine v1.2; see [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md))
-2. further `P2` slices (e.g. A2A) or drift-hardening — as in [ROADMAP](../ROADMAP.md)
-3. only later: reference existence, temporal validity, capability attestation, richer compliance packs
+2. **`H1` — Trust kernel alignment & release hardening** (before broadening protocol packs): shared predicate / classifier / Trust Card / pack / CLI alignment tests; single migration SSOT — see [PLAN-H1](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md)
+3. further `P2` slices (e.g. A2A / **P2b**) — as in [ROADMAP](../ROADMAP.md)
+4. only later: reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution
 
