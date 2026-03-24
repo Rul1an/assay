@@ -17,7 +17,7 @@ This is a **hardening wave**, not a capability wave.
 
 ## Single source of truth
 
-**Primary SSOT:** [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — Trust Card schema, claim count, engine version, pack floors, release checklist, demo regeneration path.
+**Primary SSOT (fixed filename):** [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — Trust Card schema, claim contract (`claim.id` not position), engine version, pack floors, Trust Card invariants (frozen top-level keys; claims derived from Trust Basis only), release checklist, demo regeneration path.
 
 This PLAN references that document; it does not duplicate full migration tables.
 
@@ -41,5 +41,5 @@ This PLAN references that document; it does not duplicate full migration tables.
 
 1. Migration SSOT exists and is linked from README, CHANGELOG (Unreleased), PLAN-P2a.
 2. At least one integration test uses the **same bundle bytes** for Trust Basis + MCP-001 lockstep assertions.
-3. At least one test asserts Trust Basis ↔ Trust Card **claim identity and frozen top-level JSON shape** (no extra classification in Card).
+3. At least one test asserts Trust Basis ↔ Trust Card: **same `claims` as Basis**, **frozen top-level keys** (`schema_version` / `claims` / `non_goals`), **no extra claim classification** in the card layer.
 4. ROADMAP and RFC-005 place **H1 before P2b** explicitly.
