@@ -1,8 +1,21 @@
-# GitHub Discussions — suggested pinned topics
+# GitHub Discussions — pinned topics & live threads
 
-Assay uses [GitHub Discussions](https://github.com/Rul1an/assay/discussions) for category clarity and roadmap Q&A. Maintainers can **pin** threads that match the titles below so newcomers see the north star without scrolling the README.
+Assay uses [GitHub Discussions](https://github.com/Rul1an/assay/discussions) for category clarity and roadmap Q&A. Maintainers should **pin** the threads below so newcomers see the north star without scrolling the README.
 
-Copy each block into a new Discussion (or adapt). These are **seeds**, not auto-synced from the repo.
+## Live discussions (March 2026)
+
+| Topic | URL |
+|-------|-----|
+| What Assay is (and is not) | https://github.com/Rul1an/assay/discussions/931 |
+| Trust compiler roadmap: T1a → T1b → G3 → P2 | https://github.com/Rul1an/assay/discussions/932 |
+| Examples: bundle → Trust Basis → Trust Card | https://github.com/Rul1an/assay/discussions/933 |
+| Outward-facing docs: trust compiler positioning (polish) | https://github.com/Rul1an/assay/discussions/934 |
+
+Pin **931–933** (and optionally **934**) in the GitHub UI: Discussions → open thread → **Pin** (repository write access required).
+
+---
+
+## Seed text (same content as posted; edit in-repo to match future edits)
 
 ---
 
