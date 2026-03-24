@@ -1,5 +1,7 @@
 //! H1 — same bundle bytes must yield consistent Trust Basis, MCP-001 (P2a), and Trust Card views.
 
+mod common;
+
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions, LintReportWithPacks};
 use assay_evidence::lint::packs::loader::load_pack;
 use assay_evidence::lint::packs::LoadedPack;
@@ -7,69 +9,7 @@ use assay_evidence::{
     generate_trust_basis, trust_basis_to_trust_card, TrustBasis, TrustBasisOptions, TrustClaimId,
     TrustClaimLevel, VerifyLimits, TRUST_CARD_NON_GOALS, TRUST_CARD_SCHEMA_VERSION,
 };
-use assay_evidence::{BundleWriter, EvidenceEvent};
-use chrono::{TimeZone, Utc};
-use serde_json::json;
 use std::io::Cursor;
-
-fn make_event(type_: &str, run_id: &str, seq: u64, payload: serde_json::Value) -> EvidenceEvent {
-    let mut event = EvidenceEvent::new(type_, "urn:assay:test:h1", run_id, seq, payload);
-    event.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
-    event
-}
-
-fn make_bundle(events: Vec<EvidenceEvent>) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    let mut writer = BundleWriter::new(&mut buffer);
-    for event in events {
-        writer.add_event(event);
-    }
-    writer.finish().expect("bundle should finish");
-    buffer
-}
-
-/// Full G3 + delegation + degradation (matches `mcp_signal_followup_pack::full_signal_bundle`).
-fn bundle_g3_full_pass() -> Vec<u8> {
-    make_bundle(vec![
-        make_event(
-            "assay.tool.decision",
-            "run_all",
-            0,
-            json!({
-                "tool": "t",
-                "decision": "allow",
-                "principal": "alice@example.com",
-                "auth_scheme": "jwt_bearer",
-                "auth_issuer": "https://issuer.example/",
-                "delegated_from": "agent:planner",
-            }),
-        ),
-        make_event(
-            "assay.sandbox.degraded",
-            "run_all",
-            1,
-            json!({
-                "reason_code": "policy_conflict",
-                "degradation_mode": "audit_fallback",
-                "component": "landlock"
-            }),
-        ),
-    ])
-}
-
-fn bundle_g3_absent_principal_only() -> Vec<u8> {
-    make_bundle(vec![make_event(
-        "assay.tool.decision",
-        "run_g3_absent",
-        0,
-        json!({
-            "tool": "t",
-            "decision": "allow",
-            "principal": "user:alice",
-            "approval_state": "granted"
-        }),
-    )])
-}
 
 fn load_mcp_pack() -> LoadedPack {
     load_pack("mcp-signal-followup").expect("built-in pack should load")
@@ -126,19 +66,19 @@ fn assert_kernel_lockstep(bundle: &[u8], expect_g3_verified: bool, expect_mcp001
 
 #[test]
 fn h1_same_bundle_trust_basis_and_mcp001_lockstep_full_signal() {
-    let bundle = bundle_g3_full_pass();
+    let bundle = common::full_signal_bundle();
     assert_kernel_lockstep(&bundle, true, false);
 }
 
 #[test]
 fn h1_same_bundle_trust_basis_and_mcp001_lockstep_g3_absent() {
-    let bundle = bundle_g3_absent_principal_only();
+    let bundle = common::g3_absent_principal_only_bundle();
     assert_kernel_lockstep(&bundle, false, true);
 }
 
 #[test]
 fn h1_trust_card_matches_trust_basis_claims_and_frozen_top_level() {
-    let bundle = bundle_g3_full_pass();
+    let bundle = common::full_signal_bundle();
     let tb = generate_trust_basis(
         Cursor::new(&bundle),
         VerifyLimits::default(),

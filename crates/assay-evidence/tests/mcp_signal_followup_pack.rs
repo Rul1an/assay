@@ -1,5 +1,7 @@
 //! P2a `mcp-signal-followup` pack: parity, MCP-002/003 behavior, Trust Basis alignment for MCP-001.
 
+mod common;
+
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions, LintReportWithPacks};
 use assay_evidence::lint::packs::loader::{load_pack, load_pack_from_file};
 use assay_evidence::lint::packs::schema::CheckDefinition;
@@ -8,8 +10,6 @@ use assay_evidence::{
     generate_trust_basis, TrustBasis, TrustBasisOptions, TrustClaimId, TrustClaimLevel,
     VerifyLimits,
 };
-use assay_evidence::{BundleWriter, EvidenceEvent};
-use chrono::{TimeZone, Utc};
 use serde_json::json;
 use std::fs;
 use std::io::Cursor;
@@ -53,22 +53,6 @@ fn load_builtin_pack() -> LoadedPack {
     load_pack("mcp-signal-followup").expect("built-in pack should load")
 }
 
-fn make_event(type_: &str, run_id: &str, seq: u64, payload: serde_json::Value) -> EvidenceEvent {
-    let mut event = EvidenceEvent::new(type_, "urn:assay:test:mcp", run_id, seq, payload);
-    event.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
-    event
-}
-
-fn make_bundle(events: Vec<EvidenceEvent>) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    let mut writer = BundleWriter::new(&mut buffer);
-    for event in events {
-        writer.add_event(event);
-    }
-    writer.finish().expect("bundle should finish");
-    buffer
-}
-
 fn claim_level(tb: &TrustBasis, id: TrustClaimId) -> TrustClaimLevel {
     tb.claims
         .iter()
@@ -96,51 +80,8 @@ fn has_rule_finding(result: &LintReportWithPacks, pack_name: &str, rule_id: &str
         .any(|finding| finding.rule_id.starts_with(&prefix) && finding.rule_id.ends_with(rule_id))
 }
 
-/// G3 verified + delegation + degradation (all P2a rules should pass).
-fn full_signal_bundle() -> Vec<u8> {
-    make_bundle(vec![
-        make_event(
-            "assay.tool.decision",
-            "run_all",
-            0,
-            json!({
-                "tool": "t",
-                "decision": "allow",
-                "principal": "alice@example.com",
-                "auth_scheme": "jwt_bearer",
-                "auth_issuer": "https://issuer.example/",
-                "delegated_from": "agent:planner",
-            }),
-        ),
-        make_event(
-            "assay.sandbox.degraded",
-            "run_all",
-            1,
-            json!({
-                "reason_code": "policy_conflict",
-                "degradation_mode": "audit_fallback",
-                "component": "landlock"
-            }),
-        ),
-    ])
-}
-
-fn g3_absent_principal_only_bundle() -> Vec<u8> {
-    make_bundle(vec![make_event(
-        "assay.tool.decision",
-        "run_g3_absent",
-        0,
-        json!({
-            "tool": "t",
-            "decision": "allow",
-            "principal": "user:alice",
-            "approval_state": "granted"
-        }),
-    )])
-}
-
 fn mcp002_only_bundle() -> Vec<u8> {
-    make_bundle(vec![make_event(
+    common::make_bundle(vec![common::make_event(
         "assay.tool.decision",
         "mcp2",
         0,
@@ -154,7 +95,7 @@ fn mcp002_only_bundle() -> Vec<u8> {
 }
 
 fn mcp002_fail_bundle() -> Vec<u8> {
-    make_bundle(vec![make_event(
+    common::make_bundle(vec![common::make_event(
         "assay.tool.decision",
         "mcp2f",
         0,
@@ -167,7 +108,7 @@ fn mcp002_fail_bundle() -> Vec<u8> {
 }
 
 fn mcp003_only_bundle() -> Vec<u8> {
-    make_bundle(vec![make_event(
+    common::make_bundle(vec![common::make_event(
         "assay.sandbox.degraded",
         "mcp3",
         0,
@@ -221,7 +162,7 @@ fn mcp001_uses_g3_check_definition() {
 
 #[test]
 fn mcp001_aligns_trust_basis_verified_and_pack_passes() {
-    let bundle = full_signal_bundle();
+    let bundle = common::full_signal_bundle();
     let tb = generate_trust_basis(
         Cursor::new(&bundle),
         VerifyLimits::default(),
@@ -252,7 +193,7 @@ fn mcp001_aligns_trust_basis_verified_and_pack_passes() {
 
 #[test]
 fn mcp001_aligns_trust_basis_absent_and_pack_fails() {
-    let bundle = g3_absent_principal_only_bundle();
+    let bundle = common::g3_absent_principal_only_bundle();
     let tb = generate_trust_basis(
         Cursor::new(&bundle),
         VerifyLimits::default(),
@@ -309,10 +250,14 @@ fn mcp_readme_lists_non_goals() {
 fn write_mcp_lint_demo_bundles() {
     let dir = repo_root().join("target").join("mcp-lint-demo");
     fs::create_dir_all(&dir).expect("create dir");
-    fs::write(dir.join("g3_full_pass.tar.gz"), full_signal_bundle()).expect("write full");
+    fs::write(
+        dir.join("g3_full_pass.tar.gz"),
+        common::full_signal_bundle(),
+    )
+    .expect("write full");
     fs::write(
         dir.join("g3_principal_only_fail.tar.gz"),
-        g3_absent_principal_only_bundle(),
+        common::g3_absent_principal_only_bundle(),
     )
     .expect("write fail");
     eprintln!(
