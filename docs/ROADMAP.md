@@ -6,7 +6,7 @@
 > **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
 > `E1`, `G1`, `G2`, `P1`, and `T1a` are merged on `main`, and the only post-`P1` release-line nuance is closed: workspace version is now `3.2.3`, and the OWASP signal-aware pack floors align to `>=3.2.3`.
-> Next product priorities: `T1b` Trust Card MVP, then `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs.
+> Next product priorities: `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs. `T1b` Trust Card (`trustcard.json` / `trustcard.md`) is implemented on `main`.
 
 **Strategic Focus:** Agent Runtime Evidence, Trust Compilation & Control Plane.
 **Core Value:** Verifiable Evidence + Claims-as-Code for Agent Systems.

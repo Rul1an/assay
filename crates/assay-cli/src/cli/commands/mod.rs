@@ -45,6 +45,7 @@ pub mod setup;
 pub mod sim;
 pub mod tool;
 pub mod trust_basis;
+pub mod trust_card;
 pub mod validate;
 pub mod watch;
 pub use dispatch::dispatch;

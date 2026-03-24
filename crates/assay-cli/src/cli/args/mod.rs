@@ -13,6 +13,7 @@ pub mod run;
 pub mod runtime;
 pub mod sim;
 pub mod trust_basis;
+pub mod trust_card;
 
 pub use baseline::*;
 pub use bundle::*;
@@ -27,6 +28,7 @@ pub use run::*;
 pub use runtime::*;
 pub use sim::*;
 pub use trust_basis::*;
+pub use trust_card::*;
 
 #[derive(Parser)]
 #[command(
@@ -94,6 +96,9 @@ pub enum Command {
     /// Generate canonical trust-basis artifacts from verified evidence bundles
     #[command(name = "trust-basis")]
     TrustBasis(TrustBasisArgs),
+    /// Generate trust card artifacts (trustcard.json + trustcard.md) from verified bundles
+    #[command(name = "trustcard")]
+    TrustCard(TrustCardArgs),
 }
 
 #[derive(Parser, Debug)]
