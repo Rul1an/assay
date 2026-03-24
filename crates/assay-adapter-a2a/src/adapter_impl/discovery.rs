@@ -69,6 +69,10 @@ fn extended_card_access_visible_from_attributes(g4: &Map<String, Value>) -> bool
 }
 
 /// Compute discovery fields from upstream `attributes` (raw JSON), before payload normalization.
+///
+/// Bounded meaning and paths are normative in `docs/architecture/G4-A-PHASE1-FREEZE.md` §2b and §4
+/// (including: `extended_card_access_visible` is an **observed** flag only; `agent_card_source_kind`
+/// in v1 is only `"attributes"` or `"unknown"` on the wire).
 #[must_use]
 pub(super) fn compute_discovery_fields(attributes: Option<&Value>) -> DiscoveryFields {
     let mut out = DiscoveryFields::default();

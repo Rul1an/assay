@@ -109,7 +109,7 @@ This matches **defer unless proven** and avoids weakening the seam with a half-d
 | **May use `attributes`?** | **Yes**, only this path. |
 | **Multiple signals required?** | **No.** |
 | **Explicit negatives** | Same style as §4.1; **no** inference from auth-like or generic keys. `agent_card_visible` and `extended_card_access_visible` are **independent** booleans (both may be true if both paths true). |
-| **Bounded meaning (strict)** | **Only** “producer asserted extended/authenticated card **surface** visibility” via the allowlisted flag — **not** that authentication **succeeded**, authorization **held**, or access was **legitimate**. See §2b table. |
+| **Bounded meaning (strict)** | **Only** “producer asserted visibility of an extended card **surface**” via the allowlisted flag (same literal sense as §2b / one-line guardrail) — **not** that authentication **succeeded**, authorization **held**, access was **legitimate**, or any party was **trusted**. See §2b table. |
 
 ### 4.3 `signature_material_visible`
 
@@ -251,13 +251,13 @@ Upstream with **both** allowlisted paths `true` shows that `agent_card_visible` 
 - Implement **`attributes.assay_g4`** parsing only after `attributes` is read; validate shape; set `discovery` before `build_payload` inserts `unmapped_fields_count`.
 - **Fixtures:** §7.1 positive (`agent_card`), §7.2 default, §7.3 **both flags** (`a2a_happy_agent_capabilities_g4_both_visible.json`), §8 matrix, and **§8 extended positive** (`extended_card_access` = true).
 - **Precedence tests (minimum):** (1) **Unit-level** test for the precedence helper: when only attributes-path matches → `attributes`; when nothing matches → `unknown`. (2) **Integration** test that attributes-driven visibility yields `agent_card_source_kind: "attributes"` and that fixture without `assay_g4` yields `"unknown"`. It is acceptable that `typed_payload` / `unmapped` branches are covered only by unit tests with synthetic “would match if frozen” inputs **or** are asserted unreachable in v1 via a single doc-tested guard — but **attributes vs unknown** must be exercised.
-- **Canonical stability:** Integration tests should assert `digest_canonical_json` is **identical** for repeated conversion of the same upstream bytes (full batch), and **golden** digests for the emitted **`discovery` sub-object alone** (SHA-256 over [`canonical_json_bytes`](../../crates/assay-adapter-api/src/canonical.rs)) so accidental field renames or type changes fail CI.
+- **Canonical stability:** Integration tests should assert `digest_canonical_json` is **identical** for repeated conversion of the same upstream bytes (**full `AdapterBatch`**, including when `discovery` is non-default — not only the default happy path), and **golden** digests for the emitted **`discovery` sub-object alone** (SHA-256 over [`canonical_json_bytes`](../../crates/assay-adapter-api/src/canonical.rs)) so accidental field renames or type changes fail CI.
 
 ---
 
 ## 11. Reviewer checklist (contract closure)
 
-Use this to close **strategy** review and focus on **contract** review:
+Use this to close **strategy** review and focus on **contract** review. **Keep this section to the table below** — if something needs nuance, put it in §2b, §4, §7, or §10 instead of growing §11.
 
 | # | Check | Where |
 |---|--------|--------|
@@ -277,3 +277,4 @@ Use this to close **strategy** review and focus on **contract** review:
 | 2026-03-25 | Initial executable freeze: Assay `attributes` contract, deferred `signature_material_visible`, defaults, precedence, JSON examples, negative matrix, assay-evidence line. |
 | 2026-03-25 | Review pass: contract honesty; v1 enum reachability; bounded-meaning table; stricter `extended_card_access`; N7 + extended positive fixture; precedence test minimums. |
 | 2026-03-25 | Review closure: one-line boolean semantics guardrail; §7 build note; §7.3 both-flags fixture; §11 reviewer checklist; canonical `discovery` golden digest expectation in §10. |
+| 2026-03-25 | Pre-merge: §4.2 bounded wording aligned with §2b (no “authenticated” in positive read); §11 “keep table-only”; full-batch digest test when `discovery` non-default. |

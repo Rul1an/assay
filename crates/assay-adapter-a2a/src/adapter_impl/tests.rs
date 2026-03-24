@@ -554,6 +554,30 @@ fn g4_attributes_driven_agent_card_sets_kind_attributes() {
     );
 }
 
+/// When `discovery` is non-default, full `AdapterBatch` digests must still be byte-stable across
+/// repeated conversion (not only `payload["discovery"]` golden hashes).
+#[test]
+fn g4_non_default_discovery_full_batch_digest_is_deterministic() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_agent_card.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let first = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let second = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_eq!(
+        digest_canonical_json(&first),
+        digest_canonical_json(&second)
+    );
+}
+
 #[test]
 fn g4_both_visibility_flags_true_fixture_shows_independence() {
     let adapter = A2aAdapter;
