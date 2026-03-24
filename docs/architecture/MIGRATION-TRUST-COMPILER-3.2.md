@@ -6,6 +6,11 @@
 
 For the hardening wave that introduced this document, see [PLAN-H1 — Trust Kernel Alignment & Release Hardening](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md).
 
+## Two-layer version truth (substrate floor vs embedded packs)
+
+- **`requires.assay_min_version: ">=3.2.3"`** on companion packs is the **evidence-substrate floor** (G3 + Trust Card schema 2 + seven claims). The **v3.2.3** tag is the usual reference for that prerequisite line — it does **not** imply that every built-in companion pack was already embedded in the CLI.
+- **First release embedding both** built-in companion packs (`mcp-signal-followup` **and** `a2a-signal-followup`) in published **assay** binaries is **v3.3.0** — see [CHANGELOG.md](../../CHANGELOG.md) § 3.3.0. Do not read substrate tags (e.g. v3.2.3) as “both packs were already in the binary.”
+
 ## Consumer contract (non-negotiable)
 
 **Integrations must key trust claims by `claim.id`, not by table position, row index, or implicit row count.** Order and count can change when `schema_version` changes; stable `id` is the only portable selector. Treat “seven rows” or “row N” as documentation hints for **schema_version = 2** only, not API contracts.
