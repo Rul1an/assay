@@ -261,6 +261,11 @@ pub enum CheckDefinition {
         paths: Vec<String>,
     },
 
+    /// G3 v1 (domain-specific): same predicate as Trust Basis `authorization_context_visible` (`verified`).
+    /// Not a generic pack-engine auth DSL — no parameters by design.
+    #[serde(rename = "g3_authorization_context_present")]
+    G3AuthorizationContextPresent,
+
     /// Conditional check.
     ///
     /// Engine v1.1 supports a narrow typed subset:
@@ -385,6 +390,7 @@ impl CheckDefinition {
                     });
                 }
             }
+            CheckDefinition::G3AuthorizationContextPresent => {}
             CheckDefinition::Conditional {
                 condition,
                 then_check,
@@ -506,6 +512,7 @@ impl CheckDefinition {
             CheckDefinition::EventTypeExists { .. } => "event_type_exists",
             CheckDefinition::ManifestField { .. } => "manifest_field",
             CheckDefinition::JsonPathExists { .. } => "json_path_exists",
+            CheckDefinition::G3AuthorizationContextPresent => "g3_authorization_context_present",
             CheckDefinition::Conditional { .. } => "conditional",
             CheckDefinition::Unsupported => "unsupported",
         }
