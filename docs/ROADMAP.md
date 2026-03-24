@@ -1,13 +1,13 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-03-23):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
+> **Status sync (2026-03-24):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
 > Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
 > Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
 > **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
 > `E1`, `G1`, `G2`, `P1`, `T1a`, `T1b`, and `G3` are merged on `main`; workspace version is `3.2.3` and OWASP signal-aware pack floors align to `>=3.2.3`.
-> **Sequence:** `T1a → T1b → G3 → P2a` shipped; **`H1`** (kernel alignment) then **`P2b`** — [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) §6. References: [PLAN-T1b](architecture/PLAN-T1b-TRUST-CARD-2026q2.md), [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md), [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md).
-> **Shipped:** **`P2a`** MCP companion pack on `main`. **Next hardening:** **`H1`** — trust kernel alignment & migration SSOT ([PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md)); **then** **`P2b`** and further protocol packs — see §Q3 2026 and [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) §6.
+> **Sequence:** `T1a → T1b → G3 → P2a → H1` shipped on `main`; **next wave: `P2b`** (further protocol claim packs, e.g. A2A) — [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) §6. References: [PLAN-T1b](architecture/PLAN-T1b-TRUST-CARD-2026q2.md), [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md), [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+> **Shipped:** **`P2a`** MCP companion pack; **`H1`** trust kernel alignment (migration SSOT, alignment tests, sequencing docs). **Next:** **`P2b`** and further `P2` slices — see §Q3 2026. Optional small **test-only** follow-ups (e.g. shared `tests/common` bundle builders for H1/P2a parity) do not change product semantics.
 > **Follow-up engineering (parallel, small):** optional alignment between `assay-core` auth-context normalization/redaction and `assay-evidence` trust-basis classification (shared predicates and/or cross-crate tests) to prevent drift — **not** a blocker for `P2`.
 
 **Strategic Focus:** Agent Runtime Evidence, Trust Compilation & Control Plane.
@@ -64,7 +64,7 @@ See [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) for the p
 - **Canonical evidence wins operationally**: new ingest paths may enrich or map into canonical evidence, but they must not semantically override claim classification directly from raw upstream formats.
 - **Trust Card, not trust score**: the primary artifact must show what is `verified`, `self_reported`, `inferred`, or `absent`, not collapse into `trusted/untrusted`.
 - **No aggregate trust score in MVP**: no primary scalar trust score, no `safe/unsafe` badge, and no maturity badge as the main output.
-- **Fixed order**: `T1a -> T1b -> G3 -> P2` stays ahead of dashboard work, broad pack expansion, or heavier reference/temporal semantics.
+- **Fixed order**: `T1a → T1b → G3 → P2a → H1` before broadening protocol packs (`P2b`+); that ordering stays ahead of dashboard work, unconstrained pack expansion, or heavier reference/temporal semantics.
 - **No broad correctness claims**: delegation validation, chain integrity, sandbox correctness, and temporal correctness remain out of scope until dedicated evidence and semantics exist.
 - **Anti-scope rule**: Assay is not a tracing platform, eval platform, or observability dashboard. Those may be integration surfaces, but not the product category.
 
@@ -253,7 +253,7 @@ For detailed historical delivery records, see the relevant ADRs and companion do
 
 ### Trust Compiler Core (Highest Priority)
 
-March 2026 evidence and signal waves change the ordering inside Q3. `T1a`, `T1b`, and `G3` are shipped; **`P2a`** (MCP companion pack) is shipped; **next hardening wave is `H1`** (trust kernel alignment, migration SSOT, alignment tests), **then** further **`P2`** slices (e.g. **P2b** A2A), not more observability UI or unconstrained pack expansion.
+March 2026 evidence and signal waves change the ordering inside Q3. `T1a`, `T1b`, `G3`, **`P2a`**, and **`H1`** are shipped on `main`; **next** is further **`P2`** slices (**`P2b`** / A2A-oriented packs when ready), not more observability UI or unconstrained pack expansion.
 
 | Priority | Capability | Why now | MVP boundary |
 |----------|------------|---------|--------------|
@@ -261,8 +261,8 @@ March 2026 evidence and signal waves change the ordering inside Q3. `T1a`, `T1b`
 | **P0** | `T1b` Trust Card MVP | ✅ Shipped on `main`: portable `trustcard.json` + `trustcard.md` for review and diff. | Evidence-level rows + frozen non-goals; no opaque global score. |
 | **P1** | `G3` Authorization Evidence Signal | ✅ Shipped on `main`: authorization context fields on supported MCP decision evidence; Trust Card schema `2` / seven trust-basis claims. | Supported flows only; no cryptographic or temporal auth-validation semantics. |
 | **P1** | `P2a` MCP companion pack | ✅ Shipped on `main`: built-in `mcp-signal-followup` (MCP-001..003). | G3-aligned lint; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md). |
-| **P1** | `H1` Trust kernel alignment & release hardening | **Before P2b** — one migration SSOT, classifier ↔ pack ↔ Trust Card alignment tests; no new signals. | [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md). |
-| **P1** | `P2` Protocol Claim Packs (further slices) | **After H1** — e.g. A2A / **P2b** when kernel is stable. | MCP/A2A claim packs with bounded wording; no broad compliance theater. |
+| **P1** | `H1` Trust kernel alignment & release hardening | ✅ Shipped on `main`: migration SSOT, alignment tests, docs; no new signals. | [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md). |
+| **P1** | `P2` Protocol Claim Packs (further slices) | **Next** — e.g. A2A / **P2b** (`H1` alignment shipped). | MCP/A2A claim packs with bounded wording; no broad compliance theater. |
 | **P2** | Collector processor / sidecar form factor | This is the "outside-the-box" deployment surface that competitors are not targeting. | OTel-native compile path that emits canonical evidence, not a dashboard. |
 
 These items outrank growth-only work because Assay's strongest differentiator is now trace -> evidence -> claim -> proof, not surface-area expansion.
@@ -318,7 +318,7 @@ Status on `main`:
 
 ### C. Protocol Claim Packs (`P2`) and kernel hardening (`H1`)
 - [x] **MCP companion pack (`mcp-signal-followup`, P2a)**: built-in pack MCP-001..003 — G3-aligned auth context check + delegation + containment degradation; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)
-- [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b**)
+- [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b** — ✅ **H1** shipped; **P2b** is next)
 - [ ] **Further MCP / A2A protocol packs** (P2b / beyond P2a): e.g. A2A capability/delegation/provenance claim surfaces for supported flows when ready
 - [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
 
