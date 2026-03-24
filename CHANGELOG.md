@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - **T1a Trust Basis Compiler MVP**: Assay now ships a canonical `trust-basis.json` compiler surface on `main`, derived from verified bundles with fixed claim keys, fixed evidence vocabularies, and deterministic regeneration.
 - **Low-level trust compiler CLI**: Repository builds now expose `assay trust-basis generate <bundle>` for advanced CI, diffing, and review workflows.
+- **G3 Authorization Context Evidence**: Supported MCP tool-call paths can merge policy-projected `auth_scheme`, `auth_issuer`, and `principal` onto `assay.tool.decision` evidence; normalization allowlists schemes, trims issuer, rejects JWS-compact and `Bearer ` credential material, and omits whitespace-only principals.
+- **Trust Card schema v2**: Trust Basis emits **seven** claims (adds `authorization_context_visible` between delegation and containment); `trustcard.json` uses `schema_version` **2**. Downstream consumers should select claims by stable `id`, not assume a fixed row count.
 
 ### Notes
 

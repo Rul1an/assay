@@ -1,4 +1,5 @@
 use super::super::decision::{DecisionEmitter, DecisionEvent};
+use super::super::g3_auth_context::AuthContextProjection;
 use super::super::lifecycle::LifecycleEmitter;
 use super::super::policy::McpPolicy;
 use crate::runtime::{Authorizer, AuthzReceipt};
@@ -40,6 +41,8 @@ pub struct ToolCallHandlerConfig {
     pub commit_tools: Vec<String>,
     /// Tools classified as write operations (non-commit; glob or exact). Used for mandate operation_class.
     pub write_tools: Vec<String>,
+    /// G3 v1: merged into policy metadata after evaluation when set (policy-projected auth context).
+    pub auth_context_projection: Option<AuthContextProjection>,
 }
 
 impl Default for ToolCallHandlerConfig {
@@ -49,6 +52,7 @@ impl Default for ToolCallHandlerConfig {
             require_mandate_for_commit: true,
             commit_tools: vec![],
             write_tools: vec![],
+            auth_context_projection: None,
         }
     }
 }

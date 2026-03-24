@@ -66,20 +66,21 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
     let card_json: serde_json::Value =
         serde_json::from_slice(&fs::read(out_dir.join("trustcard.json")).unwrap()).unwrap();
 
-    assert_eq!(card_json["schema_version"], json!(1));
+    assert_eq!(card_json["schema_version"], json!(2));
     assert_eq!(card_json["claims"], basis_json["claims"]);
 
     let claims = card_json["claims"].as_array().expect("claims array");
     assert_eq!(
         claims.len(),
-        6,
-        "trustcard must carry exactly six frozen claims"
+        7,
+        "trustcard must carry exactly seven frozen claims"
     );
     let expected_ids = [
         "bundle_verified",
         "signing_evidence_present",
         "provenance_backed_claims_present",
         "delegation_context_visible",
+        "authorization_context_visible",
         "containment_degradation_observed",
         "applied_pack_findings_present",
     ];
