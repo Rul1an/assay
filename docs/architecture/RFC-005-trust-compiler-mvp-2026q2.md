@@ -247,7 +247,12 @@ After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 1. `P2` — Protocol Claim Packs — **first slice `P2a`**: built-in companion pack `mcp-signal-followup` (MCP-001..003; MCP-001 shares G3 semantics with Trust Basis via `g3_authorization_context_present` in pack engine v1.2; see [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md))
 2. **`H1` — Trust kernel alignment & release hardening** (before broadening protocol packs): shared predicate / classifier / Trust Card / pack / CLI alignment tests; single migration SSOT — see [PLAN-H1](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md)
 3. further `P2` slices — **`P2b`**: built-in `a2a-signal-followup` (A2A-001..003; presence-only on `assay.adapter.a2a.*` per shipped adapter; [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)); see also [ROADMAP](../ROADMAP.md)
-4. only later: reference existence, temporal validity, capability attestation, richer compliance packs
+
+*Steps 4–5 continue the sequence **after** `P2b` is on `main`. Step 6 remains explicitly deferred.*
+
+4. **`G4` — A2A discovery / card evidence signal** (evidence-wave before the next A2A pack slice; adapter-first; not a companion pack): see [PLAN-G4](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md)
+5. **`P2c` — A2A discovery/card follow-up pack** (productization after G4; companion pack rules aligned to G4 evidence — not concurrent with G4 evidence work)
+6. only later: reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution
 
