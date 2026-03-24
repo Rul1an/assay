@@ -114,7 +114,7 @@ The adapter **already** emits typed **`agent.capabilities`**. [Acceptance criter
 | | **Option A — new typed surface** | **Option B — bounded reuse (no new keys)** |
 |---|----------------------------------|---------------------------------------------|
 | **What ships** | **New** first-class field(s) or subobject in canonical emitted evidence (adapter mapping change). | **Hardening / clarification** on **existing** first-class `payload` — new **bounded meaning**, tests, examples; **no** new typed keys. |
-| **Evidence-wave read** | Stronger fit for “G4 = evidence-wave” as **new** observable seam. | Legitimate, but G4 reads as **interpretation / documentation** on existing adapter output rather than a new evidence seam. |
+| **Evidence-wave read** | **Preferred** for “G4 = evidence-wave” as a **new** observable seam. | **Fallback only** — acceptable **only if** G4 is **consciously narrowed** to a **hardening / bounded-semantics wave** on existing output, **not** co-equal with A for evidence-wave positioning. |
 | **Phase 1** | Map agreed upstream or `attributes` paths; adapter + tests. | Docs + tests + examples only; adapter unchanged unless fixes are needed for unrelated reasons. |
 | **Constraint** | — | **Option B must not** rename, market, or reframe existing typed payload as if a **new** discovery/card **seam** had been created. **B** is **bounded clarification** of observed meaning (docs / tests / examples), **not** a materially new evidence seam. |
 
@@ -122,7 +122,7 @@ The adapter **already** emits typed **`agent.capabilities`**. [Acceptance criter
 
 **Reviewer / product note:** If G4 is positioned as a **materially new evidence-wave**, **A** is typically the stronger fit (the card/discovery-specific seam is **not** yet first-class in typed evidence). **B** is defensible for a **smaller** wave but must use **narrower outward wording** — **bounded semantics / clarification**, not “new seam.” Record **A** or **B** explicitly in the Phase 1 freeze so §1 / §6 are not argued twice in implementation.
 
-**Recorded product preference:** **Option A preferred** — **G4** should introduce a **small, first-class** A2A discovery/card evidence seam; **visibility-first**, not validity-first. Bounded presence on **`agent.capabilities` alone** is **too thin** to carry the discovery/card wave; see **G4-A** below. **B** remains valid only if explicitly chosen with narrower outward framing.
+**Recorded product preference:** **Option A preferred** — **G4** should introduce a **small, first-class** A2A discovery/card evidence seam; **visibility-first**, not validity-first. Bounded presence on **`agent.capabilities` alone** is **too thin** to carry the discovery/card wave; see **G4-A** below. **Option B** remains a **documented fallback** only when product **explicitly** chooses a **smaller** G4 (narrower outward framing — semantics / docs / tests on existing payload, **not** a new seam).
 
 ## Phase 1 — Signal freeze
 
@@ -135,13 +135,17 @@ After Phase 0 is **reviewed and accepted**, Phase 1 freezes **either**:
 
 **Phase 0 codebase pass:** complete (see matrices + record). **Phase 1 field names** remain **frozen by review**, not by this document alone.
 
-If Phase 1 follows **Option B**, use bounded semantics + tests + examples on **existing** `payload` fields only (see [Open decision — Phase 1 path (A or B)](#open-decision--phase-1-path-a-or-b)). If Phase 1 follows **Option A**, use the **G4-A** proposal below as the working freeze (subject to path validation in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/)).
+If Phase 1 follows **Option A**, use the **G4-A** proposal below as the working freeze (subject to path validation in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/)). If Phase 1 follows **Option B** (**fallback**, consciously narrowed G4), use bounded semantics + tests + examples on **existing** `payload` fields only (see [Open decision — Phase 1 path (A or B)](#open-decision--phase-1-path-a-or-b)).
 
 ### Proposed Phase 1 freeze — G4-A (Option A, proposal)
 
 **Goal:** Add **one** small typed **discovery/card** seam to **canonical emitted** A2A adapter evidence so G4 is a **materially new evidence-wave**, not only richer interpretation of **`agent.capabilities`**. **Second-order motivation** (spec ecosystem, security research around discovery/card surfaces) informs **why** this seam matters; **scope** stays **adapter-observable** and **bounded** per this PLAN.
 
-**Shape (conceptual):** one subobject on the emitted payload (exact key name frozen at implementation), e.g.:
+#### Payload placement
+
+G4-A proposes a **new top-level key** on the **emitted canonical A2A adapter `payload`** (the JSON object built in [`payload.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/payload.rs) today alongside `agent`, `task`, `artifact`, `message`, `attributes`, etc.) — e.g. `discovery` as a **sibling** of `agent`, **not** nested under `agent.*`, unless Phase 1 review explicitly records a different placement. This avoids architecture drift (“where did discovery live?”) at implementation time.
+
+**Shape (conceptual):** one subobject under that key (exact key name frozen at implementation), e.g.:
 
 ```json
 "discovery": {
@@ -156,10 +160,18 @@ Prefer **one subobject** over scattering top-level fields: one seam, clearer ext
 
 | Field | Type | Bounded meaning (may imply) | Must **not** imply |
 |-------|------|-------------------------------|---------------------|
-| `agent_card_visible` | bool | Observable discovery/card-related information is present per **frozen source rules** | Card valid, authentic, or complete |
+| `agent_card_visible` | bool | Observable discovery/card-related information is present **only** when **frozen** source rules fire (see threshold below) | Card valid, authentic, or complete |
 | `agent_card_source_kind` | enum | Where visibility was derived from | Correctness of that source |
 | `extended_card_access_visible` | bool | Observable evidence that an extended/authenticated card **surface** appeared in-band | Auth valid, client trusted, authorization sufficient |
-| `signature_material_visible` | bool | Signature-**related** material visible on a **bounded** path | Signature valid, signer trusted, provenance verified |
+| `signature_material_visible` | bool | **Only** the **presence** of material that matches **freeze-declared**, **bounded** signature-related paths (no parsing success, no crypto outcome) | Signature **valid**, signer **trusted**, provenance **verified**, **signing succeeded**, or **verification was attempted and passed** |
+
+**Minimum threshold for `agent_card_visible` = true (normative for G4-A):**
+
+- **`true` is forbidden** from a **single** ad hoc `attributes` key or heuristic (“something card-ish”) unless that key (or pattern) is **listed in the Phase 1 freeze** alongside any required value shape.
+- **`true` is allowed** only when at least one **frozen** condition holds, e.g.: (a) **typed** upstream / payload path explicitly designated as card/discovery-related in the freeze doc, or (b) **allowlisted** `attributes` path(s) with defined shape, or (c) **unmapped** top-level rule explicitly tied to card/discovery material — each enumerated in implementation, not inferred at runtime.
+- **Explicit non-trigger:** presence of **`agent.capabilities` alone** does **not** by itself set `agent_card_visible` **unless** the Phase 1 freeze adds a **named** rule (otherwise capabilities stay discovery-adjacent only, per Matrix A).
+
+**Extra guardrail — `signature_material_visible`:** This field is the **fastest to sound like verification**. It may only reflect **observable bytes/fields** at **declared** paths. It must **never** encode signing **success**, verification **outcome**, or **provenance resolution** — only “material **present** / **visible** per freeze.” Product copy must stay **visibility-only** (same discipline as freeze rule 3).
 
 **Suggested enum (`agent_card_source_kind`):** `typed_payload` \| `attributes` \| `unmapped` \| `unknown` — makes “visible = true” honest when the signal comes from **`attributes`** or **lossiness**, not only from typed columns.
 
@@ -174,11 +186,11 @@ Prefer **one subobject** over scattering top-level fields: one seam, clearer ext
 
 **Proposed Phase 1 acceptance (G4-A):**
 
-1. A **new** typed discovery/subobject (or equivalent small seam) appears in **emitted canonical** A2A evidence.
-2. At least one **representative emitted JSON** example includes the object (docs or tests).
-3. **Bounded meaning** per field is documented (may / must-not).
-4. Tests prove **`attributes`** keys are **not** promoted without **frozen** path rules.
-5. No G4-A v1 field implies **validity**, **trustworthiness**, or **verification**.
+1. A **new**, **small**, **visibility-first** first-class discovery/card **seam** appears in **emitted canonical** A2A evidence: **one** typed **`discovery`** (or equivalently named) **subobject** at **top-level** `payload` per [Payload placement](#payload-placement) — not a loose synonym for “any new signal.”
+2. At least one **representative emitted JSON** example includes that **subobject** (docs or tests).
+3. **Bounded meaning** per field is documented (may / must-not), aligned with the field table above.
+4. Tests prove **`attributes`** keys are **not** promoted without **frozen** path rules (including **`agent_card_visible`** threshold).
+5. **No** field in that seam implies **validity**, **trustworthiness**, **verification**, **signing success**, **provenance success**, or **verification outcome** — **observed visibility / presence only**, consistent with **visibility-first, not validity-first**.
 
 ## Hypothesis buckets for discovery (not frozen deliverables)
 
@@ -251,7 +263,7 @@ G4 implementation is complete when:
 The review question is **not** “is G4 a good idea?” but:
 
 1. Is Phase 0 **sufficiently grounded and honest** (matrices + spec-vs-adapter + no premature code)?
-2. Which **Phase 1 path** applies — **A** (new typed surface) vs **B** (bounded reuse + docs/tests/examples on existing payload)?
+2. Which **Phase 1 path** applies — **A** (preferred: new typed surface / G4-A) vs **B** (**fallback only**: consciously narrowed G4 — bounded reuse + docs/tests/examples on existing payload)?
 3. Are [Acceptance criteria](#acceptance-criteria-g4-done) **correct for the chosen path** — especially if **B** (no new typed keys in G4 v1)?
 
 ### General checks
