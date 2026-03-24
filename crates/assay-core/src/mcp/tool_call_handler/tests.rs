@@ -1135,6 +1135,7 @@ fn test_commit_tool_without_mandate_denied() {
         require_mandate_for_commit: true,
         commit_tools: vec!["purchase_*".to_string()],
         write_tools: vec![],
+        ..Default::default()
     };
 
     let handler = ToolCallHandler::new(policy, None, emitter.clone(), config);

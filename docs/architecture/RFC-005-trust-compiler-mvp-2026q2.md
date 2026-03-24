@@ -1,6 +1,6 @@
 # RFC-005: Trust Compiler MVP and Trust Card (Q2 2026)
 
-- Status: Active (`T1a` merged on `main`; `T1b` pending)
+- Status: Active (`T1a`, `T1b`, and `G3` merged on `main`; next: `P2`)
 - Date: 2026-03-23
 - Owner: Evidence / Product
 - Scope: bounded execution framing for `T1a` and `T1b`
@@ -32,7 +32,8 @@ This RFC defines that bridge in two steps:
 Current delivery status on `main`:
 
 - `T1a` is merged on `main` as the canonical `trust-basis.json` compiler output and low-level `assay trust-basis generate` surface
-- `T1b` remains pending and must stay a rendering/artifact wave above the trust basis rather than a second semantic layer
+- `T1b` is merged on `main` as deterministic `trustcard.json` / `trustcard.md` (`assay trustcard generate`) derived from the trust basis, without a second semantic classification layer
+- `G3` is merged on `main` as bounded authorization-context fields on supported MCP `assay.tool.decision` evidence (`auth_scheme`, `auth_issuer`, `principal`) with normalization that rejects JWT/Bearer credential material; Trust Basis emits **seven** claims (adds `authorization_context_visible`), and Trust Card JSON uses **`schema_version` `2`** (see [PLAN-G3](./PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md))
 
 ## 1.5 Why This Wedge And Not The Alternatives
 
@@ -196,12 +197,13 @@ Suggested outputs:
 
 Trust Card rendering must not invent new claim semantics. Claim classification happens in the trust basis / compiler stage, not in Markdown rendering.
 
-The first Trust Card should stay small and explicitly bounded. A minimal v1 claim set should be close to:
+The first Trust Card should stay small and explicitly bounded. The shipped claim set is **seven** rows (fixed order in the trust basis; consumers must key by `id`, not positional length):
 
 - `bundle_verified`
 - `signing_evidence_present`
 - `provenance_backed_claims_present`
 - `delegation_context_visible`
+- `authorization_context_visible` (`G3`; Trust Card JSON `schema_version` **2**)
 - `containment_degradation_observed`
 - `applied_pack_findings_present`
 
@@ -240,11 +242,10 @@ The Trust Card must not:
 
 ## 6. Follow-On Sequencing
 
-After `T1a` and `T1b`, the preferred sequence is:
+After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 
-1. `G3` — Authorization Evidence Signal
-2. `P2` — Protocol Claim Packs
-3. only later: reference existence, temporal validity, capability attestation, richer compliance packs
+1. `P2` — Protocol Claim Packs
+2. only later: reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution
 
