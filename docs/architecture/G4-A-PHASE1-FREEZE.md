@@ -4,6 +4,10 @@
 **Parent:** [PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md).
 **Repo snapshot:** Current [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) + [ADR026 fixtures](../../scripts/ci/fixtures/adr026/a2a/v0.2/) have **no** first-class upstream Agent Card / discovery **typed** columns; this freeze defines an **Assay-namespaced `attributes` contract** plus strict negatives so **1b** is not open-ended.
 
+### Contract honesty (product / review)
+
+**G4-A v1 is not a protocol-native typed upstream seam yet.** It is **adapter-emitted**, **Assay-namespaced** under `attributes.assay_g4`, and **bounded by this freeze**. That is a deliberate trade-off: repo-truth has no stable A2A-native card columns in fixtures, so visibility signals are **contracted** where producers can opt in. Do **not** market this as “full A2A Agent Card surface in typed upstream” until a later freeze adds real typed paths.
+
 ---
 
 ## 1. Definitive decision: `signature_material_visible` (v1)
@@ -35,6 +39,25 @@ This matches **defer unless proven** and avoids weakening the seam with a half-d
 
 **Enum values for `agent_card_source_kind`:** `typed_payload` \| `attributes` \| `unmapped` \| `unknown`
 
+**v1 reachability (implementers + docs):** All four enum strings remain part of the **frozen** contract (forwards-compatible). In **this** freeze, however:
+
+- **`typed_payload`** — **unreachable** in v1 (no frozen typed upstream path). Code and docs must **not** imply typed card paths are already supported.
+- **`unmapped`** — **unreachable** in v1 (no frozen unmapped-key rules). Same caution.
+- **Practically active for visibility today:** `attributes` (when §4 matches) and **`unknown`** (when nothing matches).
+
+---
+
+## 2b. Bounded meaning — may imply / must **not** imply (all four fields)
+
+| Field | May imply (visibility / presence only) | Must **not** imply |
+|-------|----------------------------------------|-------------------|
+| `agent_card_visible` | An allowlisted `attributes.assay_g4.agent_card.visible` signal was **observed** as `true` with valid shape | Card valid, authentic, complete, or “real” vs spoof |
+| `agent_card_source_kind` | Which **class** of source won precedence per §3 (for v1 usually `attributes` vs `unknown`) | Correctness, trustworthiness, or strength of that source |
+| `extended_card_access_visible` | An allowlisted `attributes.assay_g4.extended_card_access.visible` signal was **observed** as `true` with valid shape | **Authenticated**, **authorized**, **sufficient** authz, client trusted, token valid, or “extended access succeeded” |
+| `signature_material_visible` (v1) | **Nothing** beyond “slot present, value false” — deferred semantic | Any verification, validity, signer trust, provenance, or signing outcome |
+
+**Reviewer note:** `extended_card_access_visible` uses a parallel `attributes` path; give it the **strictest** product review — if the path is not meaningful for your producers, defer tightening or keep default-only until a producer contract exists.
+
 ---
 
 ## 3. Precedence rule (`agent_card_source_kind`)
@@ -56,6 +79,8 @@ This matches **defer unless proven** and avoids weakening the seam with a half-d
 | Otherwise | `unknown` |
 
 **v1 note:** With this freeze, **`typed_payload` is unreachable for `agent_card_visible` / `extended_card_access_visible`** until a future freeze adds a typed upstream path (none in current ADR026 fixtures). Implementations must still implement precedence so adding typed paths does not change resolution order later.
+
+**Implementation/doc requirement:** State explicitly in code comments (or module-level doc) and in any consumer-facing summary that **`typed_payload` and `unmapped` are frozen enum members but not produced by v1 rules** — avoids the false impression that protocol-native typed or unmapped discovery is already wired.
 
 ---
 
@@ -82,6 +107,7 @@ This matches **defer unless proven** and avoids weakening the seam with a half-d
 | **May use `attributes`?** | **Yes**, only this path. |
 | **Multiple signals required?** | **No.** |
 | **Explicit negatives** | Same style as §4.1; **no** inference from auth-like or generic keys. `agent_card_visible` and `extended_card_access_visible` are **independent** booleans (both may be true if both paths true). |
+| **Bounded meaning (strict)** | **Only** “producer asserted extended/authenticated card **surface** visibility” via the allowlisted flag — **not** that authentication **succeeded**, authorization **held**, or access was **legitimate**. See §2b table. |
 
 ### 4.3 `signature_material_visible`
 
@@ -191,6 +217,9 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 | N4 | Precedence: frozen typed path **not in v1** — use fixture with only `attributes.assay_g4` valid | `agent_card_source_kind` `attributes` |
 | N5 | Strict vs lenient: same `attributes` without `assay_g4` | Same defaults as N1 |
 | N6 | `signature_material_visible` | Always `false` in v1 |
+| N7 | **Precedence semantics** | With only `attributes.assay_g4.agent_card` valid → `agent_card_source_kind` is **`attributes`**; with no matching paths → **`unknown`** (not `attributes`) |
+
+**Additional fixture (implementation PR, recommended):** One **positive** upstream packet where `attributes.assay_g4.extended_card_access.visible` is `true` (valid shape), asserting emitted `extended_card_access_visible: true` and appropriate `agent_card_source_kind` — so this bool is not only covered by negatives. (Optional second full JSON snippet in docs mirroring §7.1.)
 
 ---
 
@@ -203,7 +232,8 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 ## 10. Link to implementation
 
 - Implement **`attributes.assay_g4`** parsing only after `attributes` is read; validate shape; set `discovery` before `build_payload` inserts `unmapped_fields_count`.
-- Add fixtures: one positive (§7.1), one default (§7.2), plus rows in §8.
+- **Fixtures:** §7.1 positive (`agent_card`), §7.2 default, §8 matrix, and **§8 extended positive** (`extended_card_access` = true).
+- **Precedence tests (minimum):** (1) **Unit-level** test for the precedence helper: when only attributes-path matches → `attributes`; when nothing matches → `unknown`. (2) **Integration** test that attributes-driven visibility yields `agent_card_source_kind: "attributes"` and that fixture without `assay_g4` yields `"unknown"`. It is acceptable that `typed_payload` / `unmapped` branches are covered only by unit tests with synthetic “would match if frozen” inputs **or** are asserted unreachable in v1 via a single doc-tested guard — but **attributes vs unknown** must be exercised.
 
 ---
 
@@ -212,3 +242,4 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 | Date | Change |
 |------|--------|
 | 2026-03-25 | Initial executable freeze: Assay `attributes` contract, deferred `signature_material_visible`, defaults, precedence, JSON examples, negative matrix, assay-evidence line. |
+| 2026-03-25 | Review pass: contract honesty; v1 enum reachability; bounded-meaning table; stricter `extended_card_access`; N7 + extended positive fixture; precedence test minimums. |
