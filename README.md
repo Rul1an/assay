@@ -31,6 +31,8 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
+> **Trust Compiler line:** Release **v3.3.0** is the first to ship **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`) in published binaries; pack YAML still documents the substrate floor `>=3.2.3` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md) (*two-layer version truth*).
+
 ```
   Agent ──► Assay ──► MCP Server
               │
@@ -231,6 +233,8 @@ Assay ships adapters that map protocol events into **canonical evidence** (same 
 | **ACP** (OpenAI/Stripe) | `assay-adapter-acp` | Checkout events, payment intents, tool calls |
 | **A2A** (Google) | `assay-adapter-a2a` | Agent capabilities, task delegation, artifacts |
 | **UCP** (Google/Shopify) | `assay-adapter-ucp` | Discover/buy/post-purchase state transitions |
+
+Adapter crates are **workspace / binary–driven** (not published as separate `crates.io` packages); consume them via this repo or released **assay** builds.
 
 Governance stays protocol-agnostic; **the evidence and claim layer stays the same** as protocols evolve.
 
