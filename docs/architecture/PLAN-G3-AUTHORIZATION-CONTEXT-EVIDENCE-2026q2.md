@@ -40,9 +40,10 @@ Merge path: `ToolCallHandlerConfig.auth_context_projection` → `AuthContextProj
 
 ## Migration
 
-Consumers must not rely on exactly six trust-basis claims; identify claims by `id`.
+Consumers must not rely on fixed row count; **key claims by stable `id`**, not index. Authoritative floors and checklist: [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md).
 
 ## References
 
+- [MIGRATION — Trust Compiler 3.2 line](MIGRATION-TRUST-COMPILER-3.2.md)
 - [ADR-006: Evidence Contract](./ADR-006-Evidence-Contract.md)
 - [ADR-033: OTel Trust Compiler Positioning](./ADR-033-OTel-Trust-Compiler-Positioning.md)
