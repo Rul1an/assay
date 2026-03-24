@@ -40,7 +40,7 @@ Details and options (bump floor vs document-only): [PLAN-P2a](PLAN-P2a-MCP-SIGNA
 ## `a2a-signal-followup` built-in pack (P2b)
 
 - **Name / version:** `a2a-signal-followup` @ `1.0.0`
-- **`requires.assay_min_version`:** `>=3.2.3` — same substrate floor convention as `mcp-signal-followup` ([PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)).
+- **Authoritative YAML:** `crates/assay-evidence/packs/a2a-signal-followup.yaml` — `requires.assay_min_version: ">=3.2.3"` (and `evidence_schema_version: "1.0"`). Same **meaning** as P2a: the floor tracks the **evidence substrate** line (G3 + Trust Card schema 2 + seven claims; **v3.2.3** reference tag), **not** automatically the first GitHub/crates.io release that embeds this built-in pack — state the latter in release notes ([PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) § `assay_min_version`).
 - **Rules:** A2A-001..003 — `event_type_exists` on canonical `assay.adapter.a2a.*` types; **no** G3 predicate; **no** `ENGINE_VERSION` bump for P2b.
 
 ## Release note checklist (copy for ship)

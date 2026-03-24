@@ -102,7 +102,20 @@ fn a2a_payload_cap() -> serde_json::Value {
     })
 }
 
-fn a2a_payload_task() -> serde_json::Value {
+fn a2a_payload_task_requested() -> serde_json::Value {
+    json!({
+        "adapter_id": "assay-adapter-a2a",
+        "adapter_version": "0.0.1",
+        "protocol": "a2a",
+        "protocol_name": "a2a",
+        "protocol_version": "0.2.0",
+        "upstream_event_type": "task.requested",
+        "agent": { "id": "agent://x" },
+        "task": { "id": "task-1", "status": "pending" }
+    })
+}
+
+fn a2a_payload_task_updated() -> serde_json::Value {
     json!({
         "adapter_id": "assay-adapter-a2a",
         "adapter_version": "0.0.1",
@@ -142,7 +155,7 @@ fn full_a2a_bundle() -> Vec<u8> {
             "assay.adapter.a2a.task.updated",
             "a2a_full",
             1,
-            a2a_payload_task(),
+            a2a_payload_task_updated(),
         ),
         make_event(
             "assay.adapter.a2a.artifact.shared",
@@ -197,7 +210,7 @@ fn a2a_001_fails_without_capabilities_event() {
             "assay.adapter.a2a.task.requested",
             "r",
             0,
-            a2a_payload_task(),
+            a2a_payload_task_requested(),
         ),
         make_event(
             "assay.adapter.a2a.artifact.shared",
@@ -225,7 +238,7 @@ fn a2a_002_accepts_task_requested() {
             "assay.adapter.a2a.task.requested",
             "r",
             1,
-            a2a_payload_task(),
+            a2a_payload_task_requested(),
         ),
         make_event(
             "assay.adapter.a2a.artifact.shared",
@@ -238,6 +251,21 @@ fn a2a_002_accepts_task_requested() {
     assert!(!has_rule_finding(&result, "a2a-signal-followup", "A2A-002"));
 }
 
+/// A2A-002 glob must match `assay.adapter.a2a.task.updated` alone (no requested event).
+#[test]
+fn a2a_002_accepts_task_updated_only() {
+    let bundle = make_bundle(vec![make_event(
+        "assay.adapter.a2a.task.updated",
+        "upd",
+        0,
+        a2a_payload_task_updated(),
+    )]);
+    let result = lint_with_pack(load_builtin_pack(), &bundle);
+    assert!(!has_rule_finding(&result, "a2a-signal-followup", "A2A-002"));
+    assert!(has_rule_finding(&result, "a2a-signal-followup", "A2A-001"));
+    assert!(has_rule_finding(&result, "a2a-signal-followup", "A2A-003"));
+}
+
 #[test]
 fn a2a_003_fails_without_artifact_event() {
     let bundle = make_bundle(vec![
@@ -247,7 +275,12 @@ fn a2a_003_fails_without_artifact_event() {
             0,
             a2a_payload_cap(),
         ),
-        make_event("assay.adapter.a2a.task.updated", "r", 1, a2a_payload_task()),
+        make_event(
+            "assay.adapter.a2a.task.updated",
+            "r",
+            1,
+            a2a_payload_task_updated(),
+        ),
     ]);
     let result = lint_with_pack(load_builtin_pack(), &bundle);
     assert!(has_rule_finding(&result, "a2a-signal-followup", "A2A-003"));
