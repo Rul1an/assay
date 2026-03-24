@@ -27,7 +27,7 @@ Pin **931–933** (and optionally **934**) in the GitHub UI: Discussions → ope
 
 **Assay is** a **trust compiler for agent systems**: it turns runtime signals (MCP tool decisions, traces, bundle contents) into **enforceable policy outcomes** and **reviewable trust artifacts** — verifiable evidence bundles, Trust Basis (`trust-basis.json`), Trust Card (`trustcard.json` / `trustcard.md`), SARIF, CI gates.
 
-**The wedge** many people meet first is **deterministic MCP policy enforcement** (`assay mcp wrap`): allow/deny before tools run, with an audit trail. That is the control plane, not the whole category.
+**The wedge** many people meet first is **deterministic MCP policy enforcement** (`assay mcp wrap`): allow/deny before tools run, with an audit trail. That is the control plane, not the whole category. The `mcp` command group is **hidden** from top-level `assay --help` while the surface stabilizes; run `assay mcp --help` or follow the [MCP Quickstart](https://github.com/Rul1an/assay/tree/main/examples/mcp-quickstart).
 
 **Assay is not:**
 

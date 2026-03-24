@@ -35,10 +35,11 @@ No hosted backend. No API keys for core flows. **Deterministic** — same input,
   Agent ──► Assay ──► MCP Server
               │
               ├─ ✅ ALLOW / ❌ DENY  (policy)
-              │
-              └─► 📋 Evidence bundle (verifiable)
-              └─► 📊 Trust Basis  →  Trust Card  →  SARIF / CI
+              ├─► 📋 Evidence bundle (verifiable)
+              └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
+
+> **CLI:** The `mcp` command group is **hidden** from top-level `assay --help` while the surface stabilizes; it is supported. Use `assay mcp --help`, `assay mcp wrap …`, or follow the [MCP Quickstart](examples/mcp-quickstart/).
 
 > **Wedge, not category.** “MCP firewall” describes the control plane; **trust compilation** describes the outcome: reviewable claims backed by evidence. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) and [RFC-005](docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md).
 
@@ -89,7 +90,7 @@ assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 
 | Output | Role |
 |--------|------|
-| **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run. |
+| **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run (see CLI note above the diagram). |
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
 | **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
 | **Trust Card** | `trustcard.json` / `trustcard.md` — same claims, review-friendly artifact. |
@@ -218,7 +219,7 @@ PRs that violate policy get blocked; SARIF can surface in the Security tab.
 | **Deterministic** | Same input, same decision — not probabilistic. |
 | **Portable artifacts** | Bundles, Trust Basis, Trust Card, SARIF — for CI, review, audit. |
 | **Bounded claims** | Explicit about what is **verified** vs **visible** vs **absent** — no score-first UX. |
-| **MCP-native wedge** | `assay mcp wrap` is the fast path; adapters extend the same engine. |
+| **MCP-native wedge** | `assay mcp wrap` is the fast path (the `mcp` group is hidden from `assay --help`; use `assay mcp --help`). Adapters extend the same engine. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 
 ## Beyond MCP: Protocol Adapters
