@@ -208,6 +208,8 @@ This PLAN is **complete enough** for **discovery review** and **direction** (Pha
 | 2 | **Representative emitted JSON** — **grounded** in the **current** adapter payload layout (top-level siblings like `agent`, `attributes`, …), not only a conceptual snippet; includes **`discovery`** with at least one realistic **`agent_card_source_kind`** | Proves placement and shape **before** code argues structure. |
 | 3 | **Explicit drop rules** — when upstream/`attributes` hints **must not** be promoted to typed `discovery.*` | Prevents inflation (“everything becomes visible”). Complements freeze rule 5 above. |
 
+**Executable freeze (filled):** The **[G4-A Phase 1 formal freeze](G4-A-PHASE1-FREEZE.md)** document contains the **per-field mapping tables**, **precedence with examples**, **hard defaults**, **two full emitted-payload JSON examples**, **negative test matrix**, **`signature_material_visible` v1 decision** (deferred), and **assay-evidence** scope line — so **1b** can proceed adapter-first without reopening semantics.
+
 **Remaining semantic closures (owned by Phase 1 freeze, not this PLAN PR):**
 
 - **`agent_card_visible` = true** — must be **fully specified** via the mapping table: frozen paths **+** minimum bounded shape **+** exclusion of mere blob fragments (see **Minimum threshold for `agent_card_visible`** in the G4-A section above).
