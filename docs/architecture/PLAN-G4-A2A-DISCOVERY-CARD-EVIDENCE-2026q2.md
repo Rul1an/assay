@@ -124,6 +124,8 @@ The adapter **already** emits typed **`agent.capabilities`**. [Acceptance criter
 
 **Recorded product preference:** **Option A preferred** — **G4** should introduce a **small, first-class** A2A discovery/card evidence seam; **visibility-first**, not validity-first. Bounded presence on **`agent.capabilities` alone** is **too thin** to carry the discovery/card wave; see **G4-A** below. **Option B** remains a **documented fallback** only when product **explicitly** chooses a **smaller** G4 (narrower outward framing — semantics / docs / tests on existing payload, **not** a new seam).
 
+**Option B in one line:** Option **B** is acceptable **only if** G4 is **consciously narrowed** from a **new evidence-wave** to **bounded semantics and examples** on **existing typed payload** — **not** as a **co-equal** alternative to **A** for evidence-wave positioning, and **not** because “B is easier.”
+
 ## Phase 1 — Signal freeze
 
 After Phase 0 is **reviewed and accepted**, Phase 1 freezes **either**:
@@ -167,11 +169,13 @@ Prefer **one subobject** over scattering top-level fields: one seam, clearer ext
 
 **Minimum threshold for `agent_card_visible` = true (normative for G4-A):**
 
-- **`true` is forbidden** from a **single** ad hoc `attributes` key or heuristic (“something card-ish”) unless that key (or pattern) is **listed in the Phase 1 freeze** alongside any required value shape.
-- **`true` is allowed** only when at least one **frozen** condition holds, e.g.: (a) **typed** upstream / payload path explicitly designated as card/discovery-related in the freeze doc, or (b) **allowlisted** `attributes` path(s) with defined shape, or (c) **unmapped** top-level rule explicitly tied to card/discovery material — each enumerated in implementation, not inferred at runtime.
+Phase 1 must **harden** this into the formal freeze; until then the following is the **intent**:
+
+- **`true` only if all** hold: **(1)** a match against a **pre-frozen set** of source paths or categories (typed payload, allowlisted `attributes`, or explicit unmapped rule — each **listed**, not guessed); **(2)** the matched source has a **minimum bounded shape** (typed columns or schema for that path — **not** a loose blob fragment); **(3)** the rule is **enumerated** in the freeze doc and tests, not inferred at runtime.
+- **`true` is forbidden** from a **single** ad hoc `attributes` key, vague upstream hint, or heuristic (“something card-ish”) unless that key (or pattern) is **listed in the Phase 1 freeze** with required value shape.
 - **Explicit non-trigger:** presence of **`agent.capabilities` alone** does **not** by itself set `agent_card_visible` **unless** the Phase 1 freeze adds a **named** rule (otherwise capabilities stay discovery-adjacent only, per Matrix A).
 
-**Extra guardrail — `signature_material_visible`:** This field is the **fastest to sound like verification**. It may only reflect **observable bytes/fields** at **declared** paths. It must **never** encode signing **success**, verification **outcome**, or **provenance resolution** — only “material **present** / **visible** per freeze.” Product copy must stay **visibility-only** (same discipline as freeze rule 3).
+**Extra guardrail — `signature_material_visible`:** This field is the **fastest to sound like verification** and the **first candidate to drop** if repo-truth cannot support **freeze-declared** paths with honest tests. It may **only** mean: **bounded, pre-declared** signature-**related** material is **visible** at named paths — **not** “card signed,” **not** signature **valid**, **not** signer **trusted**, **not** provenance **established**. It must **never** encode signing **success**, verification **outcome**, or **provenance resolution** — only observable **presence** per freeze. Product copy must stay **visibility-only** (same discipline as freeze rule 3).
 
 **Suggested enum (`agent_card_source_kind`):** `typed_payload` \| `attributes` \| `unmapped` \| `unknown` — makes “visible = true” honest when the signal comes from **`attributes`** or **lossiness**, not only from typed columns.
 
@@ -179,10 +183,12 @@ Prefer **one subobject** over scattering top-level fields: one seam, clearer ext
 
 **Freeze rules (must hold before ship):**
 
+0. **`attributes` → G4 signal (normative)** — **No** path under **`attributes`** may feed **any** `discovery.*` field unless that **exact path**, **JSON type expectation**, **redaction rule**, and **bounded meaning** are **frozen** in the Phase 1 freeze doc (and covered by tests). No path, no signal.
 1. **Source paths frozen** — Phase 1 implementation must list **exact** upstream keys / `attributes` paths (or “typed payload only” rules) that may set each field; precedence when multiple sources exist.
 2. **`attributes` allowlist only** — No free-text inference from the blob; only **pre-frozen** key patterns; no “something card-like was in `attributes`” without a named path rule.
 3. **Presence stays presence** — Product and docs may say e.g. “signature material **visible**”; never “signed card **verified**” from these fields alone.
 4. **Adapter-first** — Implementation starts in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/); [`assay-evidence`](../../crates/assay-evidence/) changes only if a bounded classification seam is truly required.
+5. **Drop rules** — Phase 1 must document when a discovery/card **hint** in upstream input **must not** be promoted to typed `discovery.*` (guard against seam inflation). Hints that fail frozen path/shape rules stay **out of** the typed seam.
 
 **Proposed Phase 1 acceptance (G4-A):**
 
@@ -191,6 +197,22 @@ Prefer **one subobject** over scattering top-level fields: one seam, clearer ext
 3. **Bounded meaning** per field is documented (may / must-not), aligned with the field table above.
 4. Tests prove **`attributes`** keys are **not** promoted without **frozen** path rules (including **`agent_card_visible`** threshold).
 5. **No** field in that seam implies **validity**, **trustworthiness**, **verification**, **signing success**, **provenance success**, or **verification outcome** — **observed visibility / presence only**, consistent with **visibility-first, not validity-first**.
+
+### Phase 1 formal freeze — artifacts still required (reviewer checklist)
+
+This PLAN is **complete enough** for **discovery review** and **direction** (Phase 0 + G4-A **proposal**). A **formal Phase 1 signal freeze** (ready for implementation PR) still requires **closing** the remaining **semantic** items below — they are **freeze deliverables**, not strategy gaps.
+
+| # | Deliverable | Purpose |
+|---|-------------|---------|
+| 1 | **Per-field source mapping table** — for each `discovery.*` field, at minimum: **field name**, **source path(s)**, **minimum condition for `true` / non-default enum**, **may use `attributes`? (Y/N + which paths)**, **redaction / sensitivity** | Removes ambiguity on **when** each field may be set; implements **`agent_card_visible`** and **`signature_material_visible`** thresholds mechanically. |
+| 2 | **Representative emitted JSON** — **grounded** in the **current** adapter payload layout (top-level siblings like `agent`, `attributes`, …), not only a conceptual snippet; includes **`discovery`** with at least one realistic **`agent_card_source_kind`** | Proves placement and shape **before** code argues structure. |
+| 3 | **Explicit drop rules** — when upstream/`attributes` hints **must not** be promoted to typed `discovery.*` | Prevents inflation (“everything becomes visible”). Complements freeze rule 5 above. |
+
+**Remaining semantic closures (owned by Phase 1 freeze, not this PLAN PR):**
+
+- **`agent_card_visible` = true** — must be **fully specified** via the mapping table: frozen paths **+** minimum bounded shape **+** exclusion of mere blob fragments (see **Minimum threshold for `agent_card_visible`** in the G4-A section above).
+- **`signature_material_visible`** — ship **only** with **named** freeze-declared paths; if repo-truth is **too thin**, **drop or defer** this field **first** rather than weak guessing.
+- **Payload placement** — **confirm** top-level `payload.discovery` (or frozen name) as the **canonical** location in the freeze doc so implementation does not reopen placement.
 
 ## Hypothesis buckets for discovery (not frozen deliverables)
 
