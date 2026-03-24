@@ -1,6 +1,6 @@
 # PLAN — G4 A2A Discovery / Card Evidence Signal (2026 Q2)
 
-- **Status:** Phase 0 discovery **recorded** (pending **human review** before Phase 1 freeze)
+- **Status:** Phase 0 discovery **recorded**; **Phase 1:** **G4-A proposal** below (**Option A** recorded as preferred — pending formal freeze + implementation)
 - **Date:** 2026-03-24
 - **Owner:** Evidence / Product
 - **Phase 0 source snapshot:** `assay-adapter-a2a` as of PLAN update (see Matrix A/B + record below)
@@ -122,6 +122,8 @@ The adapter **already** emits typed **`agent.capabilities`**. [Acceptance criter
 
 **Reviewer / product note:** If G4 is positioned as a **materially new evidence-wave**, **A** is typically the stronger fit (the card/discovery-specific seam is **not** yet first-class in typed evidence). **B** is defensible for a **smaller** wave but must use **narrower outward wording** — **bounded semantics / clarification**, not “new seam.” Record **A** or **B** explicitly in the Phase 1 freeze so §1 / §6 are not argued twice in implementation.
 
+**Recorded product preference:** **Option A preferred** — **G4** should introduce a **small, first-class** A2A discovery/card evidence seam; **visibility-first**, not validity-first. Bounded presence on **`agent.capabilities` alone** is **too thin** to carry the discovery/card wave; see **G4-A** below. **B** remains valid only if explicitly chosen with narrower outward framing.
+
 ## Phase 1 — Signal freeze
 
 After Phase 0 is **reviewed and accepted**, Phase 1 freezes **either**:
@@ -133,11 +135,50 @@ After Phase 0 is **reviewed and accepted**, Phase 1 freezes **either**:
 
 **Phase 0 codebase pass:** complete (see matrices + record). **Phase 1 field names** remain **frozen by review**, not by this document alone.
 
-**Provisional Phase 1 directions (hypotheses — not frozen):**
+If Phase 1 follows **Option B**, use bounded semantics + tests + examples on **existing** `payload` fields only (see [Open decision — Phase 1 path (A or B)](#open-decision--phase-1-path-a-or-b)). If Phase 1 follows **Option A**, use the **G4-A** proposal below as the working freeze (subject to path validation in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/)).
 
-1. **Document + test** bounded meaning for **`payload.agent.capabilities`** (and identity fields) under the discovery/card narrative — **no overclaim** vs P2b / this PLAN.
-2. **Only if** a real producer emits **stable** optional keys (e.g. in `attributes`), consider **promoting** named paths in a **separate** Phase 1 decision — with adapter tests and explicit non-proofs.
-3. **Do not** invent Agent Card **verification** or **trust** claims; stay aligned with [Explicitly out of G4 v1](#explicitly-out-of-g4-v1).
+### Proposed Phase 1 freeze — G4-A (Option A, proposal)
+
+**Goal:** Add **one** small typed **discovery/card** seam to **canonical emitted** A2A adapter evidence so G4 is a **materially new evidence-wave**, not only richer interpretation of **`agent.capabilities`**. **Second-order motivation** (spec ecosystem, security research around discovery/card surfaces) informs **why** this seam matters; **scope** stays **adapter-observable** and **bounded** per this PLAN.
+
+**Shape (conceptual):** one subobject on the emitted payload (exact key name frozen at implementation), e.g.:
+
+```json
+"discovery": {
+  "agent_card_visible": true,
+  "agent_card_source_kind": "attributes",
+  "extended_card_access_visible": false,
+  "signature_material_visible": false
+}
+```
+
+Prefer **one subobject** over scattering top-level fields: one seam, clearer extension later, explicit “discovery/card” surface vs general agent metadata.
+
+| Field | Type | Bounded meaning (may imply) | Must **not** imply |
+|-------|------|-------------------------------|---------------------|
+| `agent_card_visible` | bool | Observable discovery/card-related information is present per **frozen source rules** | Card valid, authentic, or complete |
+| `agent_card_source_kind` | enum | Where visibility was derived from | Correctness of that source |
+| `extended_card_access_visible` | bool | Observable evidence that an extended/authenticated card **surface** appeared in-band | Auth valid, client trusted, authorization sufficient |
+| `signature_material_visible` | bool | Signature-**related** material visible on a **bounded** path | Signature valid, signer trusted, provenance verified |
+
+**Suggested enum (`agent_card_source_kind`):** `typed_payload` \| `attributes` \| `unmapped` \| `unknown` — makes “visible = true” honest when the signal comes from **`attributes`** or **lossiness**, not only from typed columns.
+
+**Explicitly not in G4-A v1 (names illustrative):** `signature_verified`, `agent_card_trusted`, `issuer_trust`, `card_url_verified`, `handoff_verified`, **`authorization_context_visible`** as a **G3-style** seam for A2A — anything that reads as **validity** or **trustworthiness** rather than **visibility**.
+
+**Freeze rules (must hold before ship):**
+
+1. **Source paths frozen** — Phase 1 implementation must list **exact** upstream keys / `attributes` paths (or “typed payload only” rules) that may set each field; precedence when multiple sources exist.
+2. **`attributes` allowlist only** — No free-text inference from the blob; only **pre-frozen** key patterns; no “something card-like was in `attributes`” without a named path rule.
+3. **Presence stays presence** — Product and docs may say e.g. “signature material **visible**”; never “signed card **verified**” from these fields alone.
+4. **Adapter-first** — Implementation starts in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/); [`assay-evidence`](../../crates/assay-evidence/) changes only if a bounded classification seam is truly required.
+
+**Proposed Phase 1 acceptance (G4-A):**
+
+1. A **new** typed discovery/subobject (or equivalent small seam) appears in **emitted canonical** A2A evidence.
+2. At least one **representative emitted JSON** example includes the object (docs or tests).
+3. **Bounded meaning** per field is documented (may / must-not).
+4. Tests prove **`attributes`** keys are **not** promoted without **frozen** path rules.
+5. No G4-A v1 field implies **validity**, **trustworthiness**, or **verification**.
 
 ## Hypothesis buckets for discovery (not frozen deliverables)
 
