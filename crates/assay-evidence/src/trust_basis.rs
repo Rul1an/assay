@@ -189,83 +189,8 @@ fn classify_delegation_context(events: &[EvidenceEvent]) -> TrustClaimLevel {
     }
 }
 
-// --- G3 v1 classification helpers (must stay aligned with
-// `crates/assay-core/src/mcp/g3_auth_context.rs` normalization) ---
-
-const G3_MAX_AUTH_ISSUER_BYTES: usize = 2048;
-
-fn g3_looks_like_jws_compact(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 3 {
-        return false;
-    }
-    let (h, p, sig) = (parts[0], parts[1], parts[2]);
-    if h.len() < 4 || p.len() < 4 || sig.len() < 4 {
-        return false;
-    }
-    if !h.starts_with("eyJ") {
-        return false;
-    }
-    let is_b64url = |part: &str| {
-        part.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    };
-    is_b64url(h) && is_b64url(p) && is_b64url(sig)
-}
-
-fn g3_has_bearer_credential_prefix(s: &str) -> bool {
-    let b = s.trim().as_bytes();
-    b.len() >= 7 && b[..7].eq_ignore_ascii_case(b"bearer ")
-}
-
-fn g3_principal_field_satisfies_v1(p: &str) -> bool {
-    let t = p.trim();
-    if t.is_empty() {
-        return false;
-    }
-    !g3_has_bearer_credential_prefix(t) && !g3_looks_like_jws_compact(t)
-}
-
-fn g3_auth_issuer_field_satisfies_v1(iss: &str) -> bool {
-    let t = iss.trim();
-    if t.is_empty() || t.len() > G3_MAX_AUTH_ISSUER_BYTES {
-        return false;
-    }
-    !g3_has_bearer_credential_prefix(t) && !g3_looks_like_jws_compact(t)
-}
-
-/// G3 v1: `principal` + allowlisted `auth_scheme` + `auth_issuer` on the same decision event,
-/// with the same normalization rules as MCP emission (no JWS dumps, no `Bearer ` material, cap issuer).
 fn classify_authorization_context(events: &[EvidenceEvent]) -> TrustClaimLevel {
-    let has = events.iter().any(|event| {
-        if event.type_ != "assay.tool.decision" {
-            return false;
-        }
-        let Some(p) = event.payload.get("principal").and_then(|v| v.as_str()) else {
-            return false;
-        };
-        if !g3_principal_field_satisfies_v1(p) {
-            return false;
-        }
-        let Some(scheme) = event
-            .payload
-            .get("auth_scheme")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-        else {
-            return false;
-        };
-        let scheme = scheme.to_ascii_lowercase();
-        if scheme != "oauth2" && scheme != "jwt_bearer" {
-            return false;
-        }
-        let Some(iss) = event.payload.get("auth_issuer").and_then(|v| v.as_str()) else {
-            return false;
-        };
-        g3_auth_issuer_field_satisfies_v1(iss)
-    });
-
-    if has {
+    if crate::g3_authorization_context::bundle_satisfies_g3_authorization_context_visible(events) {
         TrustClaimLevel::Verified
     } else {
         TrustClaimLevel::Absent
@@ -634,7 +559,7 @@ mod tests {
 
     #[test]
     fn trust_basis_g3_absent_when_auth_issuer_exceeds_cap() {
-        let huge_iss = "x".repeat(G3_MAX_AUTH_ISSUER_BYTES + 1);
+        let huge_iss = "x".repeat(crate::g3_authorization_context::G3_MAX_AUTH_ISSUER_BYTES + 1);
         let bundle = make_bundle(vec![make_event(
             "assay.tool.decision",
             "run_g3_huge_iss",

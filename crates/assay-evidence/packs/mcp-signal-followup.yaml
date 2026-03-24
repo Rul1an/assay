@@ -1,0 +1,74 @@
+name: mcp-signal-followup
+version: "1.0.0"
+kind: security
+description: MCP companion pack — G3 authorization context, G2 delegation, G1 containment degradation (supported flows only)
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack evaluates bounded evidence signals for MCP policy-projected decision paths.
+  Passing does NOT prove authorization validity, issuer trust, scope sufficiency, delegation
+  chain integrity, temporal authorization correctness, sandbox correctness, transport-level
+  OAuth at MCP initialize, or broad "MCP security."
+  MCP-001 uses the same G3 v1 predicate as Trust Basis `authorization_context_visible`
+  when verified: policy-projected fields on supported flows, not cryptographic verification.
+
+requires:
+  assay_min_version: ">=3.2.3"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: MCP-001
+    severity: warning
+    description: Decision evidence surfaces policy-projected authorization context for supported MCP flows.
+    engine_min_version: "1.2"
+    help_markdown: |
+      ## Policy-projected authorization context (G3)
+
+      **What this checks:**
+      - At least one `assay.tool.decision` event satisfies the same G3 v1 predicates as Trust Basis
+        `authorization_context_visible` when verified: `principal`, allowlisted `auth_scheme`
+        (`oauth2` / `jwt_bearer`), and `auth_issuer` with G3 string discipline on one event.
+
+      **What this does not prove:**
+      - Authorization validity, issuer trust, or scope sufficiency
+      - Transport-level OAuth at MCP `initialize` or raw JWT/Bearer credential material in evidence
+      - Cryptographic verification of tokens
+    check:
+      type: g3_authorization_context_present
+
+  - id: MCP-002
+    severity: warning
+    description: Decision evidence surfaces delegated authority context for supported delegated flows.
+    article_ref: "G2"
+    help_markdown: |
+      ## Delegation context (G2)
+
+      **What this checks:**
+      - At least one `assay.tool.decision` event contains `delegated_from` for supported delegated flows.
+
+      **What this does not prove:**
+      - Delegation validity or chain integrity
+      - Inherited-scope or temporal correctness
+    event_types:
+      - assay.tool.decision
+    check:
+      type: event_field_present
+      paths_any_of:
+        - /data/delegated_from
+
+  - id: MCP-003
+    severity: warning
+    description: Evidence records supported containment degradation fallback paths.
+    article_ref: "G1"
+    help_markdown: |
+      ## Containment degradation (G1)
+
+      **What this checks:**
+      - At least one `assay.sandbox.degraded` event exists.
+
+      **What this does not prove:**
+      - Sandbox correctness or full containment coverage
+    check:
+      type: event_type_exists
+      pattern: assay.sandbox.degraded

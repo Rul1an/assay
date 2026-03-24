@@ -176,6 +176,19 @@ check:
   pattern: string           # Glob pattern for event type (e.g., "assay.policy.*")
 ```
 
+#### `g3_authorization_context_present` (engine v1.2+)
+
+True when at least one `assay.tool.decision` event satisfies the **same** G3 v1 predicate as Trust Basis
+`authorization_context_visible` (verified): allowlisted `auth_scheme`, `principal` and `auth_issuer` with G3 string
+discipline on one event. No extra YAML fields.
+
+```yaml
+check:
+  type: g3_authorization_context_present
+```
+
+Use for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). Not a substitute for authorization **validity**.
+
 #### `manifest_field`
 
 Verify manifest contains specified field.

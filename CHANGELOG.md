@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Trust Compiler
 
+- **P2a MCP companion pack (`mcp-signal-followup`)**: Built-in pack with three rules — **MCP-001** uses pack check `g3_authorization_context_present` (engine **v1.2**), sharing the same predicate as Trust Basis `authorization_context_visible` (verified); **MCP-002** / **MCP-003** cover delegation (`delegated_from`) and containment degradation (`assay.sandbox.degraded`). Open mirror under `packs/open/mcp-signal-followup/`.
+- **Pack engine v1.2**: Adds `g3_authorization_context_present`; bumps `ENGINE_VERSION` in `assay-evidence` (mandate-baseline rules that declared `engine_min_version: "1.2"` now execute with this engine).
 - **T1a Trust Basis Compiler MVP**: Assay now ships a canonical `trust-basis.json` compiler surface on `main`, derived from verified bundles with fixed claim keys, fixed evidence vocabularies, and deterministic regeneration.
 - **Low-level trust compiler CLI**: Repository builds now expose `assay trust-basis generate <bundle>` for advanced CI, diffing, and review workflows.
 - **G3 Authorization Context Evidence**: Supported MCP tool-call paths can merge policy-projected `auth_scheme`, `auth_issuer`, and `principal` onto `assay.tool.decision` evidence; normalization allowlists schemes, trims issuer, rejects JWS-compact and `Bearer ` credential material, and omits whitespace-only principals.

@@ -36,7 +36,7 @@ pub struct CheckResult {
 }
 
 /// Current pack engine version.
-pub const ENGINE_VERSION: &str = "1.1";
+pub const ENGINE_VERSION: &str = "1.2";
 
 /// Execute a pack rule check.
 ///
@@ -73,6 +73,9 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
             check_manifest_field(rule, ctx, path, *required)
         }
         CheckDefinition::JsonPathExists { paths } => check_json_path_exists(rule, ctx, paths),
+        CheckDefinition::G3AuthorizationContextPresent => {
+            check_g3_authorization_context_present(rule, ctx)
+        }
         CheckDefinition::Conditional { .. } => match rule.check.supported_conditional() {
             Ok(conditional) => check_conditional(rule, ctx, &conditional),
             Err(reason) => handle_unsupported_check(
@@ -135,6 +138,29 @@ fn engine_version_satisfies(current: &str, required: &str) -> bool {
             (c_major, c_minor) >= (r_major, r_minor)
         }
         _ => false,
+    }
+}
+
+/// G3 v1: same predicate as Trust Basis `authorization_context_visible` (verified).
+fn check_g3_authorization_context_present(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
+    let passed = crate::g3_authorization_context::bundle_satisfies_g3_authorization_context_visible(
+        ctx.events,
+    );
+    if passed {
+        CheckResult {
+            passed: true,
+            finding: None,
+        }
+    } else {
+        CheckResult {
+            passed: false,
+            finding: Some(create_finding(
+                rule,
+                ctx,
+                "No assay.tool.decision event satisfies G3 v1 policy-projected authorization context (principal + allowlisted auth_scheme + auth_issuer with G3 string discipline).".to_string(),
+                None,
+            )),
+        }
     }
 }
 
