@@ -278,7 +278,7 @@ G4 implementation is complete when:
 
 ## P2c — follow-on (not G4)
 
-**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — e.g. visibility rules aligned to G4 `payload.discovery` signals. **No pack YAML in this PLAN.** With **G4-A Phase 1** on `main`, P2c is the **next capability wave** when scoped (separate from post-merge G4 hygiene).
+**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — e.g. visibility rules aligned to G4 `payload.discovery` signals. **No pack YAML in this PLAN.** With **G4-A Phase 1** on `main`, P2c is the **next capability wave** when scoped (separate from post-merge G4 hygiene). **Working plan:** [PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
 
 ## Reviewer checks (suggested)
 
@@ -301,4 +301,5 @@ The review question is **not** “is G4 a good idea?” but:
 - [RFC-005 — Trust compiler MVP](RFC-005-trust-compiler-mvp-2026q2.md) §6 sequencing.
 - [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — SSOT for consumer/version floors if G4 implies contract or `requires` changes.
 - [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) — consult before adding new pack check types in a follow-on **P2c** wave.
+- [PLAN-P2c — A2A Discovery / Card Follow-Up Pack](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) — working plan for the P2c pack wave.
 - [ROADMAP](../ROADMAP.md) — high-level sequencing (G4-A Phase 1 shipped; **P2c** next); hypotheses stay in this PLAN.
