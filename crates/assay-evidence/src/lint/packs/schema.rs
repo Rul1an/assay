@@ -259,6 +259,14 @@ pub enum CheckDefinition {
     JsonPathExists {
         /// JSON Pointer paths to check.
         paths: Vec<String>,
+        /// When set, at least one scoped event must have this **exact** JSON value at **each**
+        /// path (after resolving the pointer). Omitted = legacy presence-only semantics
+        /// (`null` is a valid value; only missing paths fail).
+        ///
+        /// If set, `paths` must contain exactly one pointer (bundle-wide “any of these paths equals”
+        /// is intentionally unsupported for v1).
+        #[serde(default)]
+        value_equals: Option<serde_json::Value>,
     },
 
     /// G3 v1 (domain-specific): same predicate as Trust Basis `authorization_context_visible` (`verified`).
@@ -381,12 +389,23 @@ impl CheckDefinition {
                     });
                 }
             }
-            CheckDefinition::JsonPathExists { paths } => {
+            CheckDefinition::JsonPathExists {
+                paths,
+                value_equals,
+            } => {
                 if paths.is_empty() {
                     return Err(PackValidationError::InvalidCheck {
                         pack: pack_name.to_string(),
                         rule: rule_id.to_string(),
                         reason: "json_path_exists.paths cannot be empty".to_string(),
+                    });
+                }
+                if value_equals.is_some() && paths.len() != 1 {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "json_path_exists.value_equals requires exactly one path"
+                            .to_string(),
                     });
                 }
             }

@@ -72,7 +72,10 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
         CheckDefinition::ManifestField { path, required } => {
             check_manifest_field(rule, ctx, path, *required)
         }
-        CheckDefinition::JsonPathExists { paths } => check_json_path_exists(rule, ctx, paths),
+        CheckDefinition::JsonPathExists {
+            paths,
+            value_equals,
+        } => check_json_path_exists(rule, ctx, paths, value_equals.as_ref()),
         CheckDefinition::G3AuthorizationContextPresent => {
             check_g3_authorization_context_present(rule, ctx)
         }
@@ -168,11 +171,12 @@ fn check_g3_authorization_context_present(rule: &PackRule, ctx: &CheckContext<'_
     }
 }
 
-/// Check: JSON path exists in events.
+/// Check: JSON path exists in events (optional value equality at each path).
 fn check_json_path_exists(
     rule: &PackRule,
     ctx: &CheckContext<'_>,
     paths: &[String],
+    value_equals: Option<&serde_json::Value>,
 ) -> CheckResult {
     for event in scoped_events(rule, ctx) {
         let json = match serde_json::to_value(event) {
@@ -181,23 +185,32 @@ fn check_json_path_exists(
         };
 
         for path in paths {
-            if value_pointer(&json, path).is_some() {
-                return CheckResult {
-                    passed: true,
-                    finding: None,
-                };
+            match (value_pointer(&json, path), value_equals) {
+                (Some(v), Some(required)) if v == required => {
+                    return CheckResult {
+                        passed: true,
+                        finding: None,
+                    };
+                }
+                (Some(_), Some(_)) => continue,
+                (Some(_), None) => {
+                    return CheckResult {
+                        passed: true,
+                        finding: None,
+                    };
+                }
+                (None, _) => continue,
             }
         }
     }
 
+    let detail = match value_equals {
+        Some(req) => format!("No event has path {} equal to {}", paths.join(", "), req),
+        None => format!("No event contains paths: {}", paths.join(", ")),
+    };
     CheckResult {
         passed: false,
-        finding: Some(create_finding(
-            rule,
-            ctx,
-            format!("No event contains paths: {}", paths.join(", ")),
-            None,
-        )),
+        finding: Some(create_finding(rule, ctx, detail, None)),
     }
 }
 

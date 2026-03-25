@@ -174,6 +174,7 @@ fn json_path_exists_pack(scoped: bool) -> LoadedPack {
             help_markdown: None,
             check: CheckDefinition::JsonPathExists {
                 paths: vec!["/data/mandate_id".to_string()],
+                value_equals: None,
             },
             engine_min_version: None,
             event_types: scoped.then(|| vec!["assay.tool.decision".to_string()]),
