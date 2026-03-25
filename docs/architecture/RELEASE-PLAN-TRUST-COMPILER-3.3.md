@@ -8,7 +8,7 @@
 
 - [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — contract floors, claim selection rule, pack engine, release checklist copy.
 - [CHANGELOG.md](../../CHANGELOG.md) — factual shipped items (pull wording from Unreleased into the version section when tagging).
-- [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-H1](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md) — pack identity, `assay_min_version` discipline, alignment scope.
+- [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) (post–v3.3.0 P2c pack), [PLAN-H1](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md) — pack identity, `assay_min_version` discipline, alignment scope.
 
 The migration filename says **“3.2 line”** (historical); the **Assay workspace semver** for this cut is advised as **3.3.0** below — the SSOT file remains the same document until a separate rename decision.
 
@@ -18,7 +18,7 @@ The migration filename says **“3.2 line”** (historical); the **Assay workspa
 
 **Suggested lead:**
 
-> This release completes the **first trust-compiler product line**: canonical **Trust Basis**, **Trust Card** with explicit evidence-level claims, **G3** authorization-context evidence on supported MCP paths, **pack engine 1.2**, built-in **MCP** and **A2A** signal-followup packs, and the **migration / release truth** needed to consume them safely. **P2c** (`a2a-discovery-card-followup`) landed on `main` **after** tag **v3.3.0**; **`requires` / floors / P2c vs substrate** are **not** duplicated here — [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md), [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
+> This release completes the **first trust-compiler product line**: canonical **Trust Basis**, **Trust Card** with explicit evidence-level claims, **G3** authorization-context evidence on supported MCP paths, **pack engine 1.2**, built-in **MCP** and **A2A** signal-followup packs, and the **migration / release truth** needed to consume them safely.
 
 Avoid “big bang because P2b”; use “coherent line is complete.”
 
@@ -76,7 +76,7 @@ Copy structure from:
 ### Integrators (policy / CI / downstream)
 
 - **Claim selection:** key by **`claim.id`**, not table index — [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) consumer contract.
-- **`assay_min_version` on packs:** `>=3.2.3` expresses **evidence-substrate** prerequisites (P2a/P2b); the **first** release that embeds a given built-in pack must be stated in release notes (PLAN-P2a / PLAN-P2b § `assay_min_version`). **P2c** uses **`>=3.3.0`** and a different rule — **only** [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) (do not infer P2c from P2b’s floor).
+- **`requires.assay_min_version` on packs:** `>=3.2.3` expresses **evidence-substrate** prerequisites (P2a/P2b); the **first** release that embeds a given built-in pack must be stated in release notes (PLAN-P2a / PLAN-P2b § `assay_min_version`). **P2c** uses **`requires.assay_min_version: ">=3.3.0"`** (G4-A / P2c floor; not the P2b string) — **only** [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) (do not infer P2c from P2b’s floor).
 - **G3 / MCP-001:** `g3_authorization_context_present` aligns with Trust Basis `authorization_context_visible` (**verified**) — not authorization *validity*; see PLAN-P2a.
 
 ### What this release is not
@@ -109,7 +109,7 @@ Pull detailed bullets from **CHANGELOG Unreleased** and dedupe against this outl
 
 ## After this release
 
-- **P2c** (`a2a-discovery-card-followup`) shipped on `main` **after** the **v3.3.0** tag — **`requires` / floors:** [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) only; [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md); [CHANGELOG](../../CHANGELOG.md) [Unreleased] (pointer, not alternate semantics).
+- **P2c** (`a2a-discovery-card-followup`) merged on `main` **after** tag **v3.3.0** — not in the **v3.3.0** release artifact story above. Pack YAML sets **`requires.assay_min_version: ">=3.3.0"`**; floors / substrate vs P2c: [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) only; context [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md); [CHANGELOG](../../CHANGELOG.md) [Unreleased] (pointer only).
 - Further protocol slices can assume **3.3.0+** as the public baseline for trust-compiler artifacts.
 - Revisit pack `assay_min_version` floors only when intentionally changing evidence substrate — keep one sentence in release notes per MIGRATION checklist.
 
