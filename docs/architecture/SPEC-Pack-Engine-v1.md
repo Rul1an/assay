@@ -203,12 +203,20 @@ check:
 #### `json_path_exists`
 
 Verify at least one scoped event contains one of the specified JSON Pointer
-paths.
+paths. By default, **presence** of the value at the pointer is enough (including
+JSON `null` or boolean `false`).
+
+Optional **`value_equals`**: when set, at least one scoped event must have the
+pointer resolve to a value **equal** to this JSON value (e.g. boolean `true`).
+Equality is JSON value identity (`serde_json::Value ==`) — there is **no** coercion
+(e.g. string `"true"` does **not** match boolean `true`). When `value_equals` is set,
+**`paths` must contain exactly one** pointer.
 
 ```yaml
 check:
   type: json_path_exists
   paths: [string]
+  value_equals: true   # optional; requires exactly one path when present
 ```
 
 #### `conditional` (v1.1 conditional-presence subset)
@@ -686,7 +694,7 @@ pub enum CheckDefinition {
     EventFieldPresent { any_of: Vec<String>, #[serde(default)] in_data: bool },
     EventTypeExists { pattern: String },
     ManifestField { field: String, #[serde(default)] required: bool },
-    JsonPathExists { paths: Vec<String> },
+    JsonPathExists { paths: Vec<String>, #[serde(default)] value_equals: Option<serde_json::Value> },
     Conditional { /* typed subset or unsupported future shape */ },
 }
 

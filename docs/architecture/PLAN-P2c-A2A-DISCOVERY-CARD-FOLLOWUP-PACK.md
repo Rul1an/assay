@@ -131,7 +131,7 @@ Phase 0 was a **discovery** pass on pack-engine fit, CI semantics, and release f
 ## Parity, release floor, and docs sync
 
 - **Parity:** Same as P2b — built-in pack and `packs/open/a2a-discovery-card-followup/` mirror **must** match; tests must fail on drift.
-- **Release floor:** `assay_min_version` must not claim packs against Assay versions that **cannot** emit `payload.discovery`. Until pack ship, treat the **exact floor string** as **unset in this plan**; tie it to the **first G4-A-capable release** when the pack ships (release notes / tag).
+- **Release floor:** `assay_min_version` must not claim packs against Assay versions that **cannot** emit `payload.discovery`. The shipped built-in + open pack YAML use **`>=3.3.0`** as the first G4-A-capable workspace line (built-in / `packs/open/` must stay identical); tighten at release tag via release notes if the floor moves.
 - **Docs:** [ROADMAP](../ROADMAP.md) checklist row for P2c; optional one-line in [RFC-005](RFC-005-trust-compiler-mvp-2026q2.md) sequencing if maintainers want cross-link.
 
 ## Implementation order (implementation PR)
@@ -161,3 +161,4 @@ Phase 0 is **locked** ([§ Phase 0 — decisions (locked)](#phase-0--decisions-l
 | 2026-03-23 | Review pass: v1 = **2** rules in main table (**DC-001**, **DC-002**); **DC-003** moved to **Deferred / opt-in**; Phase 0 — boolean `true` on frozen paths, pre-G4-A fail default + CI copy consistency, `assay_min_version` anchored to G4-A seam (unset until ship); **Relation to P2b**; `kind: security` one-line product note; implementation order clarified (no YAML before freeze/Phase 0; remove “YAML last” ambiguity). |
 | 2026-03-23 | Polish: implementation guard — **step 2** (YAML) blocked until review + Phase 0; Phase 0 row 2 — fail = **missing pack-required discovery**, not general bundle invalidity; **DC-002** bounded meaning parallel to **DC-001**; **`kind: security`** outward-copy caution; explicit non-rule — P2c v1 does **not** reopen G4-A **`signature_material_visible`** deferral. |
 | 2026-03-25 | **Phase 0 locked** (+ **Copilot #947 follow-up**): v1 = **DC-001** + **DC-002** only; **DC-003** deferred; **fail** pre-G4-A bundles by default; **`assay_min_version` unset** until ship; **`evidence_schema_version` = 1.0**; status → Phase 0 locked; implementation order → step 2 next. Clarify row 1 / decision 2: SPEC **`json_path_exists`** is presence-only; P2c implementation PR needs **minimal** value-equality (or equivalent) for honest **`== true`** — not “existing checks already do this.” |
+| 2026-03-25 | Implementation sync: pack ships **`requires.assay_min_version: ">=3.3.0"`** (built-in + open); SPEC **`value_equals`** — JSON equality only (no coercion); parity section updated. |
