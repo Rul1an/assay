@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Evidence / P2c
 
-- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in pack with **A2A-DC-001** and **A2A-DC-002** — `json_path_exists` with optional **`value_equals`** so rules require **JSON boolean `true`** at G4-A `/data/discovery/*` pointers (not presence-only). Open mirror under `packs/open/a2a-discovery-card-followup/`. Pack sets `requires.assay_min_version: ">=3.3.0"` (G4-A-capable line; **not** the P2a/P2b `>=3.2.3` substrate floor — see [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md)). See [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md), [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
+- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002**; mirror `packs/open/a2a-discovery-card-followup/`. **`requires` floors, substrate vs G4-A/P2c, and `value_equals` without `ENGINE_VERSION` bump:** [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md) (only SSOT for version semantics). Context: [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md). Check type: [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
 
 ## [3.3.0] - 2026-03-24
 

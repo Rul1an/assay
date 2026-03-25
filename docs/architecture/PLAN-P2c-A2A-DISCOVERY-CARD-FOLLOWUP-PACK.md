@@ -131,7 +131,7 @@ Phase 0 was a **discovery** pass on pack-engine fit, CI semantics, and release f
 ## Parity, release floor, and docs sync
 
 - **Parity:** Same as P2b — built-in pack and `packs/open/a2a-discovery-card-followup/` mirror **must** match; tests must fail on drift.
-- **Release floor:** `assay_min_version` must not claim packs against Assay versions that **cannot** emit `payload.discovery`. The shipped built-in + open pack YAML use **`>=3.3.0`** as the first G4-A-capable workspace line (built-in / `packs/open/` must stay identical); tighten at release tag via release notes if the floor moves.
+- **Release floor / `requires`:** [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) § `a2a-discovery-card-followup` is the **only** normative place for **`>=3.3.0` vs `>=3.2.3`** and first-binary truth; shipped built-in + open YAML stay byte-identical.
 - **Docs:** [ROADMAP](../ROADMAP.md) checklist, [CHANGELOG](../../CHANGELOG.md) [Unreleased], [RFC-005](RFC-005-trust-compiler-mvp-2026q2.md) §6, [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) P2c section — synced for v1 ship.
 
 ## Implementation order (implementation PR)
