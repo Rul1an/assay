@@ -1,13 +1,13 @@
 # PLAN — G4 A2A Discovery / Card Evidence Signal (2026 Q2)
 
-- **Status:** Phase 0 discovery **recorded**; **Phase 1:** **G4-A proposal** below (**Option A** recorded as preferred — pending formal freeze + implementation)
-- **Date:** 2026-03-24
+- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. The **next downstream capability wave** is **P2c** — A2A discovery/card follow-up pack — see [§ P2c — follow-on (not G4)](#p2c--follow-on-not-g4).
+- **Date:** 2026-03-24 (plan); Phase 1 merged 2026-03-24 (PR #944).
 - **Owner:** Evidence / Product
-- **Phase 0 source snapshot:** `assay-adapter-a2a` as of PLAN update (see Matrix A/B + record below)
+- **Phase 0 source snapshot:** `assay-adapter-a2a` as of original PLAN update (see Matrix A/B + record below); Phase 1 signal shapes are frozen in [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md).
 
-This PLAN defines **gates**, **hypotheses**, and **acceptance** for G4; it does **not** freeze final signal shapes by virtue of being written—those follow Phase 0/1 review.
+This PLAN defines **gates**, **hypotheses**, and historical **acceptance** for G4; normative Phase 1 contracts live in the freeze linked above.
 
-This wave starts with a **discovery gate** (Phase 0). **Phase 1 must not start until Phase 0 discovery outputs are reviewed and accepted.**
+**Historical gate:** Phase 0 discovery was reviewed before Phase 1; **G4-A** (Option A — new typed `discovery` seam) shipped per that freeze.
 
 ## North star
 
@@ -105,7 +105,7 @@ Filled from **code inspection** of [`assay-adapter-a2a`](../../crates/assay-adap
 
 6. **Spec vs adapter (`>=0.2 <1.0`)?** Capabilities advertise **`SUPPORTED_SPEC_VERSION_RANGE`** as `>=0.2 <1.0`. **Runtime validation** (`version.rs`) accepts **0.2+** (major `0`, minor ≥ `2`). That matches the P2b story: **shipped line is 0.x**, not a marketing claim of full **A2A v1.0** coverage. No code change required for this Phase 0 answer.
 
-**Phase 0 gate:** Discovery matrices + record above are **complete for the adapter codebase snapshot**. **Phase 1 must not start** until Evidence/Product **reviews and accepts** this record (and any amendment to how [Acceptance criteria](#acceptance-criteria-g4-done) §1 / §6 apply — see below).
+**Phase 0 gate (historical):** Discovery matrices + record above were **complete for the adapter codebase snapshot**. Evidence/Product review preceded **G4-A Phase 1**; implementation followed [Option A](#open-decision--phase-1-path-a-or-b) and is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md)).
 
 ### Open decision — Phase 1 path (A or B)
 
@@ -278,7 +278,7 @@ G4 implementation is complete when:
 
 ## P2c — follow-on (not G4)
 
-**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — e.g. visibility rules aligned to G4 signals. **No pack YAML in this PLAN.** P2c must not be shipped in the same wave as G4 evidence implementation unless explicitly replanned.
+**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — e.g. visibility rules aligned to G4 `payload.discovery` signals. **No pack YAML in this PLAN.** With **G4-A Phase 1** on `main`, P2c is the **next capability wave** when scoped (separate from post-merge G4 hygiene).
 
 ## Reviewer checks (suggested)
 
@@ -301,4 +301,4 @@ The review question is **not** “is G4 a good idea?” but:
 - [RFC-005 — Trust compiler MVP](RFC-005-trust-compiler-mvp-2026q2.md) §6 sequencing.
 - [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — SSOT for consumer/version floors if G4 implies contract or `requires` changes.
 - [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) — consult before adding new pack check types in a follow-on **P2c** wave.
-- [ROADMAP](../ROADMAP.md) — high-level sequencing only (G4 before P2c); hypotheses stay in this PLAN.
+- [ROADMAP](../ROADMAP.md) — high-level sequencing (G4-A Phase 1 shipped; **P2c** next); hypotheses stay in this PLAN.
