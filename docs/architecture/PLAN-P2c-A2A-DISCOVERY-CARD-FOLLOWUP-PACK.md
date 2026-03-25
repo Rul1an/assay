@@ -1,6 +1,6 @@
 # PLAN — P2c A2A Discovery / Card Follow-Up Pack
 
-- **Status:** **Skeleton / planning** — freeze sections below are the **design contract**; **no pack YAML, built-in registration, or parity tests** ship until Phase 1 freeze is accepted and a separate implementation PR follows this document.
+- **Status:** **Phase 0 locked** (2026-03-25) — rule set and engine/pre-G4-A/`requires` decisions are **frozen** below; **no pack YAML, built-in registration, or parity tests** on `main` until the **implementation PR** (step 2+) lands per [§ Implementation order](#implementation-order-implementation-pr).
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
 - **Prerequisite:** [G4-A Phase 1](G4-A-PHASE1-FREEZE.md) — `payload.discovery` on emitted canonical A2A evidence — **merged on `main`**.
@@ -13,7 +13,7 @@ This wave follows the same discipline that made G4-A strong:
 2. **Freeze** (normative semantics) — **done** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md)).
 3. **Pack productization** (this PLAN) — **plan and freeze first**, then YAML + tests in a **later** PR.
 
-Do **not** commit pack YAML or rules until [§ Phase 0 — Pack engine discovery](#phase-0--pack-engine-discovery) is complete and this document’s freeze rows are accepted.
+Phase 0 is **complete** — see [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked). Do **not** commit pack YAML or rules until the **implementation PR** follows the sequencing in [§ Implementation order](#implementation-order-implementation-pr).
 
 ## Relation to G4-A `payload.discovery`
 
@@ -51,7 +51,7 @@ Ship a **small, bounded** companion pack on **`assay.adapter.a2a.*`** evidence t
 
 ## Pack identity — freeze target
 
-| Field | Freeze value (proposal) |
+| Field | Freeze value |
 |-------|-------------------------|
 | **Pack `name` (YAML)** | `a2a-discovery-card-followup` |
 | **Built-in id** | Same string as `name` (match P2b pattern) |
@@ -66,7 +66,7 @@ Prefix **`A2A-DC`** (**D**iscovery **C**ard follow-up) avoids collision with P2b
 | ID | Intent (one line) | Bounded meaning (may imply) | Must **not** imply |
 |----|-------------------|----------------------------|---------------------|
 | **A2A-DC-001** | **Agent card visibility observed** — at least one canonical A2A event has **`agent_card_visible: true`** on `payload.discovery` (per [G4-A](G4-A-PHASE1-FREEZE.md) paths). | Producer **asserted** the allowlisted visibility flag as `true` with valid upstream shape (see G4-A §4.1). | Card authentic, unspoofed, complete, or “real”. |
-| **A2A-DC-002** | **Extended card access visibility observed** — at least one event has **`extended_card_access_visible: true`**. | Same discipline as §4.2 / §2b — **observed** flag only. | Auth **succeeded**, authz **held**, access **legitimate**, client **trusted**. |
+| **A2A-DC-002** | **Extended card access visibility observed** — at least one canonical A2A event has **`extended_card_access_visible: true`** on `payload.discovery` (per [G4-A](G4-A-PHASE1-FREEZE.md) paths). | Producer **asserted** the allowlisted extended-card-access visibility flag as `true` with valid upstream shape (see G4-A §4.2 / §2b). | Auth **succeeded**, authz **held**, access **legitimate**, client **trusted**. |
 
 ### Deferred / opt-in only: A2A-DC-003
 
@@ -94,20 +94,38 @@ These are **not** P2c v1 rules (list may extend at freeze):
 
 ## Phase 0 — Pack engine discovery
 
-Before **any** pack YAML (built-in or open mirror), confirm:
+Phase 0 was a **discovery** pass on pack-engine fit, CI semantics, and release floors. Decisions are **locked** in [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked). The table below records the original questions; the **Done when** column reflects the locked outcome.
 
 | # | Question | Done when |
 |---|----------|-----------|
-| 1 | Can **existing** pack checks express **boolean `true`** on **G4-A-frozen** `/data/discovery/...` paths for DC-001 / DC-002 — i.e. **value** `true`, not merely “path/key exists” where semantics require `true`? Prefer `json_path_exists`, `event_type_exists` + **`event_types`** scoping, and **`conditional`** per [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md). Engine follow-up only if **minimal** and boolean matching cannot be expressed without **misleading** pack semantics. | Documented; optional **minimal** engine PR if truly required. |
-| 2 | **Pre-G4-A bundles** (no `/data/discovery`): default **fail** in normal lint for rules that require discovery, **consistent** with chosen check types — unless the team **explicitly** chooses skip/N/A in Phase 0 and documents **why** (CI consistency). Disclaimer + `help_markdown` must state the pack requires **G4-A discovery emission**. **Default is for CI clarity** and must read consistently across **rule descriptions**, **help text**, and **example outputs** (avoid plan-says-fail vs help-reads-N/A). This product/CI default means a rule **reports missing required discovery evidence for this pack**, **not** that the bundle is generally malformed or invalid. | Frozen in pack disclaimer + rule help. |
-| 3 | **`requires.assay_min_version`** — **do not** assume the same floor as [P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) (e.g. `>=3.2.3`) by default. **Anchor** to the **first Assay release** that ships **G4-A `payload.discovery`** in release binaries/artifacts. The **exact semver string stays intentionally unset in this plan until pack ship**; set in YAML + release notes at ship time. Meaning of `requires` floors: [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md). | Documented; concrete string at ship. |
-| 4 | **`evidence_schema_version`** | Align with other built-ins (e.g. `1.0`) unless migration doc says otherwise. |
+| 1 | Can **existing** pack checks express **boolean `true`** on **G4-A-frozen** `/data/discovery/...` paths for DC-001 / DC-002 — i.e. **value** `true`, not merely “path/key exists” where semantics require `true`? Prefer `json_path_exists`, `event_type_exists` + **`event_types`** scoping, and **`conditional`** per [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md). Engine follow-up only if **minimal** and boolean matching cannot be expressed without **misleading** pack semantics. | **Locked:** Prefer **existing** checks first; **no `ENGINE_VERSION` bump by default**; minimal engine follow-up only if needed (see **decision 2** under [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). |
+| 2 | **Pre-G4-A bundles** (no `/data/discovery`): default **fail** in normal lint for rules that require discovery, **consistent** with chosen check types — unless the team **explicitly** chooses skip/N/A in Phase 0 and documents **why** (CI consistency). Disclaimer + `help_markdown` must state the pack requires **G4-A discovery emission**. **Default is for CI clarity** and must read consistently across **rule descriptions**, **help text**, and **example outputs** (avoid plan-says-fail vs help-reads-N/A). This product/CI default means a rule **reports missing required discovery evidence for this pack**, **not** that the bundle is generally malformed or invalid. | **Locked:** **Fail by default** for DC-001 / DC-002; disclaimer + help explicit (see **decision 3** under [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). |
+| 3 | **`requires.assay_min_version`** — **do not** assume the same floor as [P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) (e.g. `>=3.2.3`) by default. **Anchor** to the **first Assay release** that ships **G4-A `payload.discovery`** in release binaries/artifacts. The **exact semver string stays intentionally unset in this plan until pack ship**; set in YAML + release notes at ship time. Meaning of `requires` floors: [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md). | **Locked:** String **unset in this plan until ship**; floor = first G4-A-capable release, **not** P2b’s floor (see **decision 4** under [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). |
+| 4 | **`evidence_schema_version`** | **Locked:** **`1.0`**, aligned with other built-ins, unless [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) or SSOT gives a reason to change (see **decision 5** under [§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). |
+
+### Phase 0 — decisions (locked)
+
+**Locked:** 2026-03-25. These decisions are **product/engine contract** for the P2c implementation PR; they do **not** change G4-A normative semantics.
+
+**One-line summary:** Ship a **minimal two-rule** P2c on the G4-A discovery seam (**DC-001**, **DC-002**); **prefer existing** boolean-path checks (**no engine bump by default**); **fail** pre-G4-A bundles by default for CI clarity; keep **`assay_min_version` unset** in this plan until the first **G4-A-capable** Assay release at pack ship; **`evidence_schema_version` = 1.0**; **defer DC-003** and any **signature/provenance** semantics beyond G4-A.
+
+1. **v1 stays exactly two rules.** Ship only **A2A-DC-001** (`agent_card_visible == true`) and **A2A-DC-002** (`extended_card_access_visible == true`). **A2A-DC-003** remains [deferred / opt-in](#deferred--opt-in-only-a2a-dc-003). **Rationale:** A2A positions Agent Cards and extended card retrieval as core discovery surfaces; recent agent-security work (e.g. **A2ASecBench**-style emphasis on discovery/card spoofing as a risk surface) supports **visibility-on-the-seam** first, not an extra “source-kind discipline” rule that drifts toward judgment semantics in v1.
+
+2. **No engine bump by default; try existing checks first.** Prefer **`json_path_exists`**, **`event_type_exists`** + scoping, and **`conditional`** per [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) so **boolean `true`** on G4-A-frozen `/data/discovery/...` paths is checked without confusing “key present” with “flag true”. Add a **minimal** engine follow-up **only** if that cannot be expressed without **misleading** pack semantics. **Rationale:** policy-as-code best practice is to reuse evaluation primitives; P2c should not invent new policy surface for a frozen-path presence-of-`true` check.
+
+3. **Pre-G4-A bundles: fail by default in normal lint.** Bundles without `/data/discovery` cause **DC-001 / DC-002** to **fail** (consistent with chosen checks). **Disclaimer** and **`help_markdown`** must state the pack **requires G4-A discovery emission**. Skip/N/A only if explicitly chosen and **documented with rationale**. **Rationale:** clearest CI signal (“this pack needs newer evidence”), not a general claim that the bundle is invalid.
+
+4. **`assay_min_version`:** **no** exact version string in this plan. At ship, set the floor to the **first Assay release** that includes **G4-A `payload.discovery`** in release binaries/artifacts — **not** [P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)’s substrate floor. **Rationale:** P2c depends on the **G4-A seam**, so the floor must track that seam.
+
+5. **`evidence_schema_version`:** **`1.0`**, aligned with other built-ins, unless migration / SSOT gives an explicit reason to differ.
+
+**Non-normative context (March 2026):** Industry and research emphasis on **identity, authorization, auditing, and observed evidence** for agents aligns with **small, observable** pack rules — not broad “secure agent” marketing claims. This plan stays within [§ Explicit non-rules](#explicit-non-rules-v1) and **does not** reopen G4-A’s deferral on **`signature_material_visible`**.
 
 ## Acceptance — plan freeze vs implementation
 
 | Gate | Criteria |
 |------|----------|
-| **Plan / freeze acceptable** | Pack identity table filled; **2** rule IDs (**DC-001**, **DC-002**) with **bounded meaning** rows; [Deferred DC-003](#deferred--opt-in-only-a2a-dc-003) documented as **not** v1; Phase 0 table answered; non-rules listed. |
+| **Plan / freeze acceptable** | Pack identity table filled; **2** rule IDs (**DC-001**, **DC-002**) with **bounded meaning** rows; [Deferred DC-003](#deferred--opt-in-only-a2a-dc-003) documented as **not** v1; [Phase 0 decisions](#phase-0--decisions-locked) **locked**; non-rules listed. |
 | **Implementation PR ready** | Built-in YAML + **`packs/open/`** mirror byte-for-byte parity (P2b pattern); **`assay-evidence`** tests for open/builtin equivalence; `requires` match release truth; docs (ROADMAP / this PLAN) synced. |
 
 ## Parity, release floor, and docs sync
@@ -116,16 +134,16 @@ Before **any** pack YAML (built-in or open mirror), confirm:
 - **Release floor:** `assay_min_version` must not claim packs against Assay versions that **cannot** emit `payload.discovery`. Until pack ship, treat the **exact floor string** as **unset in this plan**; tie it to the **first G4-A-capable release** when the pack ships (release notes / tag).
 - **Docs:** [ROADMAP](../ROADMAP.md) checklist row for P2c; optional one-line in [RFC-005](RFC-005-trust-compiler-mvp-2026q2.md) sequencing if maintainers want cross-link.
 
-## Implementation order (after freeze — not now)
+## Implementation order (implementation PR)
 
-Do **not** author YAML until **freeze acceptance** and **Phase 0** rows above are complete.
+Phase 0 is **locked** ([§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). **Step 1** below is satisfied by this document as merged; the **next** work is **step 2** (YAML) in a dedicated PR.
 
-1. Frozen **Phase 0** answers + final rule table (2 rules; DC-003 remains deferred unless opted in).
+1. ~~Frozen **Phase 0** answers + final rule table~~ — **done** (this PLAN on `main`).
 2. **YAML** (built-in + open mirror).
 3. **Tests** (parity + bundle fixtures with `payload.discovery`).
 4. **Docs** sync and release note (first version embedding the built-in).
 
-**Do not** start **step 2** (YAML) until this skeleton is reviewed, Phase 0 is complete, and **step 1** (frozen Phase 0 answers + final rule table) is accepted.
+**Do not** start **step 2** (YAML) until maintainers accept an **implementation PR** that follows these frozen decisions (no ad-hoc rule changes without updating this PLAN).
 
 ## References
 
@@ -142,3 +160,4 @@ Do **not** author YAML until **freeze acceptance** and **Phase 0** rows above ar
 | 2026-03-25 | Skeleton: file `PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md`; sequencing (evidence→freeze→pack); scope/non-goals; pack identity; **A2A-DC-001..003** with bounded-meaning rows; Phase 0; acceptance/parity/release floor; implementation order. |
 | 2026-03-23 | Review pass: v1 = **2** rules in main table (**DC-001**, **DC-002**); **DC-003** moved to **Deferred / opt-in**; Phase 0 — boolean `true` on frozen paths, pre-G4-A fail default + CI copy consistency, `assay_min_version` anchored to G4-A seam (unset until ship); **Relation to P2b**; `kind: security` one-line product note; implementation order clarified (no YAML before freeze/Phase 0; remove “YAML last” ambiguity). |
 | 2026-03-23 | Polish: implementation guard — **step 2** (YAML) blocked until review + Phase 0; Phase 0 row 2 — fail = **missing pack-required discovery**, not general bundle invalidity; **DC-002** bounded meaning parallel to **DC-001**; **`kind: security`** outward-copy caution; explicit non-rule — P2c v1 does **not** reopen G4-A **`signature_material_visible`** deferral. |
+| 2026-03-25 | **Phase 0 locked:** v1 = **DC-001** + **DC-002** only; **DC-003** deferred; **no engine bump by default**; **fail** pre-G4-A bundles by default; **`assay_min_version` unset** until ship (floor = first G4-A-capable release); **`evidence_schema_version` = 1.0**; rationale + non-normative context; status → Phase 0 locked; implementation order → step 2 next. |
