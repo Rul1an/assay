@@ -251,7 +251,7 @@ After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 *Steps 4–5 continue the sequence **after** `P2b` is on `main`. Step 6 remains explicitly deferred.*
 
 4. **`G4` — A2A discovery / card evidence signal** (evidence-wave before the next A2A pack slice; adapter-first; not a companion pack): see [PLAN-G4](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md)
-5. **`P2c` — A2A discovery/card follow-up pack** (productization after G4; companion pack rules aligned to G4 evidence — not concurrent with G4 evidence work)
+5. **`P2c` — A2A discovery/card follow-up pack** (productization after G4; companion pack rules aligned to G4 evidence — **shipped on `main`**: built-in `a2a-discovery-card-followup`; [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md))
 6. only later: reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution

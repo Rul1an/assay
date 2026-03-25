@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Evidence / P2c
+
+- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in pack with **A2A-DC-001** and **A2A-DC-002** — `json_path_exists` with optional **`value_equals`** so rules require **JSON boolean `true`** at G4-A `/data/discovery/*` pointers (not presence-only). Open mirror under `packs/open/a2a-discovery-card-followup/`. Pack sets `requires.assay_min_version: ">=3.3.0"` (G4-A-capable line). See [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md), [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
+
 ## [3.3.0] - 2026-03-24
 
 This release completes the **first trust-compiler product line** on a single public baseline: canonical Trust Basis, Trust Card schema **2** with **seven** claims (key by stable `claim.id`), G3 authorization-context evidence, pack engine **1.2**, built-in **`mcp-signal-followup`** and **`a2a-signal-followup`**, migration SSOT, and kernel/pack alignment tests. See [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [PLAN-P2a](docs/architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), and [RELEASE-PLAN-TRUST-COMPILER-3.3.md](docs/architecture/RELEASE-PLAN-TRUST-COMPILER-3.3.md). Pack `requires.assay_min_version: ">=3.2.3"` remains the **evidence-substrate floor**; **v3.3.0** is the first release embedding both built-in companion packs in release binaries.

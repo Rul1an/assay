@@ -109,7 +109,8 @@ Pull detailed bullets from **CHANGELOG Unreleased** and dedupe against this outl
 
 ## After this release
 
-- **P2c** (or next protocol slice) can assume **3.3.0+** as the public baseline for trust-compiler artifacts.
+- **P2c** (`a2a-discovery-card-followup`) shipped on `main` **after** the **v3.3.0** tag; pack `requires.assay_min_version: ">=3.3.0"` — see [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md), [CHANGELOG](../../CHANGELOG.md) [Unreleased].
+- Further protocol slices can assume **3.3.0+** as the public baseline for trust-compiler artifacts.
 - Revisit pack `assay_min_version` floors only when intentionally changing evidence substrate — keep one sentence in release notes per MIGRATION checklist.
 
 ---

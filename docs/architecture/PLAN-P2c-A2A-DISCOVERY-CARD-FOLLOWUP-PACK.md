@@ -1,6 +1,6 @@
 # PLAN — P2c A2A Discovery / Card Follow-Up Pack
 
-- **Status:** **Phase 0 locked** (2026-03-25) — rule set and engine/pre-G4-A/`requires` decisions are **frozen** below; **no pack YAML, built-in registration, or parity tests** on `main` until the **implementation PR** (step 2+) lands per [§ Implementation order](#implementation-order-implementation-pr).
+- **Status:** **v1 shipped on `main`** (2026-03-25) — built-in pack **`a2a-discovery-card-followup`**, open mirror, parity tests, and minimal **`json_path_exists.value_equals`** engine support merged ([§ Implementation order](#implementation-order-implementation-pr)). Phase 0 decisions below remain the **contract** for this pack; future rule changes require PLAN updates.
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
 - **Prerequisite:** [G4-A Phase 1](G4-A-PHASE1-FREEZE.md) — `payload.discovery` on emitted canonical A2A evidence — **merged on `main`**.
@@ -136,14 +136,14 @@ Phase 0 was a **discovery** pass on pack-engine fit, CI semantics, and release f
 
 ## Implementation order (implementation PR)
 
-Phase 0 is **locked** ([§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). **Step 1** below is satisfied by this document as merged; the **next** work is **step 2** (YAML) in a dedicated PR.
+Phase 0 is **locked** ([§ Phase 0 — decisions (locked)](#phase-0--decisions-locked)). **Steps 1–4** below are **complete** for P2c v1 on `main` (merge 2026-03-25).
 
 1. ~~Frozen **Phase 0** answers + final rule table~~ — **done** (this PLAN on `main`).
-2. **YAML** (built-in + open mirror).
-3. **Tests** (parity + bundle fixtures with `payload.discovery`).
-4. **Docs** sync and release note (first version embedding the built-in).
+2. ~~**YAML** (built-in + open mirror)~~ — **done** (`crates/assay-evidence/packs/a2a-discovery-card-followup.yaml`, `packs/open/a2a-discovery-card-followup/`).
+3. ~~**Tests** (parity + bundle fixtures with `payload.discovery`)~~ — **done** (`crates/assay-evidence/tests/a2a_discovery_card_followup_pack.rs` and related).
+4. ~~**Docs** sync and release note~~ — **done** (this PLAN + [CHANGELOG](../../CHANGELOG.md) [Unreleased]; ROADMAP checklist).
 
-**Do not** start **step 2** (YAML) until maintainers accept an **implementation PR** that follows these frozen decisions (no ad-hoc rule changes without updating this PLAN).
+**Further changes** to rules or semantics require updating this PLAN (no ad-hoc pack edits without plan alignment).
 
 ## References
 
@@ -162,3 +162,4 @@ Phase 0 is **locked** ([§ Phase 0 — decisions (locked)](#phase-0--decisions-l
 | 2026-03-23 | Polish: implementation guard — **step 2** (YAML) blocked until review + Phase 0; Phase 0 row 2 — fail = **missing pack-required discovery**, not general bundle invalidity; **DC-002** bounded meaning parallel to **DC-001**; **`kind: security`** outward-copy caution; explicit non-rule — P2c v1 does **not** reopen G4-A **`signature_material_visible`** deferral. |
 | 2026-03-25 | **Phase 0 locked** (+ **Copilot #947 follow-up**): v1 = **DC-001** + **DC-002** only; **DC-003** deferred; **fail** pre-G4-A bundles by default; **`assay_min_version` unset** until ship; **`evidence_schema_version` = 1.0**; status → Phase 0 locked; implementation order → step 2 next. Clarify row 1 / decision 2: SPEC **`json_path_exists`** is presence-only; P2c implementation PR needs **minimal** value-equality (or equivalent) for honest **`== true`** — not “existing checks already do this.” |
 | 2026-03-25 | Implementation sync: pack ships **`requires.assay_min_version: ">=3.3.0"`** (built-in + open); SPEC **`value_equals`** — JSON equality only (no coercion); parity section updated. |
+| 2026-03-25 | **Shipped on `main`:** P2c v1 implementation merged — built-in **`a2a-discovery-card-followup`** (A2A-DC-001 / A2A-DC-002), **`json_path_exists`** optional **`value_equals`**, ROADMAP / CHANGELOG / this PLAN post-merge sync. |

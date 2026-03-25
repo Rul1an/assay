@@ -1,6 +1,6 @@
 # PLAN — G4 A2A Discovery / Card Evidence Signal (2026 Q2)
 
-- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. The **next downstream capability wave** is **P2c** — A2A discovery/card follow-up pack — see [§ P2c — follow-on (not G4)](#p2c--follow-on-not-g4).
+- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. **P2c** (A2A discovery/card follow-up pack) is **shipped on `main`** — see [§ P2c — follow-on (not G4)](#p2c--follow-on-not-g4).
 - **Date:** 2026-03-24 (plan); Phase 1 merged 2026-03-24 (PR #944).
 - **Owner:** Evidence / Product
 - **Phase 0 source snapshot:** `assay-adapter-a2a` as of original PLAN update (see Matrix A/B + record below); Phase 1 signal shapes are frozen in [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md).
@@ -278,7 +278,7 @@ G4 implementation is complete when:
 
 ## P2c — follow-on (not G4)
 
-**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — e.g. visibility rules aligned to G4 `payload.discovery` signals. **No pack YAML in this PLAN.** With **G4-A Phase 1** on `main`, P2c is the **next capability wave** when scoped (separate from post-merge G4 hygiene). **Working plan:** [PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
+**P2c — A2A Discovery / Card Follow-Up Pack** productizes **lint/pack rules** *after* G4 evidence ships — visibility rules aligned to G4 `payload.discovery` signals. **Pack YAML lives in** [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) **and** the built-in / `packs/open/` artifacts on `main` (**`a2a-discovery-card-followup`**, rules A2A-DC-001 / A2A-DC-002). This G4 PLAN does not duplicate pack contents.
 
 ## Reviewer checks (suggested)
 
@@ -302,4 +302,4 @@ The review question is **not** “is G4 a good idea?” but:
 - [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md) — SSOT for consumer/version floors if G4 implies contract or `requires` changes.
 - [SPEC-Pack-Engine-v1](SPEC-Pack-Engine-v1.md) — consult before adding new pack check types in a follow-on **P2c** wave.
 - [PLAN-P2c — A2A Discovery / Card Follow-Up Pack](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) — working plan for the P2c pack wave.
-- [ROADMAP](../ROADMAP.md) — high-level sequencing (G4-A Phase 1 shipped; **P2c** next); hypotheses stay in this PLAN.
+- [ROADMAP](../ROADMAP.md) — high-level sequencing (G4-A Phase 1 + **P2c** shipped on `main`); hypotheses stay in this PLAN.
