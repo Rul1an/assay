@@ -2,7 +2,7 @@
 
 **Canonical document (use this path everywhere):** [`MIGRATION-TRUST-COMPILER-3.2.md`](MIGRATION-TRUST-COMPILER-3.2.md) — do not introduce parallel migration filenames for the same contract line.
 
-**Single source of truth (SSOT)** for Trust Basis, Trust Card, pack engine, and companion-pack contract floors (`mcp-signal-followup`, `a2a-signal-followup`). Other docs (CHANGELOG, README, [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)) point here instead of duplicating version semantics.
+**Single source of truth (SSOT)** for Trust Basis, Trust Card, pack engine, and companion-pack contract floors (`mcp-signal-followup`, `a2a-signal-followup`, **`a2a-discovery-card-followup` / P2c**). Other docs (CHANGELOG, README, [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md)) point here instead of duplicating version semantics.
 
 For the hardening wave that introduced this document, see [PLAN-H1 — Trust Kernel Alignment & Release Hardening](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md).
 
@@ -10,6 +10,7 @@ For the hardening wave that introduced this document, see [PLAN-H1 — Trust Ker
 
 - **`requires.assay_min_version: ">=3.2.3"`** on companion packs is the **evidence-substrate floor** (G3 + Trust Card schema 2 + seven claims). The **v3.2.3** tag is the usual reference for that prerequisite line — it does **not** imply that every built-in companion pack was already embedded in the CLI.
 - **First release embedding both** built-in companion packs (`mcp-signal-followup` **and** `a2a-signal-followup`) in published **assay** binaries is **v3.3.0** — see [CHANGELOG.md](../../CHANGELOG.md) § 3.3.0. Do not read substrate tags (e.g. v3.2.3) as “both packs were already in the binary.”
+- **P2c** (`a2a-discovery-card-followup`) uses a **different `requires` meaning** than P2a/P2b: **`>=3.3.0`** encodes the **G4-A** line (adapter emits `payload.discovery` **and** consumers can evaluate the pack). **`>=3.2.3` (substrate) is not sufficient for P2c** — that floor does **not** imply G4-A discovery evidence or this pack; do **not** reuse P2b’s `requires` string for P2c. Authoritative detail: [§ `a2a-discovery-card-followup`](#a2a-discovery-card-followup-built-in-pack-p2c) below.
 
 ## Consumer contract (non-negotiable)
 
@@ -33,6 +34,7 @@ For the hardening wave that introduced this document, see [PLAN-H1 — Trust Ker
 |------|--------|
 | `ENGINE_VERSION` | **1.2** (`crates/assay-evidence/src/lint/packs/checks.rs`) |
 | New check type | `g3_authorization_context_present` (same G3 v1 predicate as Trust Basis `authorization_context_visible` when verified) |
+| `json_path_exists` | Optional **`value_equals`** (JSON equality, no coercion) for P2c boolean `true` checks — **no** `ENGINE_VERSION` bump |
 
 ## `mcp-signal-followup` built-in pack
 
@@ -48,6 +50,13 @@ Details and options (bump floor vs document-only): [PLAN-P2a](PLAN-P2a-MCP-SIGNA
 - **Authoritative YAML:** `crates/assay-evidence/packs/a2a-signal-followup.yaml` — `requires.assay_min_version: ">=3.2.3"` (and `evidence_schema_version: "1.0"`). Same **meaning** as P2a: the floor tracks the **evidence substrate** line (G3 + Trust Card schema 2 + seven claims; **v3.2.3** reference tag), **not** automatically the first GitHub/crates.io release that embeds this built-in pack — state the latter in release notes ([PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md) § `assay_min_version`).
 - **Rules:** A2A-001..003 — `event_type_exists` on canonical `assay.adapter.a2a.*` types; **no** G3 predicate; **no** `ENGINE_VERSION` bump for P2b.
 
+## `a2a-discovery-card-followup` built-in pack (P2c)
+
+- **Name / version:** `a2a-discovery-card-followup` @ `1.0.0`
+- **Authoritative YAML:** `crates/assay-evidence/packs/a2a-discovery-card-followup.yaml` — `requires.assay_min_version: ">=3.3.0"` and `evidence_schema_version: "1.0"`. Normative G4-A semantics: [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md); product pack context: [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
+- **Rules:** A2A-DC-001 / A2A-DC-002 — `json_path_exists` with **`value_equals: true`** on frozen `/data/discovery/*` pointers (boolean **JSON** `true` only).
+- **First published binary** that embeds this built-in: state explicitly in release notes for the tag that first ships it (code may land on `main` before the next crates.io/GitHub release).
+
 ## Release note checklist (copy for ship)
 
 Use when cutting a release that touches trust artifacts or packs:
@@ -59,6 +68,7 @@ Use when cutting a release that touches trust artifacts or packs:
 - [ ] **First tag / version** that includes built-in `a2a-signal-followup` (P2b; if this release is the first).
 - [ ] **`assay_min_version`** on `mcp-signal-followup`: prerequisite substrate vs first binary-with-pack — one sentence, consistent with [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
 - [ ] **`assay_min_version`** on `a2a-signal-followup`: same as above for P2b — consistent with [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
+- [ ] **P2c** `a2a-discovery-card-followup` @ `1.0.0`: `requires.assay_min_version: ">=3.3.0"` (not `>=3.2.3` substrate floor); `value_equals`; no `ENGINE_VERSION` bump; **first tag / version** with this built-in — [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
 
 ## Regenerating demo bundles (canonical demo path)
 
