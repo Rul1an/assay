@@ -208,7 +208,9 @@ JSON `null` or boolean `false`).
 
 Optional **`value_equals`**: when set, at least one scoped event must have the
 pointer resolve to a value **equal** to this JSON value (e.g. boolean `true`).
-When `value_equals` is set, **`paths` must contain exactly one** pointer.
+Equality is JSON value identity (`serde_json::Value ==`) — there is **no** coercion
+(e.g. string `"true"` does **not** match boolean `true`). When `value_equals` is set,
+**`paths` must contain exactly one** pointer.
 
 ```yaml
 check:

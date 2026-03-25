@@ -172,6 +172,9 @@ fn check_g3_authorization_context_present(rule: &PackRule, ctx: &CheckContext<'_
 }
 
 /// Check: JSON path exists in events (optional value equality at each path).
+///
+/// When `value_equals` is set, matching uses `serde_json::Value` equality only — no string/bool
+/// coercion, normalization, or schema widening (wrong JSON type ⇒ no match).
 fn check_json_path_exists(
     rule: &PackRule,
     ctx: &CheckContext<'_>,

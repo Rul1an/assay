@@ -801,4 +801,44 @@ mod tests {
                 if reason == "conditional requires a then object"
         ));
     }
+
+    #[test]
+    fn test_json_path_exists_value_equals_requires_exactly_one_path() {
+        let pack = PackDefinition {
+            name: "jp-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "JP-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::JsonPathExists {
+                    paths: vec!["/data/a".into(), "/data/b".into()],
+                    value_equals: Some(serde_json::json!(true)),
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("value_equals with two paths should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "json_path_exists.value_equals requires exactly one path"
+        ));
+    }
 }

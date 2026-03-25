@@ -28,7 +28,13 @@ rules:
 
       **What this checks:**
       - At least one event has JSON boolean `true` at `/data/discovery/agent_card_visible` on the emitted
-        adapter payload (per G4-A Phase 1 freeze).
+        adapter payload (per G4-A Phase 1 freeze). The value must be a JSON boolean — not a string, number,
+        or other type (strict equality).
+
+      **Pre-G4-A / missing seam:** If your bundle has no `/data/discovery` on A2A events (older substrate
+      without G4-A emission), this rule fails with “missing” discovery evidence for **this pack**, not a
+      claim that the whole bundle is invalid. Install Assay + `assay-adapter-a2a` versions that emit
+      G4-A `payload.discovery` (see pack `requires.assay_min_version`).
 
       **What this does not prove:**
       - That the Agent Card is authentic, unspoofed, complete, or “real”
@@ -45,7 +51,11 @@ rules:
       ## Extended card access visibility observed (G4-A)
 
       **What this checks:**
-      - At least one event has JSON boolean `true` at `/data/discovery/extended_card_access_visible`.
+      - At least one event has JSON boolean `true` at `/data/discovery/extended_card_access_visible`
+        (strict JSON equality — not a string or other type).
+
+      **Pre-G4-A / missing seam:** Same as A2A-DC-001 — without G4-A `payload.discovery` on the event payload,
+      this rule signals missing discovery evidence for **this pack**, not global bundle invalidity.
 
       **What this does not prove:**
       - That authentication succeeded, authorization held, access was legitimate, or any party was trusted

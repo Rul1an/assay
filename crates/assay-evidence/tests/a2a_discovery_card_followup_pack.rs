@@ -112,6 +112,21 @@ fn a2a_payload_no_discovery() -> Value {
     })
 }
 
+/// `discovery` object with explicit shapes (for wrong-type regressions vs JSON boolean `true`).
+fn a2a_payload_discovery_object(discovery: Value) -> Value {
+    json!({
+        "adapter_id": "assay-adapter-a2a",
+        "adapter_version": "0.0.1",
+        "protocol": "a2a",
+        "protocol_name": "a2a",
+        "protocol_version": "0.2.0",
+        "upstream_event_type": "agent.capabilities",
+        "agent": { "id": "agent://planner", "capabilities": ["tasks.update"] },
+        "discovery": discovery,
+        "unmapped_fields_count": 0
+    })
+}
+
 #[test]
 fn a2a_discovery_followup_loads_builtin_and_open_with_two_rules() {
     let builtin = load_builtin_pack();
@@ -222,4 +237,79 @@ fn a2a_dc_002_fails_when_extended_false() {
         "a2a-discovery-card-followup",
         "A2A-DC-002"
     ));
+}
+
+#[test]
+fn a2a_dc_001_fails_when_agent_card_visible_is_string_not_bool() {
+    let discovery = json!({
+        "agent_card_visible": "true",
+        "agent_card_source_kind": "attributes",
+        "extended_card_access_visible": true,
+        "signature_material_visible": false
+    });
+    let bundle = make_bundle(vec![make_event(
+        "assay.adapter.a2a.agent.capabilities",
+        "run1",
+        0,
+        a2a_payload_discovery_object(discovery),
+    )]);
+    let result = lint_with_pack(load_builtin_pack(), &bundle);
+    assert!(has_rule_finding(
+        &result,
+        "a2a-discovery-card-followup",
+        "A2A-DC-001"
+    ));
+}
+
+#[test]
+fn a2a_dc_001_fails_when_agent_card_visible_is_null() {
+    let discovery = json!({
+        "agent_card_visible": null,
+        "agent_card_source_kind": "unknown",
+        "extended_card_access_visible": true,
+        "signature_material_visible": false
+    });
+    let bundle = make_bundle(vec![make_event(
+        "assay.adapter.a2a.agent.capabilities",
+        "run1",
+        0,
+        a2a_payload_discovery_object(discovery),
+    )]);
+    let result = lint_with_pack(load_builtin_pack(), &bundle);
+    assert!(has_rule_finding(
+        &result,
+        "a2a-discovery-card-followup",
+        "A2A-DC-001"
+    ));
+}
+
+#[test]
+fn a2a_dc_001_fails_when_agent_card_visible_is_number() {
+    let discovery = json!({
+        "agent_card_visible": 1,
+        "agent_card_source_kind": "attributes",
+        "extended_card_access_visible": true,
+        "signature_material_visible": false
+    });
+    let bundle = make_bundle(vec![make_event(
+        "assay.adapter.a2a.agent.capabilities",
+        "run1",
+        0,
+        a2a_payload_discovery_object(discovery),
+    )]);
+    let result = lint_with_pack(load_builtin_pack(), &bundle);
+    assert!(has_rule_finding(
+        &result,
+        "a2a-discovery-card-followup",
+        "A2A-DC-001"
+    ));
+}
+
+#[test]
+fn requires_assay_min_version_matches_pack_yaml() {
+    let builtin = load_builtin_pack();
+    assert_eq!(
+        builtin.definition.requires.assay_min_version, ">=3.3.0",
+        "built-in pack floor must match G4-A-capable release line (see PLAN-P2c / PR #949)"
+    );
 }
