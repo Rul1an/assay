@@ -18,7 +18,7 @@ The migration filename says **“3.2 line”** (historical); the **Assay workspa
 
 **Suggested lead:**
 
-> This release completes the **first trust-compiler product line**: canonical **Trust Basis**, **Trust Card** with explicit evidence-level claims, **G3** authorization-context evidence on supported MCP paths, **pack engine 1.2**, built-in **MCP** and **A2A** signal-followup packs, and the **migration / release truth** needed to consume them safely. Later waves (e.g. P2c) can branch from a clear public baseline.
+> This release completes the **first trust-compiler product line**: canonical **Trust Basis**, **Trust Card** with explicit evidence-level claims, **G3** authorization-context evidence on supported MCP paths, **pack engine 1.2**, built-in **MCP** and **A2A** signal-followup packs, and the **migration / release truth** needed to consume them safely. **P2c** (`a2a-discovery-card-followup`) merged on `main` after **v3.3.0**; it branches from the **3.3.0+** baseline and uses **`requires >=3.3.0`** — see [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md), [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md).
 
 Avoid “big bang because P2b”; use “coherent line is complete.”
 
