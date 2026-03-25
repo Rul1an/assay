@@ -76,7 +76,7 @@ Copy structure from:
 ### Integrators (policy / CI / downstream)
 
 - **Claim selection:** key by **`claim.id`**, not table index — [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) consumer contract.
-- **`requires.assay_min_version` on packs:** `>=3.2.3` expresses **evidence-substrate** prerequisites (P2a/P2b); the **first** release that embeds a given built-in pack must be stated in release notes (PLAN-P2a / PLAN-P2b § `assay_min_version`). **P2c** uses **`requires.assay_min_version: ">=3.3.0"`** (G4-A / P2c floor; not the P2b string) — **only** [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) (do not infer P2c from P2b’s floor).
+- **`requires.assay_min_version` on packs:** `>=3.2.3` expresses **evidence-substrate** prerequisites (P2a/P2b); the **first tag / version** that embeds a given built-in pack must be stated in release notes (PLAN-P2a / PLAN-P2b § `assay_min_version`). **P2c** uses **`requires.assay_min_version: ">=3.3.0"`** (G4-A / P2c; not the P2b string) — **only** [MIGRATION — P2c pack](MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) (do not infer P2c from P2b’s floor).
 - **G3 / MCP-001:** `g3_authorization_context_present` aligns with Trust Basis `authorization_context_visible` (**verified**) — not authorization *validity*; see PLAN-P2a.
 
 ### What this release is not
@@ -109,7 +109,7 @@ Pull detailed bullets from **CHANGELOG Unreleased** and dedupe against this outl
 
 ## After this release
 
-- **P2c** (`a2a-discovery-card-followup`) merged on `main` **after** tag **v3.3.0** — not in the **v3.3.0** release artifact story above. Pack YAML sets **`requires.assay_min_version: ">=3.3.0"`**; floors / substrate vs P2c: [MIGRATION](MIGRATION-TRUST-COMPILER-3.2.md) only; context [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md); [CHANGELOG](../../CHANGELOG.md) [Unreleased] (pointer only).
+- **P2c** (`a2a-discovery-card-followup`) merged on `main` **after** tag **v3.3.0** — not in the **v3.3.0** release artifact story above. Pack YAML sets **`requires.assay_min_version: ">=3.3.0"`**; **substrate vs G4-A/P2c** floors and **first tag / binary:** [MIGRATION — P2c pack](MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) only; [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md); [CHANGELOG](../../CHANGELOG.md) [Unreleased] (pointer only).
 - Further protocol slices can assume **3.3.0+** as the public baseline for trust-compiler artifacts.
 - Revisit pack `assay_min_version` floors only when intentionally changing evidence substrate — keep one sentence in release notes per MIGRATION checklist.
 

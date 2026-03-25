@@ -68,7 +68,7 @@ Use when cutting a release that touches trust artifacts or packs:
 - [ ] **First tag / version** that includes built-in `a2a-signal-followup` (P2b; if this release is the first).
 - [ ] **`assay_min_version`** on `mcp-signal-followup`: prerequisite substrate vs first binary-with-pack — one sentence, consistent with [PLAN-P2a](PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
 - [ ] **`assay_min_version`** on `a2a-signal-followup`: same as above for P2b — consistent with [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
-- [ ] **P2c** `a2a-discovery-card-followup` @ `1.0.0`: `requires >=3.3.0` (not `>=3.2.3`); `value_equals`; no `ENGINE_VERSION` bump; first tag with this built-in — [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
+- [ ] **P2c** `a2a-discovery-card-followup` @ `1.0.0`: `requires.assay_min_version: ">=3.3.0"` (not `>=3.2.3` substrate floor); `value_equals`; no `ENGINE_VERSION` bump; **first tag / version** with this built-in — [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
 
 ## Regenerating demo bundles (canonical demo path)
 

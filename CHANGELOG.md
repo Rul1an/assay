@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Evidence / P2c
 
-- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002**; mirror `packs/open/a2a-discovery-card-followup/`. **`requires` floors, substrate vs G4-A/P2c, and `value_equals` without `ENGINE_VERSION` bump:** [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md) (only SSOT for version semantics). Context: [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md). Check type: [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
+- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002**; mirror `packs/open/a2a-discovery-card-followup/`. **Substrate vs G4-A/P2c floors, `value_equals`, no `ENGINE_VERSION` bump:** [MIGRATION — P2c pack](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) (only SSOT). Context: [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md). Check type: [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
 
 ## [3.3.0] - 2026-03-24
 
