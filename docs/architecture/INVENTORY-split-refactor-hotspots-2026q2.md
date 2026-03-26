@@ -62,7 +62,7 @@ score, but it does help explain why some files are better first-wave candidates 
 | `P3` | `crates/assay-core/src/mcp/tool_call_handler/tests.rs` | 1242 | Tool call handler regression tests | **Large test-only file** | **Do not split first as production refactor**. Best handled as a follow-on to `R2`, once handler seams are stable | `T-R2` |
 | `P3` | `crates/assay-sim/src/attacks/memory_poison.rs` | 954 | Deterministic attack simulation vectors | **Single simulation module** | **Defer**. Useful cleanup candidate, but not a current operational hotspot on the main trust-compiler/product path | `R7` |
 | `Watchlist` | `crates/assay-core/src/engine/runner.rs` | 696 | Runner facade for eval execution | **Already partially split** via `runner_next/` | **Do not prioritize now**. Monitor facade thinness only; not a first refactor wave | monitor |
-| `Watchlist` | `crates/assay-evidence/src/trust_basis.rs` | 678 | Trust Basis compiler core | **Fresh trust-compiler surface** | **Do not split now**. Keep stable while `T1/P2/G4` settle; avoid refactoring a newly-shipped public surface too early | monitor |
+| `Watchlist` | `crates/assay-evidence/src/trust_basis.rs` | 678 | Trust Basis compiler core | **Fresh trust-compiler surface** | **Do not split now**. Keep stable until the surrounding trust-compiler and product boundaries settle; avoid refactoring a newly-shipped public surface too early | monitor |
 
 ## Why these bands
 
@@ -91,7 +91,7 @@ The test-heavy files are worth splitting, but not as initial production waves:
 
 ## Recommended wave order
 
-## `R1` — Decision kernel split
+### `R1` — Decision kernel split
 
 Primary file:
 
@@ -123,7 +123,7 @@ Hard constraints:
 - no event payload shape changes
 - no replay-basis behavior changes
 
-## `R2` — Tool-call evaluation split
+### `R2` — Tool-call evaluation split
 
 Primary file:
 
@@ -153,7 +153,7 @@ Hard constraints:
 - no fail-closed / degrade-read-only behavior drift
 - no event emission ordering drift
 
-## `R3` — Policy engine split
+### `R3` — Policy engine split
 
 Primary file:
 
@@ -168,7 +168,7 @@ Why after `R1/R2`:
 - the current decision / handler / policy coupling is real
 - splitting `engine.rs` first would make drift-hunting harder because the consumer seams above it are still large
 
-## `R4` — Pack engine schema + checks split
+### `R4` — Pack engine schema + checks split
 
 Primary files:
 
@@ -189,7 +189,7 @@ Reason:
 - the schema/types side is a cleaner freeze point
 - then the runtime check execution can split on a stable type boundary
 
-## `R5` — Registry trust store split
+### `R5` — Registry trust store split
 
 Primary file:
 
@@ -204,7 +204,7 @@ Risk note:
 - this is a **security-sensitive** split candidate
 - it should be its own wave with stronger contract tests than the average refactor slice
 
-## `R6` — Sandbox command split
+### `R6` — Sandbox command split
 
 Primary file:
 
@@ -218,7 +218,7 @@ Why not earlier:
 
 - it is important, but not the biggest current multiplier for trust-compiler or MCP iteration speed
 
-## `T-R1` / `T-R2` — Follow-on test decomposition
+### `T-R1` / `T-R2` — Follow-on test decomposition
 
 Follow-on files:
 
