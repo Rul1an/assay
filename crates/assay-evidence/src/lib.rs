@@ -1,6 +1,7 @@
 pub mod bundle;
 pub mod crypto;
 pub mod diff;
+pub mod g3_authorization_context;
 pub mod json_strict;
 pub mod lint;
 pub mod mandate;
@@ -8,6 +9,7 @@ pub mod ndjson;
 pub mod sanitize;
 pub mod store;
 pub mod trust_basis;
+pub mod trust_card;
 pub mod types;
 
 // Convenience re-exports
@@ -25,6 +27,10 @@ pub use store::{
 pub use trust_basis::{
     generate_trust_basis, to_canonical_json_bytes, TrustBasis, TrustBasisClaim, TrustBasisOptions,
     TrustClaimBoundary, TrustClaimId, TrustClaimLevel, TrustClaimSource,
+};
+pub use trust_card::{
+    trust_basis_to_trust_card, trust_card_to_canonical_json_bytes, trust_card_to_markdown,
+    TrustCard, TRUST_CARD_NON_GOALS, TRUST_CARD_NOTE_EMPTY_PLACEHOLDER, TRUST_CARD_SCHEMA_VERSION,
 };
 pub use types::{Envelope, EvidenceEvent, ProducerMeta, SPEC_VERSION};
 

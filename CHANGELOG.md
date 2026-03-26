@@ -4,10 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Evidence / P2c
+
+- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002**; mirror `packs/open/a2a-discovery-card-followup/`. **Substrate vs G4-A/P2c floors, `value_equals`, no `ENGINE_VERSION` bump:** [MIGRATION — P2c pack](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) (only SSOT). Context: [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md). Check type: [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
+
+## [3.3.0] - 2026-03-24
+
+This release completes the **first trust-compiler product line** on a single public baseline: canonical Trust Basis, Trust Card schema **2** with **seven** claims (key by stable `claim.id`), G3 authorization-context evidence, pack engine **1.2**, built-in **`mcp-signal-followup`** and **`a2a-signal-followup`**, migration SSOT, and kernel/pack alignment tests. See [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [PLAN-P2a](docs/architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md), [PLAN-P2b](docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), and [RELEASE-PLAN-TRUST-COMPILER-3.3.md](docs/architecture/RELEASE-PLAN-TRUST-COMPILER-3.3.md). Pack `requires.assay_min_version: ">=3.2.3"` remains the **evidence-substrate floor**; **v3.3.0** is the first release embedding both built-in companion packs in release binaries.
+
 ### Trust Compiler
 
+- **P2b A2A companion pack (`a2a-signal-followup`)**: Built-in pack with three **presence-only** rules on canonical adapter evidence — **A2A-001** (`assay.adapter.a2a.agent.capabilities`), **A2A-002** (`assay.adapter.a2a.task.*`), **A2A-003** (`assay.adapter.a2a.artifact.shared`). Uses existing pack checks (`event_type_exists`); no new engine version. Open mirror under `packs/open/a2a-signal-followup/`. Pack YAML sets `requires.assay_min_version: ">=3.2.3"` (evidence-substrate floor per [MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), same discipline as [PLAN-P2a](docs/architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)). **v3.3.0** is the first Assay release with this pack built in. See [PLAN-P2b](docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
+- **H1 — Trust kernel alignment & release hardening**: Single migration SSOT ([MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md)), [PLAN-H1](docs/architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), integration tests for Trust Basis ↔ MCP-001 lockstep and Trust Basis ↔ Trust Card invariants (no new semantics).
+- **P2a MCP companion pack (`mcp-signal-followup`)**: Built-in pack with three rules — **MCP-001** uses pack check `g3_authorization_context_present` (engine **v1.2**), sharing the same predicate as Trust Basis `authorization_context_visible` (verified); **MCP-002** / **MCP-003** cover delegation (`delegated_from`) and containment degradation (`assay.sandbox.degraded`). Open mirror under `packs/open/mcp-signal-followup/`. `assay_min_version: >=3.2.3` tracks the prerequisite line (G3 + Trust Card schema 2; **v3.2.3** is the reference tag for that substrate, not for built-in pack presence). **v3.3.0** is the first Assay release with this pack built in — see [PLAN-P2a](docs/architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md).
+- **Pack engine v1.2**: Adds `g3_authorization_context_present`; bumps `ENGINE_VERSION` in `assay-evidence` (mandate-baseline rules that declared `engine_min_version: "1.2"` now execute with this engine).
 - **T1a Trust Basis Compiler MVP**: Assay now ships a canonical `trust-basis.json` compiler surface on `main`, derived from verified bundles with fixed claim keys, fixed evidence vocabularies, and deterministic regeneration.
 - **Low-level trust compiler CLI**: Repository builds now expose `assay trust-basis generate <bundle>` for advanced CI, diffing, and review workflows.
+- **G3 Authorization Context Evidence**: Supported MCP tool-call paths can merge policy-projected `auth_scheme`, `auth_issuer`, and `principal` onto `assay.tool.decision` evidence; normalization allowlists schemes, trims issuer, rejects JWS-compact and `Bearer ` credential material, and omits whitespace-only principals.
+- **Trust Card schema v2**: Trust Basis emits **seven** claims (adds `authorization_context_visible` between delegation and containment); `trustcard.json` uses `schema_version` **2**. Downstream consumers should select claims by stable `id`, not assume a fixed row count.
 
 ### Notes
 

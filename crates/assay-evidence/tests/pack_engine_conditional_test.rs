@@ -174,6 +174,7 @@ fn json_path_exists_pack(scoped: bool) -> LoadedPack {
             help_markdown: None,
             check: CheckDefinition::JsonPathExists {
                 paths: vec!["/data/mandate_id".to_string()],
+                value_equals: None,
             },
             engine_min_version: None,
             event_types: scoped.then(|| vec!["assay.tool.decision".to_string()]),
@@ -411,17 +412,17 @@ fn mandate_001_ignores_non_decision_events_even_if_they_contain_mandate_id() {
 }
 
 #[test]
-fn future_mandate_rules_remain_version_gated() {
+fn mandate_baseline_does_not_emit_findings_for_nonexistent_rule_ids() {
     let pack = load_packs(&["mandate-baseline".to_string()]).expect("pack should load");
     let result = lint_with_pack(
         pack.into_iter().next().expect("built-in pack should exist"),
         &make_bundle(vec![decision_allow_with_mandate("run_mandate", 0)]),
     );
 
-    for future_rule in ["MANDATE-002", "MANDATE-003", "MANDATE-004", "MANDATE-005"] {
+    for fictitious in ["MANDATE-999", "MANDATE-000"] {
         assert!(
-            !has_rule_finding(&result, "mandate-baseline", future_rule),
-            "{future_rule} should remain version-gated beyond engine v1.1"
+            !has_rule_finding(&result, "mandate-baseline", fictitious),
+            "{fictitious} is not a shipped rule id"
         );
     }
 }

@@ -22,6 +22,8 @@ Open packs are included in the Assay distribution and can be used freely.
 | Pack | License | Description |
 |------|---------|-------------|
 | `eu-ai-act-baseline` | Apache-2.0 | EU AI Act Article 12 baseline |
+| `mcp-signal-followup` | Apache-2.0 | MCP companion pack (G3/G2/G1 signals; see `packs/open/mcp-signal-followup/`) |
+| `a2a-signal-followup` | Apache-2.0 | A2A companion pack (adapter canonical `assay.adapter.a2a.*` presence; see `packs/open/a2a-signal-followup/`) |
 | `soc2-baseline` | Apache-2.0 | SOC 2 baseline (coming soon) |
 
 **Usage:**

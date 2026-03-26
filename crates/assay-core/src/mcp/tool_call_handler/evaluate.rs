@@ -66,12 +66,15 @@ pub(super) fn handle_tool_call(
     let mut effective_arguments = original_arguments.clone();
 
     // Step 1: Policy evaluation
-    let policy_eval = handler.policy.evaluate_with_metadata(
+    let mut policy_eval = handler.policy.evaluate_with_metadata(
         &tool_name,
         &effective_arguments,
         state,
         runtime_identity,
     );
+    if let Some(proj) = &handler.config.auth_context_projection {
+        proj.merge_into_metadata(&mut policy_eval.metadata);
+    }
     let mut tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
     tool_match.obligation_outcomes =
         obligations::execute_log_only(&tool_match.obligations, &tool_name);

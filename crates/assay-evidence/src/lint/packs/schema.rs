@@ -259,7 +259,20 @@ pub enum CheckDefinition {
     JsonPathExists {
         /// JSON Pointer paths to check.
         paths: Vec<String>,
+        /// When set, at least one scoped event must have this **exact** JSON value at **each**
+        /// path (after resolving the pointer). Omitted = legacy presence-only semantics
+        /// (`null` is a valid value; only missing paths fail).
+        ///
+        /// If set, `paths` must contain exactly one pointer (bundle-wide “any of these paths equals”
+        /// is intentionally unsupported for v1).
+        #[serde(default)]
+        value_equals: Option<serde_json::Value>,
     },
+
+    /// G3 v1 (domain-specific): same predicate as Trust Basis `authorization_context_visible` (`verified`).
+    /// Not a generic pack-engine auth DSL — no parameters by design.
+    #[serde(rename = "g3_authorization_context_present")]
+    G3AuthorizationContextPresent,
 
     /// Conditional check.
     ///
@@ -376,7 +389,10 @@ impl CheckDefinition {
                     });
                 }
             }
-            CheckDefinition::JsonPathExists { paths } => {
+            CheckDefinition::JsonPathExists {
+                paths,
+                value_equals,
+            } => {
                 if paths.is_empty() {
                     return Err(PackValidationError::InvalidCheck {
                         pack: pack_name.to_string(),
@@ -384,7 +400,16 @@ impl CheckDefinition {
                         reason: "json_path_exists.paths cannot be empty".to_string(),
                     });
                 }
+                if value_equals.is_some() && paths.len() != 1 {
+                    return Err(PackValidationError::InvalidCheck {
+                        pack: pack_name.to_string(),
+                        rule: rule_id.to_string(),
+                        reason: "json_path_exists.value_equals requires exactly one path"
+                            .to_string(),
+                    });
+                }
             }
+            CheckDefinition::G3AuthorizationContextPresent => {}
             CheckDefinition::Conditional {
                 condition,
                 then_check,
@@ -506,6 +531,7 @@ impl CheckDefinition {
             CheckDefinition::EventTypeExists { .. } => "event_type_exists",
             CheckDefinition::ManifestField { .. } => "manifest_field",
             CheckDefinition::JsonPathExists { .. } => "json_path_exists",
+            CheckDefinition::G3AuthorizationContextPresent => "g3_authorization_context_present",
             CheckDefinition::Conditional { .. } => "conditional",
             CheckDefinition::Unsupported => "unsupported",
         }
@@ -773,6 +799,46 @@ mod tests {
             error,
             PackValidationError::InvalidCheck { reason, .. }
                 if reason == "conditional requires a then object"
+        ));
+    }
+
+    #[test]
+    fn test_json_path_exists_value_equals_requires_exactly_one_path() {
+        let pack = PackDefinition {
+            name: "jp-pack".to_string(),
+            version: "1.0.0".to_string(),
+            kind: PackKind::Security,
+            description: "test".to_string(),
+            author: "Assay Team".to_string(),
+            license: "Apache-2.0".to_string(),
+            source_url: None,
+            disclaimer: None,
+            requires: PackRequirements {
+                assay_min_version: ">=0.0.0".to_string(),
+                evidence_schema_version: None,
+            },
+            rules: vec![PackRule {
+                id: "JP-001".to_string(),
+                severity: Severity::Error,
+                description: "test".to_string(),
+                article_ref: None,
+                help_markdown: None,
+                check: CheckDefinition::JsonPathExists {
+                    paths: vec!["/data/a".into(), "/data/b".into()],
+                    value_equals: Some(serde_json::json!(true)),
+                },
+                engine_min_version: None,
+                event_types: None,
+            }],
+        };
+
+        let error = pack
+            .validate()
+            .expect_err("value_equals with two paths should fail validation");
+        assert!(matches!(
+            error,
+            PackValidationError::InvalidCheck { reason, .. }
+                if reason == "json_path_exists.value_equals requires exactly one path"
         ));
     }
 }

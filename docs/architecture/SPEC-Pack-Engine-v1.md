@@ -176,6 +176,19 @@ check:
   pattern: string           # Glob pattern for event type (e.g., "assay.policy.*")
 ```
 
+#### `g3_authorization_context_present` (engine v1.2+)
+
+**Domain-specific, not a generic auth DSL.** This check type exists so pack rules can reuse the **exact** G3 v1 predicate implemented in `assay-evidence` (same as Trust Basis `authorization_context_visible` when `verified`). It does **not** introduce new trust-claim semantics beyond that kernel.
+
+True when at least one `assay.tool.decision` event satisfies that predicate: allowlisted `auth_scheme`, `principal` and `auth_issuer` with G3 string discipline on one event. No YAML parameters (by design — avoids turning the pack engine into a configurable auth rule language).
+
+```yaml
+check:
+  type: g3_authorization_context_present
+```
+
+Intended for MCP companion packs (e.g. `mcp-signal-followup` rule MCP-001). A2A companion packs (e.g. `a2a-signal-followup`) use presence checks on `assay.adapter.a2a.*` instead — see [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md). Not a substitute for authorization **validity**, issuer trust, or scope correctness.
+
 #### `manifest_field`
 
 Verify manifest contains specified field.
@@ -190,12 +203,20 @@ check:
 #### `json_path_exists`
 
 Verify at least one scoped event contains one of the specified JSON Pointer
-paths.
+paths. By default, **presence** of the value at the pointer is enough (including
+JSON `null` or boolean `false`).
+
+Optional **`value_equals`**: when set, at least one scoped event must have the
+pointer resolve to a value **equal** to this JSON value (e.g. boolean `true`).
+Equality is JSON value identity (`serde_json::Value ==`) — there is **no** coercion
+(e.g. string `"true"` does **not** match boolean `true`). When `value_equals` is set,
+**`paths` must contain exactly one** pointer.
 
 ```yaml
 check:
   type: json_path_exists
   paths: [string]
+  value_equals: true   # optional; requires exactly one path when present
 ```
 
 #### `conditional` (v1.1 conditional-presence subset)
@@ -673,7 +694,7 @@ pub enum CheckDefinition {
     EventFieldPresent { any_of: Vec<String>, #[serde(default)] in_data: bool },
     EventTypeExists { pattern: String },
     ManifestField { field: String, #[serde(default)] required: bool },
-    JsonPathExists { paths: Vec<String> },
+    JsonPathExists { paths: Vec<String>, #[serde(default)] value_equals: Option<serde_json::Value> },
     Conditional { /* typed subset or unsupported future shape */ },
 }
 

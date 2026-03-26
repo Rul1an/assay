@@ -76,7 +76,7 @@ fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        6,
+        7,
         "all frozen claims should always be present"
     );
 
@@ -84,6 +84,10 @@ fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     assert_eq!(
         claim(claims, "delegation_context_visible")["level"],
         "verified"
+    );
+    assert_eq!(
+        claim(claims, "authorization_context_visible")["level"],
+        "absent"
     );
     assert_eq!(
         claim(claims, "containment_degradation_observed")["level"],

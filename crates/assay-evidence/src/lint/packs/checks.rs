@@ -36,7 +36,7 @@ pub struct CheckResult {
 }
 
 /// Current pack engine version.
-pub const ENGINE_VERSION: &str = "1.1";
+pub const ENGINE_VERSION: &str = "1.2";
 
 /// Execute a pack rule check.
 ///
@@ -72,7 +72,13 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
         CheckDefinition::ManifestField { path, required } => {
             check_manifest_field(rule, ctx, path, *required)
         }
-        CheckDefinition::JsonPathExists { paths } => check_json_path_exists(rule, ctx, paths),
+        CheckDefinition::JsonPathExists {
+            paths,
+            value_equals,
+        } => check_json_path_exists(rule, ctx, paths, value_equals.as_ref()),
+        CheckDefinition::G3AuthorizationContextPresent => {
+            check_g3_authorization_context_present(rule, ctx)
+        }
         CheckDefinition::Conditional { .. } => match rule.check.supported_conditional() {
             Ok(conditional) => check_conditional(rule, ctx, &conditional),
             Err(reason) => handle_unsupported_check(
@@ -138,11 +144,42 @@ fn engine_version_satisfies(current: &str, required: &str) -> bool {
     }
 }
 
-/// Check: JSON path exists in events.
+/// G3 v1: same predicate as Trust Basis `authorization_context_visible` (verified).
+///
+/// Honors `rule.event_types` like other checks: only scoped events are considered.
+fn check_g3_authorization_context_present(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
+    let passed = scoped_events(rule, ctx).into_iter().any(|event| {
+        crate::g3_authorization_context::decision_event_satisfies_g3_authorization_context_visible(
+            event,
+        )
+    });
+    if passed {
+        CheckResult {
+            passed: true,
+            finding: None,
+        }
+    } else {
+        CheckResult {
+            passed: false,
+            finding: Some(create_finding(
+                rule,
+                ctx,
+                "No assay.tool.decision event satisfies G3 v1 policy-projected authorization context (principal + allowlisted auth_scheme + auth_issuer with G3 string discipline).".to_string(),
+                None,
+            )),
+        }
+    }
+}
+
+/// Check: JSON path exists in events (optional value equality at each path).
+///
+/// When `value_equals` is set, matching uses `serde_json::Value` equality only — no string/bool
+/// coercion, normalization, or schema widening (wrong JSON type ⇒ no match).
 fn check_json_path_exists(
     rule: &PackRule,
     ctx: &CheckContext<'_>,
     paths: &[String],
+    value_equals: Option<&serde_json::Value>,
 ) -> CheckResult {
     for event in scoped_events(rule, ctx) {
         let json = match serde_json::to_value(event) {
@@ -151,23 +188,32 @@ fn check_json_path_exists(
         };
 
         for path in paths {
-            if value_pointer(&json, path).is_some() {
-                return CheckResult {
-                    passed: true,
-                    finding: None,
-                };
+            match (value_pointer(&json, path), value_equals) {
+                (Some(v), Some(required)) if v == required => {
+                    return CheckResult {
+                        passed: true,
+                        finding: None,
+                    };
+                }
+                (Some(_), Some(_)) => continue,
+                (Some(_), None) => {
+                    return CheckResult {
+                        passed: true,
+                        finding: None,
+                    };
+                }
+                (None, _) => continue,
             }
         }
     }
 
+    let detail = match value_equals {
+        Some(req) => format!("No event has path {} equal to {}", paths.join(", "), req),
+        None => format!("No event contains paths: {}", paths.join(", ")),
+    };
     CheckResult {
         passed: false,
-        finding: Some(create_finding(
-            rule,
-            ctx,
-            format!("No event contains paths: {}", paths.join(", ")),
-            None,
-        )),
+        finding: Some(create_finding(rule, ctx, detail, None)),
     }
 }
 
@@ -610,6 +656,104 @@ impl LintFindingExt for LintFinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ProducerMeta;
+    use chrono::{TimeZone, Utc};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    use crate::lint::packs::schema::{CheckDefinition, PackKind, PackRule};
+    use crate::lint::Severity;
+    use crate::types::EvidenceEvent;
+
+    fn mk_g3_decision(seq: u64) -> EvidenceEvent {
+        let mut e = EvidenceEvent::new(
+            "assay.tool.decision",
+            "urn:assay:test",
+            "run1",
+            seq,
+            json!({
+                "tool": "t",
+                "decision": "allow",
+                "principal": "alice@example.com",
+                "auth_scheme": "jwt_bearer",
+                "auth_issuer": "https://issuer.example/"
+            }),
+        );
+        e.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
+        e
+    }
+
+    fn mk_fs_event(seq: u64) -> EvidenceEvent {
+        let mut e = EvidenceEvent::new(
+            "assay.fs.access",
+            "urn:assay:test",
+            "run1",
+            seq,
+            json!({ "path": "/tmp/x" }),
+        );
+        e.time = Utc.timestamp_opt(1_700_000_000 + seq as i64, 0).unwrap();
+        e
+    }
+
+    fn g3_test_rule(event_types: Option<Vec<String>>) -> PackRule {
+        PackRule {
+            id: "T-G3".into(),
+            severity: Severity::Warn,
+            description: "test".into(),
+            article_ref: None,
+            help_markdown: None,
+            check: CheckDefinition::G3AuthorizationContextPresent,
+            engine_min_version: Some("1.2".into()),
+            event_types,
+        }
+    }
+
+    fn g3_test_ctx<'a>(manifest: &'a Manifest, events: &'a [EvidenceEvent]) -> CheckContext<'a> {
+        CheckContext {
+            events,
+            manifest,
+            bundle_path: "t.tar.gz",
+            pack_name: "p",
+            pack_version: "1",
+            pack_digest: "d",
+            pack_kind: PackKind::Security,
+        }
+    }
+
+    #[test]
+    fn g3_authorization_check_uses_scoped_events_not_full_bundle() {
+        // G3-good decision + unrelated FS event; narrowing scope to FS only must not see the decision.
+        let events = vec![mk_g3_decision(0), mk_fs_event(1)];
+        let manifest = Manifest {
+            schema_version: 1,
+            bundle_id: "b".into(),
+            producer: ProducerMeta::new("test", "0"),
+            run_id: "r".into(),
+            event_count: events.len(),
+            run_root: "".into(),
+            algorithms: Default::default(),
+            files: BTreeMap::new(),
+        };
+        let ctx = g3_test_ctx(&manifest, &events);
+
+        let mut rule = g3_test_rule(Some(vec!["assay.fs.access".into()]));
+        let r = execute_check(&rule, &ctx);
+        assert!(
+            !r.passed,
+            "scoped to fs only: no G3 on assay.fs.access, must fail"
+        );
+
+        rule.event_types = Some(vec!["assay.tool.decision".into()]);
+        let r = execute_check(&rule, &ctx);
+        assert!(
+            r.passed,
+            "scoped to tool.decision: G3 event in scope, must pass"
+        );
+
+        rule.event_types = None;
+        let r = execute_check(&rule, &ctx);
+        assert!(r.passed, "unscoped: G3 satisfied somewhere in bundle");
+    }
 
     #[test]
     fn test_value_pointer() {

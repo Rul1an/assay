@@ -1,12 +1,14 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-03-23):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
+> **Status sync (2026-03-24, G4-A 2026-03-25):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
 > Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
 > Governance support ADRs [ADR-027](architecture/ADR-027-Tool-Taxonomy.md) through [ADR-031](architecture/ADR-031-Coverage-v1.1-DX-Polish.md) are implemented on `main` and should be read as delivered contracts, not pending proposals.
 > **BYOS truth (ADR-015):** Phase 1 is complete on `main`: `push`, `pull`, `list`, `store-status`, `.assay/store.yaml` config, and provider quickstart docs (S3, B2, MinIO) are all shipped.
 > Split refactor program is closed loop through Wave7C Step3 on `main` (see [plan](architecture/PLAN-split-refactor-2026q1.md), [report](architecture/REPORT-split-refactor-2026q1.md), [program review pack](contributing/SPLIT-REVIEW-PACK-2026q1-program.md)).
-> `E1`, `G1`, `G2`, `P1`, and `T1a` are merged on `main`, and the only post-`P1` release-line nuance is closed: workspace version is now `3.2.3`, and the OWASP signal-aware pack floors align to `>=3.2.3`.
-> Next product priorities: `T1b` Trust Card MVP, then `G3` Authorization Evidence Signal and `P2` Protocol Claim Packs.
+> `E1`, `G1`, `G2`, `P1`, `T1a`, `T1b`, and `G3` are merged on `main`; workspace version is **`3.3.0`** and OWASP signal-aware pack floors align to `>=3.2.3`.
+> **Sequence:** `T1a → T1b → G3 → P2a → H1 → P2b` shipped on `main` (**`a2a-signal-followup`** in **v3.3.0**). **`G4-A` Phase 1** (A2A `payload.discovery` evidence seam) is **shipped on `main`** — [G4-A freeze](architecture/G4-A-PHASE1-FREEZE.md), [PLAN-G4](architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md). **`P2c`** — built-in **`a2a-discovery-card-followup`** (A2A-DC-001 / A2A-DC-002) — is **shipped on `main`** — [PLAN-P2c](architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md), [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) §6, [PLAN-G4 §P2c](architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md#p2c--follow-on-not-g4). **G4-A** follow-up remains post-merge verification / release-truth hygiene only (no new G4 semantics). **Next (as scoped):** further protocol claim packs / P2 slices — not unconstrained pack expansion. References: [PLAN-T1b](architecture/PLAN-T1b-TRUST-CARD-2026q2.md), [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md), [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+> **Shipped (trust compiler line):** **`P2a`** **`mcp-signal-followup`**, **`H1`** alignment, **`P2b`** **`a2a-signal-followup`** — see [PLAN-P2b](architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md), §Q3 2026, [RFC-005](architecture/RFC-005-trust-compiler-mvp-2026q2.md) §6. Optional small **test-only** follow-ups (e.g. shared `tests/common` bundle builders for H1/P2a parity) do not change product semantics.
+> **Follow-up engineering (parallel, small):** optional alignment between `assay-core` auth-context normalization/redaction and `assay-evidence` trust-basis classification (shared predicates and/or cross-crate tests) to prevent drift — **not** a blocker for `P2`.
 
 **Strategic Focus:** Agent Runtime Evidence, Trust Compilation & Control Plane.
 **Core Value:** Verifiable Evidence + Claims-as-Code for Agent Systems.
@@ -62,7 +64,7 @@ See [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) for the p
 - **Canonical evidence wins operationally**: new ingest paths may enrich or map into canonical evidence, but they must not semantically override claim classification directly from raw upstream formats.
 - **Trust Card, not trust score**: the primary artifact must show what is `verified`, `self_reported`, `inferred`, or `absent`, not collapse into `trusted/untrusted`.
 - **No aggregate trust score in MVP**: no primary scalar trust score, no `safe/unsafe` badge, and no maturity badge as the main output.
-- **Fixed order**: `T1a -> T1b -> G3 -> P2` stays ahead of dashboard work, broad pack expansion, or heavier reference/temporal semantics.
+- **Fixed order**: `T1a → T1b → G3 → P2a → H1` before broadening protocol packs (`P2b`+); that ordering stays ahead of dashboard work, unconstrained pack expansion, or heavier reference/temporal semantics.
 - **No broad correctness claims**: delegation validation, chain integrity, sandbox correctness, and temporal correctness remain out of scope until dedicated evidence and semantics exist.
 - **Anti-scope rule**: Assay is not a tracing platform, eval platform, or observability dashboard. Those may be integration surfaces, but not the product category.
 
@@ -210,10 +212,12 @@ The current substrate on `main` is strong enough to shift from "more packs" towa
 | Order | Lane | Why now | Boundary |
 |-------|------|---------|----------|
 | **1** | `T1a` OTel-native Trust Compiler MVP | ✅ Merged on `main`: verified bundle -> deterministic `trust-basis.json` with bounded claim classification. | Kept small: no Trust Card rendering, no new signals, no packs, no score-first surface. |
-| **2** | `T1b` Trust Card MVP | Assay now has a canonical trust basis; the next step is to render that into a visible, portable artifact. | Trust Card stays evidence-classified, signed/attested later, and does not become a generic risk score. |
-| **3** | `G3` Authorization Evidence Signal | MCP auth extensions and identity/authz standards make auth context the cleanest next signal seam. | Supported flows only; no auth validation or cryptographic chain semantics. |
-| **4** | `P2` Protocol Claim Packs | After `G3`, protocol-aware claim packs become honest product surfaces. | Small MCP/A2A claim packs, not broad compliance theater. |
+| **2** | `T1b` Trust Card MVP | ✅ Merged on `main`: deterministic `trustcard.json` + `trustcard.md` from verified bundles (`assay trustcard generate --out-dir`), derived from T1a only. | Evidence-classified output; signed/attestation later; no generic risk score. |
+| **3** | `G3` Authorization Evidence Signal | ✅ Merged on `main`: bounded `auth_scheme` / `auth_issuer` / `principal` on policy-projected MCP decision evidence; Trust Basis + Trust Card schema `2` / seven claims (see [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md)). | Supported flows only; no auth validation, issuer trust proof, scope checks, or temporal correctness. Optional follow-up: reduce core ↔ evidence drift (normalization vs classification). |
+| **4** | `P2` Protocol Claim Packs | **Current next wave** — protocol-aware claim packs as honest product surfaces now that auth context is visible in evidence. | Small MCP/A2A claim packs, not broad compliance theater. |
 | **Later** | Reference/temporal/capability attestation | These semantics are valuable but heavier. | Ship only after the claim product line is stable. |
+
+**G3 closure (content):** Policy-projected authorization context lands on decision evidence in a frozen supported flow, is redacted, and flows through to Trust Basis and Trust Card without overclaiming validation or issuer trust. The main remaining engineering nuance is **core/evidence alignment** (above) as a hardening pass, not a G3 scope gap.
 
 Work that primarily improves dashboarding, generic observability UX, or score-first reporting should be treated as secondary until this sequence is complete.
 
@@ -229,7 +233,7 @@ Closed lines on `main`:
 - **OTel ingest and evidence pipeline**: `trace ingest-otel` plus the `ProfileCollector -> EvidenceMapper -> EvidenceEvent` collector-style pipeline are shipped
 - **Supply chain and governance surfaces**: BYOS Phase 1, tool signing, GitHub Action v2/v2.1, mandate evidence, and starter/baseline pack infrastructure are shipped
 - **Evidence-as-a-product**: soak, closure, completeness, and the OTel bridge slices from ADR-025 are shipped
-- **Bounded claim waves**: `E1`, `G1`, `G2`, `P1`, and the `3.2.3` release-line truth fix are shipped
+- **Bounded claim waves**: `E1`, `G1`, `G2`, `P1`, `T1a`, `T1b`, `G3`, and the `3.2.3` release-line truth fix are shipped
 
 For detailed historical delivery records, see the relevant ADRs and companion docs:
 
@@ -249,14 +253,16 @@ For detailed historical delivery records, see the relevant ADRs and companion do
 
 ### Trust Compiler Core (Highest Priority)
 
-March 2026 evidence and signal waves change the ordering inside Q3. The next product gap is not "more observability" or "more packs"; it is turning the existing OTel-collector-style evidence path into a first-class claims compiler with a portable output artifact.
+March 2026 evidence and signal waves change the ordering inside Q3. `T1a`, `T1b`, `G3`, **`P2a`**, **`H1`**, **`P2b`** (`a2a-signal-followup`), **`G4-A` Phase 1** (A2A `payload.discovery`), and **`P2c`** (`a2a-discovery-card-followup`) are shipped on `main`. **G4-A** track: post-merge verification / release-truth hygiene only. **Next (as scoped):** further protocol packs / P2 slices — [PLAN-P2c](architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) — not more observability UI or unconstrained pack expansion.
 
 | Priority | Capability | Why now | MVP boundary |
 |----------|------------|---------|--------------|
-| **P0** | `T1a` OTel-native Trust Compiler MVP | `trace ingest-otel`, `ProfileCollector -> EvidenceMapper -> EvidenceEvent`, and signal-aware packs already exist on `main`. | Official compiler inputs/outputs, claim basis export, no dashboard, no new semantics. |
-| **P0** | `T1b` Trust Card MVP | The trust-compiler thesis needs a product artifact that non-authors can review and diff. | `trustcard.json` + `trustcard.md`, evidence-level classification, no opaque global score. |
-| **P1** | `G3` Authorization Evidence Signal | MCP auth extensions and NIST/OWASP identity guidance make auth context the cleanest next supported signal seam. | Supported flows only; no cryptographic or temporal auth-validation semantics. |
-| **P1** | `P2` Protocol Claim Packs | Once auth context is visible, protocol claim packs become honest follow-ons. | MCP/A2A claim packs with bounded wording; no broad compliance theater. |
+| **P0** | `T1a` OTel-native Trust Compiler MVP | ✅ Shipped on `main`: verified bundle → `trust-basis.json` / bounded claim classification. | Compiler inputs/outputs, claim basis export; no dashboard-first surface. |
+| **P0** | `T1b` Trust Card MVP | ✅ Shipped on `main`: portable `trustcard.json` + `trustcard.md` for review and diff. | Evidence-level rows + frozen non-goals; no opaque global score. |
+| **P1** | `G3` Authorization Evidence Signal | ✅ Shipped on `main`: authorization context fields on supported MCP decision evidence; Trust Card schema `2` / seven trust-basis claims. | Supported flows only; no cryptographic or temporal auth-validation semantics. |
+| **P1** | `P2a` MCP companion pack | ✅ Shipped on `main`: built-in `mcp-signal-followup` (MCP-001..003). | G3-aligned lint; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md). |
+| **P1** | `H1` Trust kernel alignment & release hardening | ✅ Shipped on `main`: migration SSOT, alignment tests, docs; no new signals. | [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md). |
+| **P1** | `P2` Protocol Claim Packs (further slices) | ✅ **`P2b`** `a2a-signal-followup` (A2A-001..003) on **`v3.3.0`**. ✅ **`G4-A` Phase 1** on `main` (`payload.discovery`). ✅ **`P2c`** `a2a-discovery-card-followup` (A2A-DC-001..002) on `main` (`requires >=3.3.0`). **Next:** further slices as scoped. | [PLAN-P2b](architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md); [PLAN-P2c](architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md); [PLAN-G4](architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md); [G4-A freeze](architecture/G4-A-PHASE1-FREEZE.md). |
 | **P2** | Collector processor / sidecar form factor | This is the "outside-the-box" deployment surface that competitors are not targeting. | OTel-native compile path that emits canonical evidence, not a dashboard. |
 
 These items outrank growth-only work because Assay's strongest differentiator is now trace -> evidence -> claim -> proof, not surface-area expansion.
@@ -310,10 +316,16 @@ Status on `main`:
 - [ ] **GitLab CI**: Native integration
 - [ ] **OTel GenAI**: Align evidence export with [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — conventions still experimental but Pydantic AI already follows them; monitor for stability before building bridge
 
-### C. Protocol Claim Packs (Post-T1)
-- [ ] **MCP Claim Pack**: protocol-aware, signal-bounded authz and telemetry claims
-- [ ] **A2A Claim Pack**: capability/delegation/provenance claim surfaces for supported flows
+### C. Protocol Claim Packs (`P2`) and kernel hardening (`H1`)
+- [x] **MCP companion pack (`mcp-signal-followup`, P2a)**: built-in pack MCP-001..003 — G3-aligned auth context check + delegation + containment degradation; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md)
+- [x] **`H1` Trust kernel alignment & release hardening**: migration SSOT, alignment tests, docs — [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md) (sequence: **H1 before P2b** — ✅ shipped)
+- [x] **`a2a-signal-followup` (P2b)**: built-in pack A2A-001..003 — bounded presence on shipped `assay.adapter.a2a.*` — [PLAN-P2b](architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md); ships in **v3.3.0**
+- [x] **`G4-A` — A2A discovery / card evidence (Phase 1)** — `payload.discovery` on emitted canonical A2A evidence — [PLAN-G4](architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md), [G4-A freeze](architecture/G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../crates/assay-adapter-a2a/) (post-merge verification / release-truth hygiene only; no new semantics in this checklist item)
+- [x] **`P2c` — A2A discovery/card follow-up pack** — [PLAN-P2c](architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md): built-in **`a2a-discovery-card-followup`** (A2A-DC-001 / A2A-DC-002) on `main`; **`json_path_exists.value_equals`** for boolean `true` at G4-A `/data/discovery/*` pointers; `requires.assay_min_version: ">=3.3.0"`
+- [ ] **Further MCP / A2A protocol packs** (beyond P2b / P2c): broader capability/delegation/provenance claims only with first-class evidence
 - [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
+
+This section is the **`P2` execution surface**: ship small, honest packs first; defer broad compliance theater.
 
 ### D. Managed Evidence Store (Evaluate)
 

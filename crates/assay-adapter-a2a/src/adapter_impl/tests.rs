@@ -45,6 +45,29 @@ fn reserved_key(key: &str) -> bool {
     )
 }
 
+fn assert_discovery_v1_defaults(payload: &Value) {
+    let d = &payload["discovery"];
+    assert_eq!(d["agent_card_visible"], Value::Bool(false));
+    assert_eq!(
+        d["agent_card_source_kind"],
+        Value::String("unknown".to_string())
+    );
+    assert_eq!(d["extended_card_access_visible"], Value::Bool(false));
+    assert_eq!(d["signature_material_visible"], Value::Bool(false));
+}
+
+/// Golden digests over `payload.discovery` via `digest_canonical_json` (sorted keys).
+/// If `discovery` shape or types change intentionally, update hashes and this comment.
+const G4_DISCOVERY_DIGEST_DEFAULT: &str =
+    "26b4d9c0105f4cc26d4b413e7b6b27effe5829f9f319a60b91ca490fd7776a13";
+const G4_DISCOVERY_DIGEST_AGENT_CARD_ATTR: &str =
+    "93f5c26d149e7400d38104c4479f332df4df23df0d1f4d25aef252aac87b9769";
+const G4_DISCOVERY_DIGEST_BOTH_FLAGS: &str =
+    "9d0f24e430e00ee3ec1bc595cb59e6e7d7d5b12c0c90e102ea4d26ad3890e665";
+/// Extended visibility only (`agent_card_source_kind` stays `unknown`).
+const G4_DISCOVERY_DIGEST_EXTENDED_ONLY: &str =
+    "13e23c6783de838b52ca92d787569bccd3cadc0f8900f1bf76b42262959f77ba";
+
 #[test]
 fn protocol_metadata_uses_exact_version_and_range_capability() {
     let adapter = A2aAdapter;
@@ -92,6 +115,11 @@ fn strict_agent_capabilities_fixture_emits_deterministic_event() {
     assert_eq!(
         first.events[0].payload["agent"]["capabilities"],
         serde_json::json!(["agent.describe", "artifacts.share", "tasks.update"])
+    );
+    assert_discovery_v1_defaults(&first.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&first.events[0].payload["discovery"]),
+        G4_DISCOVERY_DIGEST_DEFAULT
     );
 }
 
@@ -432,6 +460,238 @@ fn excessive_array_length_fails_measurement_contract() {
         .expect_err("oversized array must fail");
     assert_eq!(err.kind, AdapterErrorKind::Measurement);
     assert!(err.message.contains("max_array_length"));
+}
+
+#[test]
+fn g4_n1_non_allowlisted_attributes_only_yields_unknown_kind() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_discovery_v1_defaults(&batch.events[0].payload);
+}
+
+#[test]
+fn g4_n2_assay_g4_wrong_shape_does_not_promote() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let mut packet: Value =
+        serde_json::from_slice(&fixture("a2a_happy_agent_capabilities.json")).unwrap();
+    packet
+        .as_object_mut()
+        .unwrap()
+        .get_mut("attributes")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert("assay_g4".to_string(), Value::String("bad".to_string()));
+    let payload = serde_json::to_vec(&packet).unwrap();
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_discovery_v1_defaults(&batch.events[0].payload);
+}
+
+#[test]
+fn g4_n3_unmapped_top_level_fields_alone_do_not_affect_discovery() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let mut packet: Value =
+        serde_json::from_slice(&fixture("a2a_happy_agent_capabilities.json")).unwrap();
+    packet
+        .as_object_mut()
+        .unwrap()
+        .insert("extra_top_level".to_string(), Value::Number(1.into()));
+    let payload = serde_json::to_vec(&packet).unwrap();
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert!(batch.lossiness.unmapped_fields_count >= 1);
+    assert_discovery_v1_defaults(&batch.events[0].payload);
+}
+
+#[test]
+fn g4_attributes_driven_agent_card_sets_kind_attributes() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_agent_card.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let d = &batch.events[0].payload["discovery"];
+    assert_eq!(d["agent_card_visible"], Value::Bool(true));
+    assert_eq!(
+        d["agent_card_source_kind"],
+        Value::String("attributes".to_string())
+    );
+    assert_eq!(d["extended_card_access_visible"], Value::Bool(false));
+    assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(
+        digest_canonical_json(d),
+        G4_DISCOVERY_DIGEST_AGENT_CARD_ATTR
+    );
+}
+
+/// When `discovery` is non-default, full `AdapterBatch` digests must still be byte-stable across
+/// repeated conversion (not only `payload["discovery"]` golden hashes).
+#[test]
+fn g4_non_default_discovery_full_batch_digest_is_deterministic() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_agent_card.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let first = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let second = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_eq!(
+        digest_canonical_json(&first),
+        digest_canonical_json(&second)
+    );
+}
+
+#[test]
+fn g4_both_visibility_flags_true_fixture_shows_independence() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_both_visible.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let d = &batch.events[0].payload["discovery"];
+    assert_eq!(d["agent_card_visible"], Value::Bool(true));
+    assert_eq!(
+        d["agent_card_source_kind"],
+        Value::String("attributes".to_string())
+    );
+    assert_eq!(d["extended_card_access_visible"], Value::Bool(true));
+    assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(digest_canonical_json(d), G4_DISCOVERY_DIGEST_BOTH_FLAGS);
+}
+
+#[test]
+fn g4_extended_access_visible_positive_fixture() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_agent_capabilities_g4_extended.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let d = &batch.events[0].payload["discovery"];
+    assert_eq!(d["agent_card_visible"], Value::Bool(false));
+    assert_eq!(
+        d["agent_card_source_kind"],
+        Value::String("unknown".to_string())
+    );
+    assert_eq!(d["extended_card_access_visible"], Value::Bool(true));
+    assert_eq!(d["signature_material_visible"], Value::Bool(false));
+    assert_eq!(digest_canonical_json(d), G4_DISCOVERY_DIGEST_EXTENDED_ONLY);
+}
+
+#[test]
+fn g4_n5_strict_and_lenient_same_discovery_without_assay_g4() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_task_requested.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2"),
+    };
+    let strict = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("strict");
+    let lenient = adapter
+        .convert(
+            input,
+            &ConvertOptions {
+                mode: ConvertMode::Lenient,
+                max_payload_bytes: Some(8_192),
+                max_json_depth: None,
+                max_array_length: None,
+            },
+            &writer,
+        )
+        .expect("lenient");
+    assert_eq!(
+        strict.events[0].payload["discovery"],
+        lenient.events[0].payload["discovery"]
+    );
+    assert_discovery_v1_defaults(&strict.events[0].payload);
+}
+
+#[test]
+fn g4_missing_agent_card_object_does_not_promote() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let mut packet: Value =
+        serde_json::from_slice(&fixture("a2a_happy_agent_capabilities.json")).unwrap();
+    packet
+        .as_object_mut()
+        .unwrap()
+        .get_mut("attributes")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "assay_g4".to_string(),
+            serde_json::json!({ "priority": "nested" }),
+        );
+    let payload = serde_json::to_vec(&packet).unwrap();
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2.0"),
+    };
+    let batch = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_eq!(
+        batch.events[0].payload["discovery"]["agent_card_visible"],
+        false
+    );
+    assert_eq!(
+        batch.events[0].payload["discovery"]["agent_card_source_kind"],
+        Value::String("unknown".to_string())
+    );
 }
 
 proptest! {

@@ -158,6 +158,10 @@ pub struct PolicyDecisionEventContext {
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
+    /// G3 v1: allowlisted scheme when policy-projected
+    pub auth_scheme: Option<String>,
+    /// G3 v1: trimmed issuer string
+    pub auth_issuer: Option<String>,
     pub delegated_from: Option<String>,
     pub delegation_depth: Option<u32>,
 }
@@ -398,6 +402,12 @@ pub struct DecisionData {
     /// Authentication context summary (non-sensitive, compact)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_context_summary: Option<String>,
+    /// G3 v1: `oauth2` | `jwt_bearer` (policy-projected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_scheme: Option<String>,
+    /// G3 v1: trimmed issuer (`iss`) string
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_issuer: Option<String>,
     /// Upstream delegated authority identifier, when explicitly carried by the supported flow
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegated_from: Option<String>,
@@ -662,6 +672,8 @@ impl DecisionEvent {
                 lane: None,
                 principal: None,
                 auth_context_summary: None,
+                auth_scheme: None,
+                auth_issuer: None,
                 delegated_from: None,
                 delegation_depth: None,
                 decision: Decision::Error, // Default to error, will be set
@@ -794,6 +806,8 @@ impl DecisionEvent {
             lane,
             principal,
             auth_context_summary,
+            auth_scheme,
+            auth_issuer,
             delegated_from,
             delegation_depth,
         } = context;
@@ -843,6 +857,8 @@ impl DecisionEvent {
         self.data.lane = lane;
         self.data.principal = principal;
         self.data.auth_context_summary = auth_context_summary;
+        self.data.auth_scheme = auth_scheme;
+        self.data.auth_issuer = auth_issuer;
         self.data.delegated_from = delegated_from;
         self.data.delegation_depth = delegation_depth;
         refresh_fulfillment_normalization(&mut self.data);
@@ -1016,6 +1032,8 @@ impl DecisionEmitterGuard {
                 lane,
                 principal,
                 auth_context_summary,
+                auth_scheme,
+                auth_issuer,
                 delegated_from,
                 delegation_depth,
             } = context;
@@ -1065,6 +1083,8 @@ impl DecisionEmitterGuard {
             event.data.lane = lane;
             event.data.principal = principal;
             event.data.auth_context_summary = auth_context_summary;
+            event.data.auth_scheme = auth_scheme;
+            event.data.auth_issuer = auth_issuer;
             event.data.delegated_from = delegated_from;
             event.data.delegation_depth = delegation_depth;
             refresh_fulfillment_normalization(&mut event.data);

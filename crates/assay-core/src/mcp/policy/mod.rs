@@ -172,6 +172,10 @@ pub struct PolicyMatchMetadata {
     pub lane: Option<String>,
     pub principal: Option<String>,
     pub auth_context_summary: Option<String>,
+    /// G3 v1: `oauth2` | `jwt_bearer` when policy-projected
+    pub auth_scheme: Option<String>,
+    /// G3 v1: trimmed issuer (`iss`) string
+    pub auth_issuer: Option<String>,
     pub delegated_from: Option<String>,
     pub delegation_depth: Option<u32>,
 }

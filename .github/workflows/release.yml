@@ -379,7 +379,11 @@ jobs:
 
       - name: Generate release notes
         id: notes
+        env:
+          REPO: ${{ github.repository }}
+        shell: bash
         run: |
+          set -euo pipefail
           cat > release_notes.md << 'EOF'
           ## Assay ${{ steps.version.outputs.version }}
 
@@ -410,8 +414,9 @@ jobs:
 
           ### Changelog
 
-          See [CHANGELOG.md](https://github.com/assay-dev/assay/blob/main/CHANGELOG.md) for details.
+          See [CHANGELOG.md](__CHANGELOG_URL__) for details.
           EOF
+          sed -i "s|__CHANGELOG_URL__|https://github.com/${REPO}/blob/main/CHANGELOG.md|g" release_notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
@@ -491,7 +496,7 @@ jobs:
 
       - name: Authenticate with crates.io
         id: auth
-        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1
 
       - name: Publish Crates (Idempotent)
         run: |

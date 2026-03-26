@@ -1,0 +1,66 @@
+name: a2a-discovery-card-followup
+version: "1.0.0"
+kind: security
+description: A2A companion pack — bounded visibility on G4-A adapter-emitted payload.discovery (agent card + extended card access surfaces observed)
+author: Assay Team
+license: Apache-2.0
+
+disclaimer: |
+  This pack evaluates bounded visibility flags on canonical `assay.adapter.a2a.*` evidence where the
+  adapter emits G4-A `payload.discovery` (see G4-A-PHASE1-FREEZE.md). Passing does NOT prove Agent Card
+  authenticity, signing, authorization outcomes, or broad "A2A security." Requires Assay + adapter versions
+  that emit `/data/discovery/*` on A2A events; bundles produced without G4-A discovery emission will
+  typically fail these rules in normal lint (missing pack-required discovery evidence), not because the
+  bundle is globally invalid.
+  requires.assay_min_version is ">=3.3.0" (first release line shipping G4-A payload.discovery in artifacts;
+  tighten in release notes when the pack ships if needed — do not inherit P2b substrate floors by default).
+
+requires:
+  assay_min_version: ">=3.3.0"
+  evidence_schema_version: "1.0"
+
+rules:
+  - id: A2A-DC-001
+    severity: warning
+    description: At least one canonical A2A event has payload.discovery.agent_card_visible asserted as true (observed visibility only).
+    help_markdown: |
+      ## Agent card visibility observed (G4-A)
+
+      **What this checks:**
+      - At least one event has JSON boolean `true` at `/data/discovery/agent_card_visible` on the emitted
+        adapter payload (per G4-A Phase 1 freeze). The value must be a JSON boolean — not a string, number,
+        or other type (strict equality).
+
+      **Pre-G4-A / missing seam:** If your bundle has no `/data/discovery` on A2A events (older substrate
+      without G4-A emission), this rule fails with “missing” discovery evidence for **this pack**, not a
+      claim that the whole bundle is invalid. Install Assay + `assay-adapter-a2a` versions that emit
+      G4-A `payload.discovery` (see pack `requires.assay_min_version`).
+
+      **What this does not prove:**
+      - That the Agent Card is authentic, unspoofed, complete, or “real”
+    check:
+      type: json_path_exists
+      paths:
+        - /data/discovery/agent_card_visible
+      value_equals: true
+
+  - id: A2A-DC-002
+    severity: warning
+    description: At least one canonical A2A event has payload.discovery.extended_card_access_visible asserted as true (observed visibility only).
+    help_markdown: |
+      ## Extended card access visibility observed (G4-A)
+
+      **What this checks:**
+      - At least one event has JSON boolean `true` at `/data/discovery/extended_card_access_visible`
+        (strict JSON equality — not a string or other type).
+
+      **Pre-G4-A / missing seam:** Same as A2A-DC-001 — without G4-A `payload.discovery` on the event payload,
+      this rule signals missing discovery evidence for **this pack**, not global bundle invalidity.
+
+      **What this does not prove:**
+      - That authentication succeeded, authorization held, access was legitimate, or any party was trusted
+    check:
+      type: json_path_exists
+      paths:
+        - /data/discovery/extended_card_access_visible
+      value_equals: true

@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use super::PROTOCOL_NAME;
+use super::{discovery::discovery_object, PROTOCOL_NAME};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_payload(
@@ -111,6 +111,8 @@ pub(super) fn build_payload(
     if let Some(attributes) = attributes {
         payload.insert("attributes".to_string(), normalize_json(attributes));
     }
+
+    payload.insert("discovery".to_string(), discovery_object(attributes));
 
     payload.insert(
         "unmapped_fields_count".to_string(),
