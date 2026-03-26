@@ -124,10 +124,10 @@ cargo fmt --all --check
 cargo clippy -q -p assay-evidence --all-targets -- -D warnings
 cargo check -q -p assay-evidence
 
-cargo test -q -p assay-evidence --lib 'lint::packs::loader_internal::tests::test_is_valid_pack_name' -- --exact
-cargo test -q -p assay-evidence --lib 'lint::packs::loader_internal::tests::test_builtin_wins_over_local' -- --exact
-cargo test -q -p assay-evidence --lib 'lint::packs::loader_internal::tests::test_local_invalid_yaml_fails' -- --exact
-cargo test -q -p assay-evidence --lib 'lint::packs::loader_internal::tests::test_path_wins_over_builtin' -- --exact
+cargo test -q -p assay-evidence --lib 'lint::packs::loader::loader_internal::tests::test_is_valid_pack_name' -- --exact
+cargo test -q -p assay-evidence --lib 'lint::packs::loader::loader_internal::tests::test_builtin_wins_over_local' -- --exact
+cargo test -q -p assay-evidence --lib 'lint::packs::loader::loader_internal::tests::test_local_invalid_yaml_fails' -- --exact
+cargo test -q -p assay-evidence --lib 'lint::packs::loader::loader_internal::tests::test_path_wins_over_builtin' -- --exact
 cargo test -q -p assay-evidence --lib 'lint::packs::schema::tests::test_supported_conditional_shape_parses' -- --exact
 cargo test -q -p assay-evidence --lib 'lint::packs::schema::tests::test_conditional_with_multiple_then_paths_is_unsupported' -- --exact
 cargo test -q -p assay-evidence --lib 'lint::packs::schema::tests::test_conditional_validation_requires_condition_object' -- --exact
