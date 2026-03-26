@@ -48,13 +48,31 @@ Step1 gate:
 
 ## Step2 (mechanical split preview)
 
-Target layout preview:
+Branch: `codex/wave44-evaluate-kernel-step2` (base: `main`)
+
+Target layout:
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs` (thin facade + `handle_tool_call`)
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/mod.rs`
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs`
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/scope.rs`
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/redaction.rs`
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/fail_closed.rs`
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/classification.rs`
+
+Step2 scope:
+- `crates/assay-core/src/mcp/tool_call_handler/mod.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/mod.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/scope.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/redaction.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/fail_closed.rs`
+- `crates/assay-core/src/mcp/tool_call_handler/evaluate_next/classification.rs`
+- `docs/contributing/SPLIT-PLAN-wave44-evaluate-kernel.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave44-evaluate-kernel-step2.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave44-evaluate-kernel-step2.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave44-evaluate-kernel-step2.md`
+- `scripts/ci/review-wave44-evaluate-kernel-step2.sh`
 
 Step2 principles:
 - 1:1 body moves
@@ -64,6 +82,16 @@ Step2 principles:
 - no obligation outcome normalization drift
 - no request-id / `tool_call_id` extraction drift
 - no mandate/authz semantic changes
+- no edits under `crates/assay-core/tests/**`
+- no workflow edits
+
+Current Step2 shape:
+- `evaluate.rs`: `266` LOC
+- `evaluate_next/approval.rs`: `177` LOC
+- `evaluate_next/scope.rs`: `126` LOC
+- `evaluate_next/redaction.rs`: `232` LOC
+- `evaluate_next/fail_closed.rs`: `55` LOC
+- `evaluate_next/classification.rs`: `191` LOC
 
 ## Step3 (closure)
 

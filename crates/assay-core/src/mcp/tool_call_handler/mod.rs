@@ -6,6 +6,7 @@
 
 mod emit;
 mod evaluate;
+mod evaluate_next;
 mod types;
 
 pub use types::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
