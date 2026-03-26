@@ -69,7 +69,7 @@ Wave43 freezes the following rules for the split:
 5. Existing internal convergence modules remain semantically stable while the main file is split.
 6. Step2 is mechanical-first: move bodies 1:1 before any cleanup.
 
-## Suggested Step2 target layout
+## Shipped Step2 layout
 
 ```text
 crates/assay-core/src/mcp/decision.rs              # stable facade
@@ -148,7 +148,20 @@ Mechanical split only:
 - keep inline unit tests in `decision.rs`
 
 ### Step3
-Docs + gate only closure
+Stabilization + micro-cleanup only:
+- visibility cleanup if strictly internal
+- import/comment/doc cleanup
+- no public contract drift
+- no new modules
+- no handler/policy/server expansion
+
+## Shipped status
+Wave43 Step2 shipped on `main` via `#955`.
+
+Wave43 Step3 is intentionally smaller:
+- close the split with docs/gates that forbid redesign drift
+- bound any follow-up cleanup to internal polish only
+- keep `decision.rs` as the public facade and `decision_next/*` as the split implementation
 
 ## Reviewer notes
 This wave must remain decision-kernel split planning only.
