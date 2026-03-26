@@ -105,6 +105,14 @@ Step2 principles:
 - no edits under `crates/assay-core/tests/**`
 - no workflow edits
 
+Current Step2 shape:
+- `engine.rs`: facade target `<= 320` LOC
+- `engine_next/matcher.rs`: tool/class match helpers
+- `engine_next/effects.rs`: obligation capture and contract evaluation helpers
+- `engine_next/precedence.rs`: deny/allow precedence helpers
+- `engine_next/fail_closed.rs`: tool-drift, rate-limit, schema-deny, and unconstrained fallback helpers
+- `engine_next/diagnostics.rs`: metadata finalization and delegation parsing helpers
+
 ## Step3 (closure)
 
 Docs+gate-only closure slice that re-runs Step2 invariants and limits any follow-up to
