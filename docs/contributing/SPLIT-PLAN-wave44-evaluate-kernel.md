@@ -95,7 +95,37 @@ Current Step2 shape:
 
 ## Step3 (closure)
 
-Docs+gate-only closure slice that re-runs Step2 invariants and limits any follow-up to micro-cleanup only.
+Branch: `codex/wave44-evaluate-kernel-step3` (base: `main`)
+
+Deliverables:
+- `docs/contributing/SPLIT-PLAN-wave44-evaluate-kernel.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave44-evaluate-kernel-step3.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave44-evaluate-kernel-step3.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave44-evaluate-kernel-step3.md`
+- `scripts/ci/review-wave44-evaluate-kernel-step3.sh`
+
+Step3 constraints:
+- docs+gate only
+- no edits under `crates/assay-core/src/mcp/tool_call_handler/**`
+- no edits under `crates/assay-core/tests/**`
+- no workflow edits
+- no new module cuts
+- no behavior cleanup beyond internal follow-up notes
+
+Step3 gate:
+- allowlist-only diff (the 5 Step3 files)
+- workflow-ban (`.github/workflows/*`)
+- hard fail on tracked changes in `crates/assay-core/src/mcp/tool_call_handler/**`
+- hard fail on untracked files in `crates/assay-core/src/mcp/tool_call_handler/**`
+- hard fail on tracked changes in `crates/assay-core/tests/**`
+- hard fail on untracked files in `crates/assay-core/tests/**`
+- `cargo fmt --check`
+- `cargo clippy -p assay-core --all-targets -- -D warnings`
+- targeted tests:
+  - `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::approval_required_missing_denies' -- --exact`
+  - `cargo test -q -p assay-core --test tool_taxonomy_policy_match tool_taxonomy_policy_match_handler_decision_event_records_classes -- --exact`
+  - `cargo test -q -p assay-core --test fulfillment_normalization fulfillment_normalizes_outcomes_and_sets_policy_deny_path -- --exact`
+  - `cargo test -q -p assay-core --test replay_diff_contract classify_replay_diff_unchanged -- --exact`
 
 ## Promote
 
@@ -105,3 +135,23 @@ Stacked chain:
 - Step3 -> Step2
 
 Final promote PR to `main` from Step3 once the chain is clean.
+
+## Shipped status
+
+Wave44 Step2 shipped on `main` via `#958`.
+
+Wave44 Step3 is intentionally smaller:
+- close the split with docs/gates that forbid redesign drift
+- keep `evaluate.rs` as the stable facade entrypoint
+- keep `evaluate_next/*` as the split implementation ownership boundary
+- bound any follow-up to micro-cleanup only
+
+## Reviewer notes
+
+This wave must remain evaluate-kernel closure only.
+
+Primary failure modes:
+- sneaking new `tool_call_handler/**` edits into a closure slice
+- expanding Step3 into another code refactor
+- loosening deny/fulfillment/replay invariants after Step2 shipped
+- proposing new module cuts before the split has had time to harden on `main`
