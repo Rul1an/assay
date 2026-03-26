@@ -34,7 +34,7 @@ For the hardening wave that introduced this document, see [PLAN-H1 — Trust Ker
 |------|--------|
 | `ENGINE_VERSION` | **1.2** (`crates/assay-evidence/src/lint/packs/checks.rs`) |
 | New check type | `g3_authorization_context_present` (same G3 v1 predicate as Trust Basis `authorization_context_visible` when verified) |
-| `json_path_exists` | Optional **`value_equals`** (JSON equality, no coercion) for P2c boolean `true` checks — **no** `ENGINE_VERSION` bump |
+| `json_path_exists` | Optional **`value_equals`** (JSON equality, no coercion) for P2c boolean `true` checks; when **`value_equals`** is set, **`paths` MUST contain exactly one JSON pointer** (enforced by the pack schema) — **no** `ENGINE_VERSION` bump |
 
 ## `mcp-signal-followup` built-in pack
 
