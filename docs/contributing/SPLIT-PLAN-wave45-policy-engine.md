@@ -115,8 +115,18 @@ Current Step2 shape:
 
 ## Step3 (closure)
 
-Docs+gate-only closure slice that re-runs Step2 invariants and limits any follow-up to
-micro-cleanup only.
+Wave45 Step2 shipped on `main` via `#961`.
+
+Step3 constraints keep `engine.rs` as the stable facade entrypoint and treat `engine_next/*` as
+the shipped split ownership boundary.
+
+Step3 constraints:
+- docs+gate only
+- no edits under `crates/assay-core/src/mcp/policy/**`
+- no edits under `crates/assay-core/tests/**`
+- no new module cuts
+- no behavior cleanup beyond internal follow-up notes
+- no allow/deny, precedence, fail-closed, or decision-contract drift
 
 ## Promote
 
