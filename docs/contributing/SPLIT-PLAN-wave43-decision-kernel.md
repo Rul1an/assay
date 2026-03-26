@@ -80,8 +80,11 @@ crates/assay-core/src/mcp/decision_next/
   emitters.rs
   guard.rs
   normalization.rs
-  tests.rs
 ```
+
+Step2 keeps the existing inline `#[cfg(test)]` block in `decision.rs`.
+That keeps test selectors and reviewer expectations stable while the runtime
+implementation moves behind the facade.
 
 Current internal contract modules may remain where they are during Step2:
 - `consumer_contract`
@@ -142,6 +145,7 @@ Mechanical split only:
 - introduce `decision_next/`
 - move bodies 1:1 behind a stable facade
 - keep current contract modules semantically unchanged
+- keep inline unit tests in `decision.rs`
 
 ### Step3
 Docs + gate only closure
