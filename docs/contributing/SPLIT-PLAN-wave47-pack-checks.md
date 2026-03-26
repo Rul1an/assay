@@ -6,8 +6,8 @@ Split `crates/assay-evidence/src/lint/packs/checks.rs` behind a stable facade so
 execution can be reviewed in smaller, responsibility-based modules without changing runtime
 semantics or pack-visible findings.
 
-Current hotspot baseline on `origin/main @ c723aff2`:
-- `crates/assay-evidence/src/lint/packs/checks.rs`: `785` LOC
+Current hotspot baseline on `origin/main @ b5f359fa`:
+- `crates/assay-evidence/src/lint/packs/checks.rs`: `785` LOC before Step2, `283` LOC after Step2
 - `crates/assay-evidence/src/lint/packs/schema.rs`: `245` LOC after Wave46
 - `crates/assay-evidence/tests/pack_engine_conditional_test.rs`: execution contract companion
 - `crates/assay-evidence/tests/mcp_signal_followup_pack.rs`: G3/runtime parity companion
@@ -18,6 +18,7 @@ Current hotspot baseline on `origin/main @ c723aff2`:
 
 - Wave46 closed on `main` via `#965`.
 - Step1 is the freeze slice for `checks.rs`.
+- Step2 is the mechanical split slice for `checks.rs`.
 - `schema.rs` and `schema_next/*` are already shipped from Wave46 and are explicitly out of scope.
 - `checks.rs` follows `schema.rs` in the required `schema.rs -> checks.rs` order for `R4`.
 
@@ -53,6 +54,17 @@ Step2 may reorganize internal ownership behind `checks.rs`, but must not redefin
 - No severity / rule-id / explanation coupling drift.
 - No built-in/open parity drift.
 - No pack-engine spec or version-line drift.
+
+## Step2 layout under review
+
+- `crates/assay-evidence/src/lint/packs/checks.rs` keeps the stable facade entrypoint, top-level dispatch,
+  `CheckContext`, `CheckResult`, `ENGINE_VERSION`, and existing inline tests
+- `crates/assay-evidence/src/lint/packs/checks_next/mod.rs`
+- `crates/assay-evidence/src/lint/packs/checks_next/event.rs`
+- `crates/assay-evidence/src/lint/packs/checks_next/json_path.rs`
+- `crates/assay-evidence/src/lint/packs/checks_next/conditional.rs`
+- `crates/assay-evidence/src/lint/packs/checks_next/manifest.rs`
+- `crates/assay-evidence/src/lint/packs/checks_next/finding.rs`
 
 ## Intended Step2 ownership split
 
