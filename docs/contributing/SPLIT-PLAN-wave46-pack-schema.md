@@ -4,18 +4,18 @@
 
 Split `crates/assay-evidence/src/lint/packs/schema.rs` behind a stable facade so the pack-schema contract can be reviewed in smaller, responsibility-based modules without changing validation behavior.
 
-Current hotspot baseline on `origin/main @ dcac6383`:
-- `crates/assay-evidence/src/lint/packs/schema.rs`: `844` LOC
+Current hotspot baseline on `origin/main @ 23685893`:
+- `crates/assay-evidence/src/lint/packs/schema.rs`: `844` LOC before Step2, `245` LOC after Step2
 - `crates/assay-evidence/src/lint/packs/checks.rs`: `785` LOC
 - `crates/assay-evidence/tests/pack_engine_conditional_test.rs`: conditional contract companion
 - `crates/assay-evidence/tests/a2a_discovery_card_followup_pack.rs`: built-in/open parity companion
 - `crates/assay-evidence/tests/mcp_signal_followup_pack.rs`: built-in/open parity companion
 
-## Step sequence
+## Status
 
-1. Step1 freeze/gates only — merged on `main` via `#963`
-2. Step2 mechanical split to `schema_next/*`
-3. Step3 closure / micro-cleanup gates only
+- Wave46 Step1 merged on `main` via `#963`.
+- Wave46 Step2 shipped on `main` via `#964`.
+- Step3 is the closure slice that records the shipped split and forbids follow-on redesign drift in this wave.
 
 ## Frozen public surface
 
@@ -37,10 +37,9 @@ Step2 may reorganize internal ownership behind `schema.rs`, but must not redefin
 - loader-visible built-in/open pack loadability and parity assumptions
 - validation error category or reason-string meaning
 
-## Step2 scope
+## Shipped Step2 layout
 
-Allowed implementation files:
-- `crates/assay-evidence/src/lint/packs/schema.rs`
+- `crates/assay-evidence/src/lint/packs/schema.rs` keeps `schema.rs` as the stable facade entrypoint
 - `crates/assay-evidence/src/lint/packs/schema_next/mod.rs`
 - `crates/assay-evidence/src/lint/packs/schema_next/types.rs`
 - `crates/assay-evidence/src/lint/packs/schema_next/serde.rs`
@@ -48,35 +47,15 @@ Allowed implementation files:
 - `crates/assay-evidence/src/lint/packs/schema_next/conditional.rs`
 - `crates/assay-evidence/src/lint/packs/schema_next/errors.rs`
 
-Allowed review artifacts:
-- `docs/contributing/SPLIT-PLAN-wave46-pack-schema.md`
-- `docs/contributing/SPLIT-CHECKLIST-wave46-pack-schema-step2.md`
-- `docs/contributing/SPLIT-MOVE-MAP-wave46-pack-schema-step2.md`
-- `docs/contributing/SPLIT-REVIEW-PACK-wave46-pack-schema-step2.md`
-- `scripts/ci/review-wave46-pack-schema-step2.sh`
+## Step3 constraints
 
-Step2 principles:
-- 1:1 body moves
-- stable schema types and validation behavior
-- no `json_path_exists` / `value_equals` drift
-- no conditional-shape or unsupported-path drift
-- no loader or built-in/open pack parity drift
+- docs+gates only
+- no edits under `crates/assay-evidence/src/lint/packs/**`
 - no edits under `crates/assay-evidence/tests/**`
 - no edits under `packs/open/**`
 - no workflow edits
-
-Target layout:
-- `schema.rs` as thin facade + stable exports + existing inline tests
-- `schema_next/types.rs`
-- `schema_next/serde.rs`
-- `schema_next/validation.rs`
-- `schema_next/conditional.rs`
-- `schema_next/errors.rs`
-
-## Step3 (closure)
-
-Docs+gate-only closure slice that re-runs Step2 invariants and limits any follow-up to
-micro-cleanup only.
+- no new module cuts
+- no behavior cleanup beyond internal follow-up notes
 
 ## Reviewer notes
 
