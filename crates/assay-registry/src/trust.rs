@@ -32,7 +32,9 @@ use trust_next::cache;
 use trust_next::manifest;
 #[cfg(test)]
 use trust_next::pinned::parse_pinned_roots_json_impl;
-use trust_next::pinned::{insert_pinned_key, load_production_roots_impl};
+use trust_next::pinned::{
+    insert_pinned_key, insert_prepared_pinned_key, load_production_roots_impl, prepare_pinned_key,
+};
 
 /// Trust store for signing keys.
 #[derive(Debug, Clone)]
@@ -118,8 +120,10 @@ impl TrustStore {
 
     /// Add a pinned root key.
     pub async fn add_pinned_key(&self, key: &TrustedKey) -> RegistryResult<()> {
+        let prepared = prepare_pinned_key(key)?;
         let mut inner = self.inner.write().await;
-        insert_pinned_key(&mut inner, key)
+        insert_prepared_pinned_key(&mut inner, prepared);
+        Ok(())
     }
 
     /// Add keys from a manifest (fetched from registry).

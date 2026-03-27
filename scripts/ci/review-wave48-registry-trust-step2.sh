@@ -20,13 +20,15 @@ ALLOWED_FILES=(
   "scripts/ci/review-wave48-registry-trust-step2.sh"
 )
 
+changed_files() {
+  git diff --name-only "$BASE_REF"...HEAD || true
+  git diff --name-only || true
+  git diff --name-only --cached || true
+  git ls-files --others --exclude-standard || true
+}
+
 DIFF_FILES=()
-while IFS= read -r file; do
-  DIFF_FILES+=("$file")
-done < <(git diff --name-only "$BASE_REF"...HEAD)
-while IFS= read -r file; do
-  DIFF_FILES+=("$file")
-done < <(git ls-files --others --exclude-standard)
+mapfile -t DIFF_FILES < <(changed_files | awk 'NF' | sort -u)
 
 if (( ${#DIFF_FILES[@]} > 0 )); then
   for file in "${DIFF_FILES[@]}"; do
@@ -53,7 +55,7 @@ fi
 if (( ${#DIFF_FILES[@]} > 0 )); then
   for file in "${DIFF_FILES[@]}"; do
     [[ -z "$file" ]] && continue
-    if [[ "$file" == crates/assay-registry/tests/* ]]; then
+    if [[ "$file" =~ ^crates/assay-registry/tests/ ]]; then
       echo "registry tests must remain untouched in Step2" >&2
       exit 1
     fi
