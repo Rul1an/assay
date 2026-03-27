@@ -14,7 +14,7 @@ This plan intentionally follows Rust/Cargo integration-test conventions:
 - avoid fragmenting one contract surface into many top-level integration-test crates unless
   later CI or ownership pressure clearly justifies that
 
-Current hotspot baseline on `origin/main @ 2951b3ef`:
+Current hotspot baseline on `origin/main @ ff8deb26`:
 
 - `crates/assay-core/tests/decision_emit_invariant.rs`: `1293` LOC
 - `crates/assay-core/src/mcp/decision.rs`: already split in Wave43 and now the primary emitted-decision companion
@@ -65,8 +65,8 @@ T-R1 freezes the expectation that any later split keeps these test-surface prope
 ## Status
 
 - T-R1 plan shipped on `main` via `#978`.
-- Step1 is the freeze/gates-only slice for `decision_emit_invariant.rs`.
-- No code movement belongs in Step1.
+- T-R1 Step1 shipped on `main` via `#979`.
+- Step2 is the mechanical multi-file target conversion for `decision_emit_invariant`.
 - T-R2 remains out of scope for this wave.
 
 ## Step1 (freeze)
