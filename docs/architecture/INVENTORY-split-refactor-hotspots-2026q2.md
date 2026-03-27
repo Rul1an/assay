@@ -1,8 +1,8 @@
 # Inventory: Split / Refactor Hotspots (Q2 2026)
 
-> Status: Proposed inventory baseline
-> Date: 2026-03-26
-> Baseline: `origin/main` @ `47b67769`
+> Status: Refreshed inventory baseline
+> Date: 2026-03-27
+> Baseline: `origin/main` @ `bfbb2989`
 > Scope: Largest handwritten Rust hotspots plus immediate watchlist candidates
 > Constraint: Inventory only; no behavior or API changes are implied by this document
 
@@ -32,55 +32,75 @@ The baseline starts from the current largest handwritten Rust files on `origin/m
 ## Hotspot signal snapshot
 
 This is a compact snapshot of simple review signals at the baseline head. It is not a quality
-score, but it does help explain why some files are better first-wave candidates than others.
+score, but it does help explain why some files are better next-wave candidates than others after
+Wave43-Wave49 already retired the earlier MCP / registry / pack / sim hotspots.
 
 | File | LOC | `fn` count | Test attrs | `unwrap/expect` | `unsafe` |
 |---|---:|---:|---:|---:|---:|
-| `crates/assay-core/src/mcp/decision.rs` | 1426 | 42 | 10 | 10 | 0 |
 | `crates/assay-core/tests/decision_emit_invariant.rs` | 1293 | 43 | 30 | 36 | 0 |
 | `crates/assay-core/src/mcp/tool_call_handler/tests.rs` | 1242 | 38 | 27 | 3 | 0 |
-| `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs` | 1016 | 31 | 0 | 0 | 0 |
-| `crates/assay-sim/src/attacks/memory_poison.rs` | 954 | 27 | 9 | 1 | 0 |
-| `crates/assay-evidence/src/lint/packs/schema.rs` | 844 | 22 | 10 | 1 | 0 |
-| `crates/assay-registry/src/trust.rs` | 838 | 16 | 19 | 24 | 0 |
-| `crates/assay-core/src/mcp/policy/engine.rs` | 799 | 25 | 3 | 2 | 0 |
-| `crates/assay-evidence/src/lint/packs/checks.rs` | 785 | 27 | 3 | 3 | 0 |
-| `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | 15 | 6 | 4 | 2 |
+| `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | 16 | 6 | 4 | 2 |
+| `crates/assay-adapter-a2a/src/adapter_impl/tests.rs` | 729 | 28 | 23 | 37 | 0 |
+| `crates/assay-core/src/engine/runner.rs` | 696 | 25 | 6 | 12 | 0 |
+| `crates/assay-registry/src/auth.rs` | 685 | 27 | 13 | 11 | 0 |
+| `crates/assay-evidence/src/trust_basis.rs` | 678 | 22 | 11 | 19 | 0 |
+| `crates/assay-core/src/mcp/proxy.rs` | 672 | 21 | 12 | 9 | 0 |
+| `crates/assay-core/src/storage/store.rs` | 658 | 34 | 0 | 23 | 0 |
+| `crates/assay-core/src/vcr/mod.rs` | 654 | 26 | 7 | 4 | 0 |
+
+## Most recent top 10 handwritten hotspots
+
+This is the current raw size-ranked handwritten top 10 on `origin/main`, excluding the generated
+`crates/assay-ebpf/src/vmlinux.rs` outlier.
+
+| Rank | File | LOC | Kind |
+|---|---|---:|---|
+| 1 | `crates/assay-core/tests/decision_emit_invariant.rs` | 1293 | test-heavy |
+| 2 | `crates/assay-core/src/mcp/tool_call_handler/tests.rs` | 1242 | test-heavy |
+| 3 | `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | production |
+| 4 | `crates/assay-adapter-a2a/src/adapter_impl/tests.rs` | 729 | test-heavy |
+| 5 | `crates/assay-core/src/engine/runner.rs` | 696 | partially split production |
+| 6 | `crates/assay-registry/src/auth.rs` | 685 | production |
+| 7 | `crates/assay-evidence/src/trust_basis.rs` | 678 | fresh public surface |
+| 8 | `crates/assay-core/src/mcp/proxy.rs` | 672 | production |
+| 9 | `crates/assay-core/src/storage/store.rs` | 658 | partially split production |
+| 10 | `crates/assay-core/src/vcr/mod.rs` | 654 | production |
 
 ## Inventory table
 
 | Priority band | File | LOC | Role | Current split state | Immediate split posture | Suggested next wave |
 |---|---|---:|---|---|---|---|
-| `P1` | `crates/assay-core/src/mcp/decision.rs` | 1426 | MCP decision kernel, event emission, convergence, replay basis | **Partially split already** via internal submodules (`consumer_contract`, `context_contract`, `deny_convergence`, `outcome_convergence`, `replay_compat`, `replay_diff`) but still one very large facade/body | **Split now**. Best next candidate for a thin facade + internal `decision_next/` style structure around emitter/guard, data projection, reason codes, serialization, and replay surfaces | `R1` |
-| `P1` | `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs` | 1016 | Tool-call evaluation flow, fail-closed handling, approval / scope / redact enforcement | **Not yet structurally split**; one large evaluation body under the already-split `tool_call_handler/` directory | **Split now**. Good mechanical candidate for `approval`, `restrict_scope`, `redact_args`, `policy_eval`, and `result_mapping` seams behind stable handler types | `R2` |
-| `P1` | `crates/assay-core/src/mcp/policy/engine.rs` | 799 | MCP policy engine decisions and metadata enrichment | **Still dense single module** with policy, deny/match, obligation, and metadata logic co-located | **Split soon after `R1/R2`**. Strongly coupled to decision/tool-call behavior, so it should follow once decision seams are frozen | `R3` |
-| `P1` | `crates/assay-evidence/src/lint/packs/schema.rs` | 844 | Pack schema, serde shape, validation contract | **Single schema module** with pack metadata, rule types, conditional forms, validation errors | **Split now**. Good low-drift candidate into `types`, `serde`, `validation`, and `conditional` seams | `R4` |
-| `P1` | `crates/assay-evidence/src/lint/packs/checks.rs` | 785 | Pack engine check execution | **Single implementation module** for many pack checks | **Split now or immediately after `schema.rs`**. Natural boundary around event checks, manifest checks, JSON path checks, and auth-context checks | `R4` |
-| `P2` | `crates/assay-registry/src/trust.rs` | 838 | Trust store, pinned roots, manifest refresh, cache lifetime | **Single security-sensitive module** | **Split later, not first**. Worth doing, but only with strict behavior freeze because trust-store semantics and cache timing are easy to drift | `R5` |
-| `P2` | `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | Sandbox CLI orchestration, backend selection, degradation signaling, profile hookup | **Single command module** with embedded tests | **Split later** into CLI orchestration vs backend/degradation/profile helpers. Medium payoff, but less urgent than core MCP / pack engine hotspots | `R6` |
-| `P3` | `crates/assay-core/tests/decision_emit_invariant.rs` | 1293 | Decision invariant regression tests | **Large test-only file** | **Do not split first as production refactor**. Treat as companion cleanup after `R1`, likely into fixtures + scenario groups | `T-R1` |
-| `P3` | `crates/assay-core/src/mcp/tool_call_handler/tests.rs` | 1242 | Tool call handler regression tests | **Large test-only file** | **Do not split first as production refactor**. Best handled as a follow-on to `R2`, once handler seams are stable | `T-R2` |
-| `P3` | `crates/assay-sim/src/attacks/memory_poison.rs` | 954 | Deterministic attack simulation vectors | **Single simulation module** | **Defer**. Useful cleanup candidate, but not a current operational hotspot on the main trust-compiler/product path | `R7` |
+| `P1` | `crates/assay-registry/src/auth.rs` | 685 | Registry auth, token providers, OIDC exchange, auth caching | **Single security-sensitive module** with provider logic, token exchange, and cache coupling co-located | **Split next**. Best new production hotspot after Wave49: large enough, unsplit, and bounded around token provider / OIDC / exchange / cache seams | `R50` |
+| `P1` | `crates/assay-core/src/mcp/proxy.rs` | 672 | MCP proxy config, lifecycle, process/http bridging, and test-heavy companion logic | **Still one dense module** despite being runtime-central | **Split soon after `R50`**. Good candidate for config, launch/lifecycle, and transport-facing helper seams behind a stable proxy surface | `R51` |
+| `P1` | `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | Sandbox CLI orchestration, backend selection, degradation signaling, profile hookup | **Single command module** with embedded tests and `unsafe` usage | **Split soon, but after `R50/R51`**. Valuable, though a bit less central than registry/core runtime seams | `R52` |
+| `P2` | `crates/assay-core/src/vcr/mod.rs` | 654 | VCR cassette client, scrub config, metadata, and response handling | **Single dense module** | **Strong later candidate** once the next registry/core hotspot is retired | `R53` |
+| `P2` | `crates/assay-registry/src/lockfile.rs` | 649 | Registry lockfile read/write, materialization, and validation paths | **Single registry implementation module** | **Split later**. Reasonable next registry slice once auth has a stable freeze and split history behind it | `R54` |
+| `P2` | `crates/assay-cli/src/cli/commands/profile.rs` | 651 | Profile CLI orchestration and status/report handling | **Single command module** | **Split later**. Similar shape to `sandbox.rs` but lower urgency | `R55` |
+| `P3` | `crates/assay-core/tests/decision_emit_invariant.rs` | 1293 | Decision invariant regression tests | **Large test-only file** | **Do not split first as production refactor**. Treat as companion cleanup after the production seams it validates are fully stable | `T-R1` |
+| `P3` | `crates/assay-core/src/mcp/tool_call_handler/tests.rs` | 1242 | Tool-call handler regression tests | **Large test-only file** | **Do not split first as production refactor**. Best handled only after the handler seams have had time to settle on `main` | `T-R2` |
+| `P3` | `crates/assay-adapter-a2a/src/adapter_impl/tests.rs` | 729 | Adapter integration / contract regression tests | **Large test-only file** | **Defer** until there is an actual adapter production seam to decompose behind it | `T-A2A` |
 | `Watchlist` | `crates/assay-core/src/engine/runner.rs` | 696 | Runner facade for eval execution | **Already partially split** via `runner_next/` | **Do not prioritize now**. Monitor facade thinness only; not a first refactor wave | monitor |
-| `Watchlist` | `crates/assay-evidence/src/trust_basis.rs` | 678 | Trust Basis compiler core | **Fresh trust-compiler surface** | **Do not split now**. Keep stable until the surrounding trust-compiler and product boundaries settle; avoid refactoring a newly-shipped public surface too early | monitor |
+| `Watchlist` | `crates/assay-evidence/src/trust_basis.rs` | 678 | Trust Basis compiler core | **Fresh public trust-compiler surface** | **Do not split now**. Keep stable until the surrounding trust-compiler and release surface have had more soak time | monitor |
+| `Watchlist` | `crates/assay-core/src/storage/store.rs` | 658 | Storage facade over `store_internal::*` helpers | **Already partially split** via `store_internal` | **Do not prioritize now**. Reassess only if the facade thickens again or store-internal boundaries become hard to review | monitor |
 
 ## Why these bands
 
 ### `P1` — best near-term split candidates
 
-These are the strongest candidates because they combine:
+These are the strongest current candidates because they combine:
 
 - large enough size to hurt reviewability
-- central runtime or pack-engine behavior
+- central runtime or registry/CLI behavior
 - bounded seams that can be moved mechanically behind stable facades
-- immediate payoff for future trust-compiler and MCP work
+- immediate payoff without reopening freshly settled trust-compiler surfaces
 
 ### `P2` — valuable, but not the first wave
 
 These are real hotspots, but the timing matters:
 
-- [`crates/assay-registry/src/trust.rs`](../../crates/assay-registry/src/trust.rs) is security-sensitive and should not be mixed into a broader operational refactor wave
-- [`crates/assay-cli/src/cli/commands/sandbox.rs`](../../crates/assay-cli/src/cli/commands/sandbox.rs) has `unsafe` and backend-specific behavior, but it is less central to the current trust-compiler lane than MCP and pack-engine hotspots
+- [`crates/assay-core/src/vcr/mod.rs`](../../crates/assay-core/src/vcr/mod.rs) and
+  [`crates/assay-registry/src/lockfile.rs`](../../crates/assay-registry/src/lockfile.rs) are both solid candidates, but they are slightly less urgent than the next registry auth / core proxy seams
+- [`crates/assay-cli/src/cli/commands/profile.rs`](../../crates/assay-cli/src/cli/commands/profile.rs) is useful cleanup, but its payoff is lower than `sandbox.rs`
 
 ### `P3` — big files, but mostly test/support debt
 
@@ -91,120 +111,66 @@ The test-heavy files are worth splitting, but not as initial production waves:
 
 ## Recommended wave order
 
-### `R1` — Decision kernel split
+### `R50` — Registry auth split
 
 Primary file:
 
-- [`crates/assay-core/src/mcp/decision.rs`](../../crates/assay-core/src/mcp/decision.rs)
+- [`crates/assay-registry/src/auth.rs`](../../crates/assay-registry/src/auth.rs)
 
 Goal:
 
-- reduce `decision.rs` to a thin facade
-- isolate decision-event emission, guard lifecycle, projection, and replay-facing helpers
+- reduce `auth.rs` to a stable facade and isolate provider selection, OIDC exchange, cache
+  handling, and request/header plumbing
 
 Suggested target structure:
 
 ```text
-crates/assay-core/src/mcp/decision_next/
+crates/assay-registry/src/auth_next/
   mod.rs
-  emitter.rs
-  guard.rs
-  event_types.rs
-  decision_data.rs
-  reason_codes.rs
-  replay.rs
-  tests.rs
+  providers.rs
+  oidc.rs
+  cache.rs
+  headers.rs
+  diagnostics.rs
 ```
 
 Hard constraints:
 
-- no decision contract drift
-- no reason-code renames
-- no event payload shape changes
-- no replay-basis behavior changes
+- no registry auth semantic drift
+- no token refresh or cache lifetime drift
+- no request/exchange URL drift
+- no resolver or trust-store coupling drift
 
-### `R2` — Tool-call evaluation split
+### `R51` — MCP proxy split
 
 Primary file:
 
-- [`crates/assay-core/src/mcp/tool_call_handler/evaluate.rs`](../../crates/assay-core/src/mcp/tool_call_handler/evaluate.rs)
+- [`crates/assay-core/src/mcp/proxy.rs`](../../crates/assay-core/src/mcp/proxy.rs)
 
 Goal:
 
-- break the large evaluation flow into mechanical sub-seams behind the existing handler facade
+- isolate config parsing, process/http lifecycle, and proxy surface helpers behind the stable
+  `McpProxy` entrypoint
 
 Suggested target structure:
 
 ```text
-crates/assay-core/src/mcp/tool_call_handler/evaluate_next/
+crates/assay-core/src/mcp/proxy_next/
   mod.rs
-  policy_eval.rs
-  approval.rs
-  restrict_scope.rs
-  redact_args.rs
-  mandate.rs
-  result_mapping.rs
+  config.rs
+  lifecycle.rs
+  transport.rs
+  diagnostics.rs
 ```
 
 Hard constraints:
 
-- stable `ToolCallHandler` public surface
-- no obligation outcome drift
-- no fail-closed / degrade-read-only behavior drift
-- no event emission ordering drift
+- no proxy runtime behavior drift
+- no configuration-shape drift
+- no request/response contract drift
+- no coupling drift into handler/evidence/CLI layers
 
-### `R3` — Policy engine split
-
-Primary file:
-
-- [`crates/assay-core/src/mcp/policy/engine.rs`](../../crates/assay-core/src/mcp/policy/engine.rs)
-
-Goal:
-
-- separate matching, deny classification, obligation extraction, and metadata projection
-
-Why after `R1/R2`:
-
-- the current decision / handler / policy coupling is real
-- splitting `engine.rs` first would make drift-hunting harder because the consumer seams above it are still large
-
-### `R4` — Pack engine schema + checks split
-
-Primary files:
-
-- [`crates/assay-evidence/src/lint/packs/schema.rs`](../../crates/assay-evidence/src/lint/packs/schema.rs)
-- [`crates/assay-evidence/src/lint/packs/checks.rs`](../../crates/assay-evidence/src/lint/packs/checks.rs)
-
-Goal:
-
-- make the pack engine easier to extend without another mega-file
-
-Suggested sequence:
-
-1. `schema.rs` first
-2. `checks.rs` second
-
-Reason:
-
-- the schema/types side is a cleaner freeze point
-- then the runtime check execution can split on a stable type boundary
-
-### `R5` — Registry trust store split
-
-Primary file:
-
-- [`crates/assay-registry/src/trust.rs`](../../crates/assay-registry/src/trust.rs)
-
-Goal:
-
-- separate pinned roots, manifest refresh, cache/TTL handling, and key-metadata mutation
-
-Risk note:
-
-- this is a **security-sensitive** split candidate
-- it should be its own wave with stronger contract tests than the average refactor slice
-
-### `R6` — Sandbox command split
+### `R52` — Sandbox command split
 
 Primary file:
 
@@ -214,16 +180,30 @@ Goal:
 
 - keep CLI command UX stable while isolating backend detection, degradation payloads, profile wiring, and process execution
 
-Why not earlier:
+Why after `R50/R51`:
 
-- it is important, but not the biggest current multiplier for trust-compiler or MCP iteration speed
+- it is important, but it is less central than the next registry/core runtime candidates
+- it carries `unsafe` and backend-specific behavior, so the best split will benefit from the now-mature freeze/split/closure pattern
 
-### `T-R1` / `T-R2` — Follow-on test decomposition
+### `R53` / `R54` — VCR and registry lockfile follow-ons
+
+Primary files:
+
+- [`crates/assay-core/src/vcr/mod.rs`](../../crates/assay-core/src/vcr/mod.rs)
+- [`crates/assay-registry/src/lockfile.rs`](../../crates/assay-registry/src/lockfile.rs)
+
+Rule:
+
+- choose between them after `R50-R52` based on whichever subsystem is creating more review pain
+- both are better later than the auth/proxy/sandbox trio
+
+### `T-R1` / `T-R2` / `T-A2A` — Follow-on test decomposition
 
 Follow-on files:
 
 - [`crates/assay-core/tests/decision_emit_invariant.rs`](../../crates/assay-core/tests/decision_emit_invariant.rs)
 - [`crates/assay-core/src/mcp/tool_call_handler/tests.rs`](../../crates/assay-core/src/mcp/tool_call_handler/tests.rs)
+- [`crates/assay-adapter-a2a/src/adapter_impl/tests.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/tests.rs)
 
 Rule:
 
@@ -234,16 +214,18 @@ Rule:
 
 - generated files such as `crates/assay-ebpf/src/vmlinux.rs`
 - fresh trust-compiler product surfaces such as [`crates/assay-evidence/src/trust_basis.rs`](../../crates/assay-evidence/src/trust_basis.rs)
-- already partially split facades such as [`crates/assay-core/src/engine/runner.rs`](../../crates/assay-core/src/engine/runner.rs)
-- simulation/support modules unless they are explicitly blocking current product work
+- already partially split facades such as [`crates/assay-core/src/engine/runner.rs`](../../crates/assay-core/src/engine/runner.rs) and [`crates/assay-core/src/storage/store.rs`](../../crates/assay-core/src/storage/store.rs)
+- test-only giant files before the next production seam is chosen
+- simulation/support modules unless they are explicitly blocking product work
 
 ## Suggested next concrete step
 
 If the repo wants one new refactor lane now, the best sequence is:
 
-1. `R1` — `mcp/decision.rs`
-2. `R2` — `mcp/tool_call_handler/evaluate.rs`
-3. `R3` — `mcp/policy/engine.rs`
-4. `R4` — pack engine (`schema.rs` then `checks.rs`)
+1. `R50` — `crates/assay-registry/src/auth.rs`
+2. `R51` — `crates/assay-core/src/mcp/proxy.rs`
+3. `R52` — `crates/assay-cli/src/cli/commands/sandbox.rs`
+4. `R53/R54` — `vcr/mod.rs` vs `registry/lockfile.rs`
 
-That order keeps the highest-value runtime hotspots ahead of the secondary CLI / registry / simulation cleanup line.
+That order keeps the next unsplit production hotspots ahead of the giant test-only files and
+avoids reopening newly stabilized trust-compiler surfaces too early.
