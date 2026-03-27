@@ -424,6 +424,40 @@ fn k1_task_updated_delegation_does_not_promote_handoff_in_v1() {
 }
 
 #[test]
+fn k1_task_requested_non_delegation_does_not_promote_handoff_in_v1() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol":"a2a",
+      "version":"0.2.0",
+      "event_type":"task.requested",
+      "timestamp":"2026-02-27T11:10:00Z",
+      "agent":{"id":"agent://worker"},
+      "task":{"id":"task-1000","status":"requested","kind":"analysis"},
+      "message":{"id":"msg-analysis","role":"assistant"}
+    }"#;
+
+    let batch = adapter
+        .convert(
+            AdapterInput {
+                payload,
+                media_type: "application/json",
+                protocol_version: Some("0.2.0"),
+            },
+            &ConvertOptions::default(),
+            &writer,
+        )
+        .expect("non-delegation task.requested should still convert");
+
+    assert_eq!(batch.events[0].type_, "assay.adapter.a2a.task.requested");
+    assert_handoff_v1_defaults(&batch.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&batch.events[0].payload["handoff"]),
+        K1_HANDOFF_DIGEST_DEFAULT
+    );
+}
+
+#[test]
 fn malformed_json_fails_in_all_modes() {
     let adapter = A2aAdapter;
     let writer = TestWriter;

@@ -1,8 +1,8 @@
 # K1-A — Phase 1 formal freeze (executable)
 
-**Status:** Frozen for implementation **K1-A** (adapter-first).
+**Status:** Frozen and now implemented on `main` for **K1-A Phase 1** (adapter-first).
 **Parent:** [PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md](PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
-**Repo snapshot:** Current [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) plus [ADR026 A2A fixtures](../../scripts/ci/fixtures/adr026/a2a/v0.2/) already emit typed `task`, `message`, and canonical `assay.adapter.a2a.task.requested` events. There is **no** first-class handoff object yet, and `task.updated` is mapped but **not** fixture-backed in the current repo snapshot. This freeze therefore defines **one bounded top-level `handoff` contract** from existing typed fields only, with explicit negatives and **no** reuse of `payload.discovery`.
+**Repo snapshot:** Current [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) plus [ADR026 A2A fixtures](../../scripts/ci/fixtures/adr026/a2a/v0.2/) emit typed `task`, `message`, and canonical `assay.adapter.a2a.task.requested` events, and now also emit the first bounded top-level `handoff` object on `main`. `task.updated` remains mapped but is still **not** a positive source in v1, and the ADR026 fixture set still does **not** include a dedicated `task.updated` packet. This freeze defines **one bounded top-level `handoff` contract** from existing typed fields only, with explicit negatives and **no** reuse of `payload.discovery`.
 
 ### Contract honesty (product / review)
 
@@ -264,7 +264,7 @@ Fixture source: [a2a_happy_artifact_shared.json](../../scripts/ci/fixtures/adr02
 
 ---
 
-## 7. Negative test matrix (minimum before merge of K1-A implementation)
+## 7. Negative test matrix (implemented minimum on `main`)
 
 | # | Case | Expected `handoff` |
 |---|------|--------------------|
@@ -276,7 +276,10 @@ Fixture source: [a2a_happy_artifact_shared.json](../../scripts/ci/fixtures/adr02
 | N6 | `agent.role`, `attributes`, `payload.discovery`, or `unmapped_fields_count` alone | all defaults |
 | N7 | `task.updated` packet in v1 | all defaults until a later freeze widens the positive rule |
 
-**Minimum additional fixture work for the implementation PR:** add at least one explicit negative for N5 and one explicit `task.updated` non-promotion fixture/test, because the current ADR026 fixture set does not cover them yet.
+**Current coverage note:** the first K1-A adapter slice on `main` now includes explicit adapter-level
+tests for N1, N2, N4, N5, and N7, plus helper-level direct coverage for the source-rule default
+paths. The ADR026 fixture set itself still does not include a dedicated `task.updated` packet, so
+future fixture-parity work remains optional rather than a blocker for the shipped v1 seam.
 
 ---
 
