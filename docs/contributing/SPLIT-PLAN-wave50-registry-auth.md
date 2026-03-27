@@ -81,7 +81,8 @@ Step2 may reorganize internal ownership behind `auth.rs`, but must not redefine:
 
 - T-R1 closed on `main` via `#982`.
 - T-R2 closed on `main` via `#985`.
-- Wave50 Step1 is the freeze slice for the next unsplit production hotspot.
+- Wave50 Step1 shipped on `main` via `#986`.
+- Wave50 Step2 is the mechanical split slice for the next unsplit production hotspot.
 
 ## Step2 (mechanical split preview)
 
@@ -121,6 +122,22 @@ Step2 principles:
 - no downstream header or unauthorized-response drift
 - no edits under `crates/assay-registry/tests/**`
 - no workflow edits
+
+Current Step2 shape:
+- `auth.rs`: stable facade, public `TokenProvider` / `OidcProvider`, private cache structs, and existing inline tests
+- `auth_next/providers.rs`: `TokenProvider` constructors, env precedence, and auth-state helpers
+- `auth_next/oidc.rs`: GitHub Actions environment detection, OIDC exchange, retry, and registry-token fetch flow
+- `auth_next/cache.rs`: cache hit / refresh / clear helpers
+- `auth_next/headers.rs`: GitHub OIDC header and request-url helpers
+- `auth_next/diagnostics.rs`: network / parse / unauthorized error shaping for OIDC exchange
+
+Current Step2 LOC snapshot on this branch:
+- `crates/assay-registry/src/auth.rs`: `685 -> 492`
+- `crates/assay-registry/src/auth_next/providers.rs`: `47`
+- `crates/assay-registry/src/auth_next/oidc.rs`: `165`
+- `crates/assay-registry/src/auth_next/cache.rs`: `32`
+- `crates/assay-registry/src/auth_next/headers.rs`: `17`
+- `crates/assay-registry/src/auth_next/diagnostics.rs`: `49`
 
 ## Step3 (closure)
 
