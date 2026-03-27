@@ -17,8 +17,9 @@ Current hotspot baseline on `origin/main @ b5f359fa`:
 ## Status
 
 - Wave46 closed on `main` via `#965`.
-- Step1 is the freeze slice for `checks.rs`.
-- Step2 is the mechanical split slice for `checks.rs`.
+- Wave47 Step1 shipped on `main` via `#966`.
+- Wave47 Step2 shipped on `main` via `#967`.
+- Step3 is the closure slice for `checks.rs`.
 - `schema.rs` and `schema_next/*` are already shipped from Wave46 and are explicitly out of scope.
 - `checks.rs` follows `schema.rs` in the required `schema.rs -> checks.rs` order for `R4`.
 
@@ -74,6 +75,15 @@ Step2 may reorganize internal ownership behind `checks.rs`, but must not redefin
 - `checks_next/conditional.rs`: conditional execution and missing-required-path messaging
 - `checks_next/manifest.rs`: manifest-field execution
 - `checks_next/finding.rs`: finding creation, event locations, fingerprints, and metadata helpers
+
+## Step3 constraints
+
+- Step3 keeps `checks.rs` as the stable facade entrypoint.
+- Step3 keeps `checks_next/*` as the shipped implementation ownership boundary.
+- Step3 is docs/gates only.
+- No new module cuts.
+- No behavior cleanup beyond internal follow-up notes.
+- No execution, finding, parity, or validation-chain drift is allowed in Step3.
 
 ## Reviewer notes
 
