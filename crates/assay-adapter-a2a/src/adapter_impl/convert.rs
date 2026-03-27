@@ -51,6 +51,8 @@ pub(super) fn convert(
     let artifact_media_type = nested_string_field(&packet, &["artifact", "media_type"]);
     let message_id = nested_string_field(&packet, &["message", "id"]);
     let message_role = nested_string_field(&packet, &["message", "role"]);
+    let typed_task_id_present = task_id.is_some();
+    let typed_message_id_present = message_id.is_some();
     let mapped_event_type = map_event_type(event_type.as_deref());
 
     if matches!(options.mode, ConvertMode::Strict) {
@@ -145,6 +147,7 @@ pub(super) fn convert(
         adapter.adapter_id,
         adapter.adapter_version,
         &version,
+        mapped_event_type,
         event_type.as_deref(),
         &agent_id,
         agent_name.as_deref(),
@@ -157,6 +160,8 @@ pub(super) fn convert(
         artifact_name.as_deref(),
         artifact_media_type.as_deref(),
         message_id.as_deref(),
+        typed_task_id_present,
+        typed_message_id_present,
         message_role.as_deref(),
         packet.get("attributes"),
         unmapped_fields_count,

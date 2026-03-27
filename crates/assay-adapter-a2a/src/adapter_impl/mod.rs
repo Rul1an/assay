@@ -45,6 +45,7 @@ pub(super) fn capabilities() -> AdapterCapabilities {
 mod convert;
 mod discovery;
 mod fields;
+mod handoff;
 mod mapping;
 mod parse;
 mod payload;
