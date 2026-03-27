@@ -125,9 +125,9 @@ cargo test -q -p assay-core --test policy_engine_test test_mixed_tools_config --
 cargo test -q -p assay-core --test policy_engine_test test_constraint_enforcement -- --exact
 cargo test -q -p assay-core --test tool_taxonomy_policy_match tool_taxonomy_policy_match_policy_file_blocks_alt_sink_by_class -- --exact
 cargo test -q -p assay-core --test tool_taxonomy_policy_match tool_taxonomy_policy_match_handler_decision_event_records_classes -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant approval_required_missing_denies -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant restrict_scope_target_missing_denies -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant redact_args_target_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant approval::approval_required_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant restrict_scope::restrict_scope_target_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant redaction::redact_args_target_missing_denies -- --exact
 cargo test -q -p assay-core --lib 'mcp::policy::engine::tests::parse_delegation_context_uses_explicit_depth_only' -- --exact
 
 echo "[review] PASS"

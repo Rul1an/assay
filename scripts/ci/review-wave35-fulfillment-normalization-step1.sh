@@ -92,13 +92,13 @@ cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D 
 
 echo "[review] pinned tests"
 cargo test -p assay-core tool_taxonomy_policy_match_handler_decision_event_records_classes -- --exact
-cargo test -p assay-core test_event_contains_required_fields -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
 cargo test -p assay-core --test decision_emit_invariant
 cargo test -p assay-core mcp::tool_call_handler::tests::test_allow_with_warning_emits_log_obligation_outcome -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_alert_obligation_outcome_emitted -- --exact
-cargo test -p assay-core approval_required_missing_denies -- --exact
-cargo test -p assay-core restrict_scope_mismatch_denies -- --exact
-cargo test -p assay-core redact_args_target_missing_denies -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_alert_obligation_outcome_emitted -- --exact
+cargo test -p assay-core --test decision_emit_invariant approval::approval_required_missing_denies -- --exact
+cargo test -p assay-core --test decision_emit_invariant restrict_scope::restrict_scope_mismatch_denies -- --exact
+cargo test -p assay-core --test decision_emit_invariant redaction::redact_args_target_missing_denies -- --exact
 cargo test -p assay-cli mcp_wrap_coverage
 cargo test -p assay-cli mcp_wrap_state_window_out
 cargo test -p assay-mcp-server auth_integration

@@ -71,8 +71,14 @@ echo "[review] no-drift baseline"
   echo "FAIL: tool_call_handler/tests.rs LOC drifted during Step1"
   exit 1
 }
-[[ "$(line_count crates/assay-core/tests/decision_emit_invariant.rs)" == "1293" ]] || {
-  echo "FAIL: decision_emit_invariant.rs LOC drifted during Step1"
+decision_emit_total="$(
+  find crates/assay-core/tests/decision_emit_invariant -name '*.rs' -print0 \
+    | xargs -0 wc -l \
+    | tail -n1 \
+    | awk '{print $1}'
+)"
+[[ "$decision_emit_total" == "1290" ]] || {
+  echo "FAIL: decision_emit_invariant target LOC drifted during Step1"
   exit 1
 }
 [[ "$(line_count crates/assay-core/tests/fulfillment_normalization.rs)" == "165" ]] || {

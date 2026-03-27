@@ -22,7 +22,7 @@ echo '== Tool call handler Step2 quality checks =='
 cargo fmt --check
 cargo clippy -p assay-core --all-targets -- -D warnings
 cargo test -p assay-core tool_taxonomy_policy_match_handler_decision_event_records_classes -- --exact
-cargo test -p assay-core test_event_contains_required_fields -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
 
 echo '== Tool call handler Step2 scope checks =='
 leaks="$({ git diff --name-only "${base_ref}...HEAD" | \

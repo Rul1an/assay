@@ -108,7 +108,7 @@ cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D 
 
 echo "[review] pinned tests"
 cargo test -p assay-core --test replay_diff_contract
-cargo test -p assay-core --test decision_emit_invariant test_event_contains_required_fields -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
 cargo test -p assay-core --test fulfillment_normalization
 cargo test -p assay-cli mcp_wrap_coverage
 cargo test -p assay-cli mcp_wrap_state_window_out
