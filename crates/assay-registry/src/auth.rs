@@ -23,10 +23,10 @@
 //!           ASSAY_REGISTRY_OIDC: "1"
 //! ```
 
-use crate::error::RegistryResult;
+#[path = "auth_next/mod.rs"]
+mod auth_next;
 
-#[cfg(feature = "oidc")]
-use crate::error::RegistryError;
+use crate::error::RegistryResult;
 
 /// Token provider for registry authentication.
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ pub enum TokenProvider {
 impl TokenProvider {
     /// Create a static token provider.
     pub fn static_token(token: impl Into<String>) -> Self {
-        Self::Static(token.into())
+        auth_next::providers::static_token(token)
     }
 
     /// Create from environment variable.
@@ -55,25 +55,7 @@ impl TokenProvider {
     /// 2. `ASSAY_REGISTRY_OIDC=1` + GitHub Actions env - OIDC exchange
     /// 3. Falls back to no auth
     pub fn from_env() -> Self {
-        // Check for static token
-        if let Ok(token) = std::env::var("ASSAY_REGISTRY_TOKEN") {
-            if !token.is_empty() {
-                return Self::Static(token);
-            }
-        }
-
-        // Check for OIDC (with feature)
-        #[cfg(feature = "oidc")]
-        if std::env::var("ASSAY_REGISTRY_OIDC")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
-            if let Ok(provider) = OidcProvider::from_github_actions() {
-                return Self::Oidc(provider);
-            }
-        }
-
-        Self::None
+        auth_next::providers::from_env()
     }
 
     /// Get the current token.
@@ -81,23 +63,18 @@ impl TokenProvider {
     /// For static tokens, returns the token directly.
     /// For OIDC, may perform token exchange if expired.
     pub async fn get_token(&self) -> RegistryResult<Option<String>> {
-        match self {
-            Self::Static(token) => Ok(Some(token.clone())),
-            Self::None => Ok(None),
-            #[cfg(feature = "oidc")]
-            Self::Oidc(provider) => provider.get_token().await,
-        }
+        auth_next::providers::get_token(self).await
     }
 
     /// Check if authentication is configured.
     pub fn is_authenticated(&self) -> bool {
-        !matches!(self, Self::None)
+        auth_next::providers::is_authenticated(self)
     }
 
     /// Create an OIDC provider for GitHub Actions.
     #[cfg(feature = "oidc")]
     pub fn github_oidc() -> RegistryResult<Self> {
-        Ok(Self::Oidc(OidcProvider::from_github_actions()?))
+        auth_next::providers::github_oidc()
     }
 }
 
@@ -138,21 +115,6 @@ struct CachedToken {
 
 /// OIDC token exchange response.
 #[cfg(feature = "oidc")]
-#[derive(Debug, serde::Deserialize)]
-struct OidcTokenResponse {
-    value: String,
-}
-
-/// Registry token exchange response.
-#[cfg(feature = "oidc")]
-#[derive(Debug, serde::Deserialize)]
-struct RegistryTokenResponse {
-    access_token: String,
-    expires_in: u64,
-    token_type: String,
-}
-
-#[cfg(feature = "oidc")]
 impl OidcProvider {
     /// Create from GitHub Actions environment.
     ///
@@ -163,29 +125,7 @@ impl OidcProvider {
     /// Optional:
     /// - `ASSAY_REGISTRY_URL`: Custom registry URL (default: https://registry.getassay.dev/v1)
     pub fn from_github_actions() -> RegistryResult<Self> {
-        let token_request_url = std::env::var("ACTIONS_ID_TOKEN_REQUEST_URL").map_err(|_| {
-            RegistryError::Config {
-                message: "ACTIONS_ID_TOKEN_REQUEST_URL not set - not in GitHub Actions or id-token permission not granted".into(),
-            }
-        })?;
-
-        let request_token =
-            std::env::var("ACTIONS_ID_TOKEN_REQUEST_TOKEN").map_err(|_| RegistryError::Config {
-                message: "ACTIONS_ID_TOKEN_REQUEST_TOKEN not set".into(),
-            })?;
-
-        let registry_base = std::env::var("ASSAY_REGISTRY_URL")
-            .unwrap_or_else(|_| "https://registry.getassay.dev/v1".to_string());
-        let registry_exchange_url =
-            format!("{}/auth/oidc/exchange", registry_base.trim_end_matches('/'));
-
-        Ok(Self {
-            token_request_url,
-            request_token,
-            registry_exchange_url,
-            audience: "https://registry.getassay.dev".to_string(),
-            cached_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        })
+        auth_next::oidc::from_github_actions()
     }
 
     /// Create with custom URLs (for testing).
@@ -195,177 +135,42 @@ impl OidcProvider {
         registry_exchange_url: impl Into<String>,
         audience: impl Into<String>,
     ) -> Self {
-        Self {
-            token_request_url: token_request_url.into(),
-            request_token: request_token.into(),
-            registry_exchange_url: registry_exchange_url.into(),
-            audience: audience.into(),
-            cached_token: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        }
+        auth_next::oidc::new(
+            token_request_url,
+            request_token,
+            registry_exchange_url,
+            audience,
+        )
     }
 
     /// Get token, refreshing if expired.
     pub async fn get_token(&self) -> RegistryResult<Option<String>> {
-        // Check cache first
-        {
-            let cache = self.cached_token.read().await;
-            if let Some(cached) = cache.as_ref() {
-                // Use 60-second buffer before expiry + 30s clock skew tolerance
-                let buffer = chrono::Duration::seconds(90);
-                if cached.expires_at > chrono::Utc::now() + buffer {
-                    tracing::debug!("using cached OIDC token");
-                    return Ok(Some(cached.token.clone()));
-                }
-            }
-        }
-
-        // Need to refresh
-        tracing::debug!("refreshing OIDC token");
-        let token = self.exchange_token_with_retry().await?;
-        Ok(Some(token))
+        auth_next::cache::get_token(self).await
     }
 
     /// Exchange token with exponential backoff retry.
     async fn exchange_token_with_retry(&self) -> RegistryResult<String> {
-        let mut retries = 0;
-        let max_retries = 3;
-
-        loop {
-            match self.exchange_token().await {
-                Ok(token) => return Ok(token),
-                Err(e) if retries < max_retries => {
-                    retries += 1;
-
-                    // Exponential backoff: 1s, 2s, 4s, capped at 30s
-                    let backoff = std::time::Duration::from_secs(1 << retries);
-                    let backoff = backoff.min(std::time::Duration::from_secs(30));
-
-                    tracing::warn!(
-                        error = %e,
-                        retry = retries,
-                        backoff_secs = backoff.as_secs(),
-                        "OIDC token exchange failed, retrying"
-                    );
-
-                    tokio::time::sleep(backoff).await;
-                }
-                Err(e) => return Err(e),
-            }
-        }
+        auth_next::oidc::exchange_token_with_retry(self).await
     }
 
     /// Exchange OIDC token for registry token.
     async fn exchange_token(&self) -> RegistryResult<String> {
-        // 1. Get OIDC token from GitHub
-        let oidc_token = self.get_github_oidc_token().await?;
-
-        // 2. Exchange for registry token
-        let registry_token = self.exchange_for_registry_token(&oidc_token).await?;
-
-        Ok(registry_token)
+        auth_next::oidc::exchange_token(self).await
     }
 
     /// Request OIDC token from GitHub Actions.
     async fn get_github_oidc_token(&self) -> RegistryResult<String> {
-        let client = reqwest::Client::new();
-
-        let url = format!("{}&audience={}", self.token_request_url, self.audience);
-
-        let response = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.request_token))
-            .header("Accept", "application/json; api-version=2.0")
-            .header("Content-Type", "application/json")
-            .send()
-            .await
-            .map_err(|e| RegistryError::Network {
-                message: format!("failed to request GitHub OIDC token: {}", e),
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RegistryError::Unauthorized {
-                message: format!("GitHub OIDC request failed: HTTP {} - {}", status, body),
-            });
-        }
-
-        let token_response: OidcTokenResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse GitHub OIDC response: {}", e),
-                })?;
-
-        Ok(token_response.value)
+        auth_next::oidc::get_github_oidc_token(self).await
     }
 
     /// Exchange GitHub OIDC token for registry access token.
     async fn exchange_for_registry_token(&self, oidc_token: &str) -> RegistryResult<String> {
-        let client = reqwest::Client::new();
-
-        let response = client
-            .post(&self.registry_exchange_url)
-            .json(&serde_json::json!({
-                "token": oidc_token,
-                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                "subject_token_type": "urn:ietf:params:oauth:token-type:jwt"
-            }))
-            .send()
-            .await
-            .map_err(|e| RegistryError::Network {
-                message: format!("failed to exchange token: {}", e),
-            })?;
-
-        let status = response.status();
-
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(RegistryError::Unauthorized {
-                message: "OIDC token exchange failed: unauthorized".to_string(),
-            });
-        }
-
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(RegistryError::Network {
-                message: format!("token exchange failed: HTTP {} - {}", status, body),
-            });
-        }
-
-        let token_response: RegistryTokenResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| RegistryError::InvalidResponse {
-                    message: format!("failed to parse registry token response: {}", e),
-                })?;
-
-        // Cache the token
-        let expires_at =
-            chrono::Utc::now() + chrono::Duration::seconds(token_response.expires_in as i64);
-
-        {
-            let mut cache = self.cached_token.write().await;
-            *cache = Some(CachedToken {
-                token: token_response.access_token.clone(),
-                expires_at,
-            });
-        }
-
-        tracing::info!(
-            expires_in = token_response.expires_in,
-            token_type = %token_response.token_type,
-            "obtained registry access token"
-        );
-
-        Ok(token_response.access_token)
+        auth_next::oidc::exchange_for_registry_token(self, oidc_token).await
     }
 
     /// Clear the cached token.
     pub async fn clear_cache(&self) {
-        let mut cache = self.cached_token.write().await;
-        *cache = None;
+        auth_next::cache::clear_cache(self).await
     }
 }
 
@@ -497,7 +302,10 @@ mod oidc_tests {
         );
 
         let result = provider.get_token().await;
-        assert!(matches!(result, Err(RegistryError::Unauthorized { .. })));
+        assert!(matches!(
+            result,
+            Err(crate::error::RegistryError::Unauthorized { .. })
+        ));
     }
 
     #[tokio::test]
@@ -669,7 +477,7 @@ mod oidc_tests {
 
         // Should fail after max retries
         assert!(
-            matches!(result, Err(RegistryError::Network { .. })),
+            matches!(result, Err(crate::error::RegistryError::Network { .. })),
             "Should fail with network error after retries: {:?}",
             result
         );
