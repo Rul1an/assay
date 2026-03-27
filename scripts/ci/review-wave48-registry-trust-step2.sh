@@ -21,11 +21,16 @@ ALLOWED_FILES=(
 )
 
 changed_files() {
-  git diff --name-only "$BASE_REF"...HEAD || true
-  git diff --name-only || true
-  git diff --name-only --cached || true
-  git ls-files --others --exclude-standard || true
+  git diff --name-only "$BASE_REF"...HEAD
+  git diff --name-only
+  git diff --name-only --cached
+  git ls-files --others --exclude-standard
 }
+
+if ! git rev-parse --verify "${BASE_REF}^{commit}" >/dev/null 2>&1; then
+  echo "BASE_REF does not resolve to a commit: $BASE_REF" >&2
+  exit 1
+fi
 
 DIFF_FILES=()
 mapfile -t DIFF_FILES < <(changed_files | awk 'NF' | sort -u)

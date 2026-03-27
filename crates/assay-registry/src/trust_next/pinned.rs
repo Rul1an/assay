@@ -11,9 +11,9 @@ use super::cache;
 use super::decode::{decode_public_key_bytes, decode_verifying_key};
 
 pub(in crate::trust) struct PreparedPinnedKey {
-    pub key_id: String,
-    pub verifying_key: ed25519_dalek::VerifyingKey,
-    pub metadata: KeyMetadata,
+    key_id: String,
+    verifying_key: ed25519_dalek::VerifyingKey,
+    metadata: KeyMetadata,
 }
 
 pub(in crate::trust) fn parse_pinned_roots_json_impl(raw: &str) -> RegistryResult<Vec<TrustedKey>> {
