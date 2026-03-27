@@ -79,7 +79,9 @@ Step2 may reorganize internal ownership behind `memory_poison.rs`, but must not 
 
 - Wave48 closed on `main` via `#971`.
 - Wave49 Step1 shipped on `main` via `#972`.
-- Step2 is the mechanical split slice for `memory_poison.rs`.
+- Wave49 Step2 shipped on `main` via `#973`.
+- `#975` shipped the follow-up fail-closed hashing fix for replay basis comparison.
+- Step3 is the closure slice for the shipped `memory_poison.rs` split.
 
 ## Step2 (mechanical split preview)
 
@@ -135,17 +137,34 @@ Current Step2 LOC snapshot on this branch:
 
 ## Step3 (closure)
 
-Step3 will close the shipped Wave49 memory-poison split with docs/gates only once Step2 lands on
-`main`.
+Branch: `codex/wave49-memory-poison-step3` (base: `main`)
+
+Step3 closes the shipped Wave49 memory-poison split with docs/gates only.
+
+Step3 constraints:
+- docs+gate only
+- no edits under `crates/assay-sim/src/attacks/**`
+- no edits under `crates/assay-sim/tests/**`
+- no workflow edits
+- no `assay-core`, `assay-cli`, `assay-evidence`, or report-surface edits
+- keep `memory_poison.rs` as the stable facade entrypoint
+- no new module cuts
+- no behavior cleanup beyond internal follow-up notes
+
+Step3 deliverables:
+- `docs/contributing/SPLIT-PLAN-wave49-memory-poison.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave49-memory-poison-step3.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave49-memory-poison-step3.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave49-memory-poison-step3.md`
+- `scripts/ci/review-wave49-memory-poison-step3.sh`
 
 ## Promote
 
-Stacked chain:
-- Step1 -> `main`
-- Step2 -> Step1
-- Step3 -> Step2
-
-Final promote PR to `main` from Step3 once the chain is clean.
+Completed chain:
+- Step1 -> `main` via `#972`
+- Step2 -> `main` via `#973`
+- follow-up fix -> `main` via `#975`
+- Step3 -> current closure PR to `main`
 
 ## Reviewer notes
 
