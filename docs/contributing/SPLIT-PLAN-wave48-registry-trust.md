@@ -80,7 +80,8 @@ Step2 may reorganize internal ownership behind `trust.rs`, but must not redefine
 
 - Wave47 closed on `main` via `#968`.
 - Wave48 Step1 shipped on `main` via `#969`.
-- Step2 is the mechanical split slice for `trust.rs`.
+- Wave48 Step2 shipped on `main` via `#970`.
+- Step3 is the closure slice for the shipped `trust.rs` split.
 
 ## Step2 (mechanical split preview)
 
@@ -143,9 +144,17 @@ Step3 constraints:
 - docs+gate only
 - no edits under `crates/assay-registry/src/**`
 - no edits under `crates/assay-registry/tests/**`
+- keep `trust.rs` as the stable facade entrypoint
 - no new module cuts
 - no behavior cleanup beyond internal follow-up notes
 - no pinned-root, manifest, cache, or verification coupling drift
+
+Step3 deliverables:
+- `docs/contributing/SPLIT-PLAN-wave48-registry-trust.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave48-registry-trust-step3.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave48-registry-trust-step3.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave48-registry-trust-step3.md`
+- `scripts/ci/review-wave48-registry-trust-step3.sh`
 
 ## Promote
 
