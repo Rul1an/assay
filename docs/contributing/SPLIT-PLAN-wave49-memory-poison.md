@@ -78,7 +78,8 @@ Step2 may reorganize internal ownership behind `memory_poison.rs`, but must not 
 ## Status
 
 - Wave48 closed on `main` via `#971`.
-- Wave49 Step1 is the behavior-freeze slice for `memory_poison.rs`.
+- Wave49 Step1 shipped on `main` via `#972`.
+- Step2 is the mechanical split slice for `memory_poison.rs`.
 
 ## Step2 (mechanical split preview)
 
@@ -101,6 +102,36 @@ Step2 principles:
 - no matrix count or attack-name drift
 - no edits under `crates/assay-sim/tests/**`
 - no workflow edits
+
+Step2 scope:
+- `crates/assay-sim/src/attacks/memory_poison.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/mod.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/basis.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/vectors.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/controls.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/conditions.rs`
+- `crates/assay-sim/src/attacks/memory_poison_next/matrix.rs`
+- `docs/contributing/SPLIT-PLAN-wave49-memory-poison.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave49-memory-poison-step2.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave49-memory-poison-step2.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave49-memory-poison-step2.md`
+- `scripts/ci/review-wave49-memory-poison-step2.sh`
+
+Current Step2 shape:
+- `memory_poison.rs`: stable facade, public result/outcome surface, wrappers, and existing inline tests
+- `memory_poison_next/basis.rs`: clean replay-diff basis builders and hash helpers
+- `memory_poison_next/vectors.rs`: Condition A vectors V1-V4
+- `memory_poison_next/controls.rs`: benign controls B1-B3
+- `memory_poison_next/conditions.rs`: Condition B/C defense paths
+- `memory_poison_next/matrix.rs`: result builder and matrix runner assembly
+
+Current Step2 LOC snapshot on this branch:
+- `crates/assay-sim/src/attacks/memory_poison.rs`: `954 -> 177`
+- `crates/assay-sim/src/attacks/memory_poison_next/vectors.rs`: `265`
+- `crates/assay-sim/src/attacks/memory_poison_next/conditions.rs`: `166`
+- `crates/assay-sim/src/attacks/memory_poison_next/controls.rs`: `141`
+- `crates/assay-sim/src/attacks/memory_poison_next/matrix.rs`: `135`
+- `crates/assay-sim/src/attacks/memory_poison_next/basis.rs`: `94`
 
 ## Step3 (closure)
 
