@@ -16,6 +16,9 @@ That choice is:
 
 - **`K1` — A2A handoff / delegation-route visibility evidence**
 
+`K1` is a new wave label for bounded evidence work after the `G` / `P` trust-compiler line. It
+does **not** imply a pack wave or a new trust-claim surface by itself.
+
 `K1` is intentionally:
 
 - **not** `P2d`
@@ -31,6 +34,9 @@ Add a **first-class, bounded canonical evidence seam** for A2A **handoff / deleg
 visibility**, starting from shipped adapter-emitted reality and staying strictly below correctness,
 trust, or outcome claims.
 
+In this plan, **"handoff / delegation-route"** refers to **one bounded evidence surface**, not
+multiple independent seams.
+
 ## 3. Why `K1` now
 
 ### 3.1 What `P2c` did and did not close
@@ -45,6 +51,9 @@ The discovery note and audit matrix converge on the same gap:
 - the A2A adapter already has discovery/card visibility
 - the next missing surface is **agent-to-agent route / handoff visibility**
 - that gap is more about **what canonical evidence exists** than about pack rules
+
+MCP authorization-discovery remains relevant, but the stronger immediate bottleneck in Assay's
+shipped evidence line is the A2A route / handoff surface.
 
 ### 3.3 Why this is not "another pack first"
 
@@ -102,7 +111,8 @@ Illustrative questions the seam may answer later:
 - did the signal come from typed payload, an allowlisted extension path, or a lossy fallback?
 - is there a bounded target / route kind visibility signal?
 
-These are examples of the *kind* of seam `K1` may freeze later, not a field contract.
+These are examples of the *kind* of seam `K1` may freeze later, not a field contract. They are
+illustrative discovery directions, not provisional field commitments.
 
 ## 7. Phase 0 discovery freeze requirements
 
@@ -113,6 +123,9 @@ Before any implementation PR, `K1` must produce a freeze-ready discovery record 
 3. Which are only honest as **visibility** or **lossiness** signals?
 4. What is the **smallest honest seam**?
 5. Which upstream hints must **not** become typed route evidence?
+
+Discovery answers must be grounded in shipped adapter-emitted evidence and current code-path
+reality, not solely in protocol or standards text.
 
 Minimum artifacts for the later freeze:
 
@@ -129,6 +142,7 @@ Any future `K1` implementation slice should hard-fail review if it:
 - turns route visibility into route correctness
 - guesses from generic task metadata without a frozen source rule
 - promotes arbitrary blob content into typed route evidence
+- silently reuses `payload.discovery` for a distinct route surface without an explicit freeze decision
 - sneaks in a pack, engine bump, or trust-claim expansion in the same wave
 - widens the seam beyond one bounded route / handoff surface
 
@@ -149,6 +163,8 @@ Only after `K1` evidence is real should maintainers revisit whether:
 - a future A2A follow-up pack is honest
 - MCP authorization-discovery should become the next evidence-wave
 - any Trust Basis / Trust Card expansion is justified
+
+No downstream pack or trust-surface follow-up should be assumed as part of `K1` closure.
 
 `K1` is therefore the next **formal evidence wave**, not the start of an automatic new pack line.
 
