@@ -6,21 +6,33 @@
 //! - Configuration file
 //! - Remote keys manifest (fetched from registry)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::VerifyingKey;
 use tokio::sync::RwLock;
 
 use crate::error::{RegistryError, RegistryResult};
 use crate::types::{KeysManifest, TrustedKey};
+#[cfg(test)]
 use crate::verify::compute_key_id;
+#[cfg(test)]
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 /// Default cache TTL for keys manifest (24 hours).
 const DEFAULT_KEYS_TTL_SECS: i64 = 24 * 60 * 60;
 const PRODUCTION_TRUST_ROOTS_JSON: &str = include_str!("../assets/production-trust-roots.json");
+
+#[path = "trust_next/mod.rs"]
+mod trust_next;
+
+use trust_next::access;
+use trust_next::cache;
+use trust_next::manifest;
+#[cfg(test)]
+use trust_next::pinned::parse_pinned_roots_json_impl;
+use trust_next::pinned::{insert_pinned_key, load_production_roots_impl};
 
 /// Trust store for signing keys.
 #[derive(Debug, Clone)]
@@ -69,7 +81,7 @@ impl TrustStore {
     /// Create an empty trust store.
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Self::empty_inner())),
+            inner: Arc::new(RwLock::new(cache::empty_inner())),
         }
     }
 
@@ -77,7 +89,7 @@ impl TrustStore {
     ///
     /// Pinned roots are always trusted and cannot be revoked remotely.
     pub fn from_pinned_roots(roots: Vec<TrustedKey>) -> RegistryResult<Self> {
-        let mut inner = Self::empty_inner();
+        let mut inner = cache::empty_inner();
         for root in &roots {
             insert_pinned_key(&mut inner, root)?;
         }
@@ -106,169 +118,37 @@ impl TrustStore {
 
     /// Add a pinned root key.
     pub async fn add_pinned_key(&self, key: &TrustedKey) -> RegistryResult<()> {
-        let verifying_key = decode_verifying_key(&key.public_key)?;
-        let computed_id = compute_key_id(&decode_public_key_bytes(&key.public_key)?);
-
-        // Verify key_id matches
-        if computed_id != key.key_id {
-            return Err(RegistryError::SignatureInvalid {
-                reason: format!(
-                    "key_id mismatch: claimed {}, computed {}",
-                    key.key_id, computed_id
-                ),
-            });
-        }
-
         let mut inner = self.inner.write().await;
-        inner.keys.insert(key.key_id.clone(), verifying_key);
-        inner.metadata.insert(
-            key.key_id.clone(),
-            KeyMetadata {
-                description: key.description.clone(),
-                added_at: key.added_at,
-                expires_at: key.expires_at,
-                revoked: false, // Pinned keys cannot be revoked
-                is_pinned: true,
-            },
-        );
-        if !inner.pinned_roots.contains(&key.key_id) {
-            inner.pinned_roots.push(key.key_id.clone());
-        }
-
-        Ok(())
+        insert_pinned_key(&mut inner, key)
     }
 
     /// Add keys from a manifest (fetched from registry).
     pub async fn add_from_manifest(&self, manifest: &KeysManifest) -> RegistryResult<()> {
-        let now = Utc::now();
-
         let mut inner = self.inner.write().await;
-
-        for key in &manifest.keys {
-            // Skip revoked keys
-            if key.revoked {
-                // If the key exists and is not pinned, remove it
-                if !inner.pinned_roots.contains(&key.key_id) {
-                    inner.keys.remove(&key.key_id);
-                    if let Some(meta) = inner.metadata.get_mut(&key.key_id) {
-                        meta.revoked = true;
-                    }
-                }
-                continue;
-            }
-
-            // Skip expired keys
-            if let Some(expires_at) = key.expires_at {
-                if expires_at < now {
-                    continue;
-                }
-            }
-
-            // Don't overwrite pinned roots
-            if inner.pinned_roots.contains(&key.key_id) {
-                continue;
-            }
-
-            // Decode and add key
-            match decode_verifying_key(&key.public_key) {
-                Ok(verifying_key) => {
-                    // Verify key_id
-                    let computed_id = match decode_public_key_bytes(&key.public_key) {
-                        Ok(bytes) => compute_key_id(&bytes),
-                        Err(_) => continue,
-                    };
-
-                    if computed_id != key.key_id {
-                        tracing::warn!(
-                            claimed = %key.key_id,
-                            computed = %computed_id,
-                            "key_id mismatch, skipping"
-                        );
-                        continue;
-                    }
-
-                    inner.keys.insert(key.key_id.clone(), verifying_key);
-                    inner.metadata.insert(
-                        key.key_id.clone(),
-                        KeyMetadata {
-                            description: key.description.clone(),
-                            added_at: key.added_at,
-                            expires_at: key.expires_at,
-                            revoked: false,
-                            is_pinned: false,
-                        },
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(key_id = %key.key_id, error = %e, "failed to decode key");
-                }
-            }
-        }
-
-        // Update cache metadata
-        inner.manifest_fetched_at = Some(now);
-        inner.manifest_expires_at = manifest
-            .expires_at
-            .or(Some(now + chrono::Duration::seconds(DEFAULT_KEYS_TTL_SECS)));
-
-        Ok(())
+        manifest::add_from_manifest(&mut inner, manifest)
     }
 
     /// Get a key by ID.
     pub async fn get_key_async(&self, key_id: &str) -> RegistryResult<VerifyingKey> {
         let inner = self.inner.read().await;
-        self.get_key_inner(&inner, key_id)
+        access::get_key_inner(&inner, key_id)
     }
 
     /// Get a key by ID (blocking version for sync contexts).
     pub fn get_key(&self, key_id: &str) -> RegistryResult<VerifyingKey> {
         // Use try_read to avoid blocking
         match self.inner.try_read() {
-            Ok(inner) => self.get_key_inner(&inner, key_id),
+            Ok(inner) => access::get_key_inner(&inner, key_id),
             Err(_) => Err(RegistryError::KeyNotTrusted {
                 key_id: key_id.to_string(),
             }),
         }
     }
 
-    fn get_key_inner(&self, inner: &TrustStoreInner, key_id: &str) -> RegistryResult<VerifyingKey> {
-        // Check if key exists
-        let key = inner
-            .keys
-            .get(key_id)
-            .ok_or_else(|| RegistryError::KeyNotTrusted {
-                key_id: key_id.to_string(),
-            })?;
-
-        // Check if revoked
-        if let Some(meta) = inner.metadata.get(key_id) {
-            if meta.revoked {
-                return Err(RegistryError::KeyNotTrusted {
-                    key_id: key_id.to_string(),
-                });
-            }
-
-            // Check if expired
-            if let Some(expires_at) = meta.expires_at {
-                if expires_at < Utc::now() {
-                    return Err(RegistryError::KeyNotTrusted {
-                        key_id: key_id.to_string(),
-                    });
-                }
-            }
-        }
-
-        Ok(*key)
-    }
-
     /// Check if the keys manifest needs refresh.
     pub async fn needs_refresh(&self) -> bool {
         let inner = self.inner.read().await;
-
-        match inner.manifest_expires_at {
-            Some(expires_at) => Utc::now() >= expires_at,
-            None => inner.manifest_fetched_at.is_none(),
-        }
+        cache::needs_refresh(&inner)
     }
 
     /// Check if a key is trusted.
@@ -279,38 +159,19 @@ impl TrustStore {
     /// Get all trusted key IDs.
     pub async fn list_keys(&self) -> Vec<String> {
         let inner = self.inner.read().await;
-        inner.keys.keys().cloned().collect()
+        access::list_keys(&inner)
     }
 
     /// Get metadata for a key.
     pub async fn get_metadata(&self, key_id: &str) -> Option<KeyMetadata> {
         let inner = self.inner.read().await;
-        inner.metadata.get(key_id).cloned()
+        access::get_metadata(&inner, key_id)
     }
 
     /// Clear all non-pinned keys (for testing or force refresh).
     pub async fn clear_cached_keys(&self) {
         let mut inner = self.inner.write().await;
-
-        // Capture pinned roots to avoid borrow conflict
-        let pinned_roots: std::collections::HashSet<_> =
-            inner.pinned_roots.iter().cloned().collect();
-
-        // Keep only pinned roots
-        inner.keys.retain(|k, _| pinned_roots.contains(k));
-        inner.metadata.retain(|k, _| pinned_roots.contains(k));
-        inner.manifest_fetched_at = None;
-        inner.manifest_expires_at = None;
-    }
-
-    fn empty_inner() -> TrustStoreInner {
-        TrustStoreInner {
-            keys: HashMap::new(),
-            metadata: HashMap::new(),
-            pinned_roots: Vec::new(),
-            manifest_fetched_at: None,
-            manifest_expires_at: None,
-        }
+        cache::clear_cached_keys(&mut inner);
     }
 }
 
@@ -318,110 +179,6 @@ impl Default for TrustStore {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Decode a Base64-encoded SPKI public key to VerifyingKey.
-fn decode_verifying_key(b64: &str) -> RegistryResult<VerifyingKey> {
-    use pkcs8::DecodePublicKey;
-
-    let bytes = BASE64.decode(b64).map_err(|e| RegistryError::Config {
-        message: format!("invalid base64 public key: {}", e),
-    })?;
-
-    VerifyingKey::from_public_key_der(&bytes).map_err(|e| RegistryError::Config {
-        message: format!("invalid SPKI public key: {}", e),
-    })
-}
-
-/// Decode Base64 public key bytes.
-fn decode_public_key_bytes(b64: &str) -> RegistryResult<Vec<u8>> {
-    BASE64.decode(b64).map_err(|e| RegistryError::Config {
-        message: format!("invalid base64 public key: {}", e),
-    })
-}
-
-fn parse_pinned_roots_json_impl(raw: &str) -> RegistryResult<Vec<TrustedKey>> {
-    let roots: Vec<TrustedKey> = serde_json::from_str(raw).map_err(|e| RegistryError::Config {
-        message: format!("invalid production trust roots: {}", e),
-    })?;
-
-    if roots.is_empty() {
-        return Err(RegistryError::Config {
-            message: "production trust roots are empty".to_string(),
-        });
-    }
-
-    let mut seen = HashSet::new();
-    for root in &roots {
-        if root.algorithm != "Ed25519" {
-            return Err(RegistryError::Config {
-                message: format!(
-                    "production trust root {} uses unsupported algorithm {}",
-                    root.key_id, root.algorithm
-                ),
-            });
-        }
-
-        if root.revoked {
-            return Err(RegistryError::Config {
-                message: format!("production trust root {} is revoked", root.key_id),
-            });
-        }
-
-        if !seen.insert(root.key_id.clone()) {
-            return Err(RegistryError::Config {
-                message: format!("duplicate production trust root {}", root.key_id),
-            });
-        }
-    }
-
-    Ok(roots)
-}
-
-fn load_production_roots_impl(raw: &str) -> RegistryResult<TrustStore> {
-    let roots = parse_pinned_roots_json_impl(raw)?;
-    let mut inner = TrustStore::empty_inner();
-
-    for root in &roots {
-        insert_pinned_key(&mut inner, root).map_err(|err| RegistryError::Config {
-            message: format!("invalid production trust root {}: {}", root.key_id, err),
-        })?;
-    }
-
-    Ok(TrustStore {
-        inner: Arc::new(RwLock::new(inner)),
-    })
-}
-
-fn insert_pinned_key(inner: &mut TrustStoreInner, key: &TrustedKey) -> RegistryResult<()> {
-    let verifying_key = decode_verifying_key(&key.public_key)?;
-    let computed_id = compute_key_id(&decode_public_key_bytes(&key.public_key)?);
-
-    if computed_id != key.key_id {
-        return Err(RegistryError::SignatureInvalid {
-            reason: format!(
-                "key_id mismatch: claimed {}, computed {}",
-                key.key_id, computed_id
-            ),
-        });
-    }
-
-    inner.keys.insert(key.key_id.clone(), verifying_key);
-    inner.metadata.insert(
-        key.key_id.clone(),
-        KeyMetadata {
-            description: key.description.clone(),
-            added_at: key.added_at,
-            expires_at: key.expires_at,
-            revoked: false,
-            is_pinned: true,
-        },
-    );
-    if !inner.pinned_roots.contains(&key.key_id) {
-        inner.pinned_roots.push(key.key_id.clone());
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

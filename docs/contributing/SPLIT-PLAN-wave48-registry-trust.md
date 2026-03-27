@@ -76,6 +76,12 @@ Step2 may reorganize internal ownership behind `trust.rs`, but must not redefine
 - production-root resolver behavior
 - downstream verification trust lookup semantics
 
+## Status
+
+- Wave47 closed on `main` via `#968`.
+- Wave48 Step1 shipped on `main` via `#969`.
+- Step2 is the mechanical split slice for `trust.rs`.
+
 ## Step2 (mechanical split preview)
 
 Branch: `codex/wave48-registry-trust-step2` (base: `main`)
@@ -114,12 +120,20 @@ Step2 principles:
 - no workflow edits
 
 Current Step2 shape:
-- `trust.rs`: facade target `<= 300` LOC
+- `trust.rs`: stable facade, public `TrustStore`/`KeyMetadata`, and existing inline tests
 - `trust_next/decode.rs`: base64 / SPKI / key-id decode helpers
 - `trust_next/pinned.rs`: production-root parsing and pinned insertion helpers
 - `trust_next/manifest.rs`: manifest ingest and trust-rotation helpers
 - `trust_next/cache.rs`: refresh / cache state helpers
 - `trust_next/access.rs`: get/list/metadata access helpers
+
+Current Step2 LOC snapshot on this branch:
+- `crates/assay-registry/src/trust.rs`: `838 -> 595`
+- `crates/assay-registry/src/trust_next/pinned.rs`: `98`
+- `crates/assay-registry/src/trust_next/manifest.rs`: `77`
+- `crates/assay-registry/src/trust_next/access.rs`: `43`
+- `crates/assay-registry/src/trust_next/cache.rs`: `31`
+- `crates/assay-registry/src/trust_next/decode.rs`: `24`
 
 ## Step3 (closure)
 
