@@ -5,6 +5,9 @@
 Split `crates/assay-core/src/mcp/tool_call_handler/tests.rs` into a unit-test module tree without
 changing handler behavior, private-access coverage shape, or the white-box meaning of the suite.
 
+T-R2 Step1 shipped on `main` via `#983`.
+T-R2 Step2 shipped on `main` via `#984`.
+
 This plan intentionally follows Rust unit-test conventions:
 
 - keep this suite in `src/`
@@ -131,6 +134,7 @@ Step3 constraints:
 - no production behavior cleanup inside handler/decision/policy code
 - no new module cuts
 - no drift in private-access coverage shape
+- no selector churn beyond closure-gate alignment with the shipped module tree
 
 ## Reviewer notes
 
