@@ -147,8 +147,9 @@ This section is **second-order** motivation only. It does **not** define Assay s
 ## 9. Next steps
 
 1. **Done:** Candidate 1 is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
-2. Next execution artifact, if maintainers proceed, is a **formal freeze path** for `K1` with explicit source mapping, emitted examples, and no implementation until those answers are recorded.
-3. This note remains the historical discovery input; it no longer carries the active roadmap choice by itself.
+2. **Done in this slice:** the next execution artifact is now recorded as [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), with explicit source mapping, emitted examples, and no implementation in the freeze slice itself.
+3. Next execution step, if maintainers proceed, is a bounded adapter-first implementation slice against that freeze, not a pack wave.
+4. This note remains the historical discovery input; it no longer carries the active roadmap choice by itself.
 
 ## References (repo)
 
