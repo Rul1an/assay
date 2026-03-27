@@ -96,7 +96,7 @@ cargo clippy -p assay-core --all-targets -- -D warnings
 echo "[review] pinned decision and replay tests"
 cargo test -p assay-core --lib mcp::decision::tests::test_event_serialization -- --exact
 cargo test -p assay-core --lib mcp::decision::tests::test_reason_codes_are_string_constants -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_policy_allow_emits_once -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_policy_allow_emits_once -- --exact
 cargo test -p assay-core --test fulfillment_normalization fulfillment_normalizes_outcomes_and_sets_policy_deny_path -- --exact
 cargo test -p assay-core --test replay_diff_contract classify_replay_diff_unchanged -- --exact
 

@@ -73,7 +73,7 @@ do
   rg -n "$marker" \
     crates/assay-core/src/mcp/decision.rs \
     crates/assay-core/src/mcp/decision/context_contract.rs \
-    crates/assay-core/tests/decision_emit_invariant.rs >/dev/null || {
+    crates/assay-core/tests/decision_emit_invariant >/dev/null || {
     echo "FAIL: missing Wave42 context-envelope marker: $marker"
     exit 1
   }
@@ -91,7 +91,7 @@ for marker in \
 do
   rg -n "$marker" \
     crates/assay-core/src/mcp/decision/context_contract.rs \
-    crates/assay-core/tests/decision_emit_invariant.rs >/dev/null || {
+    crates/assay-core/tests/decision_emit_invariant >/dev/null || {
     echo "FAIL: missing deterministic context completeness marker: $marker"
     exit 1
   }
@@ -107,7 +107,7 @@ for marker in \
 do
   rg -n "$marker" \
     crates/assay-core/src/mcp/decision.rs \
-    crates/assay-core/tests/decision_emit_invariant.rs >/dev/null || {
+    crates/assay-core/tests/decision_emit_invariant >/dev/null || {
     echo "FAIL: missing existing replay/decision marker: $marker"
     exit 1
   }
@@ -135,7 +135,7 @@ cargo clippy -p assay-core -p assay-cli -p assay-mcp-server --all-targets -- -D 
 
 echo "[review] pinned replay/decision tests"
 cargo test -p assay-core context_contract
-cargo test -p assay-core --test decision_emit_invariant test_event_contains_required_fields -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
 cargo test -p assay-core --test fulfillment_normalization
 cargo test -p assay-cli mcp_wrap_coverage
 cargo test -p assay-cli mcp_wrap_state_window_out

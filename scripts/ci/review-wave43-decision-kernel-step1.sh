@@ -116,10 +116,10 @@ cargo clippy -p assay-core --all-targets -- -D warnings
 echo "[review] pinned decision tests"
 cargo test -p assay-core test_event_serialization -- --exact
 cargo test -p assay-core test_reason_codes_are_string_constants -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_policy_allow_emits_once -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_delegation_fields_are_additive_on_emitted_decisions -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_guard_drop_emits_on_early_return -- --exact
-cargo test -p assay-core --test decision_emit_invariant test_event_contains_required_fields -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_policy_allow_emits_once -- --exact
+cargo test -p assay-core --test decision_emit_invariant delegation::test_delegation_fields_are_additive_on_emitted_decisions -- --exact
+cargo test -p assay-core --test decision_emit_invariant guard::test_guard_drop_emits_on_early_return -- --exact
+cargo test -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
 cargo test -p assay-core --test fulfillment_normalization fulfillment_normalizes_outcomes_and_sets_policy_deny_path -- --exact
 
 echo "[review] PASS"

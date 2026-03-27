@@ -65,13 +65,13 @@ done <"$tmp_changed"
 cargo fmt --all --check
 cargo clippy -q -p assay-core --all-targets -- -D warnings
 
-cargo test -q -p assay-core --test decision_emit_invariant test_policy_allow_emits_once -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant test_delegation_fields_are_additive_on_emitted_decisions -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant approval_required_missing_denies -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant restrict_scope_target_missing_denies -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant redact_args_target_missing_denies -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant test_guard_emits_on_panic -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant test_event_contains_required_fields -- --exact
-cargo test -q -p assay-core --test decision_emit_invariant g3_auth_projection_emits_allowlisted_scheme_trimmed_issuer_principal_in_decision_json -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant emission::test_policy_allow_emits_once -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant delegation::test_delegation_fields_are_additive_on_emitted_decisions -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant approval::approval_required_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant restrict_scope::restrict_scope_target_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant redaction::redact_args_target_missing_denies -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant guard::test_guard_emits_on_panic -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant emission::test_event_contains_required_fields -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant g3_auth::g3_auth_projection_emits_allowlisted_scheme_trimmed_issuer_principal_in_decision_json -- --exact
 
 echo "[review] PASS"

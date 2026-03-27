@@ -30,7 +30,7 @@ emit_file="crates/assay-core/src/mcp/tool_call_handler/emit.rs"
 decision_file="crates/assay-core/src/mcp/decision.rs"
 proxy_file="crates/assay-core/src/mcp/proxy.rs"
 tool_tests="crates/assay-core/src/mcp/tool_call_handler/tests.rs"
-decision_invariant="crates/assay-core/tests/decision_emit_invariant.rs"
+decision_invariant="crates/assay-core/tests/decision_emit_invariant"
 evidence_types="crates/assay-evidence/src/types.rs"
 adr_doc="docs/architecture/ADR-006-Evidence-Contract.md"
 c1_doc="docs/security/OWASP-AGENTIC-A1-A3-A5-C1-MAPPING.md"
@@ -50,7 +50,7 @@ while IFS= read -r file; do
     crates/assay-core/src/mcp/decision.rs|\
     crates/assay-core/src/mcp/proxy.rs|\
     crates/assay-core/src/mcp/tool_call_handler/tests.rs|\
-    crates/assay-core/tests/decision_emit_invariant.rs|\
+    crates/assay-core/tests/decision_emit_invariant/main.rs|\
     crates/assay-evidence/src/types.rs|\
     docs/architecture/ADR-006-Evidence-Contract.md|\
     docs/security/OWASP-AGENTIC-A1-A3-A5-C1-MAPPING.md|\
@@ -143,7 +143,7 @@ cargo test -q -p assay-core parse_delegation_context_
 cargo test -q -p assay-core delegated_context_emits_typed_fields_for_supported_flow
 cargo test -q -p assay-core direct_authorization_flow_omits_delegation_fields
 cargo test -q -p assay-core unstructured_delegation_hints_do_not_emit_typed_fields
-cargo test -q -p assay-core --test decision_emit_invariant test_delegation_fields_are_additive_on_emitted_decisions -- --exact
+cargo test -q -p assay-core --test decision_emit_invariant delegation::test_delegation_fields_are_additive_on_emitted_decisions -- --exact
 cargo test -q -p assay-evidence tool_decision_payload_delegation_fields_are_additive
 git diff --check
 
