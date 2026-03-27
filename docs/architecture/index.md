@@ -20,7 +20,8 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [RFC-005 Trust Compiler MVP (Q2 2026)](./RFC-005-trust-compiler-mvp-2026q2.md) — bounded plan for `T1a` compiler and `T1b` Trust Card
 - [PLAN — T1a Trust Basis Compiler MVP (Q2 2026)](./PLAN-T1a-TRUST-BASIS-COMPILER-2026q2.md) — first execution wave for canonical `trust-basis.json`
 - [Trust Compiler Audit Matrix (2026-03-26)](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md) — wave-by-wave audit of the trust-compiler line from `T1b` through `P2c`
-- [Discovery — Next Evidence Wave (Q2 2026)](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md) — discovery-only note for the post-`P2c` decision point
+- [Discovery — Next Evidence Wave (Q2 2026)](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md) — historical discovery note that ranked post-`P2c` candidates and led to `K1`
+- [PLAN — K1 A2A Handoff / Delegation-Route Evidence (Q2 2026)](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) — formal next-wave plan after `P2c`, adapter-first and evidence-first
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
@@ -31,7 +32,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 | [RFC-002: Code Health Remediation](./RFC-002-code-health-remediation-q1-2026.md) | Complete (E1–E4 merged, E5→RFC-003) | Store, metrics, registry, comment cleanup |
 | [RFC-003: Generate Decomposition](./RFC-003-generate-decomposition-q1-2026.md) | Complete (G1–G6 merged) | `generate.rs` split into focused modules |
 | [RFC-004: Open Items Convergence](./RFC-004-open-items-convergence-q1-2026.md) | Closed (O1–O6 merged on `main`) | Historical closure ledger for the Q1 convergence line |
-| [RFC-005: Trust Compiler MVP](./RFC-005-trust-compiler-mvp-2026q2.md) | Active (`T1a`..`P2c` on `main`; next decision point is discovery-only) | Bounded plan for the trust-compiler and Trust Card line |
+| [RFC-005: Trust Compiler MVP](./RFC-005-trust-compiler-mvp-2026q2.md) | Active (`T1a`..`P2c` on `main`; `K1` formalized as the next evidence wave) | Bounded plan for the trust-compiler and Trust Card line |
 
 ## Architecture Decision Records
 
