@@ -20,6 +20,13 @@ FROZEN_PATHS=(
   "crates/assay-registry/tests"
 )
 
+changed_files() {
+  git diff --name-only "$BASE_REF"...HEAD || true
+  git diff --name-only || true
+  git diff --name-only --cached || true
+  git ls-files --others --exclude-standard || true
+}
+
 echo "[review] allowlist-only diff vs $BASE_REF + workflow-ban"
 while IFS= read -r f; do
   [[ -z "${f:-}" ]] && continue
@@ -38,7 +45,7 @@ while IFS= read -r f; do
     echo "FAIL: file not allowed in Wave48 Step3: $f"
     exit 1
   fi
-done < <(git diff --name-only "$BASE_REF"...HEAD)
+done < <(changed_files | awk 'NF' | sort -u)
 
 echo "[review] frozen tracked paths must not change"
 for p in "${FROZEN_PATHS[@]}"; do
