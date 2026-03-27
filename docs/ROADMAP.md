@@ -205,16 +205,16 @@ Based on [competitive landscape analysis](architecture/RESEARCH-ci-cd-ai-agents-
 - **Not a full outbound egress firewall (yet)**: raw network containment belongs to OS/runtime isolation layers. Assay governs tool routes and records policy decisions; it does not replace platform egress controls as an MVP.
 - **Not a magic trust score**: primary outputs should stay evidence-classified (`verified`, `self_reported`, `inferred`, `absent`), not collapse into a single opaque number.
 
-## Post-P1 Product Lane (March 2026)
+## Post-P1 Product Lane (March 2026, Historical)
 
-The current substrate on `main` is strong enough to shift from "more packs" toward a clearer product line:
+The substrate that was on `main` after `P1` was strong enough to shift from "more packs" toward a clearer product line. This lane is historical context; the active trust-compiler line is now `K1` / `K1-A` above.
 
 | Order | Lane | Why now | Boundary |
 |-------|------|---------|----------|
 | **1** | `T1a` OTel-native Trust Compiler MVP | ✅ Merged on `main`: verified bundle -> deterministic `trust-basis.json` with bounded claim classification. | Kept small: no Trust Card rendering, no new signals, no packs, no score-first surface. |
 | **2** | `T1b` Trust Card MVP | ✅ Merged on `main`: deterministic `trustcard.json` + `trustcard.md` from verified bundles (`assay trustcard generate --out-dir`), derived from T1a only. | Evidence-classified output; signed/attestation later; no generic risk score. |
 | **3** | `G3` Authorization Evidence Signal | ✅ Merged on `main`: bounded `auth_scheme` / `auth_issuer` / `principal` on policy-projected MCP decision evidence; Trust Basis + Trust Card schema `2` / seven claims (see [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md)). | Supported flows only; no auth validation, issuer trust proof, scope checks, or temporal correctness. Optional follow-up: reduce core ↔ evidence drift (normalization vs classification). |
-| **4** | `P2` Protocol Claim Packs | **Current next wave** — protocol-aware claim packs as honest product surfaces now that auth context is visible in evidence. | Small MCP/A2A claim packs, not broad compliance theater. |
+| **4** | `P2` Protocol Claim Packs | Historical next lane at that point — protocol-aware claim packs as honest product surfaces once auth context became visible in evidence. | Small MCP/A2A claim packs, not broad compliance theater. |
 | **Later** | Reference/temporal/capability attestation | These semantics are valuable but heavier. | Ship only after the claim product line is stable. |
 
 **G3 closure (content):** Policy-projected authorization context lands on decision evidence in a frozen supported flow, is redacted, and flows through to Trust Basis and Trust Card without overclaiming validation or issuer trust. The main remaining engineering nuance is **core/evidence alignment** (above) as a hardening pass, not a G3 scope gap.
