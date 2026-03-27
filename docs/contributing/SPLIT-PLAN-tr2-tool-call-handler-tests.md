@@ -12,7 +12,7 @@ This plan intentionally follows Rust unit-test conventions:
 - decompose it as `tests/mod.rs` plus submodules
 - preserve private access through `super::*`
 
-Current hotspot baseline on `origin/main @ 66c424c1`:
+Current hotspot baseline on `origin/main @ 26152b87`:
 
 - `crates/assay-core/src/mcp/tool_call_handler/tests.rs`: `1242` LOC
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs`: already split in Wave44 and now the closest behavior companion
