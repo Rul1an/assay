@@ -1,6 +1,6 @@
 # RFC-005: Trust Compiler MVP and Trust Card (Q2 2026)
 
-- Status: Active (`T1a`, `T1b`, and `G3` merged on `main`; next: `P2`)
+- Status: Active (`T1a`, `T1b`, `G3`, `P2a`, `H1`, `P2b`, `G4-A`, and `P2c` shipped on `main`; next decision point is discovery-only and currently favors a bounded A2A handoff / delegation-route evidence candidate, not automatically another pack)
 - Date: 2026-03-23
 - Owner: Evidence / Product
 - Scope: bounded execution framing for `T1a` and `T1b`

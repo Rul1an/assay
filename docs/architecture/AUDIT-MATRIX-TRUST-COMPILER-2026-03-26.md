@@ -1,42 +1,39 @@
 # Trust Compiler Audit Matrix (2026-03-26)
 
-This document is a compact audit matrix for the **trust-compiler line as it moved from MVP chain to first protocol product line** across the main delivery slice on **2026-03-24** and **2026-03-25**.
+This matrix records the trust-compiler line that moved from `T1b` through `P2c`, plus the current
+post-`P2c` discovery-only note. It is meant as an audit aid: each row captures the wave, the PRs
+that carried it, the kernel files, the contract/result that matters, and whether that row is
+shipped on `main` and/or part of the public `v3.3.0` release truth.
 
-It is intentionally stricter than a narrative recap:
+| Wave | PR(s) | Kernbestanden | Belangrijk contract / resultaat | `main` shipped? | Release-truth? |
+|------|-------|---------------|----------------------------------|-----------------|----------------|
+| `T1b` | `#923` | `crates/assay-evidence/src/trust_card.rs`, `crates/assay-cli/src/cli/commands/trustcard.rs` | Deterministic `trustcard.json` / `trustcard.md` derived from `trust-basis.json`; geen tweede semantische classificatielaag | Yes | Yes — in `v3.3.0` |
+| `G3` | `#929` | `crates/assay-evidence/src/g3_authorization_context.rs`, `crates/assay-evidence/src/trust_basis.rs`, `crates/assay-evidence/src/trust_card.rs` | `authorization_context_visible`; Trust Basis met **7 claims**; Trust Card `schema_version: 2`; bounded `auth_scheme` / `auth_issuer` / `principal` op ondersteunde MCP decision evidence | Yes | Yes — in `v3.3.0` |
+| Outward positioning | `#930` | `README.md`, trust-compiler docs slices | README / outward positioning verschuift naar claims-as-code / trust compiler taal | Yes | Main only |
+| `P2a` + engine `1.2` | `#935` | `crates/assay-evidence/src/lint/packs/checks.rs`, `crates/assay-evidence/src/lint/packs/mod.rs`, `packs/open/mcp-signal-followup/pack.yaml` | Built-in `mcp-signal-followup`; `g3_authorization_context_present`; pack engine `1.2` | Yes | Yes — in `v3.3.0` |
+| `H1` | `#937` | `docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md`, `crates/assay-evidence/tests/h1_trust_kernel_alignment.rs` | Migration SSOT; kernel / Trust Basis / Trust Card alignment hardening | Yes | Yes — in `v3.3.0` |
+| `H1a` | `#938` | shared trust-kernel test vectors and companion tests | Shared vectors and alignment support without new product semantics | Yes | Yes — in `v3.3.0` |
+| Roadmap sync | `#939` | `docs/ROADMAP.md` | Roadmap sync after `P2a` / `H1` / `P2b` ordering hardens | Yes | Main only |
+| `P2b` | `#940` | `packs/open/a2a-signal-followup/pack.yaml`, built-in pack wiring | Built-in `a2a-signal-followup` (`A2A-001..003`); presence-only on canonical A2A adapter evidence | Yes | Yes — in `v3.3.0` |
+| `v3.3.0` line | release cut + `#941` hardening | `CHANGELOG.md`, `docs/architecture/RELEASE-PLAN-TRUST-COMPILER-3.3.md`, crates.io line | First coherent public trust-compiler line: Trust Basis, Trust Card v2 / 7 claims, `G3`, engine `1.2`, built-in `P2a` + `P2b`, migration SSOT | Yes | Yes — tag / GitHub release / crates.io |
+| `G4` planning | `#942`, `#943` | `docs/architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md`, `docs/architecture/G4-A-PHASE1-FREEZE.md` | Discovery/card evidence wave framed as adapter-first evidence seam, not pack-first expansion | Yes | Main only |
+| `G4-A` Phase 1 | `#944`, `#945` | `crates/assay-adapter-a2a/src/adapter_impl/discovery.rs`, A2A payload wiring | New typed `payload.discovery` seam for A2A discovery/card visibility | Yes | Main only (post-`v3.3.0`) |
+| `P2c` planning + freeze | `#946`, `#947`, `#948` | `docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md` and related status docs | `P2c` frozen as a follow-on pack to `G4-A`, not part of `G4` itself | Yes | Main only |
+| `P2c` | `#949` | built-in `a2a-discovery-card-followup`, pack checks, open mirror | Built-in `A2A-DC-001` / `A2A-DC-002`; `json_path_exists` + `value_equals`; `requires.assay_min_version: ">=3.3.0"` | Yes | Main only (after `v3.3.0`) |
+| Discovery-only next-wave note | discovery note on `main` | `docs/architecture/DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md` | Preferred next evidence-wave candidate: **A2A handoff / delegation-route visibility**; second candidate: **MCP authorization-discovery**; explicitly **not** automatically another pack | Yes | Main only / discovery-only |
 
-- **`main shipped?`** means merged on `origin/main`
-- **`release-truth?`** distinguishes:
-  - **`v3.3.0 released`** — included in tag/release/crates line `v3.3.0`
-  - **`main only`** — merged on `main` after `v3.3.0`, not yet in a released tag
-  - **`open PR only`** — proposed, not merged
+## Current call
 
-The practical start of this slice is **`#923` / `#929`**, not the trust-compiler foundation PRs from **2026-03-23** (`#917` / `#918` / `#919` / `#920`), which established the north star and `T1a`.
+The trust-compiler line on `main` is shipped through `P2c`. The next formal wave is **not** yet a
+new `P` slice by default. The current documentation now converges on this call:
 
-## Matrix
+- keep `G4-A` limited to post-merge verification / release-truth hygiene
+- treat the next step as a **decision point**, not as “automatic `P2d`”
+- current best candidate: **bounded A2A handoff / delegation-route visibility evidence**
+- current second candidate: **MCP authorization-discovery evidence**
 
-| Wave / slice | PR(s) | Core files | Contract / result | `main` shipped? | Release-truth? |
-|---|---|---|---|---|---|
-| **T1b — Trust Card** | [#923](https://github.com/Rul1an/assay/pull/923) | `crates/assay-evidence/src/trust_card.rs`<br>`crates/assay-cli/src/cli/commands/trust_card.rs`<br>`docs/architecture/PLAN-T1b-TRUST-CARD-2026q2.md` | Deterministic `trustcard.json` / `trustcard.md` derived from Trust Basis only; no second semantic classification layer | **Yes** | **`v3.3.0` released** |
-| **G3 — authorization context** | [#929](https://github.com/Rul1an/assay/pull/929) | `crates/assay-evidence/src/g3_authorization_context.rs`<br>`crates/assay-evidence/src/trust_basis.rs`<br>`docs/architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md` | MCP decision evidence gets bounded auth-context fields (`auth_scheme`, `auth_issuer`, `principal`); Trust Basis grows to **7 claims**; Trust Card JSON moves to **schema 2** with `authorization_context_visible` | **Yes** | **`v3.3.0` released** |
-| **Outward positioning polish** | [#930](https://github.com/Rul1an/assay/pull/930) | `README.md`<br>`docs/community/DISCUSSIONS.md` | Public-facing trust-compiler wording sharpened; keeps claim-first positioning aligned with shipped surfaces | **Yes** | **`v3.3.0` released** |
-| **P2a — MCP companion pack** | [#935](https://github.com/Rul1an/assay/pull/935) | `crates/assay-evidence/packs/mcp-signal-followup.yaml`<br>`packs/open/mcp-signal-followup/pack.yaml`<br>`docs/architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md` | Built-in `mcp-signal-followup` pack (`MCP-001..003`); `MCP-001` shares G3 semantics with Trust Basis via `g3_authorization_context_present` | **Yes** | **`v3.3.0` released** |
-| **Pack engine 1.2** | [#935](https://github.com/Rul1an/assay/pull/935) | `crates/assay-evidence/src/lint/packs/checks.rs`<br>`crates/assay-evidence/src/lint/packs/schema.rs`<br>`docs/architecture/SPEC-Pack-Engine-v1.md` | Pack engine **1.2** adds `g3_authorization_context_present`; MCP auth-context pack semantics become first-class in engine checks | **Yes** | **`v3.3.0` released** |
-| **H1 — migration SSOT / alignment** | [#937](https://github.com/Rul1an/assay/pull/937) | `docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md`<br>`docs/architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md`<br>`crates/assay-evidence/tests/h1_trust_kernel_alignment.rs` | Migration SSOT becomes the single truth for Trust Basis / Trust Card / pack floors / release floors; alignment tests and documentation harden the trust kernel | **Yes** | **`v3.3.0` released** |
-| **H1a — shared vectors** | [#938](https://github.com/Rul1an/assay/pull/938) | `crates/assay-evidence/tests/common/` | Shared trust-kernel bundle vectors for H1 / P2a parity and future protocol-pack alignment | **Yes** | **`v3.3.0` released** |
-| **Roadmap sync after H1** | [#939](https://github.com/Rul1an/assay/pull/939) | `docs/ROADMAP.md` | Marks H1 as shipped and sets **P2b** as next, preserving the ordered trust-compiler execution story | **Yes** | **`v3.3.0` released** |
-| **P2b — A2A companion pack** | [#940](https://github.com/Rul1an/assay/pull/940) | `crates/assay-evidence/packs/a2a-signal-followup.yaml`<br>`packs/open/a2a-signal-followup/pack.yaml`<br>`docs/architecture/PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md` | Built-in `a2a-signal-followup` pack (`A2A-001..003`) on canonical `assay.adapter.a2a.*` evidence; presence-only discipline preserved | **Yes** | **`v3.3.0` released** |
-| **`v3.3.0` release line** | release commit `1aa597c3` + tag [`v3.3.0`](https://github.com/Rul1an/assay/releases/tag/v3.3.0) | `CHANGELOG.md`<br>`docs/architecture/RELEASE-PLAN-TRUST-COMPILER-3.3.md` | First public release line bundling the trust-compiler baseline: Trust Basis, Trust Card schema 2 / 7 claims, G3, engine 1.2, built-in `mcp-signal-followup`, built-in `a2a-signal-followup`, migration SSOT | **Yes** | **`v3.3.0` released** |
-| **Post-release hardening** | [#941](https://github.com/Rul1an/assay/pull/941) | `docs/ROADMAP.md`<br>`CHANGELOG.md`<br>`docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md` | Post-`v3.3.0` docs hardening; keeps public docs and strategy docs aligned after the first trust-compiler release | **Yes** | **`main` only** |
-| **G4 planning / freeze** | [#942](https://github.com/Rul1an/assay/pull/942), [#943](https://github.com/Rul1an/assay/pull/943) | `docs/architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md` | G4 is frozen as an **evidence-wave**, not a pack-wave; discovery/card surfaces must be adapter-first and bounded before a follow-up pack exists | **Yes** | **`main` only** |
-| **G4-A Phase 1** | [#944](https://github.com/Rul1an/assay/pull/944), [#945](https://github.com/Rul1an/assay/pull/945) | `docs/architecture/G4-A-PHASE1-FREEZE.md`<br>`crates/assay-adapter-a2a/` | A2A adapter emits first-class **`payload.discovery`** seam; Phase 1 is marked shipped and only post-merge verification / release-truth hygiene remains | **Yes** | **`main` only** |
-| **P2c planning / lock** | [#946](https://github.com/Rul1an/assay/pull/946), [#947](https://github.com/Rul1an/assay/pull/947), [#948](https://github.com/Rul1an/assay/pull/948) | `docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md` | P2c v1 frozen to **A2A-DC-001** / **A2A-DC-002**; decision lock includes **`value_equals`**, fail-default on pre-G4-A bundles, and **`requires >=3.3.0`** instead of substrate floor `>=3.2.3` | **Yes** | **`main` only** |
-| **P2c — A2A discovery/card follow-up pack** | [#949](https://github.com/Rul1an/assay/pull/949) | `crates/assay-evidence/packs/a2a-discovery-card-followup.yaml`<br>`packs/open/a2a-discovery-card-followup/pack.yaml`<br>`crates/assay-evidence/src/lint/packs/checks.rs` | Built-in `a2a-discovery-card-followup`; first shipped use of `json_path_exists.value_equals` on frozen `payload.discovery` pointers; pack `requires.assay_min_version: ">=3.3.0"` | **Yes** | **`main` only** |
-| **Post-P2c status sync** | commit `80975d78` | `CHANGELOG.md`<br>`docs/ROADMAP.md`<br>`docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md` | Syncs `P2c` as shipped on `main` in roadmap / changelog / RFC-005; makes the current trust-compiler sequence auditable after the second A2A slice | **Yes** | **`main` only** |
-| **Discovery next-wave note** | [#951](https://github.com/Rul1an/assay/pull/951) | `docs/architecture/DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md` | Discovery-only architecture note for what comes after `P2c`; frames candidate next evidence waves (`K1` handoff/delegation preferred) without changing roadmap or freezing a new wave | **No** | **open PR only** |
+See also:
 
-## Audit notes
-
-- `T1a` and the trust-compiler north-star foundation (`#917` / `#918` / `#919` / `#920`) predate this two-day slice and are therefore treated as **prerequisite substrate**, not as part of the main matrix above.
-- The **single source of truth** for trust-compiler version semantics remains [MIGRATION-TRUST-COMPILER-3.2.md](./MIGRATION-TRUST-COMPILER-3.2.md).
-- The **first released trust-compiler baseline** is **`v3.3.0`**. `G4-A` and `P2c` are currently **merged on `main`** but **post-`v3.3.0`**, so they should not be described as released unless a later tag includes them.
-- Consumers should key Trust Basis / Trust Card rows by stable **`claim.id`**, not by row count or ordering assumptions; “seven rows” is a **schema 2** fact, not a generic API contract.
+- [ROADMAP](./../ROADMAP.md)
+- [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
+- [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md)
