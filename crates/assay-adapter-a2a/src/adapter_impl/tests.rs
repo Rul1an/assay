@@ -56,6 +56,14 @@ fn assert_discovery_v1_defaults(payload: &Value) {
     assert_eq!(d["signature_material_visible"], Value::Bool(false));
 }
 
+fn assert_handoff_v1_defaults(payload: &Value) {
+    let h = &payload["handoff"];
+    assert_eq!(h["visible"], Value::Bool(false));
+    assert_eq!(h["source_kind"], Value::String("unknown".to_string()));
+    assert_eq!(h["task_ref_visible"], Value::Bool(false));
+    assert_eq!(h["message_ref_visible"], Value::Bool(false));
+}
+
 /// Golden digests over `payload.discovery` via `digest_canonical_json` (sorted keys).
 /// If `discovery` shape or types change intentionally, update hashes and this comment.
 const G4_DISCOVERY_DIGEST_DEFAULT: &str =
@@ -67,6 +75,12 @@ const G4_DISCOVERY_DIGEST_BOTH_FLAGS: &str =
 /// Extended visibility only (`agent_card_source_kind` stays `unknown`).
 const G4_DISCOVERY_DIGEST_EXTENDED_ONLY: &str =
     "13e23c6783de838b52ca92d787569bccd3cadc0f8900f1bf76b42262959f77ba";
+const K1_HANDOFF_DIGEST_DEFAULT: &str =
+    "60e992b4881c03d816cd94929856d8c8cade113f62273d42a8a75412533a294a";
+const K1_HANDOFF_DIGEST_TYPED_POSITIVE: &str =
+    "e478af7359a254678c90b5eb2737d63f79c6d667a2b5c4bc323442f07d09d33b";
+const K1_HANDOFF_DIGEST_LENIENT_PARTIAL: &str =
+    "0be260743587b9594018a4ab7809560157be088be0372a8ae7c7faa6a744effe";
 
 #[test]
 fn protocol_metadata_uses_exact_version_and_range_capability() {
@@ -117,9 +131,14 @@ fn strict_agent_capabilities_fixture_emits_deterministic_event() {
         serde_json::json!(["agent.describe", "artifacts.share", "tasks.update"])
     );
     assert_discovery_v1_defaults(&first.events[0].payload);
+    assert_handoff_v1_defaults(&first.events[0].payload);
     assert_eq!(
         digest_canonical_json(&first.events[0].payload["discovery"]),
         G4_DISCOVERY_DIGEST_DEFAULT
+    );
+    assert_eq!(
+        digest_canonical_json(&first.events[0].payload["handoff"]),
+        K1_HANDOFF_DIGEST_DEFAULT
     );
 }
 
@@ -218,6 +237,12 @@ fn strict_task_requested_fixture_maps_expected_event() {
         batch.events[0].payload["protocol_name"],
         Value::String(PROTOCOL_NAME.to_string())
     );
+    let h = &batch.events[0].payload["handoff"];
+    assert_eq!(h["visible"], Value::Bool(true));
+    assert_eq!(h["source_kind"], Value::String("typed_payload".to_string()));
+    assert_eq!(h["task_ref_visible"], Value::Bool(true));
+    assert_eq!(h["message_ref_visible"], Value::Bool(true));
+    assert_eq!(digest_canonical_json(h), K1_HANDOFF_DIGEST_TYPED_POSITIVE);
 }
 
 #[test]
@@ -237,6 +262,11 @@ fn strict_artifact_shared_fixture_maps_expected_event() {
 
     assert_eq!(batch.events[0].type_, "assay.adapter.a2a.artifact.shared");
     assert_eq!(batch.events[0].subject.as_deref(), Some("artifact-7"));
+    assert_handoff_v1_defaults(&batch.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&batch.events[0].payload["handoff"]),
+        K1_HANDOFF_DIGEST_DEFAULT
+    );
 }
 
 #[test]
@@ -284,6 +314,12 @@ fn lenient_missing_task_id_substitutes_unknown_task() {
     assert_eq!(batch.events[0].subject.as_deref(), Some("unknown-task"));
     assert!(batch.lossiness.unmapped_fields_count >= 1);
     assert!(batch.lossiness.raw_payload_ref.is_some());
+    let h = &batch.events[0].payload["handoff"];
+    assert_eq!(h["visible"], Value::Bool(true));
+    assert_eq!(h["source_kind"], Value::String("typed_payload".to_string()));
+    assert_eq!(h["task_ref_visible"], Value::Bool(false));
+    assert_eq!(h["message_ref_visible"], Value::Bool(true));
+    assert_eq!(digest_canonical_json(h), K1_HANDOFF_DIGEST_LENIENT_PARTIAL);
 }
 
 #[test]
@@ -323,6 +359,67 @@ fn lenient_invalid_event_type_emits_generic_message_event_and_lossiness() {
     assert_eq!(
         batch.events[0].payload["adapter_version"],
         Value::String(env!("CARGO_PKG_VERSION").to_string())
+    );
+    assert_handoff_v1_defaults(&batch.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&batch.events[0].payload["handoff"]),
+        K1_HANDOFF_DIGEST_DEFAULT
+    );
+}
+
+#[test]
+fn k1_typed_positive_full_batch_digest_is_deterministic() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = fixture("a2a_happy_task_requested.json");
+    let input = AdapterInput {
+        payload: &payload,
+        media_type: "application/json",
+        protocol_version: Some("0.2"),
+    };
+    let first = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    let second = adapter
+        .convert(input, &ConvertOptions::default(), &writer)
+        .expect("convert");
+    assert_eq!(
+        digest_canonical_json(&first),
+        digest_canonical_json(&second)
+    );
+}
+
+#[test]
+fn k1_task_updated_delegation_does_not_promote_handoff_in_v1() {
+    let adapter = A2aAdapter;
+    let writer = TestWriter;
+    let payload = br#"{
+      "protocol":"a2a",
+      "version":"0.2.0",
+      "event_type":"task.updated",
+      "timestamp":"2026-02-27T11:05:00Z",
+      "agent":{"id":"agent://worker"},
+      "task":{"id":"task-999","status":"running","kind":"delegation"},
+      "message":{"id":"msg-update","role":"assistant"}
+    }"#;
+
+    let batch = adapter
+        .convert(
+            AdapterInput {
+                payload,
+                media_type: "application/json",
+                protocol_version: Some("0.2.0"),
+            },
+            &ConvertOptions::default(),
+            &writer,
+        )
+        .expect("task.updated should still convert");
+
+    assert_eq!(batch.events[0].type_, "assay.adapter.a2a.task.updated");
+    assert_handoff_v1_defaults(&batch.events[0].payload);
+    assert_eq!(
+        digest_canonical_json(&batch.events[0].payload["handoff"]),
+        K1_HANDOFF_DIGEST_DEFAULT
     );
 }
 

@@ -1,12 +1,13 @@
 use serde_json::{Map, Value};
 
-use super::{discovery::discovery_object, PROTOCOL_NAME};
+use super::{discovery::discovery_object, handoff::handoff_object, PROTOCOL_NAME};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_payload(
     adapter_id: &str,
     adapter_version: &str,
     version: &str,
+    canonical_event_type: &str,
     upstream_event_type: Option<&str>,
     agent_id: &str,
     agent_name: Option<&str>,
@@ -19,6 +20,8 @@ pub(super) fn build_payload(
     artifact_name: Option<&str>,
     artifact_media_type: Option<&str>,
     message_id: Option<&str>,
+    typed_task_id_present: bool,
+    typed_message_id_present: bool,
     message_role: Option<&str>,
     attributes: Option<&Value>,
     unmapped_fields_count: u32,
@@ -113,6 +116,15 @@ pub(super) fn build_payload(
     }
 
     payload.insert("discovery".to_string(), discovery_object(attributes));
+    payload.insert(
+        "handoff".to_string(),
+        handoff_object(
+            canonical_event_type,
+            task_kind,
+            typed_task_id_present,
+            typed_message_id_present,
+        ),
+    );
 
     payload.insert(
         "unmapped_fields_count".to_string(),
