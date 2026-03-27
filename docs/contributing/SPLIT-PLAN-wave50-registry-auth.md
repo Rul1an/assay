@@ -82,7 +82,8 @@ Step2 may reorganize internal ownership behind `auth.rs`, but must not redefine:
 - T-R1 closed on `main` via `#982`.
 - T-R2 closed on `main` via `#985`.
 - Wave50 Step1 shipped on `main` via `#986`.
-- Wave50 Step2 is the mechanical split slice for the next unsplit production hotspot.
+- Wave50 Step2 shipped on `main` via `#987`.
+- Wave50 Step3 is the closure/docs+gates-only slice for the shipped auth split.
 
 ## Step2 (mechanical split preview)
 
@@ -141,7 +142,9 @@ Current Step2 LOC snapshot on this branch:
 
 ## Step3 (closure)
 
-Step3 will close the shipped Wave50 auth split with docs/gates only once Step2 lands on `main`.
+Branch: `codex/wave50-registry-auth-step3` (base: `main`)
+
+Step3 closes the shipped Wave50 auth split with docs/gates only after Step2 lands on `main`.
 
 Step3 constraints:
 - docs+gate only
@@ -151,6 +154,13 @@ Step3 constraints:
 - no new module cuts
 - no behavior cleanup beyond internal follow-up notes
 - no auth-header, cache, retry, or exchange-path drift
+
+Step3 deliverables:
+- `docs/contributing/SPLIT-PLAN-wave50-registry-auth.md`
+- `docs/contributing/SPLIT-CHECKLIST-wave50-registry-auth-step3.md`
+- `docs/contributing/SPLIT-MOVE-MAP-wave50-registry-auth-step3.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-wave50-registry-auth-step3.md`
+- `scripts/ci/review-wave50-registry-auth-step3.sh`
 
 ## Promote
 
