@@ -77,6 +77,7 @@ Step1 constraints:
 Step1 gate should pin representative tests from each family, for example:
 
 - `cargo test -q -p assay-core --test decision_emit_invariant test_policy_allow_emits_once -- --exact`
+- `cargo test -q -p assay-core --test decision_emit_invariant test_delegation_fields_are_additive_on_emitted_decisions -- --exact`
 - `cargo test -q -p assay-core --test decision_emit_invariant approval_required_missing_denies -- --exact`
 - `cargo test -q -p assay-core --test decision_emit_invariant restrict_scope_target_missing_denies -- --exact`
 - `cargo test -q -p assay-core --test decision_emit_invariant redact_args_target_missing_denies -- --exact`
@@ -88,6 +89,10 @@ Step1 gate should pin representative tests from each family, for example:
 
 Step2 should replace the single-file target with one multi-file target directory while preserving
 the test target name and its black-box contract role.
+
+Converting `tests/decision_emit_invariant.rs` to
+`tests/decision_emit_invariant/main.rs` must preserve the same Cargo integration-test target
+identity.
 
 Target layout:
 
@@ -105,6 +110,8 @@ Step2 principles:
 
 - keep one integration-test binary by default
 - keep `main.rs` as the test-target root and top-level module wiring only
+- keep `main.rs` limited to module wiring and, if strictly necessary, a minimal shared prelude
+- do not leave the bulk of test bodies in `main.rs`
 - move helper/setup code into `fixtures.rs`
 - move test bodies by scenario family, not by arbitrary file-size chunks
 - keep the suite black-box; do not convert any part of it into white-box/private-item tests
@@ -112,8 +119,8 @@ Step2 principles:
 
 Step2 family ownership:
 
-- `fixtures.rs`: emitters, request builders, policy builders, artifact builders
-- `emission.rs`: allow/deny, multiple-call emission, event-source, tool-call-id, required fields, non-tool-call, obligation basics
+- `fixtures.rs`: shared emitters, request builders, policy builders, and artifact builders only; no scenario-specific assertions or scenario-owned behavior unless genuinely reused across families
+- `emission.rs`: allow/deny, multiple-call emission, event-source, tool-call-id, required fields, non-tool-call, and cross-cutting obligation basics only; if one subgroup grows disproportionately, that is a later follow-up candidate rather than part of this split
 - `approval.rs`: `approval_required_*`
 - `restrict_scope.rs`: `restrict_scope_*`
 - `redaction.rs`: `redact_args_*`
@@ -148,6 +155,7 @@ Primary failure modes:
 - No production edits under `crates/assay-core/src/**`.
 - No new integration-test binaries in the first split.
 - No test-helper sharing via `tests/common/mod.rs` unless a later wave actually introduces
-  multiple top-level integration targets.
+  multiple top-level integration targets; in this wave there is exactly one preserved integration
+  target, so shared helpers belong inside that target.
 - No ownership reshuffle of emitted decision semantics.
 - No renaming of test target, contract families, or assertion intent.
