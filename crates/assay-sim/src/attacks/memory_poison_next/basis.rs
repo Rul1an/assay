@@ -81,14 +81,17 @@ pub(in crate::attacks::memory_poison) fn condition_b_replay_integrity(
     clean: &ReplayDiffBasis,
     candidate: &ReplayDiffBasis,
 ) -> bool {
-    let clean_hash = compute_basis_hash(clean);
-    let candidate_hash = compute_basis_hash(candidate);
-    clean_hash == candidate_hash
+    match (compute_basis_hash(clean), compute_basis_hash(candidate)) {
+        (Ok(clean_hash), Ok(candidate_hash)) => clean_hash == candidate_hash,
+        _ => false,
+    }
 }
 
-pub(in crate::attacks::memory_poison) fn compute_basis_hash(basis: &ReplayDiffBasis) -> String {
+pub(in crate::attacks::memory_poison) fn compute_basis_hash(
+    basis: &ReplayDiffBasis,
+) -> Result<String, serde_json::Error> {
     use sha2::{Digest, Sha256};
-    let canonical = serde_json::to_string(basis).unwrap_or_default();
+    let canonical = serde_json::to_string(basis)?;
     let hash = Sha256::digest(canonical.as_bytes());
-    format!("sha256:{}", hex::encode(hash))
+    Ok(format!("sha256:{}", hex::encode(hash)))
 }
