@@ -78,6 +78,7 @@ Step1 gate should pin representative tests from each family, for example:
 - `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::restrict_scope_target_missing_denies' -- --exact`
 - `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::redact_args_target_missing_denies' -- --exact`
 - `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::test_tool_drift_deny_emits_alert_obligation_outcome' -- --exact`
+- `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::test_operation_class_for_tool' -- --exact`
 - `cargo test -q -p assay-core --lib 'mcp::tool_call_handler::tests::test_lifecycle_emitter_not_called_when_none' -- --exact`
 
 ## Step2 (mechanical split preview)
@@ -101,21 +102,23 @@ Step2 principles:
 
 - keep the suite a unit-test tree, not an integration-test target
 - keep the parent `mod tests;` declaration stable
-- keep `mod.rs` thin: module wiring and shared imports only
+- keep `mod.rs` thin: module wiring, shared imports, and only the smallest common prelude needed for private access
+- do not leave the bulk of test bodies in `mod.rs`
 - move helper/setup code into `fixtures.rs`
 - move test bodies by scenario family
 - preserve private access through `super::*`
+- module decomposition must preserve the existing private-access pattern; submodules should continue to rely on `super::*` / parent-module access rather than forcing visibility widening in production code
 
 Step2 family ownership:
 
-- `fixtures.rs`: emitters, request builders, policy builders, approval artifacts, outcome helpers
-- `emission.rs`: basic allow/deny emission and obligation outcome tests
+- `fixtures.rs`: shared emitters, request builders, policy builders, approval artifacts, and outcome helpers only; no scenario-specific assertions or family-owned behavior unless genuinely reused across families
+- `emission.rs`: handler decision emission and obligation outcome tests only
 - `delegation.rs`: delegated/direct/unstructured delegation tests
 - `approval.rs`: `approval_required_*`
 - `scope.rs`: `restrict_scope_*`
 - `redaction.rs`: `redact_args_*`
-- `classification.rs`: commit-tool/classification helper tests
-- `lifecycle.rs`: lifecycle emitter tests
+- `classification.rs`: existing commit-tool and operation-class helper tests only; it must not become a place to reinterpret or reorganize handler taxonomy semantics during the split
+- `lifecycle.rs`: lifecycle-emitter-specific behavior only
 
 ## Step3 (closure)
 
