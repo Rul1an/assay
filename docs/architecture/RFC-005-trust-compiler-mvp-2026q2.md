@@ -1,6 +1,6 @@
 # RFC-005: Trust Compiler MVP and Trust Card (Q2 2026)
 
-- Status: Active (`T1a`, `T1b`, `G3`, `P2a`, `H1`, `P2b`, `G4-A`, and `P2c` shipped on `main`; next decision point is discovery-only and currently favors a bounded A2A handoff / delegation-route evidence candidate, not automatically another pack)
+- Status: Active (`T1a`, `T1b`, `G3`, `P2a`, `H1`, `P2b`, `G4-A`, and `P2c` shipped on `main`; `K1` is now formalized as the next evidence wave, not another automatic pack slice)
 - Date: 2026-03-23
 - Owner: Evidence / Product
 - Scope: bounded execution framing for `T1a` and `T1b`
@@ -78,7 +78,7 @@ This RFC inherits the following hard constraints from ADR-033:
 - **Assay canonical evidence is the truth layer**
 - **OTel is a first-class ingest path, not the sole semantic authority**
 - **Trust Card is evidence-classified, not score-first**
-- **the preferred order stays `T1a -> T1b -> G3 -> P2`**
+- **the preferred order stays `T1a -> T1b -> G3 -> P2 -> K1` before any broader next-pack expansion**
 - **Assay is not a tracing platform, eval platform, or observability dashboard**
 
 ## 3. Non-Goals
@@ -248,11 +248,12 @@ After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 2. **`H1` — Trust kernel alignment & release hardening** (before broadening protocol packs): shared predicate / classifier / Trust Card / pack / CLI alignment tests; single migration SSOT — see [PLAN-H1](PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](MIGRATION-TRUST-COMPILER-3.2.md)
 3. further `P2` slices — **`P2b`**: built-in `a2a-signal-followup` (A2A-001..003; presence-only on `assay.adapter.a2a.*` per shipped adapter; [PLAN-P2b](PLAN-P2b-A2A-SIGNAL-FOLLOWUP-CLAIM-PACK.md)); see also [ROADMAP](../ROADMAP.md)
 
-*Steps 4–5 continue the sequence **after** `P2b` is on `main`. Step 6 remains explicitly deferred.*
+*Steps 4–6 continue the sequence **after** `P2b` is on `main`. Step 7 remains explicitly deferred.*
 
 4. **`G4` — A2A discovery / card evidence signal** (evidence-wave before the next A2A pack slice; adapter-first; not a companion pack): see [PLAN-G4](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md)
 5. **`P2c` — A2A discovery/card follow-up pack** (productization after G4; companion pack rules aligned to G4 evidence — **shipped on `main`**: built-in `a2a-discovery-card-followup`; [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md))
-6. only later: reference existence, temporal validity, capability attestation, richer compliance packs
+6. **`K1` — A2A handoff / delegation-route visibility evidence** (next formal wave after `P2c`; adapter-first; no pack in the same slice): see [PLAN-K1](PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md)
+7. only later: further pack slices if `K1` or another evidence wave makes them honest; reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution
 

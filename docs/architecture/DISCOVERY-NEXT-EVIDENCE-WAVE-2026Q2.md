@@ -1,13 +1,15 @@
 # DISCOVERY — Next Evidence Wave (2026 Q2)
 
-- **Status:** Discovery-only / **no freeze**
+- **Status:** Historical discovery note; preferred candidate is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md)
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
-- **Scope (this PR):** No adapter code, no pack YAML, no engine work, **no [ROADMAP](../ROADMAP.md) change** — see [§ Why no ROADMAP change in this PR](#why-no-roadmap-change-in-this-pr).
+- **Scope (this document now):** Historical ranking input only. The formal next-wave choice now lives in [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
 
 ## 1. Decision frame
 
-This note does **not** formalize the next wave. It records the current best candidate surfaces after [G4-A Phase 1](G4-A-PHASE1-FREEZE.md) and [P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) and applies the same discipline as earlier waves: **evidence reality first**, productization later.
+This note originally did **not** formalize the next wave. It recorded the candidate surfaces after [G4-A Phase 1](G4-A-PHASE1-FREEZE.md) and [P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md) and applied the same discipline as earlier waves: **evidence reality first**, productization later.
+
+That choice has now been made: the preferred candidate below is formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md). This note remains the discovery record that justified that choice.
 
 ### Two-question filter
 
@@ -144,9 +146,9 @@ This section is **second-order** motivation only. It does **not** define Assay s
 
 ## 9. Next steps
 
-1. Maintainers decide whether **Candidate 1** is strong enough to formalize as a **named wave** (only then a `PLAN-G*`-style document and freeze path, following [G4](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md) / [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md) discipline).
-2. If **yes**, the next artifact should be a **formal wave plan** with explicit scope, freeze gate, and **no implementation** until discovery answers are recorded.
-3. Until then, **this note remains discovery-only** and does not commit the roadmap to a formal next wave.
+1. **Done:** Candidate 1 is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
+2. Next execution artifact, if maintainers proceed, is a **formal freeze path** for `K1` with explicit source mapping, emitted examples, and no implementation until those answers are recorded.
+3. This note remains the historical discovery input; it no longer carries the active roadmap choice by itself.
 
 ## References (repo)
 

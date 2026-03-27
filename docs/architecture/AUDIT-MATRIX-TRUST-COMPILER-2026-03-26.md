@@ -1,7 +1,7 @@
 # Trust Compiler Audit Matrix (2026-03-26)
 
-This matrix records the trust-compiler line that moved from `T1b` through `P2c`, plus the current
-post-`P2c` discovery-only note. It is meant as an audit aid: each row captures the wave, the PRs
+This matrix records the trust-compiler line that moved from `T1b` through `P2c`, plus the
+discovery-only ranking that led to `K1`. It is meant as an audit aid: each row captures the wave, the PRs
 that carried it, the kernel files, the contract/result that matters, and whether that row is
 shipped on `main` and/or part of the public `v3.3.0` release truth.
 
@@ -24,12 +24,13 @@ shipped on `main` and/or part of the public `v3.3.0` release truth.
 
 ## Current call
 
-The trust-compiler line on `main` is shipped through `P2c`. The next formal wave is **not** yet a
-new `P` slice by default. The current documentation now converges on this call:
+The trust-compiler line on `main` is shipped through `P2c`. The next formal wave is now
+**`K1` — A2A handoff / delegation-route visibility evidence**. The current documentation converges
+on this call:
 
 - keep `G4-A` limited to post-merge verification / release-truth hygiene
-- treat the next step as a **decision point**, not as “automatic `P2d`”
-- current best candidate: **bounded A2A handoff / delegation-route visibility evidence**
+- treat the next step as **`K1`**, not as “automatic `P2d`”
+- current next formal wave: **bounded A2A handoff / delegation-route visibility evidence**
 - current second candidate: **MCP authorization-discovery evidence**
 
 See also:
@@ -37,3 +38,4 @@ See also:
 - [ROADMAP](./../ROADMAP.md)
 - [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
 - [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md)
+- [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md)
