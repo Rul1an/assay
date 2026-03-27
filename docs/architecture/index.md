@@ -22,6 +22,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [Trust Compiler Audit Matrix (2026-03-26)](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md) — wave-by-wave audit of the trust-compiler line from `T1b` through `P2c`
 - [Discovery — Next Evidence Wave (Q2 2026)](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md) — historical discovery note that ranked post-`P2c` candidates and led to `K1`
 - [PLAN — K1 A2A Handoff / Delegation-Route Evidence (Q2 2026)](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) — formal next-wave plan after `P2c`, adapter-first and evidence-first
+- [K1-A Phase 1 Freeze (Q2 2026)](./K1-A-PHASE1-FREEZE.md) — executable freeze for the first bounded typed `handoff` seam in A2A canonical adapter output
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs

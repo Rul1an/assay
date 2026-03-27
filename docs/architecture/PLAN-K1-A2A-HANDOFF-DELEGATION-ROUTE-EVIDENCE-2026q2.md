@@ -1,6 +1,6 @@
 # PLAN — K1 A2A Handoff / Delegation-Route Evidence (2026 Q2)
 
-- **Current status:** Proposed next formal trust-compiler wave after `P2c`; no freeze and no implementation in this slice.
+- **Current status:** Next formal trust-compiler wave after `P2c`; [`K1-A` freeze path](./K1-A-PHASE1-FREEZE.md) is now recorded in repo docs; no implementation in this slice.
 - **Date:** 2026-03-27
 - **Owner:** Evidence / Product
 - **Inputs:** [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [ROADMAP](../ROADMAP.md), [PLAN-G4](./PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md), [PLAN-P2c](./PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md)
@@ -135,6 +135,8 @@ Minimum artifacts for the later freeze:
 - negative matrix for false positives
 - explicit may / must-not-imply language
 
+That freeze path now exists as [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md). It records the first executable contract for a bounded typed `handoff` seam while keeping `K1` itself evidence-first and implementation-free at the plan level.
+
 ## 8. Implementation gates (future, not this PR)
 
 Any future `K1` implementation slice should hard-fail review if it:
@@ -173,5 +175,6 @@ No downstream pack or trust-surface follow-up should be assumed as part of `K1` 
 - [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md)
 - [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md)
 - [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
+- [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md)
 - [PLAN-G4](./PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md)
 - [PLAN-P2c](./PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md)
