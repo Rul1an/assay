@@ -14,7 +14,7 @@ This plan intentionally follows Rust/Cargo integration-test conventions:
 - avoid fragmenting one contract surface into many top-level integration-test crates unless
   later CI or ownership pressure clearly justifies that
 
-Current hotspot baseline on `origin/main @ 66c424c1`:
+Current hotspot baseline on `origin/main @ 2951b3ef`:
 
 - `crates/assay-core/tests/decision_emit_invariant.rs`: `1293` LOC
 - `crates/assay-core/src/mcp/decision.rs`: already split in Wave43 and now the primary emitted-decision companion
@@ -62,9 +62,26 @@ T-R1 freezes the expectation that any later split keeps these test-surface prope
   - required emitted field coverage
   - G3 auth projection filtering
 
+## Status
+
+- T-R1 plan shipped on `main` via `#978`.
+- Step1 is the freeze/gates-only slice for `decision_emit_invariant.rs`.
+- No code movement belongs in Step1.
+- T-R2 remains out of scope for this wave.
+
 ## Step1 (freeze)
 
 Step1 should be docs/gates only.
+
+Branch: `codex/tr1-decision-emit-step1` (base: `main`)
+
+Step1 deliverables:
+
+- `docs/contributing/SPLIT-PLAN-tr1-decision-emit-invariant.md`
+- `docs/contributing/SPLIT-CHECKLIST-tr1-decision-emit-invariant-step1.md`
+- `docs/contributing/SPLIT-MOVE-MAP-tr1-decision-emit-invariant-step1.md`
+- `docs/contributing/SPLIT-REVIEW-PACK-tr1-decision-emit-invariant-step1.md`
+- `scripts/ci/review-tr1-decision-emit-invariant-step1.sh`
 
 Step1 constraints:
 
