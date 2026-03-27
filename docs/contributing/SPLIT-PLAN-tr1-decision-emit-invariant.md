@@ -14,9 +14,20 @@ This plan intentionally follows Rust/Cargo integration-test conventions:
 - avoid fragmenting one contract surface into many top-level integration-test crates unless
   later CI or ownership pressure clearly justifies that
 
-Current hotspot baseline on `origin/main @ ff8deb26`:
+Current hotspot baseline on `origin/main @ 0cc94e08`:
 
-- `crates/assay-core/tests/decision_emit_invariant.rs`: `1293` LOC
+- legacy single-file target before Step2: `crates/assay-core/tests/decision_emit_invariant.rs`: `1293` LOC
+- current target after Step2:
+  - `crates/assay-core/tests/decision_emit_invariant/main.rs`: `13`
+  - `crates/assay-core/tests/decision_emit_invariant/fixtures.rs`: `130`
+  - `crates/assay-core/tests/decision_emit_invariant/emission.rs`: `407`
+  - `crates/assay-core/tests/decision_emit_invariant/approval.rs`: `113`
+  - `crates/assay-core/tests/decision_emit_invariant/restrict_scope.rs`: `210`
+  - `crates/assay-core/tests/decision_emit_invariant/redaction.rs`: `222`
+  - `crates/assay-core/tests/decision_emit_invariant/guard.rs`: `46`
+  - `crates/assay-core/tests/decision_emit_invariant/delegation.rs`: `39`
+  - `crates/assay-core/tests/decision_emit_invariant/g3_auth.rs`: `110`
+  - total: `1290`
 - `crates/assay-core/src/mcp/decision.rs`: already split in Wave43 and now the primary emitted-decision companion
 - `crates/assay-core/src/mcp/tool_call_handler/evaluate.rs`: already split in Wave44 and now a behavior companion
 - `crates/assay-core/src/mcp/policy/engine.rs`: already split in Wave45 and now a policy-semantic companion
@@ -66,7 +77,9 @@ T-R1 freezes the expectation that any later split keeps these test-surface prope
 
 - T-R1 plan shipped on `main` via `#978`.
 - T-R1 Step1 shipped on `main` via `#979`.
-- Step2 is the mechanical multi-file target conversion for `decision_emit_invariant`.
+- T-R1 Step2 shipped on `main` via `#980`.
+- reviewer-script consistency follow-up shipped on `main` via `#981`.
+- Step3 is the closure/docs+gates slice for `decision_emit_invariant`.
 - T-R2 remains out of scope for this wave.
 
 ## Step1 (freeze)
