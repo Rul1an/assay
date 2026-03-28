@@ -2,7 +2,7 @@
 
 **Document:** E5-E8-TEST-REPORT
 **Scope:** Epic E5 (Observability & privacy defaults), Epic E8 (OTel GenAI) — audit-grade sign-off bundle
-**Related:** [E5-E8-VERIFICATION.md](E5-E8-VERIFICATION.md), [DX-IMPLEMENTATION-PLAN.md](../maintainers/DX-IMPLEMENTATION-PLAN.md)
+**Related:** [E5-E8-VERIFICATION.md](E5-E8-VERIFICATION.md), [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md)
 
 ---
 

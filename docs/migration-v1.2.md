@@ -38,11 +38,11 @@ You can now install Assay as a Python library:
 pip install assay
 ```
 
-See [Python Quickstart](python-quickstart.md) for details.
+See [Python Quickstart](getting-started/python-quickstart.md) for details.
 
 ### Baseline Management
 New commands for regression testing:
 - `assay baseline record`
 - `assay baseline check`
 
-See [Baseline Guide](baseline-guide.md).
+See [Baseline Guide](guides/baseline-guide.md).

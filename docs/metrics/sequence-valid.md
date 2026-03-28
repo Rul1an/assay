@@ -204,6 +204,6 @@ rules:
 
 ## See Also
 
-- [Sequence Rules DSL](../config/sequences.md)
+- [Sequence Rules DSL](../reference/config/sequences.md)
 - [args_valid](args-valid.md)
 - [tool_blocklist](tool-blocklist.md)

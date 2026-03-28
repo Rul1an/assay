@@ -912,7 +912,7 @@ Een concrete “perf gate”-policy (bijv. **“p95 worstcase mag max +10% regre
 ## Verwijzingen
 
 - [ADR-019 P0.3](architecture/ADR-019-PR-Gate-2026-SOTA.md#p03-store-performance-wal--single-writer-batching--bounded-queue)
-- [DX-IMPLEMENTATION-PLAN](DX-IMPLEMENTATION-PLAN.md) (o.a. slowest 5, cache hit rate, phase timings in summary)
+- [DX-IMPLEMENTATION-PLAN-legacy](archive/DX-IMPLEMENTATION-PLAN-legacy.md) (o.a. slowest 5, cache hit rate, phase timings in summary)
 - [SPEC-PR-Gate-Outputs-v1](architecture/SPEC-PR-Gate-Outputs-v1.md) (summary.json schema)
 - [concepts/cache.md](concepts/cache.md)
 - [Criterion](https://github.com/bheisler/criterion.rs), [Hyperfine](https://github.com/sharkdp/hyperfine), [Rust Performance Book](https://nnethercote.github.io/perf-book/), [Bencher](https://bencher.dev/) (continuous benchmarking, [GitHub Actions](https://bencher.dev/docs/how-to/github-actions/))

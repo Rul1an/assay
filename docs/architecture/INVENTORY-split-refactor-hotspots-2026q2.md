@@ -201,8 +201,8 @@ Rule:
 
 Follow-on files:
 
-- [`crates/assay-core/tests/decision_emit_invariant.rs`](../../crates/assay-core/tests/decision_emit_invariant.rs)
-- [`crates/assay-core/src/mcp/tool_call_handler/tests.rs`](../../crates/assay-core/src/mcp/tool_call_handler/tests.rs)
+- [`crates/assay-core/tests/decision_emit_invariant/main.rs`](../../crates/assay-core/tests/decision_emit_invariant/main.rs)
+- [`crates/assay-core/src/mcp/tool_call_handler/tests/mod.rs`](../../crates/assay-core/src/mcp/tool_call_handler/tests/mod.rs)
 - [`crates/assay-adapter-a2a/src/adapter_impl/tests.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/tests.rs)
 
 Rule:

@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-02
 **Scope:** Epic E5 (Observability & privacy defaults), Epic E8 (OTel GenAI Observability)
-**Source:** [DX-IMPLEMENTATION-PLAN.md](../maintainers/DX-IMPLEMENTATION-PLAN.md)
+**Source:** [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md)
 **Test outcomes:** [E5-E8-TEST-REPORT.md](E5-E8-TEST-REPORT.md) §E5, §E8
 
 ---
