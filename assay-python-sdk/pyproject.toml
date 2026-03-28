@@ -4,13 +4,29 @@ build-backend = "maturin"
 
 [project]
 name = "assay-it"
+description = "Python bindings for Assay trace capture, policy coverage, and explanation helpers."
+readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Assay" }]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Quality Assurance",
 ]
+keywords = ["assay", "policy", "testing", "coverage", "tracing"]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/Rul1an/assay"
+Repository = "https://github.com/Rul1an/assay"
+Issues = "https://github.com/Rul1an/assay/issues"
+Documentation = "https://github.com/Rul1an/assay/blob/main/README.md"
 
 [project.entry-points.pytest11]
 assay = "assay.pytest_plugin"
