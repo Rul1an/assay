@@ -30,8 +30,8 @@ This document outlines the canonical checklist for releasing new versions of Ass
 ### 3. Execution
 - [ ] **Tag**: Create and push the git tag.
   ```bash
-  git tag v2.2.3
-  git push origin v2.2.3
+  git tag vX.Y.Z
+  git push origin vX.Y.Z
   ```
 - [ ] **Watch CI**: Monitor the `release.yml` workflow.
   - Step: `Publish to Crates.io` (uses `scripts/ci/publish_idempotent.sh`).
@@ -41,8 +41,8 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Build release proof kit` (produces `release/assay-${VERSION}-release-proof-kit.tar.gz` plus `.sha256`).
 
 ### 4. Verification
-- [ ] **Install Check**: `cargo install assay-cli --version 2.2.3`
-- [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag v2.2.3`.
+- [ ] **Install Check**: `cargo install assay-cli --version X.Y.Z`
+- [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag vX.Y.Z`.
 - [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
 - [ ] **Provenance Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-provenance.json` and `assay-${VERSION}-release-provenance.json.sha256`.
 - [ ] **Proof Kit Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-release-proof-kit.tar.gz` and `assay-${VERSION}-release-proof-kit.tar.gz.sha256`.

@@ -1,6 +1,6 @@
 # PLAN — K1 A2A Handoff / Delegation-Route Evidence (2026 Q2)
 
-- **Current status:** Next formal trust-compiler wave after `P2c`; [`K1-A` freeze path](./K1-A-PHASE1-FREEZE.md) and the first bounded adapter implementation slice are now merged on `main`; no pack or trust-artifact follow-up shipped in this slice.
+- **Current status:** Next formal trust-compiler wave after `P2c`; [`K1-A` freeze path](./K1-A-PHASE1-FREEZE.md) and the first bounded adapter implementation slice are now merged on `main` and publicly released in **`v3.4.0`**; no pack or trust-artifact follow-up shipped in this slice.
 - **Date:** 2026-03-27
 - **Owner:** Evidence / Product
 - **Inputs:** [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [ROADMAP](../ROADMAP.md), [PLAN-G4](./PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md), [PLAN-P2c](./PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md)

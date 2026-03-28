@@ -1,6 +1,6 @@
 # PLAN — G4 A2A Discovery / Card Evidence Signal (2026 Q2)
 
-- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. **P2c** (A2A discovery/card follow-up pack) is **shipped on `main`** — see [§ P2c — follow-on (not G4)](#p2c-follow-on-not-g4).
+- **Current status:** **G4-A Phase 1** is merged on `main` and publicly released in **`v3.4.0`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. **P2c** (A2A discovery/card follow-up pack) is also public in **`v3.4.0`** — see [§ P2c — follow-on (not G4)](#p2c-follow-on-not-g4).
 - **Date:** 2026-03-24 (plan); Phase 1 merged 2026-03-24 (PR #944).
 - **Owner:** Evidence / Product
 - **Phase 0 source snapshot:** `assay-adapter-a2a` as of original PLAN update (see Matrix A/B + record below); Phase 1 signal shapes are frozen in [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md).

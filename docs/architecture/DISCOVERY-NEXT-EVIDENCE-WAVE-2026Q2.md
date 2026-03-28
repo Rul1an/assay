@@ -1,6 +1,6 @@
 # DISCOVERY — Next Evidence Wave (2026 Q2)
 
-- **Status:** Historical discovery note; preferred candidate is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), and the first bounded `K1-A` adapter slice is merged on `main`
+- **Status:** Historical discovery note; preferred candidate is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), and the first bounded `K1-A` adapter slice is now public in **`v3.4.0`**
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
 - **Scope (this document now):** Historical ranking input only. The formal next-wave choice now lives in [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).

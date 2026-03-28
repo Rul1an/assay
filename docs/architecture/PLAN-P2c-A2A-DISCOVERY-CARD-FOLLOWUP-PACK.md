@@ -1,6 +1,6 @@
 # PLAN — P2c A2A Discovery / Card Follow-Up Pack
 
-- **Status:** **v1 shipped on `main`** (2026-03-25) — built-in pack **`a2a-discovery-card-followup`**, open mirror, parity tests, and minimal **`json_path_exists.value_equals`** engine support merged ([§ Implementation order](#implementation-order-implementation-pr)). Phase 0 decisions below remain the **contract** for this pack; future rule changes require PLAN updates.
+- **Status:** **v1 shipped on `main`** (2026-03-25) and now publicly released in **`v3.4.0`** — built-in pack **`a2a-discovery-card-followup`**, open mirror, parity tests, and minimal **`json_path_exists.value_equals`** engine support merged ([§ Implementation order](#implementation-order-implementation-pr)). Phase 0 decisions below remain the **contract** for this pack; future rule changes require PLAN updates.
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
 - **Prerequisite:** [G4-A Phase 1](G4-A-PHASE1-FREEZE.md) — `payload.discovery` on emitted canonical A2A evidence — **merged on `main`**.
