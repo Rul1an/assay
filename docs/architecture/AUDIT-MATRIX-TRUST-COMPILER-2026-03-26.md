@@ -21,17 +21,17 @@ shipped on `main` and/or part of the public `v3.3.0` release truth.
 | `P2c` planning + freeze | `#946`, `#947`, `#948` | `docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md` and related status docs | `P2c` frozen as a follow-on pack to `G4-A`, not part of `G4` itself | Yes | Main only |
 | `P2c` | `#949` | built-in `a2a-discovery-card-followup`, pack checks, open mirror | Built-in `A2A-DC-001` / `A2A-DC-002`; `json_path_exists` + `value_equals`; `requires.assay_min_version: ">=3.3.0"` | Yes | Main only (after `v3.3.0`) |
 | `K1` formalization | `#989`, `#990`, `#991` | `docs/architecture/PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md`, `docs/ROADMAP.md`, `docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md` | Next formal wave chosen as bounded A2A handoff / delegation-route visibility evidence; explicitly adapter-first, evidence-first, no pack in the same wave | Yes | Main only |
-| `K1-A` Phase 1 freeze + first adapter slice | `#992`, `#994` | `docs/architecture/K1-A-PHASE1-FREEZE.md`, `crates/assay-adapter-a2a/src/adapter_impl/handoff.rs`, `crates/assay-adapter-a2a/src/adapter_impl/payload.rs`, `crates/assay-adapter-a2a/src/adapter_impl/tests.rs` | Top-level `payload.handoff` seam always present; `typed_payload` / `unknown` only; positive only for `task.requested` + `task.kind == "delegation"`; explicit non-promotion for `task.updated`, `artifact.shared`, generic-message fallback, and synthetic `unknown-task` | Yes | Main only |
+| `K1-A` Phase 1 freeze + first adapter slice + closure | `#992`, `#994`, `#995` | `docs/architecture/K1-A-PHASE1-FREEZE.md`, `crates/assay-adapter-a2a/src/adapter_impl/handoff.rs`, `crates/assay-adapter-a2a/src/adapter_impl/payload.rs`, `crates/assay-adapter-a2a/src/adapter_impl/tests.rs`, trust-sync docs | Top-level `payload.handoff` seam always present; `typed_payload` / `unknown` only; positive only for `task.requested` + `task.kind == "delegation"`; explicit non-promotion for `task.updated`, `artifact.shared`, generic-message fallback, synthetic `unknown-task`, and non-`delegation` `task.kind` | Yes | Main only |
 | Discovery-only next-wave note | discovery note on `main` | `docs/architecture/DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md` | Preferred next evidence-wave candidate: **A2A handoff / delegation-route visibility**; second candidate: **MCP authorization-discovery**; explicitly **not** automatically another pack | Yes | Main only / discovery-only |
 
 ## Current call
 
-The trust-compiler line on `main` is shipped through `P2c`, and `K1-A` Phase 1 is now started on
+The trust-compiler line on `main` is shipped through `P2c`, and `K1-A` Phase 1 is now shipped on
 `main` as the first bounded A2A adapter slice. The current documentation converges on this call:
 
 - keep `G4-A` limited to post-merge verification / release-truth hygiene
 - treat `K1` as the next formal wave, not as “automatic `P2d`”
-- current started slice on `main`: **bounded A2A handoff / delegation-route visibility evidence** via `K1-A`
+- current shipped slice on `main`: **bounded A2A handoff / delegation-route visibility evidence** via `K1-A`
 - current second candidate: **MCP authorization-discovery evidence**
 
 See also:

@@ -123,7 +123,7 @@ All these protocols converge on "tool calls + state transitions" — exactly wha
 2. **Mandates/Intents** need audit trails: AP2's authorization model requires provable evidence
 3. **Agent Identity** is enterprise-core: who/what authorized a transaction?
 
-See [Protocol Landscape Analysis](.private/docs/strategy/PROTOCOL-LANDSCAPE-2026.md) for detailed research
+The protocol landscape table above is the public planning summary for this area; deeper protocol research currently remains internal.
 
 ### Market Validation (Feb 2026)
 
