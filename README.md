@@ -247,7 +247,7 @@ On the M1 Pro/macOS fragmented-IPI harness, protected tool-decision path:
 - Main protection run: `0.771ms` p50 / `1.913ms` p95
 - Fast-path scenario: `0.345ms` p50 / `1.145ms` p95
 
-These are tool-decision timings, not end-to-end model latency. (See [Research & experiments](#research-mappings--experiments) for methodology context.)
+These are tool-decision timings, not end-to-end model latency. (See [Research & experiments](#research-mappings-experiments) for methodology context.)
 
 ## Install
 

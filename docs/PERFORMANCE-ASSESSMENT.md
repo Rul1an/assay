@@ -2,7 +2,7 @@
 
 Dit document beschrijft wat er nodig is om de performance van het Assay PR-gate pad **kritisch te beoordelen** en **ADR-019 P0.3 (Store performance) feitelijk te valideren**. Het Runner → Store (SQLite) → cache → metrics → report pad is de centrale bottleneck; reproduceerbare workloads, **first-class metingen** en CI-realiteit zijn nodig. Zonder file-backed WAL-runs, fase-timings, SQLite-contention-metrics en herhaalde runs (median/p95) blijft het een “smoke timing script”, geen “contention benchmark”.
 
-**Gerelateerd:** [ADR-019 P0.3 Store performance](architecture/ADR-019-PR-Gate-2026-SOTA.md#p03-store-performance-wal--single-writer-batching--bounded-queue), [concepts/cache.md](concepts/cache.md), [REVIEW-MATERIALS](REVIEW-MATERIALS.md).
+**Gerelateerd:** [ADR-019 P0.3 Store performance](architecture/ADR-019-PR-Gate-2026-SOTA.md#p03-store-performance-wal-single-writer-batching-bounded-queue), [concepts/cache.md](concepts/cache.md), [REVIEW-MATERIALS](REVIEW-MATERIALS.md).
 
 ---
 
@@ -911,7 +911,7 @@ Een concrete “perf gate”-policy (bijv. **“p95 worstcase mag max +10% regre
 
 ## Verwijzingen
 
-- [ADR-019 P0.3](architecture/ADR-019-PR-Gate-2026-SOTA.md#p03-store-performance-wal--single-writer-batching--bounded-queue)
+- [ADR-019 P0.3](architecture/ADR-019-PR-Gate-2026-SOTA.md#p03-store-performance-wal-single-writer-batching-bounded-queue)
 - [DX-IMPLEMENTATION-PLAN-legacy](archive/DX-IMPLEMENTATION-PLAN-legacy.md) (o.a. slowest 5, cache hit rate, phase timings in summary)
 - [SPEC-PR-Gate-Outputs-v1](architecture/SPEC-PR-Gate-Outputs-v1.md) (summary.json schema)
 - [concepts/cache.md](concepts/cache.md)

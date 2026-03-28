@@ -77,4 +77,4 @@ assay evidence pull --bundle-id sha256:...
 
 ## CI (GitHub Actions with OIDC)
 
-For keyless CI authentication, see the [GitHub Action BYOS guide](github-action.md#byos-push).
+For keyless CI authentication, see the [GitHub Action BYOS guide](github-action.md#byos-push-with-oidc).

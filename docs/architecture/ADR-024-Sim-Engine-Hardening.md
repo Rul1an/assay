@@ -11,7 +11,7 @@ Superseded (February 2026, by ADR-025 Reliability Surface / I1 soak rollout)
 
 ## Context
 
-The `assay sim` attack simulation suite ([ROADMAP §G](../ROADMAP.md#g-sim-engine-hardening-p2)) validates that evidence bundle verification correctly blocks integrity attacks (bitflip, truncate, inject, zip bomb, etc.). Per OWASP and resource-control best practices:
+The `assay sim` attack simulation suite ([ROADMAP — Advanced Features](../ROADMAP.md#advanced-features)) validates that evidence bundle verification correctly blocks integrity attacks (bitflip, truncate, inject, zip bomb, etc.). Per OWASP and resource-control best practices:
 
 1. **Configurable limits**: Users and CI must be able to override verification limits (e.g. stricter `max_bundle_bytes` for constrained environments).
 2. **Time budget**: Suite already has `TimeBudget` (60s default), but it is hardcoded; configurable budget supports predictable CI behavior.
@@ -216,6 +216,6 @@ struct VerifyLimitsOverrides {
 
 ## References
 
-- [ROADMAP §G](../ROADMAP.md#g-sim-engine-hardening-p2)
+- [ROADMAP — Advanced Features](../ROADMAP.md#advanced-features)
 - [assay-evidence VerifyLimits](https://github.com/Rul1an/assay/blob/main/crates/assay-evidence/src/bundle/writer.rs)
 - OWASP: Resource exhaustion, fail-fast principles
