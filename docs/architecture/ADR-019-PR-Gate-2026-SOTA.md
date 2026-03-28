@@ -5,7 +5,7 @@
 **Last Updated:** 2026-01-30
 **Extends:** ADR-004 (exit code 3, judge strategy); complements ADR-017 (main store only; ADR-017 covers MandateStore WAL).
 
-**Related:** [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [SPEC-PR-Gate-Outputs-v1](./SPEC-PR-Gate-Outputs-v1.md) (output contract and reason code registry), [ADR-003 Gate Semantics](./ADR-003-Gate-Semantics.md), [ADR-014 GitHub Action v2](./ADR-014-GitHub-Action-v2.md), [ADR-018 GitHub Action v2.1](./ADR-018-GitHub-Action-v2.1.md)
+**Related:** [ROADMAP](../ROADMAP.md), [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md), [SPEC-PR-Gate-Outputs-v1](./SPEC-PR-Gate-Outputs-v1.md) (output contract and reason code registry), [ADR-003 Gate Semantics](./ADR-003-Gate-Semantics.md), [ADR-014 GitHub Action v2](./ADR-014-GitHub-Action-v2.md), [ADR-018 GitHub Action v2.1](./ADR-018-GitHub-Action-v2.1.md)
 
 ---
 
@@ -230,7 +230,7 @@ A PR gate that teams do not turn off because it is:
 
 - **Output schema versioning:** summary.json (and other stable outputs) MUST carry a schema_version; document version history and migration so CI consumers can detect and adapt.
 - **Migration impact:** Document impact for existing CI users (exit code 3, reason codes, new artifact fields, SARIF location/truncation); provide migration notes or a compatibility window where old behaviour is deprecated but still supported where feasible.
-- **DX implementation:** Concrete per-file changes and test cases (init template v2, exit/reason codes, SARIF locations/truncation, JUnit/snippets, fork fallback, etc.) are in [DX-IMPLEMENTATION-PLAN.md](../DX-IMPLEMENTATION-PLAN.md).
+- **DX implementation:** Concrete per-file changes and test cases (init template v2, exit/reason codes, SARIF locations/truncation, JUnit/snippets, fork fallback, etc.) are in [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md).
 - **Specifications:** Normative output and replay contracts are in:
   - [SPEC-PR-Gate-Outputs-v1](./SPEC-PR-Gate-Outputs-v1.md) — summary.json schema, exit/reason code registry, SARIF location and truncation rules, next-step requirement.
   - [SPEC-Replay-Bundle-v1](./SPEC-Replay-Bundle-v1.md) — replay bundle format, manifest schema, `assay replay --bundle` semantics.

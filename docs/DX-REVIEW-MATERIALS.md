@@ -2,7 +2,7 @@
 
 Dit document ondersteunt een review van de developer experience rond de PR gate: first 15 minutes, PR feedback UX, en ergonomie/debuggability.
 
-**Implementatie:** Concrete fixes en per-file patchlist staan in [DX-IMPLEMENTATION-PLAN.md](DX-IMPLEMENTATION-PLAN.md) (P0/P1 backlog, test cases).
+**Implementatie:** Concrete fixes en per-file patchlist staan in [DX-IMPLEMENTATION-PLAN-legacy.md](archive/DX-IMPLEMENTATION-PLAN-legacy.md) (P0/P1 backlog, test cases).
 
 ---
 

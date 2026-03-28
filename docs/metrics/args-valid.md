@@ -230,6 +230,6 @@ Fix: Ensure value matches expected format.
 
 ## See Also
 
-- [Policies](../config/policies.md)
+- [Policies](../reference/config/policies.md)
 - [sequence_valid](sequence-valid.md)
 - [tool_blocklist](tool-blocklist.md)

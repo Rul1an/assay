@@ -4,7 +4,7 @@
 **Version:** 1.0.1-draft
 **Date:** 2026-02
 **ADR:** [ADR-019: PR Gate 2026 SOTA](./ADR-019-PR-Gate-2026-SOTA.md)
-**Related:** [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md), [SPEC-GitHub-Action-v2.1](./SPEC-GitHub-Action-v2.1.md)
+**Related:** [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md), [SPEC-GitHub-Action-v2.1](./SPEC-GitHub-Action-v2.1.md)
 
 ---
 
@@ -269,6 +269,6 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 ## 10. References
 
 - [ADR-019 PR Gate 2026 SOTA](./ADR-019-PR-Gate-2026-SOTA.md)
-- [DX-IMPLEMENTATION-PLAN](../DX-IMPLEMENTATION-PLAN.md)
+- [DX-IMPLEMENTATION-PLAN-legacy](../archive/DX-IMPLEMENTATION-PLAN-legacy.md)
 - [SARIF 2.1.0](https://sarifweb.azurewebsites.net/)
 - [GitHub Code Scanning SARIF](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)

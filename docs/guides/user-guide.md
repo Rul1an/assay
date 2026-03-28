@@ -66,5 +66,5 @@ Assay's error messages are designed for humans.
 
 ## 📚 Reference
 
--   [**CLI Commands**](cli/index.md)
--   [**Configuration Schema**](config/index.md)
+-   [**CLI Commands**](../reference/cli/index.md)
+-   [**Configuration Schema**](../reference/config/index.md)
