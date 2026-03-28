@@ -38,16 +38,16 @@ Assay should continue to prefer:
 
 [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md) remains the reference pattern for how a **later** freeze should look **once** a surface is chosen and implemented.
 
-## 3. Current repo reality
+## 3. Repo reality at time of discovery
 
 From the current **A2A** adapter implementation:
 
 - **Canonical event mapping** is in [`crates/assay-adapter-a2a/src/adapter_impl/mapping.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/mapping.rs): `agent.capabilities`, `task.requested`, `task.updated`, `artifact.shared`; unknown upstream types map to a generic path (`assay.adapter.a2a.message` — see [`convert.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/convert.rs)).
-- **Today’s first-class A2A surfaces** in shipped evidence are still primarily **capabilities**, **task lifecycle**, **artifact exchange**, and (after G4-A) **discovery / card visibility** via `payload.discovery` ([`discovery.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/discovery.rs)).
-- There is **not** yet a **first-class, bounded handoff / delegation-route** seam in adapter output (no dedicated mapping or typed subobject for that route in the current codepath).
+- **At the time of discovery**, first-class A2A surfaces in shipped evidence were primarily **capabilities**, **task lifecycle**, **artifact exchange**, and (after G4-A) **discovery / card visibility** via `payload.discovery` ([`discovery.rs`](../../crates/assay-adapter-a2a/src/adapter_impl/discovery.rs)).
+- **At the time of discovery**, there was **not** yet a **first-class, bounded handoff / delegation-route** seam in adapter output (no dedicated mapping or typed subobject for that route in the codepath then under review).
 - **G3** applies to **`assay.tool.decision`** authorization **context** ([`g3_authorization_context.rs`](../../crates/assay-evidence/src/g3_authorization_context.rs)) — **not** MCP authorization-**discovery** / resource-metadata as a separate bundle seam (see [§ Candidate 2](#5-candidate-2--mcp-authorization-discovery)).
 
-These repo facts are the **primary** basis for the candidate ranking below.
+These repo facts were the **primary** basis for the candidate ranking below. They are now historical context; `K1-A` Phase 1 has since added the first bounded top-level `handoff` seam on `main`.
 
 ## 4. Candidate 1 — A2A handoff / delegation-route visibility
 
@@ -67,7 +67,7 @@ This is a **different surface** from discovery/card visibility. It must **not** 
 
 ### Current gap
 
-The adapter’s mapped evidence does **not** expose a bounded, typed **handoff / delegation-route** seam. The bottleneck is therefore likely **evidence-shape** (adapter-first), not pack productization.
+At the time of discovery, the adapter’s mapped evidence did **not** expose a bounded, typed **handoff / delegation-route** seam. That bottleneck is why the path chosen here was **evidence-shape first** (adapter-first), not pack productization.
 
 ### Likely outcome under the filter
 

@@ -33,6 +33,8 @@ No hosted backend. No API keys for core flows. **Deterministic** — same input,
 
 > **Trust Compiler line:** Release **v3.3.0** is the first to ship **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`) in published binaries; pack YAML still documents the substrate floor `>=3.2.3` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md) (*two-layer version truth*).
 
+> **`main` branch truth:** Repository builds on `main` now also include **`K1-A` Phase 1** in the A2A adapter: a bounded top-level **`payload.handoff`** seam that is always present and only promotes positively for typed `task.requested` packets with `task.kind == "delegation"`. This is **merged on `main`**, not part of the published **v3.3.0** release line.
+
 ```
   Agent ──► Assay ──► MCP Server
               │
