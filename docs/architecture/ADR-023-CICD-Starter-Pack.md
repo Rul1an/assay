@@ -6,7 +6,7 @@ Accepted (February 2026)
 
 ## Context
 
-Per [ADR-016](./ADR-016-Pack-Taxonomy.md) and the [ROADMAP §F](../ROADMAP.md#f-starter-packs-oss-p1), the open core requires a **compatibility floor for adoption**—a lightweight pack that gives teams first value from `assay evidence lint` with minimal config, before they graduate to compliance packs (eu-ai-act-baseline, soc2-baseline).
+Per [ADR-016](./ADR-016-Pack-Taxonomy.md) and the [ROADMAP historical delivery lane](../ROADMAP.md#delivered-foundation-historical), the open core requires a **compatibility floor for adoption**—a lightweight pack that gives teams first value from `assay evidence lint` with minimal config, before they graduate to compliance packs (eu-ai-act-baseline, soc2-baseline).
 
 Challenges:
 - eu-ai-act-baseline and soc2-baseline are **compliance-focused** (regulatory mapping, disclaimers); they assume prior familiarity with evidence format and lint workflow.
@@ -272,4 +272,4 @@ With cicd-starter as the adoption wedge, the graduation path is:
 - [ADR-021: Local Pack Discovery](./ADR-021-Local-Pack-Discovery.md)
 - [ADR-022: SOC2 Baseline Pack](./ADR-022-SOC2-Baseline-Pack.md)
 - [SPEC-Pack-Engine-v1](./SPEC-Pack-Engine-v1.md)
-- [ROADMAP §F: Starter Packs (OSS)](../ROADMAP.md#f-starter-packs-oss-p1)
+- [ROADMAP historical delivery lane](../ROADMAP.md#delivered-foundation-historical)

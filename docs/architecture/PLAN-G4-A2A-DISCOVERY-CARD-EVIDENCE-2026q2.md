@@ -1,6 +1,6 @@
 # PLAN — G4 A2A Discovery / Card Evidence Signal (2026 Q2)
 
-- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. **P2c** (A2A discovery/card follow-up pack) is **shipped on `main`** — see [§ P2c — follow-on (not G4)](#p2c--follow-on-not-g4).
+- **Current status:** **G4-A Phase 1** is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md), [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) `payload.discovery`). Remaining work in this track is **post-merge verification / release-truth hygiene only** — no new G4 evidence semantics. **P2c** (A2A discovery/card follow-up pack) is **shipped on `main`** — see [§ P2c — follow-on (not G4)](#p2c-follow-on-not-g4).
 - **Date:** 2026-03-24 (plan); Phase 1 merged 2026-03-24 (PR #944).
 - **Owner:** Evidence / Product
 - **Phase 0 source snapshot:** `assay-adapter-a2a` as of original PLAN update (see Matrix A/B + record below); Phase 1 signal shapes are frozen in [G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md).
@@ -105,7 +105,7 @@ Filled from **code inspection** of [`assay-adapter-a2a`](../../crates/assay-adap
 
 6. **Spec vs adapter (`>=0.2 <1.0`)?** Capabilities advertise **`SUPPORTED_SPEC_VERSION_RANGE`** as `>=0.2 <1.0`. **Runtime validation** (`version.rs`) accepts **0.2+** (major `0`, minor ≥ `2`). That matches the P2b story: **shipped line is 0.x**, not a marketing claim of full **A2A v1.0** coverage. No code change required for this Phase 0 answer.
 
-**Phase 0 gate (historical):** Discovery matrices + record above were **complete for the adapter codebase snapshot**. Evidence/Product review preceded **G4-A Phase 1**; implementation followed [Option A](#open-decision--phase-1-path-a-or-b) and is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md)).
+**Phase 0 gate (historical):** Discovery matrices + record above were **complete for the adapter codebase snapshot**. Evidence/Product review preceded **G4-A Phase 1**; implementation followed [Option A](#open-decision-phase-1-path-a-or-b) and is **merged on `main`** ([G4-A-PHASE1-FREEZE.md](G4-A-PHASE1-FREEZE.md)).
 
 ### Open decision — Phase 1 path (A or B)
 
@@ -137,7 +137,7 @@ After Phase 0 is **reviewed and accepted**, Phase 1 freezes **either**:
 
 **Phase 0 codebase pass:** complete (see matrices + record). **Phase 1 field names** remain **frozen by review**, not by this document alone.
 
-If Phase 1 follows **Option A**, use the **G4-A** proposal below as the working freeze (subject to path validation in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/)). If Phase 1 follows **Option B** (**fallback**, consciously narrowed G4), use bounded semantics + tests + examples on **existing** `payload` fields only (see [Open decision — Phase 1 path (A or B)](#open-decision--phase-1-path-a-or-b)).
+If Phase 1 follows **Option A**, use the **G4-A** proposal below as the working freeze (subject to path validation in [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/)). If Phase 1 follows **Option B** (**fallback**, consciously narrowed G4), use bounded semantics + tests + examples on **existing** `payload` fields only (see [Open decision — Phase 1 path (A or B)](#open-decision-phase-1-path-a-or-b)).
 
 ### Proposed Phase 1 freeze — G4-A (Option A, proposal)
 
@@ -258,7 +258,7 @@ When implementing G4 signals: emitted payload tests, typed-field presence tests,
 
 ## Acceptance criteria (G4 “done”)
 
-**How to read §1 and §6 depends on the Phase 1 path ([Open decision — Phase 1 path (A or B)](#open-decision--phase-1-path-a-or-b)):**
+**How to read §1 and §6 depends on the Phase 1 path ([Open decision — Phase 1 path (A or B)](#open-decision-phase-1-path-a-or-b)):**
 
 | Criterion | **Option A** (new typed surface) | **Option B** (bounded reuse — no new adapter keys) |
 |-----------|----------------------------------|-----------------------------------------------------|
