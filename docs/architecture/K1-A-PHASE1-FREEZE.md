@@ -1,6 +1,6 @@
 # K1-A — Phase 1 formal freeze (executable)
 
-**Status:** Frozen and now implemented on `main` for **K1-A Phase 1** (adapter-first).
+**Status:** Frozen, implemented on `main`, and now publicly released in **`v3.4.0`** for **K1-A Phase 1** (adapter-first).
 **Parent:** [PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md](PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
 **Repo snapshot:** Current [`assay-adapter-a2a`](../../crates/assay-adapter-a2a/) plus [ADR026 A2A fixtures](../../scripts/ci/fixtures/adr026/a2a/v0.2/) emit typed `task`, `message`, and canonical `assay.adapter.a2a.task.requested` events, and now also emit the first bounded top-level `handoff` object on `main`. `task.updated` remains mapped but is still **not** a positive source in v1, and the ADR026 fixture set still does **not** include a dedicated `task.updated` packet. This freeze defines **one bounded top-level `handoff` contract** from existing typed fields only, with explicit negatives and **no** reuse of `payload.discovery`.
 
@@ -137,7 +137,7 @@ Positive promotion for the new `handoff` seam is allowed **only** when all of th
 
 ## 6. Complete emitted JSON examples (illustrative)
 
-**Build note:** `adapter_version` uses `3.3.0` as an illustration; real emission uses `CARGO_PKG_VERSION`. Reviewers should treat **presence and shape** of top-level keys as normative here, not the patch digit.
+**Build note:** `adapter_version` uses `3.4.0` as an illustration; real emission uses `CARGO_PKG_VERSION`. Reviewers should treat **presence and shape** of top-level keys as normative here, not the patch digit.
 
 ### 6.1 Typed positive (`task.requested` + `delegation`)
 
@@ -146,7 +146,7 @@ Fixture source: [a2a_happy_task_requested.json](../../scripts/ci/fixtures/adr026
 ```json
 {
   "adapter_id": "assay-adapter-a2a",
-  "adapter_version": "3.3.0",
+  "adapter_version": "3.4.0",
   "protocol": "a2a",
   "protocol_name": "a2a",
   "protocol_version": "0.2",
@@ -191,7 +191,7 @@ Fixture source: [a2a_negative_missing_task_id.json](../../scripts/ci/fixtures/ad
 ```json
 {
   "adapter_id": "assay-adapter-a2a",
-  "adapter_version": "3.3.0",
+  "adapter_version": "3.4.0",
   "protocol": "a2a",
   "protocol_name": "a2a",
   "protocol_version": "0.2",
@@ -230,7 +230,7 @@ Fixture source: [a2a_happy_artifact_shared.json](../../scripts/ci/fixtures/adr02
 ```json
 {
   "adapter_id": "assay-adapter-a2a",
-  "adapter_version": "3.3.0",
+  "adapter_version": "3.4.0",
   "protocol": "a2a",
   "protocol_name": "a2a",
   "protocol_version": "0.3.1",

@@ -138,7 +138,7 @@ Clarification: precedence row “unmapped” applies when a **frozen** rule name
 
 ## 7. Complete emitted JSON examples (full payload shape)
 
-**Build note:** `adapter_version` in examples uses **`3.3.0` as an illustration**; **real** emission uses the crate’s `CARGO_PKG_VERSION` at build time. Normative for reviewers: **presence and shape** of top-level keys (including always-present `discovery` **before** `unmapped_fields_count`), and the **`discovery` object fields** — not the patch digit of `adapter_version`.
+**Build note:** `adapter_version` in examples uses **`3.4.0` as an illustration**; **real** emission uses the crate’s `CARGO_PKG_VERSION` at build time. Normative for reviewers: **presence and shape** of top-level keys (including always-present `discovery` **before** `unmapped_fields_count`), and the **`discovery` object fields** — not the patch digit of `adapter_version`.
 
 Field order below follows the **logical** sibling set: adapter metadata, protocol, agent, task, …, `attributes`, **`discovery`**, `unmapped_fields_count` (exact key order in JSON may vary; canonical ordering is defined in implementation/tests and [`digest_canonical_json`](../../crates/assay-adapter-api/src/canonical.rs)).
 
@@ -149,7 +149,7 @@ Upstream input must satisfy `attributes.assay_g4.agent_card.visible == true` (an
 ```json
 {
   "adapter_id": "assay-adapter-a2a",
-  "adapter_version": "3.3.0",
+  "adapter_version": "3.4.0",
   "protocol": "a2a",
   "protocol_name": "a2a",
   "protocol_version": "0.2.0",
@@ -184,7 +184,7 @@ Typical conversion from [a2a_happy_agent_capabilities.json](../../scripts/ci/fix
 ```json
 {
   "adapter_id": "assay-adapter-a2a",
-  "adapter_version": "3.3.0",
+  "adapter_version": "3.4.0",
   "protocol": "a2a",
   "protocol_name": "a2a",
   "protocol_version": "0.2.0",

@@ -4,13 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Evidence / P2c
+## [3.4.0] - 2026-03-28
 
-- **P2c A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002**; mirror `packs/open/a2a-discovery-card-followup/`. **Substrate vs G4-A/P2c floors, `value_equals`, no `ENGINE_VERSION` bump:** [MIGRATION — P2c pack](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) (only SSOT). Context: [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md). Check type: [SPEC-Pack-Engine-v1](docs/architecture/SPEC-Pack-Engine-v1.md).
+This patch release makes the post-`v3.3.0` trust-compiler line public: **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), and **`K1-A` Phase 1** (`payload.handoff`) now ship in the released binaries and Python wheels. It also refreshes outward-facing package/release communication so the published line matches the actual shipped surface.
 
-### Evidence / K1-A
+### Trust Compiler
 
-- **K1-A Phase 1 (`main` only, not released in `v3.3.0`)**: `assay-adapter-a2a` now emits a bounded top-level **`payload.handoff`** object on canonical A2A adapter evidence. The seam is always present, promotes positively only for typed `assay.adapter.a2a.task.requested` packets with `task.kind == "delegation"`, and explicitly does **not** promote from `task.updated`, `artifact.shared`, generic-message fallback, or synthetic `unknown-task`. No new pack, engine bump, Trust Basis change, or Trust Card change ships in this slice. See [PLAN-K1](docs/architecture/PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) and [K1-A freeze](docs/architecture/K1-A-PHASE1-FREEZE.md).
+- **`G4-A` Phase 1**: The A2A adapter now publicly ships the bounded top-level **`payload.discovery`** seam for discovery / Agent Card visibility on canonical adapter evidence. This remains adapter-emitted, visibility-only evidence with explicit non-goals around validity, trust, or verification semantics. See [PLAN-G4](docs/architecture/PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md) and [G4-A freeze](docs/architecture/G4-A-PHASE1-FREEZE.md).
+- **`P2c` A2A discovery/card follow-up pack (`a2a-discovery-card-followup`)**: Built-in **A2A-DC-001** / **A2A-DC-002** now ship publicly. The pack mirrors `packs/open/a2a-discovery-card-followup/`, uses `json_path_exists.value_equals` for boolean `true`, and keeps the G4-A / P2c floor semantics (`requires.assay_min_version: ">=3.3.0"`) without a new engine bump. See [MIGRATION — P2c pack](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md#a2a-discovery-card-followup-built-in-pack-p2c) and [PLAN-P2c](docs/architecture/PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md).
+- **`K1-A` Phase 1**: `assay-adapter-a2a` now publicly emits a bounded top-level **`payload.handoff`** object on canonical A2A adapter evidence. The seam is always present, promotes positively only for typed `assay.adapter.a2a.task.requested` packets with `task.kind == "delegation"`, and explicitly does **not** promote from `task.updated`, `artifact.shared`, generic-message fallback, or synthetic `unknown-task`. No new pack, engine bump, Trust Basis change, or Trust Card change ships in this slice. See [PLAN-K1](docs/architecture/PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) and [K1-A freeze](docs/architecture/K1-A-PHASE1-FREEZE.md).
+
+### Python SDK
+
+- **`assay-it` outward-facing metadata**: The Python package now ships with a package-level README and bounded public metadata that matches the actual surface: `AssayClient`, `Coverage`, `Explainer`, and the pytest fixture. The published package description no longer implies the full Assay CLI or broader trust-compiler surfaces.
+
+### Release Tooling
+
+- **Release notes template truth sync**: GitHub release notes now use the canonical install URL `https://getassay.dev/install.sh` and the canonical action slug `Rul1an/assay-action@v2`, avoiding stale release-copy drift on future tags.
 
 ## [3.3.0] - 2026-03-24
 

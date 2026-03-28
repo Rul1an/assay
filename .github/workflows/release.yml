@@ -387,18 +387,18 @@ jobs:
           cat > release_notes.md << 'EOF'
           ## Assay ${{ steps.version.outputs.version }}
 
-          Deterministic policy enforcement for AI agent tool calls.
+          Deterministic policy enforcement, canonical evidence, and reviewable trust artifacts for AI agent systems.
 
           ### Installation
 
           **One-liner (Linux/macOS):**
           ```bash
-          curl -sSL https://assay.dev/install.sh | sh
+          curl -fsSL https://getassay.dev/install.sh | sh
           ```
 
           **GitHub Action:**
           ```yaml
-          - uses: assay-dev/assay-action@v1
+          - uses: Rul1an/assay-action@v2
             with:
               policy: policies/agent.yaml
               traces: traces/
@@ -411,6 +411,10 @@ jobs:
           ### Checksums
 
           Verify your download with the `.sha256` files.
+
+          ### Release Notes
+
+          See [CHANGELOG.md](__CHANGELOG_URL__) for line-specific shipped features and trust-compiler scope.
 
           ### Changelog
 

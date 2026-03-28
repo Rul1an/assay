@@ -12,7 +12,7 @@ Install Assay on your system.
     pip install assay-it
     ```
 
-    Requires Python 3.9+. Installs the `assay` CLI globally.
+    Requires Python 3.9+. Installs the Python bindings and pytest plugin, not the full `assay` CLI.
 
 === "cargo (Rust)"
 
@@ -34,7 +34,7 @@ Install Assay on your system.
 === "Binary (Linux/macOS)"
 
     ```bash
-    curl -sSL https://assay.dev/install.sh | sh
+    curl -fsSL https://getassay.dev/install.sh | sh
     ```
 
     Installs `assay` to `~/.assay/bin` and updates your PATH.
@@ -49,7 +49,7 @@ assay --version
 
 Expected output:
 ```
-assay 0.9.0
+assay 3.4.0
 ```
 
 ---

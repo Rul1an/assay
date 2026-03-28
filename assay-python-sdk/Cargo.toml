@@ -2,6 +2,9 @@
 name = "assay-it"
 version.workspace = true
 edition = "2021"
+description = "Python bindings for Assay trace capture, policy coverage, and explanation helpers."
+license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
