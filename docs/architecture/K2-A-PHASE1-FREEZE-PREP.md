@@ -1,9 +1,10 @@
 # K2-A — Phase 1 freeze prep
 
-**Status:** Prep only; not frozen, not implemented, not released.
+**Status:** Historical prep input; `K2-A` now has a formal pre-implementation freeze in [K2-A-PHASE1-FREEZE.md](K2-A-PHASE1-FREEZE.md), but no implementation or release is shipped yet.
 **Parent:** [PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md](PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md).
-**Purpose:** Record the exact discovery questions, candidate sources, and hard negatives required
-before a real `K2-A` executable freeze can exist.
+**Purpose:** Record the exact discovery questions, candidate sources, and hard negatives that were
+required before the real `K2-A` freeze could be written. It now remains as supporting input, not
+the active contract document.
 
 ## 1. Contract honesty
 
