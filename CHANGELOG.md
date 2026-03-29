@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Trust Compiler
+
+- **`K2-A` Phase 1**: `main` now includes the first bounded MCP authorization-discovery seam on imported MCP traces via `episode_start.meta.mcp.authorization_discovery`. The slice is visibility-only, promotes positively only from typed runtime-observed `WWW-Authenticate` discovery on supported `401` transport paths, and explicitly does **not** imply auth success, scope adequacy, issuer trust, or compliance. This is shipped on `main` only for now, not yet as public release truth.
+
 ## [3.4.0] - 2026-03-28
 
 This patch release makes the post-`v3.3.0` trust-compiler line public: **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), and **`K1-A` Phase 1** (`payload.handoff`) now ship in the released binaries and Python wheels. It also refreshes outward-facing package/release communication so the published line matches the actual shipped surface.
