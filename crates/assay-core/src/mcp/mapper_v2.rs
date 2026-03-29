@@ -45,6 +45,12 @@ pub fn mcp_events_to_v2_trace(
     let mut meta = serde_json::Map::new();
     meta.insert("source".into(), json!("mcp_import"));
     meta.insert("episode_id".into(), json!(episode_id));
+    meta.insert(
+        "mcp".into(),
+        json!({
+            "authorization_discovery": summarize_auth_discovery(&events)
+        }),
+    );
 
     if let Some(tid) = test_id {
         meta.insert("test_id".into(), json!(tid));
@@ -245,6 +251,14 @@ pub fn mcp_events_to_v2_trace(
     }));
 
     out
+}
+
+fn summarize_auth_discovery(events: &[McpEvent]) -> McpAuthorizationDiscovery {
+    let mut summary = McpAuthorizationDiscovery::default();
+    for event in events {
+        summary.merge_from(&event.auth_discovery);
+    }
+    summary
 }
 
 fn now_ms() -> u64 {

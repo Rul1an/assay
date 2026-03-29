@@ -3,7 +3,7 @@
 - **Current status:** Planned next bounded trust-compiler wave after `K1-A` stabilization on `main`; `K2-A` Phase 1 now has a formal pre-implementation freeze, but no implementation or release is shipped.
 - **Date:** 2026-03-29
 - **Owner:** Evidence / Product
-- **Inputs:** [ROADMAP](../ROADMAP.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-05/basic/authorization)
+- **Inputs:** [ROADMAP](../ROADMAP.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [MCP Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
 - **Scope (this PR):** Formalize the next wave choice and its guardrails only. No MCP adapter/runtime code, no pack YAML, no engine work, and no Trust Basis / Trust Card expansion.
 
 ## 1. Why this plan exists
@@ -46,6 +46,10 @@ visibility** on the MCP side:
 Those questions matter for CI-native governance and auditability, but they are still **evidence**
 questions first.
 
+This is also the stronger next enterprise wedge because MCP's current direction explicitly
+emphasizes enterprise-managed auth, discovery, and audit/observability surfaces more than general
+"more MCP features" productization.
+
 ### 3.2 Why this is not a pack-first move
 
 Even though MCP authorization-discovery is strategically important, Assay should not jump straight
@@ -79,6 +83,8 @@ That distinction must stay explicit; `K2` must not silently reuse `G3` semantics
 - token validation, auth success, scope correctness, or issuer trust
 - claims that a server is compliant, secure, or enterprise-ready
 - reusing G3 authorization context as if it were discovery evidence
+- static config files, documentation hints, or client-side remembered auth metadata as evidence
+- OIDC discovery, client registration, or broader OAuth AS metadata expansion beyond the frozen v1 sources
 - Trust Basis or Trust Card expansion in the same slice
 - broad OTel/OpenInference schema work in the same slice
 
@@ -93,6 +99,7 @@ That distinction must stay explicit; `K2` must not silently reuse `G3` semantics
 - the authorization server is trusted
 - the configured flow is valid
 - the required scopes were sufficient
+- any advertised scope requirement was adequate, correct, or enforced
 - a request was authorized successfully
 - the server is compliant with the full MCP auth model
 
@@ -107,13 +114,14 @@ This PLAN only freezes the shape discipline:
 - one meaning
 - typed beats blob
 - observed discovery beats auth-success claims
+- only explicitly frozen, runtime-observed MCP discovery sources may be promoted
 
 Illustrative questions the seam may answer later:
 
 - was protected-resource metadata visible at all?
 - were `authorization_servers` visible?
 - did the discovery source come from a `WWW-Authenticate` challenge, a well-known URI, or another
-  frozen supported source?
+  explicitly frozen runtime-observed MCP discovery source?
 - was a bounded scope challenge visible?
 
 These examples are illustrative discovery directions, not provisional field commitments.
@@ -127,6 +135,9 @@ Before any implementation PR, `K2` must produce a freeze-ready discovery record 
 3. Which signals are only honest as visibility flags and not stronger claims?
 4. What is the smallest honest seam?
 5. Which inputs must **not** become typed authorization-discovery evidence?
+
+Discovery answers must be grounded in shipped adapter/server/proxy evidence paths and repo reality,
+not solely in standards text or static configuration examples.
 
 Minimum artifacts required before freeze:
 
@@ -144,9 +155,11 @@ the resulting active contract now lives in [K2-A — Phase 1 formal freeze](./K2
 Any future `K2` implementation slice should hard-fail review if it:
 
 - turns discovery visibility into authorization correctness
-- promotes static config or docs as runtime-observed evidence without an explicit source rule
+- promotes static config, docs, or client-remembered auth metadata as runtime-observed evidence
+- treats visible scope or metadata as evidence of adequacy, correctness, or compliance
 - promotes raw tokens, bearer headers, or other secrets into evidence
 - silently reuses `G3` auth-context fields for discovery semantics
+- silently reuses `G3` or `payload.discovery` semantics for a distinct authorization-discovery seam
 - sneaks in a pack, engine bump, or Trust Card expansion in the same wave
 - widens the seam beyond one bounded authorization-discovery surface
 
@@ -178,4 +191,4 @@ No downstream pack or trust-surface follow-up should be assumed as part of `K2` 
 - [K2-A — Phase 1 formal freeze](./K2-A-PHASE1-FREEZE.md)
 - [K2-A — Phase 1 freeze prep](./K2-A-PHASE1-FREEZE-PREP.md)
 - [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md)
-- [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-05/basic/authorization)
+- [MCP Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)

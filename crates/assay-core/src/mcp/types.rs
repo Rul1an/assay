@@ -48,7 +48,42 @@ pub struct McpEvent {
     /// JSON-RPC ID (stringified) for request/response correlation (P0.2).
     pub jsonrpc_id: Option<String>,
 
+    /// Bounded MCP authorization-discovery summary observed on this event path.
+    pub auth_discovery: McpAuthorizationDiscovery,
+
     pub payload: McpPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct McpAuthorizationDiscovery {
+    pub visible: bool,
+    pub source_kind: McpAuthorizationDiscoverySourceKind,
+    pub resource_metadata_visible: bool,
+    pub authorization_servers_visible: bool,
+    pub scope_challenge_visible: bool,
+}
+
+impl McpAuthorizationDiscovery {
+    pub fn merge_from(&mut self, other: &Self) {
+        self.visible |= other.visible;
+        self.resource_metadata_visible |= other.resource_metadata_visible;
+        self.authorization_servers_visible |= other.authorization_servers_visible;
+        self.scope_challenge_visible |= other.scope_challenge_visible;
+
+        if self.source_kind == McpAuthorizationDiscoverySourceKind::Unknown
+            && other.source_kind != McpAuthorizationDiscoverySourceKind::Unknown
+        {
+            self.source_kind = other.source_kind;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpAuthorizationDiscoverySourceKind {
+    #[default]
+    Unknown,
+    WwwAuthenticate,
 }
 
 #[derive(Debug, Clone)]

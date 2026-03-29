@@ -107,7 +107,9 @@ Rules:
 - `sse.data` may be an object or a string. If it carries a JSON-RPC message, Assay normalizes it through the same JSON-RPC path as `request` and `response`.
 - `sse.event == "message"` may contribute MCP semantics.
 - Legacy control events such as `endpoint`, keepalives, and other transport-only SSE events are ignored for tool/evidence semantics.
-- `transport_context`, `headers`, `MCP-Protocol-Version`, `Mcp-Session-Id`, and `Last-Event-ID` remain transport context in T1. They are accepted in the envelope, but are not promoted into V2 trace fields and do not change semantic equivalence assertions.
+- `transport_context`, `headers`, `MCP-Protocol-Version`, `Mcp-Session-Id`, and `Last-Event-ID` remain transport context by default.
+- **`K2-A` exception:** on HTTP transcript imports, Assay may now promote one bounded authorization-discovery summary into `episode_start.meta.mcp.authorization_discovery`, but only from explicit `401` response context plus typed `WWW-Authenticate` challenge visibility (`resource_metadata` and/or `scope`).
+- Outside that bounded `K2-A` exception, transport context still does not change MCP tool-call semantic equivalence assertions.
 
 ---
 
@@ -124,6 +126,36 @@ T1 is a transcript compatibility wave. Its goal is canonical semantic equivalenc
 - orphan response behavior
 
 Equivalent sessions imported from `jsonrpc`, `streamable-http`, or `http-sse` should normalize to the same MCP tool semantics and the same Assay V2 tool-call meaning.
+
+`K2-A` does **not** change that core guarantee. It only adds an optional bounded visibility summary on `episode_start.meta` when an HTTP transcript explicitly carries a `401` authorization challenge with typed discovery parameters.
+
+### K2-A Authorization-Discovery Summary
+
+When a supported HTTP transcript entry contains:
+
+- a response-path `401` status in `transport_context`
+- a typed `WWW-Authenticate` header
+- and visible `resource_metadata` and/or `scope` challenge parameters
+
+Assay may emit:
+
+```json
+{
+  "meta": {
+    "mcp": {
+      "authorization_discovery": {
+        "visible": true,
+        "source_kind": "www_authenticate",
+        "resource_metadata_visible": true,
+        "authorization_servers_visible": false,
+        "scope_challenge_visible": true
+      }
+    }
+  }
+}
+```
+
+This summary is **visibility-only**. It does not imply auth success, scope correctness, issuer trust, or MCP auth compliance.
 
 ---
 
