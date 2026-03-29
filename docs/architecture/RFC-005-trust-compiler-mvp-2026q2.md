@@ -1,6 +1,6 @@
 # RFC-005: Trust Compiler MVP and Trust Card (Q2 2026)
 
-- Status: Active (`T1a`, `T1b`, `G3`, `P2a`, and `H1` are public in `v3.3.0`; `G4-A`, `P2c`, and `K1-A` Phase 1 are now public in `v3.4.0`; `K1` remains the next bounded evidence wave beyond that first public slice)
+- Status: Active (`T1a`, `T1b`, `G3`, `P2a`, and `H1` are public in `v3.3.0`; `G4-A`, `P2c`, and `K1-A` Phase 1 are now public in `v3.4.0`; `K2` is the planned next bounded evidence wave after `K1-A` stabilization)
 - Date: 2026-03-23
 - Owner: Evidence / Product
 - Scope: bounded execution framing for `T1a` and `T1b`
@@ -78,7 +78,7 @@ This RFC inherits the following hard constraints from ADR-033:
 - **Assay canonical evidence is the truth layer**
 - **OTel is a first-class ingest path, not the sole semantic authority**
 - **Trust Card is evidence-classified, not score-first**
-- **the preferred order stays `T1a -> T1b -> G3 -> P2 -> K1` before any broader next-pack expansion**
+- **the preferred order stays `T1a -> T1b -> G3 -> P2 -> K1 -> K2` before any broader next-pack expansion**
 - **Assay is not a tracing platform, eval platform, or observability dashboard**
 
 ## 3. Non-Goals
@@ -253,7 +253,8 @@ After `T1a`, `T1b`, and `G3` on `main`, the preferred sequence is:
 4. **`G4` — A2A discovery / card evidence signal** (evidence-wave before the next A2A pack slice; adapter-first; not a companion pack): see [PLAN-G4](PLAN-G4-A2A-DISCOVERY-CARD-EVIDENCE-2026q2.md)
 5. **`P2c` — A2A discovery/card follow-up pack** (productization after G4; companion pack rules aligned to G4 evidence — built-in `a2a-discovery-card-followup`, now public in **`v3.4.0`**; [PLAN-P2c](PLAN-P2c-A2A-DISCOVERY-CARD-FOLLOWUP-PACK.md))
 6. **`K1` — A2A handoff / delegation-route visibility evidence** (next formal wave after `P2c`; adapter-first; no pack in the same slice). `K1-A` Phase 1 is now the first public bounded A2A adapter seam in **`v3.4.0`**; see [PLAN-K1](PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) and [K1-A freeze](K1-A-PHASE1-FREEZE.md)
-7. only later: further pack slices if `K1` or another evidence wave makes them honest; reference existence, temporal validity, capability attestation, richer compliance packs
+7. **`K2` — MCP authorization-discovery evidence** (planned next bounded evidence wave after `K1-A` stabilization; evidence-first; no pack in the same slice). See [PLAN-K2](PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md) and [K2-A freeze prep](K2-A-PHASE1-FREEZE-PREP.md)
+8. only later: further pack slices if `K1`, `K2`, or another evidence wave makes them honest; reference existence, temporal validity, capability attestation, richer compliance packs
 
 ## 7. Review Gates For Future Execution
 
