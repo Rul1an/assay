@@ -30,9 +30,10 @@ The trust-compiler line is now public through `K1-A` Phase 1 in **`v3.4.0`**. Th
 documentation converges on this call:
 
 - keep `G4-A` limited to post-merge verification / release-truth hygiene
-- treat `K1` as the next formal wave, not as “automatic `P2d`”
+- treat Assay as a **CI-native protocol-governance** and evidence-first product line, not a trust-score-first engine
 - current public slice: **bounded A2A handoff / delegation-route visibility evidence** via `K1-A`
-- current second candidate: **MCP authorization-discovery evidence**
+- planned next bounded evidence wave: **`K2` — MCP authorization-discovery evidence**
+- keep protocol packs downstream of first-class evidence seams, not as the default next move
 
 See also:
 
@@ -40,3 +41,5 @@ See also:
 - [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
 - [DISCOVERY — Next Evidence Wave](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md)
 - [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md)
+- [PLAN — K2](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md)
+- [K2-A — Phase 1 freeze prep](./K2-A-PHASE1-FREEZE-PREP.md)

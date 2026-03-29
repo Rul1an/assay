@@ -1,6 +1,6 @@
 # DISCOVERY — Next Evidence Wave (2026 Q2)
 
-- **Status:** Historical discovery note; preferred candidate is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), and the first bounded `K1-A` adapter slice is now public in **`v3.4.0`**
+- **Status:** Historical discovery note; preferred candidate is now formalized as [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), the first bounded `K1-A` adapter slice is now public in **`v3.4.0`**, and the planned next bounded evidence wave is now [PLAN — K2](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md)
 - **Date:** 2026-03-25
 - **Owner:** Evidence / Product
 - **Scope (this document now):** Historical ranking input only. The formal next-wave choice now lives in [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md).
@@ -150,7 +150,7 @@ This section is **second-order** motivation only. It does **not** define Assay s
 2. **Done in this slice:** the next execution artifact is now recorded as [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), with explicit source mapping, emitted examples, and no implementation in the freeze slice itself.
 3. **Done:** the first bounded adapter-first implementation slice for `K1-A` is now merged on `main` as the top-level A2A `handoff` seam, still without a pack wave.
 4. Any further `K1` widening remains a separate maintainer decision; no downstream pack follows automatically from this slice.
-5. This note remains the historical discovery input; it no longer carries the active roadmap choice by itself.
+5. The next formal wave after `K1-A` stabilization now lives in [PLAN — K2](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md); this note remains the historical discovery input that ranked the earlier post-`P2c` candidates.
 
 ## References (repo)
 

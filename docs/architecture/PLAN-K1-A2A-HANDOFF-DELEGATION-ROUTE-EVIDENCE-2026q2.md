@@ -170,6 +170,10 @@ Only after `K1` evidence is real should maintainers revisit whether:
 - MCP authorization-discovery should become the next evidence-wave
 - any Trust Basis / Trust Card expansion is justified
 
+Current status on `main`: that revisit has now selected **`K2` — MCP authorization-discovery
+evidence** as the planned next bounded evidence wave, while still keeping packs downstream of
+first-class evidence seams.
+
 No downstream pack or trust-surface follow-up should be assumed as part of `K1` closure.
 
 `K1` is therefore the next **formal evidence wave**, not the start of an automatic new pack line.
