@@ -1,6 +1,6 @@
 # PLAN — K2 MCP Authorization-Discovery Evidence (2026 Q2)
 
-- **Current status:** Planned next bounded trust-compiler wave after `K1-A` stabilization on `main`; no implementation or freeze is shipped in this plan.
+- **Current status:** Planned next bounded trust-compiler wave after `K1-A` stabilization on `main`; `K2-A` Phase 1 now has a formal pre-implementation freeze, but no implementation or release is shipped.
 - **Date:** 2026-03-29
 - **Owner:** Evidence / Product
 - **Inputs:** [ROADMAP](../ROADMAP.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-05/basic/authorization)
@@ -136,7 +136,8 @@ Minimum artifacts required before freeze:
 - explicit negative matrix for false positives and secret-bearing inputs
 - hard may / must-not-imply language
 
-That prep path is recorded in [K2-A — Phase 1 freeze prep](./K2-A-PHASE1-FREEZE-PREP.md).
+That prep path is recorded in [K2-A — Phase 1 freeze prep](./K2-A-PHASE1-FREEZE-PREP.md), and
+the resulting active contract now lives in [K2-A — Phase 1 formal freeze](./K2-A-PHASE1-FREEZE.md).
 
 ## 8. Implementation gates (future, not this PR)
 
@@ -174,6 +175,7 @@ No downstream pack or trust-surface follow-up should be assumed as part of `K2` 
 - [ROADMAP](../ROADMAP.md)
 - [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md)
 - [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md)
+- [K2-A — Phase 1 formal freeze](./K2-A-PHASE1-FREEZE.md)
 - [K2-A — Phase 1 freeze prep](./K2-A-PHASE1-FREEZE-PREP.md)
 - [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md)
 - [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-05/basic/authorization)
