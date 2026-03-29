@@ -22,7 +22,7 @@ issuer-trust signal, and not an enterprise-readiness claim.
 
 - **one bounded MCP authorization-discovery seam**
 - **repo-reality first**
-- **adapter/server/proxy emitted evidence only**
+- **supported MCP import / runtime evidence only**
 - **no pack in the same slice**
 - **no reuse of `G3` authorization-context semantics**
 
