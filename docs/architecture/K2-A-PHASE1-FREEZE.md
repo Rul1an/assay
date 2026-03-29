@@ -43,16 +43,20 @@ allowed inputs first. Any later implementation must keep the seam singular and t
 
 - authorization succeeded
 - required scopes were sufficient
+- any advertised scope requirement was adequate, correct, or enforced
 - the discovered authorization server is trusted
 - the server is secure or compliant in the broad sense
 - a client is correctly configured
 - OAuth/OIDC discovery was complete end-to-end
+- client registration or broader auth bootstrap was correct or complete
 
 ## 3. Allowed positive source classes (v1 freeze)
 
 These source classes are the **only** classes that a future `K2-A` implementation may promote in
 v1, and only when they are observed on a supported MCP runtime/discovery path with exact source
-provenance.
+provenance. Static config, documentation hints, client-side remembered metadata, and other
+non-runtime sources are not MCP authorization-discovery evidence in this freeze unless a later
+freeze explicitly adds them.
 
 | Source class | May imply | Must not imply |
 |--------------|-----------|----------------|
@@ -67,12 +71,14 @@ provenance.
 
 - bearer tokens, access tokens, refresh tokens, client secrets, or credential-like headers
 - opaque auth blobs or copied header strings without typed source provenance
-- static config or docs that were not observed on a supported MCP discovery/runtime path
+- static config files, docs hints, or client-side remembered auth metadata that were not observed on
+  a supported MCP discovery/runtime path
 - generic logs or trace text
 - policy decisions alone
 - `G3` authorization-context fields (`auth_scheme`, `auth_issuer`, `principal`)
 - inferred issuer trust or inferred compliance
-- OAuth AS metadata / OIDC discovery fetched outside the bounded v1 source classes
+- OAuth AS metadata, OIDC discovery, or client registration fetched outside the bounded v1 source
+  classes
 
 ## 5. Repo-reality gate before implementation
 
@@ -94,9 +100,10 @@ Any future `K2-A` implementation must hard-fail review if it:
 
 - promotes anything from outside the source classes in §3
 - reuses `G3` fields as if they were discovery evidence
-- promotes authorization-discovery from static config without observed runtime/discovery provenance
+- promotes authorization-discovery from static config, docs, or client memory without observed
+  runtime/discovery provenance
 - emits credentials or secret-bearing material
-- turns visibility into auth correctness, server trust, or compliance language
+- turns visibility into auth correctness, scope adequacy, server trust, or compliance language
 - widens the work into a pack, engine bump, or broader Trust Basis / Trust Card expansion
 
 ## 7. Status meaning

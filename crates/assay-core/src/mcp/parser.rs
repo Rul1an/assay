@@ -27,7 +27,12 @@ fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
         let v: serde_json::Value = serde_json::from_str(line)
             .with_context(|| format!("invalid JSON on line {}", lineno + 1))?;
 
-        let event = parse_jsonrpc_message(v, (lineno + 1) as u64, None)?;
+        let event = parse_jsonrpc_message(
+            v,
+            (lineno + 1) as u64,
+            None,
+            McpAuthorizationDiscovery::default(),
+        )?;
         out.push(event);
     }
 
@@ -50,7 +55,12 @@ fn parse_inspector_best_effort(text: &str) -> Result<Vec<McpEvent>> {
     let mut out = Vec::new();
     for (idx, item) in arr.into_iter().enumerate() {
         // Use array index as source_line for sorting stability
-        let event = parse_jsonrpc_message(item, (idx + 1) as u64, None)?;
+        let event = parse_jsonrpc_message(
+            item,
+            (idx + 1) as u64,
+            None,
+            McpAuthorizationDiscovery::default(),
+        )?;
         out.push(event);
     }
 
@@ -104,15 +114,19 @@ fn parse_transport_transcript(
                 request,
                 source_line,
                 entry.timestamp_ms,
+                McpAuthorizationDiscovery::default(),
             )?);
             continue;
         }
+
+        let auth_discovery = parse_transport_auth_discovery(&entry);
 
         if let Some(response) = entry.response {
             out.push(parse_jsonrpc_message(
                 response,
                 source_line,
                 entry.timestamp_ms,
+                auth_discovery,
             )?);
             continue;
         }
@@ -123,6 +137,7 @@ fn parse_transport_transcript(
                     jsonrpc,
                     source_line,
                     entry.timestamp_ms,
+                    McpAuthorizationDiscovery::default(),
                 )?);
             }
         }
@@ -135,6 +150,7 @@ fn parse_jsonrpc_message(
     v: serde_json::Value,
     source_line: u64,
     timestamp_ms_override: Option<u64>,
+    auth_discovery: McpAuthorizationDiscovery,
 ) -> Result<McpEvent> {
     if !v.is_object() {
         bail!(
@@ -210,8 +226,121 @@ fn parse_jsonrpc_message(
         source_line,
         timestamp_ms: ts_ms,
         jsonrpc_id: id_str,
+        auth_discovery,
         payload,
     })
+}
+
+fn parse_transport_auth_discovery(entry: &TransportTranscriptEntry) -> McpAuthorizationDiscovery {
+    let Some(status) = extract_http_status(entry) else {
+        return McpAuthorizationDiscovery::default();
+    };
+
+    if status != 401 {
+        return McpAuthorizationDiscovery::default();
+    }
+
+    let header_value = entry
+        .transport_context
+        .as_ref()
+        .and_then(|value| find_header_case_insensitive(value, "www-authenticate"))
+        .or_else(|| {
+            entry
+                .headers
+                .as_ref()
+                .and_then(|value| find_header_case_insensitive(value, "www-authenticate"))
+        });
+
+    let Some(www_authenticate) = header_value else {
+        return McpAuthorizationDiscovery::default();
+    };
+
+    let resource_metadata_visible = auth_param_visible(&www_authenticate, "resource_metadata");
+    let scope_challenge_visible = auth_param_visible(&www_authenticate, "scope");
+
+    if !resource_metadata_visible && !scope_challenge_visible {
+        return McpAuthorizationDiscovery::default();
+    }
+
+    McpAuthorizationDiscovery {
+        visible: true,
+        source_kind: McpAuthorizationDiscoverySourceKind::WwwAuthenticate,
+        resource_metadata_visible,
+        authorization_servers_visible: false,
+        scope_challenge_visible,
+    }
+}
+
+fn extract_http_status(entry: &TransportTranscriptEntry) -> Option<u16> {
+    entry
+        .transport_context
+        .as_ref()
+        .and_then(extract_http_status_from_value)
+        .or_else(|| {
+            entry
+                .headers
+                .as_ref()
+                .and_then(extract_http_status_from_value)
+        })
+}
+
+fn extract_http_status_from_value(value: &serde_json::Value) -> Option<u16> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["status", "status_code", "http_status"] {
+                if let Some(status) = map.get(key).and_then(json_value_to_u16) {
+                    return Some(status);
+                }
+            }
+
+            map.get("response").and_then(extract_http_status_from_value)
+        }
+        _ => None,
+    }
+}
+
+fn json_value_to_u16(value: &serde_json::Value) -> Option<u16> {
+    match value {
+        serde_json::Value::Number(n) => n.as_u64().and_then(|n| u16::try_from(n).ok()),
+        serde_json::Value::String(s) => s.parse::<u16>().ok(),
+        _ => None,
+    }
+}
+
+fn find_header_case_insensitive(value: &serde_json::Value, header_name: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(headers) = map.get("headers") {
+                if let Some(found) = find_header_case_insensitive(headers, header_name) {
+                    return Some(found);
+                }
+            }
+
+            if let Some(response) = map.get("response") {
+                if let Some(found) = find_header_case_insensitive(response, header_name) {
+                    return Some(found);
+                }
+            }
+
+            map.iter().find_map(|(key, value)| {
+                if key.eq_ignore_ascii_case(header_name) {
+                    value.as_str().map(ToString::to_string)
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
+fn auth_param_visible(header_value: &str, param_name: &str) -> bool {
+    let lower = header_value.to_ascii_lowercase();
+    let needle = format!("{param_name}=");
+
+    lower
+        .match_indices(&needle)
+        .any(|(idx, _)| idx == 0 || matches!(lower.as_bytes()[idx - 1], b' ' | b',' | b'\t'))
 }
 
 fn normalize_jsonrpc_id(
