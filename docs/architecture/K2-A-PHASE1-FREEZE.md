@@ -1,13 +1,13 @@
 # K2-A — Phase 1 formal freeze
 
-**Status:** Frozen for `K2-A` Phase 1 on `main`; not implemented, not released.
+**Status:** Frozen, implemented, and public for `K2-A` Phase 1 in `v3.5.0`.
 **Parent:** [PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md](PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md).
 **Prep input:** [K2-A-PHASE1-FREEZE-PREP.md](K2-A-PHASE1-FREEZE-PREP.md).
 **Repo snapshot:** Current `main` has bounded `G3` authorization **context** on supported
-`assay.tool.decision` evidence, but it does **not** yet have a first-class MCP
-authorization-discovery seam in canonical evidence or MCP adapter/server output. This freeze is
-therefore **pre-implementation**: it locks the honest source classes, semantic ceiling, and review
-gates before any runtime code is allowed to promote a new seam.
+`assay.tool.decision` evidence **and** a first-class bounded MCP authorization-discovery seam on
+imported MCP traces. This freeze remains the active contract for that public `v3.5.0` Phase 1
+implementation: it locks the honest source classes, semantic ceiling, and review gates that the
+runtime code must continue to honor.
 
 ## Contract honesty (product / review)
 
@@ -22,7 +22,7 @@ issuer-trust signal, and not an enterprise-readiness claim.
 
 - **one bounded MCP authorization-discovery seam**
 - **repo-reality first**
-- **adapter/server/proxy emitted evidence only**
+- **supported MCP import / runtime evidence only**
 - **no pack in the same slice**
 - **no reuse of `G3` authorization-context semantics**
 
@@ -110,13 +110,12 @@ Any future `K2-A` implementation must hard-fail review if it:
 
 This freeze means:
 
-- `K2` is the planned next bounded evidence wave
-- `K2-A` Phase 1 now has a formal pre-implementation contract
-- implementation is allowed only inside the guardrails above
+- `K2` is the active bounded MCP authorization-discovery evidence wave
+- `K2-A` Phase 1 now has a formal contract **and** a released first slice in **`v3.5.0`**
+- any further implementation must stay inside the guardrails above
 
 This freeze does **not** mean:
 
-- a `K2-A` seam is already implemented
 - a pack should follow automatically
 - field names are final
 - `G3` or existing MCP decision evidence is enough by itself
