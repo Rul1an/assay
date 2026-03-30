@@ -1,6 +1,6 @@
 # K2-A — Phase 1 formal freeze
 
-**Status:** Frozen and implemented for `K2-A` Phase 1 on `main`; not yet public in a tagged release.
+**Status:** Frozen, implemented, and public for `K2-A` Phase 1 in `v3.5.0`.
 **Parent:** [PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md](PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md).
 **Prep input:** [K2-A-PHASE1-FREEZE-PREP.md](K2-A-PHASE1-FREEZE-PREP.md).
 **Repo snapshot:** Current `main` has bounded `G3` authorization **context** on supported
@@ -119,7 +119,6 @@ This freeze does **not** mean:
 - a pack should follow automatically
 - field names are final
 - `G3` or existing MCP decision evidence is enough by itself
-- the current `K2-A` slice is already part of a public tagged release
 
 ## References
 

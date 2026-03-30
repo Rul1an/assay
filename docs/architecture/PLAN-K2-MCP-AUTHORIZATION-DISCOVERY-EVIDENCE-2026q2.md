@@ -1,6 +1,6 @@
 # PLAN — K2 MCP Authorization-Discovery Evidence (2026 Q2)
 
-- **Current status:** Active bounded trust-compiler wave after `K1-A`; `K2-A` Phase 1 is now implemented on `main`, but not yet part of a public tagged release.
+- **Current status:** Active bounded trust-compiler wave after `K1-A`; `K2-A` Phase 1 is now public in `v3.5.0` as the first bounded MCP authorization-discovery slice.
 - **Date:** 2026-03-29
 - **Owner:** Evidence / Product
 - **Inputs:** [ROADMAP](../ROADMAP.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [MCP Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
@@ -173,9 +173,8 @@ Any future `K2` implementation slice should hard-fail review if it:
 4. Product language stays at **visible / advertised / observed**, not **valid / compliant / trusted**.
 5. No pack or broader trust artifact is shipped in the same wave.
 
-`K2-A` Phase 1 now meets that bar on `main` through the bounded MCP import seam merged in `#1004`.
-It is **shipped on `main`**, but **not yet public release truth** until a future tagged release carries
-the slice.
+`K2-A` Phase 1 now meets that bar through the bounded MCP import seam merged in `#1004`, and that
+slice is now part of the public **`v3.5.0`** release line.
 
 ## 10. What happens after `K2`
 

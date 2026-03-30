@@ -3,7 +3,7 @@
 This matrix records the trust-compiler line that moved from `T1b` through `K2-A` Phase 1, plus the
 discovery-only ranking that led first to `K1` and then to `K2`. It is meant as an audit aid: each row captures the wave, the PRs
 that carried it, the kernel files, the contract/result that matters, and whether that row is
-shipped on `main` and/or part of the public `v3.3.0` / `v3.4.0` release truth.
+shipped on `main` and/or part of the public `v3.3.0` / `v3.4.0` / `v3.5.0` release truth.
 
 | Wave | PR(s) | Kernbestanden | Belangrijk contract / resultaat | `main` shipped? | Release-truth? |
 |------|-------|---------------|----------------------------------|-----------------|----------------|
@@ -23,19 +23,19 @@ shipped on `main` and/or part of the public `v3.3.0` / `v3.4.0` release truth.
 | `K1` formalization | `#989`, `#990`, `#991` | `docs/architecture/PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md`, `docs/ROADMAP.md`, `docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md` | Next formal wave chosen as bounded A2A handoff / delegation-route visibility evidence; explicitly adapter-first, evidence-first, no pack in the same wave | Yes | Yes — public docs line through `v3.4.0` |
 | `K1-A` Phase 1 freeze + first adapter slice + closure | `#992`, `#994`, `#995` | `docs/architecture/K1-A-PHASE1-FREEZE.md`, `crates/assay-adapter-a2a/src/adapter_impl/handoff.rs`, `crates/assay-adapter-a2a/src/adapter_impl/payload.rs`, `crates/assay-adapter-a2a/src/adapter_impl/tests.rs`, trust-sync docs | Top-level `payload.handoff` seam always present; `typed_payload` / `unknown` only; positive only for `task.requested` + `task.kind == "delegation"`; explicit non-promotion for `task.updated`, `artifact.shared`, generic-message fallback, synthetic `unknown-task`, and non-`delegation` `task.kind` | Yes | Yes — in `v3.4.0` |
 | `K2` planning + `K2-A` freeze | docs-only follow-up on `main` | `docs/architecture/PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md`, `docs/architecture/K2-A-PHASE1-FREEZE.md`, `docs/architecture/K2-A-PHASE1-FREEZE-PREP.md`, `docs/ROADMAP.md`, `docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md` | `K2` is formalized as the next bounded MCP authorization-discovery wave; `K2-A` freezes one seam, repo-reality-first source classes, and hard non-promotion rules before implementation | Yes | Planned docs line on `main` |
-| `K2-A` Phase 1 implementation | `#1004` | `crates/assay-core/src/mcp/types.rs`, `crates/assay-core/src/mcp/parser.rs`, `crates/assay-core/src/mcp/mapper_v2.rs`, `crates/assay-core/tests/mcp_transport_compat.rs`, `crates/assay-cli/tests/mcp_transport_import.rs` | Bounded MCP authorization-discovery seam on imported MCP traces: top-level `episode_start.meta.mcp.authorization_discovery`, visibility-only, positive only for typed `WWW-Authenticate` discovery on supported `401` transport paths; explicit non-promotion without typed runtime-observed provenance | Yes | No — on `main` only, not yet in a public tagged release |
+| `K2-A` Phase 1 implementation | `#1004` | `crates/assay-core/src/mcp/types.rs`, `crates/assay-core/src/mcp/parser.rs`, `crates/assay-core/src/mcp/mapper_v2.rs`, `crates/assay-core/tests/mcp_transport_compat.rs`, `crates/assay-cli/tests/mcp_transport_import.rs` | Bounded MCP authorization-discovery seam on imported MCP traces: top-level `episode_start.meta.mcp.authorization_discovery`, visibility-only, positive only for typed `WWW-Authenticate` discovery on supported `401` transport paths; explicit non-promotion without typed runtime-observed provenance | Yes | Yes — in `v3.5.0` |
 | Discovery-only next-wave note | discovery note on `main` | `docs/architecture/DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md` | Preferred next evidence-wave candidate: **A2A handoff / delegation-route visibility**; second candidate: **MCP authorization-discovery**; explicitly **not** automatically another pack | Yes | Yes — public docs line / discovery-only context through `v3.4.0` |
 
 ## Current call
 
-The trust-compiler line is now public through `K1-A` Phase 1 in **`v3.4.0`**. The current
+The trust-compiler line is now public through `K2-A` Phase 1 in **`v3.5.0`**. The current
 documentation converges on this call:
 
 - keep `G4-A` limited to post-merge verification / release-truth hygiene
 - treat Assay as a **CI-native protocol-governance** and evidence-first product line, not a trust-score-first engine
-- current public slice: **bounded A2A handoff / delegation-route visibility evidence** via `K1-A`
+- current public slice now includes **bounded MCP authorization-discovery visibility evidence** via `K2-A`
 - active bounded evidence wave: **`K2` — MCP authorization-discovery evidence**
-- `K2-A` Phase 1 is now implemented on `main`, but not yet part of a public tagged release
+- `K2-A` Phase 1 is now public in **`v3.5.0`**
 - keep protocol packs downstream of first-class evidence seams, not as the default next move
 
 See also:
