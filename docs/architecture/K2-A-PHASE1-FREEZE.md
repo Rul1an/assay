@@ -5,7 +5,7 @@
 **Prep input:** [K2-A-PHASE1-FREEZE-PREP.md](K2-A-PHASE1-FREEZE-PREP.md).
 **Repo snapshot:** Current `main` has bounded `G3` authorization **context** on supported
 `assay.tool.decision` evidence **and** a first-class bounded MCP authorization-discovery seam on
-imported MCP traces. This freeze remains the active contract for that shipped-on-`main` Phase 1
+imported MCP traces. This freeze remains the active contract for that public `v3.5.0` Phase 1
 implementation: it locks the honest source classes, semantic ceiling, and review gates that the
 runtime code must continue to honor.
 
@@ -111,7 +111,7 @@ Any future `K2-A` implementation must hard-fail review if it:
 This freeze means:
 
 - `K2` is the active bounded MCP authorization-discovery evidence wave
-- `K2-A` Phase 1 now has a formal contract **and** an implemented first slice on `main`
+- `K2-A` Phase 1 now has a formal contract **and** a released first slice in **`v3.5.0`**
 - any further implementation must stay inside the guardrails above
 
 This freeze does **not** mean:

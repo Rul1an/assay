@@ -4,7 +4,7 @@
 - **Date:** 2026-03-29
 - **Owner:** Evidence / Product
 - **Inputs:** [ROADMAP](../ROADMAP.md), [RFC-005](./RFC-005-trust-compiler-mvp-2026q2.md), [PLAN — K1](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md), [K1-A — Phase 1 formal freeze](./K1-A-PHASE1-FREEZE.md), [Trust Compiler Audit Matrix](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md), [MCP Authorization](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
-- **Scope (this document):** Record the formal `K2` wave choice, its guardrails, and the current `K2-A` Phase 1 shipped-on-`main` status. No pack semantics, no engine bump, and no Trust Basis / Trust Card expansion are implied by this plan.
+- **Scope (this document):** Record the formal `K2` wave choice, its guardrails, and the current `K2-A` Phase 1 public release status. No pack semantics, no engine bump, and no Trust Basis / Trust Card expansion are implied by this plan.
 
 ## 1. Why this plan exists
 
@@ -174,7 +174,8 @@ Any future `K2` implementation slice should hard-fail review if it:
 5. No pack or broader trust artifact is shipped in the same wave.
 
 `K2-A` Phase 1 now meets that bar through the bounded MCP import seam merged in `#1004`, and that
-slice is now part of the public **`v3.5.0`** release line.
+slice is now part of the public **`v3.5.0`** release line. That release status does **not** by
+itself authorize an automatic second `K2` slice.
 
 ## 10. What happens after `K2`
 
