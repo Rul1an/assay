@@ -4,9 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-03-30
+
+This release makes the first bounded MCP authorization-discovery seam public. `K2-A` Phase 1 now
+ships in the public Assay line as visibility-only evidence for typed MCP auth-discovery surfaces,
+without broadening into an auth-discovery pack, auth-success claims, or compliance theater.
+
 ### Trust Compiler
 
-- **`K2-A` Phase 1**: `main` now includes the first bounded MCP authorization-discovery seam on imported MCP traces via `episode_start.meta.mcp.authorization_discovery`. The slice is visibility-only, promotes positively only from typed runtime-observed `WWW-Authenticate` discovery on supported `401` transport paths, and explicitly does **not** imply auth success, scope adequacy, issuer trust, or compliance. This is shipped on `main` only for now, not yet as public release truth.
+- **`K2-A` Phase 1**: Assay now publicly ships the first bounded MCP authorization-discovery seam on imported MCP traces via `episode_start.meta.mcp.authorization_discovery`. The slice is visibility-only, promotes positively only from typed runtime-observed `WWW-Authenticate` discovery on supported `401` transport paths, and explicitly does **not** imply auth success, scope adequacy, issuer trust, or compliance.
 
 ## [3.4.0] - 2026-03-28
 

@@ -33,9 +33,9 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
-> **Trust Compiler line:** Release **v3.4.0** is the current public trust-compiler line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), and also publicly ships **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), and **`K1-A` Phase 1** (`payload.handoff`). Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+> **Trust Compiler line:** Release **v3.5.0** is the current public trust-compiler line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), and **`K1-A` Phase 1** (`payload.handoff`), and now also publicly ships **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`). Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
 
-> **Repository truth:** `main` currently tracks the released **v3.4.0** trust-compiler surface, including the bounded A2A `payload.handoff` seam. Future trust-compiler slices may land on `main` before the next public cut, so release notes and changelog remain the authority for what is actually public.
+> **Repository truth:** `main` now tracks the released **v3.5.0** trust-compiler surface, including the bounded MCP authorization-discovery seam in imported traces. Future trust-compiler slices may still land on `main` before the next public cut, so release notes and changelog remain the authority for what is actually public.
 
 ```
   Agent ──► Assay ──► MCP Server
