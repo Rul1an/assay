@@ -51,6 +51,8 @@ No hosted backend. No API keys for core flows. **Deterministic** — same input,
 
 ## See It Work
 
+[![SafeSkill 72/100](https://img.shields.io/badge/SafeSkill-72%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/rul1an-assay)
+
 ```bash
 cargo install assay-cli
 
