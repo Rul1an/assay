@@ -844,7 +844,7 @@ When resolving from the **local pack directory** (step 3), the config pack direc
 
 | Platform | Canonical | Fallback |
 |----------|-----------|----------|
-| Unix-like (Linux/macOS) | `$XDG_CONFIG_HOME/assay/packs` | If `XDG_CONFIG_HOME` unset or empty: `~/.config/assay/packs` |
+| Unix-like (Linux/macOS) | `$XDG_CONFIG_HOME/assay/packs` | If `XDG_CONFIG_HOME` unset or empty: `$HOME/.config/assay/packs` |
 | Windows | `%APPDATA%\assay\packs` | If unset, use FOLDERID_RoamingAppData equivalent so resolution does not fail |
 
 Candidates for local resolution: `{config_dir}/{name}.yaml` or `{config_dir}/{name}/pack.yaml`. Only one level; no scanning of subdirectories beyond `{config_dir}/{name}/`.
