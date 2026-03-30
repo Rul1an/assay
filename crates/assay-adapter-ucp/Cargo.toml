@@ -21,4 +21,4 @@ hex = { workspace = true }
 workspace = true
 
 [dev-dependencies]
-proptest = "1.10"
+proptest = "1.11"
