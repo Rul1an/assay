@@ -78,7 +78,7 @@ env | grep -i secret
 # OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
-A malicious or compromised MCP server could exfiltrate these credentials.
+A malicious or compromised MCP server could send these credentials to an external service.
 
 ### The Solution
 
@@ -198,7 +198,7 @@ Allowed paths:
 
 Blocked paths:
   /home/user/.ssh/**     ← DENIED
-  /etc/shadow            ← DENIED
+  /var/lib/private-demo/credentials.txt  ← DENIED
   /                      ← DENIED
 ```
 

@@ -34,7 +34,7 @@ MCP servers execute code that you may not fully trust:
 │  • Could read ~/.aws/credentials                │
 │  • Could access GITHUB_TOKEN env var            │
 │  • Could write malicious files                  │
-│  • Could exfiltrate data via network            │
+│  • Could send sensitive data out over network   │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -96,7 +96,7 @@ Allowed:
 Denied (kernel blocks):
   /home/user/.ssh/**
   /home/user/.aws/**
-  /etc/shadow
+  /var/lib/private-demo/credentials.txt
   /*  (anything not explicitly allowed)
 ```
 
@@ -187,7 +187,7 @@ Assay detects this and either:
 | Module hijacking | 2 | `PYTHONPATH=/tmp/evil` |
 | SSH key theft | 3 | Reading `~/.ssh/id_rsa` |
 | AWS creds access | 3 | Reading `~/.aws/credentials` |
-| System file access | 3 | Reading `/etc/shadow` |
+| System file access | 3 | Reading `/var/lib/private-demo/credentials.txt` |
 | Temp file attacks | 4 | Writing to shared `/tmp` |
 | Process pollution | 4 | Interfering with other sandboxes |
 
@@ -196,7 +196,7 @@ Assay detects this and either:
 | Threat | Why | Mitigation |
 |--------|-----|------------|
 | Kernel exploits | Requires root/CAP_SYS_ADMIN | Keep kernel updated |
-| Network exfil | Requires `net: block` policy | Enable network blocking |
+| Network data leakage | Requires `net: block` policy | Enable network blocking |
 | Side channels | Out of scope for LSM | Physical isolation |
 | In-scope attacks | By design (allow = allow) | Minimize allow paths |
 | Container escape | Different threat model | Use proper containers |
