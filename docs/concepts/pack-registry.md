@@ -8,7 +8,7 @@ The **normative** pack resolution order is defined in [SPEC-Pack-Engine-v1](../a
 
 1. **Path** — Existing filesystem path: if **file**, load as YAML; if **directory**, load `<dir>/pack.yaml` only. Override built-ins by using an explicit path.
 2. **Built-in** — By name (e.g. `eu-ai-act-baseline`). Built-in wins over a pack with the same name in the config directory.
-3. **Local pack directory** — Config dir (`~/.config/assay/packs` on Unix, `%APPDATA%\assay\packs` on Windows). Look for `{name}.yaml` or `{name}/pack.yaml`; reference must be a valid pack name (see SPEC).
+3. **Local pack directory** — Config dir (`$XDG_CONFIG_HOME/assay/packs` on Unix-like systems, falling back to `$HOME/.config/assay/packs`; `%APPDATA%\\assay\\packs` on Windows). Look for `{name}.yaml` or `{name}/pack.yaml`; reference must be a valid pack name (see SPEC).
 4. **Registry** — `name@version` or pinned `name@version#sha256:...`
 5. **BYOS** — `s3://`, `gs://`, `az://` (Bring Your Own Storage)
 6. **NotFound** — Error with suggestion (e.g. "Did you mean …?" or "Available built-in packs: …").
