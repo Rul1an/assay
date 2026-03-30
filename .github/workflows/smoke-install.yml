@@ -56,7 +56,7 @@ jobs:
       # Optional: show JUnit directly in GitHub UI as Check Run / summary
       - name: Publish test report
         if: always()
-        uses: dorny/test-reporter@2dcf091ad558da2cabf16f6b423e02cd078c937a # v1
+        uses: dorny/test-reporter@ab50174d2cce6a041bb0a86aa99d11858f914df9 # v1
         continue-on-error: true
         with:
           name: Assay (JUnit)
