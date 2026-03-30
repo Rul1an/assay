@@ -820,7 +820,7 @@ flowchart TB
 ## Generated Diagrams
 
 The following diagrams are automatically generated from the codebase by the
-[docs-auto-update workflow](../../.github/workflows/docs-auto-update.yml).
+[docs-auto-update workflow](https://github.com/Rul1an/assay/blob/main/.github/workflows/docs-auto-update.yml).
 
 ### Crate Dependencies (Auto-Generated)
 
