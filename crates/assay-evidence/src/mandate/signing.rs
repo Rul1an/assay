@@ -94,7 +94,7 @@ pub struct VerifyResult {
 /// Returns `sha256:<lowercase-hex>`.
 pub fn compute_key_id(spki_bytes: &[u8]) -> String {
     let hash = Sha256::digest(spki_bytes);
-    format!("sha256:{:x}", hash)
+    format!("sha256:{}", hex::encode(hash))
 }
 
 /// Compute key_id from a VerifyingKey.
