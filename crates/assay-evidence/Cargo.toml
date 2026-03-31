@@ -14,7 +14,7 @@ serde = { workspace = true, features = ["derive", "std", "alloc"] }
 serde_json = { workspace = true, features = ["preserve_order", "std", "alloc"] }
 # CRITICAL: Pinned exactly - any change affects mandate_id computation!
 # If upgrading, MUST verify all golden vectors still pass.
-serde_jcs = "=0.1.0"
+serde_jcs = "=0.2.0"
 
 # Crypto & IDs
 sha2 = "0.10"
