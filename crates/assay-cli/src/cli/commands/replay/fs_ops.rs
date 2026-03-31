@@ -1,6 +1,7 @@
 use anyhow::Context;
 use sha2::{Digest, Sha256};
 use std::io::ErrorKind;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub(super) fn apply_seed_override(config_path: &Path, seed: u64) -> anyhow::Result<()> {
@@ -114,7 +115,14 @@ pub(super) fn write_entries(workspace: &Path, entries: &[(String, Vec<u8>)]) -> 
 pub(super) fn sha256_file(path: &Path) -> anyhow::Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut f, &mut hasher)?;
+    let mut buf = [0_u8; 8192];
+    loop {
+        let read = f.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
