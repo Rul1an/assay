@@ -208,7 +208,7 @@ impl VcrClient {
             hasher.update(canonical.as_bytes());
         }
 
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Determine provider from URL

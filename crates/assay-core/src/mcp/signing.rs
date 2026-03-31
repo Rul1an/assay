@@ -99,7 +99,7 @@ impl VerifyError {
 /// Returns `sha256:<lowercase-hex>`.
 pub fn compute_key_id(spki_bytes: &[u8]) -> String {
     let hash = Sha256::digest(spki_bytes);
-    format!("sha256:{:x}", hash)
+    format!("sha256:{}", hex::encode(hash))
 }
 
 /// Compute key_id from a VerifyingKey.
@@ -150,7 +150,7 @@ fn strip_signature(tool: &Value) -> Result<Value> {
 /// Compute payload digest.
 fn compute_payload_digest(canonical: &[u8]) -> String {
     let hash = Sha256::digest(canonical);
-    format!("sha256:{:x}", hash)
+    format!("sha256:{}", hex::encode(hash))
 }
 
 /// Sign a tool definition.
