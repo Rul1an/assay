@@ -11,5 +11,5 @@ pub fn cache_key(model: &str, prompt: &str, fingerprint: &str, trace_hash: Optio
         h.update(b"\n");
         h.update(th.as_bytes());
     }
-    format!("{:x}", h.finalize())
+    hex::encode(h.finalize())
 }
