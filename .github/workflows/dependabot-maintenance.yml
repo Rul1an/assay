@@ -1,0 +1,62 @@
+name: Dependabot Queue Maintenance
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependabot-maintenance
+  cancel-in-progress: false
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge for Dependabot PRs
+    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          already_enabled="$(
+            gh pr view "$PR_NUMBER" --repo "$REPO" --json autoMergeRequest --jq 'if .autoMergeRequest then "true" else "false" end'
+          )"
+
+          if [[ "$already_enabled" == "true" ]]; then
+            echo "Auto-merge already enabled for Dependabot PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --merge --auto
+          echo "Enabled auto-merge for Dependabot PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+
+  refresh-queue:
+    name: Refresh dependency queue PR branches
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Refresh queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: ./scripts/ci/dependabot-maintenance.sh "$REPO"
