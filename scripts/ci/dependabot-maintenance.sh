@@ -20,6 +20,28 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
+resolve_merge_state() {
+  local number="$1"
+  local state="UNKNOWN"
+  for _ in 1 2 3 4; do
+    state="$(
+      gh pr view "$number" \
+        --repo "$repo" \
+        --json mergeStateStatus \
+        --jq '.mergeStateStatus'
+    )"
+
+    if [[ "$state" != "UNKNOWN" ]]; then
+      printf '%s\n' "$state"
+      return 0
+    fi
+
+    sleep 3
+  done
+
+  printf '%s\n' "$state"
+}
+
 dependabot_prs="$(
   gh pr list \
     --repo "$repo" \
@@ -54,10 +76,15 @@ automerge_enabled=0
 automerge_failures=0
 
 while IFS=$'\t' read -r number title merge_state is_draft auto_enabled; do
+  resolved_merge_state="$merge_state"
   update_status="not-needed"
   auto_status="already-enabled"
 
-  if [[ "$merge_state" == "BEHIND" ]]; then
+  if [[ "$merge_state" == "UNKNOWN" ]]; then
+    resolved_merge_state="$(resolve_merge_state "$number")"
+  fi
+
+  if [[ "$resolved_merge_state" == "BEHIND" ]]; then
     if gh pr update-branch "$number" --repo "$repo" >/dev/null; then
       updated=$((updated + 1))
       update_status="updated"
@@ -79,8 +106,8 @@ while IFS=$'\t' read -r number title merge_state is_draft auto_enabled; do
     auto_status="draft"
   fi
 
-  append_summary "- PR #$number: $title | merge_state=$merge_state | branch=$update_status | auto_merge=$auto_status"
-  echo "PR #$number ($title): merge_state=$merge_state, branch=$update_status, auto_merge=$auto_status"
+  append_summary "- PR #$number: $title | merge_state=$merge_state -> $resolved_merge_state | branch=$update_status | auto_merge=$auto_status"
+  echo "PR #$number ($title): merge_state=$merge_state -> $resolved_merge_state, branch=$update_status, auto_merge=$auto_status"
 done < <(
   jq -r '.[] | [.number, .title, .mergeStateStatus, .isDraft, (.autoMergeRequest != null)] | @tsv' <<<"$prs_json"
 )
