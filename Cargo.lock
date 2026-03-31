@@ -4333,9 +4333,9 @@ dependencies = [
 
 [[package]]
 name = "serde_jcs"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cacecf649bc1a7c5f0e299cc813977c6a78116abda2b93b1ee01735b71ead9a8"
+checksum = "d3a60f3fda61525e439ef6d67422118f11e986566997d9021c56867ad814a0aa"
 dependencies = [
  "ryu-js",
  "serde",
