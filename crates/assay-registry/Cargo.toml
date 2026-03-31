@@ -38,7 +38,7 @@ ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
 pkcs8 = { version = "0.10", features = ["pem"] }
 
 # Pack parsing (reuse from evidence)
-serde_jcs = "=0.1.0"
+serde_jcs = "=0.2.0"
 
 # URL parsing
 url = "2.5"

@@ -26,7 +26,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
-serde_jcs = "0.1"
+serde_jcs = "0.2"
 serde_yaml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
