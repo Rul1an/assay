@@ -1,5 +1,5 @@
 use crate::config::otel::{PromptCaptureMode, RedactionConfig};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 pub struct RedactionService {
