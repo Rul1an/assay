@@ -1,8 +1,14 @@
 name: Feature Request
-description: Suggest an idea for this project
+description: Propose a bounded product or developer-facing improvement for Assay
 title: "[FEAT] "
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Use Issues for concrete, bounded feature requests.
+
+        For broad product questions, integrations, vendor outreach, or partnership proposals, please start a GitHub Discussion first.
   - type: textarea
     id: problem
     attributes:
@@ -15,7 +21,7 @@ body:
     id: solution
     attributes:
       label: Describe the solution you'd like
-      description: A clear and concise description of what you want to happen.
+      description: A clear and concise description of the bounded change you want to happen.
     validations:
       required: true
   - type: textarea
@@ -23,3 +29,9 @@ body:
     attributes:
       label: Describe alternatives you've considered
       description: A clear and concise description of any alternative solutions or features you've considered.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundaries
+      description: What should stay out of scope for this request?
+      placeholder: "Keep this limited to import-time evidence only; no new trust scoring, hosted service, or pack expansion."
