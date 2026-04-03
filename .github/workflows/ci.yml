@@ -48,7 +48,7 @@ jobs:
 
             if [[ ! -s "$changed_file" ]]; then
               lightweight_only=false
-            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$)' "$changed_file" >/dev/null; then
+            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$|\.github/ISSUE_TEMPLATE/[^/]+\.ya?ml$|\.github/DISCUSSION_TEMPLATE/[^/]+\.ya?ml$)' "$changed_file" >/dev/null; then
               lightweight_only=false
             else
               lightweight_only=true
@@ -367,8 +367,8 @@ jobs:
 
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
-    needs: [test]
-    if: github.event_name != 'pull_request'
+    needs: [scope, test]
+    if: github.event_name != 'pull_request' && needs.scope.outputs.lightweight_only != 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 60
     concurrency:
