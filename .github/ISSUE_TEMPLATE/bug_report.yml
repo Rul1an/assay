@@ -1,18 +1,21 @@
 name: Bug Report
-description: Create a report to help us improve Verdict
+description: Report a reproducible bug in Assay
 title: "[BUG] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report!
+        Thanks for taking the time to report a bug in Assay.
+
+        Issues are for reproducible product bugs.
+        For questions, integration ideas, or partnership outreach, please use GitHub Discussions instead.
   - type: textarea
     id: description
     attributes:
       label: Bug Description
       description: A clear and concise description of what the bug is.
-      placeholder: "When I run verdict ci with --trace-file, it panics..."
+      placeholder: "When I run `assay ci --trace-file traces/ci.jsonl`, the command exits with a parser error..."
     validations:
       required: true
   - type: textarea
@@ -21,16 +24,16 @@ body:
       label: Steps to Reproduce
       description: Steps to reproduce the behavior.
       placeholder: |
-        1. Run 'verdict ci ...'
-        2. See error
+        1. Run `assay ci ...`
+        2. Observe the failing output
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Verdict Version
-      description: Output of `verdict --version`
-      placeholder: "v0.2.0"
+      label: Assay Version
+      description: Output of `assay --version`
+      placeholder: "v3.5.0"
     validations:
       required: true
   - type: textarea
