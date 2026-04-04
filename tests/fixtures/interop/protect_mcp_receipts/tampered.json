@@ -1,0 +1,18 @@
+{
+  "type": "protectmcp:decision",
+  "tool_name": "delete_database",
+  "tool_input_hash": "sha256:ff7e2796c004bfab32b6b81f06e4a70e21ca0b5231398b15035b0d4582331c76",
+  "decision": "deny",
+  "policy_digest": "sha256:9d0fd4c9e72c1d5d8a3b7f2e1c4d6a8b",
+  "issued_at": "2026-04-04T14:32:04.102Z",
+  "issuer_id": "sb:issuer:1feed234c727",
+  "spec": "draft-farley-acta-signed-receipts-01",
+  "claimed_issuer_tier": "self-signed",
+  "session_id": "sess_a1b2c3d4e5f6",
+  "sequence": 1,
+  "signature": {
+    "alg": "EdDSA",
+    "kid": "sb:issuer:1feed234c727",
+    "sig": "3da3162da83e2c99968f91059c5f56209f44a69c269a058ed7c2f0b80110ad878da25b86cf053386f31483001bfe50f3eca57d67f14f8114e629b3bd40dec30b"
+  }
+}
