@@ -50,6 +50,7 @@ fn contract_probe_fixture_inventory_is_complete() {
                 .into_string()
                 .expect("utf-8 filename")
         })
+        .filter(|name| !name.starts_with('.'))
         .collect();
     actual.sort();
 
@@ -60,11 +61,11 @@ fn contract_probe_fixture_inventory_is_complete() {
 fn contract_probe_issuer_key_fixture_is_loadable() {
     let value = read_fixture_json("issuer_key.json");
 
-    assert_eq!(value["kid"], "sb:issuer:1feed234c727");
+    assert_eq!(value["kid"], "sb:issuer:de073ae64e43");
     assert_eq!(value["alg"], "EdDSA");
     assert_eq!(
         value["public_key_hex"],
-        "1feed234c727d30cf5b5f7f27df5d6168620bd8fcfd0a565efea65c08e93ed89"
+        "de073ae64e43c33ed5a0b3b238d44865052e0c7eed4f87f81f9f2c5ce37a1dfa"
     );
 }
 
@@ -77,14 +78,14 @@ fn contract_probe_valid_allow_maps_to_observed_view() {
         ProbeEvidenceView {
             receipt_present: true,
             verification_result: VerificationResult::Unchecked,
-            issuer_id: Some("sb:issuer:1feed234c727".to_string()),
+            issuer_id: Some("sb:issuer:de073ae64e43".to_string()),
             claimed_issuer_tier: Some("self-signed".to_string()),
             policy_digest: Some("sha256:9d0fd4c9e72c1d5d8a3b7f2e1c4d6a8b".to_string()),
             spec: Some("draft-farley-acta-signed-receipts-01".to_string()),
             tool_name: Some("read_file".to_string()),
             decision: Some("allow".to_string()),
             binding_key: Some(
-                "sb:issuer:1feed234c727|sess_a1b2c3d4e5f6|1|sha256:ff7e2796c004bfab32b6b81f06e4a70e21ca0b5231398b15035b0d4582331c76"
+                "sb:issuer:de073ae64e43|sess_a1b2c3d4e5f6|1|sha256:ff7e2796c004bfab32b6b81f06e4a70e21ca0b5231398b15035b0d4582331c76"
                     .to_string(),
             ),
         }
@@ -101,14 +102,14 @@ fn contract_probe_valid_deny_maps_to_observed_view() {
         ProbeEvidenceView {
             receipt_present: true,
             verification_result: VerificationResult::Unchecked,
-            issuer_id: Some("sb:issuer:1feed234c727".to_string()),
+            issuer_id: Some("sb:issuer:de073ae64e43".to_string()),
             claimed_issuer_tier: Some("self-signed".to_string()),
             policy_digest: Some("sha256:9d0fd4c9e72c1d5d8a3b7f2e1c4d6a8b".to_string()),
             spec: Some("draft-farley-acta-signed-receipts-01".to_string()),
             tool_name: Some("execute_command".to_string()),
             decision: Some("deny".to_string()),
             binding_key: Some(
-                "sb:issuer:1feed234c727|sess_a1b2c3d4e5f6|2|sha256:5c7923bd67b06c93279d49c466301c57023822eec29c49e269063e47aecd973c"
+                "sb:issuer:de073ae64e43|sess_a1b2c3d4e5f6|2|sha256:5c7923bd67b06c93279d49c466301c57023822eec29c49e269063e47aecd973c"
                     .to_string(),
             ),
         }
@@ -127,7 +128,7 @@ fn contract_probe_tampered_receipt_stays_unchecked_and_unpromoted() {
     assert_eq!(
         view.binding_key.as_deref(),
         Some(
-            "sb:issuer:1feed234c727|sess_a1b2c3d4e5f6|1|sha256:ff7e2796c004bfab32b6b81f06e4a70e21ca0b5231398b15035b0d4582331c76"
+            "sb:issuer:de073ae64e43|sess_a1b2c3d4e5f6|1|sha256:ff7e2796c004bfab32b6b81f06e4a70e21ca0b5231398b15035b0d4582331c76"
         )
     );
     assert_eq!(view.elevatable_fields(), vec!["verification_result"]);
@@ -138,7 +139,7 @@ fn contract_probe_malformed_receipt_is_rejected_as_malformed() {
     let err = derive_probe_evidence("malformed.json").expect_err("malformed receipt must fail");
 
     assert!(
-        err.contains("missing or invalid string field \"decision\""),
+        err.contains("missing or invalid object field \"payload\""),
         "unexpected malformed error: {err}"
     );
 
@@ -184,22 +185,22 @@ fn read_fixture_json(name: &str) -> Value {
 
 fn derive_probe_evidence(name: &str) -> Result<ProbeEvidenceView, String> {
     let value = read_fixture_json(name);
-    validate_minimal_shape(&value)?;
+    let payload = validate_minimal_shape(&value)?;
 
-    let issuer_id = get_string(&value, "issuer_id")?;
-    let session_id = get_string(&value, "session_id")?;
-    let sequence = get_u64(&value, "sequence")?;
-    let tool_input_hash = get_string(&value, "tool_input_hash")?;
+    let issuer_id = get_string(payload, "issuer_id")?;
+    let session_id = get_string(payload, "session_id")?;
+    let sequence = get_u64(payload, "sequence")?;
+    let tool_input_hash = get_string(payload, "tool_input_hash")?;
 
     Ok(ProbeEvidenceView {
         receipt_present: true,
         verification_result: VerificationResult::Unchecked,
         issuer_id: Some(issuer_id.clone()),
-        claimed_issuer_tier: Some(get_string(&value, "claimed_issuer_tier")?),
-        policy_digest: Some(get_string(&value, "policy_digest")?),
-        spec: Some(get_string(&value, "spec")?),
-        tool_name: Some(get_string(&value, "tool_name")?),
-        decision: Some(get_string(&value, "decision")?),
+        claimed_issuer_tier: Some(get_string(payload, "claimed_issuer_tier")?),
+        policy_digest: Some(get_string(payload, "policy_digest")?),
+        spec: Some(get_string(payload, "spec")?),
+        tool_name: Some(get_string(payload, "tool_name")?),
+        decision: Some(get_string(payload, "decision")?),
         binding_key: Some(format!(
             "{issuer_id}|{session_id}|{sequence}|{tool_input_hash}"
         )),
@@ -220,8 +221,12 @@ fn derive_malformed_probe_evidence(_name: &str) -> ProbeEvidenceView {
     }
 }
 
-fn validate_minimal_shape(value: &Value) -> Result<(), String> {
-    let type_name = get_string(value, "type")?;
+fn validate_minimal_shape(value: &Value) -> Result<&Value, String> {
+    let payload = value
+        .get("payload")
+        .filter(|payload| payload.is_object())
+        .ok_or_else(|| "missing or invalid object field \"payload\"".to_string())?;
+    let type_name = get_string(payload, "type")?;
     if type_name != "protectmcp:decision" {
         return Err(format!(
             "unexpected type {:?}, expected \"protectmcp:decision\"",
@@ -229,7 +234,7 @@ fn validate_minimal_shape(value: &Value) -> Result<(), String> {
         ));
     }
 
-    let decision = get_string(value, "decision")?;
+    let decision = get_string(payload, "decision")?;
     if decision != "allow" && decision != "deny" {
         return Err(format!(
             "unexpected decision {:?}, expected \"allow\" or \"deny\"",
@@ -237,15 +242,15 @@ fn validate_minimal_shape(value: &Value) -> Result<(), String> {
         ));
     }
 
-    get_string(value, "tool_name")?;
-    get_string(value, "tool_input_hash")?;
-    get_string(value, "policy_digest")?;
-    get_string(value, "issued_at")?;
-    get_string(value, "issuer_id")?;
-    get_string(value, "spec")?;
-    get_string(value, "claimed_issuer_tier")?;
-    get_string(value, "session_id")?;
-    get_u64(value, "sequence")?;
+    get_string(payload, "tool_name")?;
+    get_string(payload, "tool_input_hash")?;
+    get_string(payload, "policy_digest")?;
+    get_string(payload, "issued_at")?;
+    get_string(payload, "issuer_id")?;
+    get_string(payload, "spec")?;
+    get_string(payload, "claimed_issuer_tier")?;
+    get_string(payload, "session_id")?;
+    get_u64(payload, "sequence")?;
 
     let signature = value
         .get("signature")
@@ -255,7 +260,7 @@ fn validate_minimal_shape(value: &Value) -> Result<(), String> {
     get_string_from_object(signature, "kid")?;
     get_string_from_object(signature, "sig")?;
 
-    Ok(())
+    Ok(payload)
 }
 
 fn get_string(value: &Value, field: &str) -> Result<String, String> {

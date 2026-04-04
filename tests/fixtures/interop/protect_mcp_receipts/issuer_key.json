@@ -1,5 +1,5 @@
 {
-  "kid": "sb:issuer:1feed234c727",
+  "kid": "sb:issuer:de073ae64e43",
   "alg": "EdDSA",
-  "public_key_hex": "1feed234c727d30cf5b5f7f27df5d6168620bd8fcfd0a565efea65c08e93ed89"
+  "public_key_hex": "de073ae64e43c33ed5a0b3b238d44865052e0c7eed4f87f81f9f2c5ce37a1dfa"
 }

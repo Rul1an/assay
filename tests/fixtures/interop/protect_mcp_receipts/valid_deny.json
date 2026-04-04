@@ -1,19 +1,21 @@
 {
-  "type": "protectmcp:decision",
-  "tool_name": "execute_command",
-  "tool_input_hash": "sha256:5c7923bd67b06c93279d49c466301c57023822eec29c49e269063e47aecd973c",
-  "decision": "deny",
-  "deny_reason": "Policy forbids destructive shell commands",
-  "policy_digest": "sha256:9d0fd4c9e72c1d5d8a3b7f2e1c4d6a8b",
-  "issued_at": "2026-04-04T14:32:05.218Z",
-  "issuer_id": "sb:issuer:1feed234c727",
-  "spec": "draft-farley-acta-signed-receipts-01",
-  "claimed_issuer_tier": "self-signed",
-  "session_id": "sess_a1b2c3d4e5f6",
-  "sequence": 2,
+  "payload": {
+    "type": "protectmcp:decision",
+    "tool_name": "execute_command",
+    "tool_input_hash": "sha256:5c7923bd67b06c93279d49c466301c57023822eec29c49e269063e47aecd973c",
+    "decision": "deny",
+    "deny_reason": "Policy forbids destructive shell commands",
+    "policy_digest": "sha256:9d0fd4c9e72c1d5d8a3b7f2e1c4d6a8b",
+    "issued_at": "2026-04-04T14:32:05.218Z",
+    "issuer_id": "sb:issuer:de073ae64e43",
+    "spec": "draft-farley-acta-signed-receipts-01",
+    "claimed_issuer_tier": "self-signed",
+    "session_id": "sess_a1b2c3d4e5f6",
+    "sequence": 2
+  },
   "signature": {
     "alg": "EdDSA",
-    "kid": "sb:issuer:1feed234c727",
-    "sig": "d9ac58e7a399f3d4905ad564b5801e78cb5ea9ae96f229eea8d70770635780e6b63e47a40be5c02865ede2cd5fb4885093997daa4d86a194ab28a5f5316df20a"
+    "kid": "sb:issuer:de073ae64e43",
+    "sig": "d77e3d49a2f771c6b6be2068b9712dac032a22993ed74c38bbc758b239cdb161465328417308711b6153f36dbf49fc637ddb9ed68d2893304193019d47313f0a"
   }
 }
