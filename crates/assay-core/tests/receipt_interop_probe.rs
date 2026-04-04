@@ -120,7 +120,7 @@ fn contract_probe_valid_deny_maps_to_observed_view() {
 fn contract_probe_tampered_receipt_stays_unchecked_and_unpromoted() {
     let view = derive_probe_evidence("tampered.json").expect("tampered view");
 
-    assert_eq!(view.receipt_present, true);
+    assert!(view.receipt_present);
     assert_eq!(view.verification_result, VerificationResult::Unchecked);
     assert_eq!(view.tool_name.as_deref(), Some("delete_database"));
     assert_eq!(view.decision.as_deref(), Some("deny"));
@@ -143,7 +143,7 @@ fn contract_probe_malformed_receipt_is_rejected_as_malformed() {
     );
 
     let view = derive_malformed_probe_evidence("malformed.json");
-    assert_eq!(view.receipt_present, false);
+    assert!(!view.receipt_present);
     assert_eq!(view.verification_result, VerificationResult::Malformed);
     assert_eq!(view.elevatable_fields(), vec!["verification_result"]);
 }
