@@ -119,3 +119,8 @@ The correct next step, if the discussion continues, is still a tighter contract 
 - exact verifier contract and versioned behavior
 - exact binding identity and collision assumptions
 - the difference between signed claims and Assay-promotable facts
+
+See also:
+
+- `docs/maintainers/PROTECT-MCP-RECEIPT-CONTRACT-NOTE-2026-04-04.md`
+- `docs/maintainers/PROTECT-MCP-RECEIPT-DECISION-2026-04-04.md`
