@@ -6,13 +6,14 @@ Date: 2026-04-04
 
 This probe was run as a bounded interop check, not as a product wave.
 
-The current state is mixed:
+The current state is now clearer than in the first pass:
 
 - the Assay-side repo-local probe is clean and deterministic
 - existing MCP import regressions remain green
-- the advertised external verifier contract does not currently match reality
+- the original external verifier mismatch was caused by a wrong corpus envelope
+- the corrected Passport-envelope corpus now verifies under a pinned external boundary
 
-The result is useful, but it does not justify opening a real evidence seam yet.
+This is a better result than the first pass, but it still does not justify opening a real evidence seam yet.
 
 ## Corpus used
 
@@ -24,7 +25,12 @@ Frozen fixture corpus:
 - `tests/fixtures/interop/protect_mcp_receipts/tampered.json`
 - `tests/fixtures/interop/protect_mcp_receipts/malformed.json`
 
-The receipt payloads were copied literally from the GitHub discussion corpus shared by `tomjwxf`, including the real Ed25519 signatures and the issuer public key.
+The valid and tampered fixtures now use the corrected Passport envelope shape:
+
+- `payload`
+- `signature`
+
+The malformed fixture intentionally remains malformed.
 
 ## Repo-local probe result
 
@@ -51,7 +57,7 @@ Regression safety also passed:
 
 Verifier version tested:
 
-- `npx @veritasacta/verify@0.2.2`
+- `npx @veritasacta/verify@0.2.4`
 
 Manual boundary script:
 
@@ -59,72 +65,55 @@ Manual boundary script:
 
 Result:
 
-- failed with 4 contract drift issues
+- passed against the corrected corpus and command contract
 
-Observed drift against the discussion-stated contract:
+Observed behavior:
 
 1. `valid_allow.json`
-   - expected: exit `0`
-   - actual: exit `1`
-   - stdout: `no_public_key`
+   - command: `npx @veritasacta/verify@0.2.4 valid_allow.json --key <public_key_hex>`
+   - exit: `0`
+   - stdout contains: `Signature: VALID`
 
 2. `valid_deny.json`
-   - expected: exit `0`
-   - actual: exit `1`
-   - stdout: `no_public_key`
+   - command: `npx @veritasacta/verify@0.2.4 valid_deny.json --key <public_key_hex>`
+   - exit: `0`
+   - stdout contains: `Signature: VALID`
 
 3. `tampered.json`
-   - expected: exit `1` with `FAILED:`
-   - actual: exit `1`, but not in the claimed failure shape
-   - stdout: `no_public_key`
+   - command: `npx @veritasacta/verify@0.2.4 tampered.json --key <public_key_hex>`
+   - exit: `1`
+   - stdout contains: `Signature: INVALID`
 
 4. `malformed.json`
-   - expected: exit `2` with parse or malformed signal on `stderr`
-   - actual: exit `1`
-   - stdout: `no_public_key`
+   - command: `npx @veritasacta/verify@0.2.4 malformed.json`
+   - exit: `1`
+   - stdout contains: `no_public_key`
 
-Additional exploratory follow-up with the provided public key:
+Important correction from the discussion:
 
-- `npx @veritasacta/verify@0.2.2 --key <public_key_hex> valid_allow.json`
-  - exit `1`
-  - stdout: `verification_error`
-
-- `npx @veritasacta/verify@0.2.2 --key <public_key_hex> valid_deny.json`
-  - exit `1`
-  - stdout: `verification_error`
-
-- `npx @veritasacta/verify@0.2.2 --key <public_key_hex> tampered.json`
-  - exit `1`
-  - stdout: `verification_error`
-
-- `npx @veritasacta/verify@0.2.2 --key <public_key_hex> malformed.json`
-  - exit `1`
-  - stdout: `missing_signature`
-
-The verifier help output also diverges from the stated discussion contract:
-
-- help advertises only exit codes `0` and `1`
-- help does not advertise a dedicated exit code `2` path for malformed input
+- the first corpus was wrong because it used root-level payload fields instead of Passport envelope shape
+- the published verifier boundary that works here is the corrected one with `@0.2.4` plus explicit `--key` for the signed Passport-envelope receipts
+- malformed input does not expose a separate exit code split; the current public CLI still advertises only exit codes `0` and `1`
 
 ## Unresolved contract gaps
 
 These remain the blocking gaps before a real Assay seam would make sense:
 
 - timestamp semantics stay signed-claim, not trusted fact
-- `tool_input_hash` still needs a canonicalization contract
+- `tool_input_hash` still needs a sharper interoperability contract if Assay ever wants to reason about it beyond opaque binding
 - binding identity is really issuer plus session plus sequence plus input hash
 - `verification_result` is only meaningful if Assay derives it or freezes a verifier boundary on purpose
 
-Additional probe-specific concern after the real run:
+Additional probe-specific caution after the rerun:
 
-- the current external verifier contract is not yet stable enough to treat as a clean boundary
-- even with the supplied public key, the "valid" sample receipts do not currently verify under `@veritasacta/verify@0.2.2`
+- the verifier boundary is better, but still young enough that Assay should pin version and invocation shape explicitly if this ever moves beyond a probe
+- the current successful path depends on explicit `--key` usage for the signed Passport-envelope receipts
 
 ## Current maintainer call
 
 Do not open a product wave from this yet.
 
-The correct next step, if the discussion continues, is a tighter contract note on:
+The correct next step, if the discussion continues, is still a tighter contract note on:
 
 - exact signature payload and canonicalization rules
 - exact verifier contract and versioned behavior

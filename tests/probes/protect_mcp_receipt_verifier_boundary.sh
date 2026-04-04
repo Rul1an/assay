@@ -14,6 +14,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/interop/protect_mcp_receipts"
+KEY="$(jq -r '.public_key_hex' "${FIXTURE_DIR}/issuer_key.json")"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 FAILURES=0
@@ -36,14 +37,20 @@ run_case() {
   local expected_exit="$2"
   local expected_stream="$3"
   local expected_substring="$4"
+  local use_key="${5:-false}"
   local stdout_file="${TMP_DIR}/${file}.stdout"
   local stderr_file="${TMP_DIR}/${file}.stderr"
 
   echo "==> ${file}"
 
   set +e
-  npm_config_loglevel=error npx --yes @veritasacta/verify@0.2.2 \
-    "${FIXTURE_DIR}/${file}" >"${stdout_file}" 2>"${stderr_file}"
+  if [[ "${use_key}" == "true" ]]; then
+    npm_config_loglevel=error npx --yes @veritasacta/verify@0.2.4 \
+      "${FIXTURE_DIR}/${file}" --key "${KEY}" >"${stdout_file}" 2>"${stderr_file}"
+  else
+    npm_config_loglevel=error npx --yes @veritasacta/verify@0.2.4 \
+      "${FIXTURE_DIR}/${file}" >"${stdout_file}" 2>"${stderr_file}"
+  fi
   local status=$?
   set -e
 
@@ -79,10 +86,10 @@ run_case() {
   esac
 }
 
-run_case "valid_allow.json" 0 stdout "Verified:"
-run_case "valid_deny.json" 0 stdout "Verified:"
-run_case "tampered.json" 1 stdout "FAILED:"
-run_case "malformed.json" 2 stderr_nonempty ""
+run_case "valid_allow.json" 0 stdout "Signature: VALID" true
+run_case "valid_deny.json" 0 stdout "Signature: VALID" true
+run_case "tampered.json" 1 stdout "Signature: INVALID" true
+run_case "malformed.json" 1 stdout "no_public_key" false
 
 echo
 if [[ "${FAILURES}" -gt 0 ]]; then

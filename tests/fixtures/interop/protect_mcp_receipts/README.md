@@ -2,7 +2,14 @@ This folder contains a probe corpus for external signed receipt interop.
 
 It is not a normative Assay schema.
 
-Only these fields are in scope for evaluation in the first probe:
+The corrected valid fixtures use Passport envelope shape:
+
+- `payload`
+- `signature`
+
+The malformed fixture intentionally stays malformed.
+
+Only these fields are in scope for evaluation in this probe:
 
 - `receipt_present`
 - `verification_result`
