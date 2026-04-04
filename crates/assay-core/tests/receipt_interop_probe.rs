@@ -50,6 +50,7 @@ fn contract_probe_fixture_inventory_is_complete() {
                 .into_string()
                 .expect("utf-8 filename")
         })
+        .filter(|name| !name.starts_with('.'))
         .collect();
     actual.sort();
 
@@ -223,6 +224,7 @@ fn derive_malformed_probe_evidence(_name: &str) -> ProbeEvidenceView {
 fn validate_minimal_shape(value: &Value) -> Result<&Value, String> {
     let payload = value
         .get("payload")
+        .filter(|payload| payload.is_object())
         .ok_or_else(|| "missing or invalid object field \"payload\"".to_string())?;
     let type_name = get_string(payload, "type")?;
     if type_name != "protectmcp:decision" {

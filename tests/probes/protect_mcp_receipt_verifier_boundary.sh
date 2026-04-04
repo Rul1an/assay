@@ -11,10 +11,19 @@ if ! command -v npx >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required for this probe" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/interop/protect_mcp_receipts"
 KEY="$(jq -r '.public_key_hex' "${FIXTURE_DIR}/issuer_key.json")"
+if [[ -z "${KEY}" || "${KEY}" == "null" ]]; then
+  echo "invalid issuer key fixture: .public_key_hex is missing, null, or empty in ${FIXTURE_DIR}/issuer_key.json" >&2
+  exit 1
+fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 FAILURES=0
