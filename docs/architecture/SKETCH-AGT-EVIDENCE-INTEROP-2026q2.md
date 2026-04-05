@@ -58,10 +58,10 @@ The relevant AGT shape today is the `AuthResult` audit log emitted by
 - `trust_score`
 - `timestamp`
 
-See:
+See in the AGT repo:
 
-- `packages/agentmesh-integrations/mcp-trust-proxy/mcp_trust_proxy/proxy.py`
-- `packages/agentmesh-integrations/mcp-trust-proxy/tests/test_mcp_proxy.py`
+- `https://github.com/microsoft/agent-governance-toolkit/blob/main/packages/agentmesh-integrations/mcp-trust-proxy/mcp_trust_proxy/proxy.py`
+- `https://github.com/microsoft/agent-governance-toolkit/blob/main/packages/agentmesh-integrations/mcp-trust-proxy/tests/test_mcp_proxy.py`
 
 ## v1 sample flow
 
@@ -83,10 +83,13 @@ That is enough to prove whether the seam is real.
 The corpus can start as three tiny JSON records:
 
 ```json
-{"allowed":true,"tool":"web_search","agent_did":"did:mesh:agent-1","reason":"Authorized","trust_score":600,"timestamp":1712230000.0}
-{"allowed":false,"tool":"shell_exec","agent_did":"did:mesh:agent-1","reason":"Tool 'shell_exec' is blocked by policy","trust_score":600,"timestamp":1712230001.0}
+{"allowed":true,"tool":"web_search","agent_did":"did:mesh:agent-1","reason":"Authorized","trust_score":600,"timestamp":"2026-04-04T16:33:20Z"}
+{"allowed":false,"tool":"shell_exec","agent_did":"did:mesh:agent-1","reason":"Tool 'shell_exec' is blocked by policy","trust_score":600,"timestamp":"2026-04-04T16:33:21Z"}
 {"error":"malformed_record","raw":"{not-json}"}
 ```
+
+This sketch assumes the exporter normalizes AGT-emitted timestamps into RFC3339
+UTC before Assay import.
 
 The exact transport can be:
 
@@ -109,21 +112,23 @@ Suggested mapping:
 | `tool` | observed tool identifier |
 | `agent_did` | observed actor identifier |
 | `reason` | observed explanatory string |
-| `timestamp` | observed external timestamp |
+| `timestamp` | observed external timestamp, normalized to RFC3339 UTC |
 | `trust_score` | observed metadata only, never promoted |
 
-Suggested imported event shape:
+Suggested imported evidence event shape (ADR-006-style, abbreviated envelope):
 
 ```json
 {
-  "kind": "external.runtime.policy_decision",
+  "specversion": "1.0",
+  "type": "external.runtime.policy_decision",
   "source": "agt:mcp-trust-proxy",
-  "observed": {
+  "time": "2026-04-04T16:33:21Z",
+  "data": {
     "allowed": false,
     "tool": "shell_exec",
     "agent_did": "did:mesh:agent-1",
     "reason": "Tool 'shell_exec' is blocked by policy",
-    "timestamp": 1712230001.0,
+    "timestamp": "2026-04-04T16:33:21Z",
     "trust_score": 600
   }
 }
