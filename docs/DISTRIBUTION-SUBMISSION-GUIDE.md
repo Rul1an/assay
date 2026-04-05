@@ -212,8 +212,8 @@ De scan zoekt in de repo naar: `@modelcontextprotocol/sdk` (of `mcp`, `fastmcp`)
 - **Submit guide:** https://mcpcentral.io/submit-server
 - **Registry:** https://registry.mcpcentral.io (ander registry dan officieel MCP)
 
-### Huidige status (2026-03)
-`registry.mcpcentral.io` resolveert niet (DNS NXDOMAIN). **Fallback:** MCPCentral ETL’t volgens [mcpcentral.io/about](https://mcpcentral.io/about) uit het Official MCP Registry. Assay staat daar al in → kan automatisch in MCPCentral verschijnen zodra hun sync draait. Controleer later of Assay op MCPCentral staat.
+### Huidige status (2026-04)
+`registry.mcpcentral.io` resolveert soms niet of blijft onbetrouwbaar beschikbaar. Gebruik deze route daarom alleen met een **gegenereerde** `release/server.json` uit een echte release asset set. Ga er niet vanuit dat Assay al in het Official MCP Registry of automatisch in MCPCentral staat totdat dat publiek verifieerbaar is.
 
 ### Stappen (wanneer registry weer bereikbaar is)
 
@@ -235,21 +235,21 @@ chmod +x scripts/publish-mcpcentral.sh
    ```
 4. Publish:
    ```bash
-   mcp-publisher publish server.json
+   mcp-publisher publish release/server.json
    ```
 
 ### Exact invullen
-**server.json** staat al in de repo en is compatibel. MCPCentral gebruikt dezelfde `mcp-publisher` als het officiële registry; het verschil is de `-registry` flag.
+Gebruik **`release/server.json`**, niet een handmatig onderhouden rootbestand. Die metadata hoort gegenereerd te worden uit de echte MCPB release asset plus SHA-256, zodat versie, URL en package type blijven kloppen.
 
 ### Wat gebeurt er
 1. **Login:** Browser opent voor GitHub OAuth. Autoriseer de MCPCentral app.
-2. **Publish:** server.json wordt naar registry.mcpcentral.io gestuurd.
+2. **Publish:** `release/server.json` wordt naar registry.mcpcentral.io gestuurd.
 3. **Resultaat:** Listing verschijnt op https://mcpcentral.io/registry
 
 ### Troubleshooting
-- **"lookup registry.mcpcentral.io: no such host"** — Registry is down. Wacht en probeer later, of vertrouw op ETL uit het Official MCP Registry.
+- **"lookup registry.mcpcentral.io: no such host"** — Registry is down. Wacht en probeer later.
 - **"You must be logged in"** — Run `mcp-publisher login github -registry https://registry.mcpcentral.io` opnieuw.
-- **Validate faalt** — `mcp-publisher validate` gebruikt standaard het officiële registry; negeer als server.json voor officieel registry al werkt.
+- **Validate faalt** — Controleer eerst of `release/server.json` en de onderliggende `.mcpb` uit dezelfde release komen.
 
 ---
 
