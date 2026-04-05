@@ -112,10 +112,11 @@ Suggested imported evidence event shape (ADR-006-style, abbreviated envelope):
   "specversion": "1.0",
   "type": "external.evaluation.result",
   "source": "google:adk",
-  "time": "2026-04-06T10:14:23Z",
+  "time": "2026-04-06T10:15:02Z",
   "data": {
     "eval_case_id": "travel_policy_001",
     "run_id": "run_42",
+    "adk_timestamp": "2026-04-06T10:14:23Z",
     "outcome": "pass",
     "expected_steps": [
       "determine_intent",
@@ -134,6 +135,9 @@ Suggested imported evidence event shape (ADR-006-style, abbreviated envelope):
   }
 }
 ```
+
+In this shape, envelope `time` is the Assay import timestamp. The original ADK
+timestamp stays in `data` as observed upstream metadata.
 
 The important thing is not the exact event shape. The important thing is that
 Assay stays honest about what it observed.
