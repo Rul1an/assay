@@ -19,6 +19,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FIXTURE_DIR="${REPO_ROOT}/tests/fixtures/interop/protect_mcp_receipts"
+VERIFIER_VERSION="0.2.5"
 KEY="$(jq -r '.public_key_hex' "${FIXTURE_DIR}/issuer_key.json")"
 if [[ -z "${KEY}" || "${KEY}" == "null" ]]; then
   echo "invalid issuer key fixture: .public_key_hex is missing, null, or empty in ${FIXTURE_DIR}/issuer_key.json" >&2
@@ -54,10 +55,10 @@ run_case() {
 
   set +e
   if [[ "${use_key}" == "true" ]]; then
-    npm_config_loglevel=error npx --yes @veritasacta/verify@0.2.4 \
+    npm_config_loglevel=error npx --yes "@veritasacta/verify@${VERIFIER_VERSION}" \
       "${FIXTURE_DIR}/${file}" --key "${KEY}" >"${stdout_file}" 2>"${stderr_file}"
   else
-    npm_config_loglevel=error npx --yes @veritasacta/verify@0.2.4 \
+    npm_config_loglevel=error npx --yes "@veritasacta/verify@${VERIFIER_VERSION}" \
       "${FIXTURE_DIR}/${file}" >"${stdout_file}" 2>"${stderr_file}"
   fi
   local status=$?
@@ -98,7 +99,7 @@ run_case() {
 run_case "valid_allow.json" 0 stdout "Signature: VALID" true
 run_case "valid_deny.json" 0 stdout "Signature: VALID" true
 run_case "tampered.json" 1 stdout "Signature: INVALID" true
-run_case "malformed.json" 1 stdout "no_public_key" false
+run_case "malformed.json" 2 stdout "no_public_key" false
 
 echo
 if [[ "${FAILURES}" -gt 0 ]]; then
