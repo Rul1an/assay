@@ -1,0 +1,39 @@
+{
+  "manifest_version": "0.3",
+  "name": "assay-mcp-server",
+  "display_name": "Assay MCP Server",
+  "version": "__VERSION__",
+  "description": "Policy-enforcing MCP proxy with portable evidence output.",
+  "long_description": "Assay MCP Server mediates MCP tool calls with explicit allow or deny decisions and writes portable evidence for later review. This first MCPB line is intentionally small and Linux-only.",
+  "author": {
+    "name": "Assay"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rul1an/assay.git"
+  },
+  "homepage": "https://github.com/Rul1an/assay",
+  "documentation": "https://github.com/Rul1an/assay/blob/main/docs/reference/cli/mcp-server.md",
+  "support": "https://github.com/Rul1an/assay/issues",
+  "keywords": [
+    "mcp",
+    "policy",
+    "security",
+    "evidence"
+  ],
+  "license": "MIT",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/run-assay-mcp-server.sh",
+    "mcp_config": {
+      "command": "${__dirname}/server/run-assay-mcp-server.sh",
+      "args": [],
+      "env": {}
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "linux"
+    ]
+  }
+}

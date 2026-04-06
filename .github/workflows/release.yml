@@ -197,12 +197,120 @@ jobs:
           path: dist/assay-*
           retention-days: 7
 
+  build-mcp-server-linux:
+    name: Build assay-mcp-server ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
+            cross: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          command -v python3 >/dev/null 2>&1 || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
+          }
+
+          sudo dpkg --add-architecture arm64
+
+          . /etc/os-release
+          CODENAME="${VERSION_CODENAME:-noble}"
+
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo python3 scripts/ci/fix_apt_sources.py
+          fi
+
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i -E '
+              /^deb(-src)?[[:space:]]+\[.*\][[:space:]]+/b
+              s|^(deb(-src)?[[:space:]]+)(http(s)?://[^[:space:]]*ubuntu\.com/ubuntu)|\1[arch=amd64] \3|
+            ' /etc/apt/sources.list
+          fi
+
+          sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.list >/dev/null <<EOF
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME} main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-updates main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-security main universe restricted multiverse
+          deb [arch=arm64] https://mirror.gofoss.xyz/ubuntu-ports ${CODENAME}-backports main universe restricted multiverse
+          EOF
+
+          sudo bash scripts/ci/apt_ports_failover.sh
+
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            linux-libc-dev-arm64-cross \
+            pkg-config
+
+          {
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
+            echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc"
+            echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          key: release-mcp-server-${{ matrix.target }}
+
+      - name: Build assay-mcp-server binary
+        run: cargo build --release --target ${{ matrix.target }} --package assay-mcp-server
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Package assay-mcp-server
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARCHIVE_NAME="assay-mcp-server-${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/${ARCHIVE_NAME}"
+          cp "target/${{ matrix.target }}/release/assay-mcp-server" "dist/${ARCHIVE_NAME}/"
+          cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
+          cd dist
+          tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
+
+      - name: Upload assay-mcp-server artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assay-mcp-server-${{ matrix.target }}
+          path: dist/assay-mcp-server-*
+          retention-days: 7
+
   # ============================================================
   # Create GitHub Release
   # ============================================================
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-mcp-server-linux]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -262,13 +370,32 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
-          # MCP Registry MCPB: URL must contain "mcp" per https://modelcontextprotocol.io/registry/package-types
-          for f in release/assay-*-x86_64-unknown-linux-gnu.tar.gz; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f" .tar.gz)
-            cp "$f" "release/assay-mcp-cli-${base#assay-}.tar.gz"
-          done
           ls -la release/
+
+      - name: Build assay-mcp-server MCPB
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          bash scripts/ci/build_mcpb_bundle.sh \
+            --version-tag "${VERSION}" \
+            --linux-x86-archive "release/assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            --linux-arm64-archive "release/assay-mcp-server-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" \
+            --output "release/assay-mcp-server-${VERSION}-linux.mcpb"
+
+      - name: Render generated registry metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          MCPB_FILE="release/assay-mcp-server-${VERSION}-linux.mcpb"
+          MCPB_SHA="$(cut -d' ' -f1 "${MCPB_FILE}.sha256")"
+          MCPB_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/$(basename "${MCPB_FILE}")"
+          bash scripts/ci/render_registry_server_json.sh \
+            --version-tag "${VERSION}" \
+            --mcpb-url "${MCPB_URL}" \
+            --file-sha256 "${MCPB_SHA}" \
+            --output "release/server.json"
 
       - name: ADR-025 enforce readiness (fail-closed)
         env:
@@ -440,7 +567,7 @@ jobs:
   # ============================================================
   verify-lsm-blocking:
     name: Verify LSM Enforcement
-    needs: [build]
+    needs: [build, build-mcp-server-linux]
     # Manual check only, to prevent release blocking on runner availability
     if: github.event_name == 'workflow_dispatch' && inputs.verify_lsm
     runs-on: [self-hosted]

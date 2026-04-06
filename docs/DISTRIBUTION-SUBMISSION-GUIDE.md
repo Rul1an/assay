@@ -206,14 +206,66 @@ De scan zoekt in de repo naar: `@modelcontextprotocol/sdk` (of `mcp`, `fastmcp`)
 
 ---
 
-## 9. MCPCentral
+## 9. Official MCP Registry
+
+### Link
+- **Quickstart:** https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx
+- **Registry:** https://registry.modelcontextprotocol.io
+- **Schema:** https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json
+
+### Huidige status (2026-04)
+Dit is de primaire registry-route voor Assay, maar nog steeds **preview**. Gebruik hem alleen met een **gegenereerde** `release/server.json` uit een echte release asset set. Zie het als een publish-stap na een release, niet als iets dat al live is omdat de repo packaging klaar heeft.
+
+### Stappen
+
+**Optie A: Script (aanbevolen)**
+
+```bash
+cd /path/to/assay
+chmod +x scripts/publish-mcp-registry.sh
+./scripts/publish-mcp-registry.sh
+```
+
+**Optie B: Handmatig**
+
+1. Installeer `mcp-publisher`
+2. Zorg eerst dat je een echte `release/server.json` hebt. Die staat **niet** in een normale checkout. Gebruik een van deze routes:
+   - download `server.json` uit de assets van de GitHub release die ook de `.mcpb` bevat
+   - of genereer lokaal opnieuw vanuit een echte release asset set met `scripts/ci/render_registry_server_json.sh`
+3. Ga naar assay repo: `cd /path/to/assay`
+4. Login via GitHub auth:
+   ```bash
+   mcp-publisher login github
+   ```
+5. Publish de gegenereerde metadata:
+   ```bash
+   mcp-publisher publish release/server.json
+   ```
+
+### Exact invullen
+Gebruik **`release/server.json`**, niet een handmatig onderhouden rootbestand. Die metadata hoort gegenereerd te worden uit de echte MCPB release asset plus SHA-256, zodat versie, URL en package type blijven kloppen.
+
+### Wat gebeurt er
+1. **Validate:** `mcp-publisher validate` controleert de metadata tegen de officiële registry-regels
+2. **Login:** GitHub auth bewijst namespace-eigendom voor `io.github.Rul1an/...`
+3. **Publish:** `release/server.json` wordt naar de officiële registry gestuurd
+
+### Troubleshooting
+- **Validate faalt** — Controleer eerst of `release/server.json` en de onderliggende `.mcpb` uit dezelfde release komen.
+- **Login faalt** — Auth opnieuw met `mcp-publisher login github`.
+- **Publish faalt op namespace** — Controleer of de GitHub login overeenkomt met de `io.github.*` namespace in `release/server.json`.
+- **Preview drift** — De registry is nog preview; herlees de quickstart als de publish-flow veranderd is.
+
+---
+
+## 10. MCPCentral
 
 ### Link
 - **Submit guide:** https://mcpcentral.io/submit-server
 - **Registry:** https://registry.mcpcentral.io (ander registry dan officieel MCP)
 
-### Huidige status (2026-03)
-`registry.mcpcentral.io` resolveert niet (DNS NXDOMAIN). **Fallback:** MCPCentral ETL’t volgens [mcpcentral.io/about](https://mcpcentral.io/about) uit het Official MCP Registry. Assay staat daar al in → kan automatisch in MCPCentral verschijnen zodra hun sync draait. Controleer later of Assay op MCPCentral staat.
+### Huidige status (2026-04)
+`registry.mcpcentral.io` resolveert soms niet of blijft onbetrouwbaar beschikbaar. Gebruik deze route daarom alleen met een **gegenereerde** `release/server.json` uit een echte release asset set. Ga er niet vanuit dat Assay al in het Official MCP Registry of automatisch in MCPCentral staat totdat dat publiek verifieerbaar is.
 
 ### Stappen (wanneer registry weer bereikbaar is)
 
@@ -228,28 +280,31 @@ chmod +x scripts/publish-mcpcentral.sh
 **Optie B: Handmatig**
 
 1. Installeer mcp-publisher: `brew install mcp-publisher`
-2. Ga naar assay repo: `cd /path/to/assay`
-3. Auth (opent browser voor GitHub OAuth):
+2. Zorg eerst dat je een echte `release/server.json` hebt. Die staat **niet** in een normale checkout. Gebruik een van deze routes:
+   - download `server.json` uit de assets van de GitHub release die ook de `.mcpb` bevat
+   - of genereer lokaal opnieuw vanuit een echte release asset set met `scripts/ci/render_registry_server_json.sh`
+3. Ga naar assay repo: `cd /path/to/assay`
+4. Auth (opent browser voor GitHub OAuth):
    ```bash
    mcp-publisher login github -registry https://registry.mcpcentral.io
    ```
-4. Publish:
+5. Publish:
    ```bash
-   mcp-publisher publish server.json
+   mcp-publisher publish release/server.json
    ```
 
 ### Exact invullen
-**server.json** staat al in de repo en is compatibel. MCPCentral gebruikt dezelfde `mcp-publisher` als het officiële registry; het verschil is de `-registry` flag.
+Gebruik **`release/server.json`**, niet een handmatig onderhouden rootbestand. Die metadata hoort gegenereerd te worden uit de echte MCPB release asset plus SHA-256, zodat versie, URL en package type blijven kloppen.
 
 ### Wat gebeurt er
 1. **Login:** Browser opent voor GitHub OAuth. Autoriseer de MCPCentral app.
-2. **Publish:** server.json wordt naar registry.mcpcentral.io gestuurd.
+2. **Publish:** `release/server.json` wordt naar registry.mcpcentral.io gestuurd.
 3. **Resultaat:** Listing verschijnt op https://mcpcentral.io/registry
 
 ### Troubleshooting
-- **"lookup registry.mcpcentral.io: no such host"** — Registry is down. Wacht en probeer later, of vertrouw op ETL uit het Official MCP Registry.
+- **"lookup registry.mcpcentral.io: no such host"** — Registry is down. Wacht en probeer later.
 - **"You must be logged in"** — Run `mcp-publisher login github -registry https://registry.mcpcentral.io` opnieuw.
-- **Validate faalt** — `mcp-publisher validate` gebruikt standaard het officiële registry; negeer als server.json voor officieel registry al werkt.
+- **Validate faalt** — Controleer eerst of `release/server.json` en de onderliggende `.mcpb` uit dezelfde release komen.
 
 ---
 
@@ -406,7 +461,8 @@ Geen duidelijk submit-formulier gevonden. Mogelijk via contact of "Add" op de si
 | 6 | r/LocalLLaMA | 20 min | https://www.reddit.com/r/LocalLLaMA/submit |
 | 7 | MCP Server Spot | 5 min | https://www.mcpserverspot.com/submit |
 | 8 | MCP Marketplace | 15 min | https://mcp-marketplace.io/for-creators |
-| 9 | MCPCentral | 10 min | https://mcpcentral.io/submit-server |
+| 9 | Official MCP Registry | 10 min | https://registry.modelcontextprotocol.io |
+| 10 | MCPCentral | 10 min | https://mcpcentral.io/submit-server |
 | 11 | Apigene | 10 min | Contact via apigene.ai |
 | 12 | MCP Security Alliance | 30 min | https://mcp-security-alliance.org/contribute/ |
 | 15 | AgentSeal scanner | 30 min | https://github.com/AgentSeal/agentseal |
