@@ -411,8 +411,14 @@ jobs:
       - name: Pre-clean workspace ownership
         shell: bash
         run: |
+          # A stale host-side assay monitor can survive a prior failed run and interfere with
+          # workspace cleanup or checkout. Clear it before touching the tree.
+          sudo pkill -x assay 2>/dev/null || true
+
           # Remove target/ with sudo so checkout can delete workspace (avoids EPERM on root-owned fingerprints)
           sudo rm -rf "$GITHUB_WORKSPACE/target" 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/.assay-test" /tmp/assay-lsm-verify /tmp/assay-test 2>/dev/null || true
           sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
           sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" 2>/dev/null || true
 
@@ -428,6 +434,11 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+          if find . -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after pre-checkout cleanup"
+            find . -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
           AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
             clone --depth 1 "https://github.com/${GH_REPO}.git" .
