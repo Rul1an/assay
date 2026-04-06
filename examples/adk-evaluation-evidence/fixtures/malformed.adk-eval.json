@@ -1,0 +1,6 @@
+{
+  "schema": "google.adk.evaluation.result.v1",
+  "artifact_kind": "evaluation_result",
+  "eval_id": "travel_policy_003",
+  "outcome": "pass"
+}

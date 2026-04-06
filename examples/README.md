@@ -16,6 +16,10 @@ Evaluate if your RAG pipeline answers strictly based on context.
 
 ## Interop examples
 
+### [Google ADK Evaluation Evidence](./adk-evaluation-evidence)
+Map one tiny Google ADK evaluation artifact into Assay-shaped external evidence.
+**Focus**: evaluation/artifact-first seam, trajectory as observed reference only, no imported evaluator truth.
+
 ### [AGT Audit Evidence](./agt-audit-evidence)
 Map a tiny AGT `mcp-trust-proxy`-style audit corpus into Assay-shaped external evidence.
 **Focus**: allow/deny audit decisions, malformed import failure, no imported trust semantics.
