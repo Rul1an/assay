@@ -12,6 +12,8 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MCPB_CLI_VERSION="${MCPB_CLI_VERSION:-2.1.2}"
+MCPB_CLI_PACKAGE="@anthropic-ai/mcpb@${MCPB_CLI_VERSION}"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -49,7 +51,7 @@ bash "$REPO_ROOT/scripts/ci/build_mcpb_bundle.sh" \
   --linux-arm64-archive "$TMP_DIR/assay-mcp-server-v0.0.0-aarch64-unknown-linux-gnu.tar.gz" \
   --output "$TMP_DIR/assay-mcp-server-v0.0.0-linux.mcpb"
 
-npx --yes @anthropic-ai/mcpb info "$TMP_DIR/assay-mcp-server-v0.0.0-linux.mcpb" >/dev/null
+npx --yes "${MCPB_CLI_PACKAGE}" info "$TMP_DIR/assay-mcp-server-v0.0.0-linux.mcpb" >/dev/null
 
 sha="$(cut -d' ' -f1 "$TMP_DIR/assay-mcp-server-v0.0.0-linux.mcpb.sha256")"
 

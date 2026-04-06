@@ -67,6 +67,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SEMVER="${VERSION_TAG#v}"
+MCPB_CLI_VERSION="${MCPB_CLI_VERSION:-2.1.2}"
+MCPB_CLI_PACKAGE="@anthropic-ai/mcpb@${MCPB_CLI_VERSION}"
 WORK_DIR="$(mktemp -d)"
 STAGE_DIR="${WORK_DIR}/assay-mcp-server-mcpb"
 X86_DIR="${WORK_DIR}/linux-x86_64"
@@ -107,8 +109,8 @@ sed "s/__VERSION__/${SEMVER}/g" \
   "${REPO_ROOT}/packaging/mcpb/manifest.assay-mcp-server.template.json" \
   > "$STAGE_DIR/manifest.json"
 
-npx --yes @anthropic-ai/mcpb validate "$STAGE_DIR/manifest.json"
+npx --yes "${MCPB_CLI_PACKAGE}" validate "$STAGE_DIR/manifest.json"
 
 mkdir -p "$(dirname "$OUTPUT")"
-npx --yes @anthropic-ai/mcpb pack "$STAGE_DIR" "$OUTPUT"
+npx --yes "${MCPB_CLI_PACKAGE}" pack "$STAGE_DIR" "$OUTPUT"
 shasum -a 256 "$OUTPUT" > "${OUTPUT}.sha256"

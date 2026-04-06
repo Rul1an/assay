@@ -229,12 +229,15 @@ chmod +x scripts/publish-mcp-registry.sh
 **Optie B: Handmatig**
 
 1. Installeer `mcp-publisher`
-2. Ga naar assay repo: `cd /path/to/assay`
-3. Login via GitHub auth:
+2. Zorg eerst dat je een echte `release/server.json` hebt. Die staat **niet** in een normale checkout. Gebruik een van deze routes:
+   - download `server.json` uit de assets van de GitHub release die ook de `.mcpb` bevat
+   - of genereer lokaal opnieuw vanuit een echte release asset set met `scripts/ci/render_registry_server_json.sh`
+3. Ga naar assay repo: `cd /path/to/assay`
+4. Login via GitHub auth:
    ```bash
    mcp-publisher login github
    ```
-4. Publish de gegenereerde metadata:
+5. Publish de gegenereerde metadata:
    ```bash
    mcp-publisher publish release/server.json
    ```
@@ -277,12 +280,15 @@ chmod +x scripts/publish-mcpcentral.sh
 **Optie B: Handmatig**
 
 1. Installeer mcp-publisher: `brew install mcp-publisher`
-2. Ga naar assay repo: `cd /path/to/assay`
-3. Auth (opent browser voor GitHub OAuth):
+2. Zorg eerst dat je een echte `release/server.json` hebt. Die staat **niet** in een normale checkout. Gebruik een van deze routes:
+   - download `server.json` uit de assets van de GitHub release die ook de `.mcpb` bevat
+   - of genereer lokaal opnieuw vanuit een echte release asset set met `scripts/ci/render_registry_server_json.sh`
+3. Ga naar assay repo: `cd /path/to/assay`
+4. Auth (opent browser voor GitHub OAuth):
    ```bash
    mcp-publisher login github -registry https://registry.mcpcentral.io
    ```
-4. Publish:
+5. Publish:
    ```bash
    mcp-publisher publish release/server.json
    ```
