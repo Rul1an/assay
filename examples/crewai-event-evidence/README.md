@@ -26,6 +26,9 @@ This sample is pinned to the upstream commit we verified against:
 - authored on `2026-04-06`
 
 That keeps the sample aligned with the event classes currently exported from `crewai.events`.
+The synthetic runner also relies on a guarded reset of CrewAI's global event bus,
+because this pinned snapshot does not expose a simple public reset hook for a
+self-contained example.
 
 ## Install
 
@@ -92,6 +95,8 @@ It does **not**:
 
 The placeholder event type in `map_to_assay.py` is there so we can test the handoff
 shape honestly without pretending the contract is already frozen.
+For the checked-in fixture corpus, the mapper also mirrors Assay's content-hash
+input shape so the placeholder envelopes stay honest about deterministic hashing.
 
 ## Checked-in fixtures
 

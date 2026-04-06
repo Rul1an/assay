@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -55,12 +56,52 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _normalize_for_hash(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite floats are not valid in canonical JSON")
+        if value.is_integer():
+            return int(value)
+        return value
+    if isinstance(value, dict):
+        return {str(key): _normalize_for_hash(nested) for key, nested in value.items()}
+    if isinstance(value, list):
+        return [_normalize_for_hash(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_for_hash(item) for item in value]
+    raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
+
+
 def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    # This sample keeps the fixture corpus in the JCS-safe subset
+    # (objects, arrays, strings, bools, null, and integer-valued numbers),
+    # so deterministic sorted-key JSON matches the bytes Assay hashes today.
+    normalized = _normalize_for_hash(value)
+    return json.dumps(
+        normalized,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
 
 
 def _sha256(value: Any) -> str:
     return f"sha256:{hashlib.sha256(_canonical_json(value).encode('utf-8')).hexdigest()}"
+
+
+def _compute_assay_content_hash(data: dict[str, Any]) -> str:
+    # Mirror assay-evidence::crypto::id::compute_content_hash by hashing the
+    # same envelope subset {specversion, type, datacontenttype, subject?, data}.
+    content_hash_input = {
+        "specversion": "1.0",
+        "type": PLACEHOLDER_EVENT_TYPE,
+        "datacontenttype": "application/json",
+        "data": data,
+    }
+    return _sha256(content_hash_input)
 
 
 def _parse_rfc3339_utc(value: str | None) -> str:
@@ -93,7 +134,7 @@ def _build_event(
         "observed_upstream_time": record["timestamp"],
         "observed": record,
     }
-    return {
+    event = {
         "specversion": "1.0",
         "type": PLACEHOLDER_EVENT_TYPE,
         "source": PLACEHOLDER_SOURCE,
@@ -107,9 +148,10 @@ def _build_event(
         "assaygit": PLACEHOLDER_GIT,
         "assaypii": False,
         "assaysecrets": False,
-        "assaycontenthash": _sha256(data),
         "data": data,
     }
+    event["assaycontenthash"] = _compute_assay_content_hash(data)
+    return event
 
 
 def main() -> int:

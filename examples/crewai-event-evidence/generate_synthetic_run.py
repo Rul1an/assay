@@ -27,6 +27,9 @@ from crewai.tasks.task_output import TaskOutput
 from export_listener import CrewAIBoundedExportListener
 
 
+PINNED_CREWAI_COMMIT = "71b4667a0e12de74b320bffaf4d749ba6bda850c"
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a bounded CrewAI NDJSON export artifact."
@@ -64,11 +67,33 @@ def _wait_for_handlers(event: BaseEvent, source: dict[str, str]) -> None:
 
 def _reset_event_bus() -> None:
     """Clear existing global listeners so the sample stays self-contained."""
-    with crewai_event_bus._rwlock.w_locked():
-        crewai_event_bus._sync_handlers = {}
-        crewai_event_bus._async_handlers = {}
-        crewai_event_bus._handler_dependencies = {}
-        crewai_event_bus._execution_plan_cache = {}
+    required = (
+        "_rwlock",
+        "_sync_handlers",
+        "_async_handlers",
+        "_handler_dependencies",
+        "_execution_plan_cache",
+    )
+    missing = [name for name in required if not hasattr(crewai_event_bus, name)]
+    rwlock = getattr(crewai_event_bus, "_rwlock", None)
+    if missing or not hasattr(rwlock, "w_locked"):
+        joined = ", ".join(missing or ["_rwlock.w_locked"])
+        raise RuntimeError(
+            "CrewAI event bus internals changed for the pinned sample "
+            f"({PINNED_CREWAI_COMMIT}); missing {joined}. "
+            "Update _reset_event_bus() before regenerating fixtures."
+        )
+
+    with rwlock.w_locked():
+        for name in required[1:]:
+            value = getattr(crewai_event_bus, name)
+            clear = getattr(value, "clear", None)
+            if not callable(clear):
+                raise RuntimeError(
+                    "CrewAI event bus internals changed for the pinned sample "
+                    f"({PINNED_CREWAI_COMMIT}); {name} is not clearable."
+                )
+            clear()
 
 
 def _stamp(base: datetime, seconds: int) -> datetime:
@@ -290,7 +315,10 @@ def main() -> int:
     }
 
     reset_emission_counter()
-    _reset_event_bus()
+    try:
+        _reset_event_bus()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     listener = CrewAIBoundedExportListener(args.output)
     try:
         if args.scenario == "success":
