@@ -32,6 +32,10 @@ Export a small CrewAI event-listener artifact and map it into Assay-shaped exter
 Export a tiny LangGraph `tasks` v2 stream artifact and map it into Assay-shaped external evidence.
 **Focus**: OSS-native tasks seam hypothesis, minimal checkpointer dependency, no imported orchestration truth.
 
+### [OpenAI Agents Trace Evidence](./openai-agents-trace-evidence)
+Export a tiny OpenAI Agents trace artifact through a local custom `TraceProcessor`.
+**Focus**: trace-processor-first seam, bounded local export, no imported runtime truth.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.
