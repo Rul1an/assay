@@ -28,6 +28,10 @@ Map a tiny AGT `mcp-trust-proxy`-style audit corpus into Assay-shaped external e
 Export a small CrewAI event-listener artifact and map it into Assay-shaped external evidence.
 **Focus**: bounded task/tool events, optional MCP bonus path, no imported trust semantics.
 
+### [LangGraph Task Evidence](./langgraph-task-evidence)
+Export a tiny LangGraph `tasks` v2 stream artifact and map it into Assay-shaped external evidence.
+**Focus**: OSS-native tasks seam hypothesis, minimal checkpointer dependency, no imported orchestration truth.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.
