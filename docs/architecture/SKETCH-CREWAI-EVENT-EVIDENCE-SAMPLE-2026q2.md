@@ -79,11 +79,11 @@ real.
 
 Illustrative NDJSON shape:
 
-```json
+```ndjson
 {"event_type":"CrewKickoffStartedEvent","timestamp":"2026-04-06T10:14:23Z","crew_name":"research_crew","run_id":"run_42"}
-{"event_type":"TaskStartedEvent","timestamp":"2026-04-06T10:14:24Z","task_id":"task_1","agent_role":"researcher"}
-{"event_type":"ToolUsageFinishedEvent","timestamp":"2026-04-06T10:14:25Z","task_id":"task_1","tool_name":"web_search","status":"ok","duration_ms":83}
-{"event_type":"TaskCompletedEvent","timestamp":"2026-04-06T10:14:26Z","task_id":"task_1","output_hash":"sha256:8aa2..."}
+{"event_type":"TaskStartedEvent","timestamp":"2026-04-06T10:14:24Z","run_id":"run_42","task_id":"task_1","agent_role":"researcher"}
+{"event_type":"ToolUsageFinishedEvent","timestamp":"2026-04-06T10:14:25Z","run_id":"run_42","task_id":"task_1","tool_name":"web_search","status":"ok","duration_ms":83}
+{"event_type":"TaskCompletedEvent","timestamp":"2026-04-06T10:14:26Z","run_id":"run_42","task_id":"task_1","output_hash":"sha256:8aa2..."}
 {"event_type":"CrewKickoffCompletedEvent","timestamp":"2026-04-06T10:14:27Z","crew_name":"research_crew","run_id":"run_42","status":"ok"}
 ```
 
@@ -106,12 +106,14 @@ project.
 
 Assay should treat the exported file as **external runtime evidence**.
 
-Suggested imported evidence shape (ADR-006-style, abbreviated envelope):
+Suggested imported evidence shape (ADR-006-style, abbreviated envelope).
+The `type` value below is a sketch-only placeholder, not a registered Evidence
+Contract event type:
 
 ```json
 {
   "specversion": "1.0",
-  "type": "external.runtime.event",
+  "type": "example.placeholder.external-runtime-event",
   "source": "crewai:event-listener",
   "time": "2026-04-06T10:14:30Z",
   "data": {
@@ -159,7 +161,7 @@ That means the first sample should explicitly avoid:
 If `TaskEvaluationEvent` or later tracing metrics appear, they should remain
 observed evidence only.
 
-## Why this is the right point 4 strategy
+## Why a sample-first strategy is the right approach
 
 This route is different from the Microsoft Agent Framework and Google ADK
 tracks.
