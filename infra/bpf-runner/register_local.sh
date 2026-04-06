@@ -3,11 +3,23 @@
 # Helper: Register Local BPF-LSM Runner (Robust v2)
 # Usage: ./register_local.sh <GITHUB_RUNNER_TOKEN>
 # ==============================================================================
-set -e
+set -euo pipefail
 
-TOKEN=$1
+TOKEN=${1:-}
 VM="assay-bpf-runner"
 REPO_URL="https://github.com/Rul1an/assay"
+
+run_vm_root_script() {
+    multipass exec "$VM" -- sudo bash -s
+}
+
+run_vm_root_cmd() {
+    multipass exec "$VM" -- sudo bash -lc "$1"
+}
+
+run_vm_runner_cmd() {
+    multipass exec "$VM" -- sudo -u github-runner bash -lc "$1"
+}
 
 if [ -z "$TOKEN" ]; then
     echo "❌ Gebruik: $0 <GITHUB_TOKEN>"
@@ -19,7 +31,7 @@ echo "🚀 Registering runner with GitHub..."
 
 # 0. Repair / Ensure State (Idempotent Fix)
 echo "🛠️  Ensuring VM state (User, Docker, Dependencies)..."
-multipass exec "$VM" -- sudo bash -c '
+run_vm_root_script <<'EOF'
     set -e
     # Ensure User
     if ! id -u github-runner >/dev/null 2>&1; then
@@ -46,7 +58,7 @@ multipass exec "$VM" -- sudo bash -c '
 
     # SOTA: Detect Architecture (ARM64 vs x64 for Apple Silicon support)
     ARCH=$(dpkg --print-architecture)
-    if [ "$ARCH" == "arm64" ]; then
+    if [ "$ARCH" = "arm64" ]; then
         RUNNER_URL="https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-arm64-2.311.0.tar.gz"
     else
         RUNNER_URL="https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz"
@@ -79,36 +91,37 @@ multipass exec "$VM" -- sudo bash -c '
     # SOTA: Fix Permissions strictly for github-runner
     echo "   -> Enforcing strict ownership (github-runner:github-runner)..."
     chown -R github-runner:github-runner /opt/actions-runner
-'
+EOF
 
 # 1. Configure (Unattended)
 # Note: only custom labels are configured here; GitHub automatically adds
 # self-hosted/Linux plus the appropriate architecture label (for example ARM64
 # or X64).
-multipass exec "$VM" -- sudo bash -c '
+run_vm_root_script <<'EOF'
     rm -f /opt/actions-runner/.runner \
           /opt/actions-runner/.credentials \
           /opt/actions-runner/.credentials_rsaparams \
           /opt/actions-runner/.service \
           /opt/actions-runner/.runner_migrated || true
     chown -R github-runner:github-runner /opt/actions-runner
-'
-multipass exec "$VM" -- sudo su - github-runner -c \
-    "cd /opt/actions-runner && ./config.sh --url $REPO_URL --token $TOKEN --labels bpf-lsm,assay-bpf-runner --unattended --replace || echo '⚠️  Config skipped (already configured?)'"
+EOF
+run_vm_runner_cmd \
+    "cd /opt/actions-runner && ./config.sh --url '$REPO_URL' --token '$TOKEN' --labels bpf-lsm,assay-bpf-runner --unattended --replace" \
+    || echo "⚠️  Config skipped (already configured?)"
 
 # 2. Install & Start Service (SOTA: As Dedicated User)
 echo "🔌 Installing & Starting Service (User: github-runner)..."
 # Force stop/uninstall old service if it exists (e.g. running as root/ubuntu)
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh stop || true"
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh uninstall || true"
+run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh stop || true"
+run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh uninstall || true"
 
 # Re-fix ownership just in case uninstall messed with it
 multipass exec "$VM" -- sudo chown -R github-runner:github-runner /opt/actions-runner
 
 # Install as dedicated user
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh install github-runner" || echo "⚠️  Service install skipped"
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh start" || echo "⚠️  Service start skipped"
-multipass exec "$VM" -- sudo bash -c "cd /opt/actions-runner && ./svc.sh status" || true
+run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh install github-runner" || echo "⚠️  Service install skipped"
+run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh start" || echo "⚠️  Service start skipped"
+run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh status" || true
 
 echo ""
 echo "✅ Runner Registered & Active!"
