@@ -68,6 +68,10 @@ def _normalize_for_hash(value: Any) -> Any:
 
 
 def _canonical_json(value: Any) -> str:
+    # This sample keeps the fixture corpus in the JCS-safe subset
+    # (objects, arrays, strings, bools, null, and integer-valued numbers),
+    # so deterministic sorted-key JSON matches the bytes Assay hashes today.
+    # It is not a full RFC 8785 implementation for arbitrary JSON inputs.
     normalized = _normalize_for_hash(value)
     return json.dumps(
         normalized,
@@ -97,7 +101,10 @@ def _parse_rfc3339_utc(value: str | None) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"invalid RFC3339 timestamp: {value}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -110,25 +117,29 @@ def _validate_record(record: dict[str, Any], line_number: int) -> None:
         raise ValueError(f"line {line_number}: missing required keys: {joined}")
 
 
-def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
+def _normalized_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
     normalized = dict(record)
-    normalized["timestamp"] = _parse_rfc3339_utc(str(record["timestamp"]))
+    try:
+        normalized["timestamp"] = _parse_rfc3339_utc(str(record["timestamp"]))
+    except ValueError as exc:
+        raise ValueError(f"line {line_number}: {exc}") from exc
     return normalized
 
 
 def _build_event(
     record: dict[str, Any],
+    line_number: int,
     assay_run_id: str,
     assay_seq: int,
     import_time: str,
 ) -> dict[str, Any]:
-    normalized = _normalized_record(record)
+    normalized = _normalized_record(record, line_number)
     data = {
         "external_system": "agt",
         "external_surface": "mcp-trust-proxy",
         "external_schema": EXTERNAL_SCHEMA,
         "observed_upstream_time": normalized["timestamp"],
-        "observed": normalized,
+        "observed": record,
     }
     event = {
         "specversion": "1.0",
@@ -155,7 +166,10 @@ def main() -> int:
     if args.output.exists() and not args.overwrite:
         raise SystemExit(f"{args.output} already exists; pass --overwrite to replace it")
 
-    import_time = _parse_rfc3339_utc(args.import_time)
+    try:
+        import_time = _parse_rfc3339_utc(args.import_time)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     assay_run_id = args.assay_run_id or f"import-agt-{args.input.stem}"
 
     mapped: list[dict[str, Any]] = []
@@ -174,7 +188,12 @@ def main() -> int:
                 _validate_record(record, line_number)
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
-            mapped.append(_build_event(record, assay_run_id, len(mapped), import_time))
+            try:
+                mapped.append(
+                    _build_event(record, line_number, assay_run_id, len(mapped), import_time)
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:

@@ -65,6 +65,10 @@ It does not:
 
 The placeholder event type in `map_to_assay.py` is there so we can test the
 handoff honestly without pretending the contract is already frozen.
+For the checked-in fixture corpus, the mapper also stays inside the same
+JCS-safe subset boundary as the CrewAI sample, so the placeholder envelopes are
+honest about deterministic hashing without pretending to be a full RFC 8785
+canonicalizer for arbitrary JSON input.
 
 ## Checked-in fixtures
 
