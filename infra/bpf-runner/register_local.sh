@@ -22,7 +22,7 @@ run_vm_runner_cmd() {
 }
 
 if [ -z "$TOKEN" ]; then
-    echo "❌ Gebruik: $0 <GITHUB_TOKEN>"
+    echo "❌ Gebruik: $0 <GITHUB_RUNNER_TOKEN>"
     echo "   Haal je token hier op: $REPO_URL/settings/actions/runners/new"
     exit 1
 fi
@@ -40,6 +40,8 @@ run_vm_root_script <<'EOF'
         usermod -aG docker github-runner
         echo "github-runner ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/github-runner
     fi
+    chown root:root /etc/sudoers.d/github-runner
+    chmod 0440 /etc/sudoers.d/github-runner
 
     # Ensure Docker Group
     if ! getent group docker >/dev/null; then
@@ -116,7 +118,7 @@ run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh stop || true"
 run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh uninstall || true"
 
 # Re-fix ownership just in case uninstall messed with it
-multipass exec "$VM" -- sudo chown -R github-runner:github-runner /opt/actions-runner
+run_vm_root_cmd "chown -R github-runner:github-runner /opt/actions-runner"
 
 # Install as dedicated user
 run_vm_root_cmd "cd /opt/actions-runner && ./svc.sh install github-runner" || echo "⚠️  Service install skipped"
