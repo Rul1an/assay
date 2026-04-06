@@ -14,6 +14,12 @@ See ALLOW/DENY decisions for every tool call.
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
 
+## Interop examples
+
+### [CrewAI Event Evidence](./crewai-event-evidence)
+Export a small CrewAI event-listener artifact and map it into Assay-shaped external evidence.
+**Focus**: bounded task/tool events, optional MCP bonus path, no imported trust semantics.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.
