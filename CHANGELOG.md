@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-04-06
+
+This patch release keeps the `v3.5.0` trust-compiler surface intact, but makes the
+new MCP Registry publication path honest and publishable. It is the first Assay
+release line that can ship a real `assay-mcp-server-<version>-linux.mcpb` asset
+plus generated official-registry metadata from the same release asset set.
+
+### Release Tooling
+
+- **Official MCP Registry publication foundation**: Release builds now package
+  Linux `assay-mcp-server` archives into a real
+  `assay-mcp-server-<version>-linux.mcpb` bundle and generate `server.json`
+  from the released MCPB asset URL plus SHA-256. This replaces the old
+  hand-maintained metadata story with a bounded, supported `mcpb` publication
+  path for the official MCP Registry.
+
+### Examples
+
+- **CrewAI event evidence sample**: Assay now ships a small sample-first
+  `examples/crewai-event-evidence/` flow that exports bounded CrewAI runtime
+  events to NDJSON and maps them into Assay-shaped placeholder evidence without
+  promoting CrewAI runtime semantics into Assay truth.
+
 ## [3.5.0] - 2026-03-30
 
 This release makes the first bounded MCP authorization-discovery seam public. `K2-A` Phase 1 now
