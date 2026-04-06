@@ -1,0 +1,22 @@
+{
+  "schema": "google.adk.evaluation.result.v1",
+  "artifact_kind": "evaluation_result",
+  "eval_id": "travel_policy_001",
+  "run_id": "run_adk_eval_42",
+  "timestamp": "2026-04-06T10:14:23Z",
+  "outcome": "pass",
+  "criteria": [
+    {
+      "name": "response_match",
+      "label": "pass",
+      "score": 92
+    },
+    {
+      "name": "tool_trajectory",
+      "label": "pass",
+      "score": 100
+    }
+  ],
+  "trajectory_ref": "artifacts/trajectories/run_adk_eval_42.json",
+  "evaluator": "adk.eval.baseline"
+}
