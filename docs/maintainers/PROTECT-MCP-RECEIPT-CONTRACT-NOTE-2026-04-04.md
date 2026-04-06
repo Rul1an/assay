@@ -2,6 +2,14 @@
 
 Date: 2026-04-04
 
+Update: 2026-04-06
+
+The verifier boundary improved after the `@veritasacta/verify@0.2.5` rerun. The preferred contract now assumes the 3-way exit split:
+
+- `0 = valid`
+- `1 = invalid`
+- `2 = error`
+
 ## Purpose
 
 This note records the smallest contract we would need to freeze if the current signed-receipt probe ever graduates beyond probe status.
@@ -16,7 +24,7 @@ Current working probe shape:
   - `payload`
   - `signature`
 - verifier boundary
-  - `npx @veritasacta/verify@0.2.4`
+  - `npx @veritasacta/verify@0.2.5`
   - explicit `--key <public_key_hex>` for signed sample receipts
 
 The current bounded receipt fields of interest are:
@@ -43,6 +51,7 @@ If this ever moves beyond probe status, the current bounded interpretation shoul
   - derived from envelope presence
 - `verification_result`
   - derived by Assay from the pinned verifier boundary
+  - preferred interpretation is `valid | invalid | error`
 - `issuer_id`
   - observed metadata only
 - `claimed_issuer_tier`
@@ -77,6 +86,6 @@ These still need to be tightened before any real seam would be justified:
 
 - `issued_at` remains a signed claim, not a trusted fact
 - `tool_input_hash` semantics remain too loose for hard Assay-side reasoning beyond opaque binding
-- malformed behavior is still not rich or separately classified by the public verifier CLI
+- the public verifier text output remains human-oriented, so Assay should freeze exit-code semantics rather than stdout or stderr wording
 - key handling is still explicit and manual in the working probe path
 - the verifier boundary only becomes meaningful if Assay pins version and invocation shape deliberately

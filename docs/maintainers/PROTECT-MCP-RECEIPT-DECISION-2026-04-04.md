@@ -2,6 +2,16 @@
 
 Date: 2026-04-04
 
+Update: 2026-04-06
+
+The `@0.2.5` rerun improved the verifier boundary in exactly the direction we asked for by separating:
+
+- `0 = valid`
+- `1 = invalid`
+- `2 = error`
+
+That improves probe confidence, but it does not change the decision below.
+
 ## Decision
 
 Keep the ScopeBlind / VeritasActa signed-receipt line at **probe status**.
@@ -27,7 +37,7 @@ The remaining blockers are contract quality, not basic feasibility:
 - timestamp semantics are still claim-shaped
 - `tool_input_hash` is still not strong enough for hard reasoning without a tighter interop story
 - binding identity still needs a frozen statement of assumptions
-- malformed and key-handling behavior are still too young to treat as stable public boundary semantics
+- key-handling and human-readable verifier output are still too young to treat as stable public boundary semantics
 
 ## Maintainer call
 
