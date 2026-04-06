@@ -27,9 +27,9 @@ The goal is simple:
 CrewAI already exposes several surfaces that matter here:
 
 - local event listeners and an event bus
-- task, tool, and evaluation events
+- task and tool event hooks
 - MCP server support, including local stdio and remote transports
-- richer tracing through CrewAI AMP
+- richer tracing and telemetry surfaces also exist
 
 The strongest v1 seam is not AMP tracing.
 
@@ -47,7 +47,8 @@ More specifically:
 - register a custom `BaseEventListener`
 - emit a tiny NDJSON artifact during one CrewAI run
 - keep the exported shape deliberately small
-- prefer task, tool, and MCP-adjacent execution events over broad tracing data
+- prefer task and tool execution events over broad tracing data
+- treat MCP-backed tool usage as a bonus path for v1, not as a requirement
 
 This is a better first step than opening with a large repo discussion because
 it gives us something concrete to show.
@@ -57,7 +58,8 @@ it gives us something concrete to show.
 The first sample should use one short CrewAI run and export only a bounded set
 of events.
 
-Preferred event family:
+Preferred first event family, subject to verification against the current
+CrewAI event exports:
 
 - `CrewKickoffStartedEvent`
 - `CrewKickoffCompletedEvent`
@@ -68,8 +70,13 @@ Preferred event family:
 - `ToolUsageFinishedEvent`
 - `ToolUsageErrorEvent`
 
-If the sample uses CrewAI's MCP tooling, it is worth preferring the MCP-flavored
-tool execution events when they are available.
+This list is a direction for the first sample, not a frozen contract yet.
+The exact v1 event set should be confirmed against the current exported event
+classes before anything is presented publicly as the canonical CrewAI sample.
+
+If the sample happens to use CrewAI's MCP tooling, it is worth preferring
+MCP-flavored tool execution events when they are available. That is useful,
+but not required to prove the core evidence handoff.
 
 The key point is not to export everything. The key point is to export one
 reviewable run artifact with enough structure to prove the evidence handoff is
@@ -147,7 +154,7 @@ For v1, Assay should keep imported CrewAI data in the observed bucket:
 ## What Assay should not import as truth
 
 We are not asking Assay to import CrewAI runtime semantics, agent reasoning, or
-evaluator judgments as truth.
+later evaluator judgments as truth.
 
 That means the first sample should explicitly avoid:
 
@@ -156,8 +163,8 @@ That means the first sample should explicitly avoid:
 - implying that Assay independently verified task correctness
 - implying that a completed CrewAI run means the system was safe or compliant
 
-If `TaskEvaluationEvent` or later tracing metrics appear, they should remain
-observed evidence only.
+If later evaluation or tracing fields appear, they should remain observed
+evidence only.
 
 ## Why this is the right point 4 strategy
 
