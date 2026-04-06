@@ -16,6 +16,10 @@ Evaluate if your RAG pipeline answers strictly based on context.
 
 ## Interop examples
 
+### [AGT Audit Evidence](./agt-audit-evidence)
+Map a tiny AGT `mcp-trust-proxy`-style audit corpus into Assay-shaped external evidence.
+**Focus**: allow/deny audit decisions, malformed import failure, no imported trust semantics.
+
 ### [CrewAI Event Evidence](./crewai-event-evidence)
 Export a small CrewAI event-listener artifact and map it into Assay-shaped external evidence.
 **Focus**: bounded task/tool events, optional MCP bonus path, no imported trust semantics.
