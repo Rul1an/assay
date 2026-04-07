@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,12 @@ def _parse_args() -> argparse.Namespace:
 
 def _normalize_for_hash(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite floats are not valid in canonical JSON")
+        if value.is_integer():
+            return int(value)
         return value
     if isinstance(value, dict):
         return {str(key): _normalize_for_hash(nested) for key, nested in value.items()}
