@@ -260,4 +260,4 @@ That means:
 - [lastmile-ai/mcp-agent](https://github.com/lastmile-ai/mcp-agent)
 - [mcp-agent docs — observability](https://docs.mcp-agent.com/mcp-agent-sdk/advanced/observability)
 - [mcp-agent docs — welcome](https://docs.mcp-agent.com/get-started/welcome)
-- [ADR-033-OTel-Trust-Compiler-Positioning.md](./ADR-033-OTel-Trust-Compiler-Positioning.md)
+- [ADR-033: OTel Trust Compiler Positioning](./ADR-033-OTel-Trust-Compiler-Positioning.md)
