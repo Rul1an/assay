@@ -79,10 +79,10 @@ def _normalize_for_hash(value: Any) -> Any:
 
 
 def _canonical_json(value: Any) -> str:
-    # This sample keeps the fixture corpus in the JCS-safe subset
-    # (objects, arrays, strings, bools, null, and integer-valued numbers),
-    # so deterministic sorted-key JSON matches the bytes Assay hashes today.
-    # It is not a full RFC 8785 implementation for arbitrary JSON inputs.
+    # This sample emits deterministic sorted-key JSON for the validated fixture corpus,
+    # but it is not a full RFC 8785 / JCS implementation for arbitrary JSON inputs or
+    # cross-implementation hashing. Integer-valued floats are normalized to integers;
+    # finite non-integer floats are preserved as JSON numbers.
     normalized = _normalize_for_hash(value)
     return json.dumps(
         normalized,

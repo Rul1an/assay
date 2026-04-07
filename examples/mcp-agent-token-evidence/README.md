@@ -95,11 +95,10 @@ an MCP-native framework, not an MCP protocol record.
 We are not asking Assay to inherit `mcp-agent` token accounting, workflow
 outcomes, or runtime semantics as truth.
 
-For the checked-in fixture corpus, the mapper also stays inside the same
-JCS-safe subset boundary as the ADK, AGT, CrewAI, LangGraph, OpenAI Agents,
-MAF, A2A, and UCP samples, so the placeholder envelopes are honest about
-deterministic hashing without pretending to be a full RFC 8785 canonicalizer
-for arbitrary JSON input.
+For the checked-in fixture corpus, the mapper preserves deterministic hashing
+for these committed sample inputs and outputs, including the numeric forms
+present in the fixtures, without pretending to enforce a narrower integer-only
+subset or to be a full RFC 8785 canonicalizer for arbitrary JSON input.
 
 ## Checked-in fixtures
 
