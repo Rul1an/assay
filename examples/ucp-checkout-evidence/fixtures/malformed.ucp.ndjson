@@ -1,0 +1,1 @@
+{"schema":"ucp.checkout.lifecycle.export.v1","protocol":"ucp","version":"v2026-01-23","event_type":"checkout.updated","timestamp":"2026-04-07T15:40:00Z","actor":{"id":"checkout-agent-9","role":"checkout_agent"},"checkout":{"status":"blocked","step":"checkout"}}

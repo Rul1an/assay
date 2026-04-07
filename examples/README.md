@@ -40,6 +40,10 @@ Export a tiny OpenAI Agents trace artifact through a local custom `TraceProcesso
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
 
+### [UCP Checkout Evidence](./ucp-checkout-evidence)
+Map a tiny UCP checkout/order lifecycle export into Assay-shaped external evidence.
+**Focus**: checkout/order-state observation only, no imported payment, settlement, or merchant truth.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.
