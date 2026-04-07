@@ -6,7 +6,8 @@ external evidence for Assay.
 It is intentionally small:
 
 - start with `task.requested` and `task.updated`
-- keep route visibility to one bounded optional `route_ref`
+- keep route visibility to one bounded optional `route_ref` only when it is
+  already naturally present in the chosen artifact
 - freeze one success artifact, one failure artifact, and one malformed case
 - map the good artifacts into Assay-shaped placeholder envelopes
 - keep A2A task outcomes, delegation correctness, and trust/accountability
@@ -22,8 +23,8 @@ It is intentionally small:
 ## Why this seam
 
 This sample treats task lifecycle as the current best first seam for an
-external evidence consumer, with `route_ref` carried only as a bounded observed
-reference when it is already present.
+external evidence consumer. `route_ref` is secondary here and is carried only
+as a bounded observed reference when it is already naturally present.
 
 That keeps the sample small and avoids turning the first outward move into a
 broader claim about:

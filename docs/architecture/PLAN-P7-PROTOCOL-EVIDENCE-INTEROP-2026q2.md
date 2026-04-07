@@ -52,7 +52,9 @@ The protocol track does **not** reuse the same outreach shape everywhere.
 ### A2A
 
 - Upstream repo: [a2aproject/A2A](https://github.com/a2aproject/A2A)
-- Current upstream shape: active protocol and trust/accountability discussion happens in **issues**
+- Current upstream shape:
+  - A2A has broader discussion history
+  - the current trust/accountability energy we care about is visibly active in **issues**
 - Relevant signal:
   - [issue #1718](https://github.com/a2aproject/A2A/issues/1718) shows active interest in trust/accountability primitives
 - Best route: **sample first, then one small issue**
@@ -105,14 +107,16 @@ Build one tiny A2A external-evidence sample that Assay can point to in the A2A r
 
 ### 5.2 Proposed first seam
 
-Use a **task-lifecycle-plus-route-reference** seam as the first external sample.
+Use **task lifecycle first**, with route or handoff reference only if it is
+already naturally present in the chosen artifact.
 
 That means:
 
 - one bounded task request artifact
 - one bounded task update artifact
 - one malformed artifact
-- optional route / handoff reference only if it is already expressible without turning the sample into a second seam
+- optional route / handoff reference only if it is already naturally present
+  without turning the sample into a second seam
 
 This is intentionally narrower than:
 
@@ -120,6 +124,9 @@ This is intentionally narrower than:
 - trust-score proposals
 - agent-card trust profile claims
 - capability-token / authz systems
+
+The primary seam is task lifecycle. Route or handoff visibility is secondary in
+this first slice and only rides along as a bounded observed reference.
 
 ### 5.3 Why this seam
 
@@ -198,6 +205,10 @@ This is intentionally narrower than:
 - merchant legitimacy
 - payment settlement truth
 - fulfillment correctness
+
+In v1, this seam is deliberately about order-state observation, not commerce
+truth. A denied or failed state in the sample must not be treated as a claim
+about settlement success, merchant legitimacy, or payment authorization truth.
 
 ### 6.3 Why this seam
 
@@ -288,6 +299,9 @@ For now:
 5. build `examples/ucp-checkout-evidence/`
 6. merge it
 7. post one UCP discussion
+
+Do not post outward on UCP before the A2A sample and issue have both landed and
+either produced signal or had time to sit quietly without signal.
 
 ### Later
 
