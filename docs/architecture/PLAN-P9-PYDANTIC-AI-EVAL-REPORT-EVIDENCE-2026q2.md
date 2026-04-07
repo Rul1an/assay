@@ -78,8 +78,9 @@ This keeps the lane clearly different from:
 
 ## 4. Recommended v1 seam
 
-Use **one serialized `EvaluationReport`-style artifact from the documented
-code-first evals path** as the first external-consumer seam.
+Use **one serialized artifact derived from the documented `EvaluationReport`
+result surface in the code-first evals path** as the first external-consumer
+seam.
 
 This seam is:
 
@@ -89,6 +90,8 @@ This seam is:
 - smaller than span-based or telemetry-first routes
 - directly aligned with the upstream docs that describe a report object with
   per-case results and experiment-wide analyses
+- honest about the difference between a documented result object and a frozen
+  sample export shape
 
 This is intentionally not:
 
@@ -123,9 +126,9 @@ The first sample should require:
 - `summary.pass_count`
 - `summary.fail_count`
 
-### 5.3 Required case result fields
+### 5.3 Required case result fields in the frozen sample shape
 
-Each case result in v1 should require:
+Each case result in the sample's frozen v1 artifact shape should require:
 
 - `case_id`
 - `status`
@@ -155,6 +158,8 @@ If present, it must be treated as an upstream aggregate metric, not as:
 
 If omitted, the sample remains fully valid.
 
+V1 remains complete without any aggregate score field.
+
 #### `duration_ms`
 
 This field is optional and observational only.
@@ -168,6 +173,9 @@ If present, it must not be promoted into:
 #### `trace_ref`
 
 `trace_ref` must stay a bounded reference only.
+
+The v1 sample should prefer omitting `trace_ref` unless it is naturally present
+in the chosen report export path.
 
 Allowed in v1:
 
@@ -232,7 +240,8 @@ small and deterministic.
 
 Preferred:
 
-- a local generator that exercises the documented code-first evals path
+- a local generator that exercises the documented `evaluate_sync()` / dataset
+  eval flow
 - no hosted observability dependency
 - no hidden credential requirement
 - no runtime setup heavy enough to overshadow the sample
@@ -273,9 +282,9 @@ Fallback channel for a softer exploratory question:
 The outward question should stay narrow:
 
 > If an external evidence consumer wants the smallest honest Pydantic AI
-> surface for bounded eval-result evidence, is a serialized
-> `EvaluationReport`-style artifact roughly the right seam, or is there a
-> thinner result surface you'd rather point them at?
+> eval-result surface, is a serialized artifact derived from
+> `EvaluationReport` roughly the right seam, or is there a thinner result
+> surface you'd rather point them at?
 
 ## 11. Sequencing rule
 
