@@ -1,0 +1,13 @@
+{
+  "schema": "mcp-agent.token-summary.export.v1",
+  "framework": "mcp-agent",
+  "surface": "token_summary",
+  "workflow_name": "token_counter_example",
+  "run_id": "mcp-agent-malformed-run-001",
+  "timestamp": "2026-04-07T18:04:00Z",
+  "outcome": "completed",
+  "token_summary": {
+    "input_tokens": 1832,
+    "output_tokens": 710
+  }
+}

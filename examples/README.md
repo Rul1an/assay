@@ -40,6 +40,10 @@ Export a tiny OpenAI Agents trace artifact through a local custom `TraceProcesso
 Map a tiny Microsoft Agent Framework exported trace artifact into Assay-shaped external evidence.
 **Focus**: exported OpenTelemetry trace seam, bounded span metadata only, no imported runtime or governance truth.
 
+### [MCP-Agent Token Evidence](./mcp-agent-token-evidence)
+Map a tiny `mcp-agent` token-summary artifact into Assay-shaped external evidence.
+**Focus**: bounded runtime-accounting seam, upstream cost estimate only, no imported billing or workflow truth.
+
 ### [A2A Task Evidence](./a2a-task-evidence)
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
