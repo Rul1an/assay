@@ -36,6 +36,10 @@ Export a tiny LangGraph `tasks` v2 stream artifact and map it into Assay-shaped 
 Export a tiny OpenAI Agents trace artifact through a local custom `TraceProcessor`.
 **Focus**: trace-processor-first seam, bounded local export, no imported runtime truth.
 
+### [Microsoft Agent Framework Trace Evidence](./maf-trace-evidence)
+Map a tiny Microsoft Agent Framework exported trace artifact into Assay-shaped external evidence.
+**Focus**: exported OpenTelemetry trace seam, bounded span metadata only, no imported runtime or governance truth.
+
 ### [A2A Task Evidence](./a2a-task-evidence)
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
