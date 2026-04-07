@@ -1,0 +1,37 @@
+{
+  "case_results": [
+    {
+      "assertions": {
+        "EqualsExpected": true
+      },
+      "case_id": "case-hello",
+      "scores": {
+        "ExactScorePoints": 100
+      },
+      "status": "passed"
+    },
+    {
+      "assertions": {
+        "EqualsExpected": true
+      },
+      "case_id": "case-quiet",
+      "scores": {
+        "ExactScorePoints": 100
+      },
+      "status": "passed"
+    }
+  ],
+  "dataset_name": "uppercase-demo-dataset",
+  "experiment_name": "uppercase_eval_valid",
+  "framework": "pydantic-ai",
+  "outcome": "passed",
+  "report_id": "pydantic-ai-eval-valid",
+  "schema": "pydantic-evals.evaluation-report.export.v1",
+  "summary": {
+    "case_count": 2,
+    "fail_count": 0,
+    "pass_count": 2
+  },
+  "surface": "evaluation_report",
+  "timestamp": "2026-04-07T19:00:00Z"
+}
