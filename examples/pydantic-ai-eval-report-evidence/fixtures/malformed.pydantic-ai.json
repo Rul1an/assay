@@ -1,0 +1,23 @@
+{
+  "schema": "pydantic-evals.evaluation-report.export.v1",
+  "framework": "pydantic-ai",
+  "surface": "evaluation_report",
+  "dataset_name": "uppercase-demo-dataset",
+  "experiment_name": "uppercase_eval_valid",
+  "timestamp": "2026-04-07T19:10:00Z",
+  "outcome": "passed",
+  "summary": {
+    "case_count": 1,
+    "pass_count": 1,
+    "fail_count": 0
+  },
+  "case_results": [
+    {
+      "case_id": "case-hello",
+      "status": "passed",
+      "scores": {
+        "ExactScorePoints": 100
+      }
+    }
+  ]
+}
