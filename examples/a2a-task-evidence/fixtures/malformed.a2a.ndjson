@@ -1,0 +1,1 @@
+{"schema":"a2a.task.lifecycle.export.v1","protocol":"a2a","version":"0.2","event_type":"task.requested","timestamp":"2026-04-07T14:10:00Z","agent":{"id":"agent://coordinator"},"task":{"status":"requested","kind":"delegation"},"message":{"id":"msg-20","role":"assistant"}}

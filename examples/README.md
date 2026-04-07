@@ -36,6 +36,10 @@ Export a tiny LangGraph `tasks` v2 stream artifact and map it into Assay-shaped 
 Export a tiny OpenAI Agents trace artifact through a local custom `TraceProcessor`.
 **Focus**: trace-processor-first seam, bounded local export, no imported runtime truth.
 
+### [A2A Task Evidence](./a2a-task-evidence)
+Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
+**Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.
