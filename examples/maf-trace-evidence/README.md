@@ -32,6 +32,10 @@ The checked-in fixtures also keep `EnableSensitiveData` effectively false. They
 export span metadata and bounded attributes only, not raw inputs, outputs, or
 message content.
 
+This sample accepts non-sensitive trace exports only. If
+`sensitive_data_enabled=true`, the mapper fails fast instead of trying to
+reinterpret that export as non-sensitive Assay evidence.
+
 ## Map the checked-in valid artifact
 
 ```bash

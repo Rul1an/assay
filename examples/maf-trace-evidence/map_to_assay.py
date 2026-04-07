@@ -139,6 +139,13 @@ def _validate_record(record: dict[str, Any], line_number: int) -> None:
         raise ValueError(f"line {line_number}: surface must be exported_opentelemetry_trace")
     if record["record_type"] != "span":
         raise ValueError(f"line {line_number}: record_type must be span")
+    sensitive_data_enabled = record["sensitive_data_enabled"]
+    if not isinstance(sensitive_data_enabled, bool):
+        raise ValueError(f"line {line_number}: sensitive_data_enabled must be a boolean")
+    if sensitive_data_enabled:
+        raise ValueError(
+            f"line {line_number}: sensitive_data_enabled must be false for this sample"
+        )
 
 
 def _normalized_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
