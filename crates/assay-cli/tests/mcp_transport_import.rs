@@ -96,6 +96,47 @@ fn contract_trace_import_mcp_sse_legacy_alias_writes_trace() {
     assert_trace_contains_tools(&output, &["Calculator"]);
 }
 
+#[test]
+#[allow(deprecated)]
+fn contract_import_streamable_http_401_www_authenticate_writes_k2_auth_discovery_summary() {
+    let dir = tempdir().expect("tempdir");
+    let input = dir.path().join("streamable-http-authz.json");
+    let output = dir.path().join("streamable-http-authz.trace.jsonl");
+    fs::write(&input, streamable_http_authz_fixture()).expect("write input");
+
+    Command::cargo_bin("assay")
+        .expect("assay binary")
+        .arg("trace")
+        .arg("import-mcp")
+        .arg("--input")
+        .arg(&input)
+        .arg("--out-trace")
+        .arg(&output)
+        .arg("--format")
+        .arg("streamable-http")
+        .assert()
+        .success();
+
+    let text = fs::read_to_string(&output).expect("read trace output");
+    let episode_start: Value = serde_json::from_str(
+        text.lines()
+            .find(|line| line.contains("\"type\":\"episode_start\""))
+            .expect("episode_start present"),
+    )
+    .expect("valid episode_start");
+
+    assert_eq!(
+        episode_start["meta"]["mcp"]["authorization_discovery"],
+        json!({
+            "visible": true,
+            "source_kind": "www_authenticate",
+            "resource_metadata_visible": true,
+            "authorization_servers_visible": false,
+            "scope_challenge_visible": true
+        })
+    );
+}
+
 fn assert_trace_contains_tools(path: &Path, tools: &[&str]) {
     let text = fs::read_to_string(path).expect("read trace output");
     assert!(!text.trim().is_empty(), "trace output should not be empty");
@@ -188,6 +229,41 @@ fn http_sse_fixture() -> String {
                     "event": "message",
                     "id": "evt-1",
                     "data": "{\"jsonrpc\":\"2.0\",\"id\":\"call-1\",\"result\":{\"sum\":3}}"
+                }
+            }
+        ]
+    })
+    .to_string()
+}
+
+fn streamable_http_authz_fixture() -> String {
+    json!({
+        "transport": "streamable-http",
+        "entries": [
+            {
+                "timestamp_ms": 1000,
+                "request": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "Calculator",
+                        "arguments": { "a": 1, "b": 2 }
+                    }
+                }
+            },
+            {
+                "timestamp_ms": 1001,
+                "transport_context": {
+                    "status": 401,
+                    "headers": {
+                        "WWW-Authenticate": "Bearer resource_metadata=\"https://mcp.example/.well-known/oauth-protected-resource\", scope=\"tools/call\""
+                    }
+                },
+                "response": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "error": { "code": 401, "message": "unauthorized" }
                 }
             }
         ]

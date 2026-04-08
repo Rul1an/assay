@@ -1,0 +1,2 @@
+{"allowed":true,"tool":"web_search","agent_did":"did:mesh:agent-1","reason":"Authorized","trust_score":600,"timestamp":"2026-04-04T16:33:20Z"}
+{"allowed":false,"tool":"shell_exec","agent_did":"did:mesh:agent-1","reason":"Tool 'shell_exec' is blocked by policy","trust_score":600,"timestamp":"2026-04-04T16:33:21Z"}

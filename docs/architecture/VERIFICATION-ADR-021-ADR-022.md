@@ -32,7 +32,7 @@
 
 ### Config directory (XDG / Windows)
 
-- **Code:** `get_config_pack_dir()` in loader.rs: `$XDG_CONFIG_HOME/assay/packs` (fallback `~/.config/assay/packs`), Windows `%APPDATA%\assay\packs`. Missing dir treated as "no local packs".
+- **Code:** `get_config_pack_dir()` in loader.rs: `$XDG_CONFIG_HOME/assay/packs` (fallback `$HOME/.config/assay/packs`), Windows `%APPDATA%\\assay\\packs`. Missing dir treated as "no local packs".
 - **ADR §2:** Same convention; loader must not create or write.
 - **Conclusion:** Implemented.
 

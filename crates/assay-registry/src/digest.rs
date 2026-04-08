@@ -16,7 +16,7 @@ pub(crate) fn sha256_hex_reader<R: Read>(mut reader: R) -> std::io::Result<Strin
         hasher.update(&buf[..n]);
     }
 
-    Ok(format!("sha256:{:x}", hasher.finalize()))
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 pub(crate) fn sha256_hex_bytes(bytes: &[u8]) -> String {

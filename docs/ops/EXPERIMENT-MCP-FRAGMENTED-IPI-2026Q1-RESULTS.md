@@ -69,7 +69,7 @@ All located under:
 - `/tmp/assay-exp-mcp-fragmented-ipi-main/target/exp-mcp-fragmented-ipi/runs/20260302-232847-289a43ecc144/`
 
 ## Key observations (audit-relevant)
-- Baseline exfiltrated in **all** attack runs:
+- Baseline sent protected content out in **all** attack runs:
   - `web_search` was invoked
   - the canary was present in baseline `web_search.query`
 - Protected mode blocked **all** attack runs **before** the sink call:

@@ -193,7 +193,7 @@ Output:
 ```
 Timeline:
   [0] Search(query: "user data")                    allowed
-  [1] Create(path: "/etc/shadow")                   BLOCKED
+  [1] Create(path: "/var/lib/private-demo/credentials.txt")   BLOCKED
       Rule: deny_list
       EU AI Act: Article 15(3) - Robustness and accuracy
 

@@ -1,13 +1,13 @@
 # K2-A — Phase 1 formal freeze
 
-**Status:** Frozen for `K2-A` Phase 1 on `main`; not implemented, not released.
+**Status:** Frozen, implemented, and public for `K2-A` Phase 1 in `v3.5.0`.
 **Parent:** [PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md](PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md).
 **Prep input:** [K2-A-PHASE1-FREEZE-PREP.md](K2-A-PHASE1-FREEZE-PREP.md).
 **Repo snapshot:** Current `main` has bounded `G3` authorization **context** on supported
-`assay.tool.decision` evidence, but it does **not** yet have a first-class MCP
-authorization-discovery seam in canonical evidence or MCP adapter/server output. This freeze is
-therefore **pre-implementation**: it locks the honest source classes, semantic ceiling, and review
-gates before any runtime code is allowed to promote a new seam.
+`assay.tool.decision` evidence **and** a first-class bounded MCP authorization-discovery seam on
+imported MCP traces. This freeze remains the active contract for that public `v3.5.0` Phase 1
+implementation: it locks the honest source classes, semantic ceiling, and review gates that the
+runtime code must continue to honor.
 
 ## Contract honesty (product / review)
 
@@ -22,7 +22,7 @@ issuer-trust signal, and not an enterprise-readiness claim.
 
 - **one bounded MCP authorization-discovery seam**
 - **repo-reality first**
-- **adapter/server/proxy emitted evidence only**
+- **supported MCP import / runtime evidence only**
 - **no pack in the same slice**
 - **no reuse of `G3` authorization-context semantics**
 
@@ -43,16 +43,20 @@ allowed inputs first. Any later implementation must keep the seam singular and t
 
 - authorization succeeded
 - required scopes were sufficient
+- any advertised scope requirement was adequate, correct, or enforced
 - the discovered authorization server is trusted
 - the server is secure or compliant in the broad sense
 - a client is correctly configured
 - OAuth/OIDC discovery was complete end-to-end
+- client registration or broader auth bootstrap was correct or complete
 
 ## 3. Allowed positive source classes (v1 freeze)
 
 These source classes are the **only** classes that a future `K2-A` implementation may promote in
 v1, and only when they are observed on a supported MCP runtime/discovery path with exact source
-provenance.
+provenance. Static config, documentation hints, client-side remembered metadata, and other
+non-runtime sources are not MCP authorization-discovery evidence in this freeze unless a later
+freeze explicitly adds them.
 
 | Source class | May imply | Must not imply |
 |--------------|-----------|----------------|
@@ -67,12 +71,14 @@ provenance.
 
 - bearer tokens, access tokens, refresh tokens, client secrets, or credential-like headers
 - opaque auth blobs or copied header strings without typed source provenance
-- static config or docs that were not observed on a supported MCP discovery/runtime path
+- static config files, docs hints, or client-side remembered auth metadata that were not observed on
+  a supported MCP discovery/runtime path
 - generic logs or trace text
 - policy decisions alone
 - `G3` authorization-context fields (`auth_scheme`, `auth_issuer`, `principal`)
 - inferred issuer trust or inferred compliance
-- OAuth AS metadata / OIDC discovery fetched outside the bounded v1 source classes
+- OAuth AS metadata, OIDC discovery, or client registration fetched outside the bounded v1 source
+  classes
 
 ## 5. Repo-reality gate before implementation
 
@@ -94,22 +100,22 @@ Any future `K2-A` implementation must hard-fail review if it:
 
 - promotes anything from outside the source classes in §3
 - reuses `G3` fields as if they were discovery evidence
-- promotes authorization-discovery from static config without observed runtime/discovery provenance
+- promotes authorization-discovery from static config, docs, or client memory without observed
+  runtime/discovery provenance
 - emits credentials or secret-bearing material
-- turns visibility into auth correctness, server trust, or compliance language
+- turns visibility into auth correctness, scope adequacy, server trust, or compliance language
 - widens the work into a pack, engine bump, or broader Trust Basis / Trust Card expansion
 
 ## 7. Status meaning
 
 This freeze means:
 
-- `K2` is the planned next bounded evidence wave
-- `K2-A` Phase 1 now has a formal pre-implementation contract
-- implementation is allowed only inside the guardrails above
+- `K2` is the active bounded MCP authorization-discovery evidence wave
+- `K2-A` Phase 1 now has a formal contract **and** a released first slice in **`v3.5.0`**
+- any further implementation must stay inside the guardrails above
 
 This freeze does **not** mean:
 
-- a `K2-A` seam is already implemented
 - a pack should follow automatically
 - field names are final
 - `G3` or existing MCP decision evidence is enough by itself

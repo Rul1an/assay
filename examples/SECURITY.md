@@ -19,7 +19,7 @@ If you are building a "DevOps Agent" that *must* run commands:
 **Rule:** `constraints: [{ tool: "read_file", params: { path: { matches: "^/app/.*" } } }]`
 
 ### Why?
-Without constraints, `read_file` can read `/etc/passwd`, `~/.ssh/id_rsa`, or environment (secrets) files.
+Without constraints, `read_file` can read private files outside the approved workspace, SSH keys, or secrets files from the environment.
 We restrict access to specific "safe zones" (like `/app` or `/data`).
 
 ## 3. Tool Poisoning

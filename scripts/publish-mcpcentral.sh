@@ -4,10 +4,11 @@
 #
 # Prerequisites:
 #   - mcp-publisher installed (brew install mcp-publisher)
-#   - server.json in repo root
+#   - a generated registry metadata file, typically release/server.json from a
+#     real release asset set
 #
 # Usage:
-#   ./scripts/publish-mcpcentral.sh
+#   ./scripts/publish-mcpcentral.sh [path/to/server.json]
 #
 # This will:
 #   1. Validate server.json
@@ -15,13 +16,14 @@
 #   3. Login to MCPCentral (opens browser for GitHub OAuth)
 #   4. Publish to registry.mcpcentral.io
 #
-# Note: registry.mcpcentral.io may be unreachable (DNS NXDOMAIN). MCPCentral
-# ETLs from the Official MCP Registry; Assay is already there.
+# Note: registry.mcpcentral.io may be unreachable (DNS NXDOMAIN). MCPCentral may
+# ETL from the official MCP Registry, but this script does not assume Assay is
+# already published there.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVER_JSON="${REPO_ROOT}/server.json"
+SERVER_JSON="${1:-${REPO_ROOT}/release/server.json}"
 REGISTRY="https://registry.mcpcentral.io"
 
 cd "$REPO_ROOT"
@@ -33,6 +35,7 @@ fi
 
 if [[ ! -f "$SERVER_JSON" ]]; then
   echo "server.json not found at $SERVER_JSON"
+  echo "Generate it from a real release asset set first."
   exit 1
 fi
 
@@ -45,8 +48,9 @@ fi
 echo ""
 if ! host registry.mcpcentral.io &>/dev/null; then
   echo "⚠️  registry.mcpcentral.io is not reachable (DNS NXDOMAIN)."
-  echo "   MCPCentral ETLs from the Official MCP Registry; Assay is already there."
   echo "   Retry later when MCPCentral's registry is up."
+  echo "   If MCPCentral later syncs from the official registry, treat that as"
+  echo "   additive, not as proof that this Assay line is already published."
   exit 1
 fi
 

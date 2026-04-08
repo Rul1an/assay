@@ -78,8 +78,8 @@ fs:
     - path: "${HOME}/.ssh/**"
     - path: "${HOME}/.aws/**"
     - path: "${HOME}/.gnupg/**"
-    - path: "/etc/shadow"
-    - path: "/etc/passwd"
+    - path: "/var/lib/private-demo/credentials.txt"
+    - path: "/opt/private-demo/secrets.db"
 ```
 
 ⚠️ **Important**: Deny rules have limitations. See [Landlock Limitations](#landlock-limitations).

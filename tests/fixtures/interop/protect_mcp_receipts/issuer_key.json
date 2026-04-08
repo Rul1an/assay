@@ -1,0 +1,5 @@
+{
+  "kid": "sb:issuer:de073ae64e43",
+  "alg": "EdDSA",
+  "public_key_hex": "de073ae64e43c33ed5a0b3b238d44865052e0c7eed4f87f81f9f2c5ce37a1dfa"
+}

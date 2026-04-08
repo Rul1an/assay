@@ -52,11 +52,11 @@ fn compute_json_hash(val: &Option<serde_json::Value>) -> String {
     } else {
         hasher.update(b"null");
     }
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn compute_string_hash(s: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(s.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }

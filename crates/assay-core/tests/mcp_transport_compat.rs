@@ -528,6 +528,122 @@ fn contract_transport_families_normalize_to_same_semantics() {
     );
 }
 
+#[test]
+fn contract_streamable_http_401_www_authenticate_promotes_k2_auth_discovery() {
+    let input = json!({
+        "transport": "streamable-http",
+        "entries": [
+            {
+                "timestamp_ms": 1000,
+                "request": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "Calculator",
+                        "arguments": { "a": 1, "b": 2 }
+                    }
+                }
+            },
+            {
+                "timestamp_ms": 1001,
+                "transport_context": {
+                    "status": 401,
+                    "headers": {
+                        "WWW-Authenticate": "Bearer resource_metadata=\"https://mcp.example/.well-known/oauth-protected-resource\", scope=\"tools/call\""
+                    }
+                },
+                "response": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "error": { "code": 401, "message": "unauthorized" }
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let trace = mcp_events_to_v2_trace(
+        parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).unwrap(),
+        "authz_discovery".into(),
+        None,
+        None,
+    );
+
+    let TraceEvent::EpisodeStart(start) = &trace[0] else {
+        panic!("first event must be episode_start");
+    };
+
+    assert_eq!(
+        start.meta["mcp"]["authorization_discovery"],
+        json!({
+            "visible": true,
+            "source_kind": "www_authenticate",
+            "resource_metadata_visible": true,
+            "authorization_servers_visible": false,
+            "scope_challenge_visible": true
+        })
+    );
+}
+
+#[test]
+fn contract_www_authenticate_not_promoted_without_401_status() {
+    let input = json!({
+        "transport": "streamable-http",
+        "entries": [
+            {
+                "timestamp_ms": 1000,
+                "request": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "Calculator",
+                        "arguments": { "a": 1, "b": 2 }
+                    }
+                }
+            },
+            {
+                "timestamp_ms": 1001,
+                "transport_context": {
+                    "status": 200,
+                    "headers": {
+                        "WWW-Authenticate": "Bearer resource_metadata=\"https://mcp.example/.well-known/oauth-protected-resource\", scope=\"tools/call\""
+                    }
+                },
+                "response": {
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "result": { "sum": 3 }
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let trace = mcp_events_to_v2_trace(
+        parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).unwrap(),
+        "authz_discovery".into(),
+        None,
+        None,
+    );
+
+    let TraceEvent::EpisodeStart(start) = &trace[0] else {
+        panic!("first event must be episode_start");
+    };
+
+    assert_eq!(
+        start.meta["mcp"]["authorization_discovery"],
+        json!({
+            "visible": false,
+            "source_kind": "unknown",
+            "resource_metadata_visible": false,
+            "authorization_servers_visible": false,
+            "scope_challenge_visible": false
+        })
+    );
+}
+
 fn normalize_trace(input: &str, format: McpInputFormat) -> Value {
     let events = parse_mcp_transcript(input, format).expect("parse transcript");
     let trace = mcp_events_to_v2_trace(events, "transport_ep".into(), None, None);

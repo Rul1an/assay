@@ -39,7 +39,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "3.4.0"
+version = "3.5.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
@@ -70,15 +70,15 @@ codegen-units = 1
 
 [workspace.dependencies]
 # Internal crates
-assay-core = { path = "crates/assay-core", version = "3.4.0" }
-assay-common = { path = "crates/assay-common", version = "3.4.0", default-features = false }
-assay-monitor = { path = "crates/assay-monitor", version = "3.4.0" }
-assay-metrics = { path = "crates/assay-metrics", version = "3.4.0" }
-assay-policy = { path = "crates/assay-policy", version = "3.4.0" }
-assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.4.0" }
-assay-evidence = { path = "crates/assay-evidence", version = "3.4.0" }
-assay-sim = { path = "crates/assay-sim", version = "3.4.0" }
-assay-registry = { path = "crates/assay-registry", version = "3.4.0" }
+assay-core = { path = "crates/assay-core", version = "3.5.1" }
+assay-common = { path = "crates/assay-common", version = "3.5.1", default-features = false }
+assay-monitor = { path = "crates/assay-monitor", version = "3.5.1" }
+assay-metrics = { path = "crates/assay-metrics", version = "3.5.1" }
+assay-policy = { path = "crates/assay-policy", version = "3.5.1" }
+assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.5.1" }
+assay-evidence = { path = "crates/assay-evidence", version = "3.5.1" }
+assay-sim = { path = "crates/assay-sim", version = "3.5.1" }
+assay-registry = { path = "crates/assay-registry", version = "3.5.1" }
 
 # Common dependencies
 anyhow = "1"
@@ -94,7 +94,7 @@ chrono = { version = "0.4", features = ["serde"], default-features = false }
 tempfile = "3"
 regex = "1"
 async-trait = "0.1"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 aya = "0.13.0"
 aya-log = "0.2"

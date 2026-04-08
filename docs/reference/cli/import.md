@@ -16,7 +16,7 @@ assay import <INPUT_FILE> [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--format <inspector\|jsonrpc>` | Input format (default: `inspector`) |
+| `--format <inspector\|jsonrpc\|streamable-http\|http-sse>` | Input format (default: `inspector`) |
 | `--out-trace <PATH>` | Output trace path (default: `<input>.trace.jsonl`) |
 | `--init` | Generate starter scaffolding after import |
 
@@ -49,9 +49,11 @@ When `--init` is used, the current implementation generates legacy MCP scaffoldi
 
 ## Troubleshooting
 
-- `unknown format`: use `inspector` or `jsonrpc`.
+- `unknown format`: use `inspector`, `jsonrpc`, `streamable-http`, or `http-sse`.
 - Parse errors: validate your transcript JSON first.
 - Empty import: confirm the transcript actually contains MCP tool traffic.
+
+For HTTP transcript imports, bounded MCP authorization-discovery visibility may appear in `episode_start.meta.mcp.authorization_discovery` when the input explicitly carries a `401` response-path `WWW-Authenticate` challenge with supported typed discovery parameters.
 
 ---
 

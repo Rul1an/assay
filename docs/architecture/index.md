@@ -19,12 +19,12 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [ADR-033 Trust Compiler Positioning (Q2 2026)](./ADR-033-OTel-Trust-Compiler-Positioning.md) — product north star for Assay as an OTel-native trust compiler
 - [RFC-005 Trust Compiler MVP (Q2 2026)](./RFC-005-trust-compiler-mvp-2026q2.md) — bounded plan for `T1a` compiler and `T1b` Trust Card
 - [PLAN — T1a Trust Basis Compiler MVP (Q2 2026)](./PLAN-T1a-TRUST-BASIS-COMPILER-2026q2.md) — first execution wave for canonical `trust-basis.json`
-- [Trust Compiler Audit Matrix (2026-03-26)](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md) — wave-by-wave audit of the trust-compiler line from `T1b` through `K1-A` Phase 1
+- [Trust Compiler Audit Matrix (2026-03-26)](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md) — wave-by-wave audit of the trust-compiler line from `T1b` through `K2-A` Phase 1
 - [Discovery — Next Evidence Wave (Q2 2026)](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md) — historical discovery note that ranked post-`P2c` candidates and led to `K1`
 - [PLAN — K1 A2A Handoff / Delegation-Route Evidence (Q2 2026)](./PLAN-K1-A2A-HANDOFF-DELEGATION-ROUTE-EVIDENCE-2026q2.md) — formal next-wave plan after `P2c`, adapter-first and evidence-first
 - [K1-A Phase 1 Freeze (Q2 2026)](./K1-A-PHASE1-FREEZE.md) — executable freeze for the first bounded typed `handoff` seam in A2A canonical adapter output
-- [PLAN — K2 MCP Authorization-Discovery Evidence (Q2 2026)](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md) — planned next bounded evidence wave after `K1-A`, focused on MCP authorization-discovery visibility before any auth-discovery pack
-- [K2-A Phase 1 Freeze (Q2 2026)](./K2-A-PHASE1-FREEZE.md) — formal pre-implementation freeze for the first bounded MCP authorization-discovery seam
+- [PLAN — K2 MCP Authorization-Discovery Evidence (Q2 2026)](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md) — active bounded MCP authorization-discovery wave, focused on visibility before any auth-discovery pack
+- [K2-A Phase 1 Freeze (Q2 2026)](./K2-A-PHASE1-FREEZE.md) — active contract for the first bounded MCP authorization-discovery seam now public in `v3.5.0`
 - [K2-A Phase 1 Freeze Prep (Q2 2026)](./K2-A-PHASE1-FREEZE-PREP.md) — pre-freeze source inventory and guardrails for the first bounded MCP authorization-discovery seam
 - [TODO — Next Upstream Interop Lanes (Q2 2026)](./TODO-NEXT-UPSTREAM-INTEROP-LANES-2026q2.md) — ranked post-Agno queue that now reserves `P11` for commerce / trust-proof lanes and keeps Browser Use as the active adjacent lane
 - [PLAN — P12 Browser Use History / Output Evidence Interop (Q2 2026)](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md) — planned adjacent-space lane built around Browser Use local run history and output, not observability export
@@ -38,7 +38,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 | [RFC-002: Code Health Remediation](./RFC-002-code-health-remediation-q1-2026.md) | Complete (E1–E4 merged, E5→RFC-003) | Store, metrics, registry, comment cleanup |
 | [RFC-003: Generate Decomposition](./RFC-003-generate-decomposition-q1-2026.md) | Complete (G1–G6 merged) | `generate.rs` split into focused modules |
 | [RFC-004: Open Items Convergence](./RFC-004-open-items-convergence-q1-2026.md) | Closed (O1–O6 merged on `main`) | Historical closure ledger for the Q1 convergence line |
-| [RFC-005: Trust Compiler MVP](./RFC-005-trust-compiler-mvp-2026q2.md) | Active (`T1a`..`H1` public in `v3.3.0`; `G4-A`, `P2c`, and `K1-A` public in `v3.4.0`; `K2` is the planned next bounded evidence wave and `K2-A` now has a formal pre-implementation freeze) | Bounded plan for the trust-compiler and Trust Card line |
+| [RFC-005: Trust Compiler MVP](./RFC-005-trust-compiler-mvp-2026q2.md) | Active (`T1a`..`H1` public in `v3.3.0`; `G4-A`, `P2c`, and `K1-A` public in `v3.4.0`; `K2-A` Phase 1 is now public in `v3.5.0`) | Bounded plan for the trust-compiler and Trust Card line |
 
 ## Architecture Decision Records
 

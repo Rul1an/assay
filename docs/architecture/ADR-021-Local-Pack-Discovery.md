@@ -36,7 +36,7 @@ Use a **single canonical convention** with OS-specific fallbacks:
 
 | Platform | Canonical | Fallback |
 |----------|-----------|----------|
-| Unix-like (Linux/macOS) | `$XDG_CONFIG_HOME/assay/packs` | If `XDG_CONFIG_HOME` unset or empty: `~/.config/assay/packs` (XDG-compatible convention) |
+| Unix-like (Linux/macOS) | `$XDG_CONFIG_HOME/assay/packs` | If `XDG_CONFIG_HOME` unset or empty: `$HOME/.config/assay/packs` (XDG-compatible convention) |
 | Windows | Roaming app data | `%APPDATA%\assay\packs`; if unset, use FOLDERID_RoamingAppData equivalent so resolution does not fail |
 
 No new crate is required; use existing environment/directory logic in the repo where present (e.g. for config or cache). The pack directory is **not** created automatically by the loader; missing directory is treated as "no local packs" (no error). **The loader MUST NOT write to disk** (read-only resolution; security posture).
@@ -68,7 +68,7 @@ The **normative pack resolution order** and the **config directory convention** 
 
 ## Consequences
 
-- Users can install packs (e.g. `soc2-baseline`) by copying into `~/.config/assay/packs/` (or Windows equivalent) and run `assay evidence lint --pack soc2-baseline` without embedding in the binary.
+- Users can install packs (e.g. `soc2-baseline`) by copying into `$HOME/.config/assay/packs/` (or Windows equivalent) and run `assay evidence lint --pack soc2-baseline` without embedding in the binary.
 - Built-in packs cannot be overridden by name; override requires explicit path (clear security and UX contract).
 - Implementation is limited to loader + config dir resolution + tests + SPEC/concept doc updates; no pack schema or evidence contract changes.
 - PR slicing: one PR for loader + tests + docs (no new packs); SOC2 pack content and optional built-in wiring can follow in separate PRs.

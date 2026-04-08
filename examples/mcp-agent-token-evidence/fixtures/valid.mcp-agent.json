@@ -1,0 +1,33 @@
+{
+  "schema": "mcp-agent.token-summary.export.v1",
+  "framework": "mcp-agent",
+  "surface": "token_summary",
+  "workflow_name": "token_counter_example",
+  "run_id": "mcp-agent-valid-run-001",
+  "timestamp": "2026-04-07T17:55:00Z",
+  "outcome": "completed",
+  "token_summary": {
+    "total_tokens": 2542,
+    "input_tokens": 1832,
+    "output_tokens": 710
+  },
+  "model_breakdown": [
+    {
+      "model_name": "gpt-4-turbo-preview",
+      "provider": "OpenAI",
+      "total_tokens": 1234,
+      "input_tokens": 876,
+      "output_tokens": 358,
+      "cost_estimate_usd": 0.0123
+    },
+    {
+      "model_name": "claude-3-opus-20240229",
+      "provider": "Anthropic",
+      "total_tokens": 1308,
+      "input_tokens": 956,
+      "output_tokens": 352,
+      "cost_estimate_usd": 0.0111
+    }
+  ],
+  "cost_estimate_usd": 0.0234
+}

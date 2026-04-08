@@ -29,7 +29,7 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 
 ```
 ✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
-❌ DENY   read_file  path=/etc/passwd                reason=path_constraint_violation
+❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 

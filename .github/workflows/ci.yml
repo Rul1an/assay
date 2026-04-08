@@ -17,6 +17,7 @@ jobs:
     outputs:
       lightweight_only: ${{ steps.detect.outputs.lightweight_only }}
       changed_file_count: ${{ steps.detect.outputs.changed_file_count }}
+      mcp_registry_touched: ${{ steps.detect.outputs.mcp_registry_touched }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -31,6 +32,7 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             : > "$changed_file"
             lightweight_only=false
+            mcp_registry_touched=false
           else
             if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
               base_sha="${{ github.event.pull_request.base.sha }}"
@@ -48,16 +50,23 @@ jobs:
 
             if [[ ! -s "$changed_file" ]]; then
               lightweight_only=false
-            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$)' "$changed_file" >/dev/null; then
+            elif grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$|\.github/ISSUE_TEMPLATE/[^/]+\.ya?ml$|\.github/DISCUSSION_TEMPLATE/[^/]+\.ya?ml$)' "$changed_file" >/dev/null; then
               lightweight_only=false
             else
               lightweight_only=true
+            fi
+
+            if grep -E '^(crates/assay-mcp-server/|packaging/mcpb/|packaging/mcp-registry/|scripts/ci/build_mcpb_bundle\.sh$|scripts/ci/render_registry_server_json\.sh$|scripts/publish-mcpcentral\.sh$|\.github/workflows/release\.yml$)' "$changed_file" >/dev/null; then
+              mcp_registry_touched=true
+            else
+              mcp_registry_touched=false
             fi
           fi
 
           {
             echo "lightweight_only=${lightweight_only}"
             echo "changed_file_count=$(wc -l < "$changed_file" | tr -d ' ')"
+            echo "mcp_registry_touched=${mcp_registry_touched}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -65,6 +74,7 @@ jobs:
             echo "- event: ${GITHUB_EVENT_NAME}"
             echo "- lightweight_only: ${lightweight_only}"
             echo "- changed_file_count: $(wc -l < "$changed_file" | tr -d ' ')"
+            echo "- mcp_registry_touched: ${mcp_registry_touched}"
             if [[ -s "$changed_file" ]]; then
               echo ""
               echo "### Changed files"
@@ -144,6 +154,22 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check vendored pack files are in sync
         run: ./scripts/check-vendored-packs.sh
+
+  mcp-registry-foundation:
+    name: MCP Registry foundation smoke
+    needs: [scope]
+    if: needs.scope.outputs.mcp_registry_touched == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: MCP Registry foundation smoke
+        run: bash scripts/ci/mcp_registry_foundation_smoke.sh
 
   perf:
     name: Criterion benches (store + suite)
@@ -367,8 +393,8 @@ jobs:
 
   ebpf-smoke-self-hosted:
     name: eBPF monitor smoke (Linux - Self-Hosted)
-    needs: [test]
-    if: github.event_name != 'pull_request'
+    needs: [scope, test]
+    if: github.event_name != 'pull_request' && needs.scope.outputs.lightweight_only != 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 60
     concurrency:
@@ -385,8 +411,14 @@ jobs:
       - name: Pre-clean workspace ownership
         shell: bash
         run: |
+          # A stale host-side assay monitor can survive a prior failed run and interfere with
+          # workspace cleanup or checkout. Clear it before touching the tree.
+          sudo pkill -x assay 2>/dev/null || true
+
           # Remove target/ with sudo so checkout can delete workspace (avoids EPERM on root-owned fingerprints)
           sudo rm -rf "$GITHUB_WORKSPACE/target" 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/.assay-test" /tmp/assay-lsm-verify /tmp/assay-test 2>/dev/null || true
           sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
           sudo chown -R "$(id -u)":"$(id -g)" "$(dirname "$GITHUB_WORKSPACE")" 2>/dev/null || true
 
@@ -402,6 +434,11 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+          if find . -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after pre-checkout cleanup"
+            find . -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
           AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
             clone --depth 1 "https://github.com/${GH_REPO}.git" .
@@ -524,7 +561,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [scope, deps-security, clippy, open-core-boundary, vendored-packs, perf, test, ebpf-smoke-ubuntu]
+    needs: [scope, deps-security, clippy, open-core-boundary, vendored-packs, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
     steps:
       - name: Evaluate required job results
         env:
@@ -534,6 +571,7 @@ jobs:
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           OPEN_CORE_BOUNDARY_RESULT: ${{ needs.open-core-boundary.result }}
           VENDORED_PACKS_RESULT: ${{ needs.vendored-packs.result }}
+          MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
           EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
@@ -547,6 +585,7 @@ jobs:
             "clippy:${CLIPPY_RESULT}" \
             "open-core-boundary:${OPEN_CORE_BOUNDARY_RESULT}" \
             "vendored-packs:${VENDORED_PACKS_RESULT}" \
+            "mcp-registry-foundation:${MCP_REGISTRY_FOUNDATION_RESULT}" \
             "perf:${PERF_RESULT}" \
             "test:${TEST_RESULT}" \
             "ebpf-smoke-ubuntu:${EBPF_SMOKE_UBUNTU_RESULT}"

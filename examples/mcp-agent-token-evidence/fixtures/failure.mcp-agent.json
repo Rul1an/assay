@@ -1,0 +1,23 @@
+{
+  "schema": "mcp-agent.token-summary.export.v1",
+  "framework": "mcp-agent",
+  "surface": "token_summary",
+  "workflow_name": "assignment_grader",
+  "run_id": "mcp-agent-failure-run-001",
+  "timestamp": "2026-04-07T18:02:00Z",
+  "outcome": "failed",
+  "token_summary": {
+    "total_tokens": 911,
+    "input_tokens": 702,
+    "output_tokens": 209
+  },
+  "model_breakdown": [
+    {
+      "model_name": "gpt-4o-mini-2024-07-18",
+      "provider": "OpenAI",
+      "total_tokens": 911,
+      "input_tokens": 702,
+      "output_tokens": 209
+    }
+  ]
+}

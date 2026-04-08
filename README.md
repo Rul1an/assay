@@ -33,9 +33,9 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
-> **Trust Compiler line:** Release **v3.4.0** is the current public trust-compiler line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), and also publicly ships **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), and **`K1-A` Phase 1** (`payload.handoff`). Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+> **Trust Compiler line:** Release **v3.5.1** is the current public line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), and **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`). The `v3.5.1` patch line also adds the first honest official-MCP-Registry publication assets for `assay-mcp-server`. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
 
-> **Repository truth:** `main` currently tracks the released **v3.4.0** trust-compiler surface, including the bounded A2A `payload.handoff` seam. Future trust-compiler slices may land on `main` before the next public cut, so release notes and changelog remain the authority for what is actually public.
+> **Repository truth:** `main` now tracks the released **v3.5.1** line, which carries forward the bounded MCP authorization-discovery seam in imported traces and the new MCP Registry publication foundation for `assay-mcp-server`. Future trust-compiler slices may still land on `main` before the next public cut, so release notes and changelog remain the authority for what is actually public.
 
 ```
   Agent ──► Assay ──► MCP Server
@@ -51,6 +51,8 @@ No hosted backend. No API keys for core flows. **Deterministic** — same input,
 
 ## See It Work
 
+[![SafeSkill 72/100](https://img.shields.io/badge/SafeSkill-72%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/rul1an-assay)
+
 ```bash
 cargo install assay-cli
 
@@ -63,7 +65,7 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 ```
 ✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
 ✅ ALLOW  list_dir   path=/tmp/assay-demo/           reason=policy_allow
-❌ DENY   read_file  path=/etc/passwd                reason=path_constraint_violation
+❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 

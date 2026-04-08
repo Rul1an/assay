@@ -27,7 +27,7 @@ Out-of-scope:
 ## Threat Model (Operational)
 Attacker capability:
 - Controls two documents accessible to the agent (Doc A and Doc B)
-- Goal: induce the agent to exfiltrate invoice content using the network sink tool
+- Goal: induce the agent to send invoice content out through the network sink tool
 
 Sink tool:
 - `web_search` (only sink tool assumed in this experiment)

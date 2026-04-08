@@ -115,9 +115,9 @@ These documents should be updated when:
 ## Related Documentation
 
 - [Run Output](run-output.md) - run.json / summary.json contract (seeds, judge_metrics, reason_code)
-- [Architecture ADRs](../architecture/) - Architecture Decision Records
-- [Core Concepts](../concepts/) - User-facing concept documentation
-- [CLI Reference](../reference/cli/) - Detailed CLI command documentation
-- [Python SDK](../python-sdk/) - Python SDK documentation
+- [Architecture ADRs](../architecture/index.md) - Architecture Decision Records
+- [Core Concepts](../concepts/index.md) - User-facing concept documentation
+- [CLI Reference](../reference/cli/index.md) - Detailed CLI command documentation
+- [Python SDK](../python-sdk/index.md) - Python SDK documentation
 - [SPEC-PR-Gate-Outputs-v1](../architecture/SPEC-PR-Gate-Outputs-v1.md) - PR gate output spec
 - [DX Roadmap](../DX-ROADMAP.md) - Current DX execution plan
