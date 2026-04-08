@@ -1,0 +1,11 @@
+{
+  "schema": "agno.accuracy-eval.export.v1",
+  "framework": "agno",
+  "surface": "accuracy_eval",
+  "eval_type": "accuracy",
+  "eval_name": "uppercase_accuracy_demo",
+  "timestamp": "2026-04-08T08:10:00Z",
+  "outcome": "passed",
+  "num_iterations": 3,
+  "scores": [90, 88, 92]
+}
