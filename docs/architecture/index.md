@@ -26,6 +26,8 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — K2 MCP Authorization-Discovery Evidence (Q2 2026)](./PLAN-K2-MCP-AUTHORIZATION-DISCOVERY-EVIDENCE-2026q2.md) — active bounded MCP authorization-discovery wave, focused on visibility before any auth-discovery pack
 - [K2-A Phase 1 Freeze (Q2 2026)](./K2-A-PHASE1-FREEZE.md) — active contract for the first bounded MCP authorization-discovery seam now public in `v3.5.0`
 - [K2-A Phase 1 Freeze Prep (Q2 2026)](./K2-A-PHASE1-FREEZE-PREP.md) — pre-freeze source inventory and guardrails for the first bounded MCP authorization-discovery seam
+- [TODO — Next Upstream Interop Lanes (Q2 2026)](./TODO-NEXT-UPSTREAM-INTEROP-LANES-2026q2.md) — ranked post-Agno queue that now reserves `P11` for commerce / trust-proof lanes and keeps Browser Use as the active adjacent lane
+- [PLAN — P12 Browser Use History / Output Evidence Interop (Q2 2026)](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md) — planned adjacent-space lane built around Browser Use local run history and output, not observability export
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
