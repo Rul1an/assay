@@ -141,7 +141,7 @@ The first sample should require:
 
 The first sample may include:
 
-- `agent_id_ref`
+- `agent_ref`
 - `registry_ref`
 - `verification_reason`
 - `request_ref`
@@ -255,6 +255,10 @@ The optional reference fields must stay bounded:
 - small label
 - opaque id
 - short reference string
+
+If `agent_ref` is present, it must remain an opaque, non-user, non-accountable
+reference only. It must not encode or imply a user, account, or stable
+personal identity.
 
 Not allowed in v1:
 

@@ -240,7 +240,7 @@ Additional queue rules:
 2. After the Browser Use sample lands and the outward Browser Use question is
    posted, let that lane breathe before opening another new outward thread.
 3. Decide next between:
-   - executing `P11A` if frontier / protocol depth is the next deliberate move
+   - `P11A` if frontier / protocol depth is the next deliberate move
    - `Langfuse` if export/import platform adjacency is the next deliberate move
 4. Keep **Mastra** as the main fallback if the Langfuse positioning risk feels
    too high at that time.
