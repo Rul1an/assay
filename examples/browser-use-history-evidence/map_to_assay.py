@@ -213,7 +213,7 @@ def _build_event(record: dict[str, Any], assay_run_id: str, import_time: str) ->
         "external_surface": "agent-history-list",
         "external_schema": EXTERNAL_SCHEMA,
         "observed_upstream_time": normalized["timestamp"],
-        "observed": normalized,
+        "observed": record,
     }
     event = {
         "specversion": "1.0",
@@ -240,21 +240,27 @@ def main() -> int:
     if args.output.exists() and not args.overwrite:
         raise SystemExit(f"{args.output} already exists; pass --overwrite to replace it")
 
-    with args.input.open("r", encoding="utf-8") as handle:
-        record = json.load(handle)
+    try:
+        with args.input.open("r", encoding="utf-8") as handle:
+            record = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(str(exc)) from exc
 
     if not isinstance(record, dict):
         raise SystemExit("artifact: top-level JSON value must be an object")
 
-    _validate_record(record, "artifact")
+    try:
+        _validate_record(record, "artifact")
 
-    assay_run_id = args.assay_run_id or f"import-browser-use-{args.input.stem}"
-    import_time = _parse_rfc3339_utc(args.import_time)
-    event = _build_event(record, assay_run_id, import_time)
+        assay_run_id = args.assay_run_id or f"import-browser-use-{args.input.stem}"
+        import_time = _parse_rfc3339_utc(args.import_time)
+        event = _build_event(record, assay_run_id, import_time)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, separators=(",", ":"), ensure_ascii=False))
+        handle.write(_canonical_json(event))
         handle.write("\n")
     return 0
 
