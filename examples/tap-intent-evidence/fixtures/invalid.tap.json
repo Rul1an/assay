@@ -1,0 +1,13 @@
+{
+  "schema": "tap.signature_verification.export.v1",
+  "protocol": "tap",
+  "surface": "signature_verification",
+  "timestamp": "2026-04-08T12:50:00Z",
+  "session_id": "sess_tap_01J9N9C4",
+  "key_id": "kid_tap_demo_01",
+  "algorithm": "ES256",
+  "merchant_domain_ref": "shop.example.com",
+  "operation_type": "payment",
+  "verification_result": "rejected",
+  "verification_reason": "signature_mismatch"
+}

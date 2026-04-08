@@ -1,0 +1,11 @@
+{
+  "schema": "tap.signature_verification.export.v1",
+  "protocol": "tap",
+  "surface": "signature_verification",
+  "timestamp": "2026-04-08T12:55:00Z",
+  "key_id": "kid_tap_demo_01",
+  "algorithm": "ES256",
+  "merchant_domain_ref": "shop.example.com",
+  "operation_type": "payment",
+  "verification_result": "verified"
+}
