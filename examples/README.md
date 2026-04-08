@@ -48,6 +48,10 @@ Map a tiny `mcp-agent` token-summary artifact into Assay-shaped external evidenc
 Map a tiny serialized artifact derived from a `pydantic_evals` `EvaluationReport` into Assay-shaped external evidence.
 **Focus**: code-first eval-result seam, bounded case results only, no imported evaluator or tracing truth.
 
+### [Agno Accuracy Eval Evidence](./agno-accuracy-evidence)
+Map a tiny artifact derived from an Agno `AccuracyEval` / `AccuracyResult` surface into Assay-shaped external evidence.
+**Focus**: eval-result-first seam, bounded scores and avg score only, no imported evaluator or tracing truth.
+
 ### [A2A Task Evidence](./a2a-task-evidence)
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
