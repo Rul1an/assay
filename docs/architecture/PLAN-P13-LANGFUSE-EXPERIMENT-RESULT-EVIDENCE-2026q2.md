@@ -190,8 +190,7 @@ run export and not a whole trace tree.
 The first artifact should therefore center on:
 
 - one experiment name
-- one dataset identity and, if the chosen sample shape carries it, one bounded
-  dataset version reference
+- one dataset identity and one bounded dataset version reference
 - one item reference
 - one short output representation
 - one bounded list of evaluations
@@ -420,10 +419,10 @@ If this plan is accepted, the next implementation PR should add:
   a small local or self-hosted generator is viable
 - `examples/langfuse-experiment-evidence/map_to_assay.py`
 - `examples/langfuse-experiment-evidence/fixtures/valid.langfuse.json`
-- `examples/langfuse-experiment-evidence/fixtures/weak.langfuse.json`
+- `examples/langfuse-experiment-evidence/fixtures/failure.langfuse.json`
 - `examples/langfuse-experiment-evidence/fixtures/malformed.langfuse.json`
 - `examples/langfuse-experiment-evidence/fixtures/valid.assay.ndjson`
-- `examples/langfuse-experiment-evidence/fixtures/weak.assay.ndjson`
+- `examples/langfuse-experiment-evidence/fixtures/failure.assay.ndjson`
 
 Fixture boundary notes:
 
@@ -478,7 +477,7 @@ artifact shape**.
 That fallback is acceptable here because the goal is the smallest honest
 external-consumer seam, not a full Langfuse platform tutorial.
 
-## 11. Valid, weak, malformed corpus
+## 11. Valid, failure, malformed corpus
 
 The first sample should follow the established corpus pattern.
 
@@ -490,9 +489,9 @@ One strong experiment item result with:
 - one or more bounded evaluations
 - a bounded dataset version reference
 
-### 11.2 Weak
+### 11.2 Failure
 
-One weaker experiment item result with:
+One lower-scoring experiment item result with:
 
 - short `output_ref`
 - one or more bounded evaluations showing a lower or negative result
@@ -500,7 +499,8 @@ One weaker experiment item result with:
 
 This is **not** a platform failure or infrastructure failure artifact.
 
-It is only a weaker experiment-result artifact.
+It is only a weaker experiment-result artifact represented in the repo corpus
+under the established `failure` naming pattern.
 
 ### 11.3 Malformed
 
