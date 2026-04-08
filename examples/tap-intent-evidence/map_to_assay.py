@@ -75,6 +75,15 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"artifact: duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _normalize_for_hash(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, bool)):
         return value
@@ -257,8 +266,8 @@ def main() -> int:
 
     try:
         with args.input.open("r", encoding="utf-8") as handle:
-            record = json.load(handle)
-    except json.JSONDecodeError as exc:
+            record = json.load(handle, object_pairs_hook=_reject_duplicate_keys)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     if not isinstance(record, dict):
