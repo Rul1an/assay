@@ -3,9 +3,10 @@
 - **Date:** 2026-04-08
 - **Owner:** Evidence / Product
 - **Status:** Active queue note. The `P11` commerce / trust-proof family is
-  reserved for frontier protocol lanes, while Browser Use remains the active
-  adjacent-space plan that should be finished cleanly before opening another
-  new branch.
+  now formally started with [PLAN — P11A Visa TAP Intent Verification Evidence
+  Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md), while
+  Browser Use remains the active adjacent-space lane that should be finished
+  cleanly before opening another new branch.
 - **Scope (this document now):** Record the ranked post-Agno queue for the
   next upstream interop lanes, the reasons behind that ordering, and the
   execution rules learned from the current wave.
@@ -173,6 +174,10 @@ Why it still is **not** the active lane right now:
 That is why `P11A` remains the better frontier priority while Browser Use
 remains the better lane to finish first.
 
+The formal frontier plan now lives in
+[PLAN — P11A Visa TAP Intent Verification Evidence
+Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md).
+
 ## 7. Why Langfuse stays below Browser Use
 
 `langfuse/langfuse` remains strategically important, but it is still not the
@@ -235,7 +240,7 @@ Additional queue rules:
 2. After the Browser Use sample lands and the outward Browser Use question is
    posted, let that lane breathe before opening another new outward thread.
 3. Decide next between:
-   - `P11A` if frontier / protocol depth is the next deliberate move
+   - executing `P11A` if frontier / protocol depth is the next deliberate move
    - `Langfuse` if export/import platform adjacency is the next deliberate move
 4. Keep **Mastra** as the main fallback if the Langfuse positioning risk feels
    too high at that time.
@@ -243,4 +248,5 @@ Additional queue rules:
 ## References
 
 - [PLAN — P10 Agno Accuracy Eval Evidence Interop](./PLAN-P10-AGNO-ACCURACY-EVAL-EVIDENCE-2026q2.md)
+- [PLAN — P11A Visa TAP Intent Verification Evidence Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md)
 - [PLAN — P12 Browser Use History / Output Evidence Interop](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md)
