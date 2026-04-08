@@ -1,0 +1,16 @@
+{
+  "schema": "browser-use.agent-history.export.v1",
+  "framework": "browser-use",
+  "surface": "agent_history_list",
+  "task_label": "Collect Browser Use docs summary",
+  "timestamp": "2026-04-08T11:50:00Z",
+  "outcome": "failed",
+  "action_history": [
+    "go_to_url",
+    "wait_for_page"
+  ],
+  "final_result": "Run stopped before a final extracted summary was produced.",
+  "errors": [
+    "navigation_timeout"
+  ]
+}

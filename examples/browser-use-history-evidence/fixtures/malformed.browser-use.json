@@ -1,0 +1,10 @@
+{
+  "schema": "browser-use.agent-history.export.v1",
+  "framework": "browser-use",
+  "surface": "agent_history_list",
+  "task_label": "Collect Browser Use docs summary",
+  "timestamp": "2026-04-08T11:55:00Z",
+  "outcome": "succeeded",
+  "final_result": "Browser Use exposes local run history and final extracted content.",
+  "errors": []
+}
