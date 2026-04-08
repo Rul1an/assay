@@ -27,7 +27,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [K2-A Phase 1 Freeze (Q2 2026)](./K2-A-PHASE1-FREEZE.md) — active contract for the first bounded MCP authorization-discovery seam now public in `v3.5.0`
 - [K2-A Phase 1 Freeze Prep (Q2 2026)](./K2-A-PHASE1-FREEZE-PREP.md) — pre-freeze source inventory and guardrails for the first bounded MCP authorization-discovery seam
 - [PLAN — P11A Visa TAP Intent Verification Evidence Interop (Q2 2026)](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md) — planned frontier commerce / trust-proof lane built around TAP verification-result evidence, not payment truth
-- [TODO — Next Upstream Interop Lanes (Q2 2026)](./TODO-NEXT-UPSTREAM-INTEROP-LANES-2026q2.md) — ranked post-Agno queue that now records Langfuse as the next planned platform-adjacent lane after Browser Use and TAP
+- [TODO — Next Upstream Interop Lanes (Q2 2026)](./TODO-NEXT-UPSTREAM-INTEROP-LANES-2026q2.md) — ranked post-Agno queue that now tracks Langfuse as the current platform-adjacent lane and APS as a promote-only `P11D` watchlist under the commerce / trust-proof family
 - [PLAN — P12 Browser Use History / Output Evidence Interop (Q2 2026)](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md) — planned adjacent-space lane built around Browser Use local run history and output, not observability export
 - [PLAN — P13 Langfuse Experiment Result Evidence Interop (Q2 2026)](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md) — planned platform-adjacent lane built around bounded experiment item results and evaluations, not Langfuse trace export
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
