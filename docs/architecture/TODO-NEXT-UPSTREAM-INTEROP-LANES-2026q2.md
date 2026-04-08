@@ -5,9 +5,10 @@
 - **Status:** Active queue note. The `P11` commerce / trust-proof family is
   now formally started with [PLAN — P11A Visa TAP Intent Verification Evidence
   Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md), the
-  Browser Use adjacent lane is now live, and
+  Browser Use adjacent lane is now live, the
   [PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md)
-  is the next planned platform-adjacent candidate.
+  lane is now sample-backed on `main`, and `P11D` APS is explicitly
+  watchlist-only until its promote criteria are met.
 - **Scope (this document now):** Record the ranked post-Agno queue for the
   next upstream interop lanes, the reasons behind that ordering, and the
   execution rules learned from the current wave.
@@ -89,13 +90,28 @@ Tier 0 means:
 |------|-------------|--------|-----------------|------------|-------------------|
 | 4 | `P11B` — x402 | Queued | publish / integrate first | payment lifecycle evidence | Technically interesting, but the repo currently has no Issues or Discussions and the semantics are much riskier than TAP |
 | 5 | `P11C` — Identus | Watchlist | GitHub Discussion | credential / delegation proof | Interesting, but heavier and more infrastructural than the next eval/export lane |
+| 6 | `P11D` — APS | Watchlist (promote-only) | GitHub issue in `aeoess/agent-passport-system` only | signed authorization artifact / receipt at most | Serious adjacent protocol work, but still too semantically heavy to open as an active lane before a clearly smaller external-facing artifact is confirmed |
+
+### `P11D` promote rule
+
+Treat APS as a roadmap watchlist candidate, not an active lane, unless all of
+the following are true:
+
+1. A smallest external-facing artifact is confirmed publicly in APS materials
+   or in the APS repo itself, for example a signed authorization
+   artifact / receipt that clearly sits below the rest of the protocol stack.
+2. The seam can be modeled without pulling in passports, delegation lattice,
+   reputation, or governance primitives.
+3. The sample can stay strictly at `permit`, `deny`, and `malformed`.
+4. The conversation happens in the APS repo itself, not by continuing the A2A
+   thread or another third-party ecosystem thread.
 
 ### Tier 5 — still lower fit
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 6 | `livekit/agents` | Watchlist | issue or discussion only if a small hook surface becomes clear | metrics / event hook evidence at most | Lower fit because the public seam is much more deployment and observability heavy than artifact-first |
-| 7 | `microsoft/autogen` | Deprioritized | GitHub Discussion | n/a | Keep low because the repo is explicitly in maintenance mode |
+| 7 | `livekit/agents` | Watchlist | issue or discussion only if a small hook surface becomes clear | metrics / event hook evidence at most | Lower fit because the public seam is much more deployment and observability heavy than artifact-first |
+| 8 | `microsoft/autogen` | Deprioritized | GitHub Discussion | n/a | Keep low because the repo is explicitly in maintenance mode |
 
 ## 4. Historical note on Agno
 
@@ -219,6 +235,8 @@ Additional queue rules:
 - reserve `P11` for the commerce / trust-proof family
 - Browser Use should stay output/history-first, not Laminar/OpenLIT-first
 - `P11A` should stay verification-first, not payment-truth-first
+- `P11D` should remain watchlist-only unless a signed authorization artifact
+  can be kept below passports, delegation, reputation, and governance
 - Langfuse should stay experiment-result-first, not trace-first
 - Mastra should stay eval-result-first, not tracing-first
 - OpenLIT should remain a special-case OTel-native candidate, not the default
@@ -226,13 +244,14 @@ Additional queue rules:
 
 ## 10. Next actions
 
-1. **Now active:** formalize
-   [PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md).
+1. `P13` is now plan-backed and sample-backed on `main`; treat its outward move
+   as the next deliberate platform-adjacent decision, not an automatic rush.
 2. Let the fresh Browser Use and Visa TAP outward threads breathe unless an
    upstream maintainer responds.
-3. If no hot follow-up overrides the queue, build the `P13` sample next.
+3. Keep `P11D` APS as watchlist-only unless its promote criteria are met in
+   `aeoess/agent-passport-system`.
 4. Keep **Mastra** as the main fallback if the Langfuse positioning risk feels
-   too high once implementation starts.
+   too high when deciding whether to open the outward Langfuse thread.
 
 ## References
 
