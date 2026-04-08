@@ -76,7 +76,7 @@ def _normalize_for_hash(value: Any) -> Any:
             raise ValueError("non-finite floats are not valid in canonical JSON")
         if value.is_integer():
             return int(value)
-        return value
+        raise ValueError("non-integer floats are not valid in this sample's canonical JSON subset")
     if isinstance(value, dict):
         return {str(key): _normalize_for_hash(nested) for key, nested in value.items()}
     if isinstance(value, list):
