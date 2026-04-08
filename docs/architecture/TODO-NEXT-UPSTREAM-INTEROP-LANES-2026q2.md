@@ -225,7 +225,7 @@ Additional queue rules:
 - `P11A` should stay verification-first, not payment-truth-first
 - Langfuse should stay export/import-first, not trace-first
 - Mastra should stay eval-result-first, not tracing-first
-- OpenLit should remain a special-case OTel-native candidate, not the default
+- OpenLIT should remain a special-case OTel-native candidate, not the default
   next lane
 
 ## 10. Next actions
