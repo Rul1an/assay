@@ -1,0 +1,28 @@
+{
+  "schema": "langfuse.experiment-item-result.export.v1",
+  "platform": "langfuse",
+  "surface": "experiment_item_result",
+  "experiment_name": "faq-support-experiment",
+  "dataset_name": "support-faq-sample",
+  "dataset_version_ref": "2026-04-08T13:30:00Z",
+  "item_ref": "item_support_002",
+  "timestamp": "2026-04-08T13:50:00Z",
+  "output_ref": "Return requests are handled case by case after a support review.",
+  "evaluations": [
+    {
+      "name": "correctness",
+      "data_type": "numeric",
+      "value": 41
+    },
+    {
+      "name": "grounded",
+      "data_type": "boolean",
+      "value": false
+    },
+    {
+      "name": "tone",
+      "data_type": "categorical",
+      "value": "needs_review"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "langfuse.experiment-item-result.export.v1",
+  "platform": "langfuse",
+  "surface": "experiment_item_result",
+  "experiment_name": "faq-support-experiment",
+  "dataset_name": "support-faq-sample",
+  "item_ref": "item_support_003",
+  "timestamp": "2026-04-08T13:55:00Z",
+  "output_ref": "Customers can request a refund by email."
+}
