@@ -101,9 +101,11 @@ Why:
 The cleaner first wedge is:
 
 - one artifact derived from the documented `AgentHistoryList` path
-- bounded action history
-- bounded final result
-- bounded error list
+- a bounded `action_history` reduction derived from documented selectors such
+  as `action_names()` and, only if needed, a small reducer over the recorded
+  steps
+- a short `final_result` representation derived from `final_result()`
+- bounded error observations derived from `errors()`
 - optional structured output only if the chosen sample shape naturally carries
   it
 
@@ -117,12 +119,17 @@ Use **one frozen serialized artifact derived from the documented
 
 The primary documented selectors are:
 
-- `action_history()`
+- `action_names()`
 - `final_result()`
 - `errors()`
 
 `structured_output` is documented too, but it should remain secondary in v1
 because it quickly turns the seam into application-schema territory.
+
+The frozen sample shape may still use fields named `action_history`,
+`final_result`, and `errors`, but those names should be treated as Assay-side
+sample reductions derived from documented selectors, not as claims that
+Browser Use already guarantees those exact serialized export fields.
 
 This seam is:
 
@@ -156,6 +163,14 @@ The first sample should require:
 - `final_result`
 - `errors`
 
+These required fields belong to the frozen sample artifact shape.
+
+They must be described as:
+
+- sample-level reductions derived from documented Browser Use result selectors
+- not an upstream guarantee that Browser Use ships one canonical serialized
+  export object with these exact field names
+
 ### 6.2 Optional fields
 
 The first sample may include:
@@ -170,6 +185,11 @@ The first sample may include:
 #### `action_history`
 
 This field is required in the frozen sample shape.
+
+It should be described as a **sample-level bounded reduction** derived from the
+documented `AgentHistoryList` surface, preferably anchored in selectors such as
+`action_names()` and only widened by a small reducer if the chosen sample shape
+needs one.
 
 It should stay small and bounded:
 
@@ -186,12 +206,15 @@ Not allowed in v1:
 - cloud-only telemetry annotations
 
 This requirement belongs to the sample shape, not to an upstream claim that
-Browser Use guarantees one universal serialized history contract.
+Browser Use guarantees one universal serialized `action_history` contract.
 
 #### `final_result`
 
-This field is required in the frozen sample shape, but it remains upstream
-output semantics only.
+This field is required in the frozen sample shape, but it should be framed as a
+**short frozen representation** derived from `final_result()`, not necessarily
+the full upstream extracted-content body.
+
+It remains upstream output semantics only.
 
 It must not be promoted into:
 
@@ -200,11 +223,16 @@ It must not be promoted into:
 - browser-state truth
 
 The sample should prefer a short final result string or short bounded object,
-not a large application payload.
+not a large application payload or a claim that Browser Use exports one fixed
+serialized `final_result` wire field.
 
 #### `errors`
 
 This field is required in the frozen sample shape, even for successful runs.
+
+It should be framed as **bounded error observations** derived from `errors()`,
+not as a claim that Browser Use guarantees one universal small serialized error
+contract.
 
 v1 should keep it simple:
 
