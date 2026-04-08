@@ -56,6 +56,10 @@ Map a tiny artifact derived from an Agno `AccuracyEval` / `AccuracyResult` surfa
 Map a tiny artifact derived from a Browser Use `AgentHistoryList` result surface into Assay-shaped external evidence.
 **Focus**: history/output-first seam, bounded action-history reduction and final result only, no imported observability truth.
 
+### [Visa TAP Verification Evidence](./tap-intent-evidence)
+Map a tiny artifact derived from the Visa Trusted Agent Protocol signature-verification path into Assay-shaped external evidence.
+**Focus**: verification-outcome-first seam, bounded signature metadata only, no imported payment or identity truth.
+
 ### [A2A Task Evidence](./a2a-task-evidence)
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
