@@ -40,7 +40,7 @@ This is **not** a checkout-success plan.
 
 This is **not** a user-identity import plan.
 
-This is a plan for a **bounded TAP signature-verification result seam**.
+This is a plan for a **bounded TAP signature-verification outcome seam**.
 
 ## 2. Hard positioning rule
 
@@ -48,7 +48,7 @@ This lane must not overclaim what the sample actually observes.
 
 Normative framing:
 
-> This sample targets the smallest honest TAP verification-result surface, not
+> This sample targets the smallest honest TAP verification-outcome surface, not
 > a payment settlement record, merchant decision record, or customer-identity
 > truth surface.
 
@@ -163,6 +163,31 @@ If the chosen sample shape needs a little more texture, use a short
 This requirement belongs to the sample shape, not to an upstream claim that
 TAP guarantees one universal serialized verification contract.
 
+The safest internal wording for the sample remains:
+
+- verification outcome
+- not verified intent
+- not verified customer action truth
+
+#### `verification_reason`
+
+This field is optional in v1.
+
+If present, it must stay extremely small:
+
+- bounded enum
+- or one short classifier label
+
+Not allowed in v1:
+
+- free-text verifier narrative
+- verifier transcript
+- debug trace
+- raw cryptographic error detail beyond a short classifier
+
+This field must remain a small sample-level explanation aid, not a secondary
+channel for richer identity, authorization, or merchant semantics.
+
 #### Signature metadata
 
 `timestamp`, `session_id`, `key_id`, and `algorithm` are required because they
@@ -180,6 +205,14 @@ They must not become:
 - merchant authorization truth
 - payment truth
 
+`session_id` must remain an opaque identifier only.
+
+Not allowed in v1:
+
+- browser session semantics
+- cookie semantics
+- request-correlation semantics beyond the bounded id itself
+
 #### `merchant_domain_ref`
 
 This field is required because domain binding is part of the documented TAP
@@ -189,12 +222,14 @@ It should stay a bounded reference only:
 
 - hostname
 - short domain label
+- normalized merchant domain only
 
 Not allowed in v1:
 
 - full merchant session payload
 - full request headers
 - checkout body payloads
+- merchant account or tenant metadata
 
 #### `operation_type`
 
@@ -208,6 +243,10 @@ In v1, keep it small:
 
 It must remain an observed upstream operation label, not a claim that Assay
 independently validated the action.
+
+It should also be framed as a sample-level bounded label, not as a claim that
+TAP already guarantees one universal serialized enum contract for all external
+consumers.
 
 #### Optional references
 
@@ -228,7 +267,7 @@ Not allowed in v1:
 
 ## 6. Assay-side meaning
 
-The sample may only claim bounded verification observation.
+The sample may only claim bounded verification-outcome observation.
 
 Assay must not treat as truth:
 
