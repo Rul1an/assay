@@ -190,10 +190,12 @@ run export and not a whole trace tree.
 The first artifact should therefore center on:
 
 - one experiment name
-- one dataset identity and bounded dataset version reference
+- one dataset identity and, if the chosen sample shape carries it, one bounded
+  dataset version reference
 - one item reference
 - one short output representation
 - one bounded list of evaluations
+- no aggregate layer unless it is naturally present and still small
 - optional opaque run or trace references only if needed
 
 Important framing rule:
@@ -226,6 +228,11 @@ They must be described as:
 - sample-level reductions derived from documented Langfuse experiment results
 - not an upstream guarantee that Langfuse already ships one canonical
   serialized export object with these exact field names
+
+`dataset_version_ref` remains required in this v1 plan because it keeps the
+artifact reviewable in dataset/experiment context, but that is still a frozen
+sample-shape choice, not a claim that every smallest honest Langfuse export
+must carry that exact field in that exact form.
 
 ### 7.2 Optional fields
 
@@ -282,6 +289,10 @@ This field is required in the frozen sample shape.
 
 It should be framed as a **short frozen representation** derived from the
 experiment item output, not necessarily the full upstream output body.
+
+It should also be described explicitly as a **sample-level reduction of the
+documented experiment item output surface**, not as an upstream-guaranteed
+serialized export field.
 
 It remains upstream output semantics only.
 
@@ -349,6 +360,9 @@ It must not turn the lane back into a trace-first plan.
 This field is optional in v1.
 
 The sample remains complete without any aggregate score field.
+
+The v1 sample should prefer omitting it unless it is naturally present in the
+chosen experiment-result shape and still stays very small.
 
 If included, it must stay bounded:
 
@@ -432,6 +446,12 @@ Langfuse is more promising than some earlier lanes because:
 
 Even so, the first sample should still stay strict about setup cost.
 
+Practical expectation for v1:
+
+- start from a docs-backed frozen artifact shape by default
+- only switch to a real local generator if the setup turns out to be
+  surprisingly small and does not overshadow the seam
+
 ### 10.1 Preferred path
 
 Preferred:
@@ -509,6 +529,8 @@ Why `Support`:
 
 - it is the answerable category
 - the question is about the smallest honest seam
+- it is the best pragmatic fit for one technical boundary question even if it
+  is not a perfect semantic match for a planning-style interop post
 - that reads more like a technical boundary question than `Share your Work`
   or `Ideas`
 
