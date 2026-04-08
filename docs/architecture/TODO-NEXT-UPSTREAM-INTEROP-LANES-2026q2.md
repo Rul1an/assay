@@ -4,9 +4,10 @@
 - **Owner:** Evidence / Product
 - **Status:** Active queue note. The `P11` commerce / trust-proof family is
   now formally started with [PLAN — P11A Visa TAP Intent Verification Evidence
-  Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md), while
-  Browser Use remains the active adjacent-space lane that should be finished
-  cleanly before opening another new branch.
+  Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md), the
+  Browser Use adjacent lane is now live, and
+  [PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md)
+  is the next planned platform-adjacent candidate.
 - **Scope (this document now):** Record the ranked post-Agno queue for the
   next upstream interop lanes, the reasons behind that ordering, and the
   execution rules learned from the current wave.
@@ -64,52 +65,37 @@ Tier 0 means:
 - no extra pushes on cold threads
 - keep current live lanes breathing unless an upstream maintainer responds
 
-### Tier 1 — highest net priority
+### Tier 1 — next best active candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 1 | `agno-agi/agno` | Already active | GitHub Discussion | `AccuracyEval` / `AccuracyResult` artifact | Cleanest same-space lane, eval-result-first, and socially much cleaner than frontier commerce lanes |
+| 1 | `langfuse/langfuse` | Active planning | GitHub Discussion (`Support`) | bounded experiment item result / evaluation export | Best next fit after Browser Use and TAP: strong repo momentum, natural maintainer channel, and a smaller eval-result seam than trace-first observability |
 
-### Tier 2 — frontier, but heavier
-
-| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
-|------|-------------|--------|-----------------|------------|-------------------|
-| 2 | `P11A` — Visa TAP | Queued | GitHub issue | intent / auth verification result artifact | Most Assay-native frontier lane, but smaller ecosystem surface and higher semantic overclaim risk than Agno |
-
-### Tier 3 — highest upside adjacent
+### Tier 2 — clean fallback if Langfuse framing risk rises
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 3 | `browser-use/browser-use` | Active planning | GitHub Discussion | `AgentHistoryList` / `action_history()` / `final_result()` / `errors()` | Strong adjacent-space momentum and a history/output seam that is clearly different from prior trace and eval lanes |
+| 2 | `mastra-ai/mastra` | Queued | GitHub issue | `evaluate()` / scorer result / CI eval result | Good candidate and less platform-on-platform risky than Langfuse, but weaker channel shape because the repo has no Discussions |
 
-### Tier 4 — strategically strong, socially harder
-
-| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
-|------|-------------|--------|-----------------|------------|-------------------|
-| 4 | `langfuse/langfuse` | Queued | GitHub Discussion | dataset / experiment result export or score record export | Strategically strong, but most likely to read as platform-on-platform if the framing slips |
-
-### Tier 5 — frontier, but not first
+### Tier 3 — special-case OTel-native candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 5 | `P11B` — x402 | Queued | publish / integrate first | payment lifecycle evidence | Technically exciting, but the channel is weak and payment semantics are much riskier than TAP |
+| 3 | `openlit/openlit` | Watchlist | GitHub Discussion | eval/export or bounded score record export | Worth keeping as the main OTel-native special case, but still not the best general next lane |
 
-### Tier 6 — good lanes, less urgent
-
-| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
-|------|-------------|--------|-----------------|------------|-------------------|
-| 6 | `mastra-ai/mastra` | Queued | GitHub issue | `evaluate()` / scorer result / CI eval result | Good candidate, but weaker channel than Agno and less distinctive than Browser Use |
-| 7 | `pydantic/pydantic-ai` | Already active | GitHub issue | `EvaluationReport`-derived artifact | Strong lane, but less urgent now that it is already live and Agno covers the same broad eval-result family |
-| 8 | `lastmile-ai/mcp-agent` | Already active | GitHub Discussion | token summary / runtime accounting | Strong lane, but more runtime-accounting-specific than the next frontier or adjacent priorities |
-
-### Tier 7 — later / watchlist
+### Tier 4 — later frontier and heavier infra lanes
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 9 | `P11C` — Identus | Watchlist | GitHub Discussion | credential / delegation proof | Interesting, but heavier and more infrastructural than TAP |
-| 10 | `openlit/openlit` | Watchlist | GitHub Discussion | eval/export or score record export | Worth keeping as a special-case OTel-native candidate, but not the best next general lane |
-| 11 | `livekit/agents` | Watchlist | issue or discussion only if a small hook surface becomes clear | metrics / event hook evidence at most | Lower fit because the public seam is much more deployment and observability heavy than artifact-first |
-| 12 | `microsoft/autogen` | Deprioritized | GitHub Discussion | n/a | Keep low because the repo is explicitly in maintenance mode |
+| 4 | `P11B` — x402 | Queued | publish / integrate first | payment lifecycle evidence | Technically interesting, but the repo currently has no Issues or Discussions and the semantics are much riskier than TAP |
+| 5 | `P11C` — Identus | Watchlist | GitHub Discussion | credential / delegation proof | Interesting, but heavier and more infrastructural than the next eval/export lane |
+
+### Tier 5 — still lower fit
+
+| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
+|------|-------------|--------|-----------------|------------|-------------------|
+| 6 | `livekit/agents` | Watchlist | issue or discussion only if a small hook surface becomes clear | metrics / event hook evidence at most | Lower fit because the public seam is much more deployment and observability heavy than artifact-first |
+| 7 | `microsoft/autogen` | Deprioritized | GitHub Discussion | n/a | Keep low because the repo is explicitly in maintenance mode |
 
 ## 4. Historical note on Agno
 
@@ -127,12 +113,13 @@ That lane is already in motion, so the queue no longer starts with Agno even
 though Agno remains the strongest general-purpose next-lane choice in the
 ranking.
 
-## 5. Why Browser Use is now the active lane to finish
+## 5. Historical note on Browser Use
 
-`browser-use/browser-use` is not the highest strategic priority overall, but it
-is the right **active adjacent lane to finish first** because:
+`browser-use/browser-use` was not the highest strategic priority overall, but
+it was the right adjacent lane to finish before opening the next platform lane
+because:
 
-- the planning slice is already in progress
+- the planning slice was already in progress
 - the seam is clean and materially different from the current wave
 - it can be finished without opening the heavier `P11A` commerce branch yet
 - it preserves one-lane-at-a-time discipline better than pivoting mid-plan
@@ -151,39 +138,41 @@ At the same time, Browser Use also documents Laminar, OpenLIT, and telemetry.
 That broader observability layer is exactly what Assay should avoid as the
 first wedge.
 
-The active Browser Use plan now lives in
+That lane is now live. The formal Browser Use plan lives in
 [PLAN — P12 Browser Use History / Output Evidence Interop](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md).
 
-## 6. Why `P11A` stays above Browser Use in the broader ranking
+## 6. Historical note on `P11A`
 
-The `P11A` Visa TAP lane stays above Browser Use in the broader ranking because
-it has stronger frontier value:
+The `P11A` Visa TAP lane was ranked above Browser Use in the broader frontier
+ordering because it had stronger protocol value:
 
 - verification-first rather than platform-first
 - cryptographic and protocol-adjacent enough to fit Assay's trust-compiler
   direction closely
 - strategically different from another framework or eval lane
 
-Why it still is **not** the active lane right now:
-
-- issue-only channel
-- smaller ecosystem surface
-- much faster semantic overclaim risk
-- more explanation required per word
-
-That is why `P11A` remains the better frontier priority while Browser Use
-remains the better lane to finish first.
-
 The formal frontier plan now lives in
 [PLAN — P11A Visa TAP Intent Verification Evidence
 Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md).
 
-## 7. Why Langfuse stays below Browser Use
+That lane is now live too, so the queue no longer needs to choose between
+Browser Use and `P11A` as the next move.
 
-`langfuse/langfuse` remains strategically important, but it is still not the
-best immediate next move after Browser Use.
+## 7. Why Langfuse is now the next planned lane
 
-Why:
+`langfuse/langfuse` is now the next best planned lane because the two lanes
+that previously sat ahead of it in execution order are already in motion.
+
+Why it now moves up:
+
+- strong repo momentum
+- Discussions enabled with an answerable `Support` category
+- official eval docs around datasets, experiments, and scores
+- API-first and export-friendly positioning
+- a seam that is different from Browser Use history/output and TAP
+  verification
+
+Why it is still socially harder than the earlier framework lanes:
 
 - Langfuse already positions itself as a broad LLM engineering platform with
   observability, datasets, scores, and experiments
@@ -194,10 +183,12 @@ Why:
 The right posture there is:
 
 - export/import sample first
-- score or dataset/experiment result seam
-- only then one small GitHub Discussion
+- bounded experiment-result seam first
+- `Support` Discussion only after the sample lands
+- no trace-first framing
 
-That is still a good lane, just not the safest next one.
+The formal Langfuse plan now lives in
+[PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md).
 
 ## 8. Why Mastra stays below the top four
 
@@ -228,25 +219,24 @@ Additional queue rules:
 - reserve `P11` for the commerce / trust-proof family
 - Browser Use should stay output/history-first, not Laminar/OpenLIT-first
 - `P11A` should stay verification-first, not payment-truth-first
-- Langfuse should stay export/import-first, not trace-first
+- Langfuse should stay experiment-result-first, not trace-first
 - Mastra should stay eval-result-first, not tracing-first
 - OpenLIT should remain a special-case OTel-native candidate, not the default
   next lane
 
 ## 10. Next actions
 
-1. **Now active:** finish [PLAN — P12 Browser Use History / Output Evidence
-   Interop](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md).
-2. After the Browser Use sample lands and the outward Browser Use question is
-   posted, let that lane breathe before opening another new outward thread.
-3. Decide next between:
-   - `P11A` if frontier / protocol depth is the next deliberate move
-   - `Langfuse` if export/import platform adjacency is the next deliberate move
+1. **Now active:** formalize
+   [PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md).
+2. Let the fresh Browser Use and Visa TAP outward threads breathe unless an
+   upstream maintainer responds.
+3. If no hot follow-up overrides the queue, build the `P13` sample next.
 4. Keep **Mastra** as the main fallback if the Langfuse positioning risk feels
-   too high at that time.
+   too high once implementation starts.
 
 ## References
 
 - [PLAN — P10 Agno Accuracy Eval Evidence Interop](./PLAN-P10-AGNO-ACCURACY-EVAL-EVIDENCE-2026q2.md)
 - [PLAN — P11A Visa TAP Intent Verification Evidence Interop](./PLAN-P11A-VISA-TAP-INTENT-VERIFICATION-EVIDENCE-2026q2.md)
 - [PLAN — P12 Browser Use History / Output Evidence Interop](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md)
+- [PLAN — P13 Langfuse Experiment Result Evidence Interop](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md)
