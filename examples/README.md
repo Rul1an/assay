@@ -60,6 +60,10 @@ Map a tiny artifact derived from a Browser Use `AgentHistoryList` result surface
 Map a tiny artifact derived from the Visa Trusted Agent Protocol signature-verification path into Assay-shaped external evidence.
 **Focus**: verification-outcome-first seam, bounded signature metadata only, no imported payment or identity truth.
 
+### [Langfuse Experiment Result Evidence](./langfuse-experiment-evidence)
+Map a tiny artifact derived from the Langfuse experiment runner path into Assay-shaped external evidence.
+**Focus**: experiment-result-first seam, bounded item output and evaluations only, no imported trace or dashboard truth.
+
 ### [A2A Task Evidence](./a2a-task-evidence)
 Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 **Focus**: task-lifecycle-first seam, bounded route reference only, no imported trust or delegation truth.
