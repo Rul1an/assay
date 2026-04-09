@@ -100,6 +100,9 @@ def _normalize_for_hash(value: Any) -> Any:
 
 
 def _canonical_json(value: Any) -> str:
+    # This sample keeps the fixture corpus inside the same deterministic,
+    # integer-valued JSON subset the other interop samples use. It is not a full
+    # RFC 8785 / JCS implementation for arbitrary JSON inputs.
     normalized = _normalize_for_hash(value)
     return json.dumps(
         normalized,
@@ -214,11 +217,23 @@ def _validate_record(record: dict[str, Any], line_label: str) -> None:
     except ValueError as exc:
         raise ValueError(f"{line_label}: {exc}") from exc
 
+    has_invalid_reason = "invalid_reason" in record
+    has_invalid_message_ref = "invalid_message_ref" in record
+
+    if verification_result == "verified" and (has_invalid_reason or has_invalid_message_ref):
+        raise ValueError(
+            f"{line_label}: invalid_reason and invalid_message_ref are only allowed when verification_result is rejected"
+        )
+    if verification_result == "rejected" and not (has_invalid_reason or has_invalid_message_ref):
+        raise ValueError(
+            f"{line_label}: rejected artifacts must include invalid_reason or invalid_message_ref"
+        )
+
     for field in ("invalid_message_ref", "facilitator_ref", "payment_identifier_ref", "payee_ref"):
         if field in record:
             _validate_optional_ref(record[field], line_label, field)
 
-    if "invalid_reason" in record:
+    if has_invalid_reason:
         _validate_invalid_reason(record["invalid_reason"], line_label)
 
     if "timeout_seconds" in record:

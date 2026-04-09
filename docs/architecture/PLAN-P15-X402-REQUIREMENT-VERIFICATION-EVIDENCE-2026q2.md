@@ -286,7 +286,6 @@ The first sample may include:
 - `payee_ref`
 - `timeout_seconds`
 - `payment_identifier_ref`
-- `transport_ref`
 
 ### 9.3 Important field boundaries
 
@@ -383,6 +382,10 @@ This field is optional in v1.
 
 If present, it must stay a short bounded reason derived from `invalidReason`
 or an equivalent upstream verification failure label.
+
+In the frozen sample shape, `invalid_reason` and `invalid_message_ref` belong
+only on `rejected` artifacts. A `verified` artifact must not carry
+`invalid_*` failure context.
 
 Preferred shape:
 
