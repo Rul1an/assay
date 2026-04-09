@@ -30,6 +30,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [TODO — Next Upstream Interop Lanes (Q2 2026)](./TODO-NEXT-UPSTREAM-INTEROP-LANES-2026q2.md) — ranked post-Agno queue that now tracks Langfuse as the current platform-adjacent lane and APS as a promote-only `P11D` watchlist under the commerce / trust-proof family
 - [PLAN — P12 Browser Use History / Output Evidence Interop (Q2 2026)](./PLAN-P12-BROWSER-USE-HISTORY-OUTPUT-EVIDENCE-2026q2.md) — planned adjacent-space lane built around Browser Use local run history and output, not observability export
 - [PLAN — P13 Langfuse Experiment Result Evidence Interop (Q2 2026)](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md) — planned platform-adjacent lane built around bounded experiment item results and evaluations, not Langfuse trace export
+- [PLAN — P14 Mastra Scorer / Experiment-Result Evidence Interop (Q2 2026)](./PLAN-P14-MASTRA-SCORER-EXPERIMENT-RESULT-EVIDENCE-2026q2.md) — planned scorer-first Mastra lane built around bounded experiment-item evidence, not tracing or Studio exports
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs

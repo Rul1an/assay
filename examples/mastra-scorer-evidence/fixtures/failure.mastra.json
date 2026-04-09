@@ -1,0 +1,15 @@
+{
+  "schema": "mastra.scorer-result.export.v1",
+  "framework": "mastra",
+  "surface": "scorer_experiment_item_result",
+  "experiment_name": "support-faq-experiment",
+  "dataset_ref": "support-faq-dataset",
+  "dataset_version_ref": "v3",
+  "item_ref": "faq_item_002",
+  "target_type": "agent",
+  "scorer_name": "answer_correctness",
+  "score": 38,
+  "timestamp": "2026-04-09T09:05:00Z",
+  "outcome": "failed",
+  "error_label": "low_score"
+}

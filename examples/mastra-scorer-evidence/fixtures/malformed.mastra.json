@@ -1,0 +1,12 @@
+{
+  "schema": "mastra.scorer-result.export.v1",
+  "framework": "mastra",
+  "surface": "scorer_experiment_item_result",
+  "experiment_name": "support-faq-experiment",
+  "dataset_ref": "support-faq-dataset",
+  "item_ref": "faq_item_003",
+  "target_type": "browser",
+  "scorer_name": "answer_correctness",
+  "timestamp": "2026-04-09T09:10:00Z",
+  "outcome": "scored"
+}
