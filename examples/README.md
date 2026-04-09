@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [x402 Requirement / Verification Evidence](./x402-verification-evidence)
+Map a tiny artifact derived from x402's `PaymentRequired` plus `VerifyResponse`
+path into Assay-shaped external evidence.
+**Focus**: requirement-and-verification-first seam, requirement-side amount and
+asset context only, no imported settlement or fulfillment truth.
+
 ### [Mastra Scorer Evidence](./mastra-scorer-evidence)
 Map a tiny artifact derived from Mastra's current scorer / experiment path into
 Assay-shaped external evidence.

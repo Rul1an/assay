@@ -1,0 +1,14 @@
+{
+  "schema": "x402.requirement-verification.export.v1",
+  "protocol": "x402",
+  "surface": "requirement_verify_result",
+  "transport": "http",
+  "x402_version": 2,
+  "resource_ref": "https://api.example.com/premium-data",
+  "scheme": "exact",
+  "network": "eip155:84532",
+  "amount": "10000",
+  "asset_ref": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "timestamp": "2026-04-09T12:40:00Z",
+  "verification_result": "verified"
+}
