@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [Mastra Scorer Evidence](./mastra-scorer-evidence)
+Map a tiny artifact derived from Mastra's current scorer / experiment path into
+Assay-shaped external evidence.
+**Focus**: scorer-result-first seam, bounded score and experiment context only,
+no imported trace or Studio truth.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
