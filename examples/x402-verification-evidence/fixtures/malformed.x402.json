@@ -1,0 +1,13 @@
+{
+  "schema": "x402.requirement-verification.export.v1",
+  "protocol": "x402",
+  "surface": "requirement_verify_result",
+  "transport": "mcp",
+  "x402_version": 2,
+  "resource_ref": "mcp://tool/financial_analysis",
+  "scheme": "exact",
+  "network": "eip155:84532",
+  "amount": "10000",
+  "timestamp": "2026-04-09T12:50:00Z",
+  "verification_result": "verified"
+}
