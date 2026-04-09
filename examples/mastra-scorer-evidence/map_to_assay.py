@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 PLACEHOLDER_EVENT_TYPE = "example.placeholder.mastra-scorer-result"
@@ -127,7 +127,7 @@ def _compute_assay_content_hash(data: dict[str, Any]) -> str:
     return _sha256(content_hash_input)
 
 
-def _parse_rfc3339_utc(value: str | None) -> str:
+def _parse_rfc3339_utc(value: Optional[str]) -> str:
     if value is None:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -259,7 +259,7 @@ def main() -> int:
     try:
         with args.input.open("r", encoding="utf-8") as handle:
             record = json.load(handle, object_pairs_hook=_reject_duplicate_keys)
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     if not isinstance(record, dict):
@@ -274,9 +274,12 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
-        handle.write(_canonical_json(event))
-        handle.write("\n")
+    try:
+        with args.output.open("w", encoding="utf-8") as handle:
+            handle.write(_canonical_json(event))
+            handle.write("\n")
+    except OSError as exc:
+        raise SystemExit(str(exc)) from exc
     return 0
 
 

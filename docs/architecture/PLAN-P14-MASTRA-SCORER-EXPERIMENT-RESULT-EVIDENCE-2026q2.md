@@ -4,8 +4,8 @@
 - **Owner:** Evidence / Product
 - **Status:** Planning
 - **Scope (this PR):** Define the next Mastra interop lane after the current
-  Browser Use, Visa TAP, and Langfuse planning wave. No sample
-  implementation, no outward issue, and no contract freeze in this slice.
+  Browser Use, Visa TAP, and Langfuse planning wave. Include a small sample
+  implementation, with no outward issue and no contract freeze in this slice.
 
 ## 1. Why this plan exists
 
