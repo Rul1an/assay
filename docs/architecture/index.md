@@ -32,6 +32,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P13 Langfuse Experiment Result Evidence Interop (Q2 2026)](./PLAN-P13-LANGFUSE-EXPERIMENT-RESULT-EVIDENCE-2026q2.md) — planned platform-adjacent lane built around bounded experiment item results and evaluations, not Langfuse trace export
 - [PLAN — P14 Mastra Scorer / Experiment-Result Evidence Interop (Q2 2026)](./PLAN-P14-MASTRA-SCORER-EXPERIMENT-RESULT-EVIDENCE-2026q2.md) — planned scorer-first Mastra lane built around bounded experiment-item evidence, not tracing or Studio exports
 - [PLAN — P15 x402 Requirement / Verification Evidence Interop (Q2 2026)](./PLAN-P15-X402-REQUIREMENT-VERIFICATION-EVIDENCE-2026q2.md) — planned requirement-and-verification-first x402 lane built around `PaymentRequired` plus `VerifyResponse`, not settlement or fulfillment truth
+- [PLAN — P16 LiveKit Agents Testing-Result / RunEvent Evidence Interop (Q2 2026)](./PLAN-P16-LIVEKIT-AGENTS-TESTING-RESULT-RUNEVENT-EVIDENCE-2026q2.md) — planned testing-result-first LiveKit lane built around `voice.testing.RunResult.events`, not telemetry or transcript export
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs

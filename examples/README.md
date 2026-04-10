@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [LiveKit Agents Testing-Result Evidence](./livekit-runresult-evidence)
+Map a tiny artifact derived from LiveKit Agents'
+`voice.testing.RunResult.events` path into Assay-shaped external evidence.
+**Focus**: testing-result-first seam, bounded typed run events only, no
+imported telemetry, transcript, or room-state truth.
+
 ### [x402 Requirement / Verification Evidence](./x402-verification-evidence)
 Map a tiny artifact derived from x402's `PaymentRequired` plus `VerifyResponse`
 path into Assay-shaped external evidence.
