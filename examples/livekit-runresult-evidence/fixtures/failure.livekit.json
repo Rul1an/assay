@@ -1,0 +1,26 @@
+{
+  "schema": "livekit.testing-run-result.export.v1",
+  "framework": "livekit_agents",
+  "surface": "voice_testing_run_result",
+  "runtime_mode": "voice.testing",
+  "task_label": "lookup account owner",
+  "timestamp": "2026-04-10T10:35:00Z",
+  "outcome": "failed",
+  "error_label": "tool_timeout",
+  "events": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "I ran into a timeout while checking your account."
+    },
+    {
+      "type": "function_call",
+      "name": "lookup_account_owner"
+    },
+    {
+      "type": "function_call_output",
+      "name": "lookup_account_owner",
+      "status": "timeout"
+    }
+  ]
+}

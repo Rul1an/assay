@@ -1,0 +1,19 @@
+{
+  "schema": "livekit.testing-run-result.export.v1",
+  "framework": "livekit_agents",
+  "surface": "voice_testing_run_result",
+  "runtime_mode": "voice.testing",
+  "task_label": "broken message content shape",
+  "timestamp": "2026-04-10T10:40:00Z",
+  "outcome": "completed",
+  "events": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        "chunk one",
+        "chunk two"
+      ]
+    }
+  ]
+}
