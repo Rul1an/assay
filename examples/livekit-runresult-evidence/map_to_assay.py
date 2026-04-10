@@ -273,16 +273,20 @@ def _validate_events(value: Any, line_label: str) -> list[dict[str, Any]]:
 
 
 def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
-    if record.get("schema") != EXTERNAL_SCHEMA:
+    # Ignore unknown top-level fields so the sample stays tolerant to future
+    # upstream growth outside the bounded seam it actually consumes.
+    recognized = {key: value for key, value in record.items() if key in TOP_LEVEL_KEYS}
+
+    if recognized.get("schema") != EXTERNAL_SCHEMA:
         raise ValueError(f"artifact: expected schema {EXTERNAL_SCHEMA}, got {record.get('schema')}")
-    if record.get("framework") != "livekit_agents":
+    if recognized.get("framework") != "livekit_agents":
         raise ValueError("artifact: framework must be livekit_agents")
-    if record.get("surface") != "voice_testing_run_result":
+    if recognized.get("surface") != "voice_testing_run_result":
         raise ValueError("artifact: surface must be voice_testing_run_result")
-    if record.get("runtime_mode") != "voice.testing":
+    if recognized.get("runtime_mode") != "voice.testing":
         raise ValueError("artifact: runtime_mode must be voice.testing")
 
-    missing = [key for key in REQUIRED_KEYS if key not in record]
+    missing = [key for key in REQUIRED_KEYS if key not in recognized]
     if missing:
         raise ValueError(f"artifact: missing required keys: {', '.join(missing)}")
 
@@ -291,24 +295,28 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
         "framework": "livekit_agents",
         "surface": "voice_testing_run_result",
         "runtime_mode": "voice.testing",
-        "task_label": _validate_non_empty_string(record["task_label"], "artifact", "task_label"),
-        "timestamp": _parse_rfc3339_utc(str(record["timestamp"])),
-        "outcome": _validate_non_empty_string(record["outcome"], "artifact", "outcome"),
-        "events": _validate_events(record["events"], "artifact"),
+        "task_label": _validate_non_empty_string(recognized["task_label"], "artifact", "task_label"),
+        "timestamp": _parse_rfc3339_utc(str(recognized["timestamp"])),
+        "outcome": _validate_non_empty_string(recognized["outcome"], "artifact", "outcome"),
+        "events": _validate_events(recognized["events"], "artifact"),
     }
 
     if normalized["outcome"] not in ALLOWED_OUTCOMES:
         allowed = ", ".join(sorted(ALLOWED_OUTCOMES))
         raise ValueError(f"artifact: outcome must be one of: {allowed}")
 
-    if "final_output_ref" in record:
-        normalized["final_output_ref"] = _validate_short_ref(record["final_output_ref"], "artifact", "final_output_ref")
-    if "agent_ref" in record:
-        normalized["agent_ref"] = _validate_short_ref(record["agent_ref"], "artifact", "agent_ref")
-    if "sdk_version_ref" in record:
-        normalized["sdk_version_ref"] = _validate_short_ref(record["sdk_version_ref"], "artifact", "sdk_version_ref")
-    if "error_label" in record:
-        normalized["error_label"] = _validate_error_label(record["error_label"], "artifact")
+    if "final_output_ref" in recognized:
+        normalized["final_output_ref"] = _validate_short_ref(
+            recognized["final_output_ref"], "artifact", "final_output_ref"
+        )
+    if "agent_ref" in recognized:
+        normalized["agent_ref"] = _validate_short_ref(recognized["agent_ref"], "artifact", "agent_ref")
+    if "sdk_version_ref" in recognized:
+        normalized["sdk_version_ref"] = _validate_short_ref(
+            recognized["sdk_version_ref"], "artifact", "sdk_version_ref"
+        )
+    if "error_label" in recognized:
+        normalized["error_label"] = _validate_error_label(recognized["error_label"], "artifact")
 
     has_error_label = "error_label" in normalized
     if normalized["outcome"] == "completed" and has_error_label:
@@ -319,8 +327,7 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _build_event(record: dict[str, Any], assay_run_id: str, import_time: str) -> dict[str, Any]:
-    normalized = _normalized_record(record)
+def _build_event(normalized: dict[str, Any], assay_run_id: str, import_time: str) -> dict[str, Any]:
     data = {
         "external_system": "livekit_agents",
         "external_surface": "testing-run-result",
