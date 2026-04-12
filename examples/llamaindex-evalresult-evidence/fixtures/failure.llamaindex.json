@@ -1,0 +1,12 @@
+{
+  "schema": "llamaindex.evaluation-result.export.v1",
+  "framework": "llamaindex",
+  "surface": "evaluation_result",
+  "timestamp": "2026-04-12T19:55:00Z",
+  "evaluator_name": "faithfulness",
+  "outcome": "failed",
+  "passing": false,
+  "score": 0.18,
+  "feedback": "Answer introduces unsupported claims beyond the retrieved context.",
+  "target_ref": "response:turn-4"
+}

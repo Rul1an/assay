@@ -1,0 +1,12 @@
+{
+  "schema": "llamaindex.evaluation-result.export.v1",
+  "framework": "llamaindex",
+  "surface": "evaluation_result",
+  "timestamp": "2026-04-12T19:50:00Z",
+  "evaluator_name": "answer_relevancy",
+  "outcome": "passed",
+  "passing": true,
+  "score": 0.91,
+  "feedback": "Response stays on task and answers the query directly.",
+  "target_ref": "response:turn-3"
+}
