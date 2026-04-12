@@ -1,0 +1,13 @@
+{
+  "schema": "llamaindex.evaluation-result.export.v1",
+  "framework": "llamaindex",
+  "surface": "evaluation_result",
+  "timestamp": "2026-04-12T20:00:00Z",
+  "evaluator_name": "answer_relevancy",
+  "outcome": "passed",
+  "passing": true,
+  "feedback": [
+    "too",
+    "long"
+  ]
+}

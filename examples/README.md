@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [LlamaIndex EvaluationResult Evidence](./llamaindex-evalresult-evidence)
+Map a tiny artifact derived from LlamaIndex's `EvaluationResult` path into
+Assay-shaped external evidence.
+**Focus**: eval-result-first seam, bounded pass/fail, score, and feedback
+only, no imported traces, callbacks, or prompt truth.
+
 ### [LiveKit Agents Testing-Result Evidence](./livekit-runresult-evidence)
 Map a tiny artifact derived from LiveKit Agents'
 `voice.testing.RunResult.events` path into Assay-shaped external evidence.
