@@ -80,6 +80,8 @@ def _normalize_for_hash(value: Any) -> Any:
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("non-finite floats are not valid in canonical JSON")
+        if value.is_integer():
+            return int(value)
         return value
     if isinstance(value, dict):
         return {str(key): _normalize_for_hash(nested) for key, nested in value.items()}
@@ -291,7 +293,7 @@ def main() -> int:
     try:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("w", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True))
+            handle.write(_canonical_json(event))
             handle.write("\n")
     except OSError as exc:
         raise SystemExit(str(exc)) from exc
