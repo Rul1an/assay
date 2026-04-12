@@ -27,6 +27,11 @@ ignore = [
     # rsa: transitive via jsonwebtoken (assay-mcp-server). No safe upgrade; timing sidechannel.
     # JWT verification is server-side; accept risk for MCP auth until jsonwebtoken/rsa offer a fix.
     "RUSTSEC-2023-0071",
+    # rand 0.8.5 is present broadly in the current workspace and transitively via jsonwebtoken/rsa.
+    # This advisory is conditional on a custom logger calling ThreadRng during reseed; the repo does
+    # not implement a custom logger path. Accept temporarily until the workspace and transitive stack
+    # can move to rand >=0.9.3 / >=0.10.1 in a dedicated dependency update.
+    "RUSTSEC-2026-0097",
 ]
 
 # =============================================================================
