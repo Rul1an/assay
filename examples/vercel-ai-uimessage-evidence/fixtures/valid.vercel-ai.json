@@ -1,0 +1,50 @@
+{
+  "schema": "vercel-ai.uimessage-wrapper.export.v1",
+  "framework": "vercel_ai_sdk",
+  "surface": "ui_message_wrapper",
+  "timestamp": "2026-04-12T21:00:00Z",
+  "thread_ref": "chat:travel-demo-01",
+  "stream_protocol": "ui-message-stream-v1",
+  "messages": [
+    {
+      "id": "msg_user_1",
+      "role": "user",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Find two good flight options from Amsterdam to Lisbon next Friday.",
+          "state": "done"
+        }
+      ]
+    },
+    {
+      "id": "msg_assistant_1",
+      "role": "assistant",
+      "metadata": {
+        "createdAt": 1744491600000,
+        "model": "gpt-4.1-mini",
+        "totalTokens": 312
+      },
+      "parts": [
+        {
+          "type": "tool-searchFlights",
+          "toolCallId": "call_flights_01",
+          "state": "output-available",
+          "input": {
+            "from": "AMS",
+            "to": "LIS",
+            "date": "2026-04-17"
+          },
+          "output": {
+            "resultRef": "flight-search:ams-lis:top-2"
+          }
+        },
+        {
+          "type": "text",
+          "text": "I found two reasonable options from Amsterdam to Lisbon for next Friday.",
+          "state": "done"
+        }
+      ]
+    }
+  ]
+}

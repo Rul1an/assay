@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [Vercel AI SDK UIMessage Evidence](./vercel-ai-uimessage-evidence)
+Map a tiny artifact derived from Vercel AI SDK's `UIMessage` path into
+Assay-shaped external evidence.
+**Focus**: message-first seam, bounded text and tool parts only, no imported
+traces, telemetry, or backend truth.
+
 ### [LlamaIndex EvaluationResult Evidence](./llamaindex-evalresult-evidence)
 Map a tiny artifact derived from LlamaIndex's `EvaluationResult` path into
 Assay-shaped external evidence.

@@ -1,0 +1,47 @@
+{
+  "schema": "vercel-ai.uimessage-wrapper.export.v1",
+  "framework": "vercel_ai_sdk",
+  "surface": "ui_message_wrapper",
+  "timestamp": "2026-04-12T21:05:00Z",
+  "thread_ref": "chat:weather-demo-01",
+  "stream_protocol": "ui-message-stream-v1",
+  "messages": [
+    {
+      "id": "msg_user_1",
+      "role": "user",
+      "parts": [
+        {
+          "type": "text",
+          "text": "What is the weather in Utrecht tomorrow?",
+          "state": "done"
+        }
+      ]
+    },
+    {
+      "id": "msg_assistant_1",
+      "role": "assistant",
+      "metadata": {
+        "createdAt": 1744491900000,
+        "model": "gpt-4.1-mini",
+        "totalTokens": 148
+      },
+      "parts": [
+        {
+          "type": "tool-getWeather",
+          "toolCallId": "call_weather_01",
+          "state": "output-error",
+          "input": {
+            "city": "Utrecht",
+            "date": "2026-04-13"
+          },
+          "errorText": "upstream-timeout"
+        },
+        {
+          "type": "text",
+          "text": "I could not fetch the weather just now.",
+          "state": "done"
+        }
+      ]
+    }
+  ]
+}

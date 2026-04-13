@@ -1,0 +1,20 @@
+{
+  "schema": "vercel-ai.uimessage-wrapper.export.v1",
+  "framework": "vercel_ai_sdk",
+  "surface": "ui_message_wrapper",
+  "timestamp": "2026-04-12T21:08:00Z",
+  "thread_ref": "chat:file-demo-01",
+  "messages": [
+    {
+      "id": "msg_assistant_1",
+      "role": "assistant",
+      "parts": [
+        {
+          "type": "file",
+          "mediaType": "application/pdf",
+          "filename": "quote.pdf"
+        }
+      ]
+    }
+  ]
+}
