@@ -34,6 +34,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P15 x402 Requirement / Verification Evidence Interop (Q2 2026)](./PLAN-P15-X402-REQUIREMENT-VERIFICATION-EVIDENCE-2026q2.md) — planned requirement-and-verification-first x402 lane built around `PaymentRequired` plus `VerifyResponse`, not settlement or fulfillment truth
 - [PLAN — P16 LiveKit Agents Testing-Result / RunEvent Evidence Interop (Q2 2026)](./PLAN-P16-LIVEKIT-AGENTS-TESTING-RESULT-RUNEVENT-EVIDENCE-2026q2.md) — planned testing-result-first LiveKit lane built around `voice.testing.RunResult.events`, not telemetry or transcript export
 - [PLAN — P17 LlamaIndex EvaluationResult Evidence Interop (Q2 2026)](./PLAN-P17-LLAMAINDEX-EVALUATIONRESULT-EVIDENCE-2026q2.md) — planned eval-result-first LlamaIndex lane built around bounded `EvaluationResult` evidence, not traces or callback exports
+- [PLAN — P18 Vercel AI SDK UIMessage Evidence Interop (Q2 2026)](./PLAN-P18-VERCEL-AI-SDK-UIMESSAGE-EVIDENCE-2026q2.md) — planned message-first Vercel AI SDK lane built around bounded `UIMessage` artifacts, with show-and-tell-first outward strategy rather than question-first
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
