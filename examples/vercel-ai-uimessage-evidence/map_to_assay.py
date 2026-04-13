@@ -353,6 +353,9 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"artifact: missing required keys: {joined}")
+    unknown = set(record) - TOP_LEVEL_KEYS
+    if unknown:
+        raise ValueError(f"artifact: unsupported top-level keys: {', '.join(sorted(unknown))}")
 
     if record["schema"] != EXTERNAL_SCHEMA:
         raise ValueError(f"artifact: expected schema {EXTERNAL_SCHEMA}, got {record['schema']}")
@@ -380,8 +383,6 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     if "sdk_version_ref" in record:
         normalized["sdk_version_ref"] = _validate_short_id(record["sdk_version_ref"], "artifact", "sdk_version_ref")
 
-    # Explicitly ignore unknown top-level extras so the sample stays tolerant to
-    # future UIMessage-level growth while keeping the bounded seam projection small.
     return normalized
 
 
