@@ -128,10 +128,7 @@ def _compute_assay_content_hash(data: dict[str, Any]) -> str:
     return _sha256(content_hash_input)
 
 
-def _parse_rfc3339_utc(value: Optional[str]) -> str:
-    if value is None:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
+def _parse_rfc3339_datetime(value: str) -> datetime:
     normalized = value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
@@ -139,6 +136,14 @@ def _parse_rfc3339_utc(value: Optional[str]) -> str:
         raise ValueError(f"invalid RFC3339 timestamp: {value}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_rfc3339_utc(value: Optional[str]) -> str:
+    if value is None:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    parsed = _parse_rfc3339_datetime(value)
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -256,7 +261,8 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     if record["surface"] != "compacted_message_snapshot_artifact":
         raise ValueError("artifact: surface must be compacted_message_snapshot_artifact")
 
-    started_at = _parse_rfc3339_utc(str(record["started_at"]))
+    started_at_dt = _parse_rfc3339_datetime(str(record["started_at"]))
+    started_at = started_at_dt.isoformat().replace("+00:00", "Z")
     terminal_event = _validate_non_empty_string(record["terminal_event"], "artifact", "terminal_event")
     if terminal_event not in ALLOWED_TERMINAL_EVENTS:
         allowed = ", ".join(sorted(ALLOWED_TERMINAL_EVENTS))
@@ -274,9 +280,10 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
     if "finished_at" in record:
-        finished_at = _parse_rfc3339_utc(str(record["finished_at"]))
-        if finished_at < started_at:
+        finished_at_dt = _parse_rfc3339_datetime(str(record["finished_at"]))
+        if finished_at_dt < started_at_dt:
             raise ValueError("artifact: finished_at must not be earlier than started_at")
+        finished_at = finished_at_dt.isoformat().replace("+00:00", "Z")
         normalized["finished_at"] = finished_at
     if "parent_run_id_ref" in record:
         normalized["parent_run_id_ref"] = _validate_opaque_ref(
