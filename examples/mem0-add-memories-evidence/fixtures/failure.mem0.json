@@ -1,0 +1,18 @@
+{
+  "schema": "mem0.add-memories.results.export.v1",
+  "framework": "mem0",
+  "surface": "add_memories_results",
+  "timestamp": "2026-04-13T12:05:00Z",
+  "operation": "add_memories",
+  "output_format": "v1.1",
+  "run_ref": "mem0-run-20260413-01",
+  "results": [
+    {
+      "id": "mem_contact_pref_02",
+      "event": "UPDATE",
+      "data": {
+        "memory": "Dealer prefers outreach by phone after 16:00."
+      }
+    }
+  ]
+}

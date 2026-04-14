@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [Mem0 Add Memories Evidence](./mem0-add-memories-evidence)
+Map a tiny artifact derived from Mem0's `Add Memories` result path into
+Assay-shaped external evidence.
+**Focus**: mutation-result-first seam, bounded event labels and memory text
+only, no imported search, graph, or profile truth.
+
 ### [Vercel AI SDK UIMessage Evidence](./vercel-ai-uimessage-evidence)
 Map a tiny artifact derived from Vercel AI SDK's `UIMessage` path into
 Assay-shaped external evidence.

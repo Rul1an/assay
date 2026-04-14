@@ -1,0 +1,17 @@
+{
+  "schema": "mem0.add-memories.results.export.v1",
+  "framework": "mem0",
+  "surface": "add_memories_results",
+  "timestamp": "2026-04-13T12:00:00Z",
+  "operation": "add_memories",
+  "output_format": "v1.1",
+  "results": [
+    {
+      "id": "mem_ev_pref_01",
+      "event": "ADD",
+      "data": {
+        "memory": "Dealer wants more EV inventory leads this quarter."
+      }
+    }
+  ]
+}
