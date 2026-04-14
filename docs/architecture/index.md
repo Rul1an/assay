@@ -37,6 +37,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P17 LlamaIndex EvaluationResult Evidence Interop (Q2 2026)](./PLAN-P17-LLAMAINDEX-EVALUATIONRESULT-EVIDENCE-2026q2.md) — planned eval-result-first LlamaIndex lane built around bounded `EvaluationResult` evidence, not traces or callback exports
 - [PLAN — P18 Vercel AI SDK UIMessage Evidence Interop (Q2 2026)](./PLAN-P18-VERCEL-AI-SDK-UIMESSAGE-EVIDENCE-2026q2.md) — planned message-first Vercel AI SDK lane built around bounded `UIMessage` artifacts, with show-and-tell-first outward strategy rather than question-first
 - [PLAN — P19 Mem0 Add Memories Result Evidence Interop (Q2 2026)](./PLAN-P19-MEM0-ADD-MEMORIES-RESULT-EVIDENCE-2026q2.md) — planned mutation-result-first Mem0 lane built around bounded `Add Memories` results, not retrieval or profile truth
+- [PLAN — P20 AG-UI Compacted Message Snapshot Artifact Evidence Interop (Q2 2026)](./PLAN-P20-AG-UI-COMPACTED-MESSAGE-SNAPSHOT-ARTIFACT-EVIDENCE-2026q2.md) — planned compacted-message-history AG-UI lane built around one bounded run envelope and one `MESSAGES_SNAPSHOT`, not general serialization or full stream fidelity
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs

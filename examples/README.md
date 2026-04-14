@@ -16,6 +16,13 @@ Assay-shaped external evidence.
 **Focus**: mutation-result-first seam, bounded event labels and memory text
 only, no imported search, graph, or profile truth.
 
+### [AG-UI Compacted Message Snapshot Evidence](./ag-ui-compacted-message-snapshot-evidence)
+Map a tiny artifact derived from one bounded AG-UI run envelope with one
+compacted `MESSAGES_SNAPSHOT` seam into Assay-shaped external evidence.
+**Focus**: compacted-message-history-first seam, bounded thread/run anchors and
+text-bearing messages only, no imported state sync, replay, or full stream
+truth.
+
 ### [Vercel AI SDK UIMessage Evidence](./vercel-ai-uimessage-evidence)
 Map a tiny artifact derived from Vercel AI SDK's `UIMessage` path into
 Assay-shaped external evidence.

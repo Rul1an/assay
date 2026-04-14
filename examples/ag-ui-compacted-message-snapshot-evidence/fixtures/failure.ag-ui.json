@@ -1,0 +1,25 @@
+{
+  "schema": "ag-ui.compacted-message-snapshot.export.v1",
+  "framework": "ag_ui",
+  "surface": "compacted_message_snapshot_artifact",
+  "thread_id_ref": "thread_support_001",
+  "run_id_ref": "run_support_002",
+  "parent_run_id_ref": "run_support_001",
+  "started_at": "2026-04-14T20:05:00Z",
+  "messages": [
+    {
+      "id": "msg_user_003",
+      "role": "user",
+      "content": "Please try again and tell me if anything failed."
+    },
+    {
+      "id": "msg_assistant_003",
+      "role": "assistant",
+      "content": "I started the lookup, but the upstream run ended before I could finish."
+    }
+  ],
+  "terminal_event": "RUN_ERROR",
+  "finished_at": "2026-04-14T20:05:01Z",
+  "error_code": "lookup_interrupted",
+  "error_message": "agent run ended before a final reply was completed"
+}

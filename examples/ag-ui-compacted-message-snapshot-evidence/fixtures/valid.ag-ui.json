@@ -1,0 +1,27 @@
+{
+  "schema": "ag-ui.compacted-message-snapshot.export.v1",
+  "framework": "ag_ui",
+  "surface": "compacted_message_snapshot_artifact",
+  "thread_id_ref": "thread_support_001",
+  "run_id_ref": "run_support_001",
+  "started_at": "2026-04-14T20:00:00Z",
+  "messages": [
+    {
+      "id": "msg_user_001",
+      "role": "user",
+      "content": "Can you check where my refund is?"
+    },
+    {
+      "id": "msg_assistant_001",
+      "role": "assistant",
+      "content": "I can help with that."
+    },
+    {
+      "id": "msg_assistant_002",
+      "role": "assistant",
+      "content": "Your refund is processing and should settle in 3 to 5 business days."
+    }
+  ],
+  "terminal_event": "RUN_FINISHED",
+  "finished_at": "2026-04-14T20:00:02Z"
+}
