@@ -1,0 +1,19 @@
+{
+  "schema": "ag-ui.compacted-message-snapshot.export.v1",
+  "framework": "ag_ui",
+  "surface": "compacted_message_snapshot_artifact",
+  "thread_id_ref": "thread_support_002",
+  "run_id_ref": "run_support_003",
+  "started_at": "2026-04-14T20:10:00Z",
+  "messages": [
+    {
+      "id": "msg_user_004",
+      "role": "user",
+      "content": "Show me the latest status."
+    }
+  ],
+  "terminal_event": "RUN_FINISHED",
+  "state": {
+    "status": "should-not-be-here"
+  }
+}
