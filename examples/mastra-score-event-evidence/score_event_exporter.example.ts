@@ -76,27 +76,70 @@ export class AssayLegacyScoreAttachExporter {
   }
 }
 
+function normalizeClassifier(value: unknown): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  const normalized = String(value)
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/\s+/g, '_')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+function normalizeScoreSource(value: unknown): AssayScoreArtifact['score_source'] | undefined {
+  const normalized = normalizeClassifier(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized === 'live' || normalized === 'trace' || normalized === 'experiment') {
+    return normalized;
+  }
+
+  return undefined;
+}
+
 function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
   const targetRef = score.spanId ?? score.traceId ?? score.correlationContext?.entityId;
   if (!targetRef) {
     throw new Error('Score event is missing a bounded target anchor');
   }
 
+  const scorerId = score.scorerId;
+  const scorerName = score.scorerName ?? score.scorerId;
+  if (!scorerId && !scorerName) {
+    throw new Error('Score event is missing a scorer identity');
+  }
+
+  const targetEntityType = normalizeClassifier(score.targetEntityType);
+  const scoreSource = normalizeScoreSource(score.scoreSource);
+
   return {
     schema: 'mastra.score-event.export.v1',
     framework: 'mastra',
     surface: 'observability_score_event',
     timestamp: score.timestamp.toISOString(),
-    scorer_id: score.scorerId,
-    scorer_name: score.scorerName ?? score.scorerId,
+    ...(scorerId ? { scorer_id: scorerId } : {}),
+    ...(scorerName ? { scorer_name: scorerName } : {}),
     score: score.score,
     target_ref: targetRef,
-    ...(score.targetEntityType ? { target_entity_type: String(score.targetEntityType).toLowerCase() } : {}),
+    ...(targetEntityType ? { target_entity_type: targetEntityType } : {}),
     ...(score.reason ? { reason: score.reason } : {}),
     ...(score.traceId ? { trace_id_ref: score.traceId } : {}),
     ...(score.spanId ? { span_id_ref: score.spanId } : {}),
     ...(score.scorerVersion ? { scorer_version: score.scorerVersion } : {}),
-    ...(score.scoreSource ? { score_source: score.scoreSource } : {}),
+    ...(scoreSource ? { score_source: scoreSource } : {}),
     ...(score.metadata ? { metadata_ref: 'metadata:redacted' } : {}),
   };
 }
