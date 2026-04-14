@@ -24,7 +24,7 @@ gh api repos/OWNER/REPO/commits/REF --jq .sha
 | `dtolnay/rust-toolchain` | `@nightly` | `881ba7bf39a41cda34ac9e123fb41b44ed08232f` |
 | `Swatinem/rust-cache` | `@v2` | `779680da715d629ac1d338a641029a2f4372abb5` |
 | `mozilla-actions/sccache-action` | `@v0.0.6` | `9e326ebed976843c9932b3aa0e021c6f50310eb4` |
-| `bencherdev/bencher` | `@main` | `451ec1124b6d2c5797ac27d9a572233eb308e9d2` |
+| `bencherdev/bencher` | `@v0.6.2` | `0f8f620172ccd6225d40a7590598eb7b41718af8` |
 | `softprops/action-gh-release` | `@v2` | `a06a81a03ee405af7f2048a818ed3f03bbf83c7b` |
 | `github/codeql-action/upload-sarif` | `@v3` | `439137e1b50c27ba9e2f9befc93e43091b449c34` |
 | `dorny/test-reporter` | `@v1` | `d61b558e8df85cb60d09ca3e5b09653b4477cea7` |
