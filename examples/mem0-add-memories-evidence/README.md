@@ -44,11 +44,11 @@ richer memory, search, and graph surfaces, but v1 keeps the evidence boundary
 honest without pretending that a live store-backed memory harness is already
 the smallest stable path.
 
-The checked-in fixtures also omit `user_ref`, `agent_ref`, `run_ref`, and
-every other optional top-level reference on purpose. Those fields may arrive
-later in a bounded sample shape, but v1 keeps the seam on one operation label,
-one bounded `results` list, one event label per result, and one short memory
-string.
+The checked-in fixtures do not rely on optional top-level references to define
+the seam. Fields such as `user_ref` and `agent_ref` are omitted in this sample
+corpus, and `run_ref` may appear in a bounded artifact without changing the
+import shape. V1 still keeps the seam on one operation label, one bounded
+`results` list, one event label per result, and one short memory string.
 
 The repo corpus uses `failure` naming to match the established examples
 convention. In this lane, that file still represents a valid bounded
