@@ -1,8 +1,12 @@
 # Mastra Scorer Evidence Sample
 
-This example turns one tiny frozen artifact derived from Mastra's current
-scorer / experiment workflow into bounded, reviewable external evidence for
-Assay.
+This example turns one tiny frozen artifact derived from Mastra's earlier
+scorer / experiment workflow seam hypothesis into bounded, reviewable external
+evidence for Assay.
+
+It is kept as a historical comparison point. The newer Mastra recut lives in
+`../mastra-score-event-evidence/` and follows the maintainer-guided
+`ObservabilityExporter` / `ScoreEvent` path instead.
 
 It is intentionally small:
 
@@ -28,8 +32,8 @@ It is intentionally small:
 
 ## Why this seam
 
-This sample treats a frozen serialized artifact derived from Mastra's current
-scorer and experiment path as the best first seam hypothesis for Mastra.
+This sample treats a frozen serialized artifact derived from Mastra's earlier
+scorer and experiment path as the first seam hypothesis we tested for Mastra.
 
 That keeps the first slice on scorer-result artifacts only. It does not turn
 the sample into:

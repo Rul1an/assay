@@ -34,11 +34,17 @@ path into Assay-shaped external evidence.
 **Focus**: requirement-and-verification-first seam, requirement-side amount and
 asset context only, no imported settlement or fulfillment truth.
 
+### [Mastra ScoreEvent Evidence](./mastra-score-event-evidence)
+Map a tiny artifact derived from Mastra's `ObservabilityExporter` /
+`ScoreEvent` path into Assay-shaped external evidence.
+**Focus**: score-event-first seam, bounded `ExportedScore`-derived fields only,
+no imported traces, dashboards, or broader observability truth.
+
 ### [Mastra Scorer Evidence](./mastra-scorer-evidence)
-Map a tiny artifact derived from Mastra's current scorer / experiment path into
-Assay-shaped external evidence.
+Map a tiny artifact derived from Mastra's earlier scorer / experiment seam
+hypothesis into Assay-shaped external evidence.
 **Focus**: scorer-result-first seam, bounded score and experiment context only,
-no imported trace or Studio truth.
+kept for historical comparison with the newer score-event-first Mastra lane.
 
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.

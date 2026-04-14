@@ -1,0 +1,14 @@
+{
+  "schema": "mastra.score-event.export.v1",
+  "framework": "mastra",
+  "surface": "observability_score_event",
+  "timestamp": "2026-04-14T09:20:00Z",
+  "scorer_name": "Hallucination Guard",
+  "score": 0.18,
+  "target_ref": "span:demo-42-1",
+  "reason": "Answer cited an unsupported feature.",
+  "trace_id_ref": "trace:demo-42",
+  "span_id_ref": "span:demo-42-1",
+  "scorer_version": "2026-04-rc1",
+  "score_source": "live"
+}
