@@ -550,7 +550,7 @@ jobs:
           sed -i "s|__CHANGELOG_URL__|https://github.com/${REPO}/blob/main/CHANGELOG.md|g" release_notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: Assay ${{ steps.version.outputs.version }}
           tag_name: ${{ steps.version.outputs.version }}
@@ -661,7 +661,7 @@ jobs:
           python-version: '3.12'
 
       - name: Build wheels
-        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: assay-python-sdk
           target: ${{ matrix.target }}
@@ -694,7 +694,7 @@ jobs:
           path: dist
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           packages-dir: dist
           skip-existing: true  # Idempotent: skip already-published versions
