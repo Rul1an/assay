@@ -47,6 +47,11 @@ model. AG-UI messages, lifecycle events, lineage fields, and state management
 surfaces are richer than this sample. V1 keeps the evidence boundary honest
 without pretending that Assay now models AG-UI serialization as a whole.
 
+The top-level `schema`, `framework`, and `surface` fields in these fixtures are
+sample wrapper metadata. They help identify the frozen artifact and the seam
+hypothesis, but they are not a claim that AG-UI itself ships one canonical
+wrapper with those same labels.
+
 ## Current upstream seam
 
 This sample models the current snapshot seam as carefully as we can see it
@@ -72,6 +77,10 @@ snapshot-emission path upstream currently exposes.
 That proof work is still open. The checked-in fixtures are sample artifacts,
 not yet captured end-to-end live-proof artifacts.
 
+If `parent_run_id_ref` is absent in a fixture, that does not prove the run had
+no lineage. It only means this first sample does not require lineage to make
+the artifact reviewable.
+
 ## Why the message subset is smaller than AG-UI messages
 
 AG-UI messages can carry more than this sample allows.
@@ -94,6 +103,15 @@ V1 keeps each message to the smallest portable text-bearing subset:
 
 That keeps the lane on compacted portable message history, not on AG-UI's full
 conversation-state model.
+
+For v1, this is a plain-text normalized subset only. If an upstream path emits
+richer AG-UI message content, we treat that as out of scope for this sample
+rather than partially importing it and pretending the boundary stayed small.
+
+The run-envelope timestamps in this sample also stay modest on purpose.
+`started_at` and `finished_at` label the frozen compacted artifact only. They
+do not claim transport ordering, replay completeness, or end-to-end AG-UI
+timing truth beyond this bounded envelope.
 
 ## Map the checked-in valid artifact
 
@@ -133,6 +151,11 @@ rejection, not just parser hygiene:
 - a free top-level `state` bag would silently widen the claim surface
 - if we need state later, that should be a different lane or an explicitly
   narrowed future slice
+
+The same rule applies to event-family drift more broadly. For v1, any frozen
+artifact that smuggles in additional AG-UI event families beyond one bounded
+run envelope, one `MESSAGES_SNAPSHOT`, and one terminal event should be treated
+as malformed rather than partially imported.
 
 ## Important boundary
 

@@ -161,6 +161,10 @@ The first artifact should be built around:
 - exactly one bounded `MESSAGES_SNAPSHOT`
 - exactly one `RUN_FINISHED` or `RUN_ERROR`
 
+For v1, any frozen artifact containing additional AG-UI event families beyond
+`RUN_STARTED`, one `MESSAGES_SNAPSHOT`, and one terminal event should be
+treated as malformed rather than partially imported.
+
 Important framing rule:
 
 > The sample should use a frozen artifact derived from one serialized AG-UI run
@@ -201,6 +205,20 @@ The first sample may include:
 - `error_message`
 
 ### 8.3 Important field boundaries
+
+#### Wrapper self-description
+
+`schema`, `framework`, and `surface` are useful in the sample, but they are
+wrapper self-description first, not the core truth of the evidence seam.
+
+In v1:
+
+- `schema` identifies the frozen sample artifact shape
+- `framework` names the upstream protocol context
+- `surface` names the bounded seam hypothesis
+
+They must not be overread as proof that upstream itself ships one canonical
+export wrapper with those same classification labels.
 
 #### Envelope identity
 
@@ -247,6 +265,10 @@ Each v1 message should stay on the narrowest portable subset:
 Nothing else should enter the first sample unless one real implementation
 forces it.
 
+For v1, `messages` accepts only a plain-text, role-labeled, ordered normalized
+subset. Richer AG-UI message content remains out of scope even if upstream
+supports it.
+
 #### Message content
 
 The first sample should stay on the smallest honest message subset.
@@ -263,6 +285,26 @@ Not allowed in v1:
 - multimodal blobs
 - frontend activity events
 - arbitrary vendor metadata bags
+
+This is a bounded projection choice, not a claim that richer upstream AG-UI
+messages are invalid. It only means they remain out of this first Assay lane.
+
+#### Envelope timestamps
+
+`started_at` and `finished_at` are allowed because the frozen artifact needs a
+small run envelope.
+
+They must be read as observed timestamp labels for the bounded artifact only.
+
+They must not be overread as:
+
+- transport-order truth
+- replay-completeness proof
+- end-to-end protocol timing guarantees
+- proof that no earlier or later AG-UI events existed outside the artifact
+
+In other words, these timestamps label the compacted envelope; they do not
+certify full AG-UI ordering or completeness semantics beyond it.
 
 #### `terminal_event`
 
@@ -302,6 +344,10 @@ If present, it must stay:
 - informational only
 
 It must not cause the v1 sample to claim time-travel or branch-replay truth.
+
+Absence of `parent_run_id_ref` must not be interpreted as proof that no branch
+lineage exists. In v1, it is optional because reviewability does not require
+lineage to be present in every frozen artifact.
 
 ## 9. Explicit non-goals
 
@@ -385,6 +431,10 @@ Recommended first artifact shape:
 - optional `finished_at`
 - optional bounded lineage pointer
 - optional short error context only when `terminal_event=RUN_ERROR`
+
+The frozen artifact must not smuggle in additional AG-UI event families beside
+that bounded envelope. If it does, the v1 posture is malformed, not
+"best-effort partial import."
 
 First sample path:
 
