@@ -108,10 +108,6 @@ For the sample contract:
 - `target_ref` is a sample-level bounded anchor derived from exporter payload
   anchors, not a claim that Mastra publishes one official `targetRef` field
 
-`target_ref` is an Assay-side bounded anchor derived from upstream exporter
-anchors, not evidence that Mastra publishes one canonical `targetRef` export
-field.
-
 ## 4. Why exporter-first score events are the right recut
 
 The maintainer signal now points to a more concrete seam than the earlier
@@ -307,6 +303,10 @@ Why this is not stricter:
 
 So the sample should require one bounded scorer identity, not pretend both are
 already proven universal on the live `ScoreEvent` path.
+
+The checked-in corpus should still preserve one passing `scorer_name`-only
+path as long as that branch remains part of the supported sample contract,
+even though the first live callback only proved the stronger `scorer_id` path.
 
 In v1 they must stay small:
 
@@ -521,7 +521,7 @@ artifact that is explicitly marked as:
 
 ## 9.2 Live capture objective
 
-The next step is intentionally boring:
+The completed boring proof step was:
 
 > capture one real `onScoreEvent` payload from a minimal local Mastra run, keep
 > the raw payload intact, and compare it to the current frozen sample before we
@@ -582,6 +582,8 @@ Capture-backed decision:
 - keep `addScoreToTrace(...)` only as live co-fire migration context
 - narrow the checked-in sample fixture set toward the thinner field profile
   actually seen live
+- keep one passing `scorer_name`-only fixture path for contract coverage while
+  that branch stays supported
 - keep richer fields such as `reason`, `scorer_name`, and `score_id_ref`
   optional until another real callback proves them
 - keep `target_ref` as a derived Assay anchor instead of pretending it is an

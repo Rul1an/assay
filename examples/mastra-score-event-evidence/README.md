@@ -103,8 +103,11 @@ In particular:
   `spanId`, `traceId`, and `correlationContext`
 - `score_id_ref` stays optional and absent from the checked-in fixtures until a
   real callback proves it live
-- `reason` and `scorer_name` remain allowed by the sample contract, but they
-  are no longer baked into the checked-in fixtures without live proof
+- the stronger live-backed baseline uses `scorer_id`
+- one passing `scorer_name`-only fixture is still kept on purpose because that
+  branch remains part of the supported sample contract
+- `reason` remains allowed by the sample contract, but it is no longer baked
+  into the checked-in fixtures without live proof
 
 ## Terminology alignment
 
