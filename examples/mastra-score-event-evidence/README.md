@@ -10,8 +10,8 @@ It is intentionally small:
 - keep the sample to one strong score artifact, one weak score artifact, and
   one malformed case
 - map the two good artifacts into Assay-shaped placeholder envelopes
-- keep scorer identity, numeric score, target anchor, and timestamp at the
-  center
+- keep scorer identity, numeric score, one derived target anchor, and
+  timestamp at the center
 - treat trace/span anchors as optional refs only
 - keep traces, dashboards, broader observability payloads, and metadata blobs
   out of Assay truth
@@ -54,12 +54,57 @@ What that means in practice:
   `addScoreToTrace(...)`
 - Mastra has now explicitly called `addScoreToTrace(...)` the old path and
   said it will be deprecated soon
-- this sample still does **not** claim that one live `onScoreEvent` callback
-  has already been captured in the exact frozen fixture shape checked in here
+- this sample still does **not** claim that every live `onScoreEvent` callback
+  will match the exact frozen fixture shape checked in here
 
 So this is a bounded mapping lane for the `ScoreEvent` exporter reality we are
 targeting, not a claim that every live Mastra score callback has already been
 proven against the frozen fixture shape.
+
+## Live callback proof status
+
+On 2026-04-15 we captured one real local `onScoreEvent` from a deliberately
+tiny Mastra harness.
+
+That same run also emitted one legacy `addScoreToTrace(...)` call, so the live
+story is now a bit more precise than the docs alone:
+
+- the forward typed `ScoreEvent` path is real in a modern local run
+- the older legacy callback can still co-fire in the same run
+
+The real `onScoreEvent` payload was thinner than the richer frozen sample
+artifact we had before. In that callback we observed:
+
+- `timestamp`
+- `traceId`
+- `spanId`
+- `scorerId`
+- `scoreSource`
+- `score`
+- `scoreTraceId`
+- `correlationContext`
+- `metadata`
+
+And we did **not** observe:
+
+- `scorerName`
+- `reason`
+- top-level `targetEntityType`
+- `scoreId`
+- one native upstream `targetRef`
+
+That is why the checked-in valid and failure fixtures now stay close to the
+thinner field set actually seen in one live callback. They are still bounded
+derived external-consumer artifacts, not raw callback dumps.
+
+In particular:
+
+- `target_ref` is an Assay-side bounded reduction over exporter anchors such as
+  `spanId`, `traceId`, and `correlationContext`
+- `score_id_ref` stays optional and absent from the checked-in fixtures until a
+  real callback proves it live
+- `reason` and `scorer_name` remain allowed by the sample contract, but they
+  are no longer baked into the checked-in fixtures without live proof
 
 ## Terminology alignment
 
@@ -78,8 +123,9 @@ That leads to one careful but useful distinction:
 - but Mastra now calls that the old path and points external consumers to
   `ScoreEvent` instead
 
-So this sample is maintainer-guided and type-backed around `ScoreEvent`, but
-still pre-proof until we capture one real live callback and compare the shape.
+So this sample is maintainer-guided and type-backed around `ScoreEvent`, and it
+is now backed by one real live callback without pretending that one proof makes
+the fixture shape universal.
 
 This sample uses both names carefully:
 
@@ -94,10 +140,9 @@ This sample uses both names carefully:
 - `target_ref` is a sample-level bounded anchor derived from the exporter
   payload, not a claim that upstream publishes one official `targetRef` field
 
-The checked-in fixtures do not yet include `score_id_ref`, because this sample
-has not captured a live callback carrying that field yet. But the sample now
-keeps the slot bounded and ready instead of pretending the new anchor does not
-exist.
+The checked-in fixtures do not yet include `score_id_ref`, because the first
+live callback did not carry that field. But the sample now keeps the slot
+bounded and ready instead of pretending the new anchor does not exist.
 
 One small but important distinction:
 

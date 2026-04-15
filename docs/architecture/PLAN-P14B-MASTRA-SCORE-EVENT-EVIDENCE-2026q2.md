@@ -1,8 +1,9 @@
 # PLAN — P14b Mastra ScoreEvent / ExportedScore Evidence Interop (2026 Q2)
 
-- **Date:** 2026-04-13
+- **Date:** 2026-04-15
 - **Owner:** Evidence / Product
-- **Status:** Docs-backed sample implementation; runtime capture pending
+- **Status:** Docs-backed sample implementation merged; one local live
+  `onScoreEvent` captured; capture-backed sample recut active
 - **Scope (current repo state):** Recut the Mastra lane after maintainer
   feedback on `mastra-ai/mastra#15206`, and carry that recut into a bounded
   sample implementation. This slice still does not freeze a new upstream
@@ -107,6 +108,10 @@ For the sample contract:
 - `target_ref` is a sample-level bounded anchor derived from exporter payload
   anchors, not a claim that Mastra publishes one official `targetRef` field
 
+`target_ref` is an Assay-side bounded anchor derived from upstream exporter
+anchors, not evidence that Mastra publishes one canonical `targetRef` export
+field.
+
 ## 4. Why exporter-first score events are the right recut
 
 The maintainer signal now points to a more concrete seam than the earlier
@@ -203,16 +208,55 @@ What has changed in our understanding:
 - Mastra maintainers also explicitly call `addScoreToTrace(...)` the old path
   and say it will be deprecated soon
 
+Public Mastra references currently expose both the older
+`addScoreToTrace(...)` hook shape and the newer `onScoreEvent(ScoreEvent)`
+path; live callback capture is the tie-breaker for sample truth.
+
 So `P14b` should now be framed as:
 
 - **`ScoreEvent`-first by design**
-- still pre-proof on one captured live callback
+- backed by one captured live callback, but not over-generalized beyond that
+  single proof
 - careful not to overread every richer typed field as already proven in one
   frozen external artifact
 
 The older `addScoreToTrace(...)` path still matters only as migration context.
 It explains why earlier code and docs looked thinner, but it is no longer the
 seam this lane should bless going forward.
+
+One local proof run now exists as well.
+
+On 2026-04-15, a minimal local Node 22 harness using public Mastra packages
+captured:
+
+- exactly one real `onScoreEvent` payload
+- exactly one legacy `addScoreToTrace(...)` call in the same run
+
+That does two useful things for `P14b`:
+
+- it proves the forward `ScoreEvent` path is live in a modern local run
+- it also proves the legacy path still co-fires in at least one modern local
+  run, so we should not write as if it has already disappeared
+
+The captured `onScoreEvent` payload contained:
+
+- `timestamp`
+- `traceId`
+- `spanId`
+- `scorerId`
+- `scoreSource`
+- `score`
+- `scoreTraceId`
+- `correlationContext`
+- `metadata`
+
+The same real callback did **not** contain:
+
+- `scorerName`
+- `reason`
+- top-level `targetEntityType`
+- `scoreId`
+- one native upstream `targetRef`
 
 ## 7. v1 artifact contract
 
@@ -257,7 +301,7 @@ without a bounded identity for the scorer that produced it.
 Why this is not stricter:
 
 - the typed `ExportedScore` shape includes both identity concepts
-- the current lane is still pre-proof on one captured live callback
+- the current lane is only backed by one captured live callback
 - the checked-in sample should not overclaim that one field is universally
   present until a real callback proves it
 
@@ -311,6 +355,12 @@ Not allowed in v1:
 - output payloads
 - URLs into dashboards or traces
 
+The 2026-04-15 local `onScoreEvent` capture did not emit one native upstream
+`targetRef` field. The checked-in sample therefore keeps `target_ref` as an
+Assay-side bounded reduction over exporter anchors such as `spanId`,
+`traceId`, and `correlationContext`, not as a claim about one official Mastra
+target-ref export field.
+
 #### `target_entity_type`
 
 This field is optional in v1.
@@ -318,8 +368,12 @@ This field is optional in v1.
 Why:
 
 - the richer typed `ExportedScore` shape includes `targetEntityType`
-- this lane still has not captured one real callback and proven that field
-  present on the exact path we are targeting
+- the first real callback did not prove that field present on the exact path we
+  are targeting
+
+The first local `onScoreEvent` capture exposed `correlationContext.entityType`
+rather than one top-level `targetEntityType` field, which is another reason to
+keep this optional and derived only when the reduction is still honest.
 
 So this field is still useful when present, but it should not be a hard
 required field until a real capture proves it is consistently emitted on the
@@ -349,13 +403,11 @@ The checked-in fixtures do not need to include this field yet. But the sample
 contract should keep a bounded slot ready for it instead of pretending the
 emerging anchor does not matter.
 
-It must remain:
+Treat `score_id_ref` as maintainer-guided and capture-pending until one real
+exporter callback proves it live.
 
-- short
-- categorical
-- reviewable
-
-Not allowed in v1:
+The 2026-04-15 local capture did not emit `scoreId`, so `score_id_ref`
+remains optional and absent from the checked-in fixture corpus.
 
 - full output body
 - full request/response pair
@@ -456,7 +508,8 @@ Until then, `P14b` should be described as:
 - maintainer-guided
 - docs-backed
 - type-backed where possible
-- pre-proof on the live callback path
+- backed by one live callback on the typed path, but still non-normative beyond
+  that single proof
 
 If that discovery pass is too heavy or too unstable, fall back to a frozen
 artifact that is explicitly marked as:
@@ -465,6 +518,276 @@ artifact that is explicitly marked as:
 - docs-backed where possible
 - typed and exporter-derived
 - non-normative
+
+## 9.2 Live capture objective
+
+The next step is intentionally boring:
+
+> capture one real `onScoreEvent` payload from a minimal local Mastra run, keep
+> the raw payload intact, and compare it to the current frozen sample before we
+> strengthen any upstream claim.
+
+The goal is **not** to build a general Mastra adapter.
+
+The goal is also **not** to prove every optional typed field.
+
+The goal is only to answer these concrete questions:
+
+- what exact object reaches `onScoreEvent` in a real local run
+- which current sample fields are truly present vs merely type-visible
+- whether one narrower or newer anchor such as `scoreId` is already live
+- whether the current sample is too rich, too thin, or roughly right
+
+### Capture result (2026-04-15)
+
+That objective has now been completed once with a deliberately tiny local
+harness:
+
+- Node `22.22.2`
+- `@mastra/core` `1.25.0`
+- `@mastra/observability` `1.9.1`
+- one agent
+- one root-registered scorer
+- one custom exporter implementing both `onScoreEvent(event)` and
+  `addScoreToTrace(...)` for diagnostics only
+
+Observed result:
+
+- one real `onScoreEvent` payload was captured
+- one legacy `addScoreToTrace(...)` call also fired in the same run
+- the live callback was thinner than the richer frozen sample artifact
+
+Presence / absence from that real `onScoreEvent` callback:
+
+| Field | Seen in one local callback? | Notes |
+| --- | --- | --- |
+| `timestamp` | yes | top-level inside `score` |
+| `traceId` | yes | live exporter anchor |
+| `spanId` | yes | live exporter anchor |
+| `scorerId` | yes | strongest scorer identity seen live |
+| `scorerName` | no | not emitted in this run |
+| `score` | yes | numeric |
+| `reason` | no | not emitted in this run |
+| `scoreSource` | yes | emitted as `live` |
+| `scoreTraceId` | yes | live-only extra anchor, not yet used in the sample |
+| `targetEntityType` | no | only `correlationContext.entityType` was present |
+| `scoreId` | no | not emitted in this run |
+| `metadata` | yes | free-form bag, kept out of canonical truth |
+| `correlationContext` | yes | useful for reduction, not imported wholesale |
+| native `targetRef` | no | Assay derives `target_ref` instead |
+
+Capture-backed decision:
+
+- keep the lane `ScoreEvent`-first
+- keep `addScoreToTrace(...)` only as live co-fire migration context
+- narrow the checked-in sample fixture set toward the thinner field profile
+  actually seen live
+- keep richer fields such as `reason`, `scorer_name`, and `score_id_ref`
+  optional until another real callback proves them
+- keep `target_ref` as a derived Assay anchor instead of pretending it is an
+  upstream field
+
+## 9.3 Minimal runtime target
+
+Use the smallest local Mastra setup that can deterministically produce one
+score event.
+
+The preferred target shape is:
+
+- one tiny local Mastra app
+- one agent or workflow that can complete without cloud-only dependencies
+- one scorer enabled
+- one custom `ObservabilityExporter`
+- one score-producing invocation
+
+Hard constraints:
+
+- local-only when possible
+- no Studio dependency
+- no observability sink beyond the custom exporter
+- no full trace export
+- no dashboard setup
+- no multi-scorer matrix unless one scorer fails to emit
+
+Preferred environment assumptions:
+
+- Node 22.x
+- the smallest Mastra package set needed to run one scored flow
+- a pinned upstream commit or package version recorded in the capture notes
+
+## 9.4 Capture harness shape
+
+The harness should stay outside the canonical sample contract.
+
+Treat it as a disposable proof tool, not as a new product surface.
+
+Recommended harness pieces:
+
+- one tiny Mastra app entrypoint
+- one scorer configuration
+- one `ObservabilityExporter` implementation with:
+  - `onScoreEvent(event)`
+  - a no-op tracing export method only if the interface requires it
+- one file sink that writes the raw score payload exactly once
+- one short run script that executes the scored path and exits cleanly
+
+The exporter should write:
+
+- the raw `event` payload as received
+- a timestamp for the capture itself
+- the exact Mastra version or commit under test
+- the exact entrypoint used
+
+The exporter should **not**:
+
+- normalize fields before saving the raw capture
+- drop unknown fields before saving
+- enrich the payload with Assay wrappers
+- emit traces, logs, or metrics into the same capture artifact
+
+## 9.5 Proposed execution sequence
+
+### Step 1 — Build the smallest runnable harness
+
+Create a temporary local Mastra harness with one scorer and one exporter.
+
+Success condition:
+
+- the app starts
+- one invocation path completes locally
+- the exporter file sink is reachable
+
+If this step fails because current Mastra setup is too heavy or unstable, stop
+and record the blocker rather than widening the lane.
+
+### Step 2 — Emit one real score event
+
+Run the harness once with one deterministic-ish input that is known to trigger
+the scorer.
+
+Success condition:
+
+- exactly one raw score-event payload is written
+- the payload is clearly associated with `onScoreEvent`
+
+If multiple score events fire, keep the first run but note the multiplicity.
+Do not collapse or average the events at capture time.
+
+### Step 3 — Freeze the raw capture
+
+Preserve the raw payload exactly as emitted before any Assay-side reduction.
+
+The raw capture should be saved separately from the sample fixture so we keep a
+clear line between:
+
+- upstream-emitted payload
+- Assay-frozen external-consumer artifact
+
+### Step 4 — Build a field presence table
+
+From the raw payload, record a simple presence/absence table for:
+
+- `scoreId`
+- `scorerId`
+- `scorerName`
+- `score`
+- `reason`
+- `timestamp`
+- `traceId`
+- `spanId`
+- `targetEntityType`
+- `scoreSource`
+- `scorerVersion`
+- `metadata`
+- any correlation / target anchor fields
+
+This is the point where we decide what is:
+
+- required in the sample
+- optional in the sample
+- still out of scope even if present
+
+### Step 5 — Compare raw capture to the frozen sample
+
+Compare the captured payload to the current sample contract with three
+questions only:
+
+- did we require anything that the live payload does not actually support
+- did we omit one bounded field that is now clearly part of the live seam
+- did we accidentally model any field as stronger than the live payload
+  justifies
+
+Do not turn this into a “how much more can we include” exercise.
+
+### Step 6 — Re-cut only if evidence forces it
+
+Allowed outcomes:
+
+- no contract change needed
+- one field becomes optional
+- one field becomes newly available and bounded
+- one field is renamed to stay closer to upstream reality
+
+Not allowed:
+
+- widening into traces
+- widening into logs or metrics
+- importing raw metadata blobs as truth
+- inventing a broad Mastra export story from one successful run
+
+## 9.6 Deliverables from the capture pass
+
+The capture pass is only complete when it leaves behind:
+
+- one raw captured `onScoreEvent` payload
+- one short note describing the harness and Mastra version used
+- one presence/absence table
+- one written comparison against the current frozen sample
+- one decision:
+  - sample unchanged
+  - sample narrowed
+  - sample extended in one bounded way
+
+If the raw payload cannot be safely checked into the repo, keep a redacted
+internal note with the same field table and explicitly say what was redacted
+and why.
+
+## 9.7 Repo update plan after capture
+
+Now that one local capture exists, the follow-up change in Assay should stay
+very small.
+
+Allowed repo updates:
+
+- tweak fixture fields
+- tighten README wording
+- tighten or narrow required vs optional fields
+- add one new bounded optional anchor such as `score_id_ref` if the live
+  payload proves it
+- add one short note saying the sample is now backed by one real callback
+  capture
+
+Avoid:
+
+- a second large plan rewrite
+- broad adapter work
+- a new outward post before the sample comparison is finished
+
+## 9.8 Stop conditions
+
+Stop and reassess if any of these happen:
+
+- the smallest local harness still requires broad observability or Studio setup
+- `onScoreEvent` does not fire in a modern local run and only legacy pathways
+  do
+- the live payload shape differs so much from the frozen sample that a small
+  bounded recut is no longer honest
+- the only reliable capture path requires us to pull in traces or other broad
+  observability payloads
+
+If we hit one of those, the next action should be a short internal note and, if
+needed, one very small outward clarification question. It should not be a
+silent broadening of the lane.
 
 ## 10. Concrete repo deliverable
 
@@ -516,16 +839,18 @@ The first recut sample should still follow the established corpus pattern.
 
 One score-event artifact with:
 
-- one scorer id / name
+- one scorer id
 - one bounded score
-- one bounded target entity type
+- one bounded derived target anchor
+- optional trace/span refs when they naturally exist
 
 ### 12.2 Failure
 
 One weaker score artifact with:
 
+- the same thin field profile as the valid artifact where possible
 - at least one scorer identity field still present
-- lower score or bounded failure-class score label
+- lower score
 - still a valid score event, not an infrastructure failure
 
 ### 12.3 Malformed
