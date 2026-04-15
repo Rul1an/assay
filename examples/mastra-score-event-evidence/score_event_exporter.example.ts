@@ -86,6 +86,24 @@ type ForwardCompatibleExportedScore = ExportedScore & {
   scoreId?: string;
 };
 
+function normalizeOpaqueRef(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const opaqueRefPattern = /^[A-Za-z0-9:_\-.]+$/;
+  if (!opaqueRefPattern.test(normalized) || normalized.includes('://')) {
+    throw new Error('Score event is missing a bounded opaque score id');
+  }
+
+  return normalized;
+}
+
 function normalizeClassifier(value: unknown): string | undefined {
   if (value == null) {
     return undefined;
@@ -128,11 +146,12 @@ function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
   }
 
   const scorerId = score.scorerId;
-  const scorerName = score.scorerName ?? score.scorerId;
+  const scorerName = score.scorerName;
   if (!scorerId && !scorerName) {
     throw new Error('Score event is missing a scorer identity');
   }
 
+  const scoreIdRef = normalizeOpaqueRef(forwardScore.scoreId);
   const targetEntityType = normalizeClassifier(score.targetEntityType);
   const scoreSource = normalizeScoreSource(score.scoreSource);
 
@@ -141,7 +160,7 @@ function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
     framework: 'mastra',
     surface: 'observability_score_event',
     timestamp: score.timestamp.toISOString(),
-    ...(forwardScore.scoreId ? { score_id_ref: forwardScore.scoreId } : {}),
+    ...(scoreIdRef ? { score_id_ref: scoreIdRef } : {}),
     ...(scorerId ? { scorer_id: scorerId } : {}),
     ...(scorerName ? { scorer_name: scorerName } : {}),
     score: score.score,
