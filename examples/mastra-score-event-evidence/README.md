@@ -1,7 +1,8 @@
 # Mastra ScoreEvent / ExportedScore Evidence Sample
 
-This example turns one tiny frozen artifact derived from Mastra's score
-exporter path into bounded, reviewable external evidence for Assay.
+This example turns one tiny frozen artifact derived from Mastra's typed
+score-event exporter path into bounded, reviewable external evidence for
+Assay.
 
 It is intentionally small:
 
@@ -19,9 +20,9 @@ It is intentionally small:
 
 - `map_to_assay.py`: turns one tiny Mastra score artifact into an
   Assay-shaped placeholder envelope
-- `score_event_exporter.example.ts`: small exporter-side sketch that shows both
-  the richer typed `onScoreEvent` path and the currently wired
-  `addScoreToTrace(...)` path
+- `score_event_exporter.example.ts`: small exporter-side sketch centered on the
+  typed `onScoreEvent` path, with a legacy `addScoreToTrace(...)` note kept
+  only as migration context
 - `fixtures/valid.mastra.json`: one higher-score artifact
 - `fixtures/failure.mastra.json`: one lower-score artifact that intentionally
   uses the thinner scorer-name-only shape
@@ -36,51 +37,54 @@ It is intentionally small:
 This sample follows the maintainer-guided Mastra recut:
 
 - `ObservabilityExporter` is the narrow integration point
-- `ScoreEvent` / `ExportedScore` is the richer typed score shape
-- `addScoreToTrace(...)` is the currently wired scorer-hook callback in
-  upstream code today
+- `ScoreEvent` / `ExportedScore` is the primary typed score seam
+- older `addScoreToTrace(...)` mentions are legacy context, not the forward
+  seam this sample is trying to bless
 
 ## Current upstream seam
 
 This sample models the current score-export reality as carefully as we can see
-it today.
+it today, but it is now deliberately `ScoreEvent`-first.
 
 What that means in practice:
 
-- upstream types and maintainer guidance point to `ScoreEvent` /
-  `ExportedScore`
-- the currently wired scorer-hook path visible in code still calls
+- current Mastra observability code and maintainer guidance both point toward
+  `ScoreEvent` / `ExportedScore`
+- some older hooks, docs, and exporter helpers still mention
   `addScoreToTrace(...)`
-- this sample does **not** claim that Mastra already delivers a live
-  `onScoreEvent` callback in the exact frozen fixture shape checked in here
+- Mastra has now explicitly called `addScoreToTrace(...)` the old path and
+  said it will be deprecated soon
+- this sample still does **not** claim that one live `onScoreEvent` callback
+  has already been captured in the exact frozen fixture shape checked in here
 
-So this is a bounded mapping lane for the current exporter reality, not a
-claim that every live Mastra score callback already looks like the richer typed
-shape.
+So this is a bounded mapping lane for the `ScoreEvent` exporter reality we are
+targeting, not a claim that every live Mastra score callback has already been
+proven against the frozen fixture shape.
 
 ## Terminology alignment
 
-Mastra's public exporter story is usually explained in terms of the exporter
-score hook and payload fields such as `traceId`, `spanId`, `score`, `reason`,
-`scorerName`, and `metadata`.
+Mastra's public exporter story is now best read through `ScoreEvent` carrying
+`ExportedScore`.
 
-The maintainer reply on `#15206` also named the typed internal seam more
-explicitly as `ScoreEvent` carrying `ExportedScore`.
+The older `addScoreToTrace(...)` payload still matters only as historical
+context, because it explains why some older code and docs looked thinner than
+the typed score event seam.
 
-Current upstream code adds one important nuance:
+That leads to one careful but useful distinction:
 
 - the score types define `ScoreEvent` and `ExportedScore`
 - `ObservabilityEvents` exposes `onScoreEvent`
-- but the scorer hook currently calls `exporter.addScoreToTrace(...)` with a
-  narrower payload: `traceId`, `spanId`, `score`, `reason`, `scorerName`, and
-  `metadata`
+- `addScoreToTrace(...)` still exists in some codepaths and docs
+- but Mastra now calls that the old path and points external consumers to
+  `ScoreEvent` instead
 
-So this sample is still docs-backed and type-backed, not yet a real captured
-exporter callback. That is why the contract below stays careful about what is
-truly required.
+So this sample is maintainer-guided and type-backed around `ScoreEvent`, but
+still pre-proof until we capture one real live callback and compare the shape.
 
 This sample uses both names carefully:
 
+- `score_id_ref` is reserved for Mastra's upcoming `ScoreId` anchor when that
+  field lands on `ExportedScore`
 - `trace_id_ref` maps to `traceId`
 - `span_id_ref` maps to `spanId`
 - `score` maps to `score`
@@ -90,9 +94,10 @@ This sample uses both names carefully:
 - `target_ref` is a sample-level bounded anchor derived from the exporter
   payload, not a claim that upstream publishes one official `targetRef` field
 
-The current scorer-hook path does not appear to guarantee `scorer_id` or
-`target_entity_type`, so this sample now treats them as optional while still
-accepting them when the richer typed score-event shape is available.
+The checked-in fixtures do not yet include `score_id_ref`, because this sample
+has not captured a live callback carrying that field yet. But the sample now
+keeps the slot bounded and ready instead of pretending the new anchor does not
+exist.
 
 One small but important distinction:
 
@@ -130,9 +135,8 @@ The sample also includes one tiny exporter-side sketch in
 `score_event_exporter.example.ts`. It is not a production adapter. It only
 shows the smallest part of the exporter path we care about:
 
-- receive `ScoreEvent` when the typed path is available
-- or receive the thinner `addScoreToTrace(...)` payload on the current
-  scorer-hook path
+- receive `ScoreEvent` on the primary typed path
+- keep one historical `addScoreToTrace(...)` sketch only as a migration note
 - project one bounded frozen artifact for external evidence
 
 ## Map the checked-in valid artifact
@@ -196,8 +200,8 @@ Additional caps in this sample:
 
 - at least one scorer identity field must be present: `scorer_id` or
   `scorer_name`
-- `target_ref`, `trace_id_ref`, `span_id_ref`, and `metadata_ref` must stay
-  opaque ids, not URLs
+- `score_id_ref`, `target_ref`, `trace_id_ref`, `span_id_ref`, and
+  `metadata_ref` must stay opaque ids, not URLs
 - `reason` must stay short and single-line
 - `score` stays numeric in v1
 
