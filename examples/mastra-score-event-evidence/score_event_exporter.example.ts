@@ -5,6 +5,7 @@ type AssayScoreArtifact = {
   framework: 'mastra';
   surface: 'observability_score_event';
   timestamp: string;
+  score_id_ref?: string;
   scorer_id?: string;
   scorer_name?: string;
   score: number;
@@ -19,15 +20,14 @@ type AssayScoreArtifact = {
 };
 
 /**
- * Tiny illustrative sketch of the two adjacent exporter seams we care about.
+ * Tiny illustrative sketch of the primary exporter seam we care about.
  *
- * This is not a production adapter. It shows:
- * - the richer typed `onScoreEvent` path described by Mastra's score-event types
- * - the currently wired `addScoreToTrace` path used by the scorer hook
+ * This is not a production adapter. It shows the typed `onScoreEvent` path
+ * that Mastra now points external score consumers toward.
  *
- * The second path is important because it is thinner: it currently drops
- * fields such as `scorerId` and `targetEntityType`, so an external consumer
- * should not assume those are always present until a real capture confirms it.
+ * A legacy `addScoreToTrace` sketch is left below only as migration context
+ * because Mastra has explicitly called that pathway old and pending
+ * deprecation.
  */
 export class AssayScoreCaptureExporter {
   readonly scores: ExportedScore[] = [];
@@ -43,6 +43,12 @@ export class AssayScoreCaptureExporter {
   }
 }
 
+/**
+ * Historical / transitional sketch only.
+ *
+ * Keep this only to show why older docs and code samples may still mention a
+ * thinner score-attach payload. It is not the target seam for P14 anymore.
+ */
 export class AssayLegacyScoreAttachExporter {
   readonly scores: AssayScoreArtifact[] = [];
 
@@ -74,6 +80,28 @@ export class AssayLegacyScoreAttachExporter {
     this.scores.length = 0;
     return drained;
   }
+}
+
+type ForwardCompatibleExportedScore = ExportedScore & {
+  scoreId?: string;
+};
+
+function normalizeOpaqueRef(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const opaqueRefPattern = /^[A-Za-z0-9:_\-.]+$/;
+  if (!opaqueRefPattern.test(normalized) || normalized.includes('://')) {
+    throw new Error('Score event is missing a bounded opaque score id');
+  }
+
+  return normalized;
 }
 
 function normalizeClassifier(value: unknown): string | undefined {
@@ -111,17 +139,19 @@ function normalizeScoreSource(value: unknown): AssayScoreArtifact['score_source'
 }
 
 function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
+  const forwardScore = score as ForwardCompatibleExportedScore;
   const targetRef = score.spanId ?? score.traceId ?? score.correlationContext?.entityId;
   if (!targetRef) {
     throw new Error('Score event is missing a bounded target anchor');
   }
 
   const scorerId = score.scorerId;
-  const scorerName = score.scorerName ?? score.scorerId;
+  const scorerName = score.scorerName;
   if (!scorerId && !scorerName) {
     throw new Error('Score event is missing a scorer identity');
   }
 
+  const scoreIdRef = normalizeOpaqueRef(forwardScore.scoreId);
   const targetEntityType = normalizeClassifier(score.targetEntityType);
   const scoreSource = normalizeScoreSource(score.scoreSource);
 
@@ -130,6 +160,7 @@ function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
     framework: 'mastra',
     surface: 'observability_score_event',
     timestamp: score.timestamp.toISOString(),
+    ...(scoreIdRef ? { score_id_ref: scoreIdRef } : {}),
     ...(scorerId ? { scorer_id: scorerId } : {}),
     ...(scorerName ? { scorer_name: scorerName } : {}),
     score: score.score,

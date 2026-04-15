@@ -186,35 +186,33 @@ Important framing rule:
 
 ## 6.1 Current upstream code reality
 
-The maintainer guidance points to `ObservabilityExporter` + `ScoreEvent` +
-`ExportedScore`, but the current upstream code shows one important asymmetry:
+The current upstream picture is now clearer than it was during the first
+re-cut.
+
+What still holds:
 
 - the score types define `ScoreEvent` and `ExportedScore`
 - `ObservabilityEvents` exposes `onScoreEvent`
-- the scorer hook currently calls `exporter.addScoreToTrace(...)`
-- that current callback shape is narrower than `ExportedScore`
+- the observability bus and several exporters already route score traffic
+  through `onScoreEvent`
 
-At the current upstream revision reviewed for this recut, the active
-`addScoreToTrace(...)` callback carries:
+What has changed in our understanding:
 
-- `traceId`
-- `spanId`
-- `score`
-- `reason`
-- `scorerName`
-- `metadata`
+- Mastra maintainers now explicitly point external consumers at
+  `ObservabilityExporter` + `ScoreEvent` + `ExportedScore`
+- Mastra maintainers also explicitly call `addScoreToTrace(...)` the old path
+  and say it will be deprecated soon
 
-Notably, that path does **not** obviously guarantee:
+So `P14b` should now be framed as:
 
-- `scorerId`
-- `targetEntityType`
-- `scoreSource`
-- `correlationContext`
+- **`ScoreEvent`-first by design**
+- still pre-proof on one captured live callback
+- careful not to overread every richer typed field as already proven in one
+  frozen external artifact
 
-So the current P14b sample must stay honest about two adjacent truths:
-
-- the richer typed seam exists in upstream types and maintainer guidance
-- the currently wired exporter callback visible in code is thinner
+The older `addScoreToTrace(...)` path still matters only as migration context.
+It explains why earlier code and docs looked thinner, but it is no longer the
+seam this lane should bless going forward.
 
 ## 7. v1 artifact contract
 
@@ -238,6 +236,7 @@ And it should require **at least one scorer identity field**:
 
 The first recut sample may include:
 
+- `score_id_ref`
 - `scorer_id`
 - `scorer_name`
 - `target_entity_type`
@@ -257,12 +256,13 @@ without a bounded identity for the scorer that produced it.
 
 Why this is not stricter:
 
-- the richer typed `ExportedScore` shape includes `scorerId`
-- the currently wired `addScoreToTrace(...)` callback in upstream code only
-  obviously guarantees `scorerName`
+- the typed `ExportedScore` shape includes both identity concepts
+- the current lane is still pre-proof on one captured live callback
+- the checked-in sample should not overclaim that one field is universally
+  present until a real callback proves it
 
 So the sample should require one bounded scorer identity, not pretend both are
-always present on the live exporter path.
+already proven universal on the live `ScoreEvent` path.
 
 In v1 they must stay small:
 
@@ -318,12 +318,36 @@ This field is optional in v1.
 Why:
 
 - the richer typed `ExportedScore` shape includes `targetEntityType`
-- the currently wired `addScoreToTrace(...)` callback does not obviously
-  guarantee it
+- this lane still has not captured one real callback and proven that field
+  present on the exact path we are targeting
 
 So this field is still useful when present, but it should not be a hard
 required field until a real capture proves it is consistently emitted on the
 path we are actually targeting.
+
+#### `score_id_ref`
+
+This field is optional in v1.
+
+Mastra maintainers have now called out `ScoreId` as an upcoming addition to the
+typed `ExportedScore` object, and it is likely to be the cleanest bounded
+anchor back into Mastra's own score plane.
+
+For Assay this should stay:
+
+- opaque
+- short
+- anchor-only
+
+Not allowed:
+
+- score lookup URLs
+- resolver paths
+- embedded score payloads
+
+The checked-in fixtures do not need to include this field yet. But the sample
+contract should keep a bounded slot ready for it instead of pretending the
+emerging anchor does not matter.
 
 It must remain:
 
@@ -392,21 +416,20 @@ The score event is one bounded external signal, not a framework truth import.
 
 This recut should not ship another purely speculative sample.
 
-Before the next sample PR, do one bounded discovery pass:
+Before closing this lane, do one bounded discovery pass:
 
 1. build a tiny real Mastra app with one scorer enabled
-2. register a custom `ObservabilityExporter`
+2. register a custom `ObservabilityExporter` implementing `onScoreEvent`
 3. capture one real `ScoreEvent`
 4. inspect the resulting `ExportedScore` shape
-5. inspect both the richer typed score-event path and the currently wired
-   `addScoreToTrace(...)` callback when possible
-6. reduce that shape to the smallest honest external-consumer artifact
+5. reduce that shape to the smallest honest external-consumer artifact
+6. only keep any `addScoreToTrace(...)` note if a real run still shows it as
+   historical compatibility context
 
 Discovery is only done when we have:
 
 - one captured real exporter callback payload
-- explicit note on whether the capture came from `onScoreEvent` or
-  `addScoreToTrace(...)`
+- explicit note that the capture came from `onScoreEvent`
 - one presence/absence table for the fields we call required vs optional
 - confirmation that the required sample fields are not just guessed from docs
 - at least one negative example showing an optional field truly absent, such as
@@ -420,8 +443,7 @@ cleaner.
 This lane is only complete when all of the following are true:
 
 - one live exporter callback payload has been captured from a real Mastra run
-- the capture path is named explicitly: `onScoreEvent` or
-  `addScoreToTrace(...)`
+- the capture path is explicitly the typed `onScoreEvent` path
 - the current required vs optional field split has been checked against that
   real capture
 - the frozen fixtures, README, and plan have been updated if the live payload
@@ -557,6 +579,7 @@ This recut does not:
 - [PLAN — P14 Mastra Scorer / Experiment-Result Evidence Interop](./PLAN-P14-MASTRA-SCORER-EXPERIMENT-RESULT-EVIDENCE-2026q2.md)
 - [Mastra issue #15206](https://github.com/mastra-ai/mastra/issues/15206)
 - [Maintainer exporter guidance on #15206](https://github.com/mastra-ai/mastra/issues/15206#issuecomment-4238852237)
+- [Maintainer note on `ScoreEvent` as the new path and upcoming `ScoreId`](https://github.com/mastra-ai/mastra/issues/15206#issuecomment-4252212575)
 - [Mastra observability](https://mastra.ai/observability)
 - [Introducing Scorers in Mastra](https://mastra.ai/blog/mastra-scorers)
 - [Change, Run, and Compare with Experiments in Mastra Studio](https://mastra.ai/blog/mastra-experiments)

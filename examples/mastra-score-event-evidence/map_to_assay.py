@@ -26,6 +26,7 @@ REQUIRED_KEYS = (
     "target_ref",
 )
 OPTIONAL_KEYS = {
+    "score_id_ref",
     "scorer_id",
     "scorer_name",
     "target_entity_type",
@@ -226,6 +227,8 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     if scorer_id is None and scorer_name is None:
         raise ValueError("artifact: at least one scorer identity field is required: scorer_id or scorer_name")
 
+    if "score_id_ref" in record:
+        normalized["score_id_ref"] = _validate_opaque_ref(record["score_id_ref"], "artifact", "score_id_ref")
     if scorer_id is not None:
         normalized["scorer_id"] = _validate_short_string(scorer_id, "artifact", "scorer_id")
     if scorer_name is not None:
