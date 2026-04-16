@@ -1,0 +1,23 @@
+{
+  "schema": "stagehand.selector-scoped-extract.export.v1",
+  "framework": "stagehand",
+  "surface": "observe_derived_selector_scoped_extract",
+  "timestamp": "2026-04-16T08:31:00Z",
+  "observe_instruction": "Find the invoice summary card",
+  "extract_instruction": "Extract the invoice number and total due.",
+  "selector_ref": "xpath=/html[1]/body[1]/div[1]/section[1]",
+  "selector_source": "observe",
+  "selector_kind": "xpath",
+  "observe_actions": [
+    {
+      "selector": "xpath=/html[1]/body[1]/div[1]/section[1]",
+      "description": "Invoice summary card",
+      "method": "click",
+      "arguments": []
+    }
+  ],
+  "result": {
+    "invoice_number": "INV-2048",
+    "total_due": "EUR 128.40"
+  }
+}
