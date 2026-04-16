@@ -23,6 +23,13 @@ compacted `MESSAGES_SNAPSHOT` seam into Assay-shaped external evidence.
 text-bearing messages only, no imported state sync, replay, or full stream
 truth.
 
+### [OpenAI Agents JS Approval Interruption Evidence](./openai-agents-js-approval-interruption-evidence)
+Map a tiny artifact derived from one paused OpenAI Agents JS approval run into
+Assay-shaped external evidence.
+**Focus**: approval-interruption-first seam, bounded `interruptions` and one
+resumable continuation anchor only, no imported transcript, session, or full
+`RunState` truth.
+
 ### [Vercel AI SDK UIMessage Evidence](./vercel-ai-uimessage-evidence)
 Map a tiny artifact derived from Vercel AI SDK's `UIMessage` path into
 Assay-shaped external evidence.
