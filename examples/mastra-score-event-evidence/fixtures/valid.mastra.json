@@ -2,13 +2,11 @@
   "schema": "mastra.score-event.export.v1",
   "framework": "mastra",
   "surface": "observability_score_event",
-  "timestamp": "2026-04-14T09:15:00Z",
-  "scorer_id": "answer_relevance",
-  "scorer_name": "Answer Relevance",
+  "timestamp": "2026-04-15T18:53:12.297Z",
+  "scorer_id": "p14-live-capture-scorer",
   "score": 0.92,
-  "target_ref": "span:score-001",
-  "target_entity_type": "agent",
-  "reason": "Grounded answer matched the expected request.",
-  "score_source": "experiment",
-  "metadata_ref": "metadata:score-001"
+  "target_ref": "span:7c4180655970aca2",
+  "trace_id_ref": "59896b9a054b88cb48748463a0f2ab59",
+  "span_id_ref": "7c4180655970aca2",
+  "score_source": "live"
 }
