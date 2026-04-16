@@ -101,6 +101,9 @@ For v1, this is a bounded structured subset only. If an upstream path emits
 richer extraction content, we treat that as out of scope for this sample
 rather than partially importing it and pretending the boundary stayed small.
 
+The checked-in failure fixture uses an incomplete result bag. An empty result
+bag is also still a valid v1 failure shape for this lane.
+
 ## Map the checked-in valid artifact
 
 ```bash

@@ -106,6 +106,9 @@ def _normalize_for_hash(value: Any) -> Any:
 
 
 def _canonical_json(value: Any) -> str:
+    # This sample keeps the fixture corpus inside the same small deterministic
+    # JSON profile the other interop samples use. It is not a full RFC 8785 /
+    # JCS implementation for arbitrary JSON inputs.
     normalized = _normalize_for_hash(value)
     return json.dumps(
         normalized,
@@ -215,8 +218,6 @@ def _validate_result_value(value: Any, line_label: str, field_name: str) -> Any:
 def _validate_result(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("artifact: result must be an object")
-    if not value:
-        raise ValueError("artifact: result must be a non-empty object")
     if len(value) > MAX_RESULT_KEYS:
         raise ValueError(f"artifact: result must contain at most {MAX_RESULT_KEYS} fields")
 
