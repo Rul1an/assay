@@ -23,6 +23,13 @@ compacted `MESSAGES_SNAPSHOT` seam into Assay-shaped external evidence.
 text-bearing messages only, no imported state sync, replay, or full stream
 truth.
 
+### [Stagehand Selector-Scoped Extract Evidence](./stagehand-selector-scoped-extract-evidence)
+Map a tiny artifact derived from one observe-derived selector plus one
+selector-scoped extract result into Assay-shaped external evidence.
+**Focus**: selector-scoped extraction-first seam, bounded selector anchor and
+small structured result only, no imported snapshots, runtime truth, or full
+observe planning truth.
+
 ### [OpenAI Agents JS Approval Interruption Evidence](./openai-agents-js-approval-interruption-evidence)
 Map a tiny artifact derived from one paused OpenAI Agents JS approval run into
 Assay-shaped external evidence.
