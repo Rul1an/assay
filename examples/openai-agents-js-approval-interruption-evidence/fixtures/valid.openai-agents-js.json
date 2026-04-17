@@ -1,0 +1,16 @@
+{
+  "schema": "openai-agents-js.tool-approval-interruption.export.v1",
+  "framework": "openai_agents_js",
+  "surface": "tool_approval_interruption_resumable_state",
+  "timestamp": "2026-04-16T11:32:00Z",
+  "pause_reason": "tool_approval",
+  "interruptions": [
+    {
+      "tool_name": "send_email",
+      "call_id_ref": "call_p22_1",
+      "agent_ref": "agent:P22ApprovalProbe"
+    }
+  ],
+  "resume_state_ref": "runstate:sha256:a136d3d331cff5810ec27c7afc5fed9b0e16ed8608e5e698358eedbffb83fd51",
+  "active_agent_ref": "agent:P22ApprovalProbe"
+}

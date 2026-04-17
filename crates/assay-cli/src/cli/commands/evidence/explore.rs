@@ -226,13 +226,13 @@ fn run_tui_inner(state: &mut AppState) -> Result<()> {
                             state.search_query.pop();
                             state.invalidate_cache();
                         }
-                        KeyCode::Char(c) => {
-                            // Filter control chars and cap length
-                            if !c.is_control() && state.search_query.chars().count() < QUERY_MAX_LEN
-                            {
-                                state.search_query.push(c);
-                                state.invalidate_cache();
-                            }
+                        // Filter control chars and cap length
+                        KeyCode::Char(c)
+                            if !c.is_control()
+                                && state.search_query.chars().count() < QUERY_MAX_LEN =>
+                        {
+                            state.search_query.push(c);
+                            state.invalidate_cache();
                         }
                         _ => {}
                     },
@@ -245,13 +245,13 @@ fn run_tui_inner(state: &mut AppState) -> Result<()> {
                             state.filter_type.pop();
                             state.invalidate_cache();
                         }
-                        KeyCode::Char(c) => {
-                            // Filter control chars and cap length
-                            if !c.is_control() && state.filter_type.chars().count() < QUERY_MAX_LEN
-                            {
-                                state.filter_type.push(c);
-                                state.invalidate_cache();
-                            }
+                        // Filter control chars and cap length
+                        KeyCode::Char(c)
+                            if !c.is_control()
+                                && state.filter_type.chars().count() < QUERY_MAX_LEN =>
+                        {
+                            state.filter_type.push(c);
+                            state.invalidate_cache();
                         }
                         _ => {}
                     },

@@ -46,7 +46,7 @@ fn assert_no_sensitive_headers(requests: &[wiremock::Request]) {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_no_passthrough_e2e() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
