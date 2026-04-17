@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -198,7 +199,7 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
             .into_iter()
             .map(|((kind, value), count)| TopReason { kind, value, count })
             .collect();
-        top_reasons.sort_by(|a, b| b.count.cmp(&a.count));
+        top_reasons.sort_by_key(|reason| Reverse(reason.count));
         top_reasons.truncate(5);
 
         // Suggested Actions
