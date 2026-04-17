@@ -85,13 +85,16 @@ impl Metric for SequenceValidMetric {
         if let Some(rules) = effective_rules {
             for rule in rules {
                 match rule {
-                    assay_core::model::SequenceRule::Require { tool } => {
-                        if !actual_names.contains(tool) {
-                            return Ok(MetricResult::fail(
-                                0.0,
-                                &format!("sequence_valid rule failed: required tool '{}' not found in trace", tool)
-                            ));
-                        }
+                    assay_core::model::SequenceRule::Require { tool }
+                        if !actual_names.contains(tool) =>
+                    {
+                        return Ok(MetricResult::fail(
+                            0.0,
+                            &format!(
+                                "sequence_valid rule failed: required tool '{}' not found in trace",
+                                tool
+                            ),
+                        ));
                     }
                     assay_core::model::SequenceRule::Before { first, then } => {
                         let first_idx = actual_names.iter().position(|n| n == first);
