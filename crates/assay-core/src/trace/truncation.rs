@@ -11,26 +11,24 @@ pub fn truncate_value_with_provenance(v: &mut Value, path: &str) -> Vec<Truncati
     let mut metas = Vec::new();
 
     match v {
-        Value::String(s) => {
-            if s.len() > MAX_STRING_LEN {
-                let original_len = s.len();
-                let hash = hex::encode(Sha256::digest(s.as_bytes()));
+        Value::String(s) if s.len() > MAX_STRING_LEN => {
+            let original_len = s.len();
+            let hash = hex::encode(Sha256::digest(s.as_bytes()));
 
-                let keep = MAX_STRING_LEN.saturating_sub(TRUNCATED_MSG.len());
-                let mut new_s = String::with_capacity(MAX_STRING_LEN);
-                let chars: String = s.chars().take(keep).collect();
-                new_s.push_str(&chars);
-                new_s.push_str(TRUNCATED_MSG);
-                *s = new_s;
+            let keep = MAX_STRING_LEN.saturating_sub(TRUNCATED_MSG.len());
+            let mut new_s = String::with_capacity(MAX_STRING_LEN);
+            let chars: String = s.chars().take(keep).collect();
+            new_s.push_str(&chars);
+            new_s.push_str(TRUNCATED_MSG);
+            *s = new_s;
 
-                metas.push(TruncationMeta {
-                    field: path.to_string(),
-                    original_len,
-                    kept_len: keep + TRUNCATED_MSG.len(),
-                    sha256: hash,
-                    strategy: "head".to_string(),
-                });
-            }
+            metas.push(TruncationMeta {
+                field: path.to_string(),
+                original_len,
+                kept_len: keep + TRUNCATED_MSG.len(),
+                sha256: hash,
+                strategy: "head".to_string(),
+            });
         }
         Value::Array(arr) => {
             for (i, item) in arr.iter_mut().enumerate() {

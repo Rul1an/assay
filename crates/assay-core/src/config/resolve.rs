@@ -8,40 +8,36 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
             Expected::ArgsValid {
                 ref mut policy,
                 ref mut schema,
-            } => {
-                if schema.is_none() {
-                    if let Some(path) = policy {
-                        let policy_content = read_policy_file(base_dir, path)?;
-                        let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
-                            .with_context(|| format!("failed to parse policy YAML: {}", path))?;
+            } if schema.is_none() => {
+                if let Some(path) = policy {
+                    let policy_content = read_policy_file(base_dir, path)?;
+                    let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
+                        .with_context(|| format!("failed to parse policy YAML: {}", path))?;
 
-                        *schema = Some(loaded);
-                        *policy = None;
-                    }
+                    *schema = Some(loaded);
+                    *policy = None;
                 }
             }
             Expected::SequenceValid {
                 ref mut policy,
                 ref mut sequence,
                 ref mut rules,
-            } => {
-                if sequence.is_none() && rules.is_none() {
-                    if let Some(path) = policy {
-                        let policy_content = read_policy_file(base_dir, path)?;
+            } if sequence.is_none() && rules.is_none() => {
+                if let Some(path) = policy {
+                    let policy_content = read_policy_file(base_dir, path)?;
 
-                        // Try parsing as simple sequence first, then rules
-                        if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&policy_content) {
-                            *sequence = Some(loaded);
-                        } else if let Ok(loaded) =
-                            serde_yaml::from_str::<Vec<crate::model::SequenceRule>>(&policy_content)
-                        {
-                            *rules = Some(loaded);
-                        } else {
-                            anyhow::bail!("Failed to parse sequence policy '{}' as either list of strings or rules", path);
-                        }
-
-                        *policy = None;
+                    // Try parsing as simple sequence first, then rules
+                    if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&policy_content) {
+                        *sequence = Some(loaded);
+                    } else if let Ok(loaded) =
+                        serde_yaml::from_str::<Vec<crate::model::SequenceRule>>(&policy_content)
+                    {
+                        *rules = Some(loaded);
+                    } else {
+                        anyhow::bail!("Failed to parse sequence policy '{}' as either list of strings or rules", path);
                     }
+
+                    *policy = None;
                 }
             }
             Expected::Reference { path } => {

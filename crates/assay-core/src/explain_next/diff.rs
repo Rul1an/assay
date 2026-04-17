@@ -391,23 +391,20 @@ impl ExplainerState {
         // Update rule-specific state
         for (rule_idx, rule) in policy.sequences.iter().enumerate() {
             match rule {
-                SequenceRule::NeverAfter { trigger, .. } => {
+                SequenceRule::NeverAfter { trigger, .. }
                     if self.matches(tool, trigger)
-                        && !self.never_after_triggered.contains_key(&rule_idx)
-                    {
-                        self.never_after_triggered.insert(rule_idx, idx);
-                    }
+                        && !self.never_after_triggered.contains_key(&rule_idx) =>
+                {
+                    self.never_after_triggered.insert(rule_idx, idx);
                 }
                 SequenceRule::After {
                     trigger, within, ..
-                } => {
-                    if self.matches(tool, trigger) {
-                        // Start/restart the deadline timer on trigger
-                        // Note: If triggered multiple times, this implementation updates to the LATEST trigger.
-                        // This matches "within N calls after [any] trigger".
-                        self.pending_after
-                            .insert(rule_idx, (idx, idx + *within as usize));
-                    }
+                } if self.matches(tool, trigger) => {
+                    // Start/restart the deadline timer on trigger
+                    // Note: If triggered multiple times, this implementation updates to the LATEST trigger.
+                    // This matches "within N calls after [any] trigger".
+                    self.pending_after
+                        .insert(rule_idx, (idx, idx + *within as usize));
                 }
                 SequenceRule::Sequence { tools, .. } => {
                     let seq_idx = self.sequence_progress.get(&rule_idx).copied().unwrap_or(0);

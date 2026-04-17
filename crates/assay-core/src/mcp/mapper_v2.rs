@@ -210,10 +210,8 @@ pub fn mcp_events_to_v2_trace(
                 // Heuristic: Last response is final output
                 final_output = Some(result.to_string());
             }
-            McpPayload::SessionEnd { .. } => {
-                if final_output.is_none() {
-                    final_output = Some("mcp_session_end".into());
-                }
+            McpPayload::SessionEnd { .. } if final_output.is_none() => {
+                final_output = Some("mcp_session_end".into());
             }
             _ => {}
         }

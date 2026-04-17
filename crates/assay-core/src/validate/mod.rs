@@ -296,23 +296,21 @@ fn validate_strict_requirements(
     // Check Judge -> Need Judge Results
     // Only if expected is Faithfulness or Relevance
     match &tc.expected {
-        Expected::Faithfulness { .. } => {
-            if resp.meta.pointer("/assay/judge/faithfulness").is_none() {
-                missing.push(serde_json::json!({
-                    "requirement": "judge_faithfulness",
-                    "needed_by": ["faithfulness"],
-                    "meta_path": "meta.assay.judge.faithfulness"
-                }));
-            }
+        Expected::Faithfulness { .. }
+            if resp.meta.pointer("/assay/judge/faithfulness").is_none() =>
+        {
+            missing.push(serde_json::json!({
+                "requirement": "judge_faithfulness",
+                "needed_by": ["faithfulness"],
+                "meta_path": "meta.assay.judge.faithfulness"
+            }));
         }
-        Expected::Relevance { .. } => {
-            if resp.meta.pointer("/assay/judge/relevance").is_none() {
-                missing.push(serde_json::json!({
-                    "requirement": "judge_relevance",
-                    "needed_by": ["relevance"],
-                    "meta_path": "meta.assay.judge.relevance"
-                }));
-            }
+        Expected::Relevance { .. } if resp.meta.pointer("/assay/judge/relevance").is_none() => {
+            missing.push(serde_json::json!({
+                "requirement": "judge_relevance",
+                "needed_by": ["relevance"],
+                "meta_path": "meta.assay.judge.relevance"
+            }));
         }
         _ => {}
     }
