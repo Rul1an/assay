@@ -17,6 +17,7 @@ PLACEHOLDER_PRODUCER = "assay-example"
 PLACEHOLDER_PRODUCER_VERSION = "0.1.0"
 PLACEHOLDER_GIT = "sample"
 EXTERNAL_SCHEMA = "openai-agents-js.tool-approval-interruption.export.v1"
+EXTERNAL_SURFACE = "tool_approval_interruption_resumable_state"
 REQUIRED_KEYS = (
     "schema",
     "framework",
@@ -32,6 +33,25 @@ OPTIONAL_KEYS = {
     "metadata_ref",
 }
 TOP_LEVEL_KEYS = set(REQUIRED_KEYS) | OPTIONAL_KEYS
+FORBIDDEN_TOP_LEVEL_KEY_MESSAGES = {
+    "history": "artifact: history is out of scope for pause-only evidence",
+    "session": "artifact: session is out of scope for pause-only evidence",
+    "session_id": "artifact: session identifiers are out of scope for pause-only evidence",
+    "newItems": "artifact: newItems is out of scope for pause-only evidence",
+    "new_items": "artifact: newItems is out of scope for pause-only evidence",
+    "lastResponseId": "artifact: provider continuation fields are out of scope for pause-only evidence",
+    "last_response_id": "artifact: provider continuation fields are out of scope for pause-only evidence",
+    "previousResponseId": "artifact: provider continuation fields are out of scope for pause-only evidence",
+    "previous_response_id": "artifact: provider continuation fields are out of scope for pause-only evidence",
+    "state": "artifact: raw serialized state must not be embedded in the canonical artifact",
+    "run_state": "artifact: raw serialized state must not be embedded in the canonical artifact",
+    "serialized_state": "artifact: raw serialized state must not be embedded in the canonical artifact",
+    "approval_decision": "artifact: resolved approval decision data is out of scope for pause-only evidence",
+    "approval_outcome": "artifact: resolved approval decision data is out of scope for pause-only evidence",
+    "approved": "artifact: resolved approval decision data is out of scope for pause-only evidence",
+    "rejected": "artifact: resolved approval decision data is out of scope for pause-only evidence",
+    "reject_reason": "artifact: resolved approval decision data is out of scope for pause-only evidence",
+}
 ALLOWED_PAUSE_REASONS = {"tool_approval"}
 MAX_TEXT_LENGTH = 180
 MAX_REF_LENGTH = 120
@@ -210,7 +230,22 @@ def _validate_interruptions(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def _raise_on_forbidden_top_level_keys(record: dict[str, Any]) -> None:
+    # This mapper enforces the Assay-side pause-only evidence boundary. It is
+    # the reference/validation counterpart of a corresponding Harness capture
+    # pattern, so it stays intentionally smaller than full runtime or harness
+    # state.
+    present_forbidden = sorted(key for key in record if key in FORBIDDEN_TOP_LEVEL_KEY_MESSAGES)
+    if not present_forbidden:
+        return
+
+    first_key = present_forbidden[0]
+    raise ValueError(FORBIDDEN_TOP_LEVEL_KEY_MESSAGES[first_key])
+
+
 def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
+    _raise_on_forbidden_top_level_keys(record)
+
     unknown = set(record) - TOP_LEVEL_KEYS
     if unknown:
         raise ValueError(f"artifact: unsupported top-level keys: {', '.join(sorted(unknown))}")
@@ -228,8 +263,8 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact: framework must be openai_agents_js")
 
     surface = _validate_classifier(record["surface"], "artifact", "surface")
-    if surface != "tool_approval_interruption_resumable_state":
-        raise ValueError("artifact: surface must be tool_approval_interruption_resumable_state")
+    if surface != EXTERNAL_SURFACE:
+        raise ValueError(f"artifact: surface must be {EXTERNAL_SURFACE}")
 
     pause_reason = _validate_classifier(record["pause_reason"], "artifact", "pause_reason")
     if pause_reason not in ALLOWED_PAUSE_REASONS:
