@@ -59,6 +59,23 @@ Normative framing:
 - `resume_state_ref`
 - `timestamp`
 
+### Context Fields
+
+These three fields help locate the artifact without promoting broader runtime
+truth into the pattern:
+
+- `schema` identifies the concrete artifact contract used by the exporting lane
+  or mapper
+- `framework` identifies the originating runtime family in a stable lowercase
+  token such as `openai_agents_js`
+- `surface` identifies the bounded runtime seam being reduced into evidence,
+  such as `approval_interruption`
+
+`surface` and `pause_reason` are related but not interchangeable:
+
+- `surface` says which runtime seam family this artifact came from
+- `pause_reason` says why this specific artifact is paused
+
 ### Optional
 
 - `active_agent_ref`
@@ -160,11 +177,15 @@ Important warning:
 
 ## Compact Valid Example
 
+The values for `schema`, `framework`, and `surface` below are illustrative.
+They show the intended field roles for the reference pattern; they do not
+declare a repo-wide global registry that every runtime lane must already use.
+
 ```json
 {
-  "schema": "assay.harness.approval-interruption.v1",
-  "framework": "openai_agents_sdk",
-  "surface": "tool_approval",
+  "schema": "assay.paused-hitl-evidence.example.v1",
+  "framework": "openai_agents_js",
+  "surface": "approval_interruption",
   "pause_reason": "tool_approval",
   "interruptions": [
     {

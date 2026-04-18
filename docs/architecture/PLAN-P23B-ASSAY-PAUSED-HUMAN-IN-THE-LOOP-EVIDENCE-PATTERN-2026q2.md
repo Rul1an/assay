@@ -155,6 +155,12 @@ Required:
 - `resume_state_ref`
 - `timestamp`
 
+The contract should treat these fields distinctly:
+
+- `framework` identifies the originating runtime family
+- `surface` identifies the bounded pause-related seam being reduced
+- `pause_reason` identifies why this specific artifact is paused
+
 Optional:
 
 - `active_agent_ref`
@@ -206,11 +212,12 @@ This document should include:
 
 ## 9. Example deliverables
 
-Suggested example area:
+Suggested first example area, reusing the existing `P22` sample lane until a
+runtime-neutral example is warranted:
 
 ```text
 examples/
-  approval-interruption-evidence/
+  openai-agents-js-approval-interruption-evidence/
     README.md
     map_to_assay.py
     fixtures/
