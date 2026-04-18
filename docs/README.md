@@ -150,6 +150,7 @@ assay fix --config eval.yaml
 - [CLI Reference: init](reference/cli/init.md)
 - [CLI Reference: validate](reference/cli/validate.md)
 - [Config Reference](reference/config/index.md)
+- [Paused HITL Evidence Pattern](reference/patterns/paused-hitl-evidence.md)
 - [Evidence Bundles](concepts/traces.md)
 - [Replay & Caching](concepts/replay.md)
 - [GitHub Action Guide](guides/github-action.md)
