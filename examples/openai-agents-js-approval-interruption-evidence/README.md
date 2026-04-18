@@ -8,9 +8,10 @@ reference pattern in
 [`docs/reference/patterns/paused-hitl-evidence.md`](../../docs/reference/patterns/paused-hitl-evidence.md).
 
 That Assay-side shape is intended to stay aligned with the corresponding
-Assay Harness paused approval capture pattern, so this sample should be read
-as the reference/validation counterpart of the same pause-only pattern rather
-than as a standalone schema.
+Assay Harness paused approval capture pattern in the Assay-Harness
+repository, so this sample should be read as the reference/validation
+counterpart of the same pause-only pattern rather than as a standalone
+schema.
 
 It is intentionally small:
 
