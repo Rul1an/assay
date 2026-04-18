@@ -1,0 +1,20 @@
+{
+  "schema": "openai-agents-js.tool-approval-interruption.export.v1",
+  "framework": "openai_agents_js",
+  "surface": "tool_approval_interruption_resumable_state",
+  "timestamp": "2026-04-16T11:40:00Z",
+  "pause_reason": "tool_approval",
+  "interruptions": [
+    {
+      "tool_name": "send_email",
+      "call_id_ref": "call_p23a_bad_history_1"
+    }
+  ],
+  "resume_state_ref": "runstate:bad-history-1",
+  "history": [
+    {
+      "role": "user",
+      "content": "Please email ops with a short status update."
+    }
+  ]
+}

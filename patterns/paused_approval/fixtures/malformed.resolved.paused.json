@@ -1,0 +1,15 @@
+{
+  "schema": "openai-agents-js.tool-approval-interruption.export.v1",
+  "framework": "openai_agents_js",
+  "surface": "tool_approval_interruption_resumable_state",
+  "timestamp": "2026-04-16T11:42:00Z",
+  "pause_reason": "tool_approval",
+  "interruptions": [
+    {
+      "tool_name": "send_email",
+      "call_id_ref": "call_p23a_bad_approved_1"
+    }
+  ],
+  "resume_state_ref": "runstate:bad-approved-1",
+  "approved": true
+}
