@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-04-16T11:32:00Z",
+  "interruptions": [
+    {
+      "toolName": "send_email",
+      "agent": {
+        "name": "P22ApprovalProbe"
+      },
+      "rawItem": {
+        "callId": "call_p23a_raw_1"
+      }
+    }
+  ],
+  "activeAgent": {
+    "name": "P22ApprovalProbe"
+  },
+  "metadataRef": "meta:p23a-raw-openai-agents-js"
+}

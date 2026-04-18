@@ -1,0 +1,1 @@
+{"run":"paused","pauseReason":"tool_approval","agent":"P22ApprovalProbe","interruptions":[{"toolName":"send_email","callId":"call_p23a_raw_1"}]}
