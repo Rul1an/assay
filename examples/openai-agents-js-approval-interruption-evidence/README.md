@@ -3,6 +3,10 @@
 This example turns one tiny frozen artifact derived from a paused OpenAI
 Agents JS approval run into bounded, reviewable external evidence for Assay.
 
+It is also the first concrete example aligned to the Assay-side paused HITL
+reference pattern in
+[`docs/reference/patterns/paused-hitl-evidence.md`](../../docs/reference/patterns/paused-hitl-evidence.md).
+
 It is intentionally small:
 
 - start from one paused approval run only
@@ -49,6 +53,21 @@ The top-level `schema`, `framework`, and `surface` fields in these fixtures
 are sample wrapper metadata. They help identify the frozen artifact and the
 seam hypothesis, but they are not a claim that OpenAI Agents JS itself ships
 one canonical wrapper with those same labels.
+
+Within that wrapper, the fields play different roles:
+
+- `framework` identifies the originating runtime family
+- `surface` identifies the bounded runtime seam this sample reduces
+- `pause_reason` identifies why this specific artifact is paused
+
+For this sample, that means:
+
+- `framework = openai_agents_js`
+- `surface = tool_approval_interruption_resumable_state`
+- `pause_reason = tool_approval`
+
+So `surface` and `pause_reason` are intentionally related, but they are not
+the same field.
 
 ## Current discovery seam
 
@@ -153,9 +172,12 @@ python3 examples/openai-agents-js-approval-interruption-evidence/map_to_assay.py
   --overwrite
 ```
 
-This third command is expected to fail because the malformed fixture smuggles a
-top-level `history` transcript into a lane that intentionally stays smaller
-than transcript truth.
+This third command is expected to fail with:
+
+- `artifact: history is out of scope for pause-only evidence`
+
+That is because the malformed fixture smuggles a top-level `history`
+transcript into a lane that intentionally stays smaller than transcript truth.
 
 That is an explicit product-boundary rejection, not just parser hygiene:
 
@@ -165,9 +187,10 @@ That is an explicit product-boundary rejection, not just parser hygiene:
   future explicitly narrowed slice
 
 The same rule applies to other continuation drift. For v1, artifacts that mix
-`history`, `session`, `lastResponseId`-style hints, or raw serialized
-`RunState` into the same lane should be treated as malformed rather than
-partially imported.
+`history`, `session`, `newItems`, `lastResponseId` / `previousResponseId`
+style hints, raw serialized `RunState`, or resolved approval decision data
+into the same lane should be treated as malformed rather than partially
+imported.
 
 ## Important boundary
 
