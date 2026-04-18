@@ -231,6 +231,10 @@ def _validate_interruptions(value: Any) -> list[dict[str, Any]]:
 
 
 def _raise_on_forbidden_top_level_keys(record: dict[str, Any]) -> None:
+    # This mapper enforces the Assay-side pause-only evidence boundary. It is
+    # the reference/validation counterpart of a corresponding Harness capture
+    # pattern, so it stays intentionally smaller than full runtime or harness
+    # state.
     present_forbidden = sorted(key for key in record if key in FORBIDDEN_TOP_LEVEL_KEY_MESSAGES)
     if not present_forbidden:
         return
