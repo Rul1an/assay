@@ -14,6 +14,9 @@ This pattern was first internalized from the confirmed `P22` OpenAI Agents JS
 lane, but it is intentionally documented as an Assay-side reference shape, not
 as OpenAI Agents JS support in general.
 
+The corresponding runtime/capture pattern lives in the Assay-Harness
+repository; this document is the Assay-side reference/validation counterpart.
+
 ## What This Pattern Is For
 
 Use this pattern when a runtime:
