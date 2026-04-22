@@ -1,0 +1,4 @@
+arize-phoenix-client==2.4.0
+opentelemetry-sdk==1.41.0
+opentelemetry-exporter-otlp-proto-http==1.41.0
+pandas==3.0.2
