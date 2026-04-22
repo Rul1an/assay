@@ -2,3 +2,4 @@ langwatch==0.22.0
 pandas>=2.2.3
 tenacity>=9.0.0
 tqdm>=4.67.0
+httpx>=0.27.0

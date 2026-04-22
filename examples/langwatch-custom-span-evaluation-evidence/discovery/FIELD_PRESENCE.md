@@ -5,7 +5,7 @@ Date: 2026-04-22
 Project used for live capture:
 
 - local LangWatch docker stack on `http://127.0.0.1:5560`
-- seeded project API key: `sk-lw-p25-local-test-key`
+- seeded project API key: `<LANGWATCH_API_KEY>`
 
 Capture path:
 

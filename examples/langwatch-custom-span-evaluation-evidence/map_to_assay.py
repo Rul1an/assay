@@ -140,7 +140,7 @@ def _parse_rfc3339_utc(value: Optional[str]) -> str:
     if value is None:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    normalized = value.replace("Z", "+00:00")
+    normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:

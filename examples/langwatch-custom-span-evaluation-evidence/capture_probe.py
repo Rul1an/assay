@@ -80,7 +80,7 @@ def _format_span_id(span: Any) -> str:
     span_context = span.get_span_context()
     if not span_context or not span_context.is_valid:
         raise RuntimeError("current LangWatch span did not expose a valid span context")
-    return format(span_context.span_id, "x")
+    return format(span_context.span_id, "016x")
 
 
 def _extract_matching_evaluation_span(
