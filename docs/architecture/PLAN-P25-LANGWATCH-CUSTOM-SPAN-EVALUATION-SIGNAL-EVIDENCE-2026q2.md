@@ -1,7 +1,9 @@
-Date: 2026-04-22
-Owner: Evidence / External Interop
-Status: Planning lane
-Scope (current repo state): Explore one bounded LangWatch-adjacent evidence lane built around a single custom evaluation attached to a single span through the public LangWatch SDK surface. This plan is for the smallest honest external-consumer seam only. It does not propose broad LangWatch support, offline evaluation-run support, dataset support, trace export support, or prompt-management support.
+# PLAN — P25 LangWatch Custom Span Evaluation Signal Evidence
+
+- **Date:** 2026-04-22
+- **Owner:** Evidence / External Interop
+- **Status:** Planning lane
+- **Scope (current repo state):** Explore one bounded LangWatch-adjacent evidence lane built around a single custom evaluation attached to a single span through the public LangWatch SDK surface. This plan is for the smallest honest external-consumer seam only. It does not propose broad LangWatch support, offline evaluation-run support, dataset support, trace export support, or prompt-management support.
 
 ## 1. Why this plan exists
 
@@ -61,7 +63,7 @@ That means:
 
 The first seam should stay on exactly one move:
 
-- attach one custom evaluation to one current span through the public `add_evaluation(...)` path
+- emit one custom evaluation through the public `add_evaluation(...)` SDK path, presently documented against the current span
 
 Not:
 
@@ -75,7 +77,11 @@ This keeps the lane on the smallest named LangWatch evaluation signal rather tha
 
 ## 5. Canonical v1 artifact thesis
 
-The reduced artifact should stay on a single span target with a single evaluation result bag:
+The reduced artifact should stay on a single span target with a single evaluation result bag.
+
+If the first surfaced public representation naturally carries a timestamp, the reduced artifact may include it as shown below. Discovery must not invent one from unrelated trace wrappers just to make the artifact look more complete.
+
+Illustrative v1 shape:
 
 ```json
 {
@@ -99,6 +105,8 @@ Optional reviewer aids, only if naturally present in the first honest surfaced r
 
 - `trace_id_ref`
 - `sdk_language`
+
+`trace_id_ref` may be included only if it appears naturally on the first surfaced representation. It must not be recovered through separate trace export or lookup steps.
 
 Not allowed in v1:
 
@@ -137,6 +145,8 @@ It must not become:
 - a trace reconstruction surface
 - a dashboard URL
 
+`entity_id_ref` remains hard-required only if the first surfaced public representation carries a natural span anchor without importing broader trace envelopes. If discovery shows that the span anchor is only recoverable through wider trace wrappers, the lane must be recut before fixture freeze.
+
 ### 6.3 `evaluation_name`
 
 This is the canonical Assay-side name for LangWatch's required `name` field.
@@ -160,7 +170,7 @@ The reduced result bag should remain smaller than LangWatch's broader evaluation
 For v1:
 
 - at least one of `passed`, `score`, or `label` must be present
-- `details` is optional and bounded
+- `details` is optional, bounded, and never required for a valid v1 artifact
 - empty or whitespace-only `details` should be omitted or treated as malformed
 
 This is directly aligned with the documented `add_evaluation(...)` contract rather than a richer invented artifact.
@@ -236,7 +246,8 @@ Observed:
 - any present `score`
 - any present `label`
 - any present bounded `details`
-- surfaced span anchor and timestamp if actually present
+- surfaced span anchor when naturally present on the first public surfaced representation
+- surfaced timestamp when naturally present on the first public surfaced representation
 
 Derived:
 
@@ -259,6 +270,8 @@ Therefore v1 artifacts should be malformed if they contain:
 
 No partial import of larger evaluation bundles should be allowed in v1.
 
+V1 must fail closed on larger evaluation, session, or trace envelopes rather than partially importing the "first relevant" evaluation object.
+
 ## 9. Discovery gate
 
 P25 should not advance on docs snippets alone.
@@ -266,11 +279,13 @@ P25 should not advance on docs snippets alone.
 Required first proof:
 
 - emit one real custom evaluation through the public SDK `add_evaluation(...)` path
-- capture the raw emitted input to that call
-- capture the first public surfaced representation that shows the evaluation back on the span
+- capture the raw emitted input to that call as one separate discovery artifact
+- capture the first public surfaced representation that shows the evaluation back on the span as a separate discovery artifact
 - compare emitted and surfaced fields before freezing any reduced artifact
 
-If the surfaced representation is only visible through a trace view or exported trace payload, raw discovery notes must keep that context separate from the reduced artifact.
+Keep raw emitted input and raw surfaced representation separate. Do not treat emitted `add_evaluation(...)` input as equivalent to LangWatch's surfaced public shape.
+
+If the surfaced representation is only visible through a trace view or exported trace payload, raw discovery notes must keep that wider context separate from the reduced artifact.
 
 ## 10. Initial malformed rules
 
