@@ -1,0 +1,7 @@
+{
+  "label": "incorrect",
+  "name": "correctness",
+  "passed": false,
+  "score": 0.08,
+  "sdk_surface": "langwatch.get_current_span().add_evaluation"
+}

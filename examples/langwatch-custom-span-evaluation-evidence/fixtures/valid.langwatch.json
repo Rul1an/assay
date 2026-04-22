@@ -1,0 +1,16 @@
+{
+  "schema": "langwatch.custom-span-evaluation.export.v1",
+  "framework": "langwatch",
+  "surface": "custom_span_evaluation",
+  "entity_kind": "span",
+  "entity_id_ref": "4f88742c4e463977",
+  "evaluation_name": "correctness",
+  "result": {
+    "passed": true,
+    "score": 0.92,
+    "label": "correct",
+    "details": "Short bounded explanation from the LangWatch SDK probe."
+  },
+  "timestamp": "2026-04-22T18:29:11.930Z",
+  "trace_id_ref": "056c8e1d31a93ee5fda4d33bbe8f09c2"
+}

@@ -1,0 +1,37 @@
+{
+  "error": null,
+  "input": null,
+  "metrics": null,
+  "name": "correctness",
+  "output": {
+    "type": "evaluation_result",
+    "value": {
+      "details": "Short bounded explanation from the LangWatch SDK probe.",
+      "label": "correct",
+      "passed": true,
+      "score": 0.92,
+      "status": "processed"
+    }
+  },
+  "params": {
+    "langwatch": {
+      "output": "{\"status\":\"processed\",\"passed\":true,\"score\":0.92,\"label\":\"correct\",\"details\":\"Short bounded explanation from the LangWatch SDK probe.\"}",
+      "reserved": {
+        "value_types": "[\"langwatch.output=evaluation_result\"]"
+      },
+      "span": {
+        "type": "evaluation"
+      },
+      "timestamps": "{}"
+    }
+  },
+  "parent_id": "4f88742c4e463977",
+  "span_id": "38f4f5aa43286673",
+  "timestamps": {
+    "finished_at": 1776882551930,
+    "first_token_at": null,
+    "started_at": 1776882551927
+  },
+  "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2",
+  "type": "evaluation"
+}

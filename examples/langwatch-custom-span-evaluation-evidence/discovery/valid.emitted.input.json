@@ -1,0 +1,8 @@
+{
+  "details": "Short bounded explanation from the LangWatch SDK probe.",
+  "label": "correct",
+  "name": "correctness",
+  "passed": true,
+  "score": 0.92,
+  "sdk_surface": "langwatch.get_current_span().add_evaluation"
+}
