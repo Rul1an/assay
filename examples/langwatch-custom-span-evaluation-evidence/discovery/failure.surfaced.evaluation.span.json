@@ -1,0 +1,36 @@
+{
+  "error": null,
+  "input": null,
+  "metrics": null,
+  "name": "correctness",
+  "output": {
+    "type": "evaluation_result",
+    "value": {
+      "label": "incorrect",
+      "passed": false,
+      "score": 0.08,
+      "status": "processed"
+    }
+  },
+  "params": {
+    "langwatch": {
+      "output": "{\"status\":\"processed\",\"passed\":false,\"score\":0.08,\"label\":\"incorrect\"}",
+      "reserved": {
+        "value_types": "[\"langwatch.output=evaluation_result\"]"
+      },
+      "span": {
+        "type": "evaluation"
+      },
+      "timestamps": "{}"
+    }
+  },
+  "parent_id": "50e13d532b4b74bc",
+  "span_id": "d28478ef9a1a5579",
+  "timestamps": {
+    "finished_at": 1776882553092,
+    "first_token_at": null,
+    "started_at": 1776882553089
+  },
+  "trace_id": "5b039fc2be98164d3f890c90f65501e9",
+  "type": "evaluation"
+}
