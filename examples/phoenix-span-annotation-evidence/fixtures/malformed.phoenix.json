@@ -1,0 +1,33 @@
+{
+  "annotations": [
+    {
+      "annotation_name": "correctness",
+      "entity_id_ref": "4692ae2bcf97d514",
+      "entity_kind": "span",
+      "framework": "phoenix",
+      "result": {
+        "label": "correct",
+        "score": 0.92
+      },
+      "schema": "phoenix.span-annotation.export.v1",
+      "surface": "span_annotation",
+      "timestamp": "2026-04-22T16:58:42Z"
+    },
+    {
+      "annotation_name": "correctness",
+      "entity_id_ref": "ff4abcca284a7a0e",
+      "entity_kind": "span",
+      "framework": "phoenix",
+      "result": {
+        "label": "incorrect",
+        "score": 0.08
+      },
+      "schema": "phoenix.span-annotation.export.v1",
+      "surface": "span_annotation",
+      "timestamp": "2026-04-22T16:59:52Z"
+    }
+  ],
+  "framework": "phoenix",
+  "schema": "phoenix.span-annotation.export.v1",
+  "surface": "span_annotation"
+}

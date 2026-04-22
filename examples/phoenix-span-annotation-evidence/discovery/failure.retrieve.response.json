@@ -1,0 +1,17 @@
+{
+  "annotator_kind": "CODE",
+  "created_at": "2026-04-22T16:59:52+00:00",
+  "id": "U3BhbkFubm90YXRpb246Mg==",
+  "identifier": "",
+  "metadata": {},
+  "name": "correctness",
+  "result": {
+    "explanation": "Bounded negative probe annotation for P24 discovery.",
+    "label": "incorrect",
+    "score": 0.08
+  },
+  "source": "API",
+  "span_id": "ff4abcca284a7a0e",
+  "updated_at": "2026-04-22T16:59:52+00:00",
+  "user_id": null
+}
