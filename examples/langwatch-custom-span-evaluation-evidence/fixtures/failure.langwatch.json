@@ -1,0 +1,15 @@
+{
+  "schema": "langwatch.custom-span-evaluation.export.v1",
+  "framework": "langwatch",
+  "surface": "custom_span_evaluation",
+  "entity_kind": "span",
+  "entity_id_ref": "50e13d532b4b74bc",
+  "evaluation_name": "correctness",
+  "result": {
+    "passed": false,
+    "score": 0.08,
+    "label": "incorrect"
+  },
+  "timestamp": "2026-04-22T18:29:13.092Z",
+  "trace_id_ref": "5b039fc2be98164d3f890c90f65501e9"
+}

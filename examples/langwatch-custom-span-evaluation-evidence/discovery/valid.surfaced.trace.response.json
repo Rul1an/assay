@@ -1,0 +1,132 @@
+{
+  "ascii_tree": ".\n└── span: p25.langwatch.valid\n    └── tool: p25.target.valid\n        └── evaluation: correctness\n",
+  "error": null,
+  "evaluations": [],
+  "metadata": {
+    "langwatch.reserved.output_source": "inferred",
+    "langwatch.sdk.language": "python",
+    "langwatch.sdk.name": "langwatch-observability-sdk",
+    "langwatch.sdk.version": "0.22.0",
+    "sdk_language": "python",
+    "sdk_name": "opentelemetry",
+    "sdk_version": "1.41.0",
+    "service.name": "unknown_service"
+  },
+  "metrics": {
+    "completion_tokens": null,
+    "first_token_ms": null,
+    "prompt_tokens": null,
+    "tokens_estimated": false,
+    "total_cost": null,
+    "total_time_ms": 443
+  },
+  "platformUrl": "http://localhost:5560/ci-test-project-k-3xl3l_bvFHebiqmRlTP/messages/056c8e1d31a93ee5fda4d33bbe8f09c2",
+  "project_id": "AGO607xXIzrRNrbhwmoKx",
+  "spans": [
+    {
+      "error": null,
+      "input": null,
+      "metrics": null,
+      "name": "p25.target.valid",
+      "output": null,
+      "params": {
+        "gen_ai": {
+          "evaluation": {
+            "name": "correctness",
+            "score": {
+              "label": "correct",
+              "value": "0.92"
+            }
+          },
+          "operation": {
+            "name": "tool"
+          }
+        },
+        "langwatch": {
+          "span": {
+            "type": "tool"
+          },
+          "timestamps": "{}"
+        }
+      },
+      "parent_id": "fd62be01ef892e96",
+      "span_id": "4f88742c4e463977",
+      "timestamps": {
+        "finished_at": 1776882551930,
+        "first_token_at": null,
+        "started_at": 1776882551487
+      },
+      "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2",
+      "type": "tool"
+    },
+    {
+      "error": null,
+      "input": null,
+      "metrics": null,
+      "name": "p25.langwatch.valid",
+      "output": null,
+      "params": {
+        "langwatch": {
+          "labels": "[\"assay\",\"p25\",\"langwatch\",\"custom_span_evaluation\",\"valid\"]",
+          "origin": "application",
+          "span": {
+            "type": "span"
+          },
+          "timestamps": "{}"
+        }
+      },
+      "parent_id": null,
+      "span_id": "fd62be01ef892e96",
+      "timestamps": {
+        "finished_at": 1776882551930,
+        "first_token_at": null,
+        "started_at": 1776882551487
+      },
+      "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2",
+      "type": "span"
+    },
+    {
+      "error": null,
+      "input": null,
+      "metrics": null,
+      "name": "correctness",
+      "output": {
+        "type": "evaluation_result",
+        "value": {
+          "details": "Short bounded explanation from the LangWatch SDK probe.",
+          "label": "correct",
+          "passed": true,
+          "score": 0.92,
+          "status": "processed"
+        }
+      },
+      "params": {
+        "langwatch": {
+          "output": "{\"status\":\"processed\",\"passed\":true,\"score\":0.92,\"label\":\"correct\",\"details\":\"Short bounded explanation from the LangWatch SDK probe.\"}",
+          "reserved": {
+            "value_types": "[\"langwatch.output=evaluation_result\"]"
+          },
+          "span": {
+            "type": "evaluation"
+          },
+          "timestamps": "{}"
+        }
+      },
+      "parent_id": "4f88742c4e463977",
+      "span_id": "38f4f5aa43286673",
+      "timestamps": {
+        "finished_at": 1776882551930,
+        "first_token_at": null,
+        "started_at": 1776882551927
+      },
+      "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2",
+      "type": "evaluation"
+    }
+  ],
+  "timestamps": {
+    "inserted_at": 1776882552706,
+    "started_at": 1776882551487,
+    "updated_at": 1776882552860
+  },
+  "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2"
+}
