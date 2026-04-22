@@ -1,0 +1,16 @@
+{
+  "annotation_name": "correctness",
+  "annotator_kind": "LLM",
+  "entity_id_ref": "4692ae2bcf97d514",
+  "entity_kind": "span",
+  "framework": "phoenix",
+  "identifier": "probe-llm-v1",
+  "result": {
+    "explanation": "Bounded probe annotation for P24 discovery.",
+    "label": "correct",
+    "score": 0.92
+  },
+  "schema": "phoenix.span-annotation.export.v1",
+  "surface": "span_annotation",
+  "timestamp": "2026-04-22T16:58:42Z"
+}
