@@ -1,0 +1,20 @@
+{
+  "trace_id": "056c8e1d31a93ee5fda4d33bbe8f09c2",
+  "evaluations": [],
+  "spans": [
+    {
+      "span_id": "38f4f5aa43286673",
+      "parent_id": "4f88742c4e463977",
+      "name": "correctness",
+      "type": "evaluation",
+      "output": {
+        "type": "evaluation_result",
+        "value": {
+          "passed": true,
+          "score": 0.92,
+          "label": "correct"
+        }
+      }
+    }
+  ]
+}
