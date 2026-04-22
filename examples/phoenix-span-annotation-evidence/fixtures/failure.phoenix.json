@@ -1,0 +1,15 @@
+{
+  "annotation_name": "correctness",
+  "annotator_kind": "CODE",
+  "entity_id_ref": "ff4abcca284a7a0e",
+  "entity_kind": "span",
+  "framework": "phoenix",
+  "result": {
+    "explanation": "Bounded negative probe annotation for P24 discovery.",
+    "label": "incorrect",
+    "score": 0.08
+  },
+  "schema": "phoenix.span-annotation.export.v1",
+  "surface": "span_annotation",
+  "timestamp": "2026-04-22T16:59:52Z"
+}

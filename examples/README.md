@@ -10,6 +10,12 @@ See ALLOW/DENY decisions for every tool call.
 
 ## Evaluation examples
 
+### [Phoenix Span Annotation Evidence](./phoenix-span-annotation-evidence)
+Map a tiny artifact derived from Phoenix's span annotation retrieve path into
+Assay-shaped external evidence.
+**Focus**: annotation-first seam, bounded span-scoped feedback only, no
+imported trace trees, experiments, or platform truth.
+
 ### [Mem0 Add Memories Evidence](./mem0-add-memories-evidence)
 Map a tiny artifact derived from Mem0's `Add Memories` result path into
 Assay-shaped external evidence.
