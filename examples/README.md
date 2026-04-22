@@ -79,6 +79,12 @@ hypothesis into Assay-shaped external evidence.
 **Focus**: scorer-result-first seam, bounded score and experiment context only,
 kept for historical comparison with the newer score-event-first Mastra lane.
 
+### [LangWatch Custom Span Evaluation Evidence](./langwatch-custom-span-evaluation-evidence)
+Map a tiny artifact derived from LangWatch's custom `add_evaluation(...)` span
+path into Assay-shaped external evidence.
+**Focus**: surfaced child-evaluation-span seam, bounded pass/fail, score, label,
+and optional details only, no imported trace, dataset, or evaluation-session truth.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
