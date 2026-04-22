@@ -1,0 +1,10 @@
+{
+  "annotator_kind": "CODE",
+  "name": "correctness",
+  "result": {
+    "explanation": "Bounded negative probe annotation for P24 discovery.",
+    "label": "incorrect",
+    "score": 0.08
+  },
+  "span_id": "ff4abcca284a7a0e"
+}
