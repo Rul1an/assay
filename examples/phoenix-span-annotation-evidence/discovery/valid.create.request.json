@@ -1,0 +1,15 @@
+{
+  "annotator_kind": "LLM",
+  "identifier": "probe-llm-v1",
+  "metadata": {
+    "batch": "discovery",
+    "reviewer": "p24-probe"
+  },
+  "name": "correctness",
+  "result": {
+    "explanation": "Bounded probe annotation for P24 discovery.",
+    "label": "correct",
+    "score": 0.92
+  },
+  "span_id": "4692ae2bcf97d514"
+}
