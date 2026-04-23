@@ -42,61 +42,16 @@ resolve_merge_state() {
   printf '%s\n' "$state"
 }
 
-dependabot_refresh_action() {
+update_pr_branch() {
   local number="$1"
 
-  gh pr view "$number" \
-    --repo "$repo" \
-    --json commits \
-    --jq '
-      [.commits[].messageHeadline] as $heads |
-      if ($heads | length) <= 1 then
-        "rebase"
-      elif ($heads[1:] | all(startswith("Merge branch '\''main'\'' into "))) then
-        "recreate"
-      else
-        "rebase"
-      end
-    '
-}
-
-dependabot_refresh_marker() {
-  local action="$1"
-  local head_sha="$2"
-  printf '<!-- dependabot-maintenance:action=%s head=%s -->' "$action" "$head_sha"
-}
-
-dependabot_refresh_already_requested() {
-  local number="$1"
-  local marker="$2"
-
-  gh pr view "$number" \
-    --repo "$repo" \
-    --json comments \
-    --jq --arg marker "$marker" '[.comments[].body | contains($marker)] | any'
-}
-
-request_dependabot_refresh() {
-  local number="$1"
-  local head_sha="$2"
-  local action marker body
-
-  action="$(dependabot_refresh_action "$number")"
-  marker="$(dependabot_refresh_marker "$action" "$head_sha")"
-
-  if [[ "$(dependabot_refresh_already_requested "$number" "$marker")" == "true" ]]; then
-    printf 'already-requested:%s\n' "$action"
-    return 0
-  fi
-
-  body="@dependabot $action"$'\n\n'"$marker"
-  if gh pr comment "$number" --repo "$repo" --body "$body" >/dev/null; then
-    printf 'requested:%s\n' "$action"
-    return 0
-  fi
-
-  printf 'request-failed:%s\n' "$action"
-  return 1
+  # Dependabot comment commands like "@dependabot rebase" do not work from
+  # github-actions on this repo because that actor lacks push access. Use the
+  # native update-branch API instead so auto-merge can recover once checks rerun.
+  gh api \
+    --method PUT \
+    "repos/$repo/pulls/$number/update-branch" \
+    >/dev/null
 }
 
 dependabot_prs="$(
@@ -129,12 +84,10 @@ fi
 
 updated=0
 update_failures=0
-dependabot_refresh_requests=0
-dependabot_refresh_failures=0
 automerge_enabled=0
 automerge_failures=0
 
-while IFS=$'\t' read -r number title merge_state is_draft auto_enabled author_login head_sha; do
+while IFS=$'\t' read -r number title merge_state is_draft auto_enabled; do
   resolved_merge_state="$merge_state"
   update_status="not-needed"
   auto_status="already-enabled"
@@ -144,29 +97,12 @@ while IFS=$'\t' read -r number title merge_state is_draft auto_enabled author_lo
   fi
 
   if [[ "$resolved_merge_state" == "BEHIND" ]]; then
-    if [[ "$author_login" == "app/dependabot" || "$author_login" == "dependabot[bot]" ]]; then
-      refresh_result="$(request_dependabot_refresh "$number" "$head_sha")"
-      case "$refresh_result" in
-        requested:*)
-          dependabot_refresh_requests=$((dependabot_refresh_requests + 1))
-          update_status="$refresh_result"
-          ;;
-        already-requested:*)
-          update_status="$refresh_result"
-          ;;
-        *)
-          dependabot_refresh_failures=$((dependabot_refresh_failures + 1))
-          update_status="$refresh_result"
-          ;;
-      esac
+    if update_pr_branch "$number"; then
+      updated=$((updated + 1))
+      update_status="updated"
     else
-      if gh pr update-branch "$number" --repo "$repo" >/dev/null; then
-        updated=$((updated + 1))
-        update_status="updated"
-      else
-        update_failures=$((update_failures + 1))
-        update_status="update-failed"
-      fi
+      update_failures=$((update_failures + 1))
+      update_status="update-failed"
     fi
   fi
 
@@ -185,16 +121,14 @@ while IFS=$'\t' read -r number title merge_state is_draft auto_enabled author_lo
   append_summary "- PR #$number: $title | merge_state=$merge_state -> $resolved_merge_state | branch=$update_status | auto_merge=$auto_status"
   echo "PR #$number ($title): merge_state=$merge_state -> $resolved_merge_state, branch=$update_status, auto_merge=$auto_status"
 done < <(
-  jq -r '.[] | [.number, .title, .mergeStateStatus, .isDraft, (.autoMergeRequest != null), .author.login, .headRefOid] | @tsv' <<<"$prs_json"
+  jq -r '.[] | [.number, .title, .mergeStateStatus, .isDraft, (.autoMergeRequest != null)] | @tsv' <<<"$prs_json"
 )
 
 append_summary "- updated_branches: $updated"
 append_summary "- update_failures: $update_failures"
-append_summary "- dependabot_refresh_requests: $dependabot_refresh_requests"
-append_summary "- dependabot_refresh_failures: $dependabot_refresh_failures"
 append_summary "- auto_merge_enabled: $automerge_enabled"
 append_summary "- auto_merge_failures: $automerge_failures"
 
-if [[ "$update_failures" -gt 0 || "$dependabot_refresh_failures" -gt 0 || "$automerge_failures" -gt 0 ]]; then
+if [[ "$update_failures" -gt 0 || "$automerge_failures" -gt 0 ]]; then
   append_summary "- note: some PRs could not be updated automatically; inspect workflow logs for details"
 fi
