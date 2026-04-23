@@ -107,6 +107,11 @@ The strict-match path is the best first seam because it is:
 
 The reduced artifact should stay on a single returned strict-match result.
 
+The v1 artifact must be frozen from a captured returned evaluator object, not
+from README examples or caller-side expectations. The public docs are enough to
+justify the lane, but the raw returned result is the source of truth for fixture
+freeze.
+
 Illustrative v1 shape:
 
 ```json
@@ -147,6 +152,9 @@ For v1, the only allowed value is:
 
 This keeps the lane on one trajectory-evaluation result rather than wider
 session, thread, or graph semantics.
+
+`target_kind = "trajectory"` names the evaluation level only. It does not imply
+that v1 carries a stable target identity.
 
 ### 6.2 No `target_id_ref` in v1
 
@@ -213,12 +221,17 @@ It must remain:
 - bounded
 - short when present
 
+`comment` is never required. If present, it may be omitted during reduction if
+it is too long, too rich, multiline, structured, or otherwise broader than the
+small returned-result evidence surface.
+
 It must not become:
 
 - chain-of-thought import
 - raw reasoning transcript
 - prompt or rubric payload
 - embedded trajectory content dump
+- structured reasoning blob
 
 Empty or whitespace-only comments should be omitted or treated as malformed.
 
@@ -244,6 +257,14 @@ The plan must not derive:
 - dataset or run lineage
 - evaluator-mode truth beyond what is already explicit in the returned key
 
+Evaluator inputs are discovery material only:
+
+- `outputs` may be captured for discovery only
+- `reference_outputs` may be captured for discovery only
+- raw trajectory payloads must never enter the canonical v1 artifact
+- their only role is to prove that the returned result is genuinely smaller
+  than the evaluated payloads
+
 ## 8. Cardinality rule
 
 This lane is for exactly one returned evaluation result object.
@@ -256,6 +277,9 @@ Therefore v1 artifacts should be malformed if they contain:
 - LangSmith experiment result envelopes
 - dataset row bundles
 - full trajectory-plus-result payloads
+- evaluator configuration fields beyond the returned key
+- trajectory match mode fields
+- model or prompt metadata
 
 No partial import of larger evaluation bundles should be allowed in v1.
 
@@ -264,7 +288,9 @@ rather than partially importing the "first relevant" result.
 
 ## 9. Discovery gate
 
-P26 should not advance on docs snippets alone.
+P26 should not advance on docs snippets alone. Freeze nothing until one raw
+strict-match return object is captured from the public evaluator call and stored
+separately from all caller inputs.
 
 Required first proof:
 
@@ -279,7 +305,8 @@ Keep raw inputs and raw returned result separate. Do not treat the evaluator
 inputs as part of the returned public result shape.
 
 If the observed returned shape differs materially across Python and TypeScript,
-that difference must be documented before fixture freeze.
+the lane should freeze per language first rather than pretending there is a
+single cross-language v1 artifact by default.
 
 ## 10. Initial malformed rules
 
@@ -293,8 +320,11 @@ Artifacts should be malformed if they contain:
 - raw reference trajectory payloads
 - dataset or experiment identifiers
 - LangSmith wrapper fields
+- evaluator configuration fields
+- trajectory match mode fields
 - prompt, model, or rubric metadata
 - arrays of evaluation results
+- partial imports from larger LangSmith or LangChain evaluation wrappers
 
 ## 11. Repository deliverables for first execution
 
