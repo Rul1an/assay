@@ -91,6 +91,13 @@ returned result into Assay-shaped external evidence.
 **Focus**: returned-result-first seam, bounded evaluator key and boolean score
 only, no imported trajectories, LangSmith wrappers, or evaluator-config truth.
 
+### [AutoEvals ExactMatch Evidence](./autoevals-exactmatch-evidence)
+Map a tiny artifact derived from AutoEvals' deterministic `ExactMatch` score
+object into Assay-shaped external evidence.
+**Focus**: returned-score-first seam, bounded scorer name and integer `0`/`1`
+score only, no imported raw compared values, Braintrust wrappers, or scorer
+config truth.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.

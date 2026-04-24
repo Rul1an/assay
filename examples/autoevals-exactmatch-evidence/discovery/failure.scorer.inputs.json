@@ -1,0 +1,8 @@
+{
+  "expected": "Rotterdam",
+  "output": "Amsterdam",
+  "package": "autoevals",
+  "package_version": "0.2.0",
+  "scorer": "ExactMatch",
+  "sdk_language": "python"
+}

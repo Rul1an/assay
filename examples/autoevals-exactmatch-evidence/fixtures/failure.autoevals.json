@@ -1,0 +1,10 @@
+{
+  "schema": "autoevals.exactmatch-score.export.v1",
+  "framework": "autoevals",
+  "surface": "exactmatch_score",
+  "target_kind": "output_expected_pair",
+  "scorer_name": "ExactMatch",
+  "result": {
+    "score": 0
+  }
+}
