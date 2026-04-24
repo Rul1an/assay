@@ -44,6 +44,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P24 Phoenix Span Annotation Evaluation-Signal Evidence Interop (Q2 2026)](./PLAN-P24-PHOENIX-SPAN-ANNOTATION-EVALUATION-SIGNAL-EVIDENCE-2026q2.md) — planned annotation-first Phoenix lane built around one bounded span annotation artifact, not trace, experiment, evaluator, or platform truth
 - [PLAN — P25 LangWatch Custom Span Evaluation Signal Evidence Interop (Q2 2026)](./PLAN-P25-LANGWATCH-CUSTOM-SPAN-EVALUATION-SIGNAL-EVIDENCE-2026q2.md) — planned custom-evaluation-first LangWatch lane built around one bounded span-linked evaluation signal, not trace, dataset, evaluation-session, or platform truth
 - [PLAN — P26 AgentEvals Trajectory Strict-Match Result Signal Evidence (Q2 2026)](./PLAN-P26-AGENTEVALS-TRAJECTORY-STRICT-MATCH-RESULT-SIGNAL-EVIDENCE-2026q2.md) — planned strict-match-first AgentEvals lane built around one returned deterministic trajectory match result, not LangSmith runs, LLM-as-judge outputs, or raw trajectory truth
+- [PLAN — P27 AutoEvals ExactMatch Score Evidence (Q2 2026)](./PLAN-P27-AUTOEVALS-EXACTMATCH-SCORE-EVIDENCE-2026q2.md) — planned ExactMatch-first AutoEvals lane built around one returned deterministic output/expected comparison score, not Braintrust runs, JSON/list scorer bundles, LLM judge outputs, or raw payload truth
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
