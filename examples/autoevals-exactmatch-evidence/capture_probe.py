@@ -53,11 +53,11 @@ def _score_to_dict(score: Any) -> dict[str, Any]:
     return dict(score.__dict__)
 
 
-def _build_inputs(case: dict[str, str]) -> dict[str, Any]:
+def _build_inputs(case: dict[str, str], package_version: str) -> dict[str, Any]:
     return {
         "sdk_language": "python",
         "package": "autoevals",
-        "package_version": importlib.metadata.version("autoevals"),
+        "package_version": package_version,
         "scorer": "ExactMatch",
         "output": case["output"],
         "expected": case["expected"],
@@ -71,7 +71,7 @@ def main() -> int:
     summary: dict[str, Any] = {"package_version": package_version}
 
     for case_name, case in CASES.items():
-        inputs = _build_inputs(case)
+        inputs = _build_inputs(case, package_version)
         score = scorer.eval(output=case["output"], expected=case["expected"])
         returned = _score_to_dict(score)
         _write_json(args.out_dir / f"{case_name}.scorer.inputs.json", inputs)
