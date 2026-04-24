@@ -1,0 +1,23 @@
+{
+  "schema": "agentevals.trajectory-strict-match.export.v1",
+  "framework": "agentevals",
+  "surface": "trajectory_strict_match_result",
+  "target_kind": "trajectory",
+  "evaluator_key": "trajectory_strict_match",
+  "trajectory_match_mode": "strict",
+  "outputs": [
+    {
+      "role": "assistant",
+      "content": "I'll check the weather in Amsterdam."
+    }
+  ],
+  "reference_outputs": [
+    {
+      "role": "assistant",
+      "content": "I'll check the weather in Amsterdam."
+    }
+  ],
+  "result": {
+    "score": true
+  }
+}
