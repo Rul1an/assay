@@ -122,6 +122,10 @@ result object, not from docs snippets, TypeScript interface snippets, or
 caller-side expectations. Public docs justify the lane, but the raw surfaced
 result is the source of truth for fixture freeze.
 
+The v1 artifact models one extracted surfaced assertion result only. It does
+not model Promptfoo JSON, JSONL, YAML, or XML export schemas, and it does not
+model full eval result wrappers.
+
 Illustrative v1 shape:
 
 ```json
@@ -216,10 +220,10 @@ For the first lane, the expected v1 value is:
 
 - `equals`
 
-Discovery must confirm whether the surfaced result naturally carries the
-assertion type. If it does not, the reducer may use the explicitly invoked
-assertion type, but must document that as a minimal reduction choice rather
-than returned-result truth.
+`assertion_type` should preserve the surfaced assertion type when naturally
+present. If the surfaced result does not carry it directly, the reducer may use
+the explicitly invoked deterministic assertion type, but must document that as
+a minimal reduction choice rather than surfaced-result truth.
 
 ### 6.4 `result.pass`
 
@@ -237,6 +241,8 @@ It must not be treated as:
 - proof that the model output is true
 - proof that the expected value is correct
 - Promptfoo run success as a whole
+- Promptfoo test-case success as a whole
+- Promptfoo threshold or weighted-score success as a whole
 
 ### 6.5 `result.score`
 
@@ -249,9 +255,9 @@ For first execution, it should remain:
 - observed exactly as surfaced
 - bounded to the shape proven by discovery
 
-For a deterministic `equals` assertion, discovery should decide whether the
-first reducer accepts only `0` and `1` or preserves a wider numeric shape if
-Promptfoo surfaces one naturally.
+For the first deterministic `equals` lane, assume binary score semantics by
+default. Widen only if the surfaced deterministic result demonstrably returns a
+broader numeric shape on the chosen public path.
 
 The plan should not widen `result.score` to generic scorer semantics before
 capture.
@@ -263,6 +269,7 @@ This is optional reviewer support only.
 It must remain:
 
 - optional
+- never required
 - short
 - bounded
 - non-empty when present
@@ -276,7 +283,9 @@ It must not become:
 - model-graded rubric explanation
 - multi-line structured reasoning blob
 
-The reducer may omit `reason` even when present if it is too long or too rich.
+The reducer may omit `reason` even when present if it is too long, too rich, or
+too close to rubric/provider reasoning. Multiline, verbose, structured, or
+rubric-like reason content should be malformed or dropped for v1.
 
 ## 7. Observed vs derived rule
 
@@ -305,6 +314,10 @@ The plan must not derive:
 - prompt, provider, dataset, or config lineage
 - output/expected hashes as identity
 - pass/fail summaries for the run
+
+`result.pass` names assertion outcome only. It must not be interpreted as
+Promptfoo test-case success, threshold success, weighted-score success, or
+overall run success.
 
 Promptfoo inputs and wrappers are discovery material only:
 
@@ -371,9 +384,9 @@ Do not treat full Promptfoo JSON output as equivalent to the assertion result
 shape. Promptfoo JSON/YAML/XML exports can include config and redacted
 environment data, so importing them as v1 evidence would be too broad.
 
-If CLI JSON, JSONL, and Node package paths return materially different shapes,
-the lane should freeze one surfaced path first rather than pretending there is a
-single cross-output Promptfoo v1 artifact by default.
+Freeze one surfaced path first: CLI JSON, JSONL, or Node package. If those paths
+return materially different shapes, freeze per surfaced path rather than
+pretending there is a single Promptfoo-wide v1 result shape by default.
 
 ## 10. Initial malformed rules
 
