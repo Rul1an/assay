@@ -114,10 +114,10 @@ The `ExactMatch` path is the best first AutoEvals surface because it is:
 
 The reduced artifact should stay on a single returned `ExactMatch` score object.
 
-The v1 artifact must be frozen from a captured returned scorer object, not from
-README examples or caller-side expectations. The public docs are enough to
-justify the lane, but the raw returned result is the source of truth for fixture
-freeze.
+The v1 artifact must be frozen only from a captured returned `ExactMatch` score
+object, not from README examples or caller-side expectations. The public docs
+are enough to justify the lane, but the raw returned score object is the only
+source of truth for fixture freeze.
 
 Illustrative v1 shape:
 
@@ -134,7 +134,8 @@ Illustrative v1 shape:
 }
 ```
 
-Optional reviewer support, only if naturally present on the returned score
+Optional reviewer support is out of scope by default and may be added only if
+discovery proves it is naturally present on the returned `ExactMatch` score
 object:
 
 - `result.metadata_ref`
@@ -188,7 +189,7 @@ It should stay:
 
 - required
 - short
-- observed or directly implied by the returned score object and scorer call
+- observed when the returned score object naturally carries a name field
 - reviewer-readable
 
 It must not become:
@@ -197,14 +198,15 @@ It must not become:
 - scorer configuration truth
 - a broader AutoEvals scorer ontology
 
-For the first lane, the expected v1 name is:
+For the first lane, the expected scorer identity is:
 
 - `ExactMatch`
 
 Discovery must confirm the actual returned field names before fixture freeze.
-If the returned object naturally uses `name` rather than a class-style scorer
-name, the reducer should preserve that observed value instead of forcing the
-illustrative value above.
+`scorer_name` should preserve the observed returned scorer name when present.
+If the returned score object does not naturally carry a name field, the reducer
+may use the explicitly invoked scorer identity, but must document that as a
+minimal reduction choice rather than returned-result truth.
 
 ### 6.4 `result.score`
 
@@ -213,9 +215,16 @@ This is the core bounded evaluation signal.
 For v1 `ExactMatch`, it should remain:
 
 - required
-- numeric
 - exactly `0` or `1`
 - observed exactly as returned
+
+V1 accepts only the exact returned binary score shape proven by discovery. Do
+not widen to generic numeric semantics unless the public returned object
+requires it.
+
+That means the reducer should not accept booleans masquerading as numbers, or
+float variants such as `1.0`, unless discovery proves that is the exact
+returned public shape for the selected language surface.
 
 It must not be treated as:
 
@@ -229,18 +238,20 @@ output/expected pair.
 
 ### 6.5 `result.metadata_ref`
 
-Inline metadata should not be part of v1.
+Metadata is out of scope by default for `ExactMatch` v1.
 
-If the returned score object includes metadata and discovery proves a tiny
-stable subset is genuinely necessary for review, P27 should prefer:
+No `metadata_ref` should appear unless discovery shows a naturally returned
+metadata field on the `ExactMatch` public result surface and proves a tiny
+stable subset is genuinely necessary for review. If that happens, P27 should
+prefer:
 
 - `metadata_ref`
 
 over importing the raw metadata object.
 
-For first execution, raw inline metadata should be malformed unless discovery
-proves otherwise. This keeps LLM-judge rationales, RAG context, provider
-payloads, and Braintrust logging details out of the first lane.
+For first execution, raw inline metadata should be malformed. This keeps
+LLM-judge rationales, RAG context, provider payloads, and Braintrust logging
+details out of the first lane.
 
 ## 7. Observed vs derived rule
 
@@ -273,6 +284,8 @@ Scorer inputs are discovery material only:
 - `input` may be captured for discovery only if the public call requires or
   naturally accepts it
 - raw compared payloads must never enter the canonical v1 artifact
+- raw compared payloads must not be reduced into synthetic identifiers or
+  hashes for v1
 - their only role is to prove that the returned score is genuinely smaller than
   the evaluated payloads
 
@@ -307,16 +320,20 @@ Required first proof:
 
 - call one real `ExactMatch` scorer through the public AutoEvals API
 - capture raw `output` and `expected` separately as discovery artifacts
+- keep those raw compared values only as discovery artifacts
 - capture the raw returned score object as its own discovery artifact
 - compare the input boundary to the returned-score boundary before freezing
   any reduced artifact
 
 Keep raw inputs and raw returned score separate. Do not treat scorer inputs as
-part of the returned public result shape.
+part of the returned public result shape. Do not let `output`, `expected`, or
+optional `input` enter the canonical v1 artifact, even as redacted values,
+synthetic identifiers, or hashes.
 
 If Python and TypeScript return materially different score shapes, the lane
 should freeze per language first rather than pretending there is a single
-cross-language v1 artifact by default.
+cross-language v1 artifact by default. Do not freeze a cross-language artifact
+contract until discovery proves the returned shape is materially compatible.
 
 ## 10. Initial malformed rules
 
@@ -324,7 +341,7 @@ Artifacts should be malformed if they contain:
 
 - no `scorer_name`
 - no `result`
-- a non-numeric `result.score`
+- a `result.score` shape other than the discovered binary score shape
 - a `result.score` other than `0` or `1`
 - raw output
 - raw expected
