@@ -1,0 +1,10 @@
+{
+  "schema": "agentevals.trajectory-strict-match.export.v1",
+  "framework": "agentevals",
+  "surface": "trajectory_strict_match_result",
+  "target_kind": "trajectory",
+  "evaluator_key": "trajectory_strict_match",
+  "result": {
+    "score": false
+  }
+}

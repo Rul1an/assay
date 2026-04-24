@@ -1,0 +1,55 @@
+{
+  "evaluator_factory": "create_trajectory_match_evaluator",
+  "outputs": [
+    {
+      "content": "I'll look it up first.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "args": {
+            "query": "Amsterdam weather"
+          },
+          "id": "call_search",
+          "name": "search_web"
+        }
+      ]
+    },
+    {
+      "content": "12C and clear",
+      "role": "tool",
+      "tool_call_id": "call_search"
+    },
+    {
+      "content": "It is 12C and clear in Amsterdam.",
+      "role": "assistant"
+    }
+  ],
+  "package": "agentevals",
+  "package_version": "0.0.9",
+  "reference_outputs": [
+    {
+      "content": "I'll check the weather in Amsterdam.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "args": {
+            "city": "Amsterdam"
+          },
+          "id": "call_weather",
+          "name": "get_weather"
+        }
+      ]
+    },
+    {
+      "content": "12C and clear",
+      "role": "tool",
+      "tool_call_id": "call_weather"
+    },
+    {
+      "content": "It is 12C and clear in Amsterdam.",
+      "role": "assistant"
+    }
+  ],
+  "sdk_language": "python",
+  "trajectory_match_mode": "strict"
+}

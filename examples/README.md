@@ -85,6 +85,12 @@ path into Assay-shaped external evidence.
 **Focus**: surfaced child-evaluation-span seam, bounded pass/fail, score, label,
 and optional details only, no imported trace, dataset, or evaluation-session truth.
 
+### [AgentEvals Trajectory Strict-Match Evidence](./agentevals-trajectory-strict-match-evidence)
+Map a tiny artifact derived from AgentEvals' deterministic strict-match
+returned result into Assay-shaped external evidence.
+**Focus**: returned-result-first seam, bounded evaluator key and boolean score
+only, no imported trajectories, LangSmith wrappers, or evaluator-config truth.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
