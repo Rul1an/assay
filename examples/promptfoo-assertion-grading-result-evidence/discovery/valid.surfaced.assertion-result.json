@@ -1,0 +1,9 @@
+{
+  "pass": true,
+  "score": 1,
+  "reason": "Assertion passed",
+  "assertion": {
+    "type": "equals",
+    "value": "Hello world"
+  }
+}

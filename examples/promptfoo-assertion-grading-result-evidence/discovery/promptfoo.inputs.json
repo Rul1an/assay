@@ -1,0 +1,16 @@
+{
+  "sdk_language": "node",
+  "package": "promptfoo",
+  "package_version": "0.119.0",
+  "surfaced_path": "cli-jsonl",
+  "model_outputs": [
+    "Hello world",
+    "Goodbye world"
+  ],
+  "assertions": [
+    {
+      "type": "equals",
+      "value": "Hello world"
+    }
+  ]
+}
