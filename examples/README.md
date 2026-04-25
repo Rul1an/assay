@@ -98,6 +98,13 @@ object into Assay-shaped external evidence.
 score only, no imported raw compared values, Braintrust wrappers, or scorer
 config truth.
 
+### [OpenFeature EvaluationDetails Evidence](./openfeature-evaluation-details-evidence)
+Map a tiny artifact derived from OpenFeature's detailed flag evaluation API
+into Assay-shaped external evidence.
+**Focus**: decision-detail-first surface, bounded flag key, returned value,
+reason, variant, and fallback error fields only, no imported provider config,
+targeting, rollout, telemetry, or application correctness truth.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.
