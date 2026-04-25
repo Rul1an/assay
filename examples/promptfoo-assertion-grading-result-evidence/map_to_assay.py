@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 
-PLACEHOLDER_EVENT_TYPE = "example.placeholder.promptfoo-assertion-result"
-PLACEHOLDER_SOURCE = "urn:example:assay:external:promptfoo:assertion-result"
+PLACEHOLDER_EVENT_TYPE = "example.placeholder.promptfoo-assertion-grading-result"
+PLACEHOLDER_SOURCE = "urn:example:assay:external:promptfoo:assertion-grading-result"
 PLACEHOLDER_PRODUCER = "assay-example"
 PLACEHOLDER_PRODUCER_VERSION = "0.1.0"
 PLACEHOLDER_GIT = "sample"

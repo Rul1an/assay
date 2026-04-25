@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -86,55 +86,70 @@ function main() {
   const packageVersion = readPromptfooVersion();
   const workDir = mkdtempSync(join(tmpdir(), "assay-p28-promptfoo-"));
 
-  const outputs = ["Hello world", "Goodbye world"];
-  const assertions = [{ type: "equals", value: "Hello world" }];
+  try {
+    mkdirSync(outDir, { recursive: true });
+    const outputs = ["Hello world", "Goodbye world"];
+    const assertions = [{ type: "equals", value: "Hello world" }];
 
-  writeJson(join(workDir, "outputs.json"), outputs);
-  writeFileSync(join(workDir, "asserts.yaml"), "- type: equals\n  value: Hello world\n", "utf8");
+    writeJson(join(workDir, "outputs.json"), outputs);
+    writeFileSync(join(workDir, "asserts.yaml"), "- type: equals\n  value: Hello world\n", "utf8");
 
-  runPromptfoo(workDir, promptfooBin);
+    runPromptfoo(workDir, promptfooBin);
 
-  const rows = readFileSync(join(workDir, "results.jsonl"), "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+    const rows = readFileSync(join(workDir, "results.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
 
-  if (rows.length !== 2) {
-    throw new Error(`expected two JSONL rows, got ${rows.length}`);
+    if (rows.length !== 2) {
+      throw new Error(`expected two JSONL rows, got ${rows.length}`);
+    }
+
+    const classifiedRows = rows.map((row) => ({
+      row,
+      assertion: extractAssertionResult(row),
+    }));
+    const passingRows = classifiedRows.filter(({ assertion }) => assertion.pass === true);
+    const failingRows = classifiedRows.filter(({ assertion }) => assertion.pass === false);
+    if (passingRows.length !== 1 || failingRows.length !== 1) {
+      throw new Error(
+        `expected exactly one passing and one failing JSONL row, got ${passingRows.length} passing and ${failingRows.length} failing`,
+      );
+    }
+
+    const [{ row: validRow, assertion: validAssertion }] = passingRows;
+    const [{ row: failureRow, assertion: failureAssertion }] = failingRows;
+    const discoveryInput = {
+      sdk_language: "node",
+      package: "promptfoo",
+      package_version: packageVersion,
+      surfaced_path: "cli-jsonl",
+      model_outputs: outputs,
+      assertions,
+    };
+
+    writeJson(join(outDir, "promptfoo.inputs.json"), discoveryInput);
+    writeJson(join(outDir, "valid.full-jsonl-row.json"), validRow);
+    writeJson(join(outDir, "valid.surfaced.assertion-result.json"), validAssertion);
+    writeJson(join(outDir, "failure.full-jsonl-row.json"), failureRow);
+    writeJson(join(outDir, "failure.surfaced.assertion-result.json"), failureAssertion);
+
+    console.log(
+      JSON.stringify(
+        {
+          package_version: packageVersion,
+          surfaced_path: "cli-jsonl",
+          valid_score: validAssertion.score,
+          failure_score: failureAssertion.score,
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
   }
-
-  const discoveryInput = {
-    sdk_language: "node",
-    package: "promptfoo",
-    package_version: packageVersion,
-    surfaced_path: "cli-jsonl",
-    model_outputs: outputs,
-    assertions,
-  };
-  const validAssertion = extractAssertionResult(rows[0]);
-  const failureAssertion = extractAssertionResult(rows[1]);
-
-  writeJson(join(outDir, "promptfoo.inputs.json"), discoveryInput);
-  writeJson(join(outDir, "valid.full-jsonl-row.json"), rows[0]);
-  writeJson(join(outDir, "valid.surfaced.assertion-result.json"), validAssertion);
-  writeJson(join(outDir, "failure.full-jsonl-row.json"), rows[1]);
-  writeJson(join(outDir, "failure.surfaced.assertion-result.json"), failureAssertion);
-
-  rmSync(workDir, { recursive: true, force: true });
-
-  console.log(
-    JSON.stringify(
-      {
-        package_version: packageVersion,
-        surfaced_path: "cli-jsonl",
-        valid_score: validAssertion.score,
-        failure_score: failureAssertion.score,
-      },
-      null,
-      2,
-    ),
-  );
 }
 
 main();
