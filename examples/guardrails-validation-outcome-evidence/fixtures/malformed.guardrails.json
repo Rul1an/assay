@@ -1,0 +1,18 @@
+{
+  "fix_value": "needs review approved",
+  "framework": "guardrails-ai",
+  "metadata": {
+    "required_term": "approved"
+  },
+  "raw_output": "needs review",
+  "result": {
+    "error": "Value must include required term: approved",
+    "outcome": "fail"
+  },
+  "schema": "guardrails.validation-outcome.export.v1",
+  "surface": "validation_result",
+  "target_kind": "validation_call",
+  "validated_output": "needs review approved",
+  "validation_passed": false,
+  "validator_logs": []
+}

@@ -1,0 +1,11 @@
+{
+  "metadata": {
+    "required_term": "approved"
+  },
+  "package": "guardrails-ai",
+  "package_version": "0.10.0",
+  "public_path": "Validator.validate",
+  "sdk_language": "python",
+  "validator_name": "contains-approved-term",
+  "value": "approved response"
+}

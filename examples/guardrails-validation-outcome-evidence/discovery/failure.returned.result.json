@@ -1,0 +1,8 @@
+{
+  "error_message": "Value must include required term: approved",
+  "error_spans": null,
+  "fix_value": "needs review approved",
+  "metadata": null,
+  "outcome": "fail",
+  "validated_chunk": null
+}
