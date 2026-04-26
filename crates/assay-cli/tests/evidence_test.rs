@@ -4,6 +4,13 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
 
+fn claim<'a>(claims: &'a [serde_json::Value], id: &str) -> &'a serde_json::Value {
+    claims
+        .iter()
+        .find(|claim| claim["id"] == id)
+        .expect("claim should exist")
+}
+
 #[test]
 fn test_evidence_export_verify_show_flow() {
     let dir = tempdir().unwrap();
@@ -71,6 +78,77 @@ entries:
         .stdout(predicate::str::contains("~/**/secret.txt"))
         .stdout(predicate::str::contains("assay.fs.access"))
         .stdout(predicate::str::contains("api.stripe.com"));
+}
+
+#[test]
+fn test_promptfoo_imported_receipts_feed_trust_basis_generation() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("results.jsonl");
+    let bundle = dir.path().join("promptfoo-receipts.tar.gz");
+    fs::write(
+        &input,
+        concat!(
+            r#"{"gradingResult":{"componentResults":[{"pass":true,"score":1,"reason":"Assertion passed","assertion":{"type":"equals","value":"Hello world"}}]}}"#,
+            "\n",
+            r#"{"gradingResult":{"componentResults":[{"pass":false,"score":0,"reason":"Expected output \"Goodbye world\" to equal \"Hello world\"","assertion":{"type":"equals","value":"Hello world"}}]}}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("promptfoo-jsonl")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("results.jsonl")
+        .arg("--run-id")
+        .arg("promptfoo_trust_basis")
+        .arg("--import-time")
+        .arg("2026-04-26T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(
+        claims.len(),
+        7,
+        "P32 locks Trust Basis readability without adding a Promptfoo-specific claim yet"
+    );
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert!(
+        claims
+            .iter()
+            .all(|claim| claim["id"] != "external_eval_receipt_boundary_visible"),
+        "Promptfoo-specific Trust Basis claim expansion is intentionally deferred"
+    );
 }
 
 #[test]

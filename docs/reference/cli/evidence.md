@@ -48,6 +48,17 @@ The output bundle can be verified with:
 assay evidence verify promptfoo-evidence.tar.gz
 ```
 
+The same bundle can also feed the current Trust Basis compiler:
+
+```bash
+assay trust-basis generate promptfoo-evidence.tar.gz
+```
+
+This proves the imported receipts are bundleable, verifiable, and readable by
+the Trust Basis path. It does not yet add Promptfoo-specific Trust Basis claims
+or bump the Trust Card schema; that claim expansion is a separate compatibility
+decision.
+
 Use `--import-time <RFC3339>` for deterministic fixture generation.
 
 ### Options
