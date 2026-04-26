@@ -98,6 +98,13 @@ object into Assay-shaped external evidence.
 score only, no imported raw compared values, Braintrust wrappers, or scorer
 config truth.
 
+### [OpenFeature EvaluationDetails Evidence](./openfeature-evaluation-details-evidence)
+Map a tiny artifact derived from OpenFeature's detailed flag evaluation API
+into Assay-shaped external evidence.
+**Focus**: decision-detail-first surface, bounded flag key, returned value,
+reason, variant, and fallback error fields only, no imported provider config,
+targeting, rollout, telemetry, or application correctness truth.
+
 ### [Promptfoo Assertion GradingResult Evidence](./promptfoo-assertion-grading-result-evidence)
 Map a tiny artifact derived from Promptfoo's deterministic `equals` assertion
 component result into Assay-shaped external evidence.

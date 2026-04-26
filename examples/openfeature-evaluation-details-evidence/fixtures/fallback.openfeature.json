@@ -1,0 +1,13 @@
+{
+  "schema": "openfeature.evaluation-details.export.v1",
+  "framework": "openfeature",
+  "surface": "evaluation_details",
+  "target_kind": "feature_flag",
+  "flag_key": "checkout.missing",
+  "result": {
+    "value": false,
+    "reason": "ERROR",
+    "error_code": "FLAG_NOT_FOUND",
+    "error_message": "Flag 'checkout.missing' not found"
+  }
+}

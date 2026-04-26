@@ -1,0 +1,12 @@
+{
+  "schema": "openfeature.evaluation-details.export.v1",
+  "framework": "openfeature",
+  "surface": "evaluation_details",
+  "target_kind": "feature_flag",
+  "flag_key": "checkout.new_flow",
+  "result": {
+    "value": true,
+    "variant": "on",
+    "reason": "STATIC"
+  }
+}
