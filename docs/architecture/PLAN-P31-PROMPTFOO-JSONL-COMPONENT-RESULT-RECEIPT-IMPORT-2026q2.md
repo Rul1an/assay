@@ -92,18 +92,23 @@ Harness does not parse Promptfoo JSONL in P31.
 
 ## 4. Recommended import surface
 
-The first importer should target one public surfaced path:
+P31 v1 freezes exactly one public surfaced path:
 
 - Promptfoo CLI JSONL output
 - `gradingResult.componentResults[]`
 - deterministic `equals` assertion component result
+
+Other Promptfoo output paths remain out of scope for v1, including Node package
+results, full JSON output, YAML/XML exports, and JSONL as a broad family. If a
+future path proves useful, it should be planned as a separate lane rather than
+quietly folded into this one.
 
 Candidate CLI shape, to confirm during implementation:
 
 ```bash
 assay evidence import promptfoo-jsonl \
   --input results.jsonl \
-  --output promptfoo.receipts.ndjson \
+  --bundle-out promptfoo-evidence.tar.gz \
   --source-artifact-ref results.jsonl
 ```
 
@@ -117,6 +122,7 @@ The importer should:
 - inspect each row for `gradingResult.componentResults[]`
 - reduce each component result independently
 - emit one receipt event per accepted component result
+- write accepted receipt events through the existing evidence bundle path
 - fail closed on malformed rows or unsupported component shapes
 - allow deterministic `imported_at` injection for tests and fixtures
 
@@ -306,8 +312,9 @@ when naturally available on the chosen surfaced path.
 
 If Promptfoo JSONL exposes the component outcome without repeating the
 assertion type, the reducer may carry the explicitly invoked deterministic
-assertion type from the row context. That must be documented as a minimal
-reduction choice, not returned-result truth.
+assertion type from the row context. In that case, `assertion_type` is
+derived/reducer-carried invocation context, not surfaced-result truth. That
+must be documented in the importer and fixtures.
 
 Do not import full assertion config.
 
@@ -333,15 +340,20 @@ It must not be confused with:
 
 `result.score` is the component score.
 
-For the first deterministic `equals` lane, v1 should assume binary score
-semantics unless implementation discovery proves a broader shape is naturally
-surfaced.
+For the first deterministic `equals` lane, v1 accepts only binary component
+scores:
+
+- `0`
+- `1`
+
+If implementation discovery proves a different naturally surfaced score shape,
+the lane must be recut before fixture freeze rather than widened silently.
 
 It should be:
 
 - required
 - numeric
-- bounded to the captured component result shape
+- exactly `0` or `1` for v1
 
 It must not be:
 
@@ -404,6 +416,17 @@ one `gradingResult.componentResults[]` item -> one Assay receipt.
 If a JSONL row contains multiple component results, the importer may emit
 multiple receipts. Each emitted receipt must remain single-component.
 
+Receipt uniqueness comes from Assay import-run provenance and envelope
+sequence:
+
+- `assayrunid`
+- `assayseq`
+- CloudEvents `id`
+
+It must not come from synthetic target identity. JSONL row index and component
+index may be used as importer-local addressing for diagnostics, but not as
+domain identity and not as a substitute for prompt/output/expected identity.
+
 The importer must not emit:
 
 - one receipt for an entire JSONL row
@@ -426,16 +449,18 @@ Initial malformed cases:
 - component result missing `pass`
 - component result missing `score`
 - component `pass` is not boolean
-- unsupported or ambiguous score shape
+- component `score` is not exactly `0` or `1`
 - unsupported assertion type for v1
 - attempted receipt contains raw prompt/output/expected/vars/assertion value
 - attempted receipt contains full row or aggregate row fields
 - attempted receipt contains red-team, model-graded, rubric, provider, token,
   cost, latency, or stats fields
 
-Rows without assertions may be skipped only if the importer has an explicit
-documented mode for that behavior. The first implementation should prefer clear
-errors in fixture and test paths.
+P31 v1 operates in strict mode only. Rows without
+`gradingResult.componentResults[]` are errors, not silently skipped.
+
+Permissive mixed-row ingestion can be future work, but it should not be part of
+the first compiler-path implementation.
 
 ## 10. Trust Basis posture
 
@@ -446,6 +471,7 @@ Future Trust Basis claims can speak to:
 
 - external evaluation receipt is present
 - Promptfoo component-result surface is visible
+- source surface is visible
 - source artifact digest is present
 - reducer version is visible
 - raw Promptfoo payloads are excluded
@@ -475,14 +501,14 @@ assay evidence export --profile profile.yaml --out evidence.tar.gz
 assay evidence verify evidence.tar.gz
 ```
 
-Therefore P31 must choose one real bundle integration path during
-implementation:
+P31 chooses the first real bundle integration path now: write Promptfoo receipt
+events through the existing `BundleWriter`.
 
-- write Promptfoo receipt events through the existing `BundleWriter`
-- or produce a profile/sidecar shape that `assay evidence export --profile`
-  can already consume
-- or explicitly add a new evidence import/export command and document the new
-  path
+The implementation may add a debug or fixture-only event stream output if that
+helps tests, but the first production-facing compiler path should produce a
+verifiable evidence bundle directly. If `BundleWriter` integration is blocked,
+the lane should be recut before the implementation PR instead of producing a
+dead-end receipt NDJSON artifact.
 
 Implementation target, shown as pseudocode until the CLI exists:
 
@@ -496,8 +522,8 @@ assay evidence verify promptfoo-evidence.tar.gz
 ```
 
 The architecture requirement is that receipt output must not be a dead-end
-example file. It must become an Assay `EvidenceEvent` stream or bundle that the
-existing verification and later Trust Basis path can consume.
+example file. It must become an Assay evidence bundle that the existing
+verification and later Trust Basis path can consume.
 
 ## 12. Assay Harness boundary
 
@@ -555,13 +581,16 @@ P31 implementation can be considered ready when:
 - importer streams rows
 - importer extracts assertion component results only
 - importer emits one receipt per component result
+- importer operates in strict mode for v1
+- component scores are binary only for v1
 - receipt output excludes raw prompt/output/expected/vars/assertion value
 - source artifact digest is present
+- source surface is visible
 - reducer version is present
 - deterministic fixture import is possible
 - malformed fixtures fail closed
-- receipt events are emitted as Assay `EvidenceEvent`s or written directly into
-  a verifiable evidence bundle
+- receipt events are emitted as Assay `EvidenceEvent`s and written through
+  `BundleWriter` into a verifiable evidence bundle
 - docs explain that Harness comparison and Trust Card rendering are follow-ups
 
 ## 15. Suggested implementation slices
@@ -571,9 +600,10 @@ Recommended order:
 1. Add receipt contract and reducer tests around the P28 fixture shape.
 2. Add streaming JSONL importer with deterministic fixture output.
 3. Add CLI entry point and README usage.
-4. Wire receipt NDJSON into the current evidence/bundle path.
+4. Write receipt events through `BundleWriter` into a verifiable evidence
+   bundle.
 5. Add Trust Basis claims for receipt presence, digest presence, reducer
-   visibility, and raw payload exclusion.
+   visibility, source-surface visibility, and raw payload exclusion.
 6. Only after that, add Trust Card summarization.
 7. Only after that, add Assay Harness baseline/candidate comparison.
 
