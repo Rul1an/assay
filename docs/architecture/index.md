@@ -49,6 +49,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P29 Guardrails Validation Outcome Evidence (Q2 2026)](./PLAN-P29-GUARDRAILS-VALIDATION-OUTCOME-EVIDENCE-2026q2.md) — planned outcome-first Guardrails AI lane built around one bounded validation outcome, not prompt, corrected-output, reask, or guard-history truth
 - [PLAN — P30 OpenFeature EvaluationDetails Evidence (Q2 2026)](./PLAN-P30-OPENFEATURE-EVALUATION-DETAILS-EVIDENCE-2026q2.md) — planned governance-adjacent OpenFeature lane built around one returned `EvaluationDetails` object, not provider config, targeting, rollout, telemetry, or application correctness truth
 - [PLAN — P31 Promptfoo JSONL Component Result Receipt Import (Q2 2026)](./PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md) — planned compiler-path follow-up to P28 that imports one Promptfoo JSONL assertion component result into one portable Assay evidence receipt, not full Promptfoo eval-run truth or Harness regression gating
+- [PLAN — P32 Promptfoo Receipt Trust Basis Readiness (Q2 2026)](./PLAN-P32-PROMPTFOO-RECEIPT-TRUST-BASIS-READINESS-2026q2.md) — execution slice that proves P31 receipt bundles feed the current Trust Basis compiler without adding a Promptfoo-specific claim row or Trust Card schema bump
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
