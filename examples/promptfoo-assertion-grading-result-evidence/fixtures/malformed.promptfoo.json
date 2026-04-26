@@ -1,0 +1,20 @@
+{
+  "schema": "promptfoo.assertion-grading-result.export.v1",
+  "framework": "promptfoo",
+  "surface": "assertion_grading_result",
+  "target_kind": "promptfoo_output_assertion",
+  "assertion_type": "equals",
+  "output": "Hello world",
+  "expected": "Hello world",
+  "componentResults": [
+    {
+      "pass": true,
+      "score": 1,
+      "reason": "Assertion passed"
+    }
+  ],
+  "result": {
+    "pass": true,
+    "score": true
+  }
+}

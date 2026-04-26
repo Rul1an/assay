@@ -1,0 +1,102 @@
+{
+  "provider": {
+    "id": "echo",
+    "label": "",
+    "config": {
+      "basePath": ""
+    }
+  },
+  "prompt": {
+    "raw": "Hello world",
+    "label": "{{output}}"
+  },
+  "vars": {
+    "output": "Hello world"
+  },
+  "response": {
+    "output": "Hello world",
+    "raw": "Hello world",
+    "cost": 0,
+    "cached": false,
+    "tokenUsage": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0
+    },
+    "isRefusal": false,
+    "metadata": {}
+  },
+  "success": true,
+  "failureReason": 0,
+  "score": 1,
+  "namedScores": {},
+  "latencyMs": 1,
+  "cost": 0,
+  "metadata": {
+    "_promptfooFileMetadata": {}
+  },
+  "promptIdx": 0,
+  "testIdx": 0,
+  "testCase": {
+    "vars": {
+      "output": "Hello world"
+    },
+    "assert": [
+      {
+        "type": "equals",
+        "value": "Hello world"
+      }
+    ],
+    "options": {},
+    "metadata": {}
+  },
+  "promptId": "",
+  "tokenUsage": {
+    "prompt": 0,
+    "completion": 0,
+    "cached": 0,
+    "total": 0,
+    "numRequests": 1,
+    "completionDetails": {
+      "reasoning": 0,
+      "acceptedPrediction": 0,
+      "rejectedPrediction": 0
+    },
+    "assertions": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0,
+      "cached": 0,
+      "numRequests": 1,
+      "completionDetails": {
+        "reasoning": 0,
+        "acceptedPrediction": 0,
+        "rejectedPrediction": 0
+      }
+    }
+  },
+  "gradingResult": {
+    "pass": true,
+    "score": 1,
+    "reason": "All assertions passed",
+    "namedScores": {},
+    "tokensUsed": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0,
+      "cached": 0,
+      "numRequests": 0
+    },
+    "componentResults": [
+      {
+        "pass": true,
+        "score": 1,
+        "reason": "Assertion passed",
+        "assertion": {
+          "type": "equals",
+          "value": "Hello world"
+        }
+      }
+    ]
+  }
+}

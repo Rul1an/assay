@@ -1,0 +1,9 @@
+{
+  "pass": false,
+  "score": 0,
+  "reason": "Expected output \"Goodbye world\" to equal \"Hello world\"",
+  "assertion": {
+    "type": "equals",
+    "value": "Hello world"
+  }
+}

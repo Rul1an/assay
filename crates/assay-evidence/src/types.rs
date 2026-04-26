@@ -7,8 +7,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Spec version for this implementation of the Evidence Contract.
-pub const SPEC_VERSION: &str = "1.0";
+/// CloudEvents specversion used by Evidence Contract v1 envelopes.
+pub const CE_SPECVERSION: &str = "1.0";
+
+/// Assay Evidence Spec version implemented by this crate.
+pub const ASSAY_EVIDENCE_SPEC_VERSION: &str = "1.0";
+
+/// Backward-compatible alias for the CloudEvents specversion.
+///
+/// New code should prefer `CE_SPECVERSION` when filling the CloudEvents
+/// envelope and `ASSAY_EVIDENCE_SPEC_VERSION` when referring to Assay's
+/// own evidence contract version.
+pub const SPEC_VERSION: &str = CE_SPECVERSION;
 
 /// Alias for clearer semantics
 pub type Envelope = EvidenceEvent;
@@ -69,7 +79,7 @@ pub struct EvidenceEvent {
     /// CloudEvents spec version (fixed "1.0")
     pub specversion: String,
 
-    /// Event Type URN (e.g., "assay.env.filtered")
+    /// Event type (dot-separated identifier, e.g., "assay.env.filtered")
     #[serde(rename = "type")]
     pub type_: String,
 
@@ -152,7 +162,7 @@ impl EvidenceEvent {
     ) -> Self {
         let run_id = run_id.into();
         Self {
-            specversion: SPEC_VERSION.into(),
+            specversion: CE_SPECVERSION.into(),
             type_: type_.into(),
             source: source.into(),
             id: format!("{}:{}", run_id, seq),
@@ -341,6 +351,22 @@ mod tests {
 
         let meta_no_git = ProducerMeta::new("assay-cli", "2.6.0");
         assert_eq!(meta_no_git.to_string_compact(), "assay-cli/2.6.0");
+    }
+
+    #[test]
+    fn version_constants_keep_cloudevents_and_assay_axes_separate() {
+        assert_eq!(CE_SPECVERSION, "1.0");
+        assert_eq!(ASSAY_EVIDENCE_SPEC_VERSION, "1.0");
+        assert_eq!(SPEC_VERSION, CE_SPECVERSION);
+
+        let event = EvidenceEvent::new(
+            "assay.test.event",
+            "urn:assay:test",
+            "run_version_constants",
+            0,
+            serde_json::json!({}),
+        );
+        assert_eq!(event.specversion, CE_SPECVERSION);
     }
 
     #[test]

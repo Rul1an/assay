@@ -30,6 +30,7 @@ assay --version
 | [`assay explain`](explain.md) | Explain why trace steps were allowed/blocked |
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
+| [`assay evidence`](evidence.md) | Manage evidence bundles and external evidence imports |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
 | [`assay doctor`](doctor.md) | Diagnose setup and optionally auto-fix known issues |
@@ -246,6 +247,14 @@ See [Configuration](../config/index.md) for full reference.
     Create and verify replay bundles.
 
     [:octicons-arrow-right-24: Full reference](bundle.md)
+
+-   :material-shield-check:{ .lg .middle } __assay evidence__
+
+    ---
+
+    Manage evidence bundles and import external evidence receipts.
+
+    [:octicons-arrow-right-24: Full reference](evidence.md)
 
 -   :material-server:{ .lg .middle } __assay mcp wrap__
 
