@@ -32,6 +32,16 @@ The importer is intentionally strict in v1:
 - component scores must be binary (`0` or `1`)
 - raw prompt, output, expected value, vars, and full JSONL rows are excluded
 
+The importer first computes `source_artifact_digest` over the full JSONL file,
+then parses and reduces assertion components. That two-pass flow is intentional:
+the receipts stay small while still binding back to the exact source artifact
+bytes.
+
+`result.reason` is optional and bounded. For v1, failure reasons are omitted
+because Promptfoo `equals` failure messages commonly quote raw output and
+expected values. Passing reasons are included only when they remain short and
+reviewer-safe.
+
 The output bundle can be verified with:
 
 ```bash

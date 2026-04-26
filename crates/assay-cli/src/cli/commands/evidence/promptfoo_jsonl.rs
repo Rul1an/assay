@@ -47,8 +47,16 @@ pub fn cmd_promptfoo_jsonl(args: PromptfooJsonlArgs) -> Result<i32> {
     let source_artifact_ref = args
         .source_artifact_ref
         .unwrap_or_else(|| default_source_artifact_ref(&args.input));
+    // Deliberately digest the full source artifact bytes before parsing. The
+    // receipt provenance binds to the exact JSONL artifact, independent of the
+    // reduced component payloads we choose to import.
     let source_artifact_digest = sha256_file(&args.input)
         .with_context(|| format!("failed to digest input {}", args.input.display()))?;
+    let producer = ProducerMeta {
+        name: "assay-cli".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        git: option_env!("ASSAY_GIT_SHA").map(str::to_string),
+    };
 
     let events = read_promptfoo_jsonl_events(
         &args.input,
@@ -56,11 +64,11 @@ pub fn cmd_promptfoo_jsonl(args: PromptfooJsonlArgs) -> Result<i32> {
         &source_artifact_digest,
         &args.run_id,
         import_time,
+        &producer,
     )?;
 
     let out_file = File::create(&args.bundle_out)
         .with_context(|| format!("failed to create bundle {}", args.bundle_out.display()))?;
-    let producer = ProducerMeta::new("assay-cli", env!("CARGO_PKG_VERSION"));
     let mut writer = BundleWriter::new(out_file).with_producer(producer);
     for event in events {
         writer.add_event(event);
@@ -83,6 +91,7 @@ fn read_promptfoo_jsonl_events(
     source_artifact_digest: &str,
     run_id: &str,
     import_time: DateTime<Utc>,
+    producer: &ProducerMeta,
 ) -> Result<Vec<EvidenceEvent>> {
     if run_id.contains(':') {
         bail!("run_id cannot contain ':' because event ids use run_id:seq");
@@ -126,7 +135,7 @@ fn read_promptfoo_jsonl_events(
             )?;
             let event = EvidenceEvent::new(EVENT_TYPE, EVENT_SOURCE, run_id, seq, payload)
                 .with_time(import_time)
-                .with_producer(&ProducerMeta::new("assay-cli", env!("CARGO_PKG_VERSION")));
+                .with_producer(producer);
             events.push(event);
         }
     }
@@ -226,6 +235,9 @@ fn binary_score(value: Option<&Value>, line_number: usize, component_index: usiz
 }
 
 fn safe_reason(value: Option<&Value>, pass: bool) -> Option<String> {
+    // Promptfoo equals failure reasons commonly quote the raw output and
+    // expected value. v1 keeps failure reasons out rather than trying to
+    // redact free text after the fact.
     if !pass {
         return None;
     }

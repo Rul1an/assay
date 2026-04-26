@@ -378,6 +378,11 @@ It may be omitted even when present on the source component if it is too long,
 too rich, multiline, rubric-like, provider-generated, or includes compared
 values that would leak raw evaluated payloads.
 
+For the first `equals` importer, failure reasons may be omitted by policy even
+when short, because Promptfoo failure messages commonly quote the compared
+output and expected values. This is stricter than the general optional-reason
+rule and should be documented in CLI help and fixtures.
+
 P31 should prefer omission over unsafe convenience.
 
 ## 7. Explicitly excluded fields
