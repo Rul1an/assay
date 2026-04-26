@@ -32,7 +32,10 @@ pub use trust_card::{
     trust_basis_to_trust_card, trust_card_to_canonical_json_bytes, trust_card_to_markdown,
     TrustCard, TRUST_CARD_NON_GOALS, TRUST_CARD_NOTE_EMPTY_PLACEHOLDER, TRUST_CARD_SCHEMA_VERSION,
 };
-pub use types::{Envelope, EvidenceEvent, ProducerMeta, SPEC_VERSION};
+pub use types::{
+    Envelope, EvidenceEvent, ProducerMeta, ASSAY_EVIDENCE_SPEC_VERSION, CE_SPECVERSION,
+    SPEC_VERSION,
+};
 
 // Re-export bytes for CLI convenience
 pub use bytes::Bytes;

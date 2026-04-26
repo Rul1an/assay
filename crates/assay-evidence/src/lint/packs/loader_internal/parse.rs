@@ -27,6 +27,13 @@ pub(crate) fn load_pack_from_string_impl(
             message: format_yaml_error_impl(e),
         })?;
 
+    if definition.requires.evidence_schema_version.is_none() {
+        tracing::warn!(
+            pack = %definition.name,
+            "pack missing evidence_schema_version; assuming Assay Evidence Spec v1.0 for backward compatibility"
+        );
+    }
+
     // Validate the pack
     definition.validate()?;
 
