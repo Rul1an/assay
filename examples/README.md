@@ -98,6 +98,13 @@ object into Assay-shaped external evidence.
 score only, no imported raw compared values, Braintrust wrappers, or scorer
 config truth.
 
+### [Guardrails Validation Outcome Evidence](./guardrails-validation-outcome-evidence)
+Map a tiny artifact derived from Guardrails AI's direct `ValidationResult` path
+into Assay-shaped external evidence.
+**Focus**: validation-result-first seam, bounded pass/fail and short failure
+message only, no imported raw output, corrected output, reask, or guard-history
+truth.
+
 ### [OpenFeature EvaluationDetails Evidence](./openfeature-evaluation-details-evidence)
 Map a tiny artifact derived from OpenFeature's detailed flag evaluation API
 into Assay-shaped external evidence.

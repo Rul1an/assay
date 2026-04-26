@@ -1,0 +1,11 @@
+{
+  "framework": "guardrails-ai",
+  "result": {
+    "outcome": "pass"
+  },
+  "schema": "guardrails.validation-outcome.export.v1",
+  "surface": "validation_result",
+  "target_kind": "validation_call",
+  "validation_passed": true,
+  "validator_name": "contains-approved-term"
+}
