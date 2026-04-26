@@ -429,7 +429,10 @@ Please upgrade Assay: cargo install assay-cli
 
 ### `evidence_schema_version` Check
 
-Optional field for future schema evolution. Currently informational.
+Optional field for future schema evolution. For Evidence Contract v1, absent
+`evidence_schema_version` is interpreted as `"1.0"` for backward
+compatibility. Lint SHOULD warn when the field is absent so older packs remain
+usable without making the implicit default invisible.
 
 ## SARIF Output
 
