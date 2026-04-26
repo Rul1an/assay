@@ -137,22 +137,44 @@ of one Promptfoo assertion component result.
 It should be frozen from the P28 live discovery shape plus a P31 importer
 fixture, not from Promptfoo docs alone.
 
-Illustrative receipt data shape:
+The default P31 decision is that this receipt is emitted as an Assay
+`EvidenceEvent` under the existing CloudEvents-compatible envelope. The receipt
+body lives under `data`. A standalone non-CloudEvents receipt artifact would
+require new bundling and verification tooling, so it is not the preferred first
+path.
+
+Illustrative `EvidenceEvent` shape:
 
 ```json
 {
-  "schema": "assay.receipt.promptfoo.assertion-component.v1",
-  "source_system": "promptfoo",
-  "source_surface": "cli-jsonl.gradingResult.componentResults",
-  "source_artifact_ref": "results.jsonl",
-  "source_artifact_digest": "sha256:...",
-  "reducer_version": "assay-promptfoo-jsonl-component-result@0.1.0",
-  "imported_at": "2026-04-26T12:00:00Z",
-  "assertion_type": "equals",
-  "result": {
-    "pass": true,
-    "score": 1,
-    "reason": "Assertion passed"
+  "specversion": "1.0",
+  "type": "assay.receipt.promptfoo.assertion_component.v1",
+  "source": "urn:assay:external:promptfoo:assertion-component",
+  "id": "import-promptfoo-jsonl:0",
+  "time": "2026-04-26T12:00:00Z",
+  "datacontenttype": "application/json",
+  "assayrunid": "import-promptfoo-jsonl",
+  "assayseq": 0,
+  "assayproducer": "assay-cli",
+  "assayproducerversion": "3.5.1",
+  "assaygit": "unknown",
+  "assaypii": false,
+  "assaysecrets": false,
+  "assaycontenthash": "sha256:...",
+  "data": {
+    "schema": "assay.receipt.promptfoo.assertion-component.v1",
+    "source_system": "promptfoo",
+    "source_surface": "cli-jsonl.gradingResult.componentResults",
+    "source_artifact_ref": "results.jsonl",
+    "source_artifact_digest": "sha256:...",
+    "reducer_version": "assay-promptfoo-jsonl-component-result@0.1.0",
+    "imported_at": "2026-04-26T12:00:00Z",
+    "assertion_type": "equals",
+    "result": {
+      "pass": true,
+      "score": 1,
+      "reason": "Assertion passed"
+    }
   }
 }
 ```
@@ -162,7 +184,14 @@ This shape is intentionally not a Promptfoo JSONL row.
 It is also not yet a Trust Card. It is the receipt that later compiler steps
 can bundle, verify, summarize, and display.
 
+Implementation must either register this as a new evidence event type with the
+normal Evidence Contract v1 bar, or keep it explicitly experimental until the
+registry row, payload contract, and conformance test exist.
+
 ## 6. Field boundaries
+
+Unless otherwise noted, the fields below describe the receipt body inside the
+`data` payload of the Assay `EvidenceEvent`.
 
 ### 6.1 `schema`
 
@@ -435,23 +464,40 @@ discipline. It should not upgrade external outcomes into universal truth.
 
 ## 11. Bundle path
 
-The P31 implementation should make receipts easy to bundle after import.
+The P31 implementation should make receipts easy to bundle after import, but
+the current CLI does not accept arbitrary receipt NDJSON via
+`assay bundle create --evidence`.
 
-Target flow:
+Current bundle commands are profile/bundle-oriented, for example:
+
+```bash
+assay evidence export --profile profile.yaml --out evidence.tar.gz
+assay evidence verify evidence.tar.gz
+```
+
+Therefore P31 must choose one real bundle integration path during
+implementation:
+
+- write Promptfoo receipt events through the existing `BundleWriter`
+- or produce a profile/sidecar shape that `assay evidence export --profile`
+  can already consume
+- or explicitly add a new evidence import/export command and document the new
+  path
+
+Implementation target, shown as pseudocode until the CLI exists:
 
 ```bash
 promptfoo eval --output results.jsonl
 assay evidence import promptfoo-jsonl \
   --input results.jsonl \
-  --output promptfoo.receipts.ndjson \
+  --bundle-out promptfoo-evidence.tar.gz \
   --source-artifact-ref results.jsonl
-assay bundle create --evidence promptfoo.receipts.ndjson
+assay evidence verify promptfoo-evidence.tar.gz
 ```
 
-The exact bundle command may differ from current CLI reality. The architecture
-requirement is that the receipt output must not be a dead-end example file. It
-must be shaped so the existing evidence and bundle path can consume it with
-minimal glue.
+The architecture requirement is that receipt output must not be a dead-end
+example file. It must become an Assay `EvidenceEvent` stream or bundle that the
+existing verification and later Trust Basis path can consume.
 
 ## 12. Assay Harness boundary
 
@@ -514,7 +560,8 @@ P31 implementation can be considered ready when:
 - reducer version is present
 - deterministic fixture import is possible
 - malformed fixtures fail closed
-- receipt NDJSON can enter the evidence/bundle path
+- receipt events are emitted as Assay `EvidenceEvent`s or written directly into
+  a verifiable evidence bundle
 - docs explain that Harness comparison and Trust Card rendering are follow-ups
 
 ## 15. Suggested implementation slices
