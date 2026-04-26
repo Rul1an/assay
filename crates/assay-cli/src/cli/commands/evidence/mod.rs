@@ -2,6 +2,7 @@ pub mod diff;
 pub mod lint;
 pub mod list;
 pub mod mapping;
+pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
 pub mod store_status;
@@ -21,6 +22,8 @@ pub enum EvidenceCmd {
     Verify(EvidenceVerifyArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
+    /// Import external evidence into an Assay evidence bundle
+    Import(EvidenceImportArgs),
     /// Lint a bundle for quality and security issues
     Lint(lint::LintArgs),
     /// Diff two bundles and report changes
@@ -75,11 +78,25 @@ pub struct EvidenceShowArgs {
     pub format: String,
 }
 
+#[derive(Debug, Args, Clone)]
+pub struct EvidenceImportArgs {
+    #[command(subcommand)]
+    pub cmd: EvidenceImportCmd,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum EvidenceImportCmd {
+    /// Import Promptfoo CLI JSONL assertion component results
+    #[command(name = "promptfoo-jsonl")]
+    PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
+}
+
 pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
     match args.cmd {
         EvidenceCmd::Export(a) => cmd_export(a),
         EvidenceCmd::Verify(a) => cmd_verify(a),
         EvidenceCmd::Show(a) => cmd_show(a),
+        EvidenceCmd::Import(a) => cmd_import(a),
         EvidenceCmd::Lint(a) => lint::cmd_lint(a),
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
         EvidenceCmd::Push(a) => push::cmd_push(a).await,
@@ -88,6 +105,12 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::StoreStatus(a) => store_status::cmd_store_status(a).await,
         #[cfg(feature = "tui")]
         EvidenceCmd::Explore(a) => explore::cmd_explore(a),
+    }
+}
+
+fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
+    match args.cmd {
+        EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
 }
 

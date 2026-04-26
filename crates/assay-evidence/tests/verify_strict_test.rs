@@ -4,7 +4,9 @@
 
 use assay_evidence::bundle::writer::{verify_bundle, BundleWriter};
 use assay_evidence::crypto::id::compute_content_hash;
-use assay_evidence::types::EvidenceEvent;
+use assay_evidence::types::{
+    EvidenceEvent, PayloadEnvFiltered, PayloadSandboxDegraded, PayloadToolDecision,
+};
 use chrono::{TimeZone, Utc};
 use sha2::Digest;
 use std::io::Cursor;
@@ -34,6 +36,18 @@ fn create_valid_bundle(event_count: usize) -> Vec<u8> {
         writer.finish().unwrap();
     }
     buffer
+}
+
+fn verify_single_event(mut event: EvidenceEvent) {
+    event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer);
+    writer.add_event(event);
+    writer.finish().unwrap();
+
+    let result = verify_bundle(Cursor::new(&buffer)).unwrap();
+    assert_eq!(result.event_count, 1);
 }
 
 // ============================================================================
@@ -66,6 +80,129 @@ fn test_verify_run_root_matches() {
 
     // Computed run_root must match manifest
     assert_eq!(result.computed_run_root, result.manifest.run_root);
+}
+
+#[test]
+fn test_profile_started_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "profile_name": "default",
+        "profile_version": "1.0",
+        "total_runs_aggregated": 1
+    });
+    assert_eq!(payload["profile_name"], "default");
+    verify_single_event(EvidenceEvent::new(
+        "assay.profile.started",
+        "urn:assay:test",
+        "run_profile_started_contract",
+        0,
+        payload,
+    ));
+}
+
+#[test]
+fn test_profile_finished_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "files_count": 1,
+        "network_count": 0,
+        "processes_count": 1,
+        "sandbox_degradation_count": 0,
+        "integrity_scope": "observed"
+    });
+    assert_eq!(payload["integrity_scope"], "observed");
+    verify_single_event(EvidenceEvent::new(
+        "assay.profile.finished",
+        "urn:assay:test",
+        "run_profile_finished_contract",
+        0,
+        payload,
+    ));
+}
+
+#[test]
+fn test_fs_access_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "hits": 3
+    });
+    assert_eq!(payload["hits"], 3);
+    let event = EvidenceEvent::new(
+        "assay.fs.access",
+        "urn:assay:test",
+        "run_fs_access_contract",
+        0,
+        payload,
+    )
+    .with_subject("~/project/input.txt");
+    verify_single_event(event);
+}
+
+#[test]
+fn test_tool_decision_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "tool": "read_file",
+        "decision": "allow",
+        "reason_code": "P_POLICY_ALLOW",
+        "args_schema_hash": "sha256:abc",
+        "delegated_from": "agent:planner",
+        "delegation_depth": 1
+    });
+    let typed: PayloadToolDecision = serde_json::from_value(payload.clone())
+        .expect("tool decision payload contract should parse");
+    assert_eq!(typed.tool, "read_file");
+    assert_eq!(typed.delegation_depth, Some(1));
+    verify_single_event(EvidenceEvent::new(
+        "assay.tool.decision",
+        "urn:assay:test",
+        "run_tool_decision_contract",
+        0,
+        payload,
+    ));
+}
+
+#[test]
+fn test_env_filtered_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "mode": "strict",
+        "passed_keys": ["PATH"],
+        "dropped_keys": ["OPENAI_API_KEY"],
+        "counters": {
+            "passed": 1,
+            "dropped": 1
+        }
+    });
+    let typed: PayloadEnvFiltered = serde_json::from_value(payload.clone())
+        .expect("env filtered payload contract should parse");
+    assert_eq!(typed.mode, "strict");
+    assert_eq!(typed.dropped_keys, vec!["OPENAI_API_KEY"]);
+
+    verify_single_event(EvidenceEvent::new(
+        "assay.env.filtered",
+        "urn:assay:test",
+        "run_env_filtered_contract",
+        0,
+        payload,
+    ));
+}
+
+#[test]
+fn test_sandbox_degraded_stable_payload_conformance() {
+    let payload = serde_json::json!({
+        "reason_code": "policy_conflict",
+        "degradation_mode": "audit_fallback",
+        "component": "landlock"
+    });
+    let typed: PayloadSandboxDegraded = serde_json::from_value(payload.clone())
+        .expect("sandbox degraded payload contract should parse");
+    assert_eq!(
+        typed.reason_code,
+        assay_evidence::types::SandboxDegradationReasonCode::PolicyConflict
+    );
+    verify_single_event(EvidenceEvent::new(
+        "assay.sandbox.degraded",
+        "urn:assay:test",
+        "run_sandbox_degraded_contract",
+        0,
+        payload,
+    ));
 }
 
 // ============================================================================
