@@ -1,0 +1,12 @@
+{
+  "name": "assay-promptfoo-assertion-grading-result-evidence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "capture": "node capture_probe.mjs"
+  },
+  "dependencies": {
+    "promptfoo": "0.119.0"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "provider": {
+    "id": "echo",
+    "label": "",
+    "config": {
+      "basePath": ""
+    }
+  },
+  "prompt": {
+    "raw": "Goodbye world",
+    "label": "{{output}}"
+  },
+  "vars": {
+    "output": "Goodbye world"
+  },
+  "response": {
+    "output": "Goodbye world",
+    "raw": "Goodbye world",
+    "cost": 0,
+    "cached": false,
+    "tokenUsage": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0
+    },
+    "isRefusal": false,
+    "metadata": {}
+  },
+  "success": false,
+  "failureReason": 1,
+  "score": 0,
+  "namedScores": {},
+  "latencyMs": 2,
+  "cost": 0,
+  "metadata": {
+    "_promptfooFileMetadata": {}
+  },
+  "promptIdx": 0,
+  "testIdx": 1,
+  "testCase": {
+    "vars": {
+      "output": "Goodbye world"
+    },
+    "assert": [
+      {
+        "type": "equals",
+        "value": "Hello world"
+      }
+    ],
+    "options": {},
+    "metadata": {}
+  },
+  "promptId": "",
+  "tokenUsage": {
+    "prompt": 0,
+    "completion": 0,
+    "cached": 0,
+    "total": 0,
+    "numRequests": 1,
+    "completionDetails": {
+      "reasoning": 0,
+      "acceptedPrediction": 0,
+      "rejectedPrediction": 0
+    },
+    "assertions": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0,
+      "cached": 0,
+      "numRequests": 1,
+      "completionDetails": {
+        "reasoning": 0,
+        "acceptedPrediction": 0,
+        "rejectedPrediction": 0
+      }
+    }
+  },
+  "error": "Expected output \"Goodbye world\" to equal \"Hello world\"",
+  "gradingResult": {
+    "pass": false,
+    "score": 0,
+    "reason": "Expected output \"Goodbye world\" to equal \"Hello world\"",
+    "namedScores": {},
+    "tokensUsed": {
+      "total": 0,
+      "prompt": 0,
+      "completion": 0,
+      "cached": 0,
+      "numRequests": 0
+    },
+    "componentResults": [
+      {
+        "pass": false,
+        "score": 0,
+        "reason": "Expected output \"Goodbye world\" to equal \"Hello world\"",
+        "assertion": {
+          "type": "equals",
+          "value": "Hello world"
+        }
+      }
+    ]
+  }
+}
