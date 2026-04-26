@@ -80,9 +80,14 @@ function runPromptfoo(workDir, promptfooBin) {
   }
 }
 
+function resolvePromptfooBin() {
+  const executable = process.platform === "win32" ? "promptfoo.cmd" : "promptfoo";
+  return join(__dirname, "node_modules", ".bin", executable);
+}
+
 function main() {
   const { outDir } = parseArgs();
-  const promptfooBin = join(__dirname, "node_modules", ".bin", "promptfoo");
+  const promptfooBin = resolvePromptfooBin();
   const packageVersion = readPromptfooVersion();
   const workDir = mkdtempSync(join(tmpdir(), "assay-p28-promptfoo-"));
 

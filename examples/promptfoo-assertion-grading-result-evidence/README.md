@@ -96,7 +96,7 @@ assertion artifact, not an infrastructure failure.
 
 ```bash
 cd examples/promptfoo-assertion-grading-result-evidence
-npm install --package-lock=false
+npm ci
 npm run capture
 ```
 
