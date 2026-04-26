@@ -93,6 +93,7 @@ This table lists event types for Assay Evidence Spec v1.x (bundle schema_version
 | assay.mandate.used.v1 | stable | Mandate used lifecycle | SPEC-Mandate-v1 | mandate events tests |
 | assay.mandate.revoked.v1 | stable | Mandate revoked lifecycle | SPEC-Mandate-v1 | mandate events tests |
 | sandbox.degraded | stable | Operational integrity | [ADR-006 §3.C](../architecture/ADR-006-Evidence-Contract.md#3-core-payload-schemas-v10) | generate_fixture, evidence tests |
+| assay.receipt.promptfoo.assertion_component.v1 | experimental | Promptfoo CLI JSONL assertion component receipt | [PLAN-P31 §5-§6](../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md#5-receipt-v1-thesis) | promptfoo_jsonl importer tests |
 
 ## 5. Deprecation policy
 

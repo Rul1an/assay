@@ -1,0 +1,59 @@
+# assay evidence
+
+Manage Assay evidence bundles and external evidence imports.
+
+---
+
+## Synopsis
+
+```bash
+assay evidence <COMMAND> [OPTIONS]
+```
+
+---
+
+## Promptfoo JSONL Import
+
+Import Promptfoo CLI JSONL assertion component results into a verifiable Assay
+evidence bundle:
+
+```bash
+assay evidence import promptfoo-jsonl \
+  --input results.jsonl \
+  --bundle-out promptfoo-evidence.tar.gz \
+  --source-artifact-ref results.jsonl
+```
+
+The importer is intentionally strict in v1:
+
+- input must be Promptfoo CLI JSONL rows
+- each row must carry `gradingResult.componentResults[]`
+- each component must be an `equals` assertion result
+- component scores must be binary (`0` or `1`)
+- raw prompt, output, expected value, vars, and full JSONL rows are excluded
+
+The output bundle can be verified with:
+
+```bash
+assay evidence verify promptfoo-evidence.tar.gz
+```
+
+Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--input <PATH>` | Promptfoo CLI JSONL output file |
+| `--bundle-out <PATH>` | Output Assay evidence bundle path |
+| `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
+| `--run-id <ID>` | Assay import run id used for receipt event ids |
+| `--import-time <RFC3339>` | Deterministic import timestamp override |
+
+---
+
+## See Also
+
+- [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
+- [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
+- [Promptfoo assertion grading-result example](../../../examples/promptfoo-assertion-grading-result-evidence/README.md)
