@@ -1,0 +1,9 @@
+{
+  "error_code": null,
+  "error_message": null,
+  "flag_key": "checkout.new_flow",
+  "flag_metadata": {},
+  "reason": "STATIC",
+  "value": true,
+  "variant": "on"
+}

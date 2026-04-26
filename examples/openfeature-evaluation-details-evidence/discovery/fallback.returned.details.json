@@ -1,0 +1,9 @@
+{
+  "error_code": "FLAG_NOT_FOUND",
+  "error_message": "Flag 'checkout.missing' not found",
+  "flag_key": "checkout.missing",
+  "flag_metadata": {},
+  "reason": "ERROR",
+  "value": false,
+  "variant": null
+}

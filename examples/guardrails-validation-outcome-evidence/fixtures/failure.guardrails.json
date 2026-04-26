@@ -1,0 +1,12 @@
+{
+  "framework": "guardrails-ai",
+  "result": {
+    "error": "Value must include required term: approved",
+    "outcome": "fail"
+  },
+  "schema": "guardrails.validation-outcome.export.v1",
+  "surface": "validation_result",
+  "target_kind": "validation_call",
+  "validation_passed": false,
+  "validator_name": "contains-approved-term"
+}

@@ -1,0 +1,18 @@
+{
+  "default_value": false,
+  "defined_flags": {
+    "checkout.new_flow": {
+      "default_variant": "on",
+      "variants": {
+        "off": false,
+        "on": true
+      }
+    }
+  },
+  "flag_key": "checkout.missing",
+  "method": "get_boolean_details",
+  "package": "openfeature-sdk",
+  "package_version": "0.8.4",
+  "provider": "InMemoryProvider",
+  "sdk_language": "python"
+}

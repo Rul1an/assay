@@ -1,0 +1,22 @@
+{
+  "schema": "openfeature.evaluation-details.export.v1",
+  "framework": "openfeature",
+  "surface": "evaluation_details",
+  "target_kind": "feature_flag",
+  "flag_key": "checkout.new_flow",
+  "default_value": false,
+  "provider_config": {
+    "provider": "InMemoryProvider"
+  },
+  "evaluation_context": {
+    "targeting_key": "user-123"
+  },
+  "flag_metadata": {
+    "owner": "checkout"
+  },
+  "result": {
+    "value": true,
+    "variant": "on",
+    "reason": "STATIC"
+  }
+}
