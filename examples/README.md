@@ -105,6 +105,13 @@ into Assay-shaped external evidence.
 reason, variant, and fallback error fields only, no imported provider config,
 targeting, rollout, telemetry, or application correctness truth.
 
+### [Promptfoo Assertion GradingResult Evidence](./promptfoo-assertion-grading-result-evidence)
+Map a tiny artifact derived from Promptfoo's deterministic `equals` assertion
+component result into Assay-shaped external evidence.
+**Focus**: extracted-assertion-result-first seam, bounded pass/score/reason
+only, no imported full eval exports, prompt matrices, provider responses, or
+raw compared values.
+
 ### [RAG Grounding](./rag-grounding)
 Evaluate if your RAG pipeline answers strictly based on context.
 **Metrics**: `semantic_similarity`, `must_contain`, `must_not_contain`.

@@ -11,11 +11,11 @@
 
 | Layer | Identifier | Meaning |
 |-------|------------|---------|
-| **Assay Evidence Spec** | v1.0 (string) | Assay’s envelope + payload contract per ADR-006. Implemented as `SPEC_VERSION = "1.0"` in code. |
+| **Assay Evidence Spec** | v1.0 (string) | Assay’s envelope + payload contract per ADR-006. Implemented as `ASSAY_EVIDENCE_SPEC_VERSION = "1.0"` in code. |
 | Bundle container | schema_version = 1 (integer) | Manifest and .tar.gz layout. Only value 1 is valid for v1; any other is rejected by verify/reader. |
-| Pack compatibility | evidence_schema_version: "1.0" | Packs declare the Assay Evidence Spec version they support. **Interpretation (Pack Engine v1 policy):** Pack engines MUST interpret this field as follows. For v1 freeze: *exact match* on `"1.0"` (only bundles with Assay Evidence Spec v1.0 and bundle schema_version 1 are accepted). If the field is absent, assume v1.0. If the value is present and not recognized, the pack engine MUST fail closed (reject) unless explicitly configured otherwise. This is a contract between pack engine and pack. Enforcement lives in the pack engine and lint layer, not in evidence verify. Future Pack Engine specs MAY adopt SemVer range semantics; build metadata is ignored; prerelease has lower precedence than release. |
+| Pack compatibility | evidence_schema_version: "1.0" | Packs declare the Assay Evidence Spec version they support. **Interpretation (Pack Engine v1 policy):** Pack engines MUST interpret this field as follows. For v1 freeze: *exact match* on `"1.0"` (only bundles with Assay Evidence Spec v1.0 and bundle schema_version 1 are accepted). If the field is absent, assume v1.0; lint SHOULD warn when `evidence_schema_version` is absent, even if pack engines default it to v1.0 for backward compatibility. If the value is present and not recognized, the pack engine MUST fail closed (reject) unless explicitly configured otherwise. This is a contract between pack engine and pack. Enforcement lives in the pack engine and lint layer, not in evidence verify. Future Pack Engine specs MAY adopt SemVer range semantics; build metadata is ignored; prerelease has lower precedence than release. |
 
-**Naming note:** *CloudEvents* `specversion` is the string `"1.0"` (CloudEvents context attribute). *Assay Evidence Spec* is Assay’s contract version (also `"1.0"` for v1). They are distinct concepts; tooling and tickets should distinguish “CloudEvents specversion” from “Assay Evidence Spec”.
+**Naming note:** *CloudEvents* `specversion` is the string `"1.0"` (CloudEvents context attribute). *Assay Evidence Spec* is Assay’s contract version (also `"1.0"` for v1). They are distinct concepts; tooling and tickets should distinguish “CloudEvents specversion” from “Assay Evidence Spec”. Code and tooling SHOULD use distinct constant names for these axes (`CE_SPECVERSION` for CloudEvents; `ASSAY_EVIDENCE_SPEC_VERSION` for Assay Evidence) and SHOULD avoid ambiguous names such as `SPEC_VERSION` in new code.
 
 **Source of truth for breaking changes:** This spec and the bundle manifest schema_version. Event envelope or payload changes that break existing consumers require a new spec version (e.g. v2) or a new bundle schema_version, with migration notes.
 
@@ -34,6 +34,7 @@
 
 **Version axes and evolution (mechanically testable):**
 - In v1, bundle schema_version is always 1. There is no schema_version 2 while the Assay Evidence Spec is v1.x.
+- Any bundle schema_version greater than 1 is outside Assay Evidence Spec v1.x and therefore requires Assay Evidence Spec v2+ with migration notes.
 - Assay Evidence Spec minor (v1.1, v1.2, …) MAY contain only additive changes (new optional fields, new event types). Breaking changes are not allowed within v1.x.
 - **Breaking change rule:** (1) Container/layout breaking ⇒ bundle schema_version bump (e.g. 2) with migration notes. (2) Meaning or payload breaking for an existing event type ⇒ new type identifier (preferred) or Assay Evidence Spec major (v2). Prefer adding a new type over bumping the spec major to reduce disruption for tooling.
 
@@ -54,7 +55,7 @@
 - **No semantic change:** The meaning of existing fields MUST NOT change.
 - **No type change:** Changing the type of an existing field is breaking.
 - **Removal or rename:** Breaking. Allowed only after deprecation window and only in a new spec version (v2) or new bundle schema_version, with migration notes.
-- **Unknown fields (compatibility mode vs strict JSON):** Verify/reader MUST accept events that contain unknown JSON object keys, *unless* one of the following applies (closed list): duplicate keys at any nesting level, event line bytes not valid UTF-8 or invalid Unicode escapes (including lone surrogates)—event lines are UTF-8 NDJSON (events.ndjson), manifest or event size limit exceeded, event count limit exceeded, decompression limit exceeded. No other condition may be used to reject solely on “unknown” keys. **Compatibility mode:** Unknown keys MUST be ignored by consumers. **Strict JSON (parser hardening):** The conditions above are the only security overrides; this aligns with JCS/canonical JSON and fail-closed verification.
+- **Unknown fields (compatibility mode vs strict JSON):** Verify/reader MUST accept events that contain unknown JSON object keys, *unless* one of the following applies (closed list): duplicate keys at any nesting level, event line bytes not valid UTF-8 or invalid Unicode escapes (including lone surrogates)—event lines are UTF-8 NDJSON (events.ndjson), manifest or event size limit exceeded, event count limit exceeded, decompression limit exceeded. No other condition may be used to reject solely on “unknown” keys. **Compatibility mode:** Unknown keys MUST be ignored by consumers. **Strict JSON (parser hardening):** The conditions above are the only security overrides; this aligns with JCS/canonical JSON and fail-closed verification. Limit values used by security overrides MUST have a documented source of truth if intended to be normative across implementations; in the reference implementation these defaults live in `VerifyLimits`. Otherwise, such checks are implementation hardening behavior and MUST be documented by the verifier.
 
 ### 4.1 New event types (compatibility)
 
@@ -62,11 +63,11 @@
 
 1. It is added to the [Event types (v1)](#42-event-types-v1) registry table.
 2. Its payload contract is documented in [ADR-006](../architecture/ADR-006-Evidence-Contract.md) or the relevant spec: at minimum the type string, payload shape (required/optional fields + types), semantics (1–2 sentences), and versioning posture (v1 additive-only; breaking ⇒ new type or v2). A field-level contract is required; full JSON Schema is not.
-3. At least one conformance test verifies that an event of this type passes verify (happy path) and checks at least one required invariant. The payload must be validated/decoded by the consumer(s) that are supposed to understand it—at minimum: evidence verify can parse the envelope and content-hash invariants hold. **At minimum, the test MUST assert: (a) verify succeeds, and (b) assaycontenthash matches the canonicalized payload bytes per v1 rules (directly or indirectly via verify).** Lint/explore coverage is optional.
+3. At least one conformance test verifies that an event of this type passes verify (happy path) and checks at least one required invariant. The payload must be validated/decoded by the consumer(s) that are supposed to understand it—at minimum: evidence verify can parse the envelope and content-hash invariants hold. **At minimum, the test MUST assert: (a) verify succeeds, and (b) assaycontenthash matches the canonicalized v1 content-hash input (directly or indirectly via verify).** Lint/explore coverage is optional. Stable event types MUST have at least one type-specific conformance test that checks a payload-level invariant beyond envelope/hash validity.
 
 Existing type strings MUST NOT change payload meaning; breaking changes require a new type string.
 
-This policy applies to any new type intended for production/stable use. Experimental and test-only types MUST still be registered, but MAY use TBD links and MAY use weaker test coverage; they MUST NOT be emitted by default in released builds. **A type may only be marked experimental or test-only temporarily; promotion to stable requires the full bar (schema link + conformance test) and MUST be recorded in version history.**
+This policy applies to any new type intended for production/stable use. Experimental and test-only types MUST still be registered, but MAY use TBD links and MAY use weaker test coverage; they MUST NOT be emitted by default in released builds. Experimental rows whose payload contract points to a plan are provisional: they MAY be emitted only by an explicitly invoked experimental/importer surface, and MUST NOT be emitted by default or implicit evidence-export paths until the payload contract and conformance tests are merged. **A type may only be marked experimental or test-only temporarily; promotion to stable requires the full bar (schema link + conformance test) and MUST be recorded in version history.**
 
 Version suffixes in the type string (e.g. `.v1`) are allowed but not required; use them when the payload contract itself is versioned independently (e.g. mandate lifecycle).
 
@@ -82,17 +83,18 @@ This table lists event types for Assay Evidence Spec v1.x (bundle schema_version
 
 | Event type | Status | Description | Payload contract | Test coverage |
 |------------|--------|-------------|-------------------|---------------|
-| assay.profile.started | stable | Run context start | [ADR-006 §3.A](../architecture/ADR-006-Evidence-Contract.md#3-core-payload-schemas-v10) | generate_fixture, evidence mapping/lint/diff |
-| assay.profile.finished | stable | Run context end | ADR-006 §3.A (same) | generate_fixture, evidence mapping |
-| assay.fs.access | stable | Filesystem activity (generalized) | [ADR-006 §3.D](../architecture/ADR-006-Evidence-Contract.md#3-core-payload-schemas-v10) | generate_fixture, evidence diff_test, explore |
+| assay.profile.started | stable | Run context start | [ADR-006 §3.A](../architecture/ADR-006-Evidence-Contract.md#payload-assay-profile-started) | verify_strict_test::test_profile_started_stable_payload_conformance |
+| assay.profile.finished | stable | Run context end | [ADR-006 §3.A](../architecture/ADR-006-Evidence-Contract.md#payload-assay-profile-finished) | verify_strict_test::test_profile_finished_stable_payload_conformance |
+| assay.fs.access | stable | Filesystem activity (generalized) | [ADR-006 §3.D](../architecture/ADR-006-Evidence-Contract.md#payload-assay-fs-access) | verify_strict_test::test_fs_access_stable_payload_conformance |
 | assay.net.connect | experimental | Network connection | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test, lint |
 | assay.process.exec | experimental | Process execution | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test |
-| assay.tool.decision | stable | Policy enforcement decision | [ADR-006 §3.B](../architecture/ADR-006-Evidence-Contract.md#3-core-payload-schemas-v10) | evidence verify_strict_test, mandate/lint |
-| assay.env.filtered | stable | Env filtering | ADR-006 envelope + example | assay_evidence types unit test |
+| assay.tool.decision | stable | Policy enforcement decision | [ADR-006 §3.B](../architecture/ADR-006-Evidence-Contract.md#payload-assay-tool-decision) | verify_strict_test::test_tool_decision_stable_payload_conformance |
+| assay.env.filtered | stable | Env filtering | [ADR-006 §3.E](../architecture/ADR-006-Evidence-Contract.md#payload-assay-env-filtered) | verify_strict_test::test_env_filtered_stable_payload_conformance |
 | assay.mandate.v1 | stable | Mandate content | [SPEC-Mandate-v1](../architecture/SPEC-Mandate-v1.md) | mandate golden/crypto vectors |
 | assay.mandate.used.v1 | stable | Mandate used lifecycle | SPEC-Mandate-v1 | mandate events tests |
 | assay.mandate.revoked.v1 | stable | Mandate revoked lifecycle | SPEC-Mandate-v1 | mandate events tests |
-| sandbox.degraded | stable | Operational integrity | [ADR-006 §3.C](../architecture/ADR-006-Evidence-Contract.md#3-core-payload-schemas-v10) | generate_fixture, evidence tests |
+| assay.sandbox.degraded | stable | Operational integrity | [ADR-006 §3.C](../architecture/ADR-006-Evidence-Contract.md#payload-assay-sandbox-degraded) | verify_strict_test::test_sandbox_degraded_stable_payload_conformance |
+| assay.receipt.promptfoo.assertion_component.v1 | experimental | Promptfoo CLI JSONL assertion component receipt | [PLAN-P31 §5-§6](../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md#5-receipt-v1-thesis) | promptfoo_jsonl::tests::import_writes_verifiable_bundle_without_raw_payloads |
 
 ## 5. Deprecation policy
 
@@ -111,13 +113,13 @@ The following fixtures are normative. Consumers (verify, lint, explore, and CI) 
 
 **Container golden vs event golden:** *Container golden* covers tar layout, manifest schema, file hashes, and entry ordering. *Event golden* covers CloudEvents envelope and payload semantics (required attributes, types, content hashes). Both are part of the normative contract; fixtures may target one or both.
 
-**Container determinism (tar.gz):** For reproducible “container golden” builds the canonical writer SHOULD normalize so output is platform-independent: tar entry ordering fixed (e.g. manifest.json first, then events.ndjson); tar header uid, gid, uname, gname, mtime (e.g. 0 / epoch); gzip mtime and OS byte (e.g. mtime=0, OS=255 “unknown”). determinism_test pins the container hash for the canonical writer output; implementations that produce different tar/gzip header bytes are not byte-for-byte compatible with that pinned output. They may still be semantically compatible (verify passes), but are not deterministic-identical to the canonical writer output.
+**Container determinism (tar.gz):** For reproducible “container golden” builds the canonical writer MUST normalize so output is platform-independent: tar entry ordering fixed (e.g. manifest.json first, then events.ndjson); tar header uid, gid, uname, gname, mtime (e.g. 0 / epoch); gzip mtime and OS byte (e.g. mtime=0, OS=255 “unknown”). Other implementations SHOULD do the same for byte-identical compatibility. determinism_test pins the container hash for the canonical writer output; implementations that produce different tar/gzip header bytes are not byte-for-byte compatible with that pinned output. They may still be semantically compatible (verify passes), but are not deterministic-identical to the canonical writer output.
 
 **Determinism goldens vs smoke goldens (do not conflate):**
 - **Determinism goldens (pinned hashes):** The pinned hashes in `determinism_test.rs` apply to a bundle *generated inside that test* (in-memory), not to the file `test-bundle.tar.gz`. Updating “pinned hashes” means updating the assertions in `test_golden_hash` after changing the writer or event format.
 - **Smoke goldens (file fixtures):** `test-bundle.tar.gz` is a separate file fixture used to verify layout, verify, lint, and explore; it uses a different event set (from `generate_fixture`). Regenerating `test-bundle.tar.gz` does not change the determinism_test pinned values.
 
-**What is pinned (exact inputs):** (1) SHA-256 of the manifest.json bytes as stored in the tar; (2) SHA-256 of the events.ndjson bytes (UTF-8, one event per line, newline `\n`); (3) SHA-256 of the entire compressed tar.gz. Event-level content hashes use JCS (RFC 8785) canonicalization for the hash input. JCS is the norm for deterministic hashing and signing in v1; implementations that hash different normalized bytes are not compatible.
+**What is pinned (exact inputs):** (1) SHA-256 of the manifest.json bytes as stored in the tar; (2) SHA-256 of the events.ndjson bytes (UTF-8, one event per line, newline `\n`); (3) SHA-256 of the entire compressed tar.gz. Event-level content hashes use JCS (RFC 8785) canonicalization for the v1 content-hash input: `specversion`, `type`, `datacontenttype`, optional `subject`, and `data`. They do not cover the full CloudEvents envelope. JCS is the norm for deterministic hashing and signing in v1; implementations that hash different normalized bytes are not compatible.
 
 | Fixture | Purpose | Location | Determinism | Tests / consumers |
 |---------|---------|----------|-------------|-------------------|
@@ -147,18 +149,19 @@ These IDs are stable; if a test is renamed, maintain a compatibility alias (e.g.
 | 1                        | 2026-01| Initial: manifest schema, events.ndjson, CloudEvents envelope per ADR-006/007. |
 | 1                        | 2026-02| Contract freeze: this spec (compat matrix, evolution rules, deprecation, golden fixtures). |
 | 1                        | 2026-02| New event types policy (§4.1): no new type without registry + schema + conformance test; Event types (v1) registry table (§4.2); §2 normative rule clarified (schema_version 1 + v1.0 baseline; verify MAY v1.x, pack MAY exact 1.0). |
+| 1                        | 2026-04| Tightened version-axis naming (`CE_SPECVERSION` vs `ASSAY_EVIDENCE_SPEC_VERSION`), stable event registry anchors, canonical-writer determinism language, content-hash input scope, and experimental receipt-type emission posture. |
 
 ## 8. Normative checklist (summary)
 
 Before treating this document as normative, confirm:
 
-- **Terminologie:** CloudEvents `specversion` vs Assay Evidence Spec are clearly separated; no conflation in tooling or tickets.
+- **Terminologie:** CloudEvents `specversion` vs Assay Evidence Spec are clearly separated; new code uses `CE_SPECVERSION` and `ASSAY_EVIDENCE_SPEC_VERSION` rather than conflating the axes.
 - **Unknown keys:** Verify MUST accept unknown keys unless one of the closed list applies (duplicate keys, invalid UTF-8/surrogate, size/count/decompression limits); no other reject reason for “unknown” alone.
 - **v1.x additive-only:** In v1, bundle schema_version remains 1; Assay Evidence Spec minor (v1.1, v1.2) contains only additive changes; breaking ⇒ v2 or schema_version bump.
 - **Deprecations:** Deprecations ship in a minor release; removals only in a major spec or new schema_version.
-- **Container determinism:** Canonical writer SHOULD normalize tar/gzip headers; determinism_test pins container hash for that output.
+- **Container determinism:** Canonical writer MUST normalize tar/gzip headers; determinism_test pins container hash for that output.
 - **Fixture regen:** Pinned-hash locations are exactly named (see §6: `determinism_test.rs`, test `test_golden_hash`, three `assert_eq!` hex values).
-- **New event types (§4.1):** No new type without registry row + payload contract (concrete section for stable) + conformance test (verify + assaycontenthash invariant). Stable rows no "implied"; experimental/test-only temporary until full bar; promotion in version history.
+- **New event types (§4.1):** No new type without registry row + payload contract (concrete section for stable) + conformance test (verify + assaycontenthash content-hash-input invariant). Stable rows no "implied"; experimental/test-only temporary until full bar; promotion in version history.
 
 ## 9. References
 

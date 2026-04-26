@@ -18,7 +18,7 @@ Every evidence record is an Event enveloping a type-specific Payload.
 | Field | Type | Description | Invariants |
 | :--- | :--- | :--- | :--- |
 | `specversion` | `1.0` | CloudEvents spec version | Fixed string. |
-| `type` | string | Event Type URN | e.g. `assay.env.filtered`, `assay.tool.decision`. |
+| `type` | string | Event type identifier | e.g. `assay.env.filtered`, `assay.tool.decision`. |
 | `source` | string | Producer Identifier | URI identifying the specific runner instance. |
 | `id` | string | Event ID | `{run_id}:{seq}` (e.g. `run_abc:0`). |
 | `time` | string | Timestamp (RFC3339) | UTC only. |
@@ -29,8 +29,15 @@ Every evidence record is an Event enveloping a type-specific Payload.
 | `assayseq` | int | Sequence (Flattened) | 0-indexed monotonic counter. |
 | `assayproducer` | string | Producer Name | e.g. "assay". |
 | `assayproducerversion`| string | Producer Version | e.g. "2.6.0". |
-| `assaycontenthash` | string | **Payload Integrity** | `sha256(canonical_payload)`. |
+| `assaycontenthash` | string | **Content Integrity** | `sha256` over the v1 canonical content-hash input. |
 | `data` | object | **Type-Specific Data** | Validated against `type` schema. |
+
+In v1, `assaycontenthash` covers the JCS-canonicalized content-hash input:
+`specversion`, `type`, `datacontenttype`, optional `subject`, and `data`.
+It does not cover the full CloudEvents envelope, stream identity, timestamp,
+producer metadata, policy metadata, privacy flags, or trace context. This is
+intentionally narrower than the full envelope but not data-only: changing the
+event type changes the content hash.
 
 ### 2. Privacy Classes (Data Protection)
 
@@ -44,10 +51,16 @@ The format enforces strict redaction categories to ensure evidence is "safe by d
 
 ### 3. Core Payload Schemas (v1.0)
 
-All payloads are defined via stable Rust types in `assay-evidence` and mapped from `assay-cli`.
+Core payloads are mapped from `assay-cli` into the Evidence envelope. Some
+payloads also have convenience Rust types in `assay-evidence`; the v1 envelope
+and content-hash contract remain generic over JSON payloads.
 
-#### A. `assay.profile.started` (Run Context)
-Records the start of an attestation run.
+<a id="payload-assay-profile-started"></a>
+<a id="payload-assay-profile-finished"></a>
+#### A. `assay.profile.started` / `assay.profile.finished` (Run Context)
+Records the start and end of a profile evidence export.
+
+`assay.profile.started`:
 ```json
 {
   "profile_name": "string",
@@ -56,6 +69,20 @@ Records the start of an attestation run.
 }
 ```
 
+`assay.profile.finished`:
+```json
+{
+  "files_count": 1,
+  "network_count": 1,
+  "processes_count": 1,
+  "sandbox_degradation_count": 0,
+  "integrity_scope": "observed"
+}
+```
+
+`integrity_scope` is optional and records the profile/export scope when present.
+
+<a id="payload-assay-tool-decision"></a>
 #### B. `assay.tool.decision` (Policy Enforcement)
 Records authorization decisions (HITL-ready, protocol-based).
 ```json
@@ -74,8 +101,8 @@ surfaced only when a supported decision flow carries explicit
 `_meta.delegation` context. They do not imply delegation-chain completeness or
 integrity, inherited-scope validation, or temporal correctness.
 
-
-#### C. `sandbox.degraded` (Operational Integrity)
+<a id="payload-assay-sandbox-degraded"></a>
+#### C. `assay.sandbox.degraded` (Operational Integrity)
 Records when stronger-than-audit containment was requested, weaker containment
 became effective, and execution continued.
 ```json
@@ -87,15 +114,43 @@ became effective, and execution continued.
 }
 ```
 
-#### D. `fs.observed` (Activity Log)
-Records filesystem activity with generalized paths.
+`reason_code` is currently `backend_unavailable` or `policy_conflict`.
+`degradation_mode` is currently `audit_fallback`. `component` is currently
+`landlock`. `detail` is optional and must be redacted operator context.
+
+<a id="payload-assay-fs-access"></a>
+#### D. `assay.fs.access` (Activity Log)
+Records filesystem activity with generalized paths. In observed mode, payloads
+are minimized and the generalized subject is carried in the envelope `subject`.
 ```json
 {
-  "op": "read|write|exec",
-  "path": "${ASSAY_TMP}/input.txt",
-  "backend": "landlock|ebpf"
+  "hits": 3
 }
 ```
+
+Full-detail local exports may include additional observed fields such as
+`file`, `first_seen`, `last_seen`, and `runs_seen`. Those fields are additive
+and not required for v1 stable consumption.
+
+<a id="payload-assay-env-filtered"></a>
+#### E. `assay.env.filtered` (Environment Filtering)
+Records environment-filtering posture and summary counts without raw
+environment values.
+```json
+{
+  "mode": "strict",
+  "passed_keys": ["PATH"],
+  "dropped_keys": ["OPENAI_API_KEY"],
+  "counters": {
+    "passed": 1,
+    "dropped": 1
+  }
+}
+```
+
+`mode` is the observed filter mode. `passed_keys` and `dropped_keys` are key
+names only; raw environment values must not appear in this payload. `counters`
+is an additive map of summary counters.
 
 ## Consequences
 - **Interoperability**: Standard envelope allows ingestion by any CloudEvents-compatible system (Splunk, Azure Event Grid).

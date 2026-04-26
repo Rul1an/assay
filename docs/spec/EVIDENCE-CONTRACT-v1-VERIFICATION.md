@@ -6,7 +6,8 @@ This document records verification of [EVIDENCE-CONTRACT-v1.md](./EVIDENCE-CONTR
 
 | Claim | Location | Status |
 |-------|----------|--------|
-| **SPEC_VERSION = "1.0"** | `crates/assay-evidence/src/types.rs`: `pub const SPEC_VERSION: &str = "1.0"` | ✓ |
+| **CloudEvents specversion = "1.0"** | `crates/assay-evidence/src/types.rs`: `pub const CE_SPECVERSION: &str = "1.0"`; `SPEC_VERSION` remains a backward-compatible alias. | ✓ |
+| **Assay Evidence Spec version = "1.0"** | `crates/assay-evidence/src/types.rs`: `pub const ASSAY_EVIDENCE_SPEC_VERSION: &str = "1.0"` | ✓ |
 | **Bundle schema_version only 1 accepted** | `crates/assay-evidence/src/bundle/writer.rs`: `verify_bundle_with_limits` rejects `m.schema_version != 1` with `ContractSchemaVersion` (lines 811–817). Reader uses same verify path. | ✓ |
 | **specversion "1.0" enforced** | `writer.rs`: after deserializing event, `if event.specversion != "1.0"` → reject (lines 941–946). | ✓ |
 | **Assay requires time** | `EvidenceEvent.time` is `DateTime<Utc>` (required). CloudEvents does not require it; Assay does. | ✓ |
@@ -14,7 +15,7 @@ This document records verification of [EVIDENCE-CONTRACT-v1.md](./EVIDENCE-CONTR
 | **Unknown fields ignored** | `EvidenceEvent` has no `#[serde(deny_unknown_fields)]`. Deserialization ignores unknown keys. | ✓ |
 | **Verify does not reject solely for unknown** | Verify uses `validate_json_strict` (duplicate keys, lone surrogates, limits) then `serde_json::from_str::<EvidenceEvent>`. Unknown keys are not checked; they are dropped by serde. Rejection only for security/integrity (duplicate keys, bad UTF-8, hash mismatch, etc.). | ✓ |
 | **Canonicalization: JCS (RFC 8785)** | `crates/assay-evidence/src/crypto/jcs.rs`: uses `serde_jcs`; module doc references RFC 8785. | ✓ |
-| **Content hash: SHA-256, lowercase hex, "sha256:" prefix** | `crates/assay-evidence/src/crypto/id.rs`: `Sha256::digest`, `format!("sha256:{}", hex::encode(hash))`. | ✓ |
+| **Content hash: SHA-256, lowercase hex, "sha256:" prefix** | `crates/assay-evidence/src/crypto/id.rs`: `Sha256::digest`, `format!("sha256:{}", hex::encode(hash))`. The v1 hash input is `specversion`, `type`, `datacontenttype`, optional `subject`, and `data`, not the full envelope. | ✓ |
 | **Pinned hashes location** | `crates/assay-evidence/tests/determinism_test.rs`, test `test_golden_hash`: manifest content hash, events content hash, container hash (lines 272–296). | ✓ |
 | **test-bundle.tar.gz generation** | `crates/assay-evidence/tests/generate_fixture.rs`: writes to `tests/fixtures/evidence/test-bundle.tar.gz`; command as in spec. | ✓ |
 | **Fixtures path** | `tests/fixtures/evidence/test-bundle.tar.gz` and `README.md` exist. | ✓ |
@@ -22,7 +23,7 @@ This document records verification of [EVIDENCE-CONTRACT-v1.md](./EVIDENCE-CONTR
 ## Pack evidence_schema_version
 
 - **Spec:** “For v1 freeze: exact match on 1.0”. Packs declare `evidence_schema_version: "1.0"` (e.g. `packs/eu-ai-act-baseline.yaml`, `crates/assay-evidence/packs/mandate-baseline.yaml`).
-- **Code:** `lint/packs/schema.rs` has `evidence_schema_version: Option<String>`. SPEC-Pack-Engine-v1 states the check is “Currently informational”.
+- **Code:** `lint/packs/schema.rs` has `evidence_schema_version: Option<String>`. The pack loader warns when the field is absent and assumes v1.0 for backward compatibility.
 - **Conclusion:** Contract is defined in this spec; enforcement (e.g. rejecting a pack run when bundle schema_version or event spec does not match) may be added in a future release. No change required for doc-only freeze.
 
 ## Golden fixture: determinism vs file fixture
