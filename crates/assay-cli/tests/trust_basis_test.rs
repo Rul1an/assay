@@ -204,7 +204,7 @@ fn trust_basis_diff_fails_on_external_receipt_claim_regression_when_requested() 
         .output()
         .unwrap();
 
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"regressions\""));
     assert!(stdout.contains("\"external_eval_receipt_boundary_visible\""));

@@ -3,9 +3,10 @@ use crate::lint::engine::{lint_bundle_with_options, LintOptions, LintReportWithP
 use crate::types::EvidenceEvent;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustClaimId {
     BundleVerified,
@@ -80,6 +81,7 @@ pub struct TrustBasisClaimMetadataDiff {
     pub candidate_source: TrustClaimSource,
     pub baseline_boundary: TrustClaimBoundary,
     pub candidate_boundary: TrustClaimBoundary,
+    pub note_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,23 +114,24 @@ pub struct TrustBasisOptions {
 }
 
 pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustBasisDiffReport {
+    let mut candidate_by_id: HashMap<TrustClaimId, &TrustBasisClaim> = HashMap::new();
+    for claim in &candidate.claims {
+        candidate_by_id.entry(claim.id).or_insert(claim);
+    }
+
     let mut regressions = Vec::new();
     let mut improvements = Vec::new();
     let mut removals = Vec::new();
     let mut metadata_changes = Vec::new();
     let mut unchanged = 0;
-    let mut seen_candidate_ids = Vec::new();
+    let mut seen_candidate_ids = HashSet::new();
 
     for baseline_claim in &baseline.claims {
-        let Some(candidate_claim) = candidate
-            .claims
-            .iter()
-            .find(|claim| claim.id == baseline_claim.id)
-        else {
+        let Some(candidate_claim) = candidate_by_id.get(&baseline_claim.id).copied() else {
             removals.push(baseline_claim.clone());
             continue;
         };
-        seen_candidate_ids.push(candidate_claim.id);
+        seen_candidate_ids.insert(candidate_claim.id);
 
         let baseline_rank = trust_claim_level_rank(baseline_claim.level);
         let candidate_rank = trust_claim_level_rank(candidate_claim.level);
@@ -146,6 +149,7 @@ pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustB
             });
         } else if baseline_claim.source != candidate_claim.source
             || baseline_claim.boundary != candidate_claim.boundary
+            || baseline_claim.note != candidate_claim.note
         {
             metadata_changes.push(TrustBasisClaimMetadataDiff {
                 id: baseline_claim.id,
@@ -153,6 +157,7 @@ pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustB
                 candidate_source: candidate_claim.source,
                 baseline_boundary: baseline_claim.boundary,
                 candidate_boundary: candidate_claim.boundary,
+                note_changed: baseline_claim.note != candidate_claim.note,
             });
         } else {
             unchanged += 1;
@@ -552,6 +557,16 @@ mod tests {
             }
         }
         payload
+    }
+
+    fn test_claim(id: TrustClaimId, level: TrustClaimLevel, note: Option<&str>) -> TrustBasisClaim {
+        TrustBasisClaim {
+            id,
+            level,
+            source: TrustClaimSource::BundleVerification,
+            boundary: TrustClaimBoundary::BundleWide,
+            note: note.map(str::to_string),
+        }
     }
 
     #[test]
@@ -1042,5 +1057,30 @@ mod tests {
                 .contains("trust basis bundle exceeds compressed input limit"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn trust_basis_diff_reports_note_metadata_changes() {
+        let baseline = TrustBasis {
+            claims: vec![test_claim(
+                TrustClaimId::BundleVerified,
+                TrustClaimLevel::Verified,
+                Some("baseline note"),
+            )],
+        };
+        let candidate = TrustBasis {
+            claims: vec![test_claim(
+                TrustClaimId::BundleVerified,
+                TrustClaimLevel::Verified,
+                Some("candidate note"),
+            )],
+        };
+
+        let report = diff_trust_basis(&baseline, &candidate);
+
+        assert!(report.regressions.is_empty());
+        assert!(report.improvements.is_empty());
+        assert_eq!(report.metadata_changes.len(), 1);
+        assert!(report.metadata_changes[0].note_changed);
     }
 }

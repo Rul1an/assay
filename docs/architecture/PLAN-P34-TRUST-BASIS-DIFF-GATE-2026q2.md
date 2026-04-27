@@ -77,7 +77,7 @@ The diff also reports:
 
 - added claims
 - removed claims
-- source/boundary metadata changes
+- source/boundary/note metadata changes
 - unchanged claim count
 
 Metadata changes are visible but do not fail by default. They may represent a

@@ -1,8 +1,8 @@
 use crate::cli::args::{
     OutputFormat, TrustBasisArgs, TrustBasisDiffArgs, TrustBasisGenerateArgs, TrustBasisSub,
 };
-use crate::exit_codes::EXIT_SUCCESS;
-use anyhow::{bail, Context, Result};
+use crate::exit_codes::{EXIT_SUCCESS, EXIT_TEST_FAILURE};
+use anyhow::{Context, Result};
 use assay_evidence::lint::engine::LintOptions;
 use assay_evidence::lint::packs::load_packs;
 use assay_evidence::{
@@ -74,7 +74,8 @@ fn cmd_diff(args: TrustBasisDiffArgs) -> Result<i32> {
     }
 
     if args.fail_on_regression && report.has_regressions() {
-        bail!("Trust Basis regression check failed");
+        eprintln!("Trust Basis regression check failed");
+        return Ok(EXIT_TEST_FAILURE);
     }
 
     Ok(EXIT_SUCCESS)
@@ -164,12 +165,13 @@ fn write_metadata_diffs(
     for diff in diffs {
         writeln!(
             writer,
-            "- {}: source {} -> {}, boundary {} -> {}",
+            "- {}: source {} -> {}, boundary {} -> {}, note_changed={}",
             id_label(diff.id),
             source_label(diff.baseline_source),
             source_label(diff.candidate_source),
             boundary_label(diff.baseline_boundary),
-            boundary_label(diff.candidate_boundary)
+            boundary_label(diff.candidate_boundary),
+            diff.note_changed
         )?;
     }
     Ok(())

@@ -62,8 +62,9 @@ absent < inferred < self_reported < verified
 ```
 
 Lowering a claim level, or removing a baseline claim, is a regression.
-Improving a level, adding a claim, or changing claim metadata is reported but
-does not fail unless a future caller adds a stricter policy above this command.
+Improving a level, adding a claim, or changing claim source, boundary, or note
+metadata is reported but does not fail unless a future caller adds a stricter
+policy above this command.
 
 ---
 
