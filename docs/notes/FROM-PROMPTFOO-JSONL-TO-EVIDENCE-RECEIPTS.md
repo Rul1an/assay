@@ -8,7 +8,7 @@ Promptfoo already makes AI behavior testable in CI. Assay shows how selected
 assertion outcomes can become portable evidence.
 
 This note is about evidence portability for AI eval outcomes. Promptfoo is the
-first concrete example, not the scope of the idea.
+first concrete wedge, not the scope of the idea.
 
 ## The Gap
 
@@ -27,6 +27,9 @@ the important question is often not "did the eval tool run?" It is:
   eval runner.
 
 That is the evidence portability gap.
+
+The point is not to re-explain eval outputs. It is to show how a selected eval
+outcome becomes a portable evidence unit.
 
 ## The Boundary
 
@@ -92,7 +95,7 @@ truth.
 
 ## What Trust Basis May Say
 
-For supported Promptfoo assertion-component receipts, Trust Basis may say:
+For the current Promptfoo receipt pipeline, Trust Basis may say:
 
 - a supported external eval receipt boundary is visible,
 - the receipt was carried through a verifiable Assay bundle,
