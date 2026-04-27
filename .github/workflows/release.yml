@@ -665,8 +665,9 @@ jobs:
         with:
           working-directory: assay-python-sdk
           target: ${{ matrix.target }}
-          # setup-python does not affect the manylinux container, so the
-          # interpreter must be explicit for Linux wheel builds.
+          # Keep the interpreter explicit for all wheel targets. This is
+          # required inside the manylinux container and harmless on macOS,
+          # where setup-python provides the same Python version.
           args: --release --out dist --locked -i python3.12 --compatibility pypi
           sccache: 'true'
           manylinux: auto

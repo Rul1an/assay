@@ -158,11 +158,15 @@ pub struct TrustBasisOptions {
     pub lint: Option<LintOptions>,
 }
 
+/// Diff two Trust Basis artifacts by stable claim identity.
+///
+/// The CLI rejects duplicate claim IDs before calling this function. Library
+/// callers still get deterministic output if duplicate IDs are present: the
+/// first claim for each ID wins, and duplicate IDs are not repeated in diff
+/// arrays.
 pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustBasisDiffReport {
-    let mut candidate_by_id: HashMap<TrustClaimId, &TrustBasisClaim> = HashMap::new();
-    for claim in &candidate.claims {
-        candidate_by_id.entry(claim.id).or_insert(claim);
-    }
+    let baseline_by_id = first_claim_by_id(baseline);
+    let candidate_by_id = first_claim_by_id(candidate);
 
     let mut regressed_claims = Vec::new();
     let mut improved_claims = Vec::new();
@@ -171,7 +175,7 @@ pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustB
     let mut unchanged_claim_count = 0;
     let mut seen_candidate_ids = HashSet::new();
 
-    for baseline_claim in &baseline.claims {
+    for baseline_claim in baseline_by_id.values() {
         let Some(candidate_claim) = candidate_by_id.get(&baseline_claim.id).copied() else {
             removed_claims.push(presence_diff_removed(baseline_claim));
             continue;
@@ -214,18 +218,18 @@ pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustB
         }
     }
 
-    let mut added_claims: Vec<TrustBasisClaimPresenceDiff> = candidate
-        .claims
-        .iter()
+    let mut added_claims: Vec<TrustBasisClaimPresenceDiff> = candidate_by_id
+        .values()
+        .copied()
         .filter(|claim| !seen_candidate_ids.contains(&claim.id))
         .map(presence_diff_added)
         .collect();
 
-    regressed_claims.sort_by_key(|diff| diff.claim_id);
-    improved_claims.sort_by_key(|diff| diff.claim_id);
-    removed_claims.sort_by_key(|diff| diff.claim_id);
-    added_claims.sort_by_key(|diff| diff.claim_id);
-    metadata_changes.sort_by_key(|diff| diff.claim_id);
+    regressed_claims.sort_by_key(|diff| claim_id_sort_key(diff.claim_id));
+    improved_claims.sort_by_key(|diff| claim_id_sort_key(diff.claim_id));
+    removed_claims.sort_by_key(|diff| claim_id_sort_key(diff.claim_id));
+    added_claims.sort_by_key(|diff| claim_id_sort_key(diff.claim_id));
+    metadata_changes.sort_by_key(|diff| claim_id_sort_key(diff.claim_id));
 
     let summary = TrustBasisDiffSummary {
         regressed_claims: regressed_claims.len(),
@@ -254,6 +258,14 @@ pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustB
         metadata_changes,
         unchanged_claim_count,
     }
+}
+
+fn first_claim_by_id(trust_basis: &TrustBasis) -> HashMap<TrustClaimId, &TrustBasisClaim> {
+    let mut by_id = HashMap::new();
+    for claim in &trust_basis.claims {
+        by_id.entry(claim.id).or_insert(claim);
+    }
+    by_id
 }
 
 fn presence_diff_removed(claim: &TrustBasisClaim) -> TrustBasisClaimPresenceDiff {
@@ -299,9 +311,16 @@ pub fn duplicate_trust_basis_claim_ids(trust_basis: &TrustBasis) -> Vec<TrustCla
             }
         })
         .collect();
-    duplicates.sort();
+    duplicates.sort_by_key(|id| claim_id_sort_key(*id));
     duplicates.dedup();
     duplicates
+}
+
+fn claim_id_sort_key(id: TrustClaimId) -> String {
+    match serde_json::to_value(id).expect("TrustClaimId serialization should succeed") {
+        serde_json::Value::String(value) => value,
+        _ => unreachable!("TrustClaimId should serialize as a string"),
+    }
 }
 
 fn trust_claim_level_rank(level: TrustClaimLevel) -> u8 {
@@ -1187,6 +1206,81 @@ mod tests {
             TrustClaimId::ExternalEvalReceiptBoundaryVisible
         );
         assert!(report.metadata_changes[0].note_changed);
+    }
+
+    #[test]
+    fn trust_basis_diff_sorts_by_serialized_claim_id() {
+        let baseline = TrustBasis { claims: vec![] };
+        let candidate = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::AppliedPackFindingsPresent,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+            ],
+        };
+
+        let report = diff_trust_basis(&baseline, &candidate);
+        let added_ids: Vec<_> = report
+            .added_claims
+            .iter()
+            .map(|diff| diff.claim_id)
+            .collect();
+
+        assert_eq!(
+            added_ids,
+            vec![
+                TrustClaimId::AppliedPackFindingsPresent,
+                TrustClaimId::BundleVerified,
+            ]
+        );
+    }
+
+    #[test]
+    fn trust_basis_diff_dedupes_duplicate_claim_ids_for_library_consumers() {
+        let baseline = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(TrustClaimId::BundleVerified, TrustClaimLevel::Absent, None),
+            ],
+        };
+        let candidate = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Absent,
+                    None,
+                ),
+            ],
+        };
+
+        let report = diff_trust_basis(&baseline, &candidate);
+
+        assert_eq!(report.removed_claims.len(), 1);
+        assert_eq!(
+            report.removed_claims[0].claim_id,
+            TrustClaimId::BundleVerified
+        );
+        assert_eq!(report.added_claims.len(), 1);
+        assert_eq!(
+            report.added_claims[0].claim_id,
+            TrustClaimId::ExternalEvalReceiptBoundaryVisible
+        );
     }
 
     #[test]
