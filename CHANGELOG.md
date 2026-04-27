@@ -4,15 +4,57 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-04-27
+
+This minor release makes the first external-eval evidence portability lane
+release-ready. Assay can now import selected external evaluation outcomes as
+bounded evidence receipts, carry them through Trust Basis, and compare claim
+artifacts without importing full eval-run truth or claiming model correctness.
+
 ### Trust Compiler
 
-- **External eval outcomes as bounded receipts**: On `main`, Assay now has the
-  first evidence-portability lane for selected external eval outcomes. The lane
-  starts with Promptfoo assertion-component results, compiles them into Assay
-  evidence receipts, carries them through Trust Basis / diff, and keeps the
-  boundary explicit: no full eval-run import, no Promptfoo integration claim,
-  and no model-correctness truth. See
+- **External eval outcomes as bounded receipts**: Assay now has the first
+  evidence-portability lane for selected external eval outcomes. The lane starts
+  with Promptfoo assertion-component results, compiles them into Assay evidence
+  receipts, carries them through Trust Basis / diff, and keeps the boundary
+  explicit: no full eval-run import, no Promptfoo integration claim, and no
+  model-correctness truth. See
   [From Promptfoo JSONL to Evidence Receipts](docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md).
+- **Promptfoo JSONL receipt import**: `assay evidence import promptfoo-jsonl`
+  imports strict Promptfoo CLI JSONL rows from
+  `gradingResult.componentResults[]` and writes verifiable Assay evidence
+  bundles. The v1 lane is deterministic-assertion-first (`equals`, binary
+  `0`/`1` component scores) and excludes raw prompt, output, expected value,
+  vars, provider payloads, token/cost data, and full JSONL rows.
+- **Trust Basis visibility for external receipts**: supported external eval
+  receipt bundles can now surface the bounded
+  `external_eval_receipt_boundary_visible` claim. The claim means the receipt
+  boundary and provenance are visible; it does not mean the upstream eval run
+  passed or that Assay imports upstream payloads as truth.
+- **Trust Basis diff contract**: `assay trust-basis diff` compares canonical
+  Trust Basis artifacts by stable claim identity, reports added / removed /
+  improved / regressed / metadata-only changes, and can fail CI only on
+  claim-presence or claim-level regressions.
+
+### Examples and Notes
+
+- **Promptfoo evidence sample and recipe path**: the Promptfoo assertion
+  grading-result sample is restored on `main`, and the Assay-side note explains
+  the evidence portability boundary without positioning this as a Promptfoo
+  integration or partnership.
+- **Additional bounded evidence examples**: OpenFeature `EvaluationDetails` and
+  Guardrails validation-outcome lanes document adjacent evidence units while
+  staying clear of provider-config truth, corrected-output truth, and full run
+  history.
+
+### Notes for Upgraders
+
+- Trust Basis and Trust Card consumers should keep selecting claims by stable
+  `claim.id`, not row position or row count. The external-eval receipt claim is
+  additive.
+- The Promptfoo lane is downstream evidence portability over existing
+  JSONL/assertion surfaces. It is not official Promptfoo support, not a
+  partnership claim, and not a full Promptfoo export importer.
 
 ## [3.5.1] - 2026-04-06
 

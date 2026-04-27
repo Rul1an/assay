@@ -33,9 +33,9 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
-> **Trust Compiler line:** Release **v3.5.1** is the current public line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), and **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`). The `v3.5.1` patch line also adds the first honest official-MCP-Registry publication assets for `assay-mcp-server`. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+> **Trust Compiler line:** Release **v3.6.0** is the prepared evidence-portability line. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`), and **`v3.5.1`** as the official-MCP-Registry publication foundation for `assay-mcp-server`. **`v3.6.0`** adds the first external-eval receipt lane: selected eval outcomes can enter Assay as bounded evidence receipts, starting with Promptfoo assertion-component results. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
 
-> **Repository truth:** `main` now tracks the released **v3.5.1** line, which carries forward the bounded MCP authorization-discovery seam in imported traces and the new MCP Registry publication foundation for `assay-mcp-server`. Future trust-compiler slices may still land on `main` before the next public cut, so release notes and changelog remain the authority for what is actually public.
+> **Repository truth:** release notes and [CHANGELOG.md](CHANGELOG.md) remain the authority for what is actually public. `main` may carry release-prep commits before a tag is cut; crates.io publication is separate from repository merge state.
 
 ```
   Agent ──► Assay ──► MCP Server
@@ -94,7 +94,7 @@ assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 
 `trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md](docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md).
 
-On `main`, supported external eval outcomes can also enter this compiler path as bounded receipts rather than full eval-run truth; [From Promptfoo JSONL to Evidence Receipts](docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) shows the first concrete lane.
+In the `v3.6.0` line, supported external eval outcomes can also enter this compiler path as bounded receipts rather than full eval-run truth; [From Promptfoo JSONL to Evidence Receipts](docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) shows the first concrete lane.
 
 ## What you get
 
@@ -102,7 +102,7 @@ On `main`, supported external eval outcomes can also enter this compiler path as
 |--------|------|
 | **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run (see CLI note above the diagram). |
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
-| **External eval receipts** | Merged on `main`: selected eval outcomes as bounded evidence receipts; Promptfoo assertion components are the first lane. |
+| **External eval receipts** | `v3.6.0` line: selected eval outcomes as bounded evidence receipts; Promptfoo assertion components are the first lane. |
 | **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
 | **Trust Card** | `trustcard.json` / `trustcard.md` — same claims, review-friendly artifact. |
 | **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
