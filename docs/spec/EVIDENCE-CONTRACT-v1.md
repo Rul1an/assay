@@ -95,6 +95,7 @@ This table lists event types for Assay Evidence Spec v1.x (bundle schema_version
 | assay.mandate.revoked.v1 | stable | Mandate revoked lifecycle | SPEC-Mandate-v1 | mandate events tests |
 | assay.sandbox.degraded | stable | Operational integrity | [ADR-006 §3.C](../architecture/ADR-006-Evidence-Contract.md#payload-assay-sandbox-degraded) | verify_strict_test::test_sandbox_degraded_stable_payload_conformance |
 | assay.receipt.promptfoo.assertion_component.v1 | experimental | Promptfoo CLI JSONL assertion component receipt | [PLAN-P31 §5-§6](../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md#5-receipt-v1-thesis) | promptfoo_jsonl::tests::import_writes_verifiable_bundle_without_raw_payloads |
+| assay.receipt.openfeature.evaluation_details.v1 | experimental | OpenFeature boolean EvaluationDetails decision receipt | [PLAN-P41 §5-§6](../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md#5-receipt-v1-thesis) | openfeature_details::tests::import_writes_verifiable_boolean_decision_bundle |
 
 ## 5. Deprecation policy
 

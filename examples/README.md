@@ -109,7 +109,7 @@ truth.
 Map a tiny artifact derived from OpenFeature's detailed flag evaluation API
 into Assay-shaped external evidence.
 **Focus**: decision-detail-first surface, bounded flag key, returned value,
-reason, variant, and fallback error fields only, no imported provider config,
+reason, variant, and fallback error code only, no imported provider config,
 targeting, rollout, telemetry, or application correctness truth.
 
 ### [Promptfoo Assertion GradingResult Evidence](./promptfoo-assertion-grading-result-evidence)

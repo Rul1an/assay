@@ -2,6 +2,7 @@ pub mod diff;
 pub mod lint;
 pub mod list;
 pub mod mapping;
+pub mod openfeature_details;
 pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
@@ -86,6 +87,9 @@ pub struct EvidenceImportArgs {
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum EvidenceImportCmd {
+    /// Import bounded OpenFeature boolean EvaluationDetails decision artifacts
+    #[command(name = "openfeature-details")]
+    OpenFeatureDetails(openfeature_details::OpenFeatureDetailsArgs),
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
@@ -110,6 +114,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
 
 fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
     match args.cmd {
+        EvidenceImportCmd::OpenFeatureDetails(a) => openfeature_details::cmd_openfeature_details(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
 }

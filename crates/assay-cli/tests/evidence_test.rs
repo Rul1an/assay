@@ -151,6 +151,76 @@ fn test_promptfoo_imported_receipts_feed_trust_basis_generation() {
 }
 
 #[test]
+fn test_openfeature_imported_decision_receipts_verify_and_feed_trust_basis_generation() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("openfeature-details.jsonl");
+    let bundle = dir.path().join("openfeature-receipts.tar.gz");
+    fs::write(
+        &input,
+        concat!(
+            r#"{"schema":"openfeature.evaluation-details.export.v1","framework":"openfeature","surface":"evaluation_details","target_kind":"feature_flag","flag_key":"checkout.new_flow","result":{"value":true,"variant":"on","reason":"STATIC"}}"#,
+            "\n",
+            r#"{"schema":"openfeature.evaluation-details.export.v1","framework":"openfeature","surface":"evaluation_details","target_kind":"feature_flag","flag_key":"checkout.missing","result":{"value":false,"reason":"ERROR","error_code":"FLAG_NOT_FOUND"}}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("openfeature-details")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("openfeature-details.jsonl")
+        .arg("--run-id")
+        .arg("openfeature_trust_basis")
+        .arg("--import-time")
+        .arg("2026-04-27T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(
+        claims.len(),
+        8,
+        "P41 does not add a Trust Basis claim yet; it proves bundle/readability first"
+    );
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "OpenFeature decision receipts are not external eval receipts"
+    );
+}
+
+#[test]
 fn test_evidence_export_deterministic() {
     let dir = tempdir().unwrap();
     let profile_path = dir.path().join("profile.yaml");
