@@ -33,6 +33,10 @@ It is intentionally small:
 - `fixtures/fallback.openfeature.json`: one bounded fallback/error artifact
 - `fixtures/malformed.openfeature.json`: one malformed provider/config import
   case
+- `fixtures/decision-details.openfeature.jsonl`: two P41 importer-ready bounded
+  boolean decision details
+- `fixtures/context-leak.openfeature.jsonl`: one P41 fail-closed case with
+  context plus free-text error message
 - `fixtures/valid.assay.ndjson`: mapped placeholder output with fixed import
   time
 - `fixtures/fallback.assay.ndjson`: mapped placeholder output with fixed import
@@ -150,6 +154,30 @@ python3 examples/openfeature-evaluation-details-evidence/map_to_assay.py \
 This third command is expected to fail because the malformed fixture tries to
 carry provider configuration, evaluation context, inline flag metadata, and
 caller-side defaults into a one-detail v1 lane.
+
+## Import the checked-in JSONL artifact as Assay receipts
+
+P41 turns the sample from placeholder mapping into a real Assay compiler path:
+
+```bash
+assay evidence import openfeature-details \
+  --input examples/openfeature-evaluation-details-evidence/fixtures/decision-details.openfeature.jsonl \
+  --bundle-out /tmp/openfeature-decision-receipts.tar.gz \
+  --source-artifact-ref decision-details.openfeature.jsonl \
+  --run-id p41_openfeature_fixture \
+  --import-time 2026-04-27T12:00:00Z
+
+assay evidence verify /tmp/openfeature-decision-receipts.tar.gz
+```
+
+The importer consumes the bounded `openfeature.evaluation-details.export.v1`
+JSONL shape from this example, not provider configuration or a cross-SDK
+OpenFeature wire-format claim. It writes one
+`assay.receipt.openfeature.evaluation_details.v1` event per JSONL row.
+
+The P41 receipt excludes `error_message`, inline flag metadata, provider state,
+targeting keys, evaluation context, and targeting rules. The
+`context-leak.openfeature.jsonl` fixture is expected to fail closed.
 
 ## Important boundary
 
