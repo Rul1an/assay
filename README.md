@@ -94,12 +94,15 @@ assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 
 `trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md](docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md).
 
+On `main`, supported external eval outcomes can also enter this compiler path as bounded receipts rather than full eval-run truth; [From Promptfoo JSONL to Evidence Receipts](docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) shows the first concrete lane.
+
 ## What you get
 
 | Output | Role |
 |--------|------|
 | **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run (see CLI note above the diagram). |
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
+| **External eval receipts** | Merged on `main`: selected eval outcomes as bounded evidence receipts; Promptfoo assertion components are the first lane. |
 | **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
 | **Trust Card** | `trustcard.json` / `trustcard.md` — same claims, review-friendly artifact. |
 | **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
