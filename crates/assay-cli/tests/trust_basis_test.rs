@@ -54,6 +54,26 @@ fn write_trust_basis_json(path: &std::path::Path, external_eval_level: &str) {
     fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }
 
+fn write_duplicate_claim_trust_basis_json(path: &std::path::Path) {
+    let value = json!({
+        "claims": [
+            {
+                "id": "bundle_verified",
+                "level": "verified",
+                "source": "bundle_verification",
+                "boundary": "bundle-wide"
+            },
+            {
+                "id": "bundle_verified",
+                "level": "verified",
+                "source": "bundle_verification",
+                "boundary": "bundle-wide"
+            }
+        ]
+    });
+    fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+}
+
 #[test]
 fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     let dir = tempdir().unwrap();
@@ -204,12 +224,18 @@ fn trust_basis_diff_fails_on_external_receipt_claim_regression_when_requested() 
         .output()
         .unwrap();
 
-    assert!(!output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("\"regressions\""));
-    assert!(stdout.contains("\"external_eval_receipt_boundary_visible\""));
-    assert!(stdout.contains("\"baseline_level\": \"verified\""));
-    assert!(stdout.contains("\"candidate_level\": \"absent\""));
+    assert_eq!(output.status.code(), Some(1));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["schema"], "assay.trust-basis.diff.v1");
+    assert_eq!(stdout["claim_identity"], "claim.id");
+    assert_eq!(stdout["summary"]["has_regressions"], true);
+    assert_eq!(stdout["summary"]["regressed_claims"], 1);
+    assert_eq!(
+        stdout["regressed_claims"][0]["claim_id"],
+        "external_eval_receipt_boundary_visible"
+    );
+    assert_eq!(stdout["regressed_claims"][0]["baseline_level"], "verified");
+    assert_eq!(stdout["regressed_claims"][0]["candidate_level"], "absent");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("Trust Basis regression check failed"));
 }
@@ -234,5 +260,27 @@ fn trust_basis_diff_reports_external_receipt_claim_improvement_without_failing()
         .stdout(predicate::str::contains("Improvements:"))
         .stdout(predicate::str::contains(
             "external_eval_receipt_boundary_visible: absent -> verified",
+        ));
+}
+
+#[test]
+fn trust_basis_diff_rejects_duplicate_claim_identity() {
+    let dir = tempdir().unwrap();
+    let baseline = dir.path().join("baseline.trust-basis.json");
+    let candidate = dir.path().join("candidate.trust-basis.json");
+    write_duplicate_claim_trust_basis_json(&baseline);
+    write_trust_basis_json(&candidate, "verified");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("diff")
+        .arg(&baseline)
+        .arg(&candidate)
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "baseline Trust Basis contains duplicate claim id(s): bundle_verified",
         ));
 }

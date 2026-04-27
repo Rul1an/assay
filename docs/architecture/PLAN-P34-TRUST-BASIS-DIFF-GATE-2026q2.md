@@ -58,6 +58,18 @@ Trust Basis claims, not Promptfoo semantics.
 
 ## 3. Comparison Semantics
 
+P34 v1 accepts canonical Trust Basis JSON produced by
+`assay trust-basis generate`.
+
+Claim comparison is keyed by stable claim identity:
+
+```text
+claim.id
+```
+
+Duplicate claim IDs in either input are invalid. Without unique claim identity,
+the command cannot distinguish an actual regression from ambiguous input.
+
 Trust Basis claim levels are ordered:
 
 ```text
@@ -77,11 +89,30 @@ The diff also reports:
 
 - added claims
 - removed claims
-- source/boundary metadata changes
+- source/boundary/note metadata changes
 - unchanged claim count
 
-Metadata changes are visible but do not fail by default. They may represent a
-spec or compiler evolution rather than a runtime regression.
+P34 v1 gates on claim presence and claim level only. Metadata changes are
+visible but do not fail by default. They may represent a spec or compiler
+evolution rather than a runtime regression.
+
+Added claims, including unknown or newly introduced claim IDs, are not
+regressions by default.
+
+Machine-readable JSON output uses the stable schema
+`assay.trust-basis.diff.v1` and includes:
+
+- `summary`
+- `regressed_claims`
+- `improved_claims`
+- `removed_claims`
+- `added_claims`
+- `metadata_changes`
+- `unchanged_claim_count`
+
+Each diff item carries the matching `claim_id`, its diff class, and the
+baseline/candidate fields needed by later Harness or SARIF/JUnit projection.
+All arrays are sorted deterministically by `claim.id`.
 
 ---
 
@@ -110,6 +141,13 @@ This keeps the compiler path and the gate policy separate:
 - `assay trust-basis diff` compares those artifacts.
 - Harness can later decide how to surface regressions in PR feedback.
 
+Exit code contract:
+
+- `0` means the comparison completed and no enabled gate failed.
+- `1` means `--fail-on-regression` was set and a missing/lowered baseline claim
+  was found.
+- Other non-zero exits are reserved for input, parse, or validation failures.
+
 ---
 
 ## 5. Acceptance Criteria
@@ -118,7 +156,11 @@ P34 is complete when:
 
 - `assay trust-basis diff` accepts two canonical Trust Basis JSON files.
 - text and JSON output are available.
-- `--fail-on-regression` exits non-zero only for missing/lowered baseline claims.
+- claim comparison is keyed by `claim.id`.
+- JSON output exposes the stable `assay.trust-basis.diff.v1` shape.
+- output ordering is deterministic.
+- metadata changes are visible and non-blocking in v1.
+- `--fail-on-regression` exits with code `1` only for missing/lowered baseline claims.
 - Promptfoo-origin Trust Basis claim improvements and regressions are covered by CLI tests.
 - docs explain that this command compares Trust Basis artifacts, not external eval payloads.
 

@@ -1,14 +1,15 @@
 use crate::cli::args::{
     OutputFormat, TrustBasisArgs, TrustBasisDiffArgs, TrustBasisGenerateArgs, TrustBasisSub,
 };
-use crate::exit_codes::EXIT_SUCCESS;
+use crate::exit_codes::{EXIT_SUCCESS, EXIT_TEST_FAILURE};
 use anyhow::{bail, Context, Result};
 use assay_evidence::lint::engine::LintOptions;
 use assay_evidence::lint::packs::load_packs;
 use assay_evidence::{
-    diff_trust_basis, generate_trust_basis, to_canonical_json_bytes, TrustBasis, TrustBasisClaim,
-    TrustBasisClaimLevelDiff, TrustBasisClaimMetadataDiff, TrustBasisDiffReport, TrustBasisOptions,
-    TrustClaimBoundary, TrustClaimId, TrustClaimLevel, TrustClaimSource, VerifyLimits,
+    diff_trust_basis, duplicate_trust_basis_claim_ids, generate_trust_basis,
+    to_canonical_json_bytes, TrustBasis, TrustBasisClaimLevelDiff, TrustBasisClaimMetadataDiff,
+    TrustBasisClaimPresenceDiff, TrustBasisDiffReport, TrustBasisOptions, TrustClaimBoundary,
+    TrustClaimId, TrustClaimLevel, TrustClaimSource, VerifyLimits,
 };
 use std::fs::File;
 use std::io::Write;
@@ -66,6 +67,8 @@ fn cmd_generate(args: TrustBasisGenerateArgs) -> Result<i32> {
 fn cmd_diff(args: TrustBasisDiffArgs) -> Result<i32> {
     let baseline = read_trust_basis(&args.baseline)?;
     let candidate = read_trust_basis(&args.candidate)?;
+    ensure_unique_claim_ids("baseline", &baseline)?;
+    ensure_unique_claim_ids("candidate", &candidate)?;
     let report = diff_trust_basis(&baseline, &candidate);
 
     match args.format {
@@ -74,7 +77,8 @@ fn cmd_diff(args: TrustBasisDiffArgs) -> Result<i32> {
     }
 
     if args.fail_on_regression && report.has_regressions() {
-        bail!("Trust Basis regression check failed");
+        eprintln!("Trust Basis regression check failed");
+        return Ok(EXIT_TEST_FAILURE);
     }
 
     Ok(EXIT_SUCCESS)
@@ -87,6 +91,20 @@ fn read_trust_basis(path: &std::path::Path) -> Result<TrustBasis> {
         .with_context(|| format!("failed to parse trust basis {}", path.display()))
 }
 
+fn ensure_unique_claim_ids(label: &str, trust_basis: &TrustBasis) -> Result<()> {
+    let duplicates = duplicate_trust_basis_claim_ids(trust_basis);
+    if duplicates.is_empty() {
+        return Ok(());
+    }
+
+    let duplicate_labels = duplicates
+        .into_iter()
+        .map(id_label)
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("{label} Trust Basis contains duplicate claim id(s): {duplicate_labels}");
+}
+
 fn write_diff_json(report: &TrustBasisDiffReport) -> Result<()> {
     let mut stdout = std::io::stdout();
     serde_json::to_writer_pretty(&mut stdout, report)?;
@@ -97,17 +115,18 @@ fn write_diff_json(report: &TrustBasisDiffReport) -> Result<()> {
 fn write_diff_text(report: &TrustBasisDiffReport) -> Result<()> {
     let mut stdout = std::io::stdout();
     writeln!(stdout, "Assay Trust Basis Diff")?;
+    writeln!(stdout, "Claim identity: {}", report.claim_identity)?;
     if !report.has_changes() {
         writeln!(stdout, "No Trust Basis differences found.")?;
         return Ok(());
     }
 
-    write_level_diffs(&mut stdout, "Regressions", &report.regressions)?;
-    write_level_diffs(&mut stdout, "Improvements", &report.improvements)?;
-    write_claims(&mut stdout, "Removed claims", &report.removals)?;
-    write_claims(&mut stdout, "Added claims", &report.additions)?;
+    write_level_diffs(&mut stdout, "Regressions", &report.regressed_claims)?;
+    write_level_diffs(&mut stdout, "Improvements", &report.improved_claims)?;
+    write_presence_diffs(&mut stdout, "Removed claims", &report.removed_claims)?;
+    write_presence_diffs(&mut stdout, "Added claims", &report.added_claims)?;
     write_metadata_diffs(&mut stdout, &report.metadata_changes)?;
-    writeln!(stdout, "Unchanged claims: {}", report.unchanged)?;
+    writeln!(stdout, "Unchanged claims: {}", report.unchanged_claim_count)?;
     Ok(())
 }
 
@@ -125,7 +144,7 @@ fn write_level_diffs(
         writeln!(
             writer,
             "- {}: {} -> {}",
-            id_label(diff.id),
+            id_label(diff.claim_id),
             level_label(diff.baseline_level),
             level_label(diff.candidate_level)
         )?;
@@ -133,20 +152,24 @@ fn write_level_diffs(
     Ok(())
 }
 
-fn write_claims(writer: &mut impl Write, title: &str, claims: &[TrustBasisClaim]) -> Result<()> {
-    if claims.is_empty() {
+fn write_presence_diffs(
+    writer: &mut impl Write,
+    title: &str,
+    diffs: &[TrustBasisClaimPresenceDiff],
+) -> Result<()> {
+    if diffs.is_empty() {
         return Ok(());
     }
 
     writeln!(writer, "{title}:")?;
-    for claim in claims {
+    for diff in diffs {
         writeln!(
             writer,
             "- {}: {} ({}, {})",
-            id_label(claim.id),
-            level_label(claim.level),
-            source_label(claim.source),
-            boundary_label(claim.boundary)
+            id_label(diff.claim_id),
+            optional_level_label(diff.baseline_level.or(diff.candidate_level)),
+            optional_source_label(diff.baseline_source.or(diff.candidate_source)),
+            optional_boundary_label(diff.baseline_boundary.or(diff.candidate_boundary))
         )?;
     }
     Ok(())
@@ -164,12 +187,13 @@ fn write_metadata_diffs(
     for diff in diffs {
         writeln!(
             writer,
-            "- {}: source {} -> {}, boundary {} -> {}",
-            id_label(diff.id),
+            "- {}: source {} -> {}, boundary {} -> {}, note changed: {}",
+            id_label(diff.claim_id),
             source_label(diff.baseline_source),
             source_label(diff.candidate_source),
             boundary_label(diff.baseline_boundary),
-            boundary_label(diff.candidate_boundary)
+            boundary_label(diff.candidate_boundary),
+            diff.note_changed
         )?;
     }
     Ok(())
@@ -189,6 +213,24 @@ fn source_label(source: TrustClaimSource) -> String {
 
 fn boundary_label(boundary: TrustClaimBoundary) -> String {
     json_label(boundary)
+}
+
+fn optional_level_label(level: Option<TrustClaimLevel>) -> String {
+    level
+        .map(level_label)
+        .unwrap_or_else(|| "absent".to_string())
+}
+
+fn optional_source_label(source: Option<TrustClaimSource>) -> String {
+    source
+        .map(source_label)
+        .unwrap_or_else(|| "unknown-source".to_string())
+}
+
+fn optional_boundary_label(boundary: Option<TrustClaimBoundary>) -> String {
+    boundary
+        .map(boundary_label)
+        .unwrap_or_else(|| "unknown-boundary".to_string())
 }
 
 fn json_label(value: impl serde::Serialize) -> String {
