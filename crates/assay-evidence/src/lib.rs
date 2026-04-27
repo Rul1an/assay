@@ -25,9 +25,11 @@ pub use store::{
     BundleMeta, BundleStore, ObjectStoreBundleStore, StoreError, StoreSpec, StoreStatus,
 };
 pub use trust_basis::{
-    diff_trust_basis, generate_trust_basis, to_canonical_json_bytes, TrustBasis, TrustBasisClaim,
-    TrustBasisClaimLevelDiff, TrustBasisClaimMetadataDiff, TrustBasisDiffReport, TrustBasisOptions,
-    TrustClaimBoundary, TrustClaimId, TrustClaimLevel, TrustClaimSource,
+    diff_trust_basis, duplicate_trust_basis_claim_ids, generate_trust_basis,
+    to_canonical_json_bytes, TrustBasis, TrustBasisClaim, TrustBasisClaimLevelDiff,
+    TrustBasisClaimMetadataDiff, TrustBasisClaimPresenceDiff, TrustBasisDiffClass,
+    TrustBasisDiffReport, TrustBasisDiffSummary, TrustBasisOptions, TrustClaimBoundary,
+    TrustClaimId, TrustClaimLevel, TrustClaimSource, TRUST_BASIS_DIFF_SCHEMA,
 };
 pub use trust_card::{
     trust_basis_to_trust_card, trust_card_to_canonical_json_bytes, trust_card_to_markdown,

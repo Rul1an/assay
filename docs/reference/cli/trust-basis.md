@@ -34,6 +34,10 @@ Compare a baseline Trust Basis artifact with a candidate Trust Basis artifact:
 assay trust-basis diff baseline.trust-basis.json candidate.trust-basis.json
 ```
 
+Both inputs are canonical Trust Basis JSON files produced by
+`assay trust-basis generate`. The diff keys claim comparison by stable
+`claim.id`; duplicate claim IDs are rejected as invalid inputs.
+
 Use JSON output for CI and Harness-style consumers:
 
 ```bash
@@ -52,8 +56,8 @@ assay trust-basis diff \
   --fail-on-regression
 ```
 
-The diff compares Trust Basis claim levels only. It does not parse Promptfoo
-JSONL, inspect external eval payloads, or infer model correctness.
+The diff compares Trust Basis claim presence and levels only. It does not parse
+Promptfoo JSONL, inspect external eval payloads, or infer model correctness.
 
 Claim levels are ordered as:
 
@@ -64,6 +68,30 @@ absent < inferred < self_reported < verified
 Lowering a claim level, or removing a baseline claim, is a regression.
 Improving a level, adding a claim, or changing claim metadata is reported but
 does not fail unless a future caller adds a stricter policy above this command.
+New or unknown claim IDs in the candidate are additions, not regressions.
+
+Source, boundary, and note changes are reported as metadata changes. In v1 they
+are review-visible and non-blocking; the gate fails only on missing baseline
+claims or lowered levels when `--fail-on-regression` is set.
+
+JSON output uses the stable machine-readable schema
+`assay.trust-basis.diff.v1` and includes:
+
+- `summary`
+- `regressed_claims`
+- `improved_claims`
+- `removed_claims`
+- `added_claims`
+- `metadata_changes`
+- `unchanged_claim_count`
+
+Diff arrays are sorted deterministically by `claim.id`.
+
+Exit codes are:
+
+- `0` for successful comparisons with no gate failure.
+- `1` when `--fail-on-regression` is set and regressions are present.
+- Other non-zero codes for input, parse, or validation failures.
 
 ---
 

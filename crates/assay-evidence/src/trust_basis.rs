@@ -3,9 +3,12 @@ use crate::lint::engine::{lint_bundle_with_options, LintOptions, LintReportWithP
 use crate::types::EvidenceEvent;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub const TRUST_BASIS_DIFF_SCHEMA: &str = "assay.trust-basis.diff.v1";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustClaimId {
     BundleVerified,
@@ -66,43 +69,87 @@ pub struct TrustBasis {
     pub claims: Vec<TrustBasisClaim>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustBasisDiffClass {
+    Regressed,
+    Improved,
+    Removed,
+    Added,
+    MetadataChanged,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustBasisClaimLevelDiff {
-    pub id: TrustClaimId,
+    pub diff_class: TrustBasisDiffClass,
+    pub claim_id: TrustClaimId,
     pub baseline_level: TrustClaimLevel,
     pub candidate_level: TrustClaimLevel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustBasisClaimMetadataDiff {
-    pub id: TrustClaimId,
+    pub diff_class: TrustBasisDiffClass,
+    pub claim_id: TrustClaimId,
+    pub baseline_level: TrustClaimLevel,
+    pub candidate_level: TrustClaimLevel,
     pub baseline_source: TrustClaimSource,
     pub candidate_source: TrustClaimSource,
     pub baseline_boundary: TrustClaimBoundary,
     pub candidate_boundary: TrustClaimBoundary,
+    pub note_changed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustBasisClaimPresenceDiff {
+    pub diff_class: TrustBasisDiffClass,
+    pub claim_id: TrustClaimId,
+    pub baseline_level: Option<TrustClaimLevel>,
+    pub candidate_level: Option<TrustClaimLevel>,
+    pub baseline_source: Option<TrustClaimSource>,
+    pub candidate_source: Option<TrustClaimSource>,
+    pub baseline_boundary: Option<TrustClaimBoundary>,
+    pub candidate_boundary: Option<TrustClaimBoundary>,
+    pub baseline_note: Option<String>,
+    pub candidate_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustBasisDiffSummary {
+    pub regressed_claims: usize,
+    pub improved_claims: usize,
+    pub removed_claims: usize,
+    pub added_claims: usize,
+    pub metadata_changes: usize,
+    pub unchanged_claim_count: usize,
+    pub has_regressions: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustBasisDiffReport {
-    pub regressions: Vec<TrustBasisClaimLevelDiff>,
-    pub improvements: Vec<TrustBasisClaimLevelDiff>,
-    pub removals: Vec<TrustBasisClaim>,
-    pub additions: Vec<TrustBasisClaim>,
+    pub schema: String,
+    pub claim_identity: String,
+    pub level_order: Vec<TrustClaimLevel>,
+    pub summary: TrustBasisDiffSummary,
+    pub regressed_claims: Vec<TrustBasisClaimLevelDiff>,
+    pub improved_claims: Vec<TrustBasisClaimLevelDiff>,
+    pub removed_claims: Vec<TrustBasisClaimPresenceDiff>,
+    pub added_claims: Vec<TrustBasisClaimPresenceDiff>,
     pub metadata_changes: Vec<TrustBasisClaimMetadataDiff>,
-    pub unchanged: usize,
+    pub unchanged_claim_count: usize,
 }
 
 impl TrustBasisDiffReport {
     pub fn has_changes(&self) -> bool {
-        !self.regressions.is_empty()
-            || !self.improvements.is_empty()
-            || !self.removals.is_empty()
-            || !self.additions.is_empty()
+        !self.regressed_claims.is_empty()
+            || !self.improved_claims.is_empty()
+            || !self.removed_claims.is_empty()
+            || !self.added_claims.is_empty()
             || !self.metadata_changes.is_empty()
     }
 
     pub fn has_regressions(&self) -> bool {
-        !self.regressions.is_empty() || !self.removals.is_empty()
+        !self.regressed_claims.is_empty() || !self.removed_claims.is_empty()
     }
 }
 
@@ -112,68 +159,149 @@ pub struct TrustBasisOptions {
 }
 
 pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustBasisDiffReport {
-    let mut regressions = Vec::new();
-    let mut improvements = Vec::new();
-    let mut removals = Vec::new();
+    let mut candidate_by_id: HashMap<TrustClaimId, &TrustBasisClaim> = HashMap::new();
+    for claim in &candidate.claims {
+        candidate_by_id.entry(claim.id).or_insert(claim);
+    }
+
+    let mut regressed_claims = Vec::new();
+    let mut improved_claims = Vec::new();
+    let mut removed_claims = Vec::new();
     let mut metadata_changes = Vec::new();
-    let mut unchanged = 0;
-    let mut seen_candidate_ids = Vec::new();
+    let mut unchanged_claim_count = 0;
+    let mut seen_candidate_ids = HashSet::new();
 
     for baseline_claim in &baseline.claims {
-        let Some(candidate_claim) = candidate
-            .claims
-            .iter()
-            .find(|claim| claim.id == baseline_claim.id)
-        else {
-            removals.push(baseline_claim.clone());
+        let Some(candidate_claim) = candidate_by_id.get(&baseline_claim.id).copied() else {
+            removed_claims.push(presence_diff_removed(baseline_claim));
             continue;
         };
-        seen_candidate_ids.push(candidate_claim.id);
+        seen_candidate_ids.insert(candidate_claim.id);
 
         let baseline_rank = trust_claim_level_rank(baseline_claim.level);
         let candidate_rank = trust_claim_level_rank(candidate_claim.level);
         if candidate_rank < baseline_rank {
-            regressions.push(TrustBasisClaimLevelDiff {
-                id: baseline_claim.id,
+            regressed_claims.push(TrustBasisClaimLevelDiff {
+                diff_class: TrustBasisDiffClass::Regressed,
+                claim_id: baseline_claim.id,
                 baseline_level: baseline_claim.level,
                 candidate_level: candidate_claim.level,
             });
         } else if candidate_rank > baseline_rank {
-            improvements.push(TrustBasisClaimLevelDiff {
-                id: baseline_claim.id,
+            improved_claims.push(TrustBasisClaimLevelDiff {
+                diff_class: TrustBasisDiffClass::Improved,
+                claim_id: baseline_claim.id,
                 baseline_level: baseline_claim.level,
                 candidate_level: candidate_claim.level,
             });
         } else if baseline_claim.source != candidate_claim.source
             || baseline_claim.boundary != candidate_claim.boundary
+            || baseline_claim.note != candidate_claim.note
         {
             metadata_changes.push(TrustBasisClaimMetadataDiff {
-                id: baseline_claim.id,
+                diff_class: TrustBasisDiffClass::MetadataChanged,
+                claim_id: baseline_claim.id,
+                baseline_level: baseline_claim.level,
+                candidate_level: candidate_claim.level,
                 baseline_source: baseline_claim.source,
                 candidate_source: candidate_claim.source,
                 baseline_boundary: baseline_claim.boundary,
                 candidate_boundary: candidate_claim.boundary,
+                note_changed: baseline_claim.note != candidate_claim.note,
             });
         } else {
-            unchanged += 1;
+            unchanged_claim_count += 1;
         }
     }
 
-    let additions = candidate
+    let mut added_claims: Vec<TrustBasisClaimPresenceDiff> = candidate
         .claims
         .iter()
         .filter(|claim| !seen_candidate_ids.contains(&claim.id))
-        .cloned()
+        .map(presence_diff_added)
         .collect();
 
+    regressed_claims.sort_by_key(|diff| diff.claim_id);
+    improved_claims.sort_by_key(|diff| diff.claim_id);
+    removed_claims.sort_by_key(|diff| diff.claim_id);
+    added_claims.sort_by_key(|diff| diff.claim_id);
+    metadata_changes.sort_by_key(|diff| diff.claim_id);
+
+    let summary = TrustBasisDiffSummary {
+        regressed_claims: regressed_claims.len(),
+        improved_claims: improved_claims.len(),
+        removed_claims: removed_claims.len(),
+        added_claims: added_claims.len(),
+        metadata_changes: metadata_changes.len(),
+        unchanged_claim_count,
+        has_regressions: !regressed_claims.is_empty() || !removed_claims.is_empty(),
+    };
+
     TrustBasisDiffReport {
-        regressions,
-        improvements,
-        removals,
-        additions,
+        schema: TRUST_BASIS_DIFF_SCHEMA.to_string(),
+        claim_identity: "claim.id".to_string(),
+        level_order: vec![
+            TrustClaimLevel::Absent,
+            TrustClaimLevel::Inferred,
+            TrustClaimLevel::SelfReported,
+            TrustClaimLevel::Verified,
+        ],
+        summary,
+        regressed_claims,
+        improved_claims,
+        removed_claims,
+        added_claims,
         metadata_changes,
-        unchanged,
+        unchanged_claim_count,
     }
+}
+
+fn presence_diff_removed(claim: &TrustBasisClaim) -> TrustBasisClaimPresenceDiff {
+    TrustBasisClaimPresenceDiff {
+        diff_class: TrustBasisDiffClass::Removed,
+        claim_id: claim.id,
+        baseline_level: Some(claim.level),
+        candidate_level: None,
+        baseline_source: Some(claim.source),
+        candidate_source: None,
+        baseline_boundary: Some(claim.boundary),
+        candidate_boundary: None,
+        baseline_note: claim.note.clone(),
+        candidate_note: None,
+    }
+}
+
+fn presence_diff_added(claim: &TrustBasisClaim) -> TrustBasisClaimPresenceDiff {
+    TrustBasisClaimPresenceDiff {
+        diff_class: TrustBasisDiffClass::Added,
+        claim_id: claim.id,
+        baseline_level: None,
+        candidate_level: Some(claim.level),
+        baseline_source: None,
+        candidate_source: Some(claim.source),
+        baseline_boundary: None,
+        candidate_boundary: Some(claim.boundary),
+        baseline_note: None,
+        candidate_note: claim.note.clone(),
+    }
+}
+
+pub fn duplicate_trust_basis_claim_ids(trust_basis: &TrustBasis) -> Vec<TrustClaimId> {
+    let mut seen = HashSet::new();
+    let mut duplicates: Vec<TrustClaimId> = trust_basis
+        .claims
+        .iter()
+        .filter_map(|claim| {
+            if seen.insert(claim.id) {
+                None
+            } else {
+                Some(claim.id)
+            }
+        })
+        .collect();
+    duplicates.sort();
+    duplicates.dedup();
+    duplicates
 }
 
 fn trust_claim_level_rank(level: TrustClaimLevel) -> u8 {
@@ -527,6 +655,20 @@ mod tests {
             .iter()
             .find(|claim| claim.id == id)
             .expect("claim should exist")
+    }
+
+    fn trust_basis_claim(
+        id: TrustClaimId,
+        level: TrustClaimLevel,
+        note: Option<&str>,
+    ) -> TrustBasisClaim {
+        TrustBasisClaim {
+            id,
+            level,
+            source: TrustClaimSource::ExternalEvidenceReceipt,
+            boundary: TrustClaimBoundary::SupportedExternalEvalReceiptEventsOnly,
+            note: note.map(str::to_string),
+        }
     }
 
     fn promptfoo_receipt_payload(extra: serde_json::Value) -> serde_json::Value {
@@ -1012,6 +1154,74 @@ mod tests {
         assert_eq!(
             claim(&trust_basis, TrustClaimId::AppliedPackFindingsPresent).level,
             TrustClaimLevel::Verified
+        );
+    }
+
+    #[test]
+    fn trust_basis_diff_keys_by_claim_id_and_reports_note_metadata_nonblocking() {
+        let baseline = TrustBasis {
+            claims: vec![trust_basis_claim(
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                TrustClaimLevel::Verified,
+                Some("old note"),
+            )],
+        };
+        let candidate = TrustBasis {
+            claims: vec![trust_basis_claim(
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                TrustClaimLevel::Verified,
+                Some("new note"),
+            )],
+        };
+
+        let report = diff_trust_basis(&baseline, &candidate);
+
+        assert_eq!(report.schema, TRUST_BASIS_DIFF_SCHEMA);
+        assert_eq!(report.claim_identity, "claim.id");
+        assert!(!report.has_regressions());
+        assert!(report.regressed_claims.is_empty());
+        assert!(report.removed_claims.is_empty());
+        assert_eq!(report.metadata_changes.len(), 1);
+        assert_eq!(
+            report.metadata_changes[0].claim_id,
+            TrustClaimId::ExternalEvalReceiptBoundaryVisible
+        );
+        assert!(report.metadata_changes[0].note_changed);
+    }
+
+    #[test]
+    fn duplicate_trust_basis_claim_ids_are_reported_deterministically() {
+        let trust_basis = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+            ],
+        };
+
+        assert_eq!(
+            duplicate_trust_basis_claim_ids(&trust_basis),
+            vec![
+                TrustClaimId::BundleVerified,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+            ]
         );
     }
 
