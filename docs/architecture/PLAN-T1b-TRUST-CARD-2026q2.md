@@ -8,12 +8,12 @@
 
 Ship `trustcard.json` (canonical) and `trustcard.md` (secondary) derived **only** from `generate_trust_basis` → `trust_basis_to_trust_card`. No second classification pass, no aggregate score, no badge semantics, no `trust_basis_sha256` in v1.
 
-## 2) Frozen contract (T1b baseline; extended by G3)
+## 2) Frozen contract (T1b baseline; extended by G3 and P33)
 
 | Item | Rule |
 |------|------|
-| `schema_version` | `2` after [G3](./PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md) (`TRUST_CARD_SCHEMA_VERSION`); was `1` for the original T1b-only ship. |
-| `claims[]` | `Vec<TrustBasisClaim>` — same serde as trust basis; **seven** frozen ids after G3, same order as `TrustBasis::claims` (was six for T1a-only). |
+| `schema_version` | `3` after [P33](./PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) (`TRUST_CARD_SCHEMA_VERSION`); was `2` after [G3](./PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md) and `1` for the original T1b-only ship. |
+| `claims[]` | `Vec<TrustBasisClaim>` — same serde as trust basis; **eight** frozen ids after P33, same order as `TrustBasis::claims` (was seven after G3 and six for T1a-only). |
 | `non_goals` | Three fixed strings in fixed order (`TRUST_CARD_NON_GOALS` in code); identical in JSON and Markdown. |
 | Markdown `note` column | Empty T1a `note` renders as placeholder `-` (`TRUST_CARD_NOTE_EMPTY_PLACEHOLDER`); no multiline cells. |
 | Markdown shape | Title + fixed five-column table + `## Non-goals` with literal bullets. |

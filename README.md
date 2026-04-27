@@ -87,12 +87,12 @@ Install from [crates.io](https://crates.io/crates/assay-cli) or source (`cargo i
 # Machine-readable claim basis (deterministic, claim-first)
 assay trust-basis generate demo/fixtures/bundle.tar.gz > trust-basis.json
 
-# Human + machine Trust Card (schema v2 — seven trust claims; key by `id`, not row count)
+# Human + machine Trust Card (schema v3 — eight trust claims; key by `id`, not row count)
 assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 # → trust-out/trustcard.json , trust-out/trustcard.md
 ```
 
-`trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+`trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md](docs/architecture/PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md).
 
 ## What you get
 
