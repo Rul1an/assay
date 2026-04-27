@@ -82,5 +82,6 @@ To compare the resulting claim artifact against another run, use
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
 - [Trust Basis CLI](./trust-basis.md)
+- [From Promptfoo JSONL to Evidence Receipts](../../notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
 - [Promptfoo assertion grading-result example](../../../examples/promptfoo-assertion-grading-result-evidence/README.md)
