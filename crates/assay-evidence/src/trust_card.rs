@@ -6,8 +6,8 @@ use crate::trust_basis::{TrustBasis, TrustBasisClaim};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-/// Trust Card schema: `2` adds G3 `authorization_context_visible` claim (same row layout as v1).
-pub const TRUST_CARD_SCHEMA_VERSION: u32 = 2;
+/// Trust Card schema: `3` adds `external_eval_receipt_boundary_visible`.
+pub const TRUST_CARD_SCHEMA_VERSION: u32 = 3;
 
 /// Markdown table cell when T1a leaves `note` empty (`None` or blank). Do not vary by test/renderer.
 pub const TRUST_CARD_NOTE_EMPTY_PLACEHOLDER: &str = "-";
@@ -120,13 +120,14 @@ mod tests {
     use std::io::Cursor;
 
     /// Must match `TrustBasis::claims` order from [`crate::trust_basis::generate_trust_basis`].
-    const FROZEN_TRUST_BASIS_CLAIM_ID_ORDER: [TrustClaimId; 7] = [
+    const FROZEN_TRUST_BASIS_CLAIM_ID_ORDER: [TrustClaimId; 8] = [
         TrustClaimId::BundleVerified,
         TrustClaimId::SigningEvidencePresent,
         TrustClaimId::ProvenanceBackedClaimsPresent,
         TrustClaimId::DelegationContextVisible,
         TrustClaimId::AuthorizationContextVisible,
         TrustClaimId::ContainmentDegradationObserved,
+        TrustClaimId::ExternalEvalReceiptBoundaryVisible,
         TrustClaimId::AppliedPackFindingsPresent,
     ];
 
@@ -233,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn trust_card_json_always_exactly_seven_frozen_claim_ids_once_in_trust_basis_order() {
+    fn trust_card_json_always_exactly_eight_frozen_claim_ids_once_in_trust_basis_order() {
         let bundle = make_bundle(vec![make_event(
             "assay.process.exec",
             "run_seven",
@@ -248,7 +249,7 @@ mod tests {
         .expect("trust basis");
         let card = trust_basis_to_trust_card(&basis);
 
-        assert_eq!(card.claims.len(), 7);
+        assert_eq!(card.claims.len(), 8);
         let ids: Vec<TrustClaimId> = card.claims.iter().map(|c| c.id).collect();
         assert_eq!(ids, FROZEN_TRUST_BASIS_CLAIM_ID_ORDER);
     }
@@ -373,13 +374,13 @@ mod tests {
             .filter(|l| !l.contains("| --- |"))
             .count();
         assert_eq!(
-            table_rows, 7,
-            "schema 2 adds one claim row; no extra markdown table blocks"
+            table_rows, 8,
+            "schema 3 adds one external receipt row; no extra markdown table blocks"
         );
     }
 
     #[test]
-    fn trust_card_schema_version_is_two() {
+    fn trust_card_schema_version_is_three() {
         let bundle = make_bundle(vec![make_event(
             "assay.process.exec",
             "run_schema",
@@ -393,11 +394,11 @@ mod tests {
         )
         .expect("trust basis");
         let card = trust_basis_to_trust_card(&basis);
-        assert_eq!(card.schema_version, 2);
+        assert_eq!(card.schema_version, 3);
         let v: serde_json::Value =
             serde_json::from_slice(&trust_card_to_canonical_json_bytes(&card).expect("json"))
                 .expect("parse");
-        assert_eq!(v["schema_version"], json!(2));
+        assert_eq!(v["schema_version"], json!(3));
     }
 
     #[test]

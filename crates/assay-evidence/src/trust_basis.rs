@@ -15,6 +15,7 @@ pub enum TrustClaimId {
     /// G3 v1: policy-projected `principal` + `auth_scheme` + `auth_issuer` on decision evidence
     AuthorizationContextVisible,
     ContainmentDegradationObserved,
+    ExternalEvalReceiptBoundaryVisible,
     AppliedPackFindingsPresent,
 }
 
@@ -34,6 +35,7 @@ pub enum TrustClaimSource {
     BundleProofSurface,
     CanonicalDecisionEvidence,
     CanonicalEventPresence,
+    ExternalEvidenceReceipt,
     PackExecutionResults,
 }
 
@@ -45,6 +47,7 @@ pub enum TrustClaimBoundary {
     /// G3 v1: auth context fields from supported policy-projected MCP decision path only
     SupportedAuthProjectedFlowsOnly,
     SupportedContainmentFallbackPathsOnly,
+    SupportedExternalEvalReceiptEventsOnly,
     ProofSurfacesOnly,
     PackExecutionOnly,
 }
@@ -140,6 +143,13 @@ pub fn generate_trust_basis<R: Read>(
                 note: None,
             },
             TrustBasisClaim {
+                id: TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                level: classify_external_eval_receipt_boundary(&events),
+                source: TrustClaimSource::ExternalEvidenceReceipt,
+                boundary: TrustClaimBoundary::SupportedExternalEvalReceiptEventsOnly,
+                note: None,
+            },
+            TrustBasisClaim {
                 id: TrustClaimId::AppliedPackFindingsPresent,
                 level: classify_pack_findings(lint_result.as_ref()),
                 source: TrustClaimSource::PackExecutionResults,
@@ -208,6 +218,128 @@ fn classify_containment_degradation(events: &[EvidenceEvent]) -> TrustClaimLevel
     }
 }
 
+const PROMPTFOO_RECEIPT_EVENT_TYPE: &str = "assay.receipt.promptfoo.assertion_component.v1";
+const PROMPTFOO_RECEIPT_SCHEMA: &str = "assay.receipt.promptfoo.assertion-component.v1";
+const PROMPTFOO_RECEIPT_SOURCE_SYSTEM: &str = "promptfoo";
+const PROMPTFOO_RECEIPT_SOURCE_SURFACE: &str = "cli-jsonl.gradingResult.componentResults";
+const PROMPTFOO_RECEIPT_REDUCER_PREFIX: &str = "assay-promptfoo-jsonl-component-result@";
+const PROMPTFOO_MAX_REASON_CHARS: usize = 160;
+
+fn classify_external_eval_receipt_boundary(events: &[EvidenceEvent]) -> TrustClaimLevel {
+    if events.iter().any(is_supported_promptfoo_receipt) {
+        TrustClaimLevel::Verified
+    } else {
+        TrustClaimLevel::Absent
+    }
+}
+
+fn is_supported_promptfoo_receipt(event: &EvidenceEvent) -> bool {
+    if event.type_ != PROMPTFOO_RECEIPT_EVENT_TYPE {
+        return false;
+    }
+
+    let Some(payload) = event.payload.as_object() else {
+        return false;
+    };
+    let allowed_fields = [
+        "schema",
+        "source_system",
+        "source_surface",
+        "source_artifact_ref",
+        "source_artifact_digest",
+        "reducer_version",
+        "imported_at",
+        "assertion_type",
+        "result",
+    ];
+    if payload
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    string_field(payload, "schema") == Some(PROMPTFOO_RECEIPT_SCHEMA)
+        && string_field(payload, "source_system") == Some(PROMPTFOO_RECEIPT_SOURCE_SYSTEM)
+        && string_field(payload, "source_surface") == Some(PROMPTFOO_RECEIPT_SOURCE_SURFACE)
+        && non_empty_string_field(payload, "source_artifact_ref")
+        && string_field(payload, "source_artifact_digest")
+            .map(is_sha256_digest)
+            .unwrap_or(false)
+        && string_field(payload, "reducer_version")
+            .map(|value| value.starts_with(PROMPTFOO_RECEIPT_REDUCER_PREFIX))
+            .unwrap_or(false)
+        && non_empty_string_field(payload, "imported_at")
+        && string_field(payload, "assertion_type") == Some("equals")
+        && payload
+            .get("result")
+            .and_then(|value| value.as_object())
+            .map(is_supported_promptfoo_result)
+            .unwrap_or(false)
+}
+
+fn string_field<'a>(
+    payload: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a str> {
+    payload.get(key).and_then(|value| value.as_str())
+}
+
+fn non_empty_string_field(payload: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
+    string_field(payload, key)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn is_sha256_digest(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_supported_promptfoo_result(result: &serde_json::Map<String, serde_json::Value>) -> bool {
+    let allowed_fields = ["pass", "score", "reason"];
+    if result
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    if result
+        .get("pass")
+        .and_then(|value| value.as_bool())
+        .is_none()
+    {
+        return false;
+    }
+
+    if !matches!(
+        result.get("score").and_then(|value| value.as_i64()),
+        Some(0 | 1)
+    ) {
+        return false;
+    }
+
+    match result.get("reason") {
+        Some(value) => value.as_str().map(is_bounded_reason).unwrap_or(false),
+        None => true,
+    }
+}
+
+fn is_bounded_reason(reason: &str) -> bool {
+    let trimmed = reason.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() <= PROMPTFOO_MAX_REASON_CHARS
+        && !trimmed.contains('\n')
+        && !trimmed.contains('\r')
+        && !trimmed.contains('"')
+        && !trimmed.contains('`')
+        && !trimmed.contains('{')
+        && !trimmed.contains('}')
+}
+
 fn classify_pack_findings(lint_result: Option<&LintReportWithPacks>) -> TrustClaimLevel {
     let Some(lint_result) = lint_result else {
         return TrustClaimLevel::Absent;
@@ -274,6 +406,31 @@ mod tests {
             .expect("claim should exist")
     }
 
+    fn promptfoo_receipt_payload(extra: serde_json::Value) -> serde_json::Value {
+        let mut payload = json!({
+            "schema": "assay.receipt.promptfoo.assertion-component.v1",
+            "source_system": "promptfoo",
+            "source_surface": "cli-jsonl.gradingResult.componentResults",
+            "source_artifact_ref": "results.jsonl",
+            "source_artifact_digest": format!("sha256:{}", "a".repeat(64)),
+            "reducer_version": "assay-promptfoo-jsonl-component-result@0.1.0",
+            "imported_at": "2026-04-26T12:00:00Z",
+            "assertion_type": "equals",
+            "result": {
+                "pass": true,
+                "score": 1,
+                "reason": "Assertion passed"
+            }
+        });
+        if let Some(extra) = extra.as_object() {
+            let obj = payload.as_object_mut().expect("payload object");
+            for (key, value) in extra {
+                obj.insert(key.clone(), value.clone());
+            }
+        }
+        payload
+    }
+
     #[test]
     fn g3_authorization_claim_is_after_delegation_before_containment() {
         let bundle = make_bundle(vec![make_event(
@@ -290,7 +447,7 @@ mod tests {
         .expect("trust basis");
         let ids: Vec<_> = trust_basis.claims.iter().map(|c| c.id).collect();
         let pos = |id| ids.iter().position(|&x| x == id).expect("claim id");
-        assert_eq!(ids.len(), 7);
+        assert_eq!(ids.len(), 8);
         assert!(
             pos(TrustClaimId::DelegationContextVisible)
                 < pos(TrustClaimId::AuthorizationContextVisible)
@@ -355,6 +512,11 @@ mod tests {
                     TrustClaimBoundary::SupportedContainmentFallbackPathsOnly,
                 ),
                 (
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimSource::ExternalEvidenceReceipt,
+                    TrustClaimBoundary::SupportedExternalEvalReceiptEventsOnly,
+                ),
+                (
                     TrustClaimId::AppliedPackFindingsPresent,
                     TrustClaimSource::PackExecutionResults,
                     TrustClaimBoundary::PackExecutionOnly,
@@ -369,6 +531,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 TrustClaimLevel::Verified,
+                TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
@@ -453,6 +616,60 @@ mod tests {
         );
         assert_eq!(
             claim(&trust_basis, TrustClaimId::AuthorizationContextVisible).level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_detects_supported_external_eval_receipt_boundary() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.promptfoo.assertion_component.v1",
+            "run_promptfoo_receipt",
+            0,
+            promptfoo_receipt_payload(json!({})),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Verified
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_promptfoo_receipt_boundary_when_raw_payload_leaks_in() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.promptfoo.assertion_component.v1",
+            "run_promptfoo_raw",
+            0,
+            promptfoo_receipt_payload(json!({
+                "output": "raw model output should not be in the receipt"
+            })),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
             TrustClaimLevel::Absent
         );
     }

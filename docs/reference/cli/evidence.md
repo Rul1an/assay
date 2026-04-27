@@ -55,9 +55,11 @@ assay trust-basis generate promptfoo-evidence.tar.gz
 ```
 
 This proves the imported receipts are bundleable, verifiable, and readable by
-the Trust Basis path. It does not yet add Promptfoo-specific Trust Basis claims
-or bump the Trust Card schema; that claim expansion is a separate compatibility
-decision.
+the Trust Basis path. Trust Basis now emits
+`external_eval_receipt_boundary_visible` when the supported Promptfoo receipt
+shape is present. That claim means the bounded receipt boundary is visible; it
+does not mean the Promptfoo eval run passed, the model output was correct, or
+the raw Promptfoo payload is imported as Assay truth.
 
 Use `--import-time <RFC3339>` for deterministic fixture generation.
 

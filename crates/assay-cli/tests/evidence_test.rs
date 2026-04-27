@@ -139,15 +139,14 @@ fn test_promptfoo_imported_receipts_feed_trust_basis_generation() {
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        7,
-        "P32 locks Trust Basis readability without adding a Promptfoo-specific claim yet"
+        8,
+        "P33 adds one bounded external receipt boundary claim"
     );
     assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
-    assert!(
-        claims
-            .iter()
-            .all(|claim| claim["id"] != "external_eval_receipt_boundary_visible"),
-        "Promptfoo-specific Trust Basis claim expansion is intentionally deferred"
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "verified",
+        "Promptfoo receipts should now surface the bounded external receipt boundary claim"
     );
 }
 
