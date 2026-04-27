@@ -1,3 +1,4 @@
+use super::common::OutputFormat;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
@@ -11,6 +12,8 @@ pub struct TrustBasisArgs {
 pub enum TrustBasisSub {
     /// Generate canonical trust-basis.json from a verified evidence bundle
     Generate(TrustBasisGenerateArgs),
+    /// Compare two canonical trust-basis.json artifacts
+    Diff(TrustBasisDiffArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -30,4 +33,23 @@ pub struct TrustBasisGenerateArgs {
     /// Maximum lint results considered when pack execution is enabled
     #[arg(long, default_value = "500")]
     pub max_results: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TrustBasisDiffArgs {
+    /// Baseline trust-basis.json
+    #[arg(value_name = "BASELINE")]
+    pub baseline: PathBuf,
+
+    /// Candidate trust-basis.json
+    #[arg(value_name = "CANDIDATE")]
+    pub candidate: PathBuf,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
+    /// Exit non-zero when the candidate removes or lowers a baseline claim
+    #[arg(long)]
+    pub fail_on_regression: bool,
 }

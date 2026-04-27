@@ -51,7 +51,7 @@ assay evidence verify promptfoo-evidence.tar.gz
 The same bundle can also feed the current Trust Basis compiler:
 
 ```bash
-assay trust-basis generate promptfoo-evidence.tar.gz
+assay trust-basis generate promptfoo-evidence.tar.gz --out promptfoo.trust-basis.json
 ```
 
 This proves the imported receipts are bundleable, verifiable, and readable by
@@ -62,6 +62,9 @@ does not mean the Promptfoo eval run passed, the model output was correct, or
 the raw Promptfoo payload is imported as Assay truth.
 
 Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+To compare the resulting claim artifact against another run, use
+[`assay trust-basis diff`](./trust-basis.md).
 
 ### Options
 
@@ -78,5 +81,6 @@ Use `--import-time <RFC3339>` for deterministic fixture generation.
 ## See Also
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
+- [Trust Basis CLI](./trust-basis.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
 - [Promptfoo assertion grading-result example](../../../examples/promptfoo-assertion-grading-result-evidence/README.md)

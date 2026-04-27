@@ -51,6 +51,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P31 Promptfoo JSONL Component Result Receipt Import (Q2 2026)](./PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md) — planned compiler-path follow-up to P28 that imports one Promptfoo JSONL assertion component result into one portable Assay evidence receipt, not full Promptfoo eval-run truth or Harness regression gating
 - [PLAN — P32 Promptfoo Receipt Trust Basis Readiness (Q2 2026)](./PLAN-P32-PROMPTFOO-RECEIPT-TRUST-BASIS-READINESS-2026q2.md) — execution slice that proves P31 receipt bundles feed the current Trust Basis compiler without adding a Promptfoo-specific claim row or Trust Card schema bump
 - [PLAN — P33 External Eval Receipt Trust Basis Claim (Q2 2026)](./PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) — execution slice that adds one bounded Trust Basis claim for supported external evaluation receipt boundaries, starting with Promptfoo assertion-component receipts
+- [PLAN — P34 Trust Basis Diff Gate (Q2 2026)](./PLAN-P34-TRUST-BASIS-DIFF-GATE-2026q2.md) — execution slice that compares canonical Trust Basis artifacts for claim-level regressions without parsing Promptfoo JSONL or external eval payloads
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
