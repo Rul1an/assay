@@ -4,6 +4,8 @@
 
 **Product story (repo root):** Assay is positioned as a **trust compiler for agent systems** — MCP policy enforcement as the wedge, plus verifiable evidence bundles, Trust Basis, Trust Card, and CI/SARIF. See the [main README](../README.md), [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md), and [community discussion seeds](community/DISCUSSIONS.md).
 
+**Evidence portability note:** [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the existing Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
+
 ## 5-Minute Quickstart
 
 ### 1. Install

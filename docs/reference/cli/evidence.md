@@ -34,13 +34,11 @@ The importer is intentionally strict in v1:
 
 The importer first computes `source_artifact_digest` over the full JSONL file,
 then parses and reduces assertion components. That two-pass flow is intentional:
-the receipts stay small while still binding back to the exact source artifact
-bytes.
+receipts stay small while still binding back to the exact source artifact bytes.
 
 `result.reason` is optional and bounded. For v1, failure reasons are omitted
-because Promptfoo `equals` failure messages commonly quote raw output and
-expected values. Passing reasons are included only when they remain short and
-reviewer-safe.
+when they would leak raw compared values. Passing reasons are included only
+when they remain short and reviewer-safe.
 
 The output bundle can be verified with:
 
@@ -48,7 +46,7 @@ The output bundle can be verified with:
 assay evidence verify promptfoo-evidence.tar.gz
 ```
 
-The same bundle can also feed the current Trust Basis compiler:
+The same bundle can feed the Trust Basis compiler:
 
 ```bash
 assay trust-basis generate promptfoo-evidence.tar.gz --out promptfoo.trust-basis.json
@@ -63,7 +61,7 @@ the raw Promptfoo payload is imported as Assay truth.
 
 Use `--import-time <RFC3339>` for deterministic fixture generation.
 
-To compare the resulting claim artifact against another run, use
+To compare the resulting Trust Basis artifact against another run, use
 [`assay trust-basis diff`](./trust-basis.md).
 
 ### Options
@@ -73,7 +71,7 @@ To compare the resulting claim artifact against another run, use
 | `--input <PATH>` | Promptfoo CLI JSONL output file |
 | `--bundle-out <PATH>` | Output Assay evidence bundle path |
 | `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
-| `--run-id <ID>` | Assay import run id used for receipt event ids |
+| `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |
 | `--import-time <RFC3339>` | Deterministic import timestamp override |
 
 ---
@@ -82,5 +80,6 @@ To compare the resulting claim artifact against another run, use
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
 - [Trust Basis CLI](./trust-basis.md)
-- [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
 - [Promptfoo assertion grading-result example](../../../examples/promptfoo-assertion-grading-result-evidence/README.md)
+- [From Promptfoo JSONL to Evidence Receipts](../../notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md)
+- [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
