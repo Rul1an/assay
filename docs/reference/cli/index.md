@@ -31,6 +31,7 @@ assay --version
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
 | [`assay evidence`](evidence.md) | Manage evidence bundles and external evidence imports |
+| [`assay trust-basis`](trust-basis.md) | Generate and compare canonical Trust Basis artifacts |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
 | [`assay doctor`](doctor.md) | Diagnose setup and optionally auto-fix known issues |
@@ -255,6 +256,14 @@ See [Configuration](../config/index.md) for full reference.
     Manage evidence bundles and import external evidence receipts.
 
     [:octicons-arrow-right-24: Full reference](evidence.md)
+
+-   :material-shield-search:{ .lg .middle } __assay trust-basis__
+
+    ---
+
+    Generate and compare canonical Trust Basis artifacts.
+
+    [:octicons-arrow-right-24: Full reference](trust-basis.md)
 
 -   :material-server:{ .lg .middle } __assay mcp wrap__
 

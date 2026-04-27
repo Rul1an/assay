@@ -66,9 +66,123 @@ pub struct TrustBasis {
     pub claims: Vec<TrustBasisClaim>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustBasisClaimLevelDiff {
+    pub id: TrustClaimId,
+    pub baseline_level: TrustClaimLevel,
+    pub candidate_level: TrustClaimLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustBasisClaimMetadataDiff {
+    pub id: TrustClaimId,
+    pub baseline_source: TrustClaimSource,
+    pub candidate_source: TrustClaimSource,
+    pub baseline_boundary: TrustClaimBoundary,
+    pub candidate_boundary: TrustClaimBoundary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustBasisDiffReport {
+    pub regressions: Vec<TrustBasisClaimLevelDiff>,
+    pub improvements: Vec<TrustBasisClaimLevelDiff>,
+    pub removals: Vec<TrustBasisClaim>,
+    pub additions: Vec<TrustBasisClaim>,
+    pub metadata_changes: Vec<TrustBasisClaimMetadataDiff>,
+    pub unchanged: usize,
+}
+
+impl TrustBasisDiffReport {
+    pub fn has_changes(&self) -> bool {
+        !self.regressions.is_empty()
+            || !self.improvements.is_empty()
+            || !self.removals.is_empty()
+            || !self.additions.is_empty()
+            || !self.metadata_changes.is_empty()
+    }
+
+    pub fn has_regressions(&self) -> bool {
+        !self.regressions.is_empty() || !self.removals.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TrustBasisOptions {
     pub lint: Option<LintOptions>,
+}
+
+pub fn diff_trust_basis(baseline: &TrustBasis, candidate: &TrustBasis) -> TrustBasisDiffReport {
+    let mut regressions = Vec::new();
+    let mut improvements = Vec::new();
+    let mut removals = Vec::new();
+    let mut metadata_changes = Vec::new();
+    let mut unchanged = 0;
+    let mut seen_candidate_ids = Vec::new();
+
+    for baseline_claim in &baseline.claims {
+        let Some(candidate_claim) = candidate
+            .claims
+            .iter()
+            .find(|claim| claim.id == baseline_claim.id)
+        else {
+            removals.push(baseline_claim.clone());
+            continue;
+        };
+        seen_candidate_ids.push(candidate_claim.id);
+
+        let baseline_rank = trust_claim_level_rank(baseline_claim.level);
+        let candidate_rank = trust_claim_level_rank(candidate_claim.level);
+        if candidate_rank < baseline_rank {
+            regressions.push(TrustBasisClaimLevelDiff {
+                id: baseline_claim.id,
+                baseline_level: baseline_claim.level,
+                candidate_level: candidate_claim.level,
+            });
+        } else if candidate_rank > baseline_rank {
+            improvements.push(TrustBasisClaimLevelDiff {
+                id: baseline_claim.id,
+                baseline_level: baseline_claim.level,
+                candidate_level: candidate_claim.level,
+            });
+        } else if baseline_claim.source != candidate_claim.source
+            || baseline_claim.boundary != candidate_claim.boundary
+        {
+            metadata_changes.push(TrustBasisClaimMetadataDiff {
+                id: baseline_claim.id,
+                baseline_source: baseline_claim.source,
+                candidate_source: candidate_claim.source,
+                baseline_boundary: baseline_claim.boundary,
+                candidate_boundary: candidate_claim.boundary,
+            });
+        } else {
+            unchanged += 1;
+        }
+    }
+
+    let additions = candidate
+        .claims
+        .iter()
+        .filter(|claim| !seen_candidate_ids.contains(&claim.id))
+        .cloned()
+        .collect();
+
+    TrustBasisDiffReport {
+        regressions,
+        improvements,
+        removals,
+        additions,
+        metadata_changes,
+        unchanged,
+    }
+}
+
+fn trust_claim_level_rank(level: TrustClaimLevel) -> u8 {
+    match level {
+        TrustClaimLevel::Absent => 0,
+        TrustClaimLevel::Inferred => 1,
+        TrustClaimLevel::SelfReported => 2,
+        TrustClaimLevel::Verified => 3,
+    }
 }
 
 pub fn generate_trust_basis<R: Read>(
