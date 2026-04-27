@@ -1,9 +1,13 @@
-# PLAN - P41 OpenFeature EvaluationDetails Decision Receipt Import
+# PLAN — P41 OpenFeature EvaluationDetails Decision Receipt Import
 
-**Status:** execution slice
-**Target repo:** `Rul1an/assay`
-**Depends on:** P30, P31-P34
-**Date:** 2026-04-27
+- **Date:** 2026-04-27
+- **Owner:** Assay maintainers
+- **Status:** execution slice
+- **Scope:** Turn one bounded OpenFeature boolean `EvaluationDetails` artifact
+  into one portable Assay decision receipt, without importing provider,
+  context, rule, or application truth.
+- **Target repo:** `Rul1an/assay`
+- **Depends on:** P30, P31-P34
 
 ## One-line goal
 
