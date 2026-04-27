@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Trust Compiler
+
+- **External eval outcomes as bounded receipts**: On `main`, Assay now has the
+  first evidence-portability lane for selected external eval outcomes. The lane
+  starts with Promptfoo assertion-component results, compiles them into Assay
+  evidence receipts, carries them through Trust Basis / diff, and keeps the
+  boundary explicit: no full eval-run import, no Promptfoo integration claim,
+  and no model-correctness truth. See
+  [From Promptfoo JSONL to Evidence Receipts](docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md).
+
 ## [3.5.1] - 2026-04-06
 
 This patch release keeps the `v3.5.0` trust-compiler surface intact, but makes the
