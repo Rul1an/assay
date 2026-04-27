@@ -269,7 +269,9 @@ fn is_supported_promptfoo_receipt(event: &EvidenceEvent) -> bool {
         && string_field(payload, "reducer_version")
             .map(|value| value.starts_with(PROMPTFOO_RECEIPT_REDUCER_PREFIX))
             .unwrap_or(false)
-        && non_empty_string_field(payload, "imported_at")
+        && string_field(payload, "imported_at")
+            .map(is_utc_rfc3339)
+            .unwrap_or(false)
         && string_field(payload, "assertion_type") == Some("equals")
         && payload
             .get("result")
@@ -296,6 +298,13 @@ fn is_sha256_digest(value: &str) -> bool {
         return false;
     };
     hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_utc_rfc3339(value: &str) -> bool {
+    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) else {
+        return false;
+    };
+    timestamp.offset().local_minus_utc() == 0
 }
 
 fn is_supported_promptfoo_result(result: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -654,6 +663,34 @@ mod tests {
             0,
             promptfoo_receipt_payload(json!({
                 "output": "raw model output should not be in the receipt"
+            })),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_promptfoo_receipt_boundary_when_import_time_is_not_utc_rfc3339() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.promptfoo.assertion_component.v1",
+            "run_promptfoo_bad_time",
+            0,
+            promptfoo_receipt_payload(json!({
+                "imported_at": "not-a-timestamp"
             })),
         )]);
 

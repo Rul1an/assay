@@ -52,7 +52,7 @@ with:
 - `source_surface = "cli-jsonl.gradingResult.componentResults"`
 - reviewer-safe source artifact ref and digest
 - reducer version
-- import timestamp
+- UTC RFC3339 import timestamp
 - `assertion_type = "equals"`
 - `result.pass`
 - binary `result.score`
@@ -90,6 +90,7 @@ The Trust Basis predicate must stay stricter than generic event presence.
 - supported receipt event type
 - exact supported source system and source surface
 - digest-shaped source artifact binding
+- UTC RFC3339 import timestamp
 - supported reducer-version prefix
 - supported assertion type
 - bounded result object
