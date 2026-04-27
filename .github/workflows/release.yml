@@ -665,7 +665,9 @@ jobs:
         with:
           working-directory: assay-python-sdk
           target: ${{ matrix.target }}
-          args: --release --out dist --locked
+          # setup-python does not affect the manylinux container, so the
+          # interpreter must be explicit for Linux wheel builds.
+          args: --release --out dist --locked -i python3.12 --compatibility pypi
           sccache: 'true'
           manylinux: auto
 
