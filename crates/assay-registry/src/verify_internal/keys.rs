@@ -14,7 +14,7 @@ pub(crate) fn compute_key_id_impl(spki_bytes: &[u8]) -> String {
 }
 
 pub(crate) fn compute_key_id_from_key_impl(key: &VerifyingKey) -> RegistryResult<String> {
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let doc = key.to_public_key_der().map_err(|e| RegistryError::Config {
         message: format!("failed to encode public key: {}", e),
     })?;

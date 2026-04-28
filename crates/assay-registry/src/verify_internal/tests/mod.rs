@@ -55,8 +55,8 @@ fn keypair_from_seed(seed: [u8; 32]) -> SigningKey {
 
 /// Helper to create a DSSE envelope with real signature.
 fn create_signed_envelope(signing_key: &SigningKey, content: &str) -> (DsseEnvelope, String) {
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     use ed25519_dalek::Signer;
-    use pkcs8::EncodePublicKey;
 
     // Canonicalize content
     let canonical = crate::canonicalize::to_canonical_jcs_bytes(

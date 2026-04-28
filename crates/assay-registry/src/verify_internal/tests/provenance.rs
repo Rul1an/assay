@@ -16,7 +16,7 @@ fn test_verify_pack_uses_canonical_bytes() {
     let (envelope, key_id) = create_signed_envelope(&signing_key, content);
 
     // Add key to trust store
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {
@@ -82,7 +82,7 @@ fn test_verify_pack_canonicalization_equivalent_yaml_variants_contract() {
 
     let (envelope, key_id) = create_signed_envelope(&signing_key, source_yaml);
 
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {
@@ -156,7 +156,7 @@ fn test_verify_dsse_signature_bytes_directly() {
     let (envelope, key_id) = create_signed_envelope(&signing_key, content);
 
     // Add key to trust store
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {
@@ -207,7 +207,7 @@ fn test_verify_dsse_signature_legacy_helper_matches_bytes_path() {
 
     let (envelope, key_id) = create_signed_envelope(&signing_key, content);
 
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {

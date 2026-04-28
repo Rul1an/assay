@@ -188,8 +188,8 @@ impl Default for TrustStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     use ed25519_dalek::SigningKey;
-    use pkcs8::EncodePublicKey;
 
     fn generate_trusted_key() -> (SigningKey, TrustedKey) {
         let signing_key = SigningKey::generate(&mut rand::thread_rng());

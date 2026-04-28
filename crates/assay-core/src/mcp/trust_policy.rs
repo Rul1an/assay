@@ -149,7 +149,7 @@ pub struct LoadedKey {
 
 /// Load a public key from SPKI PEM file.
 pub fn load_public_key_pem(path: &Path) -> Result<VerifyingKey> {
-    use pkcs8::DecodePublicKey;
+    use ed25519_dalek::pkcs8::DecodePublicKey;
 
     let pem = fs::read_to_string(path)
         .with_context(|| format!("failed to read public key: {}", path.display()))?;
@@ -160,7 +160,7 @@ pub fn load_public_key_pem(path: &Path) -> Result<VerifyingKey> {
 
 /// Load a private key from PKCS#8 PEM file.
 pub fn load_private_key_pem(path: &Path) -> Result<ed25519_dalek::SigningKey> {
-    use pkcs8::DecodePrivateKey;
+    use ed25519_dalek::pkcs8::DecodePrivateKey;
 
     let pem = fs::read_to_string(path)
         .with_context(|| format!("failed to read private key: {}", path.display()))?;
