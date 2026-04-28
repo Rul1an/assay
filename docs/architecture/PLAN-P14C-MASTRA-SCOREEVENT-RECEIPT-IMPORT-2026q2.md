@@ -20,8 +20,8 @@ ObservabilityExporter -> onScoreEvent(ScoreEvent) -> ExportedScore
 That recut now has two useful anchors:
 
 - an Assay-side sample around `ScoreEvent` / `ExportedScore`
-- upstream Mastra docs merged in `mastra-ai/mastra#15757` documenting
-  `ObservabilityExporter` event callbacks, including `onScoreEvent`
+- Mastra observability docs now publicly expose `ObservabilityExporter` event
+  callbacks, including `onScoreEvent(event: ScoreEvent)`
 
 P14c is the next narrow step. It should make the score-event lane a real Assay
 compiler path without claiming Mastra runtime truth, scoring truth, trace truth,
@@ -51,7 +51,8 @@ P14c v1 should import one JSONL row per bounded score artifact derived from a
 Mastra `ScoreEvent`.
 
 The input row is not a raw callback dump. It is a reviewer-safe reduction over
-`ScoreEvent.score` / `ExportedScore`.
+`ScoreEvent.score` / `ExportedScore`. P14c v1 imports a reduced score-event
+artifact in JSONL form, not a raw exporter callback payload.
 
 Recommended input surface:
 
@@ -59,7 +60,7 @@ Recommended input surface:
 {
   "schema": "mastra.score-event.export.v1",
   "framework": "mastra",
-  "surface": "observability_score_event",
+  "surface": "observability.score_event",
   "timestamp": "2026-04-28T12:00:00Z",
   "score_id_ref": "score_01h...",
   "scorer_id": "toxicity-check",
@@ -81,24 +82,35 @@ P14c should require:
 
 - `schema = "mastra.score-event.export.v1"`
 - `framework = "mastra"`
-- `surface = "observability_score_event"`
+- `surface = "observability.score_event"`
 - `timestamp` as RFC3339 with UTC offset
 - numeric `score`
+- bounded `target_ref`
+
+The input `surface` value intentionally matches the receipt `source_surface`
+value to avoid contract drift between the reduced artifact and Assay receipt.
+
+Capture-gated identity fields:
+
 - bounded `score_id_ref`
 - bounded `scorer_id`
-- bounded `target_ref`
+
+These are the preferred canonical bounded identity fields for v1. They become
+hard required only once a supported live callback capture proves that the
+selected Mastra path reliably carries them.
 
 Why this is stricter than the older P14b sample:
 
-- current upstream `ExportedScore` exposes `scoreId` and `scorerId`
+- current type/live discovery may expose `scoreId` and `scorerId`
 - a real receipt importer should prefer stable bounded identity over display
   labels
 - `scorer_name` is useful for review, but should not be the primary identity
   for a compiler path once `scorer_id` is available
 
-If implementation discovery proves that a current live callback still omits
-`scoreId` in a supported path, the importer may temporarily allow missing
-`score_id_ref`, but that exception must be explicit in the implementation PR.
+If implementation discovery proves that a current supported live callback still
+omits either identity field, the importer may temporarily allow the missing
+field. That exception must be explicit in the implementation PR and covered by
+tests so it cannot become accidental looseness.
 
 ## 5. Optional fields
 
@@ -114,10 +126,12 @@ P14c may preserve these bounded fields when naturally present:
 - `target_entity_type`
 - `metadata_ref`
 
-`metadata_ref` is a reference only. It is not metadata import.
+`metadata_ref` is a bounded string reference only. It is not metadata import.
+Raw `metadata` or `correlationContext` objects inline are malformed for v1.
 
 `trace_id_ref`, `span_id_ref`, and `score_trace_id_ref` are anchors only. They
-must not make this a trace import lane.
+must not make this a trace import lane. These fields are optional reviewer aids
+only and must not affect receipt validity or downstream claim semantics in v1.
 
 ## 6. v1 receipt payload
 
@@ -161,6 +175,7 @@ P14c v1 must not import:
 
 - raw `metadata` bodies
 - raw `correlationContext` bodies
+- inline replacements for `metadata_ref`
 - trace trees
 - span payloads
 - logs, metrics, or feedback events
@@ -175,6 +190,10 @@ P14c v1 must not import:
 - score histograms or aggregate rollups
 
 The lane is `ScoreEvent`-first. It is not observability-first.
+
+Only bounded reference fields are allowed for metadata or correlation context
+continuity. No raw body, object expansion, or callback-envelope import is part
+of v1.
 
 ## 8. What the receipt does not claim
 
@@ -210,6 +229,7 @@ assay evidence import mastra-score-event \
 Implementation should mirror the existing external receipt importers:
 
 - strict streaming JSONL ingestion
+- reduced score-event artifact input, not raw callback input
 - full-file SHA-256 source digest
 - one Assay `EvidenceEvent` receipt per score artifact
 - direct `BundleWriter` output
@@ -246,9 +266,10 @@ Minimum test set:
 
 - valid score event JSONL imports into a verifiable bundle
 - multiple rows produce multiple receipt events
-- missing `score_id_ref`, `scorer_id`, `target_ref`, or `timestamp` fails
-  closed unless the implementation explicitly documents a live-callback
-  exception
+- missing `target_ref` or `timestamp` fails closed
+- missing `score_id_ref` or `scorer_id` fails closed once live-capture support
+  confirms they are reliably present; any temporary missing-field exception must
+  be explicit, tested, and documented in the implementation PR
 - non-numeric `score` fails closed
 - raw `metadata` object fails closed
 - raw `correlationContext` object fails closed
