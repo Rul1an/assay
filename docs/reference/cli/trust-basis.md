@@ -57,7 +57,12 @@ assay trust-basis diff \
 ```
 
 The diff compares Trust Basis claim presence and levels only. It does not parse
-Promptfoo JSONL, inspect external eval payloads, or infer model correctness.
+Promptfoo JSONL, CycloneDX BOMs, external receipt payloads, or infer model,
+decision, inventory, or upstream-tool correctness.
+
+Claim identity is determined solely by `claim.id`. Source, boundary, and note
+differences do not create a different claim identity; they are reported
+separately as metadata changes.
 
 Claim levels are ordered as:
 
@@ -86,6 +91,10 @@ JSON output uses the stable machine-readable schema
 - `unchanged_claim_count`
 
 Diff arrays are sorted deterministically by `claim.id`.
+
+P34/P35/P36 consumers should treat `assay.trust-basis.diff.v1` JSON as the
+canonical machine contract and must not infer regressions from ad hoc text
+output.
 
 Exit codes are:
 

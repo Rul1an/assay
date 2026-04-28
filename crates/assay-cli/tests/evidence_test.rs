@@ -139,14 +139,19 @@ fn test_promptfoo_imported_receipts_feed_trust_basis_generation() {
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        8,
-        "P33 adds one bounded external receipt boundary claim"
+        9,
+        "P45 keeps all frozen Trust Basis claims present"
     );
     assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
     assert_eq!(
         claim(claims, "external_eval_receipt_boundary_visible")["level"],
         "verified",
         "Promptfoo receipts should now surface the bounded external receipt boundary claim"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "absent",
+        "Promptfoo receipts are eval receipts, not inventory receipts"
     );
 }
 
@@ -209,14 +214,19 @@ fn test_openfeature_imported_decision_receipts_verify_and_feed_trust_basis_gener
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        8,
-        "P41 does not add a Trust Basis claim yet; it proves bundle/readability first"
+        9,
+        "P45 keeps all frozen Trust Basis claims present"
     );
     assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
     assert_eq!(
         claim(claims, "external_eval_receipt_boundary_visible")["level"],
         "absent",
         "OpenFeature decision receipts are not external eval receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "absent",
+        "OpenFeature decision receipts are not inventory receipts"
     );
 }
 
@@ -298,14 +308,19 @@ fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() 
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        8,
-        "P43 does not add an inventory-specific Trust Basis claim yet"
+        9,
+        "P45 adds one bounded external inventory receipt boundary claim"
     );
     assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
     assert_eq!(
         claim(claims, "external_eval_receipt_boundary_visible")["level"],
         "absent",
         "CycloneDX ML-BOM model receipts are inventory receipts, not external eval receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "verified",
+        "CycloneDX ML-BOM model receipts should surface the bounded inventory receipt boundary claim"
     );
 }
 

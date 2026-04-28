@@ -117,7 +117,7 @@ fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     let claims = json["claims"].as_array().unwrap();
     assert_eq!(
         claims.len(),
-        8,
+        9,
         "all frozen claims should always be present"
     );
 
@@ -145,6 +145,10 @@ fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     );
     assert_eq!(
         claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
         "absent"
     );
 }
