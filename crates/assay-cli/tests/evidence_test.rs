@@ -221,6 +221,95 @@ fn test_openfeature_imported_decision_receipts_verify_and_feed_trust_basis_gener
 }
 
 #[test]
+fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("bom.cdx.json");
+    let bundle = dir.path().join("cyclonedx-model-receipts.tar.gz");
+    fs::write(
+        &input,
+        r#"{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "components": [
+    {
+      "bom-ref": "pkg:huggingface/example/model@abc123",
+      "type": "machine-learning-model",
+      "publisher": "Example Inc.",
+      "name": "example-model",
+      "version": "1.0.0",
+      "purl": "pkg:huggingface/example/model@abc123",
+      "modelCard": {
+        "bom-ref": "model-card-example-model",
+        "modelParameters": {
+          "datasets": [{ "ref": "component-training-data" }]
+        }
+      }
+    },
+    {
+      "bom-ref": "component-training-data",
+      "type": "data",
+      "name": "Training Data"
+    }
+  ]
+}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("cyclonedx-mlbom-model")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("bom.cdx.json")
+        .arg("--run-id")
+        .arg("cyclonedx_trust_basis")
+        .arg("--import-time")
+        .arg("2026-04-28T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(
+        claims.len(),
+        8,
+        "P43 does not add an inventory-specific Trust Basis claim yet"
+    );
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "CycloneDX ML-BOM model receipts are inventory receipts, not external eval receipts"
+    );
+}
+
+#[test]
 fn test_evidence_export_deterministic() {
     let dir = tempdir().unwrap();
     let profile_path = dir.path().join("profile.yaml");

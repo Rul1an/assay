@@ -1,0 +1,11 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "components": [
+    {
+      "bom-ref": "component-application",
+      "type": "application",
+      "name": "example-application"
+    }
+  ]
+}

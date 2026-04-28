@@ -1,3 +1,4 @@
+pub mod cyclonedx_mlbom_model;
 pub mod diff;
 pub mod lint;
 pub mod list;
@@ -87,6 +88,9 @@ pub struct EvidenceImportArgs {
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum EvidenceImportCmd {
+    /// Import one CycloneDX ML-BOM machine-learning-model component receipt
+    #[command(name = "cyclonedx-mlbom-model")]
+    CycloneDxMlBomModel(cyclonedx_mlbom_model::CycloneDxMlBomModelArgs),
     /// Import bounded OpenFeature boolean EvaluationDetails decision artifacts
     #[command(name = "openfeature-details")]
     OpenFeatureDetails(openfeature_details::OpenFeatureDetailsArgs),
@@ -114,6 +118,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
 
 fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
     match args.cmd {
+        EvidenceImportCmd::CycloneDxMlBomModel(a) => {
+            cyclonedx_mlbom_model::cmd_cyclonedx_mlbom_model(a)
+        }
         EvidenceImportCmd::OpenFeatureDetails(a) => openfeature_details::cmd_openfeature_details(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
