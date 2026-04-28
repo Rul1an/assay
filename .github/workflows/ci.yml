@@ -239,6 +239,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     env:
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -252,6 +254,31 @@ jobs:
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
         with:
           components: rustfmt, clippy
+
+      - name: Free hosted runner disk (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Disk before cleanup ==="
+          df -h /
+
+          # Hosted Ubuntu images include large SDK/tool caches that this Rust
+          # workspace job does not use. Removing them before Rust cache restore
+          # leaves room for target/, sccache, and feature-enabled E2E builds.
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo apt-get clean 2>/dev/null || true
+
+          echo "=== Disk after cleanup ==="
+          df -h /
 
       - name: Install mold (Linux)
         if: runner.os == 'Linux'
