@@ -57,6 +57,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [PLAN — P41 OpenFeature EvaluationDetails Decision Receipt Import (Q2 2026)](./PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md) — execution slice that imports bounded boolean OpenFeature decision details as portable Assay receipts, not provider config, targeting, metadata, or application correctness truth
 - [PLAN — P43 CycloneDX ML-BOM Model Component Receipt Import (Q2 2026)](./PLAN-P43-CYCLONEDX-MLBOM-MODEL-COMPONENT-RECEIPT-IMPORT-2026q2.md) — execution slice that imports one selected CycloneDX `machine-learning-model` component as a portable inventory receipt, not full BOM, model-card, dataset, graph, or compliance truth
 - [PLAN — P45 Inventory Receipt Trust Basis Claim (Q2 2026)](./PLAN-P45-INVENTORY-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) — execution slice that adds one bounded Trust Basis claim for supported inventory receipt boundaries, starting with CycloneDX ML-BOM model-component receipts
+- [PLAN — P45b Decision Receipt Trust Basis Claim (Q2 2026)](./PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) — execution slice that adds one bounded Trust Basis claim for supported decision receipt boundaries, starting with OpenFeature boolean EvaluationDetails receipts
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs

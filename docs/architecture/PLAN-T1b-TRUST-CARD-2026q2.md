@@ -8,7 +8,7 @@
 
 Ship `trustcard.json` (canonical) and `trustcard.md` (secondary) derived **only** from `generate_trust_basis` → `trust_basis_to_trust_card`. No second classification pass, no aggregate score, no badge semantics, no `trust_basis_sha256` in v1.
 
-## 2) Frozen contract (T1b baseline; extended by G3, P33, and P45)
+## 2) Frozen contract (T1b baseline; extended by G3, P33, P45, and P45b)
 
 This table records the current effective T1b surface as extended by later
 accepted slices; it is not a claim that all of these properties shipped in the
@@ -16,8 +16,8 @@ original March 2026 cut.
 
 | Item | Rule |
 |------|------|
-| `schema_version` | `4` after [P45](./PLAN-P45-INVENTORY-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) (`TRUST_CARD_SCHEMA_VERSION`); was `3` after [P33](./PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md), `2` after [G3](./PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md), and `1` for the original T1b-only ship. |
-| `claims[]` | `Vec<TrustBasisClaim>` — same serde as trust basis; **nine** frozen ids after P45, same order as `TrustBasis::claims` (was eight after P33, seven after G3, and six for T1a-only). |
+| `schema_version` | `5` after [P45b](./PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) (`TRUST_CARD_SCHEMA_VERSION`); was `4` after [P45](./PLAN-P45-INVENTORY-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md), `3` after [P33](./PLAN-P33-EXTERNAL-EVAL-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md), `2` after [G3](./PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md), and `1` for the original T1b-only ship. |
+| `claims[]` | `Vec<TrustBasisClaim>` — same serde as trust basis; **ten** frozen ids after P45b, same order as `TrustBasis::claims` (was nine after P45, eight after P33, seven after G3, and six for T1a-only). |
 | `non_goals` | Three fixed strings in fixed order (`TRUST_CARD_NON_GOALS` in code); identical in JSON and Markdown. |
 | Markdown `note` column | Empty T1a `note` renders as placeholder `-` (`TRUST_CARD_NOTE_EMPTY_PLACEHOLDER`); no multiline cells. |
 | Markdown shape | Title + fixed five-column table + `## Non-goals` with literal bullets. |
