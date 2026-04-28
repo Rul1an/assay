@@ -19,6 +19,7 @@ pub enum TrustClaimId {
     AuthorizationContextVisible,
     ContainmentDegradationObserved,
     ExternalEvalReceiptBoundaryVisible,
+    ExternalInventoryReceiptBoundaryVisible,
     AppliedPackFindingsPresent,
 }
 
@@ -39,6 +40,7 @@ pub enum TrustClaimSource {
     CanonicalDecisionEvidence,
     CanonicalEventPresence,
     ExternalEvidenceReceipt,
+    ExternalInventoryReceipt,
     PackExecutionResults,
 }
 
@@ -51,6 +53,7 @@ pub enum TrustClaimBoundary {
     SupportedAuthProjectedFlowsOnly,
     SupportedContainmentFallbackPathsOnly,
     SupportedExternalEvalReceiptEventsOnly,
+    SupportedExternalInventoryReceiptEventsOnly,
     ProofSurfacesOnly,
     PackExecutionOnly,
 }
@@ -411,6 +414,13 @@ pub fn generate_trust_basis<R: Read>(
                 note: None,
             },
             TrustBasisClaim {
+                id: TrustClaimId::ExternalInventoryReceiptBoundaryVisible,
+                level: classify_external_inventory_receipt_boundary(&events),
+                source: TrustClaimSource::ExternalInventoryReceipt,
+                boundary: TrustClaimBoundary::SupportedExternalInventoryReceiptEventsOnly,
+                note: None,
+            },
+            TrustBasisClaim {
                 id: TrustClaimId::AppliedPackFindingsPresent,
                 level: classify_pack_findings(lint_result.as_ref()),
                 source: TrustClaimSource::PackExecutionResults,
@@ -485,6 +495,17 @@ const PROMPTFOO_RECEIPT_SOURCE_SYSTEM: &str = "promptfoo";
 const PROMPTFOO_RECEIPT_SOURCE_SURFACE: &str = "cli-jsonl.gradingResult.componentResults";
 const PROMPTFOO_RECEIPT_REDUCER_PREFIX: &str = "assay-promptfoo-jsonl-component-result@";
 const PROMPTFOO_MAX_REASON_CHARS: usize = 160;
+const SOURCE_ARTIFACT_REF_MAX_CHARS: usize = 240;
+const CYCLONEDX_MLBOM_MODEL_RECEIPT_EVENT_TYPE: &str =
+    "assay.receipt.cyclonedx.mlbom_model_component.v1";
+const CYCLONEDX_MLBOM_MODEL_RECEIPT_SCHEMA: &str =
+    "assay.receipt.cyclonedx.mlbom-model-component.v1";
+const CYCLONEDX_MLBOM_MODEL_RECEIPT_SOURCE_SYSTEM: &str = "cyclonedx";
+const CYCLONEDX_MLBOM_MODEL_RECEIPT_SOURCE_SURFACE: &str =
+    "bom.components[type=machine-learning-model]";
+const CYCLONEDX_MLBOM_MODEL_RECEIPT_REDUCER_PREFIX: &str = "assay-cyclonedx-mlbom-model-component@";
+const INVENTORY_BOUNDARY_STRING_MAX_CHARS: usize = 240;
+const INVENTORY_REF_MAX_COUNT: usize = 32;
 
 fn classify_external_eval_receipt_boundary(events: &[EvidenceEvent]) -> TrustClaimLevel {
     if events.iter().any(is_supported_promptfoo_receipt) {
@@ -523,7 +544,9 @@ fn is_supported_promptfoo_receipt(event: &EvidenceEvent) -> bool {
     string_field(payload, "schema") == Some(PROMPTFOO_RECEIPT_SCHEMA)
         && string_field(payload, "source_system") == Some(PROMPTFOO_RECEIPT_SOURCE_SYSTEM)
         && string_field(payload, "source_surface") == Some(PROMPTFOO_RECEIPT_SOURCE_SURFACE)
-        && non_empty_string_field(payload, "source_artifact_ref")
+        && string_field(payload, "source_artifact_ref")
+            .map(is_bounded_source_artifact_ref)
+            .unwrap_or(false)
         && string_field(payload, "source_artifact_digest")
             .map(is_sha256_digest)
             .unwrap_or(false)
@@ -541,17 +564,71 @@ fn is_supported_promptfoo_receipt(event: &EvidenceEvent) -> bool {
             .unwrap_or(false)
 }
 
+fn classify_external_inventory_receipt_boundary(events: &[EvidenceEvent]) -> TrustClaimLevel {
+    if events
+        .iter()
+        .any(is_supported_cyclonedx_mlbom_model_receipt)
+    {
+        TrustClaimLevel::Verified
+    } else {
+        TrustClaimLevel::Absent
+    }
+}
+
+fn is_supported_cyclonedx_mlbom_model_receipt(event: &EvidenceEvent) -> bool {
+    if event.type_ != CYCLONEDX_MLBOM_MODEL_RECEIPT_EVENT_TYPE {
+        return false;
+    }
+
+    let Some(payload) = event.payload.as_object() else {
+        return false;
+    };
+    let allowed_fields = [
+        "schema",
+        "source_system",
+        "source_surface",
+        "source_artifact_ref",
+        "source_artifact_digest",
+        "reducer_version",
+        "imported_at",
+        "model_component",
+    ];
+    if payload
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    string_field(payload, "schema") == Some(CYCLONEDX_MLBOM_MODEL_RECEIPT_SCHEMA)
+        && string_field(payload, "source_system")
+            == Some(CYCLONEDX_MLBOM_MODEL_RECEIPT_SOURCE_SYSTEM)
+        && string_field(payload, "source_surface")
+            == Some(CYCLONEDX_MLBOM_MODEL_RECEIPT_SOURCE_SURFACE)
+        && string_field(payload, "source_artifact_ref")
+            .map(is_bounded_source_artifact_ref)
+            .unwrap_or(false)
+        && string_field(payload, "source_artifact_digest")
+            .map(is_sha256_digest)
+            .unwrap_or(false)
+        && string_field(payload, "reducer_version")
+            .map(|value| value.starts_with(CYCLONEDX_MLBOM_MODEL_RECEIPT_REDUCER_PREFIX))
+            .unwrap_or(false)
+        && string_field(payload, "imported_at")
+            .map(is_utc_rfc3339)
+            .unwrap_or(false)
+        && payload
+            .get("model_component")
+            .and_then(|value| value.as_object())
+            .map(is_supported_cyclonedx_model_component)
+            .unwrap_or(false)
+}
+
 fn string_field<'a>(
     payload: &'a serde_json::Map<String, serde_json::Value>,
     key: &str,
 ) -> Option<&'a str> {
     payload.get(key).and_then(|value| value.as_str())
-}
-
-fn non_empty_string_field(payload: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
-    string_field(payload, key)
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
 }
 
 fn is_sha256_digest(value: &str) -> bool {
@@ -608,6 +685,86 @@ fn is_bounded_reason(reason: &str) -> bool {
         && !trimmed.contains('`')
         && !trimmed.contains('{')
         && !trimmed.contains('}')
+}
+
+fn is_supported_cyclonedx_model_component(
+    component: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let allowed_fields = [
+        "bom_ref",
+        "name",
+        "version",
+        "publisher",
+        "purl",
+        "dataset_refs",
+        "model_card_refs",
+    ];
+    if component
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    string_field(component, "bom_ref")
+        .map(is_bounded_inventory_string)
+        .unwrap_or(false)
+        && string_field(component, "name")
+            .map(is_bounded_inventory_string)
+            .unwrap_or(false)
+        && optional_bounded_inventory_string_field(component, "version")
+        && optional_bounded_inventory_string_field(component, "publisher")
+        && optional_bounded_inventory_string_field(component, "purl")
+        && optional_inventory_ref_array_field(component, "dataset_refs")
+        && optional_inventory_ref_array_field(component, "model_card_refs")
+}
+
+fn optional_bounded_inventory_string_field(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> bool {
+    match payload.get(key) {
+        Some(value) => value
+            .as_str()
+            .map(is_bounded_inventory_string)
+            .unwrap_or(false),
+        None => true,
+    }
+}
+
+fn optional_inventory_ref_array_field(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> bool {
+    match payload.get(key) {
+        Some(serde_json::Value::Array(values)) => {
+            values.len() <= INVENTORY_REF_MAX_COUNT
+                && values.iter().all(|value| {
+                    value
+                        .as_str()
+                        .map(is_bounded_inventory_string)
+                        .unwrap_or(false)
+                })
+        }
+        Some(_) => false,
+        None => true,
+    }
+}
+
+fn is_bounded_inventory_string(value: &str) -> bool {
+    is_bounded_reviewer_string(value, INVENTORY_BOUNDARY_STRING_MAX_CHARS)
+}
+
+fn is_bounded_source_artifact_ref(value: &str) -> bool {
+    is_bounded_reviewer_string(value, SOURCE_ARTIFACT_REF_MAX_CHARS)
+}
+
+fn is_bounded_reviewer_string(value: &str, max_chars: usize) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed == value
+        && value.chars().count() <= max_chars
+        && !value.chars().any(char::is_control)
 }
 
 fn classify_pack_findings(lint_result: Option<&LintReportWithPacks>) -> TrustClaimLevel {
@@ -715,6 +872,34 @@ mod tests {
         payload
     }
 
+    fn cyclonedx_mlbom_model_receipt_payload(extra: serde_json::Value) -> serde_json::Value {
+        let mut payload = json!({
+            "schema": "assay.receipt.cyclonedx.mlbom-model-component.v1",
+            "source_system": "cyclonedx",
+            "source_surface": "bom.components[type=machine-learning-model]",
+            "source_artifact_ref": "bom.cdx.json",
+            "source_artifact_digest": format!("sha256:{}", "b".repeat(64)),
+            "reducer_version": "assay-cyclonedx-mlbom-model-component@0.1.0",
+            "imported_at": "2026-04-28T12:00:00Z",
+            "model_component": {
+                "bom_ref": "pkg:huggingface/example/model@abc123",
+                "name": "example-model",
+                "version": "1.0.0",
+                "publisher": "Example Inc.",
+                "purl": "pkg:huggingface/example/model@abc123",
+                "dataset_refs": ["component-training-data"],
+                "model_card_refs": ["model-card-example-model"]
+            }
+        });
+        if let Some(extra) = extra.as_object() {
+            let obj = payload.as_object_mut().expect("payload object");
+            for (key, value) in extra {
+                obj.insert(key.clone(), value.clone());
+            }
+        }
+        payload
+    }
+
     #[test]
     fn g3_authorization_claim_is_after_delegation_before_containment() {
         let bundle = make_bundle(vec![make_event(
@@ -731,7 +916,7 @@ mod tests {
         .expect("trust basis");
         let ids: Vec<_> = trust_basis.claims.iter().map(|c| c.id).collect();
         let pos = |id| ids.iter().position(|&x| x == id).expect("claim id");
-        assert_eq!(ids.len(), 8);
+        assert_eq!(ids.len(), 9);
         assert!(
             pos(TrustClaimId::DelegationContextVisible)
                 < pos(TrustClaimId::AuthorizationContextVisible)
@@ -801,6 +986,11 @@ mod tests {
                     TrustClaimBoundary::SupportedExternalEvalReceiptEventsOnly,
                 ),
                 (
+                    TrustClaimId::ExternalInventoryReceiptBoundaryVisible,
+                    TrustClaimSource::ExternalInventoryReceipt,
+                    TrustClaimBoundary::SupportedExternalInventoryReceiptEventsOnly,
+                ),
+                (
                     TrustClaimId::AppliedPackFindingsPresent,
                     TrustClaimSource::PackExecutionResults,
                     TrustClaimBoundary::PackExecutionOnly,
@@ -815,6 +1005,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 TrustClaimLevel::Verified,
+                TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
@@ -980,6 +1171,169 @@ mod tests {
             claim(
                 &trust_basis,
                 TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_detects_supported_external_inventory_receipt_boundary() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.cyclonedx.mlbom_model_component.v1",
+            "run_cyclonedx_receipt",
+            0,
+            cyclonedx_mlbom_model_receipt_payload(json!({})),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalInventoryReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Verified
+        );
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_inventory_receipt_boundary_when_model_card_body_leaks_in() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.cyclonedx.mlbom_model_component.v1",
+            "run_cyclonedx_raw_model_card",
+            0,
+            cyclonedx_mlbom_model_receipt_payload(json!({
+                "model_component": {
+                    "bom_ref": "pkg:huggingface/example/model@abc123",
+                    "name": "example-model",
+                    "modelCard": {
+                        "modelParameters": {
+                            "datasets": [{ "ref": "component-training-data" }]
+                        }
+                    }
+                }
+            })),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalInventoryReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_inventory_receipt_boundary_when_digest_is_missing_or_bad() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.cyclonedx.mlbom_model_component.v1",
+            "run_cyclonedx_bad_digest",
+            0,
+            cyclonedx_mlbom_model_receipt_payload(json!({
+                "source_artifact_digest": "sha256:not-a-real-digest"
+            })),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalInventoryReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_inventory_receipt_boundary_when_source_ref_is_unbounded() {
+        for (case_name, source_artifact_ref) in [
+            ("control_char", "bom.cdx.json\nnext-line".to_string()),
+            ("too_long", "x".repeat(SOURCE_ARTIFACT_REF_MAX_CHARS + 1)),
+        ] {
+            let bundle = make_bundle(vec![make_event(
+                "assay.receipt.cyclonedx.mlbom_model_component.v1",
+                case_name,
+                0,
+                cyclonedx_mlbom_model_receipt_payload(json!({
+                    "source_artifact_ref": source_artifact_ref
+                })),
+            )]);
+
+            let trust_basis = generate_trust_basis(
+                Cursor::new(bundle),
+                VerifyLimits::default(),
+                TrustBasisOptions::default(),
+            )
+            .expect("trust basis should generate");
+
+            assert_eq!(
+                claim(
+                    &trust_basis,
+                    TrustClaimId::ExternalInventoryReceiptBoundaryVisible
+                )
+                .level,
+                TrustClaimLevel::Absent
+            );
+        }
+    }
+
+    #[test]
+    fn trust_basis_rejects_inventory_receipt_boundary_when_refs_are_expanded_objects() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.cyclonedx.mlbom_model_component.v1",
+            "run_cyclonedx_expanded_dataset",
+            0,
+            cyclonedx_mlbom_model_receipt_payload(json!({
+                "model_component": {
+                    "bom_ref": "pkg:huggingface/example/model@abc123",
+                    "name": "example-model",
+                    "dataset_refs": [{ "ref": "component-training-data", "name": "raw dataset body" }]
+                }
+            })),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalInventoryReceiptBoundaryVisible
             )
             .level,
             TrustClaimLevel::Absent

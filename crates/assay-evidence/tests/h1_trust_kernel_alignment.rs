@@ -88,7 +88,7 @@ fn h1_trust_card_matches_trust_basis_claims_and_frozen_top_level() {
     let card = trust_basis_to_trust_card(&tb);
 
     assert_eq!(card.schema_version, TRUST_CARD_SCHEMA_VERSION);
-    assert_eq!(card.claims.len(), 8);
+    assert_eq!(card.claims.len(), 9);
     assert_eq!(
         card.claims, tb.claims,
         "Trust Card must not reclassify claims"

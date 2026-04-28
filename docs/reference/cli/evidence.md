@@ -54,9 +54,11 @@ The same bundle can feed the Trust Basis compiler:
 assay trust-basis generate cyclonedx-model-receipt.tar.gz --out cyclonedx-model.trust-basis.json
 ```
 
-P43 does not add an inventory-specific Trust Basis claim yet. The first
-CycloneDX compiler slice proves the receipt bundle is bundleable, verifiable,
-and readable by the Trust Basis path.
+Trust Basis emits `external_inventory_receipt_boundary_visible` when the
+supported CycloneDX ML-BOM model-component receipt shape is present. That claim
+means the bounded inventory receipt boundary is visible; it does not mean the
+BOM is complete, the model is safe, the model card is correct, the datasets are
+approved, or the CycloneDX artifact is imported as Assay truth.
 
 Use `--bom-ref <REF>` when the BOM has multiple `machine-learning-model`
 components. Use `--import-time <RFC3339>` for deterministic fixture generation.

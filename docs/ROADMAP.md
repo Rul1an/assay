@@ -235,6 +235,7 @@ Closed lines on `main`:
 - **Supply chain and governance surfaces**: BYOS Phase 1, tool signing, GitHub Action v2/v2.1, mandate evidence, and starter/baseline pack infrastructure are shipped
 - **Evidence-as-a-product**: soak, closure, completeness, and the OTel bridge slices from ADR-025 are shipped
 - **External eval receipts**: P31-P39 are merged on `main` as the first evidence-portability lane for selected external eval outcomes, starting with Promptfoo assertion components and ending in Trust Basis diff / Harness reporting without importing full eval-run truth
+- **Inventory receipts**: P43/P45 add the first inventory/provenance receipt lane, starting with CycloneDX ML-BOM model components and a bounded Trust Basis boundary-visibility claim without importing full BOM, model-card, dataset, graph, or compliance truth
 - **Bounded claim waves**: `E1`, `G1`, `G2`, `P1`, `T1a`, `T1b`, `G3`, and the `3.2.3` release-line truth fix are shipped
 
 For detailed historical delivery records, see the relevant ADRs and companion docs:

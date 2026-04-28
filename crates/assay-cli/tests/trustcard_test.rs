@@ -66,14 +66,14 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
     let card_json: serde_json::Value =
         serde_json::from_slice(&fs::read(out_dir.join("trustcard.json")).unwrap()).unwrap();
 
-    assert_eq!(card_json["schema_version"], json!(3));
+    assert_eq!(card_json["schema_version"], json!(4));
     assert_eq!(card_json["claims"], basis_json["claims"]);
 
     let claims = card_json["claims"].as_array().expect("claims array");
     assert_eq!(
         claims.len(),
-        8,
-        "trustcard must carry exactly eight frozen claims"
+        9,
+        "trustcard must carry exactly nine frozen claims"
     );
     let expected_ids = [
         "bundle_verified",
@@ -83,6 +83,7 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
         "authorization_context_visible",
         "containment_degradation_observed",
         "external_eval_receipt_boundary_visible",
+        "external_inventory_receipt_boundary_visible",
         "applied_pack_findings_present",
     ];
     let ids: Vec<_> = claims
