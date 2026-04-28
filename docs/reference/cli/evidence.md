@@ -76,6 +76,71 @@ components. Use `--import-time <RFC3339>` for deterministic fixture generation.
 
 ---
 
+## Mastra ScoreEvent Import
+
+Import bounded, reviewer-safe Mastra `ScoreEvent` / `ExportedScore`-derived
+score artifacts into a verifiable Assay evidence bundle:
+
+```bash
+assay evidence import mastra-score-event \
+  --input mastra-score-events.jsonl \
+  --bundle-out mastra-score-receipts.tar.gz \
+  --source-artifact-ref mastra-score-events.jsonl
+```
+
+The importer is intentionally strict in v1:
+
+- input must be JSONL with one reduced score-event artifact per row
+- each row must use `mastra.score-event.export.v1`
+- each row must use `surface = observability.score_event`
+- `score` must be numeric
+- `target_ref` and at least one scorer identity (`scorer_id` or `scorer_name`)
+  must be present
+- `score_id_ref` is optional and capture-gated until the supported live callback
+  path reliably carries it
+- raw exporter callback payloads, raw `metadata`, raw `correlationContext`,
+  trace trees, spans, logs, metrics, feedback, prompts, request/response bodies,
+  scorer configs, and dashboard state are excluded
+
+The importer first computes `source_artifact_digest` over the full JSONL file,
+then parses and reduces score-event artifacts. Receipts stay small while still
+binding back to the exact reduced source artifact bytes.
+
+The receipt is a score-boundary artifact. It does not mean the score is
+correct, the scorer is reliable, the Mastra runtime behaved correctly, the
+trace/span anchor is complete, or the score should pass or fail a gate.
+
+The output bundle can be verified with:
+
+```bash
+assay evidence verify mastra-score-receipts.tar.gz
+```
+
+The same bundle can feed the Trust Basis compiler:
+
+```bash
+assay trust-basis generate mastra-score-receipts.tar.gz --out mastra-score.trust-basis.json
+```
+
+P14c does not add a Trust Basis claim yet. The first Mastra compiler slice
+proves the receipt bundle is bundleable, verifiable, and readable by the Trust
+Basis path. Score-specific Trust Basis claims are a later compatibility
+decision.
+
+Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--input <PATH>` | Mastra reduced ScoreEvent JSONL artifact file |
+| `--bundle-out <PATH>` | Output Assay evidence bundle path |
+| `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
+| `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |
+| `--import-time <RFC3339>` | Deterministic import timestamp override |
+
+---
+
 ## OpenFeature Details Import
 
 Import bounded OpenFeature boolean `EvaluationDetails` artifacts into a
@@ -206,9 +271,11 @@ To compare the resulting Trust Basis artifact against another run, use
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
 - [Trust Basis CLI](./trust-basis.md)
 - [CycloneDX ML-BOM Model Component evidence example](../../../examples/cyclonedx-mlbom-model-component-evidence/README.md)
+- [Mastra ScoreEvent evidence example](../../../examples/mastra-score-event-evidence/README.md)
 - [OpenFeature EvaluationDetails evidence example](../../../examples/openfeature-evaluation-details-evidence/README.md)
 - [Promptfoo assertion grading-result example](../../../examples/promptfoo-assertion-grading-result-evidence/README.md)
 - [From Promptfoo JSONL to Evidence Receipts](../../notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md)
 - [P43 CycloneDX ML-BOM model component receipt import plan](../../architecture/PLAN-P43-CYCLONEDX-MLBOM-MODEL-COMPONENT-RECEIPT-IMPORT-2026q2.md)
+- [P14c Mastra ScoreEvent receipt import plan](../../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md)
 - [P41 OpenFeature decision receipt import plan](../../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)

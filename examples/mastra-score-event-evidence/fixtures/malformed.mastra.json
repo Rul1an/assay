@@ -1,7 +1,7 @@
 {
   "schema": "mastra.score-event.export.v1",
   "framework": "mastra",
-  "surface": "observability_score_event",
+  "surface": "observability.score_event",
   "timestamp": "2026-04-14T09:25:00Z",
   "scorer_id": "answer_relevance",
   "scorer_name": "Answer Relevance",

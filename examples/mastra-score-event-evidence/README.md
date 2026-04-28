@@ -9,7 +9,8 @@ It is intentionally small:
 - start from one typed score-event seam
 - keep the sample to one strong score artifact, one weak score artifact, and
   one malformed case
-- map the two good artifacts into Assay-shaped placeholder envelopes
+- import the reduced JSONL form into verifiable Assay receipt bundles
+- keep the older placeholder mapper around only as sample/discovery context
 - keep scorer identity, numeric score, one derived target anchor, and
   timestamp at the center
 - treat trace/span anchors as optional refs only
@@ -19,10 +20,12 @@ It is intentionally small:
 ## What is in here
 
 - `map_to_assay.py`: turns one tiny Mastra score artifact into an
-  Assay-shaped placeholder envelope
+  Assay-shaped placeholder envelope for the older sample path
 - `score_event_exporter.example.ts`: small exporter-side sketch centered on the
   typed `onScoreEvent` path, with a legacy `addScoreToTrace(...)` note kept
   only as migration context
+- `fixtures/score-events.mastra.jsonl`: reduced JSONL input for
+  `assay evidence import mastra-score-event`
 - `fixtures/valid.mastra.json`: one higher-score artifact
 - `fixtures/failure.mastra.json`: one lower-score artifact that intentionally
   uses the thinner scorer-name-only shape
@@ -187,13 +190,37 @@ shows the smallest part of the exporter path we care about:
 - keep one historical `addScoreToTrace(...)` sketch only as a migration note
 - project one bounded frozen artifact for external evidence
 
+## Import the reduced JSONL artifact
+
+```bash
+assay evidence import mastra-score-event \
+  --input examples/mastra-score-event-evidence/fixtures/score-events.mastra.jsonl \
+  --bundle-out /tmp/mastra-score-event-receipts.tar.gz \
+  --source-artifact-ref score-events.mastra.jsonl \
+  --run-id mastra_score_event_fixture \
+  --import-time 2026-04-28T12:00:00Z
+```
+
+The command writes real `assay.receipt.mastra.score_event.v1` receipt events.
+It imports the reduced JSONL artifact, not the raw exporter callback payload.
+
+The bundle can then be verified:
+
+```bash
+assay evidence verify /tmp/mastra-score-event-receipts.tar.gz
+```
+
+It can also feed the current Trust Basis compiler. P14c deliberately does not
+add a score-specific Trust Basis claim; this path proves bundle readability
+without turning score semantics into gate semantics.
+
 ## Map the checked-in valid artifact
 
 ```bash
 python3 examples/mastra-score-event-evidence/map_to_assay.py \
   examples/mastra-score-event-evidence/fixtures/valid.mastra.json \
   --output examples/mastra-score-event-evidence/fixtures/valid.assay.ndjson \
-  --import-time 2026-04-14T10:00:00Z \
+  --import-time 2026-04-15T20:10:00Z \
   --overwrite
 ```
 
@@ -203,7 +230,7 @@ python3 examples/mastra-score-event-evidence/map_to_assay.py \
 python3 examples/mastra-score-event-evidence/map_to_assay.py \
   examples/mastra-score-event-evidence/fixtures/failure.mastra.json \
   --output examples/mastra-score-event-evidence/fixtures/failure.assay.ndjson \
-  --import-time 2026-04-14T10:05:00Z \
+  --import-time 2026-04-15T20:15:00Z \
   --overwrite
 ```
 
@@ -231,11 +258,11 @@ That failure is intentional for product reasons, not just parser hygiene:
 
 ## Important boundary
 
-This mapper writes sample-only placeholder envelopes.
+The mapper writes sample-only placeholder envelopes.
 
 It does not:
 
-- register a new Assay Evidence Contract event type
+- replace the `assay evidence import mastra-score-event` receipt importer
 - treat Mastra scoring semantics, trace semantics, or observability semantics
   as Assay truth
 - imply that Assay independently verified a Mastra runtime outcome
@@ -268,6 +295,8 @@ full RFC 8785 canonicalizer for arbitrary JSON input.
 - `fixtures/failure.mastra.json`: bounded score artifact with a weaker score
   and only the scorer-name identity field
 - `fixtures/malformed.mastra.json`: malformed import case
+- `fixtures/score-events.mastra.jsonl`: reduced JSONL artifact for the real
+  receipt importer
 - `fixtures/valid.assay.ndjson`: mapped placeholder output with fixed import
   time
 - `fixtures/failure.assay.ndjson`: mapped placeholder output with fixed import

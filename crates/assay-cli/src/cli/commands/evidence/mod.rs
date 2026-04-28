@@ -3,6 +3,7 @@ pub mod diff;
 pub mod lint;
 pub mod list;
 pub mod mapping;
+pub mod mastra_score_event;
 pub mod openfeature_details;
 pub mod promptfoo_jsonl;
 pub mod pull;
@@ -94,6 +95,9 @@ pub enum EvidenceImportCmd {
     /// Import bounded OpenFeature boolean EvaluationDetails decision artifacts
     #[command(name = "openfeature-details")]
     OpenFeatureDetails(openfeature_details::OpenFeatureDetailsArgs),
+    /// Import bounded Mastra ScoreEvent-derived score artifacts
+    #[command(name = "mastra-score-event")]
+    MastraScoreEvent(mastra_score_event::MastraScoreEventArgs),
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
@@ -122,6 +126,7 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
             cyclonedx_mlbom_model::cmd_cyclonedx_mlbom_model(a)
         }
         EvidenceImportCmd::OpenFeatureDetails(a) => openfeature_details::cmd_openfeature_details(a),
+        EvidenceImportCmd::MastraScoreEvent(a) => mastra_score_event::cmd_mastra_score_event(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
 }
