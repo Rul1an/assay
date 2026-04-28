@@ -33,6 +33,7 @@ OPTIONAL_KEYS = {
     "reason",
     "trace_id_ref",
     "span_id_ref",
+    "score_trace_id_ref",
     "scorer_version",
     "score_source",
     "metadata_ref",
@@ -210,13 +211,13 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"artifact: expected schema {EXTERNAL_SCHEMA}, got {record['schema']}")
     if record["framework"] != "mastra":
         raise ValueError("artifact: framework must be mastra")
-    if record["surface"] != "observability_score_event":
-        raise ValueError("artifact: surface must be observability_score_event")
+    if record["surface"] != "observability.score_event":
+        raise ValueError("artifact: surface must be observability.score_event")
 
     normalized = {
         "schema": EXTERNAL_SCHEMA,
         "framework": "mastra",
-        "surface": "observability_score_event",
+        "surface": "observability.score_event",
         "timestamp": _parse_rfc3339_utc(str(record["timestamp"])),
         "score": float(_validate_score(record["score"], "artifact")),
         "target_ref": _validate_opaque_ref(record["target_ref"], "artifact", "target_ref"),
@@ -246,6 +247,8 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
         normalized["trace_id_ref"] = _validate_opaque_ref(record["trace_id_ref"], "artifact", "trace_id_ref")
     if "span_id_ref" in record:
         normalized["span_id_ref"] = _validate_opaque_ref(record["span_id_ref"], "artifact", "span_id_ref")
+    if "score_trace_id_ref" in record:
+        normalized["score_trace_id_ref"] = _validate_opaque_ref(record["score_trace_id_ref"], "artifact", "score_trace_id_ref")
     if "scorer_version" in record:
         normalized["scorer_version"] = _validate_short_string(
             record["scorer_version"], "artifact", "scorer_version", 64
@@ -265,7 +268,7 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
 def _build_event(normalized: dict[str, Any], assay_run_id: str, import_time: str) -> dict[str, Any]:
     data = {
         "external_system": "mastra",
-        "external_surface": "observability-score-event",
+        "external_surface": "observability.score_event",
         "external_schema": EXTERNAL_SCHEMA,
         "observed_upstream_time": normalized["timestamp"],
         "observed": normalized,

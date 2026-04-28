@@ -3,7 +3,7 @@ import type { ExportedScore, ScoreEvent } from '@mastra/core/observability';
 type AssayScoreArtifact = {
   schema: 'mastra.score-event.export.v1';
   framework: 'mastra';
-  surface: 'observability_score_event';
+  surface: 'observability.score_event';
   timestamp: string;
   score_id_ref?: string;
   scorer_id?: string;
@@ -63,7 +63,7 @@ export class AssayLegacyScoreAttachExporter {
     this.scores.push({
       schema: 'mastra.score-event.export.v1',
       framework: 'mastra',
-      surface: 'observability_score_event',
+      surface: 'observability.score_event',
       timestamp: new Date().toISOString(),
       scorer_name: args.scorerName,
       score: args.score,
@@ -158,7 +158,7 @@ function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
   return {
     schema: 'mastra.score-event.export.v1',
     framework: 'mastra',
-    surface: 'observability_score_event',
+    surface: 'observability.score_event',
     timestamp: score.timestamp.toISOString(),
     ...(scoreIdRef ? { score_id_ref: scoreIdRef } : {}),
     ...(scorerId ? { scorer_id: scorerId } : {}),

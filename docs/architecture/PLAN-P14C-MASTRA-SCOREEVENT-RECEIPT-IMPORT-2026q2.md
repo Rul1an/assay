@@ -2,7 +2,7 @@
 
 - **Date:** 2026-04-28
 - **Owner:** Evidence / Product
-- **Status:** Proposed execution slice
+- **Status:** Implemented importer slice
 - **Scope:** Turn one bounded Mastra `ScoreEvent` / `ExportedScore`-derived
   artifact into one portable Assay evidence receipt bundle. This is an
   Assay-side compiler path, not a Mastra integration, partnership, exporter, or

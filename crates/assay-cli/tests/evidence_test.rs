@@ -231,6 +231,81 @@ fn test_openfeature_imported_decision_receipts_verify_and_feed_trust_basis_gener
 }
 
 #[test]
+fn test_mastra_imported_score_receipts_verify_and_feed_trust_basis_generation() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("mastra-score-events.jsonl");
+    let bundle = dir.path().join("mastra-score-receipts.tar.gz");
+    fs::write(
+        &input,
+        concat!(
+            r#"{"schema":"mastra.score-event.export.v1","framework":"mastra","surface":"observability.score_event","timestamp":"2026-04-15T18:53:12.297Z","scorer_id":"p14-live-capture-scorer","score":0.92,"target_ref":"span:7c4180655970aca2","trace_id_ref":"59896b9a054b88cb48748463a0f2ab59","span_id_ref":"7c4180655970aca2","score_source":"live"}"#,
+            "\n",
+            r#"{"schema":"mastra.score-event.export.v1","framework":"mastra","surface":"observability.score_event","timestamp":"2026-04-15T18:58:12.297Z","scorer_name":"P14 Live Capture Scorer","score":0.18,"target_ref":"span:c4b7f4a58f2d90e1","trace_id_ref":"9f5bbab9073de1205f4a1de4925ad2b","span_id_ref":"c4b7f4a58f2d90e1","metadata_ref":"metadata:p14-live-capture"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("mastra-score-event")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("mastra-score-events.jsonl")
+        .arg("--run-id")
+        .arg("mastra_trust_basis")
+        .arg("--import-time")
+        .arg("2026-04-28T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(
+        claims.len(),
+        9,
+        "P14c adds an experimental receipt type, not a Trust Basis claim"
+    );
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "Mastra score receipts are not supported eval receipt claims in P14c"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "absent",
+        "Mastra score receipts are not inventory receipts"
+    );
+}
+
+#[test]
 fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("bom.cdx.json");
