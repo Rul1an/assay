@@ -6,8 +6,8 @@ use crate::trust_basis::{TrustBasis, TrustBasisClaim};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-/// Trust Card schema: `4` adds `external_inventory_receipt_boundary_visible`.
-pub const TRUST_CARD_SCHEMA_VERSION: u32 = 4;
+/// Trust Card schema: `5` adds `external_decision_receipt_boundary_visible`.
+pub const TRUST_CARD_SCHEMA_VERSION: u32 = 5;
 
 /// Markdown table cell when T1a leaves `note` empty (`None` or blank). Do not vary by test/renderer.
 pub const TRUST_CARD_NOTE_EMPTY_PLACEHOLDER: &str = "-";
@@ -120,7 +120,7 @@ mod tests {
     use std::io::Cursor;
 
     /// Must match `TrustBasis::claims` order from [`crate::trust_basis::generate_trust_basis`].
-    const FROZEN_TRUST_BASIS_CLAIM_ID_ORDER: [TrustClaimId; 9] = [
+    const FROZEN_TRUST_BASIS_CLAIM_ID_ORDER: [TrustClaimId; 10] = [
         TrustClaimId::BundleVerified,
         TrustClaimId::SigningEvidencePresent,
         TrustClaimId::ProvenanceBackedClaimsPresent,
@@ -128,6 +128,7 @@ mod tests {
         TrustClaimId::AuthorizationContextVisible,
         TrustClaimId::ContainmentDegradationObserved,
         TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+        TrustClaimId::ExternalDecisionReceiptBoundaryVisible,
         TrustClaimId::ExternalInventoryReceiptBoundaryVisible,
         TrustClaimId::AppliedPackFindingsPresent,
     ];
@@ -235,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn trust_card_json_always_exactly_nine_frozen_claim_ids_once_in_trust_basis_order() {
+    fn trust_card_json_always_exactly_ten_frozen_claim_ids_once_in_trust_basis_order() {
         let bundle = make_bundle(vec![make_event(
             "assay.process.exec",
             "run_seven",
@@ -250,7 +251,7 @@ mod tests {
         .expect("trust basis");
         let card = trust_basis_to_trust_card(&basis);
 
-        assert_eq!(card.claims.len(), 9);
+        assert_eq!(card.claims.len(), 10);
         let ids: Vec<TrustClaimId> = card.claims.iter().map(|c| c.id).collect();
         assert_eq!(ids, FROZEN_TRUST_BASIS_CLAIM_ID_ORDER);
     }
@@ -375,13 +376,13 @@ mod tests {
             .filter(|l| !l.contains("| --- |"))
             .count();
         assert_eq!(
-            table_rows, 9,
-            "schema 4 adds one external inventory receipt row; no extra markdown table blocks"
+            table_rows, 10,
+            "schema 5 adds one external decision receipt row; no extra markdown table blocks"
         );
     }
 
     #[test]
-    fn trust_card_schema_version_is_four() {
+    fn trust_card_schema_version_is_five() {
         let bundle = make_bundle(vec![make_event(
             "assay.process.exec",
             "run_schema",
@@ -395,11 +396,11 @@ mod tests {
         )
         .expect("trust basis");
         let card = trust_basis_to_trust_card(&basis);
-        assert_eq!(card.schema_version, 4);
+        assert_eq!(card.schema_version, 5);
         let v: serde_json::Value =
             serde_json::from_slice(&trust_card_to_canonical_json_bytes(&card).expect("json"))
                 .expect("parse");
-        assert_eq!(v["schema_version"], json!(4));
+        assert_eq!(v["schema_version"], json!(5));
     }
 
     #[test]

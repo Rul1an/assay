@@ -183,12 +183,16 @@ The same bundle can feed the Trust Basis compiler:
 assay trust-basis generate openfeature-decision-receipts.tar.gz --out openfeature.trust-basis.json
 ```
 
-P41 does not add a Trust Basis claim yet. The first OpenFeature compiler slice
-proves the receipt bundle is bundleable, verifiable, and readable by the Trust
-Basis path. Decision-specific Trust Basis claims are a later compatibility
-decision.
+Trust Basis emits `external_decision_receipt_boundary_visible` when the
+supported OpenFeature boolean decision receipt shape is present. That claim
+means the bounded decision receipt boundary is visible; it does not mean the
+flag decision was correct, the provider was correct, the targeting rules are
+correct, or application behavior is safe.
 
 Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+To compare the resulting Trust Basis artifact against another run, use
+[`assay trust-basis diff`](./trust-basis.md).
 
 ### Options
 
@@ -269,6 +273,7 @@ To compare the resulting Trust Basis artifact against another run, use
 ## See Also
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
+- [Receipt family matrix](../receipt-family-matrix.json)
 - [Trust Basis CLI](./trust-basis.md)
 - [CycloneDX ML-BOM Model Component evidence example](../../../examples/cyclonedx-mlbom-model-component-evidence/README.md)
 - [Mastra ScoreEvent evidence example](../../../examples/mastra-score-event-evidence/README.md)
@@ -277,5 +282,6 @@ To compare the resulting Trust Basis artifact against another run, use
 - [From Promptfoo JSONL to Evidence Receipts](../../notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md)
 - [P43 CycloneDX ML-BOM model component receipt import plan](../../architecture/PLAN-P43-CYCLONEDX-MLBOM-MODEL-COMPONENT-RECEIPT-IMPORT-2026q2.md)
 - [P14c Mastra ScoreEvent receipt import plan](../../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md)
+- [P45b OpenFeature decision receipt Trust Basis claim plan](../../architecture/PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md)
 - [P41 OpenFeature decision receipt import plan](../../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)

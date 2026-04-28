@@ -161,7 +161,7 @@ default evidence export paths.
 
 ## 9. Trust Basis posture
 
-P41 does not add a Trust Basis claim. The first slice proves:
+P41 itself did not add a Trust Basis claim. The first slice proved:
 
 - the importer writes a verifiable evidence bundle
 - the event type is registered
@@ -169,8 +169,10 @@ P41 does not add a Trust Basis claim. The first slice proves:
 - the current Trust Basis compiler can read the bundle
 - OpenFeature decision receipts are not classified as external eval receipts
 
-A future slice may add a decision-receipt Trust Basis claim, but that should be
-a separate compatibility decision.
+P45b later adds `external_decision_receipt_boundary_visible` as that separate
+compatibility decision. It keeps the claim at the same narrow boundary layer:
+supported bounded decision receipt present, not flag correctness, provider
+correctness, targeting-rule truth, or application safety.
 
 ## 10. Acceptance criteria
 

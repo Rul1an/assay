@@ -19,6 +19,7 @@ pub enum TrustClaimId {
     AuthorizationContextVisible,
     ContainmentDegradationObserved,
     ExternalEvalReceiptBoundaryVisible,
+    ExternalDecisionReceiptBoundaryVisible,
     ExternalInventoryReceiptBoundaryVisible,
     AppliedPackFindingsPresent,
 }
@@ -40,6 +41,7 @@ pub enum TrustClaimSource {
     CanonicalDecisionEvidence,
     CanonicalEventPresence,
     ExternalEvidenceReceipt,
+    ExternalDecisionReceipt,
     ExternalInventoryReceipt,
     PackExecutionResults,
 }
@@ -53,6 +55,7 @@ pub enum TrustClaimBoundary {
     SupportedAuthProjectedFlowsOnly,
     SupportedContainmentFallbackPathsOnly,
     SupportedExternalEvalReceiptEventsOnly,
+    SupportedExternalDecisionReceiptEventsOnly,
     SupportedExternalInventoryReceiptEventsOnly,
     ProofSurfacesOnly,
     PackExecutionOnly,
@@ -414,6 +417,13 @@ pub fn generate_trust_basis<R: Read>(
                 note: None,
             },
             TrustBasisClaim {
+                id: TrustClaimId::ExternalDecisionReceiptBoundaryVisible,
+                level: classify_external_decision_receipt_boundary(&events),
+                source: TrustClaimSource::ExternalDecisionReceipt,
+                boundary: TrustClaimBoundary::SupportedExternalDecisionReceiptEventsOnly,
+                note: None,
+            },
+            TrustBasisClaim {
                 id: TrustClaimId::ExternalInventoryReceiptBoundaryVisible,
                 level: classify_external_inventory_receipt_boundary(&events),
                 source: TrustClaimSource::ExternalInventoryReceipt,
@@ -496,6 +506,14 @@ const PROMPTFOO_RECEIPT_SOURCE_SURFACE: &str = "cli-jsonl.gradingResult.componen
 const PROMPTFOO_RECEIPT_REDUCER_PREFIX: &str = "assay-promptfoo-jsonl-component-result@";
 const PROMPTFOO_MAX_REASON_CHARS: usize = 160;
 const SOURCE_ARTIFACT_REF_MAX_CHARS: usize = 240;
+const OPENFEATURE_DECISION_RECEIPT_EVENT_TYPE: &str =
+    "assay.receipt.openfeature.evaluation_details.v1";
+const OPENFEATURE_DECISION_RECEIPT_SCHEMA: &str = "assay.receipt.openfeature.evaluation_details.v1";
+const OPENFEATURE_DECISION_RECEIPT_SOURCE_SYSTEM: &str = "openfeature";
+const OPENFEATURE_DECISION_RECEIPT_SOURCE_SURFACE: &str = "evaluation_details.boolean";
+const OPENFEATURE_DECISION_RECEIPT_REDUCER_PREFIX: &str = "assay-openfeature-evaluation-details@";
+const DECISION_FLAG_KEY_MAX_CHARS: usize = 200;
+const DECISION_BOUNDARY_STRING_MAX_CHARS: usize = 120;
 const CYCLONEDX_MLBOM_MODEL_RECEIPT_EVENT_TYPE: &str =
     "assay.receipt.cyclonedx.mlbom_model_component.v1";
 const CYCLONEDX_MLBOM_MODEL_RECEIPT_SCHEMA: &str =
@@ -561,6 +579,63 @@ fn is_supported_promptfoo_receipt(event: &EvidenceEvent) -> bool {
             .get("result")
             .and_then(|value| value.as_object())
             .map(is_supported_promptfoo_result)
+            .unwrap_or(false)
+}
+
+fn classify_external_decision_receipt_boundary(events: &[EvidenceEvent]) -> TrustClaimLevel {
+    if events.iter().any(is_supported_openfeature_decision_receipt) {
+        TrustClaimLevel::Verified
+    } else {
+        TrustClaimLevel::Absent
+    }
+}
+
+fn is_supported_openfeature_decision_receipt(event: &EvidenceEvent) -> bool {
+    if event.type_ != OPENFEATURE_DECISION_RECEIPT_EVENT_TYPE {
+        return false;
+    }
+
+    let Some(payload) = event.payload.as_object() else {
+        return false;
+    };
+    let allowed_fields = [
+        "schema",
+        "source_system",
+        "source_surface",
+        "source_artifact_ref",
+        "source_artifact_digest",
+        "reducer_version",
+        "imported_at",
+        "decision",
+    ];
+    if payload
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    string_field(payload, "schema") == Some(OPENFEATURE_DECISION_RECEIPT_SCHEMA)
+        && string_field(payload, "source_system")
+            == Some(OPENFEATURE_DECISION_RECEIPT_SOURCE_SYSTEM)
+        && string_field(payload, "source_surface")
+            == Some(OPENFEATURE_DECISION_RECEIPT_SOURCE_SURFACE)
+        && string_field(payload, "source_artifact_ref")
+            .map(is_bounded_source_artifact_ref)
+            .unwrap_or(false)
+        && string_field(payload, "source_artifact_digest")
+            .map(is_sha256_digest)
+            .unwrap_or(false)
+        && string_field(payload, "reducer_version")
+            .map(|value| value.starts_with(OPENFEATURE_DECISION_RECEIPT_REDUCER_PREFIX))
+            .unwrap_or(false)
+        && string_field(payload, "imported_at")
+            .map(is_utc_rfc3339)
+            .unwrap_or(false)
+        && payload
+            .get("decision")
+            .and_then(|value| value.as_object())
+            .map(is_supported_openfeature_decision)
             .unwrap_or(false)
 }
 
@@ -675,10 +750,67 @@ fn is_supported_promptfoo_result(result: &serde_json::Map<String, serde_json::Va
     }
 }
 
+fn is_supported_openfeature_decision(
+    decision: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let allowed_fields = [
+        "flag_key",
+        "value_type",
+        "value",
+        "variant",
+        "reason",
+        "error_code",
+    ];
+    if decision
+        .keys()
+        .any(|key| !allowed_fields.contains(&key.as_str()))
+    {
+        return false;
+    }
+
+    string_field(decision, "flag_key")
+        .map(|value| is_bounded_decision_string(value, DECISION_FLAG_KEY_MAX_CHARS))
+        .unwrap_or(false)
+        && string_field(decision, "value_type") == Some("boolean")
+        && decision
+            .get("value")
+            .and_then(|value| value.as_bool())
+            .is_some()
+        && optional_bounded_decision_string_field(decision, "variant")
+        && optional_bounded_decision_string_field(decision, "reason")
+        && optional_bounded_decision_string_field(decision, "error_code")
+}
+
 fn is_bounded_reason(reason: &str) -> bool {
     let trimmed = reason.trim();
     !trimmed.is_empty()
         && trimmed.chars().count() <= PROMPTFOO_MAX_REASON_CHARS
+        && !trimmed.contains('\n')
+        && !trimmed.contains('\r')
+        && !trimmed.contains('"')
+        && !trimmed.contains('`')
+        && !trimmed.contains('{')
+        && !trimmed.contains('}')
+}
+
+fn optional_bounded_decision_string_field(
+    payload: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> bool {
+    match payload.get(key) {
+        Some(value) => value
+            .as_str()
+            .map(|value| is_bounded_decision_string(value, DECISION_BOUNDARY_STRING_MAX_CHARS))
+            .unwrap_or(false),
+        None => true,
+    }
+}
+
+fn is_bounded_decision_string(value: &str, max_chars: usize) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed == value
+        && value.chars().count() <= max_chars
         && !trimmed.contains('\n')
         && !trimmed.contains('\r')
         && !trimmed.contains('"')
@@ -872,6 +1004,32 @@ mod tests {
         payload
     }
 
+    fn openfeature_decision_receipt_payload(extra: serde_json::Value) -> serde_json::Value {
+        let mut payload = json!({
+            "schema": "assay.receipt.openfeature.evaluation_details.v1",
+            "source_system": "openfeature",
+            "source_surface": "evaluation_details.boolean",
+            "source_artifact_ref": "openfeature-details.jsonl",
+            "source_artifact_digest": format!("sha256:{}", "c".repeat(64)),
+            "reducer_version": "assay-openfeature-evaluation-details@0.1.0",
+            "imported_at": "2026-04-27T12:00:00Z",
+            "decision": {
+                "flag_key": "checkout.new_flow",
+                "value_type": "boolean",
+                "value": true,
+                "variant": "on",
+                "reason": "STATIC"
+            }
+        });
+        if let Some(extra) = extra.as_object() {
+            let obj = payload.as_object_mut().expect("payload object");
+            for (key, value) in extra {
+                obj.insert(key.clone(), value.clone());
+            }
+        }
+        payload
+    }
+
     fn cyclonedx_mlbom_model_receipt_payload(extra: serde_json::Value) -> serde_json::Value {
         let mut payload = json!({
             "schema": "assay.receipt.cyclonedx.mlbom-model-component.v1",
@@ -916,7 +1074,7 @@ mod tests {
         .expect("trust basis");
         let ids: Vec<_> = trust_basis.claims.iter().map(|c| c.id).collect();
         let pos = |id| ids.iter().position(|&x| x == id).expect("claim id");
-        assert_eq!(ids.len(), 9);
+        assert_eq!(ids.len(), 10);
         assert!(
             pos(TrustClaimId::DelegationContextVisible)
                 < pos(TrustClaimId::AuthorizationContextVisible)
@@ -986,6 +1144,11 @@ mod tests {
                     TrustClaimBoundary::SupportedExternalEvalReceiptEventsOnly,
                 ),
                 (
+                    TrustClaimId::ExternalDecisionReceiptBoundaryVisible,
+                    TrustClaimSource::ExternalDecisionReceipt,
+                    TrustClaimBoundary::SupportedExternalDecisionReceiptEventsOnly,
+                ),
+                (
                     TrustClaimId::ExternalInventoryReceiptBoundaryVisible,
                     TrustClaimSource::ExternalInventoryReceipt,
                     TrustClaimBoundary::SupportedExternalInventoryReceiptEventsOnly,
@@ -1005,6 +1168,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 TrustClaimLevel::Verified,
+                TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
                 TrustClaimLevel::Absent,
@@ -1175,6 +1339,150 @@ mod tests {
             .level,
             TrustClaimLevel::Absent
         );
+    }
+
+    #[test]
+    fn trust_basis_detects_supported_external_decision_receipt_boundary() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.receipt.openfeature.evaluation_details.v1",
+            "run_openfeature_receipt",
+            0,
+            openfeature_decision_receipt_payload(json!({})),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalDecisionReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Verified
+        );
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalEvalReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+        assert_eq!(
+            claim(
+                &trust_basis,
+                TrustClaimId::ExternalInventoryReceiptBoundaryVisible
+            )
+            .level,
+            TrustClaimLevel::Absent
+        );
+    }
+
+    #[test]
+    fn trust_basis_rejects_decision_receipt_boundary_when_context_or_metadata_leaks_in() {
+        for (case_name, extra) in [
+            (
+                "run_openfeature_context",
+                json!({ "evaluation_context": { "targeting_key": "user-123" } }),
+            ),
+            (
+                "run_openfeature_metadata",
+                json!({
+                    "decision": {
+                        "flag_key": "checkout.new_flow",
+                        "value_type": "boolean",
+                        "value": true,
+                        "flag_metadata": { "provider": "out-of-scope" }
+                    }
+                }),
+            ),
+            (
+                "run_openfeature_error_message",
+                json!({
+                    "decision": {
+                        "flag_key": "checkout.new_flow",
+                        "value_type": "boolean",
+                        "value": false,
+                        "reason": "ERROR",
+                        "error_code": "FLAG_NOT_FOUND",
+                        "error_message": "provider message is out of scope"
+                    }
+                }),
+            ),
+        ] {
+            let bundle = make_bundle(vec![make_event(
+                "assay.receipt.openfeature.evaluation_details.v1",
+                case_name,
+                0,
+                openfeature_decision_receipt_payload(extra),
+            )]);
+
+            let trust_basis = generate_trust_basis(
+                Cursor::new(bundle),
+                VerifyLimits::default(),
+                TrustBasisOptions::default(),
+            )
+            .expect("trust basis should generate");
+
+            assert_eq!(
+                claim(
+                    &trust_basis,
+                    TrustClaimId::ExternalDecisionReceiptBoundaryVisible
+                )
+                .level,
+                TrustClaimLevel::Absent
+            );
+        }
+    }
+
+    #[test]
+    fn trust_basis_rejects_decision_receipt_boundary_when_value_type_or_value_is_not_boolean() {
+        for (case_name, decision) in [
+            (
+                "run_openfeature_wrong_value_type",
+                json!({
+                    "flag_key": "checkout.new_flow",
+                    "value_type": "string",
+                    "value": true
+                }),
+            ),
+            (
+                "run_openfeature_string_value",
+                json!({
+                    "flag_key": "checkout.new_flow",
+                    "value_type": "boolean",
+                    "value": "on"
+                }),
+            ),
+        ] {
+            let bundle = make_bundle(vec![make_event(
+                "assay.receipt.openfeature.evaluation_details.v1",
+                case_name,
+                0,
+                openfeature_decision_receipt_payload(json!({ "decision": decision })),
+            )]);
+
+            let trust_basis = generate_trust_basis(
+                Cursor::new(bundle),
+                VerifyLimits::default(),
+                TrustBasisOptions::default(),
+            )
+            .expect("trust basis should generate");
+
+            assert_eq!(
+                claim(
+                    &trust_basis,
+                    TrustClaimId::ExternalDecisionReceiptBoundaryVisible
+                )
+                .level,
+                TrustClaimLevel::Absent
+            );
+        }
     }
 
     #[test]

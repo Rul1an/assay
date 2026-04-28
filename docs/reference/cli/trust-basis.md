@@ -108,4 +108,5 @@ Exit codes are:
 
 - [Evidence imports](./evidence.md)
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
+- [Receipt family matrix](../receipt-family-matrix.json)
 - [P34 Trust Basis diff gate plan](../../architecture/PLAN-P34-TRUST-BASIS-DIFF-GATE-2026q2.md)
