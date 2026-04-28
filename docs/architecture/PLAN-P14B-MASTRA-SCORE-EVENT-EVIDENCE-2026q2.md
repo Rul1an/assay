@@ -3,7 +3,8 @@
 - **Date:** 2026-04-15
 - **Owner:** Evidence / Product
 - **Status:** Docs-backed sample implementation merged; one local live
-  `onScoreEvent` captured; capture-backed sample recut active
+  `onScoreEvent` captured; upstream exporter callback docs public;
+  capture-backed sample recut active
 - **Scope (current repo state):** Recut the Mastra lane after maintainer
   feedback on `mastra-ai/mastra#15206`, and carry that recut into a bounded
   sample implementation. This slice still does not freeze a new upstream
@@ -203,6 +204,9 @@ What has changed in our understanding:
   `ObservabilityExporter` + `ScoreEvent` + `ExportedScore`
 - Mastra maintainers also explicitly call `addScoreToTrace(...)` the old path
   and say it will be deprecated soon
+- Mastra's public observability docs now surface the shared
+  `ObservabilityExporter` event callbacks directly in the interface reference,
+  including `onScoreEvent(ScoreEvent)`
 
 Public Mastra references currently expose both the older
 `addScoreToTrace(...)` hook shape and the newer `onScoreEvent(ScoreEvent)`
