@@ -310,7 +310,10 @@ jobs:
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)
         if: runner.os == 'Linux'
-        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
+        # no_passthrough_e2e shells out to a feature-enabled cargo build/run and has
+        # a dedicated step below. Skipping it here avoids duplicating that heavy build
+        # inside the already-large workspace test job on hosted Ubuntu runners.
+        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it -- --skip test_no_passthrough_e2e
 
       # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature)
       - name: Test MCP no-pass-through E2E (E6a.3)
