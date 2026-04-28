@@ -30,7 +30,7 @@ pub fn cmd_keygen(args: KeygenArgs) -> i32 {
 }
 
 fn run_keygen(args: KeygenArgs) -> Result<()> {
-    use pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+    use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, EncodePrivateKey, EncodePublicKey};
 
     // Ensure output directory exists
     if !args.out.exists() {

@@ -110,7 +110,7 @@ pub fn compute_key_id_from_verifying_key(key: &VerifyingKey) -> Result<String> {
 
 /// Convert VerifyingKey to SPKI DER bytes.
 fn key_to_spki_der(key: &VerifyingKey) -> Result<Vec<u8>> {
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let doc = key
         .to_public_key_der()
         .context("failed to encode public key as SPKI DER")?;

@@ -15,7 +15,7 @@ fn test_dsse_valid_signature_real_ed25519() {
     let (envelope, key_id) = create_signed_envelope(&signing_key, content);
 
     // Build trust store with this key
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {
@@ -58,7 +58,7 @@ fn test_dsse_payload_mismatch() {
     let (envelope, key_id) = create_signed_envelope(&signing_key, original_content);
 
     // Build trust store
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let trusted_key = crate::types::TrustedKey {
@@ -177,7 +177,7 @@ fn test_dsse_invalid_signature_rejected() {
     .unwrap();
 
     // Compute key ID
-    use pkcs8::EncodePublicKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     let verifying_key = signing_key.verifying_key();
     let spki_der = verifying_key.to_public_key_der().unwrap();
     let key_id = compute_key_id(spki_der.as_bytes());

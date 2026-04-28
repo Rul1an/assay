@@ -114,7 +114,7 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
         })?;
 
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-        use pkcs8::DecodePublicKey;
+        use ed25519_dalek::pkcs8::DecodePublicKey;
 
         let pubkey_bytes = BASE64
             .decode(&pubkey_b64)

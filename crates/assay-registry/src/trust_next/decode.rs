@@ -5,7 +5,7 @@ use crate::error::{RegistryError, RegistryResult};
 
 /// Decode a Base64-encoded SPKI public key to VerifyingKey.
 pub(in crate::trust) fn decode_verifying_key(b64: &str) -> RegistryResult<VerifyingKey> {
-    use pkcs8::DecodePublicKey;
+    use ed25519_dalek::pkcs8::DecodePublicKey;
 
     let bytes = BASE64.decode(b64).map_err(|e| RegistryError::Config {
         message: format!("invalid base64 public key: {}", e),
