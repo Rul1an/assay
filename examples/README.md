@@ -8,6 +8,15 @@ Ready-to-use examples to get started with Assay.
 Wrap an MCP server with policy enforcement in under 2 minutes.
 See ALLOW/DENY decisions for every tool call.
 
+## Inventory examples
+
+### [CycloneDX ML-BOM Model Component Evidence](./cyclonedx-mlbom-model-component-evidence)
+Import one selected CycloneDX `machine-learning-model` component into a
+verifiable Assay inventory receipt bundle.
+**Focus**: model-component-first seam, bounded model identity and refs only,
+no imported full BOM graph, modelCard body, dataset body, vulnerabilities, or
+compliance truth.
+
 ## Evaluation examples
 
 ### [Phoenix Span Annotation Evidence](./phoenix-span-annotation-evidence)

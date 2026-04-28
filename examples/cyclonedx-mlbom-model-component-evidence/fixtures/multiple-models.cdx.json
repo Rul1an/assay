@@ -1,0 +1,16 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "components": [
+    {
+      "bom-ref": "component-primary-model",
+      "type": "machine-learning-model",
+      "name": "primary-model"
+    },
+    {
+      "bom-ref": "component-secondary-model",
+      "type": "machine-learning-model",
+      "name": "secondary-model"
+    }
+  ]
+}

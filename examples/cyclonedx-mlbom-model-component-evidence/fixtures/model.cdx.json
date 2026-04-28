@@ -1,0 +1,56 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:11111111-2222-3333-4444-555555555555",
+  "version": 1,
+  "components": [
+    {
+      "bom-ref": "pkg:huggingface/example/checkout-risk-model@abc123",
+      "type": "machine-learning-model",
+      "publisher": "Example Inc.",
+      "name": "checkout-risk-model",
+      "version": "1.0.0",
+      "purl": "pkg:huggingface/example/checkout-risk-model@abc123",
+      "description": "Description stays in the source BOM and is not imported into the receipt.",
+      "modelCard": {
+        "bom-ref": "model-card-checkout-risk-model",
+        "modelParameters": {
+          "datasets": [
+            {
+              "ref": "component-checkout-risk-training-data"
+            }
+          ]
+        },
+        "quantitativeAnalysis": {
+          "performanceMetrics": [
+            {
+              "type": "accuracy",
+              "value": "0.91"
+            }
+          ]
+        },
+        "considerations": {
+          "ethicalConsiderations": [
+            {
+              "name": "Example consideration retained only in the source BOM."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bom-ref": "component-checkout-risk-training-data",
+      "type": "data",
+      "publisher": "Example Inc.",
+      "name": "Checkout Risk Training Data",
+      "version": "2026-04-28",
+      "data": [
+        {
+          "type": "dataset",
+          "classification": "internal"
+        }
+      ]
+    }
+  ]
+}
