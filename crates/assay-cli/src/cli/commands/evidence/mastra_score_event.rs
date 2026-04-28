@@ -402,7 +402,7 @@ mod tests {
         fs::write(
             &input,
             concat!(
-                r#"{"schema":"mastra.score-event.export.v1","framework":"mastra","surface":"observability.score_event","timestamp":"2026-04-15T18:53:12.297Z","scorer_id":"p14-live-capture-scorer","score":0.92,"target_ref":"span:7c4180655970aca2","trace_id_ref":"59896b9a054b88cb48748463a0f2ab59","span_id_ref":"7c4180655970aca2","score_source":"live"}"#,
+                r#"{"schema":"mastra.score-event.export.v1","framework":"mastra","surface":"observability.score_event","timestamp":"2026-04-15T18:53:12.297Z","scorer_id":"p14-live-capture-scorer","score":0.92,"target_ref":"span:7c4180655970aca2","trace_id_ref":"59896b9a054b88cb48748463a0f2ab59","span_id_ref":"7c4180655970aca2","score_trace_id_ref":"score-trace:7c4180655970aca2","score_source":"live"}"#,
                 "\n",
                 r#"{"schema":"mastra.score-event.export.v1","framework":"mastra","surface":"observability.score_event","timestamp":"2026-04-15T18:58:12.297Z","scorer_name":"P14 Live Capture Scorer","score":0.18,"target_ref":"span:c4b7f4a58f2d90e1","trace_id_ref":"9f5bbab9073de1205f4a1de4925ad2b","span_id_ref":"c4b7f4a58f2d90e1","metadata_ref":"metadata:p14-live-capture"}"#,
                 "\n"
@@ -434,6 +434,10 @@ mod tests {
         assert_eq!(
             events[0].payload["score_event"]["timestamp"],
             "2026-04-15T18:53:12.297Z"
+        );
+        assert_eq!(
+            events[0].payload["score_event"]["score_trace_id_ref"],
+            "score-trace:7c4180655970aca2"
         );
         assert_eq!(
             events[1].payload["score_event"]["scorer_name"],
