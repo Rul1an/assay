@@ -6,7 +6,8 @@ use crate::trust_basis::{TrustBasis, TrustBasisClaim};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-/// Trust Card schema: `5` adds `external_decision_receipt_boundary_visible`.
+/// Trust Card schema: `5` is the ten-claim surface after the eval, inventory,
+/// and decision receipt boundary claims became visible.
 pub const TRUST_CARD_SCHEMA_VERSION: u32 = 5;
 
 /// Markdown table cell when T1a leaves `note` empty (`None` or blank). Do not vary by test/renderer.

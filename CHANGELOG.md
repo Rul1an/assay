@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-04-29
+
+This minor release turns the v3.7.0 three-family receipt surface into a more
+external-ready contract line. The receipt families and Trust Basis claims stay
+the same; the new work is machine-readable schema coverage and release-truth
+alignment for consumers that need to produce or inspect bounded receipts.
+
+### Receipt Contracts
+
+- **Receipt schema registry**: `docs/reference/receipt-schemas/` now contains
+  JSON Schema contracts for the supported Promptfoo, OpenFeature, CycloneDX
+  ML-BOM, and Mastra receipt payloads plus their supported importer input
+  artifact shapes.
+- **Receipt family matrix links schemas**:
+  `docs/reference/receipt-family-matrix.json` now points each claim-visible
+  family at its receipt and input schemas. Mastra remains documented as
+  importer-only: schema-covered, bundleable, and Trust Basis-readable, but not
+  part of the three claim-visible public families.
+- **Schema validation tests**: importer-generated receipt payloads and supported
+  input artifacts are validated against the registry, keeping prose, fixtures,
+  and emitted payloads in lockstep.
+
+### Release Truth
+
+- The three-family note is part of the v3.8.0 release line instead of living
+  only as post-v3.7.0 main-branch docs.
+- Trust Card schema v5 wording is tightened around the 10-claim surface. There
+  are no new Trust Basis claims in this release.
+
 ## [3.7.0] - 2026-04-29
 
 This minor release makes the first three-family evidence-portability surface

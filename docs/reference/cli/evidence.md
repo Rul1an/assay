@@ -274,6 +274,7 @@ To compare the resulting Trust Basis artifact against another run, use
 
 - [Evidence Contract v1](../../spec/EVIDENCE-CONTRACT-v1.md)
 - [Receipt family matrix](../receipt-family-matrix.json)
+- [Receipt schema registry](../receipt-schemas/README.md)
 - [Trust Basis CLI](./trust-basis.md)
 - [CycloneDX ML-BOM Model Component evidence example](../../../examples/cyclonedx-mlbom-model-component-evidence/README.md)
 - [Mastra ScoreEvent evidence example](../../../examples/mastra-score-event-evidence/README.md)

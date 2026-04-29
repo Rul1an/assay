@@ -1,12 +1,14 @@
 {
   "schema": "assay.receipt-family-matrix.v1",
-  "updated_at": "2026-04-28",
+  "updated_at": "2026-04-29",
   "families": [
     {
       "family": "external_eval_receipts",
       "first_surface": "promptfoo_assertion_component_result",
       "event_type": "assay.receipt.promptfoo.assertion_component.v1",
       "receipt_schema": "assay.receipt.promptfoo.assertion-component.v1",
+      "receipt_schema_path": "receipt-schemas/receipts/promptfoo.assertion-component.v1.schema.json",
+      "input_schema_path": "receipt-schemas/inputs/promptfoo-cli-jsonl-component-result.v1.schema.json",
       "source_system": "promptfoo",
       "source_surface": "cli-jsonl.gradingResult.componentResults",
       "trust_basis_claim": "external_eval_receipt_boundary_visible",
@@ -20,7 +22,7 @@
         "source_artifact_digest",
         "reducer_version",
         "imported_at",
-        "assertion.assertion_type",
+        "assertion_type",
         "result.pass",
         "result.score",
         "result.reason"
@@ -50,6 +52,8 @@
       "first_surface": "openfeature_evaluation_details_boolean",
       "event_type": "assay.receipt.openfeature.evaluation_details.v1",
       "receipt_schema": "assay.receipt.openfeature.evaluation_details.v1",
+      "receipt_schema_path": "receipt-schemas/receipts/openfeature.evaluation-details.v1.schema.json",
+      "input_schema_path": "receipt-schemas/inputs/openfeature-evaluation-details-export.v1.schema.json",
       "source_system": "openfeature",
       "source_surface": "evaluation_details.boolean",
       "trust_basis_claim": "external_decision_receipt_boundary_visible",
@@ -95,6 +99,8 @@
       "first_surface": "cyclonedx_mlbom_model_component",
       "event_type": "assay.receipt.cyclonedx.mlbom_model_component.v1",
       "receipt_schema": "assay.receipt.cyclonedx.mlbom-model-component.v1",
+      "receipt_schema_path": "receipt-schemas/receipts/cyclonedx.mlbom-model-component.v1.schema.json",
+      "input_schema_path": "receipt-schemas/inputs/cyclonedx-mlbom-model-component-input.v1.schema.json",
       "source_system": "cyclonedx",
       "source_surface": "bom.components[type=machine-learning-model]",
       "trust_basis_claim": "external_inventory_receipt_boundary_visible",
@@ -137,6 +143,64 @@
         "the CycloneDX artifact is Assay truth"
       ],
       "plan": "../architecture/PLAN-P45-INVENTORY-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md"
+    }
+  ],
+  "importer_only_receipts": [
+    {
+      "family": "score_receipts",
+      "first_surface": "mastra_score_event",
+      "event_type": "assay.receipt.mastra.score_event.v1",
+      "receipt_schema": "assay.receipt.mastra.score_event.v1",
+      "receipt_schema_path": "receipt-schemas/receipts/mastra.score-event.v1.schema.json",
+      "input_schema_path": "receipt-schemas/inputs/mastra-score-event-export.v1.schema.json",
+      "source_system": "mastra",
+      "source_surface": "observability.score_event",
+      "trust_basis_claim": null,
+      "included_fields": [
+        "schema",
+        "source_system",
+        "source_surface",
+        "source_artifact_ref",
+        "source_artifact_digest",
+        "reducer_version",
+        "imported_at",
+        "score_event.score",
+        "score_event.target_ref",
+        "score_event.timestamp",
+        "score_event.score_id_ref",
+        "score_event.scorer_id",
+        "score_event.scorer_name",
+        "score_event.scorer_version",
+        "score_event.score_source",
+        "score_event.trace_id_ref",
+        "score_event.span_id_ref",
+        "score_event.score_trace_id_ref",
+        "score_event.target_entity_type",
+        "score_event.metadata_ref",
+        "score_event.reason"
+      ],
+      "excluded_fields": [
+        "raw_metadata",
+        "raw_correlationContext",
+        "trace_tree",
+        "exportedSpan",
+        "logs",
+        "metrics",
+        "feedback",
+        "prompts",
+        "request_response_bodies",
+        "scorer_config",
+        "dashboard_state"
+      ],
+      "does_not_claim": [
+        "a Trust Basis score receipt claim is present",
+        "the score is correct",
+        "the scorer is reliable",
+        "the Mastra runtime behaved correctly",
+        "the trace or span anchor is complete",
+        "the score should pass or fail a gate"
+      ],
+      "plan": "../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md"
     }
   ]
 }

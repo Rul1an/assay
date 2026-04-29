@@ -2,13 +2,15 @@
 
 > **Status:** technical note
 > **Last updated:** 2026-04-29
-> **Scope:** explains the released Assay v3.7.0 receipt-family surface; adds no new schema, claim, or Harness semantics
+> **Scope:** explains the Assay v3.8.0 receipt-family and schema surface; adds no new Trust Basis claim or Harness semantics
 
 Modern AI governance stacks do not only need more tests, traces, or dashboards.
 They need small, portable evidence units at the existing seams where important
 things already happen.
 
-Assay v3.7.0 makes the first three of those seams claim-visible:
+Assay v3.7.0 made the first three of those seams claim-visible, and v3.8.0
+adds machine-readable schema contracts for the supported receipt/import
+surfaces:
 
 - Promptfoo assertion component results become eval outcome receipts.
 - OpenFeature boolean `EvaluationDetails` become runtime decision receipts.
@@ -118,6 +120,7 @@ humans review the result, but they are not the source of truth.
 The machine-readable family matrix is:
 
 - [Receipt family matrix](../reference/receipt-family-matrix.json)
+- [Receipt schema registry](../reference/receipt-schemas/README.md)
 
 ## Harness Boundary
 
