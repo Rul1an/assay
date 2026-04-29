@@ -4,6 +4,63 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-04-29
+
+This minor release makes the first three-family evidence-portability surface
+release-ready. Assay can now reduce selected external eval outcomes, runtime
+decision details, and model inventory/provenance surfaces into bounded receipts,
+compile supported receipt families into Trust Basis, and keep the same
+claim-level boundary discipline as the earlier Promptfoo lane.
+
+### Trust Compiler
+
+- **Three receipt families are claim-visible**: supported eval, decision, and
+  inventory receipt bundles can now surface bounded Trust Basis boundary claims:
+  `external_eval_receipt_boundary_visible`,
+  `external_decision_receipt_boundary_visible`, and
+  `external_inventory_receipt_boundary_visible`. These claims mean the supported
+  receipt boundary and provenance are visible; they do not mean upstream eval
+  correctness, flag-decision correctness, model safety, dataset approval, BOM
+  completeness, license posture, vulnerability posture, or compliance truth.
+- **OpenFeature decision receipts**: `assay evidence import openfeature-details`
+  imports bounded boolean OpenFeature `EvaluationDetails` rows into verifiable
+  decision receipt bundles. The v1 lane keeps provider config, evaluation
+  context, targeting keys, rules, user identifiers, flag metadata, provider
+  metadata, `error_message`, and non-boolean values out of the canonical
+  receipt path.
+- **CycloneDX ML-BOM model-component receipts**:
+  `assay evidence import cyclonedx-mlbom-model` imports one selected
+  `machine-learning-model` component as a bounded inventory receipt. The v1
+  lane keeps full BOM graphs, model-card bodies, dataset bodies, pedigree,
+  vulnerabilities, licenses, metrics, safety posture, and compliance semantics
+  out of the receipt.
+- **Mastra ScoreEvent receipts**: `assay evidence import mastra-score-event`
+  imports reduced, reviewer-safe Mastra ScoreEvent JSONL artifacts into score
+  receipt bundles. This lane does not yet add a Trust Basis score claim; it is
+  intentionally separate from the three-family public claim surface.
+- **Trust Card schema v5**: Trust Card output now reflects the expanded
+  claim table. Consumers must continue to key by stable `claim.id`, not row
+  position or row count.
+- **Receipt family matrix**: `docs/reference/receipt-family-matrix.json` records
+  each supported receipt family, event type, Trust Basis claim, included fields,
+  excluded fields, and explicit non-claims.
+
+### Examples and Docs
+
+- Added OpenFeature, CycloneDX ML-BOM, and Mastra ScoreEvent evidence examples
+  plus CLI reference docs for the new importers.
+- Updated the evidence contract registry with the new experimental receipt event
+  types.
+
+### Notes for Upgraders
+
+- This is a release of bounded receipt compiler lanes, not official integration
+  or partnership support for Promptfoo, OpenFeature, CycloneDX, or Mastra.
+- Trust Basis and Trust Card consumers should treat the new claim rows as
+  additive. Select claims by `claim.id` and tolerate unknown future claims.
+- Assay Harness `v0.3.0` is the intended companion release for running the
+  Promptfoo, OpenFeature, and CycloneDX recipes over this claim surface.
+
 ## [3.6.0] - 2026-04-27
 
 This minor release makes the first external-eval evidence portability lane
