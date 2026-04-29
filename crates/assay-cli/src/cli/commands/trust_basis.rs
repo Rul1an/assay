@@ -1,5 +1,6 @@
 use crate::cli::args::{
-    OutputFormat, TrustBasisArgs, TrustBasisDiffArgs, TrustBasisGenerateArgs, TrustBasisSub,
+    OutputFormat, TrustBasisArgs, TrustBasisAssertArgs, TrustBasisDiffArgs, TrustBasisGenerateArgs,
+    TrustBasisSub,
 };
 use crate::exit_codes::{EXIT_SUCCESS, EXIT_TEST_FAILURE};
 use anyhow::{bail, Context, Result};
@@ -11,13 +12,18 @@ use assay_evidence::{
     TrustBasisClaimPresenceDiff, TrustBasisDiffReport, TrustBasisOptions, TrustClaimBoundary,
     TrustClaimId, TrustClaimLevel, TrustClaimSource, VerifyLimits,
 };
+use serde::Serialize;
+use serde_json::Value;
 use std::fs::File;
 use std::io::Write;
+
+const TRUST_BASIS_ASSERT_SCHEMA: &str = "assay.trust-basis.assert.v1";
 
 pub fn run(args: TrustBasisArgs) -> Result<i32> {
     match args.cmd {
         TrustBasisSub::Generate(args) => cmd_generate(args),
         TrustBasisSub::Diff(args) => cmd_diff(args),
+        TrustBasisSub::Assert(args) => cmd_assert(args),
     }
 }
 
@@ -84,6 +90,28 @@ fn cmd_diff(args: TrustBasisDiffArgs) -> Result<i32> {
     Ok(EXIT_SUCCESS)
 }
 
+fn cmd_assert(args: TrustBasisAssertArgs) -> Result<i32> {
+    let trust_basis = read_trust_basis(&args.input)?;
+    ensure_unique_claim_ids("input", &trust_basis)?;
+    let requirements = parse_requirements(&args.requirements)?;
+    let report = assert_trust_basis(&trust_basis, requirements);
+
+    match args.format {
+        OutputFormat::Text => {
+            write_assert_text(&report).context("failed to write assert output")?
+        }
+        OutputFormat::Json => {
+            write_assert_json(&report).context("failed to write assert output")?
+        }
+    }
+
+    if report.summary.failed_requirements > 0 {
+        return Ok(EXIT_TEST_FAILURE);
+    }
+
+    Ok(EXIT_SUCCESS)
+}
+
 fn read_trust_basis(path: &std::path::Path) -> Result<TrustBasis> {
     let file = File::open(path)
         .with_context(|| format!("failed to open trust basis {}", path.display()))?;
@@ -103,6 +131,166 @@ fn ensure_unique_claim_ids(label: &str, trust_basis: &TrustBasis) -> Result<()> 
         .collect::<Vec<_>>()
         .join(", ");
     bail!("{label} Trust Basis contains duplicate claim id(s): {duplicate_labels}");
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrustBasisRequirement {
+    claim_id: TrustClaimId,
+    expected_level: TrustClaimLevel,
+}
+
+#[derive(Debug, Serialize)]
+struct TrustBasisAssertReport {
+    schema: &'static str,
+    claim_identity: &'static str,
+    summary: TrustBasisAssertSummary,
+    requirements: Vec<TrustBasisAssertRequirementResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrustBasisAssertSummary {
+    total_requirements: usize,
+    passed_requirements: usize,
+    failed_requirements: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct TrustBasisAssertRequirementResult {
+    claim_id: TrustClaimId,
+    expected_level: TrustClaimLevel,
+    actual_level: Option<TrustClaimLevel>,
+    status: TrustBasisAssertStatus,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TrustBasisAssertStatus {
+    Passed,
+    Failed,
+}
+
+fn parse_requirements(raw_requirements: &[String]) -> Result<Vec<TrustBasisRequirement>> {
+    raw_requirements
+        .iter()
+        .map(|raw| parse_requirement(raw))
+        .collect()
+}
+
+fn parse_requirement(raw: &str) -> Result<TrustBasisRequirement> {
+    let (claim_id_raw, level_raw) = raw.split_once('=').ok_or_else(|| {
+        anyhow::anyhow!("invalid trust basis requirement {raw:?}: expected <claim-id>=<level>")
+    })?;
+    let claim_id = parse_claim_id(claim_id_raw.trim())?;
+    let expected_level = parse_claim_level(level_raw.trim())?;
+    Ok(TrustBasisRequirement {
+        claim_id,
+        expected_level,
+    })
+}
+
+fn parse_claim_id(raw: &str) -> Result<TrustClaimId> {
+    if raw.is_empty() {
+        bail!("invalid trust basis requirement: claim id is empty");
+    }
+    serde_json::from_value(Value::String(raw.to_string()))
+        .with_context(|| format!("unknown Trust Basis claim id {raw:?}"))
+}
+
+fn parse_claim_level(raw: &str) -> Result<TrustClaimLevel> {
+    if raw.is_empty() {
+        bail!("invalid trust basis requirement: claim level is empty");
+    }
+    serde_json::from_value(Value::String(raw.to_string()))
+        .with_context(|| format!("unknown Trust Basis claim level {raw:?}"))
+}
+
+fn assert_trust_basis(
+    trust_basis: &TrustBasis,
+    requirements: Vec<TrustBasisRequirement>,
+) -> TrustBasisAssertReport {
+    let results: Vec<TrustBasisAssertRequirementResult> = requirements
+        .into_iter()
+        .map(|requirement| {
+            let actual_level = trust_basis
+                .claims
+                .iter()
+                .find(|claim| claim.id == requirement.claim_id)
+                .map(|claim| claim.level);
+            let status = if actual_level == Some(requirement.expected_level) {
+                TrustBasisAssertStatus::Passed
+            } else {
+                TrustBasisAssertStatus::Failed
+            };
+            TrustBasisAssertRequirementResult {
+                claim_id: requirement.claim_id,
+                expected_level: requirement.expected_level,
+                actual_level,
+                status,
+            }
+        })
+        .collect();
+
+    let passed_requirements = results
+        .iter()
+        .filter(|result| matches!(result.status, TrustBasisAssertStatus::Passed))
+        .count();
+    let failed_requirements = results.len().saturating_sub(passed_requirements);
+
+    TrustBasisAssertReport {
+        schema: TRUST_BASIS_ASSERT_SCHEMA,
+        claim_identity: "claim.id",
+        summary: TrustBasisAssertSummary {
+            total_requirements: results.len(),
+            passed_requirements,
+            failed_requirements,
+        },
+        requirements: results,
+    }
+}
+
+fn write_assert_json(report: &TrustBasisAssertReport) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    serde_json::to_writer_pretty(&mut stdout, report)?;
+    stdout.write_all(b"\n")?;
+    Ok(())
+}
+
+fn write_assert_text(report: &TrustBasisAssertReport) -> Result<()> {
+    let mut stdout = std::io::stdout();
+    if report.summary.failed_requirements == 0 {
+        writeln!(
+            stdout,
+            "Trust Basis assertions passed: {}/{} requirement(s)",
+            report.summary.passed_requirements, report.summary.total_requirements
+        )?;
+    } else {
+        writeln!(
+            stdout,
+            "Trust Basis assertions failed: {}/{} requirement(s) failed",
+            report.summary.failed_requirements, report.summary.total_requirements
+        )?;
+    }
+
+    for result in &report.requirements {
+        let marker = match result.status {
+            TrustBasisAssertStatus::Passed => "PASS",
+            TrustBasisAssertStatus::Failed => "FAIL",
+        };
+        writeln!(
+            stdout,
+            "- {marker} {}: expected {}, actual {}",
+            id_label(result.claim_id),
+            level_label(result.expected_level),
+            assert_actual_level_label(result.actual_level)
+        )?;
+    }
+    Ok(())
+}
+
+fn assert_actual_level_label(level: Option<TrustClaimLevel>) -> String {
+    level
+        .map(level_label)
+        .unwrap_or_else(|| "missing".to_string())
 }
 
 fn write_diff_json(report: &TrustBasisDiffReport) -> Result<()> {

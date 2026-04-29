@@ -104,6 +104,64 @@ Exit codes are:
 
 ---
 
+## Assert
+
+Assert required claim levels in one canonical Trust Basis artifact:
+
+```bash
+assay trust-basis assert \
+  --input trust-basis.json \
+  --require external_eval_receipt_boundary_visible=verified
+```
+
+`assert` is intentionally smaller than `diff`. It reads one
+`trust-basis.json` artifact, keys requirements only by stable `claim.id`, and
+checks that each requested claim has the expected level.
+
+Multiple requirements are allowed:
+
+```bash
+assay trust-basis assert \
+  --input trust-basis.json \
+  --require bundle_verified=verified \
+  --require external_decision_receipt_boundary_visible=verified
+```
+
+Use JSON output for CI consumers:
+
+```bash
+assay trust-basis assert \
+  --input trust-basis.json \
+  --require external_inventory_receipt_boundary_visible=verified \
+  --format json
+```
+
+JSON output uses the stable machine-readable schema
+`assay.trust-basis.assert.v1` and includes:
+
+- `summary`
+- `requirements`
+- `claim_id`
+- `expected_level`
+- `actual_level`
+- `status`
+
+Missing claims are policy mismatches, not successes. Unknown claim IDs, unknown
+levels, malformed requirements, duplicate claim IDs in the input artifact, and
+parse errors are input/config failures.
+
+Exit codes are:
+
+- `0` when all requirements are satisfied.
+- `1` when at least one requirement does not match.
+- Other non-zero codes for input, parse, or validation failures.
+
+`assert` does not compare baseline and candidate artifacts, replace
+`trust-basis diff`, or add Promptfoo/OpenFeature/CycloneDX-specific policy. It
+is a generic claim-id gate over one Trust Basis artifact.
+
+---
+
 ## See Also
 
 - [Evidence imports](./evidence.md)

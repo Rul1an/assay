@@ -180,9 +180,12 @@ nav:
     - assay doctor: reference/cli/doctor.md
     - assay watch: reference/cli/watch.md
     - assay sandbox: reference/cli/sandbox.md
+    - assay evidence: reference/cli/evidence.md
+    - assay bundle: reference/cli/bundle.md
     - assay import: reference/cli/import.md
     - assay migrate: reference/cli/migrate.md
     - assay replay: reference/cli/replay.md
+    - assay trust-basis: reference/cli/trust-basis.md
     - assay mcp-server: reference/cli/mcp-server.md
 
   - Metrics Reference:

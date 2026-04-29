@@ -74,6 +74,20 @@ fn write_duplicate_claim_trust_basis_json(path: &std::path::Path) {
     fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }
 
+fn write_minimal_trust_basis_json(path: &std::path::Path) {
+    let value = json!({
+        "claims": [
+            {
+                "id": "bundle_verified",
+                "level": "verified",
+                "source": "bundle_verification",
+                "boundary": "bundle-wide"
+            }
+        ]
+    });
+    fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+}
+
 #[test]
 fn trust_basis_generate_stdout_emits_all_frozen_claims() {
     let dir = tempdir().unwrap();
@@ -290,5 +304,129 @@ fn trust_basis_diff_rejects_duplicate_claim_identity() {
         .code(2)
         .stderr(predicate::str::contains(
             "baseline Trust Basis contains duplicate claim id(s): bundle_verified",
+        ));
+}
+
+#[test]
+fn trust_basis_assert_passes_required_claim_level() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_trust_basis_json(&input, "verified");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("external_eval_receipt_boundary_visible=verified")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Trust Basis assertions passed"))
+        .stdout(predicate::str::contains(
+            "external_eval_receipt_boundary_visible: expected verified, actual verified",
+        ));
+}
+
+#[test]
+fn trust_basis_assert_exits_one_on_mismatch() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_trust_basis_json(&input, "absent");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("external_eval_receipt_boundary_visible=verified")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Trust Basis assertions failed"))
+        .stdout(predicate::str::contains(
+            "external_eval_receipt_boundary_visible: expected verified, actual absent",
+        ));
+}
+
+#[test]
+fn trust_basis_assert_json_reports_missing_claim_as_failed_requirement() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_minimal_trust_basis_json(&input);
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("external_eval_receipt_boundary_visible=verified")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["schema"], "assay.trust-basis.assert.v1");
+    assert_eq!(stdout["claim_identity"], "claim.id");
+    assert_eq!(stdout["summary"]["total_requirements"], 1);
+    assert_eq!(stdout["summary"]["passed_requirements"], 0);
+    assert_eq!(stdout["summary"]["failed_requirements"], 1);
+    assert_eq!(
+        stdout["requirements"][0]["claim_id"],
+        "external_eval_receipt_boundary_visible"
+    );
+    assert_eq!(stdout["requirements"][0]["expected_level"], "verified");
+    assert_eq!(
+        stdout["requirements"][0]["actual_level"],
+        serde_json::Value::Null
+    );
+    assert_eq!(stdout["requirements"][0]["status"], "failed");
+}
+
+#[test]
+fn trust_basis_assert_rejects_unknown_claim_id_as_input_error() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_trust_basis_json(&input, "verified");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("not_a_claim=verified")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "unknown Trust Basis claim id \"not_a_claim\"",
+        ));
+}
+
+#[test]
+fn trust_basis_assert_rejects_duplicate_claim_identity() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_duplicate_claim_trust_basis_json(&input);
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("bundle_verified=verified")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "input Trust Basis contains duplicate claim id(s): bundle_verified",
         ));
 }
