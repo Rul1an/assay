@@ -1,4 +1,7 @@
-use assay_core::mcp::decision::{Decision, NullDecisionEmitter};
+use assay_core::mcp::decision::{
+    Decision, NullDecisionEmitter, POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY,
+    POLICY_SNAPSHOT_DIGEST_ALG_SHA256, POLICY_SNAPSHOT_SCHEMA_V1,
+};
 use assay_core::mcp::jsonrpc::JsonRpcRequest;
 use assay_core::mcp::policy::{McpPolicy, PolicyDecision, PolicyState, TypedPolicyDecision};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
@@ -126,7 +129,30 @@ fn tool_taxonomy_policy_match_handler_decision_event_records_classes() {
                 Some(TypedPolicyDecision::Deny)
             );
             assert!(decision_event.data.policy_version.is_some());
-            assert!(decision_event.data.policy_digest.is_some());
+            let policy_digest = decision_event
+                .data
+                .policy_digest
+                .as_deref()
+                .expect("policy digest should be visible");
+            assert_eq!(
+                decision_event.data.policy_snapshot_digest.as_deref(),
+                Some(policy_digest)
+            );
+            assert_eq!(
+                decision_event.data.policy_snapshot_digest_alg.as_deref(),
+                Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256)
+            );
+            assert_eq!(
+                decision_event
+                    .data
+                    .policy_snapshot_canonicalization
+                    .as_deref(),
+                Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY)
+            );
+            assert_eq!(
+                decision_event.data.policy_snapshot_schema.as_deref(),
+                Some(POLICY_SNAPSHOT_SCHEMA_V1)
+            );
         }
         other => panic!("expected deny result, got {:?}", other),
     }

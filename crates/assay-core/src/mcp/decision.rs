@@ -19,6 +19,8 @@ pub use self::decision_next::emitters::{
 pub use self::decision_next::event_types::{
     reason_codes, Decision, DecisionData, DecisionEvent, FulfillmentDecisionPath,
     ObligationOutcome, ObligationOutcomeStatus, PolicyDecisionEventContext,
+    POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY, POLICY_SNAPSHOT_DIGEST_ALG_SHA256,
+    POLICY_SNAPSHOT_SCHEMA_V1,
 };
 pub use self::decision_next::guard::DecisionEmitterGuard;
 pub(crate) use self::decision_next::normalization::refresh_contract_projections;
@@ -308,6 +310,64 @@ mod tests {
 
         assert!(!data.contains_key("delegated_from"));
         assert!(!data.contains_key("delegation_depth"));
+    }
+
+    #[test]
+    fn test_decision_event_omits_policy_snapshot_fields_when_digest_absent() {
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_no_policy_snapshot".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW);
+
+        let value = serde_json::to_value(event).expect("decision event should serialize");
+        let data = value
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .expect("decision event data should be an object");
+
+        assert!(!data.contains_key("policy_snapshot_digest"));
+        assert!(!data.contains_key("policy_snapshot_digest_alg"));
+        assert!(!data.contains_key("policy_snapshot_canonicalization"));
+        assert!(!data.contains_key("policy_snapshot_schema"));
+    }
+
+    #[test]
+    fn test_with_policy_context_projects_policy_snapshot_digest() {
+        let context = PolicyDecisionEventContext {
+            policy_digest: Some("sha256:policy123".to_string()),
+            ..PolicyDecisionEventContext::default()
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_policy_snapshot".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(context);
+
+        assert_eq!(
+            event.data.policy_digest.as_deref(),
+            Some("sha256:policy123")
+        );
+        assert_eq!(
+            event.data.policy_snapshot_digest.as_deref(),
+            Some("sha256:policy123")
+        );
+        assert_eq!(
+            event.data.policy_snapshot_digest_alg.as_deref(),
+            Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256)
+        );
+        assert_eq!(
+            event.data.policy_snapshot_canonicalization.as_deref(),
+            Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY)
+        );
+        assert_eq!(
+            event.data.policy_snapshot_schema.as_deref(),
+            Some(POLICY_SNAPSHOT_SCHEMA_V1)
+        );
     }
 
     #[test]

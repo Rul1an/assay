@@ -91,10 +91,22 @@ Records authorization decisions (HITL-ready, protocol-based).
   "decision": "allow|deny|requires_approval",
   "reason_code": "E_POLICY_DENY",
   "args_schema_hash": "sha256:...",
+  "policy_snapshot_digest": "sha256:...",
+  "policy_snapshot_digest_alg": "sha256",
+  "policy_snapshot_canonicalization": "jcs:mcp_policy",
+  "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1",
   "delegated_from": "agent:planner",
   "delegation_depth": 1
 }
 ```
+
+`policy_snapshot_digest`, `policy_snapshot_digest_alg`,
+`policy_snapshot_canonicalization`, and `policy_snapshot_schema` are additive
+optional P56a fields. They make the canonical MCP policy snapshot digest
+visible when supported runtime decision paths already have a policy digest.
+They do not imply that the policy is correct, sufficient, safe, approved, or
+complete. Existing `policy_digest` remains a compatibility field;
+`policy_snapshot_digest` is the explicit reviewer surface.
 
 `delegated_from` and `delegation_depth` are additive optional fields. They are
 surfaced only when a supported decision flow carries explicit

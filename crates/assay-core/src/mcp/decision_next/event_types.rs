@@ -12,6 +12,13 @@ use crate::mcp::policy::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Policy snapshot digest algorithm used by supported decision events.
+pub const POLICY_SNAPSHOT_DIGEST_ALG_SHA256: &str = "sha256";
+/// Canonicalization applied before computing `policy_snapshot_digest`.
+pub const POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY: &str = "jcs:mcp_policy";
+/// Bounded schema tag for the supported MCP policy snapshot projection.
+pub const POLICY_SNAPSHOT_SCHEMA_V1: &str = "assay.mcp.policy.snapshot.v1";
+
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
     // Policy decisions (P_*)
@@ -101,6 +108,10 @@ pub struct PolicyDecisionEventContext {
     pub typed_decision: Option<TypedPolicyDecision>,
     pub policy_version: Option<String>,
     pub policy_digest: Option<String>,
+    pub policy_snapshot_digest: Option<String>,
+    pub policy_snapshot_digest_alg: Option<String>,
+    pub policy_snapshot_canonicalization: Option<String>,
+    pub policy_snapshot_schema: Option<String>,
     pub obligations: Vec<PolicyObligation>,
     pub obligation_outcomes: Vec<ObligationOutcome>,
     pub approval_state: Option<String>,
@@ -179,6 +190,18 @@ pub struct DecisionData {
     /// Policy bundle digest used for evaluation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_digest: Option<String>,
+    /// P56a: digest of the canonical policy snapshot used for this evaluation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_digest: Option<String>,
+    /// P56a: digest algorithm for `policy_snapshot_digest`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_digest_alg: Option<String>,
+    /// P56a: canonicalization used before digesting the policy snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_canonicalization: Option<String>,
+    /// P56a: bounded schema tag for the snapshot surface being digested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_schema: Option<String>,
     /// Obligations attached to an allow/deny decision
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obligations: Vec<PolicyObligation>,
@@ -419,4 +442,29 @@ pub struct DecisionData {
     /// Store latency in milliseconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store_latency_ms: Option<u64>,
+}
+
+impl DecisionData {
+    pub(crate) fn apply_policy_snapshot_projection(
+        &mut self,
+        digest: Option<String>,
+        digest_alg: Option<String>,
+        canonicalization: Option<String>,
+        schema: Option<String>,
+    ) {
+        self.policy_snapshot_digest = digest.or_else(|| self.policy_digest.clone());
+
+        if self.policy_snapshot_digest.is_some() {
+            self.policy_snapshot_digest_alg =
+                digest_alg.or_else(|| Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256.to_string()));
+            self.policy_snapshot_canonicalization = canonicalization
+                .or_else(|| Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY.to_string()));
+            self.policy_snapshot_schema =
+                schema.or_else(|| Some(POLICY_SNAPSHOT_SCHEMA_V1.to_string()));
+        } else {
+            self.policy_snapshot_digest_alg = None;
+            self.policy_snapshot_canonicalization = None;
+            self.policy_snapshot_schema = None;
+        }
+    }
 }

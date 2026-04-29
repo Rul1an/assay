@@ -5,6 +5,8 @@ use assay_core::mcp::decision::{
     ObligationOutcomeStatus, OutcomeCompatState, ReplayClassificationSource,
     DECISION_BASIS_VERSION_V1, DECISION_CONSUMER_CONTRACT_VERSION_V1,
     DECISION_CONTEXT_CONTRACT_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
+    POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY, POLICY_SNAPSHOT_DIGEST_ALG_SHA256,
+    POLICY_SNAPSHOT_SCHEMA_V1,
 };
 use assay_core::mcp::policy::{McpPolicy, PolicyState, ToolPolicy, TypedPolicyDecision};
 use assay_core::mcp::tool_call_handler::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
@@ -286,7 +288,27 @@ fn test_event_contains_required_fields() {
     assert!(!event.data.tool_call_id.is_empty());
     assert!(!event.data.reason_code.is_empty());
     assert!(event.data.policy_version.is_some());
-    assert!(event.data.policy_digest.is_some());
+    let policy_digest = event
+        .data
+        .policy_digest
+        .as_deref()
+        .expect("policy digest should be visible");
+    assert_eq!(
+        event.data.policy_snapshot_digest.as_deref(),
+        Some(policy_digest)
+    );
+    assert_eq!(
+        event.data.policy_snapshot_digest_alg.as_deref(),
+        Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256)
+    );
+    assert_eq!(
+        event.data.policy_snapshot_canonicalization.as_deref(),
+        Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY)
+    );
+    assert_eq!(
+        event.data.policy_snapshot_schema.as_deref(),
+        Some(POLICY_SNAPSHOT_SCHEMA_V1)
+    );
     assert_eq!(
         event.data.typed_decision,
         Some(TypedPolicyDecision::AllowWithObligations)

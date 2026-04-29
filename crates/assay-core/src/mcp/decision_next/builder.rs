@@ -22,6 +22,10 @@ impl DecisionEvent {
                 typed_decision: None,
                 policy_version: None,
                 policy_digest: None,
+                policy_snapshot_digest: None,
+                policy_snapshot_digest_alg: None,
+                policy_snapshot_canonicalization: None,
+                policy_snapshot_schema: None,
                 obligations: Vec::new(),
                 obligation_outcomes: Vec::new(),
                 approval_state: None,
@@ -194,6 +198,10 @@ impl DecisionEvent {
             typed_decision,
             policy_version,
             policy_digest,
+            policy_snapshot_digest,
+            policy_snapshot_digest_alg,
+            policy_snapshot_canonicalization,
+            policy_snapshot_schema,
             obligations,
             obligation_outcomes,
             approval_state,
@@ -229,6 +237,12 @@ impl DecisionEvent {
         self.data.typed_decision = typed_decision;
         self.data.policy_version = policy_version;
         self.data.policy_digest = policy_digest;
+        self.data.apply_policy_snapshot_projection(
+            policy_snapshot_digest,
+            policy_snapshot_digest_alg,
+            policy_snapshot_canonicalization,
+            policy_snapshot_schema,
+        );
         self.data.obligations = obligations;
         self.data.obligation_outcomes = obligation_outcomes;
         self.data.approval_state = approval_state;

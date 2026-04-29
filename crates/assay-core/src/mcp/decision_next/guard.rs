@@ -103,6 +103,10 @@ impl DecisionEmitterGuard {
                 typed_decision,
                 policy_version,
                 policy_digest,
+                policy_snapshot_digest,
+                policy_snapshot_digest_alg,
+                policy_snapshot_canonicalization,
+                policy_snapshot_schema,
                 obligations,
                 obligation_outcomes,
                 approval_state,
@@ -138,6 +142,12 @@ impl DecisionEmitterGuard {
             event.data.typed_decision = typed_decision;
             event.data.policy_version = policy_version;
             event.data.policy_digest = policy_digest;
+            event.data.apply_policy_snapshot_projection(
+                policy_snapshot_digest,
+                policy_snapshot_digest_alg,
+                policy_snapshot_canonicalization,
+                policy_snapshot_schema,
+            );
             event.data.obligations = obligations;
             event.data.obligation_outcomes = obligation_outcomes;
             event.data.approval_state = approval_state;
