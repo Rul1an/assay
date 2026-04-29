@@ -14,6 +14,18 @@ not full Promptfoo, OpenFeature, CycloneDX, or Mastra schemas.
 - `inputs/`: supported importer input artifact schemas where the import shape
   differs from the receipt payload.
 
+## CLI
+
+The registry is also available through the Assay CLI:
+
+```bash
+assay evidence schema list
+assay evidence schema show promptfoo.assertion-component.v1
+assay evidence schema validate --schema promptfoo.assertion-component.v1 --input receipt.json
+```
+
+Use `--jsonl` with `validate` for JSONL importer inputs.
+
 ## Boundary
 
 The schemas do not make integration, endorsement, correctness, safety,

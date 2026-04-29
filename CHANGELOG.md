@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
   `--require <claim-id>=<level>` predicates. The command is claim-id based,
   emits text or `assay.trust-basis.assert.v1` JSON, exits `0` on pass, exits
   `1` on policy mismatch, and keeps input/config/runtime failures on `2+`.
+- **Receipt schema CLI**: `assay evidence schema list/show/validate` exposes
+  the v3.8.0 receipt schema registry as a command-line surface. It lists
+  receipt payload and importer-input schemas, shows schema metadata before raw
+  JSON Schema content, validates JSON or JSONL artifacts, and keeps Mastra
+  marked as importer-only rather than a public Trust Basis claim family.
 
 ## [3.8.0] - 2026-04-29
 
