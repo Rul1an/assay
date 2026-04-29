@@ -19,6 +19,7 @@ Assay is a governance and evidence platform for AI agents, built as a Rust works
 - [ADR-033 Trust Compiler Positioning (Q2 2026)](./ADR-033-OTel-Trust-Compiler-Positioning.md) — product north star for Assay as an OTel-native trust compiler
 - [RFC-005 Trust Compiler MVP (Q2 2026)](./RFC-005-trust-compiler-mvp-2026q2.md) — bounded plan for `T1a` compiler and `T1b` Trust Card
 - [Release Plan — Trust Compiler 3.6 Evidence Portability](./RELEASE-PLAN-TRUST-COMPILER-3.6.md) — release-prep checklist for the first external-eval receipt lane
+- [Release Plan — Trust Compiler 3.7 Evidence Portability](./RELEASE-PLAN-TRUST-COMPILER-3.7.md) — release-prep checklist for the first three-family receipt boundary line
 - [PLAN — T1a Trust Basis Compiler MVP (Q2 2026)](./PLAN-T1a-TRUST-BASIS-COMPILER-2026q2.md) — first execution wave for canonical `trust-basis.json`
 - [Trust Compiler Audit Matrix (2026-03-26)](./AUDIT-MATRIX-TRUST-COMPILER-2026-03-26.md) — wave-by-wave audit of the trust-compiler line from `T1b` through `K2-A` Phase 1
 - [Discovery — Next Evidence Wave (Q2 2026)](./DISCOVERY-NEXT-EVIDENCE-WAVE-2026Q2.md) — historical discovery note that ranked post-`P2c` candidates and led to `K1`
