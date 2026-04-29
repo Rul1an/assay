@@ -256,6 +256,9 @@ policy snapshot digest visible != policy is correct or sufficient
 
 ## 8. P56b — Tool Definition Digest Binding
 
+Status: execution plan tracked in
+[PLAN-P56b](./PLAN-P56B-TOOL-DEFINITION-DIGEST-BINDING-2026q2.md).
+
 ### Goal
 
 Bind supported tool decisions to the tool definition surface that was reviewed,

@@ -61,6 +61,7 @@ Assay is a CI-native evidence and trust compiler for agent systems, built as a R
 - [PLAN — P45b Decision Receipt Trust Basis Claim (Q2 2026)](./PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md) — execution slice that adds one bounded Trust Basis claim for supported decision receipt boundaries, starting with OpenFeature boolean EvaluationDetails receipts
 - [PLAN — P52-P56 Assay Product Surface Consolidation Program (Q2 2026)](./PLAN-P52-P56-CONSOLIDATION-PROGRAM-2026q2.md) — post-v3.8.0 consolidation program for product truth sync, Trust Basis assertions, receipt schema CLI, static Trust Card HTML, and policy/tool digest binding
 - [PLAN — P56a Policy Snapshot Digest Visibility (Q2 2026)](./PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md) — execution slice that projects canonical policy snapshot digest metadata onto supported MCP decision evidence without claiming policy correctness
+- [PLAN — P56b Tool Definition Digest Binding (Q2 2026)](./PLAN-P56B-TOOL-DEFINITION-DIGEST-BINDING-2026q2.md) — planned companion slice that binds supported MCP decision evidence to a bounded tool-definition digest without claiming tool safety, signature validity, or registry truth
 - [Assay Architecture & Roadmap Gap Analysis (Q2 2026)](./GAP-ASSAY-ARCHITECTURE-ROADMAP-2026q2.md) — repo-wide truth sync and next-step ordering
 
 ## Active RFCs
