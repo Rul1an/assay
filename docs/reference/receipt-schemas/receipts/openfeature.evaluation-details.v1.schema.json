@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rul1an/assay/docs/reference/receipt-schemas/receipts/openfeature.evaluation-details.v1.schema.json",
+  "title": "Assay OpenFeature EvaluationDetails Decision Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_system",
+    "source_surface",
+    "source_artifact_ref",
+    "source_artifact_digest",
+    "reducer_version",
+    "imported_at",
+    "decision"
+  ],
+  "properties": {
+    "schema": { "const": "assay.receipt.openfeature.evaluation_details.v1" },
+    "source_system": { "const": "openfeature" },
+    "source_surface": { "const": "evaluation_details.boolean" },
+    "source_artifact_ref": { "$ref": "#/$defs/boundedRef" },
+    "source_artifact_digest": { "$ref": "#/$defs/sha256Digest" },
+    "reducer_version": { "const": "assay-openfeature-evaluation-details@0.1.0" },
+    "imported_at": { "type": "string", "format": "date-time" },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flag_key", "value_type", "value"],
+      "properties": {
+        "flag_key": { "$ref": "#/$defs/flagKey" },
+        "value_type": { "const": "boolean" },
+        "value": { "type": "boolean" },
+        "variant": { "$ref": "#/$defs/boundedString" },
+        "reason": { "$ref": "#/$defs/boundedString" },
+        "error_code": { "$ref": "#/$defs/boundedString" }
+      }
+    }
+  },
+  "$defs": {
+    "boundedRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "flagKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

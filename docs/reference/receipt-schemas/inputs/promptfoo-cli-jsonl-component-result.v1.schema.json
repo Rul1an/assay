@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rul1an/assay/docs/reference/receipt-schemas/inputs/promptfoo-cli-jsonl-component-result.v1.schema.json",
+  "title": "Assay-supported Promptfoo CLI JSONL Row v1",
+  "type": "object",
+  "required": ["gradingResult"],
+  "properties": {
+    "gradingResult": {
+      "type": "object",
+      "required": ["componentResults"],
+      "properties": {
+        "componentResults": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["pass", "score"],
+            "properties": {
+              "pass": { "type": "boolean" },
+              "score": { "enum": [0, 1] },
+              "reason": { "type": "string" },
+              "assertion": {
+                "type": "object",
+                "properties": {
+                  "type": { "const": "equals" }
+                },
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
