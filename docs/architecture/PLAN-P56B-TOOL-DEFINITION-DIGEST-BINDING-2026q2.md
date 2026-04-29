@@ -2,7 +2,7 @@
 
 - **Date:** 2026-04-29
 - **Owner:** Evidence / MCP Security
-- **Status:** Plan
+- **Status:** Implemented
 - **Scope:** Bind supported `assay.tool.decision` evidence to a bounded MCP tool
   definition digest when a reviewed tool definition surface is available,
   without claiming tool safety, signature validity, or registry truth.

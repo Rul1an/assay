@@ -240,6 +240,7 @@ impl EvidenceEvent {
 // -- Strongly Typed Payload Helpers --
 
 /// Typed payload variants (for convenience, not enforced by contract)
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 pub enum Payload {
@@ -284,6 +285,16 @@ pub struct PayloadToolDecision {
     pub policy_snapshot_canonicalization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_snapshot_schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_definition_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_definition_digest_alg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_definition_canonicalization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_definition_schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_definition_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -424,6 +435,11 @@ mod tests {
         assert_eq!(without_payload.policy_snapshot_digest_alg, None);
         assert_eq!(without_payload.policy_snapshot_canonicalization, None);
         assert_eq!(without_payload.policy_snapshot_schema, None);
+        assert_eq!(without_payload.tool_definition_digest, None);
+        assert_eq!(without_payload.tool_definition_digest_alg, None);
+        assert_eq!(without_payload.tool_definition_canonicalization, None);
+        assert_eq!(without_payload.tool_definition_schema, None);
+        assert_eq!(without_payload.tool_definition_source, None);
 
         let with = serde_json::json!({
             "tool": "deploy_service",
@@ -434,7 +450,12 @@ mod tests {
             "policy_snapshot_digest": "sha256:abc123",
             "policy_snapshot_digest_alg": "sha256",
             "policy_snapshot_canonicalization": "jcs:mcp_policy",
-            "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1"
+            "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1",
+            "tool_definition_digest": "sha256:def456",
+            "tool_definition_digest_alg": "sha256",
+            "tool_definition_canonicalization": "jcs:mcp_tool_definition.v1",
+            "tool_definition_schema": "assay.mcp.tool-definition.snapshot.v1",
+            "tool_definition_source": "mcp.tools/list"
         });
         let with_payload: PayloadToolDecision =
             serde_json::from_value(with).expect("policy snapshot payload should deserialize");
@@ -454,6 +475,26 @@ mod tests {
         assert_eq!(
             with_payload.policy_snapshot_schema.as_deref(),
             Some("assay.mcp.policy.snapshot.v1")
+        );
+        assert_eq!(
+            with_payload.tool_definition_digest.as_deref(),
+            Some("sha256:def456")
+        );
+        assert_eq!(
+            with_payload.tool_definition_digest_alg.as_deref(),
+            Some("sha256")
+        );
+        assert_eq!(
+            with_payload.tool_definition_canonicalization.as_deref(),
+            Some("jcs:mcp_tool_definition.v1")
+        );
+        assert_eq!(
+            with_payload.tool_definition_schema.as_deref(),
+            Some("assay.mcp.tool-definition.snapshot.v1")
+        );
+        assert_eq!(
+            with_payload.tool_definition_source.as_deref(),
+            Some("mcp.tools/list")
         );
     }
 

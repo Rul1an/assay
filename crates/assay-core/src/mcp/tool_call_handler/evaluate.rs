@@ -4,6 +4,7 @@ use super::super::jsonrpc::JsonRpcRequest;
 use super::super::lifecycle::mandate_used_event;
 use super::super::obligations;
 use super::super::policy::{FailClosedTrigger, PolicyDecision, PolicyState};
+use super::super::tool_definition::ToolDefinitionBinding;
 use super::emit;
 use super::evaluate_next::{
     approval::validate_approval_required,
@@ -21,6 +22,7 @@ pub(super) fn handle_tool_call(
     request: &JsonRpcRequest,
     state: &mut PolicyState,
     runtime_identity: Option<&ToolIdentity>,
+    tool_definition_binding: Option<&ToolDefinitionBinding>,
     mandate: Option<&MandateData>,
     transaction_object: Option<&Value>,
 ) -> HandleResult {
@@ -71,6 +73,7 @@ pub(super) fn handle_tool_call(
         proj.merge_into_metadata(&mut policy_eval.metadata);
     }
     let mut tool_match = emit::ToolMatchMetadata::from_policy_metadata(&policy_eval.metadata);
+    tool_match.tool_definition_binding = tool_definition_binding.cloned();
     tool_match.obligation_outcomes =
         obligations::execute_log_only(&tool_match.obligations, &tool_name);
     seed_fail_closed_context(

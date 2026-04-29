@@ -1,5 +1,6 @@
 use super::super::decision::{reason_codes, DecisionEvent, PolicyDecisionEventContext};
 use super::super::policy::PolicyMatchMetadata;
+use super::super::tool_definition::ToolDefinitionBinding;
 use super::types::HandleResult;
 use crate::runtime::AuthzReceipt;
 
@@ -42,6 +43,7 @@ pub(super) struct ToolMatchMetadata {
     pub(super) auth_issuer: Option<String>,
     pub(super) delegated_from: Option<String>,
     pub(super) delegation_depth: Option<u32>,
+    pub(super) tool_definition_binding: Option<ToolDefinitionBinding>,
 }
 
 impl ToolMatchMetadata {
@@ -110,6 +112,7 @@ impl ToolMatchMetadata {
             auth_issuer: metadata.auth_issuer.clone(),
             delegated_from: metadata.delegated_from.clone(),
             delegation_depth: metadata.delegation_depth,
+            tool_definition_binding: None,
         }
     }
 
@@ -148,6 +151,7 @@ impl ToolMatchMetadata {
             auth_issuer: self.auth_issuer.clone(),
             delegated_from: self.delegated_from.clone(),
             delegation_depth: self.delegation_depth,
+            tool_definition_binding: self.tool_definition_binding.clone(),
         }
     }
 }

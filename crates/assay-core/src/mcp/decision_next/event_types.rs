@@ -9,6 +9,7 @@ use crate::mcp::policy::{
     ApprovalArtifact, ApprovalFreshness, FailClosedContext, PolicyObligation, RedactArgsContract,
     RestrictScopeContract, TypedPolicyDecision,
 };
+use crate::mcp::tool_definition::ToolDefinitionBinding;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -140,6 +141,7 @@ pub struct PolicyDecisionEventContext {
     pub auth_issuer: Option<String>,
     pub delegated_from: Option<String>,
     pub delegation_depth: Option<u32>,
+    pub tool_definition_binding: Option<ToolDefinitionBinding>,
 }
 
 /// A tool decision event (CloudEvents compliant).
@@ -198,6 +200,21 @@ pub struct DecisionData {
     /// P56a: bounded schema tag for the snapshot surface being digested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_snapshot_schema: Option<String>,
+    /// P56b: digest of the bounded MCP tool definition observed from `tools/list`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_definition_digest: Option<String>,
+    /// P56b: digest algorithm for `tool_definition_digest`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_definition_digest_alg: Option<String>,
+    /// P56b: canonicalization used before digesting the tool definition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_definition_canonicalization: Option<String>,
+    /// P56b: bounded schema tag for the tool-definition surface being digested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_definition_schema: Option<String>,
+    /// P56b: observed source surface for the tool-definition digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_definition_source: Option<String>,
     /// Obligations attached to an allow/deny decision
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obligations: Vec<PolicyObligation>,
@@ -456,6 +473,29 @@ impl DecisionData {
             self.policy_snapshot_digest_alg = None;
             self.policy_snapshot_canonicalization = None;
             self.policy_snapshot_schema = None;
+        }
+    }
+
+    /// Project a P56b tool-definition binding into the decision payload.
+    ///
+    /// This is digest visibility only. The field cluster is emitted atomically
+    /// and is omitted when no bounded `tools/list` definition was observed.
+    pub(crate) fn apply_tool_definition_binding(
+        &mut self,
+        binding: Option<&ToolDefinitionBinding>,
+    ) {
+        if let Some(binding) = binding {
+            self.tool_definition_digest = Some(binding.digest.clone());
+            self.tool_definition_digest_alg = Some(binding.digest_alg.clone());
+            self.tool_definition_canonicalization = Some(binding.canonicalization.clone());
+            self.tool_definition_schema = Some(binding.schema.clone());
+            self.tool_definition_source = Some(binding.source.clone());
+        } else {
+            self.tool_definition_digest = None;
+            self.tool_definition_digest_alg = None;
+            self.tool_definition_canonicalization = None;
+            self.tool_definition_schema = None;
+            self.tool_definition_source = None;
         }
     }
 }

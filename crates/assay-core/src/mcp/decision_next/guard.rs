@@ -133,12 +133,16 @@ impl DecisionEmitterGuard {
                 auth_issuer,
                 delegated_from,
                 delegation_depth,
+                tool_definition_binding,
             } = context;
 
             event.data.typed_decision = typed_decision;
             event.data.policy_version = policy_version;
             event.data.policy_digest = policy_digest;
             event.data.apply_policy_snapshot_projection();
+            event
+                .data
+                .apply_tool_definition_binding(tool_definition_binding.as_ref());
             event.data.obligations = obligations;
             event.data.obligation_outcomes = obligation_outcomes;
             event.data.approval_state = approval_state;

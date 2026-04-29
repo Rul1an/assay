@@ -3,6 +3,11 @@ use super::fixtures::{assert_fail_closed_defaults, make_tool_call_request, Count
 use crate::mcp::decision::{reason_codes, FulfillmentDecisionPath, ObligationOutcomeStatus};
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::policy::{McpPolicy, PolicyState, ToolPolicy, TypedPolicyDecision};
+use crate::mcp::tool_definition::{
+    binding_from_tools_list_tool, TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1,
+    TOOL_DEFINITION_DIGEST_ALG_SHA256, TOOL_DEFINITION_SCHEMA_V1,
+    TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST,
+};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -176,4 +181,63 @@ fn test_tool_drift_deny_emits_alert_obligation_outcome() {
 #[test]
 fn test_alert_obligation_outcome_emitted() {
     test_tool_drift_deny_emits_alert_obligation_outcome();
+}
+
+#[test]
+fn test_handler_projects_tool_definition_binding_when_supplied() {
+    let emitter = Arc::new(CountingEmitter(AtomicUsize::new(0)));
+    let policy = McpPolicy::default();
+    let handler = ToolCallHandler::new(
+        policy,
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+    let binding = binding_from_tools_list_tool(
+        &serde_json::json!({
+            "name": "safe_tool",
+            "description": " Safe read ",
+            "inputSchema": {"type": "object"}
+        }),
+        Some("server-a"),
+    )
+    .unwrap()
+    .unwrap();
+
+    let request = make_tool_call_request("safe_tool", serde_json::json!({}));
+    let mut state = PolicyState::default();
+    let result = handler.handle_tool_call_with_tool_definition_binding(
+        &request,
+        &mut state,
+        None,
+        Some(&binding),
+        None,
+        None,
+    );
+
+    match result {
+        HandleResult::Allow { decision_event, .. } => {
+            assert!(decision_event.data.tool_definition_digest.is_some());
+            assert_eq!(
+                decision_event.data.tool_definition_digest_alg.as_deref(),
+                Some(TOOL_DEFINITION_DIGEST_ALG_SHA256)
+            );
+            assert_eq!(
+                decision_event
+                    .data
+                    .tool_definition_canonicalization
+                    .as_deref(),
+                Some(TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1)
+            );
+            assert_eq!(
+                decision_event.data.tool_definition_schema.as_deref(),
+                Some(TOOL_DEFINITION_SCHEMA_V1)
+            );
+            assert_eq!(
+                decision_event.data.tool_definition_source.as_deref(),
+                Some(TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST)
+            );
+        }
+        other => panic!("expected allow result, got {:?}", other),
+    }
 }

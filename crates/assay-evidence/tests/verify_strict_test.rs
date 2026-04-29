@@ -147,6 +147,11 @@ fn test_tool_decision_stable_payload_conformance() {
         "policy_snapshot_digest_alg": "sha256",
         "policy_snapshot_canonicalization": "jcs:mcp_policy",
         "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1",
+        "tool_definition_digest": "sha256:tooldef123",
+        "tool_definition_digest_alg": "sha256",
+        "tool_definition_canonicalization": "jcs:mcp_tool_definition.v1",
+        "tool_definition_schema": "assay.mcp.tool-definition.snapshot.v1",
+        "tool_definition_source": "mcp.tools/list",
         "delegated_from": "agent:planner",
         "delegation_depth": 1
     });
@@ -160,6 +165,14 @@ fn test_tool_decision_stable_payload_conformance() {
     assert_eq!(
         typed.policy_snapshot_digest.as_deref(),
         Some("sha256:policy123")
+    );
+    assert_eq!(
+        typed.tool_definition_digest.as_deref(),
+        Some("sha256:tooldef123")
+    );
+    assert_eq!(
+        typed.tool_definition_source.as_deref(),
+        Some("mcp.tools/list")
     );
     assert_eq!(typed.delegation_depth, Some(1));
     verify_single_event(EvidenceEvent::new(

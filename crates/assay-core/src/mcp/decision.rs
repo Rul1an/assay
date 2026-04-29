@@ -42,6 +42,11 @@ pub use replay_diff::{
 mod tests {
     use super::*;
     use crate::mcp::policy::{ApprovalArtifact, ApprovalFreshness};
+    use crate::mcp::tool_definition::{
+        ToolDefinitionBinding, TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1,
+        TOOL_DEFINITION_DIGEST_ALG_SHA256, TOOL_DEFINITION_SCHEMA_V1,
+        TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -334,6 +339,28 @@ mod tests {
     }
 
     #[test]
+    fn test_decision_event_omits_tool_definition_fields_when_binding_absent() {
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_no_tool_definition".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW);
+
+        let value = serde_json::to_value(event).expect("decision event should serialize");
+        let data = value
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .expect("decision event data should be an object");
+
+        assert!(!data.contains_key("tool_definition_digest"));
+        assert!(!data.contains_key("tool_definition_digest_alg"));
+        assert!(!data.contains_key("tool_definition_canonicalization"));
+        assert!(!data.contains_key("tool_definition_schema"));
+        assert!(!data.contains_key("tool_definition_source"));
+    }
+
+    #[test]
     fn test_with_policy_context_projects_policy_snapshot_digest() {
         let context = PolicyDecisionEventContext {
             policy_digest: Some("sha256:policy123".to_string()),
@@ -387,6 +414,50 @@ mod tests {
         assert!(event.data.policy_snapshot_digest_alg.is_some());
         assert!(event.data.policy_snapshot_canonicalization.is_some());
         assert!(event.data.policy_snapshot_schema.is_some());
+    }
+
+    #[test]
+    fn test_with_policy_context_projects_tool_definition_binding() {
+        let binding = ToolDefinitionBinding {
+            digest: "sha256:tooldef123".to_string(),
+            digest_alg: TOOL_DEFINITION_DIGEST_ALG_SHA256.to_string(),
+            canonicalization: TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1
+                .to_string(),
+            schema: TOOL_DEFINITION_SCHEMA_V1.to_string(),
+            source: TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST.to_string(),
+        };
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_tool_definition".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(PolicyDecisionEventContext {
+            tool_definition_binding: Some(binding),
+            ..PolicyDecisionEventContext::default()
+        });
+
+        assert_eq!(
+            event.data.tool_definition_digest.as_deref(),
+            Some("sha256:tooldef123")
+        );
+        assert_eq!(
+            event.data.tool_definition_digest_alg.as_deref(),
+            Some(TOOL_DEFINITION_DIGEST_ALG_SHA256)
+        );
+        assert_eq!(
+            event.data.tool_definition_canonicalization.as_deref(),
+            Some(TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1)
+        );
+        assert_eq!(
+            event.data.tool_definition_schema.as_deref(),
+            Some(TOOL_DEFINITION_SCHEMA_V1)
+        );
+        assert_eq!(
+            event.data.tool_definition_source.as_deref(),
+            Some(TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST)
+        );
     }
 
     #[test]
