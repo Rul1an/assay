@@ -275,6 +275,16 @@ pub struct PayloadToolDecision {
     pub reason_code: Option<String>,
     pub args_schema_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_digest_alg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_canonicalization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_snapshot_schema: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<u32>,
@@ -397,6 +407,54 @@ mod tests {
             Some("agent:planner")
         );
         assert_eq!(with_payload.delegation_depth, Some(1));
+    }
+
+    #[test]
+    fn tool_decision_payload_policy_snapshot_fields_are_additive() {
+        let without = serde_json::json!({
+            "tool": "deploy_service",
+            "decision": "allow",
+            "reason_code": "P_POLICY_ALLOW",
+            "args_schema_hash": null
+        });
+        let without_payload: PayloadToolDecision =
+            serde_json::from_value(without).expect("legacy payload should deserialize");
+        assert_eq!(without_payload.policy_digest, None);
+        assert_eq!(without_payload.policy_snapshot_digest, None);
+        assert_eq!(without_payload.policy_snapshot_digest_alg, None);
+        assert_eq!(without_payload.policy_snapshot_canonicalization, None);
+        assert_eq!(without_payload.policy_snapshot_schema, None);
+
+        let with = serde_json::json!({
+            "tool": "deploy_service",
+            "decision": "allow",
+            "reason_code": "P_POLICY_ALLOW",
+            "args_schema_hash": null,
+            "policy_digest": "sha256:abc123",
+            "policy_snapshot_digest": "sha256:abc123",
+            "policy_snapshot_digest_alg": "sha256",
+            "policy_snapshot_canonicalization": "jcs:mcp_policy",
+            "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1"
+        });
+        let with_payload: PayloadToolDecision =
+            serde_json::from_value(with).expect("policy snapshot payload should deserialize");
+        assert_eq!(with_payload.policy_digest.as_deref(), Some("sha256:abc123"));
+        assert_eq!(
+            with_payload.policy_snapshot_digest.as_deref(),
+            Some("sha256:abc123")
+        );
+        assert_eq!(
+            with_payload.policy_snapshot_digest_alg.as_deref(),
+            Some("sha256")
+        );
+        assert_eq!(
+            with_payload.policy_snapshot_canonicalization.as_deref(),
+            Some("jcs:mcp_policy")
+        );
+        assert_eq!(
+            with_payload.policy_snapshot_schema.as_deref(),
+            Some("assay.mcp.policy.snapshot.v1")
+        );
     }
 
     #[test]

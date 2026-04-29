@@ -220,6 +220,9 @@ source of truth.
 
 ## 7. P56a — Policy Snapshot Digest Visibility
 
+Status: execution slice tracked in
+[PLAN-P56a](./PLAN-P56A-POLICY-SNAPSHOT-DIGEST-VISIBILITY-2026q2.md).
+
 ### Goal
 
 Make the policy snapshot that governed a decision visibly digest-bound in

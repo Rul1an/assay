@@ -153,6 +153,7 @@ These IDs are stable; if a test is renamed, maintain a compatibility alias (e.g.
 | 1                        | 2026-02| Contract freeze: this spec (compat matrix, evolution rules, deprecation, golden fixtures). |
 | 1                        | 2026-02| New event types policy (§4.1): no new type without registry + schema + conformance test; Event types (v1) registry table (§4.2); §2 normative rule clarified (schema_version 1 + v1.0 baseline; verify MAY v1.x, pack MAY exact 1.0). |
 | 1                        | 2026-04| Tightened version-axis naming (`CE_SPECVERSION` vs `ASSAY_EVIDENCE_SPEC_VERSION`), stable event registry anchors, canonical-writer determinism language, content-hash input scope, and experimental receipt-type emission posture. |
+| 1                        | 2026-04| Added optional `policy_snapshot_*` fields on stable `assay.tool.decision` payloads for P56a policy snapshot digest visibility; this is additive, visibility-only, and projects the existing `policy_digest` without adding policy truth. |
 
 ## 8. Normative checklist (summary)
 
