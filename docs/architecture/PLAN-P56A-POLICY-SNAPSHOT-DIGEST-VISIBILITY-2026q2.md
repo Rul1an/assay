@@ -1,5 +1,12 @@
 # PLAN — P56a Policy Snapshot Digest Visibility (Q2 2026)
 
+- **Date:** 2026-04-29
+- **Owner:** Evidence / MCP Security
+- **Status:** Execution slice
+- **Scope:** Surface the existing canonical policy digest as an explicit,
+  self-describing policy snapshot review boundary on supported
+  `assay.tool.decision` evidence.
+
 ## 1. Goal
 
 Make supported MCP decision evidence explicitly show which canonical policy
