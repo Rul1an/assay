@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 No unreleased changes yet.
 
+## [3.9.1] - 2026-04-29
+
+This patch release publishes the final public three-family evidence receipts
+note under an immutable Assay release tag. It does not add runtime behavior,
+Trust Basis claims, receipt families, schema semantics, or Harness semantics.
+
+### Release Truth
+
+- **Versioned public note**:
+  [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md)
+  now points to the released Assay `v3.9.1` surface and Assay Harness `v0.3.2`
+  compatibility line, while keeping the same downstream-only boundary:
+  Promptfoo assertion component results, OpenFeature boolean `EvaluationDetails`
+  outcomes, and CycloneDX `machine-learning-model` components are bounded
+  receipt families, not official integrations or upstream truth claims.
+
 ## [3.9.0] - 2026-04-29
 
 This minor release turns the post-v3.8.0 consolidation program into a

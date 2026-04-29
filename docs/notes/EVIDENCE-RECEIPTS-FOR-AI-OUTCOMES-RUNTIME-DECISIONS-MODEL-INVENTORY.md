@@ -2,7 +2,7 @@
 
 > **Status:** public technical note
 > **Last updated:** 2026-04-29
-> **Scope:** explains the released Assay v3.9.0 and Assay Harness v0.3.2
+> **Scope:** explains the released Assay v3.9.1 and Assay Harness v0.3.2
 > three-family receipt surface; adds no new Trust Basis claim, receipt family,
 > or Harness semantics.
 
@@ -64,16 +64,20 @@ is that the boundary stays crisp.
 
 This note refers to versioned releases, not floating main branches:
 
-- Assay `v3.9.0`: <https://github.com/Rul1an/assay/releases/tag/v3.9.0>
+- Assay `v3.9.1`: <https://github.com/Rul1an/assay/releases/tag/v3.9.1>
 - Assay Harness `v0.3.2`: <https://github.com/Rul1an/Assay-Harness/releases/tag/v0.3.2>
-- Receipt family matrix: <https://github.com/Rul1an/assay/blob/v3.9.0/docs/reference/receipt-family-matrix.json>
-- Receipt schema registry: <https://github.com/Rul1an/assay/tree/v3.9.0/docs/reference/receipt-schemas>
+- Receipt family matrix: <https://github.com/Rul1an/assay/blob/v3.9.1/docs/reference/receipt-family-matrix.json>
+- Receipt schema registry: <https://github.com/Rul1an/assay/tree/v3.9.1/docs/reference/receipt-schemas>
 - Harness compatibility note: <https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/ASSAY_COMPATIBILITY.md>
 
 There is also an example release-binary proof run showing the Harness recipes
 passing against Assay `v3.9.0`:
 
 <https://github.com/Rul1an/Assay-Harness/actions/runs/25131209377>
+
+Assay `v3.9.1` does not change receipt runtime behavior, Trust Basis claims,
+or Harness semantics; it only publishes this note under an immutable Assay
+release tag.
 
 ## Copyable Recipe Docs
 
