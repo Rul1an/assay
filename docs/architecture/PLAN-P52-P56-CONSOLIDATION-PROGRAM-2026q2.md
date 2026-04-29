@@ -2,7 +2,7 @@
 
 - **Date:** 2026-04-29
 - **Owner:** Assay maintainers
-- **Status:** planning program
+- **Status:** Implemented; release-truth synced for the v3.9.0 line
 - **Scope:** Consolidate the post-v3.8.0 Assay product surface before opening
   another evidence family or upstream wedge.
 
@@ -325,10 +325,10 @@ visibility does not accidentally classify as verified trust.
 
 ## 11. External posture
 
-Do not publish a new external wedge from this program until P52, P53, and P55
-are landed. If P54 lands soon after, use the HTML Trust Card as the reviewer
-artifact in demos. P56a/P56b are stronger security follow-ups, not blockers for
-basic external readability.
+Do not publish a new external wedge from this program until the v3.9.0 release
+tag is live. P52, P53, P55, P54, P56a, and P56b are now merged on `main`;
+external language should link to versioned release artifacts rather than
+floating main-branch docs.
 
 External language should stay small:
 

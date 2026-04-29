@@ -439,7 +439,7 @@ Rul1an/assay/assay-action@v2
 **Workspace Version**: All crates share version from `Cargo.toml` workspace:
 ```toml
 [workspace.package]
-version = "3.8.0"
+version = "3.9.0"
 ```
 
 **Patch Section**: Internal crates are patched to use local paths:

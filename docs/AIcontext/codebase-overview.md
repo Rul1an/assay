@@ -1,6 +1,6 @@
 # Assay Codebase Overview
 
-> **Version**: 3.8.0 (April 2026)
+> **Version**: 3.9.0 (April 2026)
 > **SOTA Status**: Trust Compiler line (MCP governance, Trust Basis, receipt portability)
 
 ## What is Assay?

@@ -4,7 +4,7 @@
 
 **Product story (repo root):** Assay is positioned as a **trust compiler for agent systems** — MCP policy enforcement as the wedge, plus verifiable evidence bundles, Trust Basis, Trust Card, and CI/SARIF. See the [main README](../README.md), [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md), and [community discussion seeds](community/DISCUSSIONS.md).
 
-**Evidence portability notes:** [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the released `v3.8.0` receipt/schema surface and the first three claim-visible receipt families. [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the first Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
+**Evidence portability notes:** [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the released `v3.8.0` receipt/schema surface and the first three claim-visible receipt families. The `v3.9.0` line adds assertion, schema CLI, Trust Card HTML, and MCP policy/tool digest review surfaces without adding new receipt families or Trust Basis claims. [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the first Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
 
 ## 5-Minute Quickstart
 

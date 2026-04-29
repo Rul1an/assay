@@ -1,7 +1,7 @@
 # Decision Trees
 
 > **Purpose**: Help AI agents decide which command, approach, or pattern to use.
-> **Version**: 3.8.0 (April 2026)
+> **Version**: 3.9.0 (April 2026)
 
 ## Decision Tree 1: Which Command Should I Use?
 

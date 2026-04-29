@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## [3.9.0] - 2026-04-29
+
+This minor release turns the post-v3.8.0 consolidation program into a
+user-facing release line. It does not add new Trust Basis claims or receipt
+families. Instead, it makes the existing trust compiler surface easier to gate,
+inspect, review, and bind to the MCP policy/tool surfaces that governed a
+decision.
+
 ### Trust Compiler
 
 - **Trust Basis assertions**: `assay trust-basis assert` can now gate one
@@ -39,6 +49,14 @@ All notable changes to this project will be documented in this file.
   runtime results, and inferred `tools/call` fields. This is review visibility
   only; it does not claim tool safety, signature validity, signer trust,
   registry truth, or implementation truth.
+
+### Product Truth
+
+- **Product surface alignment**: README, docs home, scope docs, CLI about text,
+  AI-context notes, and the P52-P56 consolidation plan now describe Assay as a
+  CI-native evidence and trust compiler. The wording separates Assay core from
+  Assay Harness, keeps external receipt lanes downstream-only, and avoids
+  partnership, integration, correctness, safety, or compliance-truth claims.
 
 ## [3.8.0] - 2026-04-29
 

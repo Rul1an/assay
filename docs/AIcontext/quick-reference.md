@@ -1,7 +1,7 @@
 # Quick Reference
 
 > **Purpose**: Fast lookup for AI agents - commands, patterns, exit codes, and common operations.
-> **Version**: 3.8.0 (April 2026)
+> **Version**: 3.9.0 (April 2026)
 
 ## TL;DR - What is Assay?
 

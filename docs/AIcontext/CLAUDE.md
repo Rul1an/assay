@@ -10,7 +10,7 @@ Trust Card, and CI projections without a hosted backend.
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `3.8.0`.
+Rust monorepo with workspace version `3.9.0`.
 
 ```
 crates/
@@ -238,7 +238,7 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
-- Workspace version in root `Cargo.toml` (`version = "3.8.0"`)
+- Workspace version in root `Cargo.toml` (`version = "3.9.0"`)
 - Internal crate deps use `workspace = true` with path + version
 - `#[deny(unsafe_code)]` on all crates except assay-ebpf
 - Error handling: `anyhow` for applications, `thiserror` for libraries

@@ -1,6 +1,6 @@
 # AI Context Documentation
 
-> **Version**: 3.8.0 (April 2026)
+> **Version**: 3.9.0 (April 2026)
 > **Last Updated**: 2026-04-29
 > **SOTA Status**: Trust Compiler line with Trust Basis, receipt portability, and schema registry
 
