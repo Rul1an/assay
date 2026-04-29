@@ -1,13 +1,13 @@
 # Release Plan — Trust Compiler 3.7 Evidence Portability
 
-**Purpose:** Prepare **v3.7.0** as the first public Assay line where three
+**Purpose:** Record **v3.7.0** as the first public Assay line where three
 bounded receipt families are claim-visible in Trust Basis: eval outcomes,
 runtime decision details, and inventory/provenance surfaces.
 
-**Status:** workspace and docs are prepared for **v3.7.0**. Tag **`v3.7.0`**
-only after the release-prep PR is merged and the pre-release checks below pass
-on the release commit. Crates.io publication remains a separate publish step
-after the tag/release workflow.
+**Status:** released as **v3.7.0** on 2026-04-29.
+
+The release workflow created the GitHub Release, release assets, provenance
+artifacts, crates.io publications, and PyPI publication from tag **`v3.7.0`**.
 
 **SSOT (do not re-invent semantics here):**
 
@@ -57,17 +57,17 @@ artifact pipeline while keeping the epistemic boundary narrow.
 
 ## Pre-Release Verification
 
-- [ ] `cargo fmt --check`
-- [ ] `cargo check -p assay-cli --all-targets`
-- [ ] `cargo test -p assay-evidence trust_basis -- --nocapture`
-- [ ] `cargo test -p assay-cli --test evidence_test -- --nocapture`
-- [ ] `cargo test -p assay-cli --test trust_basis_test -- --nocapture`
-- [ ] `cargo test -p assay-cli --test trustcard_test -- --nocapture`
-- [ ] `cargo run -p assay-cli -- evidence import openfeature-details --help`
-- [ ] `cargo run -p assay-cli -- evidence import cyclonedx-mlbom-model --help`
-- [ ] `cargo run -p assay-cli -- evidence import mastra-score-event --help`
-- [ ] `cargo publish -p assay-cli --dry-run` or a documented crates.io blocker.
-- [ ] [CHANGELOG.md](../../CHANGELOG.md), [README.md](../../README.md), and
+- [x] `cargo fmt --check`
+- [x] `cargo check -p assay-cli --all-targets`
+- [x] `cargo test -p assay-evidence trust_basis -- --nocapture`
+- [x] `cargo test -p assay-cli --test evidence_test -- --nocapture`
+- [x] `cargo test -p assay-cli --test trust_basis_test -- --nocapture`
+- [x] `cargo test -p assay-cli --test trustcard_test -- --nocapture`
+- [x] `cargo run -p assay-cli -- evidence import openfeature-details --help`
+- [x] `cargo run -p assay-cli -- evidence import cyclonedx-mlbom-model --help`
+- [x] `cargo run -p assay-cli -- evidence import mastra-score-event --help`
+- [x] crates.io publication completed through the release workflow.
+- [x] [CHANGELOG.md](../../CHANGELOG.md), [README.md](../../README.md), and
   [docs/ROADMAP.md](../ROADMAP.md) agree on the release line.
 
 Publish-order note: `assay-cli` depends on internal workspace crates at the same
