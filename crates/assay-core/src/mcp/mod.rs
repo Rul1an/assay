@@ -15,6 +15,7 @@ pub mod proxy;
 pub mod runtime_features;
 pub mod signing;
 pub mod tool_call_handler;
+pub mod tool_definition;
 pub mod tool_match;
 pub mod tool_taxonomy;
 pub mod trust_policy;

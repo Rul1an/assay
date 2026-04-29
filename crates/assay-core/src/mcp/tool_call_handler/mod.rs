@@ -16,6 +16,7 @@ use super::identity::ToolIdentity;
 use super::jsonrpc::JsonRpcRequest;
 use super::lifecycle::LifecycleEmitter;
 use super::policy::{McpPolicy, PolicyState};
+use super::tool_definition::ToolDefinitionBinding;
 use crate::runtime::{Authorizer, MandateData};
 use serde_json::Value;
 use std::sync::Arc;
@@ -53,6 +54,32 @@ impl ToolCallHandler {
             request,
             state,
             runtime_identity,
+            None,
+            mandate,
+            transaction_object,
+        )
+    }
+
+    /// Handle a tool call with an observed bounded tool-definition binding.
+    ///
+    /// This preserves the existing runtime identity/pin surface while allowing
+    /// supported `tools/list` observations to be projected onto decision
+    /// evidence as P56b digest visibility.
+    pub fn handle_tool_call_with_tool_definition_binding(
+        &self,
+        request: &JsonRpcRequest,
+        state: &mut PolicyState,
+        runtime_identity: Option<&ToolIdentity>,
+        tool_definition_binding: Option<&ToolDefinitionBinding>,
+        mandate: Option<&MandateData>,
+        transaction_object: Option<&Value>,
+    ) -> HandleResult {
+        evaluate::handle_tool_call(
+            self,
+            request,
+            state,
+            runtime_identity,
+            tool_definition_binding,
             mandate,
             transaction_object,
         )

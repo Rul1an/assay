@@ -7,6 +7,7 @@ use super::jsonrpc::JsonRpcRequest;
 use super::policy::{
     make_deny_response, McpPolicy, PolicyDecision, PolicyMatchMetadata, PolicyState,
 };
+use super::tool_definition::{binding_from_tools_list_tool, ToolDefinitionBinding};
 use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, Write},
@@ -115,6 +116,8 @@ pub struct McpProxy {
     config: ProxyConfig,
     /// Cache of tool identities discovered during tools/list
     identity_cache: Arc<Mutex<HashMap<String, super::identity::ToolIdentity>>>,
+    /// Cache of bounded tool-definition bindings discovered during tools/list
+    tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
 }
 
 impl Drop for McpProxy {
@@ -143,6 +146,7 @@ impl McpProxy {
             policy,
             config,
             identity_cache: Arc::new(Mutex::new(HashMap::new())),
+            tool_definition_cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -155,6 +159,8 @@ impl McpProxy {
         let config = self.config.clone();
         let identity_cache_a = self.identity_cache.clone();
         let identity_cache_b = self.identity_cache.clone();
+        let tool_definition_cache_a = self.tool_definition_cache.clone();
+        let tool_definition_cache_b = self.tool_definition_cache.clone();
 
         // Initialize decision emitter (I1: always emit decision)
         let decision_emitter: Arc<dyn DecisionEmitter> =
@@ -183,37 +189,22 @@ impl McpProxy {
                         if let Some(tools) = result.get_mut("tools").and_then(|t| t.as_array_mut())
                         {
                             for tool in tools {
-                                let name = tool
-                                    .get("name")
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown");
-                                let description = tool
-                                    .get("description")
-                                    .and_then(|d| d.as_str())
-                                    .map(|s| s.to_string());
-                                let input_schema = tool
-                                    .get("inputSchema")
-                                    .or_else(|| tool.get("input_schema"))
-                                    .cloned();
+                                if let Some(observation) =
+                                    Self::observe_tool_definition(tool, &config.server_id)
+                                {
+                                    let mut identity_cache = identity_cache_a.lock().unwrap();
+                                    identity_cache.insert(
+                                        observation.name.clone(),
+                                        observation.identity.clone(),
+                                    );
+                                    drop(identity_cache);
 
-                                let identity = super::identity::ToolIdentity::new(
-                                    &config.server_id,
-                                    name,
-                                    &input_schema,
-                                    &description,
-                                );
-
-                                // Cache for runtime verification
-                                let mut cache = identity_cache_a.lock().unwrap();
-                                cache.insert(name.to_string(), identity.clone());
-
-                                // Augment the response with the computed identity for downstream/logging
-                                tool.as_object_mut().and_then(|m| {
-                                    m.insert(
-                                        "tool_identity".to_string(),
-                                        serde_json::to_value(&identity).unwrap(),
-                                    )
-                                });
+                                    if let Some(binding) = observation.binding {
+                                        let mut binding_cache =
+                                            tool_definition_cache_a.lock().unwrap();
+                                        binding_cache.insert(observation.name, binding);
+                                    }
+                                }
                             }
                             processed_line =
                                 serde_json::to_string(&v).unwrap_or(line.clone()) + "\n";
@@ -248,12 +239,19 @@ impl McpProxy {
                 match serde_json::from_str::<JsonRpcRequest>(&line) {
                     Ok(req) => {
                         // 2. Check Policy with Identity (Phase 9)
-                        let runtime_id = if req.is_tool_call() {
+                        let (runtime_id, tool_definition_binding) = if req.is_tool_call() {
                             let name = req.tool_params().map(|p| p.name).unwrap_or_default();
-                            let cache = identity_cache_b.lock().unwrap();
-                            cache.get(&name).cloned()
+                            let runtime_id = {
+                                let cache = identity_cache_b.lock().unwrap();
+                                cache.get(&name).cloned()
+                            };
+                            let tool_definition_binding = {
+                                let cache = tool_definition_cache_b.lock().unwrap();
+                                cache.get(&name).cloned()
+                            };
+                            (runtime_id, tool_definition_binding)
                         } else {
-                            None
+                            (None, None)
                         };
 
                         let tool_name = req.tool_params().map(|p| p.name).unwrap_or_default();
@@ -283,6 +281,7 @@ impl McpProxy {
                                         None,
                                         req.id.clone(),
                                         &policy_eval.metadata,
+                                        tool_definition_binding.as_ref(),
                                     );
                                 }
                             }
@@ -315,6 +314,7 @@ impl McpProxy {
                                     Some(reason),
                                     req.id.clone(),
                                     &policy_eval.metadata,
+                                    tool_definition_binding.as_ref(),
                                 );
                                 // Then proceed as a normal allow
                                 Self::handle_allow(&req, &mut audit_log, false);
@@ -364,6 +364,7 @@ impl McpProxy {
                                     Some(reason),
                                     req.id.clone(),
                                     &policy_eval.metadata,
+                                    tool_definition_binding.as_ref(),
                                 );
 
                                 if config.dry_run {
@@ -495,6 +496,7 @@ impl McpProxy {
         reason: Option<String>,
         request_id: Option<serde_json::Value>,
         metadata: &PolicyMatchMetadata,
+        tool_definition_binding: Option<&ToolDefinitionBinding>,
     ) {
         let mut event = DecisionEvent::new(
             source.to_string(),
@@ -513,6 +515,9 @@ impl McpProxy {
         event.data.policy_version = metadata.policy_version.clone();
         event.data.policy_digest = metadata.policy_digest.clone();
         event.data.apply_policy_snapshot_projection();
+        event
+            .data
+            .apply_tool_definition_binding(tool_definition_binding);
         event.data.obligations = metadata.obligations.clone();
         event.data.obligation_outcomes =
             super::obligations::execute_log_only(&metadata.obligations, tool);
@@ -559,11 +564,80 @@ impl McpProxy {
         refresh_contract_projections(&mut event.data);
         emitter.emit(&event);
     }
+
+    fn observe_tool_definition(
+        tool: &mut serde_json::Value,
+        server_id: &str,
+    ) -> Option<ToolDefinitionObservation> {
+        let name = tool.get("name").and_then(|n| n.as_str())?;
+        if name.trim().is_empty() {
+            return None;
+        }
+        let name = name.to_string();
+        let description = tool
+            .get("description")
+            .and_then(|d| d.as_str())
+            .map(|s| s.to_string());
+        let input_schema = tool
+            .get("inputSchema")
+            .or_else(|| tool.get("input_schema"))
+            .cloned();
+
+        let identity =
+            super::identity::ToolIdentity::new(server_id, &name, &input_schema, &description);
+        let binding = binding_from_tools_list_tool(tool, Some(server_id))
+            .ok()
+            .flatten();
+
+        // Augment the response with the computed identity for downstream/logging.
+        tool.as_object_mut().and_then(|m| {
+            m.insert(
+                "tool_identity".to_string(),
+                serde_json::to_value(&identity).unwrap(),
+            )
+        });
+
+        Some(ToolDefinitionObservation {
+            name,
+            identity,
+            binding,
+        })
+    }
+}
+
+struct ToolDefinitionObservation {
+    name: String,
+    identity: super::identity::ToolIdentity,
+    binding: Option<ToolDefinitionBinding>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tool_definition::{
+        TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1,
+        TOOL_DEFINITION_DIGEST_ALG_SHA256, TOOL_DEFINITION_SCHEMA_V1,
+        TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST,
+    };
+    use std::sync::Mutex as StdMutex;
+
+    struct CapturingEmitter {
+        events: StdMutex<Vec<DecisionEvent>>,
+    }
+
+    impl CapturingEmitter {
+        fn new() -> Self {
+            Self {
+                events: StdMutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl DecisionEmitter for CapturingEmitter {
+        fn emit(&self, event: &DecisionEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
 
     #[test]
     fn event_source_accepts_assay_uri() {
@@ -669,5 +743,71 @@ mod tests {
         };
 
         assert!(ProxyConfig::try_from_raw(raw).is_err());
+    }
+
+    #[test]
+    fn observe_tool_definition_computes_identity_and_binding() {
+        let mut tool = serde_json::json!({
+            "name": "read_file",
+            "description": " Read files ",
+            "inputSchema": {"type": "object"},
+            "annotations": {"title": "Read"},
+            "x-assay-sig": {"signature": "opaque"}
+        });
+
+        let observation = McpProxy::observe_tool_definition(&mut tool, "server-a")
+            .expect("supported tool definition should be observed");
+
+        assert_eq!(observation.name, "read_file");
+        assert_eq!(observation.identity.server_id, "server-a");
+        assert!(observation.binding.is_some());
+        assert!(tool.get("tool_identity").is_some());
+    }
+
+    #[test]
+    fn emit_decision_projects_tool_definition_binding_atomically() {
+        let mut tool = serde_json::json!({
+            "name": "read_file",
+            "description": "Read files",
+            "inputSchema": {"type": "object"}
+        });
+        let observation = McpProxy::observe_tool_definition(&mut tool, "server-a")
+            .expect("supported tool definition should be observed");
+        let binding = observation.binding.expect("binding should be visible");
+        let emitter = Arc::new(CapturingEmitter::new());
+        let emitter_trait: Arc<dyn DecisionEmitter> = emitter.clone();
+
+        McpProxy::emit_decision(
+            &emitter_trait,
+            "assay://test",
+            "tc_tool_definition",
+            "read_file",
+            Decision::Allow,
+            reason_codes::P_POLICY_ALLOW,
+            None,
+            None,
+            &PolicyMatchMetadata::default(),
+            Some(&binding),
+        );
+
+        let events = emitter.events.lock().unwrap();
+        let data = &events[0].data;
+        assert!(data.tool_definition_digest.is_some());
+        assert_eq!(
+            data.tool_definition_digest_alg.as_deref(),
+            Some(TOOL_DEFINITION_DIGEST_ALG_SHA256)
+        );
+        assert_eq!(
+            data.tool_definition_canonicalization.as_deref(),
+            Some(TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1)
+        );
+        assert_eq!(
+            data.tool_definition_schema.as_deref(),
+            Some(TOOL_DEFINITION_SCHEMA_V1)
+        );
+        assert_eq!(
+            data.tool_definition_source.as_deref(),
+            Some(TOOL_DEFINITION_SOURCE_MCP_TOOLS_LIST)
+        );
     }
 }

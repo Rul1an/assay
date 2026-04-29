@@ -26,6 +26,11 @@ impl DecisionEvent {
                 policy_snapshot_digest_alg: None,
                 policy_snapshot_canonicalization: None,
                 policy_snapshot_schema: None,
+                tool_definition_digest: None,
+                tool_definition_digest_alg: None,
+                tool_definition_canonicalization: None,
+                tool_definition_schema: None,
+                tool_definition_source: None,
                 obligations: Vec::new(),
                 obligation_outcomes: Vec::new(),
                 approval_state: None,
@@ -228,12 +233,15 @@ impl DecisionEvent {
             auth_issuer,
             delegated_from,
             delegation_depth,
+            tool_definition_binding,
         } = context;
 
         self.data.typed_decision = typed_decision;
         self.data.policy_version = policy_version;
         self.data.policy_digest = policy_digest;
         self.data.apply_policy_snapshot_projection();
+        self.data
+            .apply_tool_definition_binding(tool_definition_binding.as_ref());
         self.data.obligations = obligations;
         self.data.obligation_outcomes = obligation_outcomes;
         self.data.approval_state = approval_state;

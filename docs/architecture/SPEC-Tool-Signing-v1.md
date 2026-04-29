@@ -47,6 +47,21 @@ Signing Input = JCS(tool_object - {"x-assay-sig"})
 | `inputSchema` | Yes |
 | `x-assay-sig` | **No** (removed before canonicalization) |
 
+### 2.2.1 Relation to P56b Decision Evidence Digests
+
+P56b `tool_definition_digest` is a separate decision-evidence review surface.
+It is computed over a bounded MCP `tools/list` projection (`name`, optional
+trimmed `description`, optional normalized `input_schema`, and conditional
+`server_id`) and excludes `x-assay-sig` plus unsupported top-level metadata
+before JCS canonicalization.
+
+The v1 local signing input above remains the full JCS-canonicalized tool object
+with `x-assay-sig` removed. Therefore, `x-assay-sig.payload_digest` and P56b
+`tool_definition_digest` are not required to be the same digest in this spec.
+If a future signing version adopts the same bounded projection as P56b, any
+divergence between signing input and decision-visible digest input MUST be a
+deliberate versioned contract change, not an implementation detail.
+
 ### 2.3 Payload Type Binding
 
 To prevent type confusion attacks, the signature binds to a payload type using DSSE Pre-Authentication Encoding (PAE):

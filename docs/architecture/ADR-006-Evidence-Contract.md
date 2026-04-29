@@ -96,6 +96,11 @@ Records authorization decisions (HITL-ready, protocol-based).
   "policy_snapshot_digest_alg": "sha256",
   "policy_snapshot_canonicalization": "jcs:mcp_policy",
   "policy_snapshot_schema": "assay.mcp.policy.snapshot.v1",
+  "tool_definition_digest": "sha256:...",
+  "tool_definition_digest_alg": "sha256",
+  "tool_definition_canonicalization": "jcs:mcp_tool_definition.v1",
+  "tool_definition_schema": "assay.mcp.tool-definition.snapshot.v1",
+  "tool_definition_source": "mcp.tools/list",
   "delegated_from": "agent:planner",
   "delegation_depth": 1
 }
@@ -121,6 +126,29 @@ reconstruct policy snapshots after the fact, and it does not make policy
 snapshots retrievable, exportable, or embedded. Absence of
 `policy_snapshot_digest` means the policy snapshot boundary is not visible, not
 that the decision is safe.
+
+`tool_definition_digest`, `tool_definition_digest_alg`,
+`tool_definition_canonicalization`, `tool_definition_schema`, and
+`tool_definition_source` are additive optional P56b fields. They make the
+bounded MCP `tools/list` tool-definition digest visible when a supported
+decision path observed that definition before the tool call. The field cluster
+is atomic: if `tool_definition_digest` is present, the algorithm,
+canonicalization, schema, and source fields MUST also be present.
+
+For P56b v1, `tool_definition_digest_alg` is `"sha256"`,
+`tool_definition_canonicalization` is `"jcs:mcp_tool_definition.v1"`,
+`tool_definition_schema` is `"assay.mcp.tool-definition.snapshot.v1"`, and
+`tool_definition_source` is `"mcp.tools/list"`. The digest is computed over a
+bounded JCS projection of the observed tool definition: `name`, optional
+trimmed `description`, optional full normalized `input_schema`, and optional
+`server_id` only when the observed definition is server-scoped. Top-level
+vendor/provider metadata, annotations, display hints, runtime result payloads,
+registry bodies, and `x-assay-sig` are excluded before digesting. Schema
+keywords inside `input_schema` remain part of the reviewed schema surface.
+P56b does not claim tool safety, implementation truth, signature validity,
+signer trust, registry trust, or that the tool definition is retrievable or
+embedded. Absence of `tool_definition_digest` means the tool-definition
+boundary is not visible, not that the tool is safe.
 
 `delegated_from` and `delegation_depth` are additive optional fields. They are
 surfaced only when a supported decision flow carries explicit

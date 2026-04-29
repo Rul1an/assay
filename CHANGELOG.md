@@ -30,6 +30,15 @@ All notable changes to this project will be documented in this file.
   cluster is produced atomically. This is a review binding only; it does not
   claim the policy is correct, sufficient, safe, approved, complete,
   retrievable, exportable, or embedded.
+- **Tool definition digest visibility**: supported MCP `tools/list` to
+  `tools/call` decision paths can now project an atomic `tool_definition_*`
+  field cluster onto `assay.tool.decision` events. The digest is computed over
+  the bounded observed tool-definition surface using
+  `jcs:mcp_tool_definition.v1` and excludes `x-assay-sig`, top-level
+  vendor/provider metadata, annotations, display hints, raw registry bodies,
+  runtime results, and inferred `tools/call` fields. This is review visibility
+  only; it does not claim tool safety, signature validity, signer trust,
+  registry truth, or implementation truth.
 
 ## [3.8.0] - 2026-04-29
 
