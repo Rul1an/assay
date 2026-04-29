@@ -18,6 +18,9 @@ CRATES=(
   "assay-cli"
 )
 
+CRATESIO_PUBLISH_WAIT_ATTEMPTS="${CRATESIO_PUBLISH_WAIT_ATTEMPTS:-36}"
+CRATESIO_PUBLISH_WAIT_DELAY_SECONDS="${CRATESIO_PUBLISH_WAIT_DELAY_SECONDS:-10}"
+
 # Get version from the crate's Cargo.toml (with workspace fallback)
 crate_version() {
   local crate="$1"
@@ -77,8 +80,42 @@ cratesio_status() {
     "$url" || echo "000"
 }
 
+wait_for_cratesio_version() {
+  local crate="$1"
+  local ver="$2"
+  local code
+  local i
+
+  echo "Waiting for ${crate}@${ver} to appear in the crates.io API..."
+  for ((i = 1; i <= CRATESIO_PUBLISH_WAIT_ATTEMPTS; i++)); do
+    code="$(cratesio_status "$crate" "$ver")"
+    case "$code" in
+      200)
+        echo "✅ ${crate}@${ver} is visible in crates.io."
+        return 0
+        ;;
+      403)
+        echo "⚠️  crates.io API returned 403 while confirming ${crate}@${ver}; cargo publish succeeded, so continuing."
+        return 0
+        ;;
+      404|429|500|502|503|504|000)
+        echo "⏳ ${crate}@${ver} not visible yet (status ${code}, attempt ${i}/${CRATESIO_PUBLISH_WAIT_ATTEMPTS})."
+        sleep "${CRATESIO_PUBLISH_WAIT_DELAY_SECONDS}"
+        ;;
+      *)
+        echo "❌ Unexpected HTTP status '${code}' while waiting for ${crate}@${ver}."
+        return 1
+        ;;
+    esac
+  done
+
+  echo "❌ ${crate}@${ver} did not become visible after ${CRATESIO_PUBLISH_WAIT_ATTEMPTS} attempts."
+  return 1
+}
+
 try_publish() {
   local crate="$1"
+  local ver="$2"
 
   # Attempt publish; treat "already exists" as success for idempotency.
   # Using mktemp avoids pipefail issues with tee + grep.
@@ -90,8 +127,10 @@ try_publish() {
   set -e
 
   if [ "$rc" -eq 0 ]; then
-    echo "Sleeping 45s for index propagation..."
-    sleep 45
+    if ! wait_for_cratesio_version "$crate" "$ver"; then
+      rm -f "$log"
+      return 1
+    fi
     rm -f "$log"
     return 0
   fi
@@ -133,12 +172,12 @@ publish_one() {
       ;;
     404)
       echo "⬆️  ${crate}@${ver} not found — publishing..."
-      try_publish "$crate"
+      try_publish "$crate" "$ver"
       return 0
       ;;
     403)
       echo "⚠️  crates.io API returned 403 (likely WAF/Cloudflare). Falling back to publish-attempt idempotency..."
-      try_publish "$crate"
+      try_publish "$crate" "$ver"
       return 0
       ;;
     429|500|502|503|504|000)
@@ -152,7 +191,7 @@ publish_one() {
         fi
         if [[ "$code" == "404" || "$code" == "403" ]]; then
           echo "⬆️  attempting publish (try $i)..."
-          if try_publish "$crate"; then
+          if try_publish "$crate" "$ver"; then
             return 0
           fi
         fi

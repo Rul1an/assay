@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### CI / Release
+
+- Hardened the idempotent crates.io publisher so it waits for each newly
+  published workspace crate to become visible through the crates.io API before
+  publishing the next dependent crate.
 
 ## [3.9.1] - 2026-04-29
 
