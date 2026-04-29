@@ -14,6 +14,7 @@ use assay_evidence::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
@@ -208,14 +209,16 @@ fn assert_trust_basis(
     trust_basis: &TrustBasis,
     requirements: Vec<TrustBasisRequirement>,
 ) -> TrustBasisAssertReport {
+    let claim_levels: HashMap<TrustClaimId, TrustClaimLevel> = trust_basis
+        .claims
+        .iter()
+        .map(|claim| (claim.id, claim.level))
+        .collect();
+
     let results: Vec<TrustBasisAssertRequirementResult> = requirements
         .into_iter()
         .map(|requirement| {
-            let actual_level = trust_basis
-                .claims
-                .iter()
-                .find(|claim| claim.id == requirement.claim_id)
-                .map(|claim| claim.level);
+            let actual_level = claim_levels.get(&requirement.claim_id).copied();
             let status = if actual_level == Some(requirement.expected_level) {
                 TrustBasisAssertStatus::Passed
             } else {
