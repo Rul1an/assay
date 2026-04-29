@@ -40,9 +40,11 @@ impl ToolDefinitionBinding {
 
 /// Compute a P56b binding from an observed `tools/list` tool definition.
 ///
-/// Returns `Ok(None)` when the observed value is not a supported bounded v1
-/// tool definition. This function never reconstructs a definition from
-/// `tools/call` data and never imports unsupported top-level fields.
+/// Returns `Ok(None)` when the observed value is well-formed but is not a
+/// supported bounded v1 tool definition. Malformed or otherwise invalid tool
+/// definitions may return `Err` during normalization or projection. This
+/// function never reconstructs a definition from `tools/call` data and never
+/// imports unsupported top-level fields.
 pub fn binding_from_tools_list_tool(
     tool: &Value,
     server_id: Option<&str>,
