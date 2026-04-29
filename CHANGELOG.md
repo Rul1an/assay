@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Trust Compiler
+
+- **Trust Basis assertions**: `assay trust-basis assert` can now gate one
+  canonical `trust-basis.json` artifact against generic
+  `--require <claim-id>=<level>` predicates. The command is claim-id based,
+  emits text or `assay.trust-basis.assert.v1` JSON, exits `0` on pass, exits
+  `1` on policy mismatch, and keeps input/config/runtime failures on `2+`.
+
 ## [3.8.0] - 2026-04-29
 
 This minor release turns the v3.7.0 three-family receipt surface into a more

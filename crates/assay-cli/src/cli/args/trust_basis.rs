@@ -14,6 +14,8 @@ pub enum TrustBasisSub {
     Generate(TrustBasisGenerateArgs),
     /// Compare two canonical trust-basis.json artifacts
     Diff(TrustBasisDiffArgs),
+    /// Assert required claim levels in one canonical trust-basis.json artifact
+    Assert(TrustBasisAssertArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -52,4 +54,19 @@ pub struct TrustBasisDiffArgs {
     /// Exit non-zero when the candidate removes or lowers a baseline claim
     #[arg(long)]
     pub fail_on_regression: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TrustBasisAssertArgs {
+    /// Trust Basis JSON artifact produced by `assay trust-basis generate`
+    #[arg(long, short = 'i', value_name = "TRUST_BASIS")]
+    pub input: PathBuf,
+
+    /// Required claim level, formatted as <claim-id>=<level>
+    #[arg(long = "require", value_name = "CLAIM=LEVEL", required = true)]
+    pub requirements: Vec<String>,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
 }
