@@ -1,4 +1,4 @@
-# What Assay Is And Is Not
+# What Assay Is and Is Not
 
 Assay compiles agent runtime signals and selected external outcomes into
 verifiable evidence and bounded Trust Basis claims.
@@ -40,7 +40,7 @@ verified, what was merely visible, and what should not be claimed.
 The machine-readable receipt family surface is tracked in the
 [receipt family matrix](../reference/receipt-family-matrix.json).
 
-## Out Of Scope
+## Out of Scope
 
 | Area | Why It Is Not Assay |
 |---|---|
