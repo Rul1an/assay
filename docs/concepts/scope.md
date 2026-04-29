@@ -32,7 +32,7 @@ verified, what was merely visible, and what should not be claimed.
 | Protocol policy | Deterministic allow/deny/approval decisions over supported MCP tool-call surfaces. |
 | Evidence bundles | Offline-verifiable evidence artifacts with canonical event envelopes and content binding. |
 | Trust Basis | Bounded claim classification from verified bundles, keyed by stable `claim.id`. |
-| Trust Card | Human-readable JSON/Markdown projection of the Trust Basis claim set. |
+| Trust Card | Canonical JSON plus Markdown/HTML projections of the Trust Basis claim set. |
 | External receipts | Narrow compiler lanes for selected upstream seams such as Promptfoo assertion components, OpenFeature boolean `EvaluationDetails`, and CycloneDX ML-BOM model components. |
 | CI projections | SARIF/JUnit/Markdown outputs where appropriate, with raw canonical artifacts kept separate. |
 | Packs | Optional evidence linting and policy packs that structure findings; packs do not prove legal compliance by themselves. |

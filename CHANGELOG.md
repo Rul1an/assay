@@ -16,6 +16,11 @@ All notable changes to this project will be documented in this file.
   receipt payload and importer-input schemas, shows schema metadata before raw
   JSON Schema content, validates JSON or JSONL artifacts, and keeps Mastra
   marked as importer-only rather than a public Trust Basis claim family.
+- **Static Trust Card HTML**: `assay trustcard generate` now writes
+  `trustcard.html` beside `trustcard.json` and `trustcard.md`. JSON remains the
+  canonical Trust Card artifact; Markdown and single-file HTML are deterministic
+  reviewer projections with no remote assets, JavaScript requirement, scores,
+  badges, or second classifier.
 
 ## [3.8.0] - 2026-04-29
 

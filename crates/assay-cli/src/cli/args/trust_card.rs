@@ -9,7 +9,7 @@ pub struct TrustCardArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TrustCardSub {
-    /// Generate trustcard.json and trustcard.md from a verified evidence bundle
+    /// Generate trustcard.json, trustcard.md, and trustcard.html from a verified evidence bundle
     Generate(TrustCardGenerateArgs),
 }
 
@@ -19,7 +19,7 @@ pub struct TrustCardGenerateArgs {
     #[arg(value_name = "BUNDLE")]
     pub bundle: PathBuf,
 
-    /// Output directory for trustcard.json and trustcard.md
+    /// Output directory for trustcard.json, trustcard.md, and trustcard.html
     #[arg(long = "out-dir", value_name = "DIR")]
     pub out_dir: PathBuf,
 

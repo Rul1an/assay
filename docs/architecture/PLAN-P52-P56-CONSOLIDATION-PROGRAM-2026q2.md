@@ -199,13 +199,8 @@ source of truth.
 - Add HTML projection support to Trust Card generation.
 - Produce a deterministic single-file artifact.
 - Render the same claim rows as `trustcard.json` and `trustcard.md`.
-- Show claim id, level, source, boundary, note, and evidence posture.
-- Show receipt-family context where present:
-  - event type,
-  - included fields,
-  - excluded fields,
-  - `does_not_claim`.
-- Link to raw Trust Basis and evidence artifacts when the caller supplies paths.
+- Show claim id, level, source, boundary, and note.
+- Keep `trustcard.json` canonical; Markdown and HTML are projections.
 
 ### Non-goals
 
@@ -214,6 +209,7 @@ source of truth.
 - No JavaScript requirement to understand the artifact.
 - No scores, badges, or second classifier.
 - No claim semantics added in HTML.
+- No receipt-family context expansion or raw evidence links in this slice.
 
 ### Acceptance
 

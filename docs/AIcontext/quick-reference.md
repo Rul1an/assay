@@ -28,6 +28,7 @@ assay ci --config eval.yaml --trace-file traces.jsonl
 assay evidence verify bundle.tar.gz
 assay trust-basis generate bundle.tar.gz --out trust-basis.json
 assay trustcard generate bundle.tar.gz --out-dir trustcard
+# writes trustcard.json, trustcard.md, and static trustcard.html
 
 # Debug failures
 assay doctor                  # Diagnose common issues
