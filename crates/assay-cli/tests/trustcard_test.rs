@@ -139,6 +139,13 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
         "HTML must keep JSON canonical"
     );
     assert!(
+        html.contains("Content-Security-Policy")
+            && html.contains("script-src 'none'")
+            && html.contains("prefers-color-scheme: dark")
+            && html.contains("forced-colors: active"),
+        "trustcard.html must carry static-page security and accessibility polish"
+    );
+    assert!(
         !html.contains("<script") && !html.contains("https://") && !html.contains("http://"),
         "trustcard.html must be a static no-network projection"
     );

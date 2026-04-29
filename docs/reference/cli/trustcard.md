@@ -22,8 +22,10 @@ non-goals:
 - `trustcard.html` is a deterministic single-file static HTML projection for
   browser review.
 
-The HTML artifact has inline styles only. It does not require JavaScript,
-remote assets, a hosted backend, or network access. It does not add claim
+The HTML artifact has inline styles only plus a static-page Content Security
+Policy. It does not require JavaScript, remote assets, a hosted backend, or
+network access. It includes accessible table structure, responsive overflow,
+dark-mode, forced-colors, and print styling, but it does not add claim
 semantics, scores, badges, or a second classifier.
 
 ## Options
