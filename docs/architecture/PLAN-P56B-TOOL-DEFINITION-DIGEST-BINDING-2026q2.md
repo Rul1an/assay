@@ -55,20 +55,28 @@ The bounded canonical input is a JSON object containing only:
 - `name`;
 - optional `description`;
 - optional `input_schema`;
-- optional `server_id` only when the observed definition is already scoped to a
-  configured server label.
+- optional `server_id` only when the observed `tools/list` definition is
+  already emitted in a server-scoped context and omitting the server label would
+  collapse distinct reviewed definitions.
 
 Before canonicalization:
 
+- top-level fields are closed for v1: only `name`, `description`,
+  `input_schema`, and conditionally `server_id` are allowed in the projection;
 - `inputSchema` and `input_schema` MUST normalize to `input_schema`;
 - `description` is part of the review boundary because it is agent- and
   reviewer-facing tool text;
-- whitespace-only `description` values SHOULD be treated as absent;
-- the full normalized `input_schema` object SHOULD be included, not a reduced
+- `description` values MUST be trimmed at the boundary; if the trimmed value is
+  empty, the field MUST be treated as absent; internal whitespace is preserved;
+- `server_id` MUST be absent unless the observed definition is server-scoped and
+  omission would collapse distinct reviewed definitions;
+- the full normalized `input_schema` object MUST be included, not a reduced
   schema subset;
 - JSON object key ordering MUST NOT affect the digest;
 - no `x-assay-sig` field;
 - no provider metadata or vendor extension fields outside `input_schema`;
+- no top-level vendor extensions, annotations, display hints, or extra metadata
+  blobs;
 - no runtime result payload;
 - no full registry object;
 - no inferred fields from a later `tools/call`.
@@ -77,6 +85,9 @@ The digest input is the JCS canonicalization of that bounded projection.
 Unsupported top-level fields are excluded before JCS canonicalization. Schema
 keywords inside `input_schema` are preserved as part of the reviewed schema
 surface rather than normalized into a smaller Assay-specific schema language.
+This means vendor-specific schema keywords inside `input_schema` remain part of
+the reviewed schema surface, while vendor/provider fields beside the tool
+definition are excluded.
 
 The proposed decision-evidence projection is:
 
@@ -144,6 +155,10 @@ are derived from the same observed `tools/list` surface, they SHOULD use the
 same bounded canonical projection, minus `x-assay-sig`, so review and
 verification do not diverge unnecessarily.
 
+If signing uses that same bounded projection, any divergence between the signing
+input and the `tool_definition_digest` input must be treated as a deliberate
+versioned contract change, not an implementation detail.
+
 P56b must not claim:
 
 - the signature was verified;
@@ -198,11 +213,16 @@ visible, not that the tool is safe.
 - Decision paths without an observed bounded tool definition omit the cluster
   rather than inventing a digest.
 - Tests prove digest determinism for equivalent bounded definitions.
-- Tests prove equivalent observed `tools/list` definitions produce the same
-  digest regardless of JSON key ordering.
+- Tests prove allowed top-level field subsets produce the same digest regardless
+  of JSON key ordering.
+- Tests prove unknown top-level fields are excluded before digesting.
 - Tests prove `inputSchema` and `input_schema` normalize to the same digest.
 - Tests prove whitespace-only `description` handling is deterministic.
+- Tests prove `server_id` inclusion and omission follow the v1 server-scoping
+  rule.
 - Tests prove `x-assay-sig` does not affect the digest.
+- Tests prove equivalent signed and unsigned observed definitions can carry the
+  same digest when only `x-assay-sig` differs.
 - Tests prove provider metadata, top-level vendor fields, and raw tool bodies
   are not imported into the decision evidence path.
 - Tests prove half-present `tool_definition_*` clusters are not emitted.
