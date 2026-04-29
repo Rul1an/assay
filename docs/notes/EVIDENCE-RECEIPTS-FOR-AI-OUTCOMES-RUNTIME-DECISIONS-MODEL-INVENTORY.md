@@ -124,7 +124,7 @@ The machine-readable family matrix is:
 
 ## Harness Boundary
 
-Assay Harness v0.3.0 proves the same generic gate/report layer can carry all
+Assay Harness v0.3.1 proves the same generic gate/report layer can carry all
 three families.
 
 Harness does not parse Promptfoo JSONL, OpenFeature JSONL, CycloneDX BOMs, or
@@ -134,9 +134,9 @@ gates, and projects the raw Assay Trust Basis diff contract.
 
 Runnable recipes live in Assay Harness:
 
-- [Promptfoo receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.0/docs/PROMPTFOO_RECEIPT_PIPELINE.md)
-- [OpenFeature decision receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.0/docs/OPENFEATURE_DECISION_RECEIPT_PIPELINE.md)
-- [CycloneDX ML-BOM model receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.0/docs/CYCLONEDX_MLBOM_MODEL_RECEIPT_PIPELINE.md)
+- [Promptfoo receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.1/docs/PROMPTFOO_RECEIPT_PIPELINE.md)
+- [OpenFeature decision receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.1/docs/OPENFEATURE_DECISION_RECEIPT_PIPELINE.md)
+- [CycloneDX ML-BOM model receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.1/docs/CYCLONEDX_MLBOM_MODEL_RECEIPT_PIPELINE.md)
 
 ## What This Does Not Claim
 

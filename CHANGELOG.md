@@ -87,7 +87,7 @@ claim-level boundary discipline as the earlier Promptfoo lane.
   or partnership support for Promptfoo, OpenFeature, CycloneDX, or Mastra.
 - Trust Basis and Trust Card consumers should treat the new claim rows as
   additive. Select claims by `claim.id` and tolerate unknown future claims.
-- Assay Harness `v0.3.0` is the intended companion release for running the
+- Assay Harness `v0.3.1` is the intended companion release for running the
   Promptfoo, OpenFeature, and CycloneDX recipes over this claim surface.
 
 ## [3.6.0] - 2026-04-27
