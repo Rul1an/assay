@@ -12,6 +12,58 @@ assay evidence <COMMAND> [OPTIONS]
 
 ---
 
+## Receipt Schema Registry
+
+Inspect and validate the machine-readable receipt schema registry:
+
+```bash
+assay evidence schema list
+assay evidence schema show promptfoo.assertion-component.v1
+assay evidence schema show promptfoo.assertion-component.v1 --raw
+assay evidence schema validate \
+  --schema promptfoo.assertion-component.v1 \
+  --input receipt.json
+```
+
+For JSONL importer inputs, validate each non-empty row with `--jsonl`:
+
+```bash
+assay evidence schema validate \
+  --schema promptfoo-cli-jsonl-component-result.v1 \
+  --input results.jsonl \
+  --jsonl
+```
+
+The schema CLI covers the v3.8.0 registry:
+
+- receipt payload schemas for Promptfoo, OpenFeature, CycloneDX ML-BOM, and
+  Mastra receipts
+- importer input schemas where the reduced input artifact differs from the
+  receipt payload
+- metadata such as schema `$id`, family, status, source path, short
+  description, and Trust Basis claim when one exists
+
+Mastra remains importer-only in this registry. It has input and receipt schemas,
+but no public Trust Basis score receipt claim yet.
+
+`validate` exits `0` when the artifact matches the selected schema and exits
+`1` when the artifact is valid JSON/JSONL but fails schema validation. Unknown
+schema names, unreadable files, and runtime/configuration errors remain
+input/config errors (`2+` via the top-level CLI error handling).
+
+### Options
+
+| Command | Description |
+|---------|-------------|
+| `assay evidence schema list [--format text|json]` | List all supported schema entries |
+| `assay evidence schema show <SCHEMA> [--format text|json] [--raw]` | Show schema metadata or raw JSON Schema |
+| `assay evidence schema validate --schema <SCHEMA> --input <PATH> [--jsonl] [--format text|json]` | Validate a JSON or JSONL artifact |
+
+Schema names can be the registry name, known alias, source path, or JSON Schema
+`$id`. Use `list` to discover supported names.
+
+---
+
 ## CycloneDX ML-BOM Model Import
 
 Import one selected CycloneDX ML-BOM `machine-learning-model` component into a

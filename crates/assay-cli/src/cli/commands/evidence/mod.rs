@@ -8,6 +8,7 @@ pub mod openfeature_details;
 pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
+pub mod schema;
 pub mod store_status;
 
 use anyhow::{Context, Result};
@@ -27,6 +28,8 @@ pub enum EvidenceCmd {
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
     Import(EvidenceImportArgs),
+    /// Inspect and validate supported receipt/input schemas
+    Schema(schema::SchemaArgs),
     /// Lint a bundle for quality and security issues
     Lint(lint::LintArgs),
     /// Diff two bundles and report changes
@@ -109,6 +112,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Verify(a) => cmd_verify(a),
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),
+        EvidenceCmd::Schema(a) => schema::cmd_schema(a),
         EvidenceCmd::Lint(a) => lint::cmd_lint(a),
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
         EvidenceCmd::Push(a) => push::cmd_push(a).await,

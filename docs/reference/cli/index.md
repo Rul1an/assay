@@ -30,7 +30,7 @@ assay --version
 | [`assay explain`](explain.md) | Explain why trace steps were allowed/blocked |
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
-| [`assay evidence`](evidence.md) | Manage evidence bundles and external evidence imports |
+| [`assay evidence`](evidence.md) | Manage evidence bundles, external evidence imports, and receipt schemas |
 | [`assay trust-basis`](trust-basis.md) | Generate, compare, and assert canonical Trust Basis artifacts |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
