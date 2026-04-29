@@ -91,6 +91,7 @@ Records authorization decisions (HITL-ready, protocol-based).
   "decision": "allow|deny|requires_approval",
   "reason_code": "E_POLICY_DENY",
   "args_schema_hash": "sha256:...",
+  "policy_digest": "sha256:...",
   "policy_snapshot_digest": "sha256:...",
   "policy_snapshot_digest_alg": "sha256",
   "policy_snapshot_canonicalization": "jcs:mcp_policy",
@@ -106,7 +107,20 @@ optional P56a fields. They make the canonical MCP policy snapshot digest
 visible when supported runtime decision paths already have a policy digest.
 They do not imply that the policy is correct, sufficient, safe, approved, or
 complete. Existing `policy_digest` remains a compatibility field;
-`policy_snapshot_digest` is the explicit reviewer surface.
+`policy_snapshot_digest` is the explicit reviewer surface. On supported paths,
+`policy_snapshot_digest` is the self-describing projection of `policy_digest`
+and MUST carry the same digest value. If `policy_snapshot_digest` is present,
+then `policy_snapshot_digest_alg`, `policy_snapshot_canonicalization`, and
+`policy_snapshot_schema` MUST also be present.
+
+`policy_snapshot_canonicalization: "jcs:mcp_policy"` means the digest is
+computed over the existing canonical serialization of the `McpPolicy` object
+using JCS before SHA-256 hashing, matching the `McpPolicy::policy_digest()`
+implementation. P56a projects this existing digest only; it does not infer or
+reconstruct policy snapshots after the fact, and it does not make policy
+snapshots retrievable, exportable, or embedded. Absence of
+`policy_snapshot_digest` means the policy snapshot boundary is not visible, not
+that the decision is safe.
 
 `delegated_from` and `delegation_depth` are additive optional fields. They are
 surfaced only when a supported decision flow carries explicit

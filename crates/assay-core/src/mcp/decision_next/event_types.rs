@@ -108,10 +108,6 @@ pub struct PolicyDecisionEventContext {
     pub typed_decision: Option<TypedPolicyDecision>,
     pub policy_version: Option<String>,
     pub policy_digest: Option<String>,
-    pub policy_snapshot_digest: Option<String>,
-    pub policy_snapshot_digest_alg: Option<String>,
-    pub policy_snapshot_canonicalization: Option<String>,
-    pub policy_snapshot_schema: Option<String>,
     pub obligations: Vec<PolicyObligation>,
     pub obligation_outcomes: Vec<ObligationOutcome>,
     pub approval_state: Option<String>,
@@ -445,22 +441,17 @@ pub struct DecisionData {
 }
 
 impl DecisionData {
-    pub(crate) fn apply_policy_snapshot_projection(
-        &mut self,
-        digest: Option<String>,
-        digest_alg: Option<String>,
-        canonicalization: Option<String>,
-        schema: Option<String>,
-    ) {
-        self.policy_snapshot_digest = digest.or_else(|| self.policy_digest.clone());
+    /// Project the legacy-compatible `policy_digest` into the explicit P56a
+    /// review surface. This is a pure projection: never reconstruct a digest,
+    /// and never let the snapshot fields represent a different value.
+    pub(crate) fn apply_policy_snapshot_projection(&mut self) {
+        self.policy_snapshot_digest = self.policy_digest.clone();
 
         if self.policy_snapshot_digest.is_some() {
-            self.policy_snapshot_digest_alg =
-                digest_alg.or_else(|| Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256.to_string()));
-            self.policy_snapshot_canonicalization = canonicalization
-                .or_else(|| Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY.to_string()));
-            self.policy_snapshot_schema =
-                schema.or_else(|| Some(POLICY_SNAPSHOT_SCHEMA_V1.to_string()));
+            self.policy_snapshot_digest_alg = Some(POLICY_SNAPSHOT_DIGEST_ALG_SHA256.to_string());
+            self.policy_snapshot_canonicalization =
+                Some(POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY.to_string());
+            self.policy_snapshot_schema = Some(POLICY_SNAPSHOT_SCHEMA_V1.to_string());
         } else {
             self.policy_snapshot_digest_alg = None;
             self.policy_snapshot_canonicalization = None;

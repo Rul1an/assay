@@ -1,8 +1,4 @@
-use super::super::decision::{
-    reason_codes, DecisionEvent, PolicyDecisionEventContext,
-    POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY, POLICY_SNAPSHOT_DIGEST_ALG_SHA256,
-    POLICY_SNAPSHOT_SCHEMA_V1,
-};
+use super::super::decision::{reason_codes, DecisionEvent, PolicyDecisionEventContext};
 use super::super::policy::PolicyMatchMetadata;
 use super::types::HandleResult;
 use crate::runtime::AuthzReceipt;
@@ -118,18 +114,10 @@ impl ToolMatchMetadata {
     }
 
     pub(super) fn policy_context(&self) -> PolicyDecisionEventContext {
-        let has_policy_digest = self.policy_digest.is_some();
         PolicyDecisionEventContext {
             typed_decision: self.typed_decision,
             policy_version: self.policy_version.clone(),
             policy_digest: self.policy_digest.clone(),
-            policy_snapshot_digest: self.policy_digest.clone(),
-            policy_snapshot_digest_alg: has_policy_digest
-                .then(|| POLICY_SNAPSHOT_DIGEST_ALG_SHA256.to_string()),
-            policy_snapshot_canonicalization: has_policy_digest
-                .then(|| POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY.to_string()),
-            policy_snapshot_schema: has_policy_digest
-                .then(|| POLICY_SNAPSHOT_SCHEMA_V1.to_string()),
             obligations: self.obligations.clone(),
             obligation_outcomes: self.obligation_outcomes.clone(),
             approval_state: self.approval_state.clone(),

@@ -24,9 +24,12 @@ All notable changes to this project will be documented in this file.
 - **Policy snapshot digest visibility**: supported MCP `assay.tool.decision`
   events now project `policy_snapshot_digest`,
   `policy_snapshot_digest_alg`, `policy_snapshot_canonicalization`, and
-  `policy_snapshot_schema` from the canonical policy digest when available.
-  This is a review binding only; it does not claim the policy is correct,
-  sufficient, safe, approved, or complete.
+  `policy_snapshot_schema` from the existing `policy_digest` when available.
+  `policy_snapshot_digest` is the self-describing reviewer projection of
+  `policy_digest`; the values match on supported paths, and the snapshot field
+  cluster is produced atomically. This is a review binding only; it does not
+  claim the policy is correct, sufficient, safe, approved, complete,
+  retrievable, exportable, or embedded.
 
 ## [3.8.0] - 2026-04-29
 

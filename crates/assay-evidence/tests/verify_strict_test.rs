@@ -142,6 +142,7 @@ fn test_tool_decision_stable_payload_conformance() {
         "decision": "allow",
         "reason_code": "P_POLICY_ALLOW",
         "args_schema_hash": "sha256:abc",
+        "policy_digest": "sha256:policy123",
         "policy_snapshot_digest": "sha256:policy123",
         "policy_snapshot_digest_alg": "sha256",
         "policy_snapshot_canonicalization": "jcs:mcp_policy",
@@ -152,6 +153,10 @@ fn test_tool_decision_stable_payload_conformance() {
     let typed: PayloadToolDecision = serde_json::from_value(payload.clone())
         .expect("tool decision payload contract should parse");
     assert_eq!(typed.tool, "read_file");
+    assert_eq!(
+        typed.policy_digest.as_deref(),
+        typed.policy_snapshot_digest.as_deref()
+    );
     assert_eq!(
         typed.policy_snapshot_digest.as_deref(),
         Some("sha256:policy123")

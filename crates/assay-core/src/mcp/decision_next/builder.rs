@@ -198,10 +198,6 @@ impl DecisionEvent {
             typed_decision,
             policy_version,
             policy_digest,
-            policy_snapshot_digest,
-            policy_snapshot_digest_alg,
-            policy_snapshot_canonicalization,
-            policy_snapshot_schema,
             obligations,
             obligation_outcomes,
             approval_state,
@@ -237,12 +233,7 @@ impl DecisionEvent {
         self.data.typed_decision = typed_decision;
         self.data.policy_version = policy_version;
         self.data.policy_digest = policy_digest;
-        self.data.apply_policy_snapshot_projection(
-            policy_snapshot_digest,
-            policy_snapshot_digest_alg,
-            policy_snapshot_canonicalization,
-            policy_snapshot_schema,
-        );
+        self.data.apply_policy_snapshot_projection();
         self.data.obligations = obligations;
         self.data.obligation_outcomes = obligation_outcomes;
         self.data.approval_state = approval_state;

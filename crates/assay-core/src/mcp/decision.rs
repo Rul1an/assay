@@ -354,7 +354,7 @@ mod tests {
         );
         assert_eq!(
             event.data.policy_snapshot_digest.as_deref(),
-            Some("sha256:policy123")
+            event.data.policy_digest.as_deref()
         );
         assert_eq!(
             event.data.policy_snapshot_digest_alg.as_deref(),
@@ -368,6 +368,25 @@ mod tests {
             event.data.policy_snapshot_schema.as_deref(),
             Some(POLICY_SNAPSHOT_SCHEMA_V1)
         );
+    }
+
+    #[test]
+    fn test_policy_snapshot_projection_is_atomic() {
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_policy_snapshot_atomic".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(PolicyDecisionEventContext {
+            policy_digest: Some("sha256:policy456".to_string()),
+            ..PolicyDecisionEventContext::default()
+        });
+
+        assert!(event.data.policy_snapshot_digest.is_some());
+        assert!(event.data.policy_snapshot_digest_alg.is_some());
+        assert!(event.data.policy_snapshot_canonicalization.is_some());
+        assert!(event.data.policy_snapshot_schema.is_some());
     }
 
     #[test]
