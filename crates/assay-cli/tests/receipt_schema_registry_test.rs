@@ -16,6 +16,12 @@ fn schema_path(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+fn packaged_schema_path(relative: &str) -> PathBuf {
+    repo_root()
+        .join("crates/assay-cli/receipt-schemas")
+        .join(relative)
+}
+
 fn receipt_family_matrix() -> Value {
     let path = repo_root().join("docs/reference/receipt-family-matrix.json");
     serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
@@ -141,6 +147,31 @@ fn schema_cli_paths_match_receipt_family_matrix() {
 }
 
 #[test]
+fn packaged_schema_assets_match_docs_registry() {
+    let matrix = receipt_family_matrix();
+    let families = matrix["families"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(matrix["importer_only_receipts"].as_array().unwrap().iter());
+
+    for family in families {
+        for key in ["receipt_schema_path", "input_schema_path"] {
+            let relative = family[key]
+                .as_str()
+                .unwrap()
+                .strip_prefix("receipt-schemas/")
+                .unwrap();
+            assert_eq!(
+                fs::read(schema_path(relative)).unwrap(),
+                fs::read(packaged_schema_path(relative)).unwrap(),
+                "packaged schema asset should match docs registry for {relative}"
+            );
+        }
+    }
+}
+
+#[test]
 fn schema_cli_shows_metadata_and_raw_schema() {
     let output = assay_schema_command()
         .arg("show")
@@ -243,6 +274,59 @@ fn schema_cli_returns_exit_one_for_schema_mismatch() {
     let report: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(report["valid"], false);
     assert!(!report["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn schema_cli_returns_exit_two_for_invalid_json_input() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("receipt.json");
+    fs::write(
+        &input,
+        r#"{"schema":"assay.receipt.promptfoo.assertion-component.v1""#,
+    )
+    .unwrap();
+
+    let output = assay_schema_command()
+        .arg("validate")
+        .arg("--schema")
+        .arg("promptfoo.assertion-component.v1")
+        .arg("--input")
+        .arg(&input)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["valid"], false);
+    assert_eq!(report["errors"][0]["kind"], "parse");
+}
+
+#[test]
+fn schema_cli_returns_exit_two_for_empty_jsonl_input() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("results.jsonl");
+    fs::write(&input, "\n\n").unwrap();
+
+    let output = assay_schema_command()
+        .arg("validate")
+        .arg("--schema")
+        .arg("promptfoo-cli-jsonl-component-result.v1")
+        .arg("--input")
+        .arg(&input)
+        .arg("--jsonl")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["valid"], false);
+    assert_eq!(report["errors"][0]["kind"], "empty_input");
 }
 
 #[test]

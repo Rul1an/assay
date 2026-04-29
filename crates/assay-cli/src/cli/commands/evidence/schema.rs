@@ -1,5 +1,5 @@
 use crate::cli::args::OutputFormat;
-use crate::exit_codes::{EXIT_SUCCESS, EXIT_TEST_FAILURE};
+use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_SUCCESS, EXIT_TEST_FAILURE};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use jsonschema::Draft;
@@ -12,38 +12,32 @@ const SCHEMA_LIST_REPORT: &str = "assay.evidence.schema.list.v1";
 const SCHEMA_SHOW_REPORT: &str = "assay.evidence.schema.show.v1";
 const SCHEMA_VALIDATION_REPORT: &str = "assay.evidence.schema.validation.v1";
 
-const PROMPTFOO_RECEIPT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/receipts/promptfoo.assertion-component.v1.schema.json"
-));
-const OPENFEATURE_RECEIPT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/receipts/openfeature.evaluation-details.v1.schema.json"
-));
-const CYCLONEDX_RECEIPT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/receipts/cyclonedx.mlbom-model-component.v1.schema.json"
-));
-const MASTRA_RECEIPT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/receipts/mastra.score-event.v1.schema.json"
-));
-const PROMPTFOO_INPUT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/inputs/promptfoo-cli-jsonl-component-result.v1.schema.json"
-));
-const OPENFEATURE_INPUT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/inputs/openfeature-evaluation-details-export.v1.schema.json"
-));
-const CYCLONEDX_INPUT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/inputs/cyclonedx-mlbom-model-component-input.v1.schema.json"
-));
-const MASTRA_INPUT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/reference/receipt-schemas/inputs/mastra-score-event-export.v1.schema.json"
-));
+macro_rules! include_packaged_schema {
+    ($relative_path:literal) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/receipt-schemas/",
+            $relative_path
+        ))
+    };
+}
+
+const PROMPTFOO_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/promptfoo.assertion-component.v1.schema.json");
+const OPENFEATURE_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/openfeature.evaluation-details.v1.schema.json");
+const CYCLONEDX_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/cyclonedx.mlbom-model-component.v1.schema.json");
+const MASTRA_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/mastra.score-event.v1.schema.json");
+const PROMPTFOO_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/promptfoo-cli-jsonl-component-result.v1.schema.json");
+const OPENFEATURE_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/openfeature-evaluation-details-export.v1.schema.json");
+const CYCLONEDX_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/cyclonedx-mlbom-model-component-input.v1.schema.json");
+const MASTRA_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/mastra-score-event-export.v1.schema.json");
 
 /// Inspect and validate supported receipt schema contracts.
 #[derive(Debug, Args, Clone)]
@@ -296,8 +290,28 @@ struct SchemaValidationReport {
 #[derive(Debug, Serialize)]
 struct SchemaValidationError {
     document: usize,
+    kind: SchemaValidationErrorKind,
     instance_path: String,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SchemaValidationErrorKind {
+    Parse,
+    EmptyInput,
+    Schema,
+}
+
+impl SchemaValidationReport {
+    fn has_input_errors(&self) -> bool {
+        self.errors.iter().any(|error| {
+            matches!(
+                error.kind,
+                SchemaValidationErrorKind::Parse | SchemaValidationErrorKind::EmptyInput
+            )
+        })
+    }
 }
 
 pub fn cmd_schema(args: SchemaArgs) -> Result<i32> {
@@ -364,6 +378,8 @@ fn cmd_validate(args: SchemaValidateArgs) -> Result<i32> {
 
     if report.valid {
         Ok(EXIT_SUCCESS)
+    } else if report.has_input_errors() {
+        Ok(EXIT_CONFIG_ERROR)
     } else {
         Ok(EXIT_TEST_FAILURE)
     }
@@ -381,9 +397,7 @@ fn find_schema(raw: &str) -> Result<&'static SchemaDescriptor> {
         }
     }
 
-    bail!(
-        "unknown receipt schema {needle:?}; run `assay evidence schema list` for supported schemas"
-    );
+    bail!("unknown schema {needle:?}; run `assay evidence schema list` for supported schemas");
 }
 
 fn schema_metadata(descriptor: &SchemaDescriptor) -> Result<SchemaMetadata> {
@@ -426,6 +440,7 @@ fn validate_input(
                 Ok(value) => collect_validation_errors(line_number, &value, validator, &mut errors),
                 Err(err) => errors.push(SchemaValidationError {
                     document: line_number,
+                    kind: SchemaValidationErrorKind::Parse,
                     instance_path: "$".to_string(),
                     message: format!("invalid JSON: {err}"),
                 }),
@@ -437,6 +452,7 @@ fn validate_input(
             Ok(value) => collect_validation_errors(1, &value, validator, &mut errors),
             Err(err) => errors.push(SchemaValidationError {
                 document: 1,
+                kind: SchemaValidationErrorKind::Parse,
                 instance_path: "$".to_string(),
                 message: format!("invalid JSON: {err}"),
             }),
@@ -446,6 +462,7 @@ fn validate_input(
     if documents == 0 {
         errors.push(SchemaValidationError {
             document: 0,
+            kind: SchemaValidationErrorKind::EmptyInput,
             instance_path: "$".to_string(),
             message: "no JSON documents found".to_string(),
         });
@@ -474,6 +491,7 @@ fn collect_validation_errors(
             .iter_errors(value)
             .map(|err| SchemaValidationError {
                 document,
+                kind: SchemaValidationErrorKind::Schema,
                 instance_path: err.instance_path().to_string(),
                 message: err.to_string(),
             }),
@@ -481,7 +499,7 @@ fn collect_validation_errors(
 }
 
 fn write_list_text(report: &SchemaListReport) -> Result<i32> {
-    println!("Assay Receipt Schema Registry");
+    println!("Assay Evidence Schema Registry");
     println!("Schema: {}", report.schema);
     for schema in &report.schemas {
         println!(

@@ -47,9 +47,9 @@ Mastra remains importer-only in this registry. It has input and receipt schemas,
 but no public Trust Basis score receipt claim yet.
 
 `validate` exits `0` when the artifact matches the selected schema and exits
-`1` when the artifact is valid JSON/JSONL but fails schema validation. Unknown
-schema names, unreadable files, and runtime/configuration errors remain
-input/config errors (`2+` via the top-level CLI error handling).
+`1` when the artifact is valid JSON/JSONL but fails schema validation. Invalid
+JSON, invalid JSONL rows, empty JSONL input, unknown schema names, unreadable
+files, and runtime/configuration errors remain input/config errors (`2+`).
 
 ### Options
 
