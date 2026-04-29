@@ -24,6 +24,10 @@ decision evidence
 The point is reviewability. P56b does not make the tool safe, trusted, signed,
 approved, or globally registered.
 
+P56b makes the reviewed MCP tool-definition boundary self-describing on
+supported `assay.tool.decision` events. It does not add tool truth, signature
+trust, registry trust, or implementation truth.
+
 ## 2. Current Seams
 
 Assay already has three related surfaces:
@@ -46,16 +50,33 @@ overbroad concept.
 P56b v1 should be limited to supported MCP tool definitions observed from
 `tools/list`.
 
-The bounded canonical input is:
+The bounded canonical input is a JSON object containing only:
 
 - `name`;
 - optional `description`;
-- optional `inputSchema` / `input_schema`, normalized to one canonical key;
+- optional `input_schema`;
+- optional `server_id` only when the observed definition is already scoped to a
+  configured server label.
+
+Before canonicalization:
+
+- `inputSchema` and `input_schema` MUST normalize to `input_schema`;
+- `description` is part of the review boundary because it is agent- and
+  reviewer-facing tool text;
+- whitespace-only `description` values SHOULD be treated as absent;
+- the full normalized `input_schema` object SHOULD be included, not a reduced
+  schema subset;
+- JSON object key ordering MUST NOT affect the digest;
 - no `x-assay-sig` field;
-- no provider metadata;
+- no provider metadata or vendor extension fields outside `input_schema`;
 - no runtime result payload;
 - no full registry object;
 - no inferred fields from a later `tools/call`.
+
+The digest input is the JCS canonicalization of that bounded projection.
+Unsupported top-level fields are excluded before JCS canonicalization. Schema
+keywords inside `input_schema` are preserved as part of the reviewed schema
+surface rather than normalized into a smaller Assay-specific schema language.
 
 The proposed decision-evidence projection is:
 
@@ -73,10 +94,24 @@ If `tool_definition_digest` is present, the field cluster is atomic:
 `tool_definition_digest_alg`, `tool_definition_canonicalization`,
 `tool_definition_schema`, and `tool_definition_source` MUST also be present.
 
+The v1 cluster values are closed:
+
+- `tool_definition_digest_alg` MUST be exactly `"sha256"`;
+- `tool_definition_canonicalization` MUST be exactly
+  `"jcs:mcp_tool_definition.v1"`;
+- `tool_definition_schema` MUST be exactly
+  `"assay.mcp.tool-definition.snapshot.v1"`;
+- `tool_definition_source` MUST be exactly `"mcp.tools/list"`.
+
+Any later source, canonicalization, or schema widening requires a deliberate
+new version.
+
 ## 4. Relation to Existing ToolIdentity
 
 `ToolIdentity` remains the runtime pin/drift surface. It should not be silently
 renamed into P56b.
+
+`tool_definition_digest` is not a replacement for `ToolIdentity`.
 
 For v1:
 
@@ -85,9 +120,12 @@ For v1:
   bounded tool definition projection;
 - the implementation may derive both from the same `tools/list` observation;
 - neither surface should invent identity when `tools/list` was not observed.
+- `ToolIdentity` may still be used for runtime drift/pinning even when no
+  reviewable `tool_definition_digest` is present.
 
 This keeps old policy-pin behavior compatible while giving reviewers a single
-digest for the reviewed tool definition boundary.
+digest for the reviewed tool definition boundary. Absence of
+`tool_definition_digest` must not be reinterpreted as absence of tool identity.
 
 ## 5. Relation to x-assay-sig, DSSE, and Transparency Logs
 
@@ -100,6 +138,11 @@ tool-signing domain where possible:
 - DSSE PAE remains part of the signing/verification path;
 - `tool_definition_digest` is the decision-evidence review digest;
 - future signature fields, if added, should be separate from digest visibility.
+
+When a signed tool definition and a decision-visible `tool_definition_digest`
+are derived from the same observed `tools/list` surface, they SHOULD use the
+same bounded canonical projection, minus `x-assay-sig`, so review and
+verification do not diverge unnecessarily.
 
 P56b must not claim:
 
@@ -143,6 +186,7 @@ It does not mean:
 - the tool implementation matches the definition;
 - the tool result is safe;
 - the policy snapshot approved the tool definition.
+- the tool definition is retrievable, embeddable, or viewer-ready.
 
 Missing `tool_definition_digest` means the tool-definition boundary is not
 visible, not that the tool is safe.
@@ -154,8 +198,14 @@ visible, not that the tool is safe.
 - Decision paths without an observed bounded tool definition omit the cluster
   rather than inventing a digest.
 - Tests prove digest determinism for equivalent bounded definitions.
-- Tests prove provider metadata, signatures, and raw tool bodies are not
-  imported into the decision evidence path.
+- Tests prove equivalent observed `tools/list` definitions produce the same
+  digest regardless of JSON key ordering.
+- Tests prove `inputSchema` and `input_schema` normalize to the same digest.
+- Tests prove whitespace-only `description` handling is deterministic.
+- Tests prove `x-assay-sig` does not affect the digest.
+- Tests prove provider metadata, top-level vendor fields, and raw tool bodies
+  are not imported into the decision evidence path.
+- Tests prove half-present `tool_definition_*` clusters are not emitted.
 - Tests prove missing tool-definition digest visibility does not classify as
   safe or verified trust.
 - Docs clearly distinguish `ToolIdentity`, `tool_definition_digest`,
