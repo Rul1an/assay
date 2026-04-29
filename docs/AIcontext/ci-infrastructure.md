@@ -1,7 +1,7 @@
 # CI Infrastructure
 
 > **Purpose**: Documentation for CI/CD infrastructure, self-hosted runners, health checks, and optimization.
-> **Version**: 2.15.0 (February 2026)
+> **Version**: 3.8.0 (April 2026)
 
 ## Overview
 

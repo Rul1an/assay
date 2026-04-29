@@ -1,17 +1,21 @@
 # Assay Codebase Overview
 
-> **Version**: 2.15.0 (February 2026)
-> **SOTA Status**: Bleeding Edge (Judge Reliability, MCP Auth, OTel GenAI, Replay Bundle)
+> **Version**: 3.8.0 (April 2026)
+> **SOTA Status**: Trust Compiler line (MCP governance, Trust Basis, receipt portability)
 
 ## What is Assay?
 
-**Assay** is a **Policy-as-Code** engine for Model Context Protocol (MCP) that validates AI agent behavior. It provides:
+**Assay** is a CI-native evidence and trust compiler for agent systems. It
+compiles agent runtime signals and selected external outcomes into verifiable
+evidence and bounded Trust Basis claims. It provides:
 
-- **Deterministic testing**: Replay recorded traces without LLM API calls (milliseconds, $0 cost, 0% flakiness)
-- **Runtime security**: Kernel-level enforcement on Linux to block unauthorized tool access
-- **Compliance gates**: Validate tool arguments, sequences, and blocklists before production
+- **Protocol policy enforcement**: Deterministic MCP tool decisions without LLM calls in CI
+- **Evidence bundles**: Offline-verifiable artifacts for audit, review, and replay
+- **Trust compiler artifacts**: Trust Basis and Trust Card outputs with explicit evidence levels
+- **External receipt lanes**: Bounded receipt imports for selected eval, decision, inventory, and score-event surfaces
 
-Assay replaces flaky, network-dependent evals with deterministic replay testing. Record agent behavior once, then validate every PR in milliseconds.
+Policy-as-code remains an important wedge, but the current product surface is
+broader: verified evidence, bounded claims, and portable receipt contracts.
 
 ## High-Level Architecture
 
@@ -207,7 +211,7 @@ Report (console/JSON/JUnit/SARIF; SARIF truncation at 25k results by default, wi
 
 1. **Determinism**: Same input + same policy = same result (zero flakiness)
 2. **Statelessness**: Validation requires only policy file + trace list
-3. **Policy-as-Code**: Uses logic, not LLMs, for evaluation
+3. **Deterministic policy**: Uses explicit logic, not LLMs, for policy decisions
 4. **Separation of Concerns**: CLI handles UX/config, core handles evaluation logic
 5. **Extensibility**: Metrics, providers, and policies are pluggable via traits
 

@@ -21,9 +21,9 @@
 
 Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and what can you honestly **prove** about that run afterward?
 
-**Assay compiles agent runtime signals into enforceable decisions and portable evidence artifacts.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The product story is broader: canonical **evidence**, **bounded trust claims** (what is verified vs merely visible), and outputs you can hand to CI, security review, or audit — without a hosted backend.
+**Assay compiles agent runtime signals and selected external outcomes into verifiable evidence and bounded Trust Basis claims.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The product story is broader: canonical **evidence**, **bounded trust claims** (what is verified vs merely visible), and outputs you can hand to CI, security review, or audit — without a hosted backend.
 
-**Positioning:** Assay is best understood as a **CI-native protocol-governance layer**: canonical evidence compiler + protocol-aware policy checks. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer.
+**Positioning:** Assay is best understood as a **CI-native protocol-governance layer**: canonical evidence compiler + protocol-aware policy checks. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer. See [What Assay is and is not](docs/concepts/scope.md) for the current boundary.
 
 | | |
 |---|---|

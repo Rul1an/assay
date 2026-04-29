@@ -1,14 +1,14 @@
 # Quick Reference
 
 > **Purpose**: Fast lookup for AI agents - commands, patterns, exit codes, and common operations.
-> **Version**: 2.15.0 (February 2026)
+> **Version**: 3.8.0 (April 2026)
 
 ## TL;DR - What is Assay?
 
-**Assay** = Policy-as-Code engine for AI agent validation
-- **Input**: Agent traces (JSONL) + Policy (YAML)
-- **Output**: Pass/Fail + SARIF report
-- **Key insight**: Deterministic replay testing (no LLM calls needed in CI)
+**Assay** = CI-native evidence and trust compiler for agent systems
+- **Input**: Agent runtime signals, evidence bundles, and bounded external receipt inputs
+- **Output**: Evidence bundles, Trust Basis, Trust Card, SARIF/JUnit/CI projections
+- **Key insight**: deterministic policy and bounded evidence claims, not trust scores or dashboards
 
 ## Most Common Commands
 
@@ -23,6 +23,11 @@ assay run --config eval.yaml --trace-file traces.jsonl
 
 # CI gate (strict mode)
 assay ci --config eval.yaml --trace-file traces.jsonl
+
+# Trust compiler artifacts
+assay evidence verify bundle.tar.gz
+assay trust-basis generate bundle.tar.gz --out trust-basis.json
+assay trustcard generate bundle.tar.gz --out-dir trustcard
 
 # Debug failures
 assay doctor                  # Diagnose common issues
