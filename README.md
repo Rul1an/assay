@@ -29,7 +29,7 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 |---|---|
 | **Enforce** | Intercept MCP tool calls, apply policy, **ALLOW** / **DENY** deterministically. |
 | **Compile** | Turn traces, decisions, and bundles into **canonical evidence** — not raw OTel or ad hoc logs as truth. |
-| **Prove** | Export **tamper-evident bundles**, **Trust Basis** (`trust-basis.json`), **Trust Card** (`trustcard.json` / `trustcard.md`), SARIF, and CI gates. |
+| **Prove** | Export **tamper-evident bundles**, **Trust Basis** (`trust-basis.json`), **Trust Card** (`trustcard.json` / `trustcard.md` / `trustcard.html`), SARIF, and CI gates. |
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
@@ -89,10 +89,10 @@ assay trust-basis generate demo/fixtures/bundle.tar.gz > trust-basis.json
 
 # Human + machine Trust Card (schema v5 — ten trust claims; key by `id`, not row count)
 assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
-# → trust-out/trustcard.json , trust-out/trustcard.md
+# → trust-out/trustcard.json , trust-out/trustcard.md , trust-out/trustcard.html
 ```
 
-`trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, `external_decision_receipt_boundary_visible`, `external_inventory_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/reference/receipt-family-matrix.json](docs/reference/receipt-family-matrix.json).
+`trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, `external_decision_receipt_boundary_visible`, `external_inventory_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals; `trustcard.json` is canonical, while Markdown and static HTML are reviewer projections. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/reference/receipt-family-matrix.json](docs/reference/receipt-family-matrix.json).
 
 In the `v3.8.0` line, supported external eval outcomes, runtime decision details, and model inventory/provenance surfaces can enter this compiler path as bounded receipts rather than full upstream truth, with machine-readable JSON Schema contracts for the supported receipt/import surfaces. The first three claim-visible families are Promptfoo assertion-component results, OpenFeature boolean `EvaluationDetails`, and CycloneDX ML-BOM model components; [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the three-family surface.
 
@@ -104,7 +104,7 @@ In the `v3.8.0` line, supported external eval outcomes, runtime decision details
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
 | **External receipts** | `v3.8.0` line: selected eval outcomes, runtime decision details, and inventory/provenance surfaces as bounded evidence receipts with JSON Schema contracts. |
 | **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
-| **Trust Card** | `trustcard.json` / `trustcard.md` — same claims, review-friendly artifact. |
+| **Trust Card** | `trustcard.json` / `trustcard.md` / `trustcard.html` — same claims, review-friendly artifacts. |
 | **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
 
 ## Evidence levels (trust vocabulary)

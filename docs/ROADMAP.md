@@ -213,7 +213,7 @@ The substrate that was on `main` after `P1` was strong enough to shift from "mor
 | Order | Lane | Why now | Boundary |
 |-------|------|---------|----------|
 | **1** | `T1a` OTel-native Trust Compiler MVP | ✅ Merged on `main`: verified bundle -> deterministic `trust-basis.json` with bounded claim classification. | Kept small: no Trust Card rendering, no new signals, no packs, no score-first surface. |
-| **2** | `T1b` Trust Card MVP | ✅ Merged on `main`: deterministic `trustcard.json` + `trustcard.md` from verified bundles (`assay trustcard generate --out-dir`), derived from T1a only. | Evidence-classified output; signed/attestation later; no generic risk score. |
+| **2** | `T1b` Trust Card MVP | ✅ Merged on `main`: deterministic Trust Card artifacts from verified bundles (`trustcard.json`, `trustcard.md`, and static `trustcard.html` via `assay trustcard generate --out-dir`), derived from Trust Basis only. | Evidence-classified output; signed/attestation later; no generic risk score. |
 | **3** | `G3` Authorization Evidence Signal | ✅ Merged on `main`: bounded `auth_scheme` / `auth_issuer` / `principal` on policy-projected MCP decision evidence; Trust Basis + Trust Card schema `2` / seven claims (see [PLAN-G3](architecture/PLAN-G3-AUTHORIZATION-CONTEXT-EVIDENCE-2026q2.md)). | Supported flows only; no auth validation, issuer trust proof, scope checks, or temporal correctness. Optional follow-up: reduce core ↔ evidence drift (normalization vs classification). |
 | **4** | `P2` Protocol Claim Packs | Historical next lane at that point — protocol-aware claim packs as honest product surfaces once auth context became visible in evidence. | Small MCP/A2A claim packs, not broad compliance theater. |
 | **Later** | Reference/temporal/capability attestation | These semantics are valuable but heavier. | Ship only after the claim product line is stable. |
@@ -261,7 +261,7 @@ March 2026 evidence and signal waves change the ordering inside Q3. `T1a`, `T1b`
 | Priority | Capability | Why now | MVP boundary |
 |----------|------------|---------|--------------|
 | **P0** | `T1a` OTel-native Trust Compiler MVP | ✅ Shipped on `main`: verified bundle → `trust-basis.json` / bounded claim classification. | Compiler inputs/outputs, claim basis export; no dashboard-first surface. |
-| **P0** | `T1b` Trust Card MVP | ✅ Shipped on `main`: portable `trustcard.json` + `trustcard.md` for review and diff. | Evidence-level rows + frozen non-goals; no opaque global score. |
+| **P0** | `T1b` Trust Card MVP | ✅ Shipped on `main`: portable `trustcard.json`, `trustcard.md`, and static `trustcard.html` for review and diff. | Evidence-level rows + frozen non-goals; no opaque global score. |
 | **P1** | `G3` Authorization Evidence Signal | ✅ Shipped on `main`: authorization context fields on supported MCP decision evidence; Trust Card schema `2` / seven trust-basis claims. | Supported flows only; no cryptographic or temporal auth-validation semantics. |
 | **P1** | `P2a` MCP companion pack | ✅ Shipped on `main`: built-in `mcp-signal-followup` (MCP-001..003). | G3-aligned lint; see [PLAN-P2a](architecture/PLAN-P2a-MCP-SIGNAL-FOLLOWUP-CLAIM-PACK.md). |
 | **P1** | `H1` Trust kernel alignment & release hardening | ✅ Shipped on `main`: migration SSOT, alignment tests, docs; no new signals. | [PLAN-H1](architecture/PLAN-H1-TRUST-KERNEL-ALIGNMENT-RELEASE-HARDENING.md), [MIGRATION-TRUST-COMPILER-3.2.md](architecture/MIGRATION-TRUST-COMPILER-3.2.md). |

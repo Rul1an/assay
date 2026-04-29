@@ -5,7 +5,7 @@ use assay_evidence::lint::engine::LintOptions;
 use assay_evidence::lint::packs::load_packs;
 use assay_evidence::{
     generate_trust_basis, trust_basis_to_trust_card, trust_card_to_canonical_json_bytes,
-    trust_card_to_markdown, TrustBasisOptions, VerifyLimits,
+    trust_card_to_html, trust_card_to_markdown, TrustBasisOptions, VerifyLimits,
 };
 use std::fs::File;
 
@@ -39,6 +39,7 @@ fn cmd_generate(args: TrustCardGenerateArgs) -> Result<i32> {
     let json =
         trust_card_to_canonical_json_bytes(&card).context("failed to serialize trust card json")?;
     let md = trust_card_to_markdown(&card);
+    let html = trust_card_to_html(&card);
 
     std::fs::create_dir_all(&args.out_dir).with_context(|| {
         format!(
@@ -49,16 +50,20 @@ fn cmd_generate(args: TrustCardGenerateArgs) -> Result<i32> {
 
     let json_path = args.out_dir.join("trustcard.json");
     let md_path = args.out_dir.join("trustcard.md");
+    let html_path = args.out_dir.join("trustcard.html");
 
     std::fs::write(&json_path, json)
         .with_context(|| format!("failed to write {}", json_path.display()))?;
     std::fs::write(&md_path, md)
         .with_context(|| format!("failed to write {}", md_path.display()))?;
+    std::fs::write(&html_path, html)
+        .with_context(|| format!("failed to write {}", html_path.display()))?;
 
     eprintln!(
-        "Wrote trust card to {} and {}",
+        "Wrote trust card to {}, {}, and {}",
         json_path.display(),
-        md_path.display()
+        md_path.display(),
+        html_path.display()
     );
 
     Ok(EXIT_SUCCESS)

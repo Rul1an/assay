@@ -89,6 +89,10 @@ assay trust-basis generate bundle.tar.gz --out trust-basis.json
 assay trustcard generate bundle.tar.gz --out-dir trustcard
 ```
 
+`trustcard.json` is the canonical Trust Card artifact. `trustcard.md` and
+`trustcard.html` are deterministic reviewer projections of the same claim rows
+and frozen non-goals.
+
 ### 5. Optional: Lint with a Pack
 
 ```bash

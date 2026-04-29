@@ -117,6 +117,31 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
         assert!(md.contains(&format!("- {line}")));
     }
     assert!(md.contains("| id | level | source | boundary | note |"));
+
+    let html = String::from_utf8(fs::read(out_dir.join("trustcard.html")).unwrap()).unwrap();
+    assert!(html.starts_with("<!doctype html>\n"));
+    assert_eq!(
+        html.matches("data-claim-id=").count(),
+        claims.len(),
+        "trustcard.html must render the same claim rows as trustcard.json"
+    );
+    for id in expected_ids {
+        assert!(
+            html.contains(&format!("data-claim-id=\"{id}\"")),
+            "missing html claim row for {id}"
+        );
+    }
+    for line in TRUST_CARD_NON_GOALS {
+        assert!(html.contains(&format!("<li>{line}</li>")));
+    }
+    assert!(
+        html.contains("Canonical source of truth: trustcard.json"),
+        "HTML must keep JSON canonical"
+    );
+    assert!(
+        !html.contains("<script") && !html.contains("https://") && !html.contains("http://"),
+        "trustcard.html must be a static no-network projection"
+    );
 }
 
 #[test]
