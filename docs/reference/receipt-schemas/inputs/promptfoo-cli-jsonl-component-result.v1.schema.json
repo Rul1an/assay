@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Rul1an/assay/docs/reference/receipt-schemas/inputs/promptfoo-cli-jsonl-component-result.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/inputs/promptfoo-cli-jsonl-component-result.v1.schema.json",
   "title": "Assay-supported Promptfoo CLI JSONL Row v1",
   "type": "object",
   "required": ["gradingResult"],
