@@ -540,7 +540,7 @@ mod tests {
         let card = trust_basis_to_trust_card(&basis);
         let html = trust_card_to_html(&card);
         assert!(html.starts_with("<!doctype html>\n"));
-        assert_eq!(html.matches("data-claim-id=").count(), 10);
+        assert_eq!(html.matches("data-claim-id=").count(), card.claims.len());
         assert!(
             !html.contains("<script"),
             "static Trust Card HTML must not require script"

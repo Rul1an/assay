@@ -2,9 +2,15 @@
 
 Generate Trust Card artifacts from a verified evidence bundle.
 
+---
+
+## Synopsis
+
 ```bash
 assay trustcard <COMMAND> [OPTIONS]
 ```
+
+---
 
 ## Generate
 
@@ -28,6 +34,8 @@ network access. It includes accessible table structure, responsive overflow,
 dark-mode, forced-colors, and print styling, but it does not add claim
 semantics, scores, badges, or a second classifier.
 
+---
+
 ## Options
 
 | Option | Meaning |
@@ -37,8 +45,18 @@ semantics, scores, badges, or a second classifier.
 | `--pack <PACK[,PACK...]>` | Optional pack references to execute while classifying pack findings. |
 | `--max-results <N>` | Maximum lint results considered when pack execution is enabled. Default: `500`. |
 
+---
+
 ## Contract
 
 Trust Card rendering must stay a projection layer. Claim classification happens
 in [`assay trust-basis`](./trust-basis.md), and consumers should key claims by
 stable `claim.id`, not by row position or count.
+
+---
+
+## See Also
+
+- [Trust Basis CLI](./trust-basis.md)
+- [Receipt family matrix](../receipt-family-matrix.json)
+- [P52-P56 consolidation plan](../../architecture/PLAN-P52-P56-CONSOLIDATION-PROGRAM-2026q2.md)
