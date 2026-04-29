@@ -2,11 +2,15 @@
 
 ## What is Assay?
 
-Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that validates AI agent behavior. It provides deterministic testing (trace replay), runtime security (eBPF/LSM kernel enforcement on Linux), and compliance gates (tool argument/sequence validation).
+Assay is a **CI-native evidence and trust compiler** for agent systems. It
+compiles agent runtime signals and selected external outcomes into verifiable
+evidence and bounded Trust Basis claims. MCP policy enforcement remains the
+main runtime wedge: deterministic tool decisions, evidence bundles, Trust Basis,
+Trust Card, and CI projections without a hosted backend.
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `2.15.0`.
+Rust monorepo with workspace version `3.8.0`.
 
 ```
 crates/
@@ -234,7 +238,7 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
-- Workspace version in root `Cargo.toml` (`version = "2.15.0"`)
+- Workspace version in root `Cargo.toml` (`version = "3.8.0"`)
 - Internal crate deps use `workspace = true` with path + version
 - `#[deny(unsafe_code)]` on all crates except assay-ebpf
 - Error handling: `anyhow` for applications, `thiserror` for libraries

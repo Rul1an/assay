@@ -4,7 +4,7 @@
 
 site_name: Assay
 site_url: https://docs.assay.dev
-site_description: "The purity test for AI — Zero-flake CI for AI agents"
+site_description: "CI-native evidence compiler and Trust Basis artifacts for agent systems"
 site_author: Assay Team
 
 repo_name: Rul1an/assay

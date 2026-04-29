@@ -6,9 +6,13 @@
   <br>
 </h1>
 
-<p class="subtitle">Policy-as-Code for AI Agents</p>
+<p class="subtitle">CI-native evidence compiler for agent governance</p>
 
-Assay is a **Policy-as-Code** engine for the Model Context Protocol (MCP). End-to-end governance pipeline: trace capture → policy generation → deterministic CI replay gating → verifiable evidence bundles → signed compliance packs.
+Assay compiles **agent runtime signals** and selected external outcomes into
+**verifiable evidence** and bounded **Trust Basis claims**. MCP policy
+enforcement is the wedge: Assay can sit between an agent and its tools, make
+deterministic allow/deny decisions, and preserve the evidence chain for CI,
+security review, and audit without a hosted backend.
 
 ---
 
@@ -22,11 +26,11 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
 <div class="grid cards" markdown>
 
--   :material-shield-check:{ .lg .middle } __Policy Enforcement__
+-   :material-shield-check:{ .lg .middle } __Protocol Policy Enforcement__
 
     ---
 
-    Validate tool calls against JSON Schema constraints, sequence rules, and allowlists. No LLM calls in CI.
+    Validate MCP tool calls against JSON Schema constraints, sequence rules, and allowlists. No LLM calls in CI.
 
     [:octicons-arrow-right-24: Policy Reference](reference/config/policies.md)
 
@@ -34,17 +38,17 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
     ---
 
-    Tamper-evident audit trails with content-addressed IDs. CloudEvents v1.0 format. SARIF output for GitHub Security. Combine with BYOS append-only storage for audit-grade completeness.
+    Tamper-evident audit trails with content-addressed IDs. Verify bundles offline and keep canonical evidence separate from projections.
 
     [:octicons-arrow-right-24: Evidence Guide](concepts/traces.md)
 
--   :material-clipboard-check:{ .lg .middle } __Compliance Packs__
+-   :material-clipboard-check:{ .lg .middle } __Trust Basis & Receipts__
 
     ---
 
-    Built-in rule packs that structure engineering evidence for EU AI Act, SOC 2, and custom policies. Article-referenced findings for auditors. Packs do not constitute legal compliance on their own.
+    Compile verified bundles into Trust Basis claims and import bounded external receipt families for eval outcomes, runtime decisions, and model inventory.
 
-    [:octicons-arrow-right-24: Pack Engine](architecture/SPEC-Pack-Engine-v1.md)
+    [:octicons-arrow-right-24: Receipt Matrix](reference/receipt-family-matrix.json)
 
 -   :material-key:{ .lg .middle } __Tool Signing__
 
@@ -78,7 +82,14 @@ assay evidence export --profile assay-profile.yaml --out bundle.tar.gz
 assay evidence verify bundle.tar.gz
 ```
 
-### 4. Lint with Compliance Pack
+### 4. Generate Trust Artifacts
+
+```bash
+assay trust-basis generate bundle.tar.gz --out trust-basis.json
+assay trustcard generate bundle.tar.gz --out-dir trustcard
+```
+
+### 5. Optional: Lint with a Pack
 
 ```bash
 assay evidence lint --pack eu-ai-act-baseline bundle.tar.gz
@@ -119,11 +130,12 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 | CloudEvents v1.0 | Evidence envelope format |
 | W3C Trace Context | `traceparent` correlation |
 | SARIF 2.1.0 | GitHub Code Scanning |
-| EU AI Act Article 12 | Compliance pack mapping |
+| EU AI Act Article 12 | Optional pack mapping |
 
 ## Next Steps
 
 - [**Getting Started**](getting-started/index.md)
+- [**Scope & Boundaries**](concepts/scope.md)
 - [**Operator Proof Flow**](guides/operator-proof-flow.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
 - [**OpenTelemetry & Langfuse**](guides/otel-langfuse.md)

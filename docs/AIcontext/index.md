@@ -1,10 +1,13 @@
 # AI Context Documentation
 
-> **Version**: 2.18.0 (February 2026, post-RFC-003)
-> **Last Updated**: 2026-02-10
-> **SOTA Status**: Generate decomposition complete (RFC-003); Code health complete (RFC-002); Judge output (PR #159); SARIF limits (PR #160)
+> **Version**: 3.8.0 (April 2026)
+> **Last Updated**: 2026-04-29
+> **SOTA Status**: Trust Compiler line with Trust Basis, receipt portability, and schema registry
 
-This directory contains comprehensive documentation designed specifically for AI agents (LLMs) to understand and work with the Assay codebase. These documents follow best practices for AI context management as of January 2026.
+This directory contains documentation designed specifically for AI agents
+(LLMs) to understand and work with the Assay codebase. The highest-priority
+files now describe Assay as a CI-native evidence and trust compiler, not just
+as the older policy-as-code wedge.
 
 ## Quick Start for AI Agents
 

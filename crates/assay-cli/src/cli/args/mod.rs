@@ -34,7 +34,7 @@ pub use trust_card::*;
 #[command(
     name = "assay",
     version,
-    about = "Policy-as-Code for AI Agents — deterministic testing, verifiable evidence, and runtime enforcement for MCP"
+    about = "CI-native evidence and trust compiler for agent runtime governance"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -80,7 +80,7 @@ pub enum Command {
     Profile(super::commands::profile::ProfileArgs),
     /// Secure execution sandbox (v0.1)
     Sandbox(SandboxArgs),
-    /// Evidence Management (Audit/Compliance)
+    /// Evidence bundles, imports, verification, and stores
     Evidence(EvidenceArgs),
     /// Replay bundle management (create/verify)
     Bundle(BundleArgs),
