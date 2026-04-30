@@ -20,6 +20,9 @@ excluded, which reducer was used, and which Trust Basis claim became visible.
 That boundary is the product. Boring in the right way: small, reviewable, and
 predictable.
 
+For the same idea as a small artifact-first proof, see
+[Evidence Receipts in Action](EVIDENCE-RECEIPTS-IN-ACTION.md).
+
 ## Three Receipt Families
 
 The current released line includes three receipt families. This note describes

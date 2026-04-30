@@ -12,6 +12,16 @@ All notable changes to this project will be documented in this file.
   importer keeps the field optional for older reduced artifacts and
   compatibility fixtures.
 
+### Docs
+
+- Added
+  [Evidence Receipts in Action](docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md),
+  a static proof page with checked-in artifacts generated from the released
+  Assay `v3.9.1` binary and Assay Harness `v0.3.2` gate/report surface. The
+  page shows the three released receipt families, their exact Trust Basis claim
+  IDs, and the raw diff JSON to Markdown/JUnit projection split without adding
+  a new product surface or integration claim.
+
 ### CI / Release
 
 - Hardened the idempotent crates.io publisher so it waits for each newly
