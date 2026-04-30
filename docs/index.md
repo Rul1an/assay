@@ -140,6 +140,7 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 
 - [**Getting Started**](getting-started/index.md)
 - [**Scope & Boundaries**](concepts/scope.md)
+- [**Evidence Receipts in Action**](notes/EVIDENCE-RECEIPTS-IN-ACTION.md)
 - [**Operator Proof Flow**](guides/operator-proof-flow.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
 - [**OpenTelemetry & Langfuse**](guides/otel-langfuse.md)
