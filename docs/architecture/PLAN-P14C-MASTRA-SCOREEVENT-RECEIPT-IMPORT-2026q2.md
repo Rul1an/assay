@@ -90,27 +90,39 @@ P14c should require:
 The input `surface` value intentionally matches the receipt `source_surface`
 value to avoid contract drift between the reduced artifact and Assay receipt.
 
-Capture-gated identity fields:
+Preferred live-backed identity fields:
 
 - bounded `score_id_ref`
 - bounded `scorer_id`
 
-These are the preferred canonical bounded identity fields for v1. They become
-hard required only once a supported live callback capture proves that the
-selected Mastra path reliably carries them.
+These are the preferred canonical bounded identity fields for v1. Mastra's
+public docs confirm the `onScoreEvent` exporter seam, while the stronger
+`scoreId` / `scorerId` expectations are live-capture-backed rather than
+docs-hard. A fresh 2026-04-30 capture on `@mastra/core` `1.29.1` /
+`@mastra/observability` `1.10.2` proves that the current supported
+`onScoreEvent` path carries both fields.
+
+They remain optional in the released v1 reduced artifact for compatibility
+with older captures and fixtures. Future schema versions may make this stricter
+once the team is ready to intentionally break older reduced artifacts.
+
+If `score_id_ref` is absent in v1, the reduced artifact still needs enough
+bounded context to remain reviewable: `target_ref`, `timestamp`, numeric
+`score`, and at least one scorer identity. `scorer_id` is strongly preferred
+when naturally present; `scorer_name` remains a compatibility fallback rather
+than the preferred compiler identity.
 
 Why this is stricter than the older P14b sample:
 
-- current type/live discovery may expose `scoreId` and `scorerId`
+- current type/live discovery exposes `scoreId` and `scorerId`
 - a real receipt importer should prefer stable bounded identity over display
   labels
 - `scorer_name` is useful for review, but should not be the primary identity
   for a compiler path once `scorer_id` is available
 
-If implementation discovery proves that a current supported live callback still
-omits either identity field, the importer may temporarily allow the missing
-field. That exception must be explicit in the implementation PR and covered by
-tests so it cannot become accidental looseness.
+The importer should preserve these fields when present and tests should prove
+they round-trip into receipts. Any later move from preferred to required should
+be a deliberate schema-versioned tightening, not an accidental v1 drift.
 
 ## 5. Optional fields
 
@@ -126,12 +138,16 @@ P14c may preserve these bounded fields when naturally present:
 - `target_entity_type`
 - `metadata_ref`
 
-`metadata_ref` is a bounded string reference only. It is not metadata import.
-Raw `metadata` or `correlationContext` objects inline are malformed for v1.
+`metadata_ref` MUST be a bounded reviewer-safe string reference only. It is
+non-resolving by default: no inline object, body expansion, URL requirement, or
+dereference semantics are part of v1. Raw `metadata` or `correlationContext`
+objects inline are malformed for v1.
 
 `trace_id_ref`, `span_id_ref`, and `score_trace_id_ref` are anchors only. They
 must not make this a trace import lane. These fields are optional reviewer aids
 only and must not affect receipt validity or downstream claim semantics in v1.
+`score_source`, `trace_id_ref`, `span_id_ref`, and `score_trace_id_ref` are
+never part of the canonical identity of the receipt in v1.
 
 ## 6. v1 receipt payload
 
@@ -267,9 +283,12 @@ Minimum test set:
 - valid score event JSONL imports into a verifiable bundle
 - multiple rows produce multiple receipt events
 - missing `target_ref` or `timestamp` fails closed
-- missing `score_id_ref` or `scorer_id` fails closed once live-capture support
-  confirms they are reliably present; any temporary missing-field exception must
-  be explicit, tested, and documented in the implementation PR
+- present `score_id_ref` and `scorer_id` round-trip into receipts; missing
+  `score_id_ref` remains accepted in v1 when the row still carries the minimum
+  bounded review surface (`target_ref`, `timestamp`, numeric `score`, and at
+  least one scorer identity)
+- `score_source`, `trace_id_ref`, `span_id_ref`, and `score_trace_id_ref` do
+  not participate in receipt identity or Trust Basis claim semantics
 - non-numeric `score` fails closed
 - raw `metadata` object fails closed
 - raw `correlationContext` object fails closed

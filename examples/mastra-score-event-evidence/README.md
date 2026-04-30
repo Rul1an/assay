@@ -75,7 +75,7 @@ story is now a bit more precise than the docs alone:
 - the forward typed `ScoreEvent` path is real in a modern local run
 - the older legacy callback can still co-fire in the same run
 
-The real `onScoreEvent` payload was thinner than the richer frozen sample
+The first real `onScoreEvent` payload was thinner than the richer frozen sample
 artifact we had before. In that callback we observed:
 
 - `timestamp`
@@ -96,16 +96,29 @@ And we did **not** observe:
 - `scoreId`
 - one native upstream `targetRef`
 
-That is why the checked-in valid and failure fixtures now stay close to the
-thinner field set actually seen in one live callback. They are still bounded
-derived external-consumer artifacts, not raw callback dumps.
+On 2026-04-30 we repeated the proof against the newer Mastra line after
+maintainer guidance that `ScoreId` had shipped:
+
+- `@mastra/core` `1.29.1`
+- `@mastra/observability` `1.10.2`
+
+That fresh `onScoreEvent` callback carried `score.scoreId` as a generated UUID
+alongside the expected score fields. The checked-in strong fixture now includes
+that live-backed anchor as `score_id_ref`. The lower-score fixture still keeps
+the older scorer-name-only path on purpose, so the sample continues proving the
+backward-compatible reduced contract rather than pretending every historical
+artifact came from the newest callback shape.
+
+The fixtures are still bounded derived external-consumer artifacts, not raw
+callback dumps.
 
 In particular:
 
 - `target_ref` is an Assay-side bounded reduction over exporter anchors such as
   `spanId`, `traceId`, and `correlationContext`
-- `score_id_ref` stays optional and absent from the checked-in fixtures until a
-  real callback proves it live
+- `score_id_ref` is now live-backed on the fresh Mastra `1.29.1` /
+  `1.10.2` proof run, but remains optional in the v1 reduced artifact for
+  older captures and compatibility fixtures
 - the stronger live-backed baseline uses `scorer_id`
 - one passing `scorer_name`-only fixture is still kept on purpose because that
   branch remains part of the supported sample contract
@@ -135,8 +148,8 @@ the fixture shape universal.
 
 This sample uses both names carefully:
 
-- `score_id_ref` is reserved for Mastra's upcoming `ScoreId` anchor when that
-  field lands on `ExportedScore`
+- `score_id_ref` maps to Mastra's `scoreId` anchor when present on
+  `ExportedScore`
 - `trace_id_ref` maps to `traceId`
 - `span_id_ref` maps to `spanId`
 - `score` maps to `score`
@@ -146,9 +159,10 @@ This sample uses both names carefully:
 - `target_ref` is a sample-level bounded anchor derived from the exporter
   payload, not a claim that upstream publishes one official `targetRef` field
 
-The checked-in fixtures do not yet include `score_id_ref`, because the first
-live callback did not carry that field. But the sample now keeps the slot
-bounded and ready instead of pretending the new anchor does not exist.
+The checked-in strong fixture now includes `score_id_ref` because a fresh
+callback on the newer Mastra line carried `scoreId`. The field remains optional
+for v1 because older reduced artifacts and the first live capture did not carry
+it.
 
 One small but important distinction:
 
