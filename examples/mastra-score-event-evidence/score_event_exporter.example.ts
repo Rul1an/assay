@@ -82,10 +82,6 @@ export class AssayLegacyScoreAttachExporter {
   }
 }
 
-type ForwardCompatibleExportedScore = ExportedScore & {
-  scoreId?: string;
-};
-
 function normalizeOpaqueRef(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -139,7 +135,6 @@ function normalizeScoreSource(value: unknown): AssayScoreArtifact['score_source'
 }
 
 function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
-  const forwardScore = score as ForwardCompatibleExportedScore;
   const targetRef = score.spanId ?? score.traceId ?? score.correlationContext?.entityId;
   if (!targetRef) {
     throw new Error('Score event is missing a bounded target anchor');
@@ -151,7 +146,7 @@ function toAssayScoreArtifact(score: ExportedScore): AssayScoreArtifact {
     throw new Error('Score event is missing a scorer identity');
   }
 
-  const scoreIdRef = normalizeOpaqueRef(forwardScore.scoreId);
+  const scoreIdRef = normalizeOpaqueRef(score.scoreId);
   const targetEntityType = normalizeClassifier(score.targetEntityType);
   const scoreSource = normalizeScoreSource(score.scoreSource);
 

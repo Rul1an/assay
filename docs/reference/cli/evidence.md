@@ -148,8 +148,12 @@ The importer is intentionally strict in v1:
 - `score` must be numeric
 - `target_ref` and at least one scorer identity (`scorer_id` or `scorer_name`)
   must be present
-- `score_id_ref` is optional and capture-gated until the supported live callback
-  path reliably carries it
+- `score_id_ref` maps to Mastra `scoreId` when present; it is live-backed on
+  `@mastra/core` `1.29.1` / `@mastra/observability` `1.10.2`, but remains
+  optional in the v1 reduced artifact for older captures and compatibility
+  fixtures
+- `score_source`, `trace_id_ref`, `span_id_ref`, and `score_trace_id_ref` are
+  reviewer aids only, not receipt identity in v1
 - raw exporter callback payloads, raw `metadata`, raw `correlationContext`,
   trace trees, spans, logs, metrics, feedback, prompts, request/response bodies,
   scorer configs, and dashboard state are excluded

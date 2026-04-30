@@ -2,9 +2,10 @@
 
 - **Date:** 2026-04-15
 - **Owner:** Evidence / Product
-- **Status:** Docs-backed sample implementation merged; one local live
-  `onScoreEvent` captured; upstream exporter callback docs public;
-  capture-backed sample recut active
+- **Status:** Docs-backed sample implementation merged; local live
+  `onScoreEvent` captures completed on the original and newer Mastra lines;
+  `scoreId` is now proven on `@mastra/core` `1.29.1` /
+  `@mastra/observability` `1.10.2`; capture-backed sample recut active
 - **Scope (current repo state):** Recut the Mastra lane after maintainer
   feedback on `mastra-ai/mastra#15206`, and carry that recut into a bounded
   sample implementation. This slice still does not freeze a new upstream
@@ -100,6 +101,7 @@ different seams.
 
 For the sample contract:
 
+- `score_id_ref` maps to `scoreId` when present
 - `trace_id_ref` maps to `traceId`
 - `span_id_ref` maps to `spanId`
 - `score` maps to `score`
@@ -258,6 +260,13 @@ The same real callback did **not** contain:
 - `scoreId`
 - one native upstream `targetRef`
 
+A fresh follow-up proof run on 2026-04-30 used `@mastra/core` `1.29.1` and
+`@mastra/observability` `1.10.2` after maintainer guidance that `ScoreId` had
+shipped. That run captured `score.scoreId` as a generated UUID on the typed
+`onScoreEvent` path. The checked-in strong fixture now includes that value as a
+bounded `score_id_ref`, while the lower-score fixture keeps the older
+scorer-name-only compatibility path.
+
 ## 7. v1 artifact contract
 
 ### 7.1 Required fields
@@ -387,9 +396,10 @@ path we are actually targeting.
 
 This field is optional in v1.
 
-Mastra maintainers have now called out `ScoreId` as an upcoming addition to the
-typed `ExportedScore` object, and it is likely to be the cleanest bounded
-anchor back into Mastra's own score plane.
+Mastra maintainers called out `ScoreId` as the forward anchor on the typed
+`ExportedScore` object. A fresh 2026-04-30 local capture on
+`@mastra/core` `1.29.1` / `@mastra/observability` `1.10.2` proves it is now
+present on the supported `onScoreEvent` path.
 
 For Assay this should stay:
 
@@ -403,15 +413,10 @@ Not allowed:
 - resolver paths
 - embedded score payloads
 
-The checked-in fixtures do not need to include this field yet. But the sample
-contract should keep a bounded slot ready for it instead of pretending the
-emerging anchor does not matter.
-
-Treat `score_id_ref` as maintainer-guided and capture-pending until one real
-exporter callback proves it live.
-
-The 2026-04-15 local capture did not emit `scoreId`, so `score_id_ref`
-remains optional and absent from the checked-in fixture corpus.
+The checked-in strong fixture now includes this field. It remains optional in
+the v1 reduced artifact because the first live capture and older reduced
+artifacts did not carry it, and because keeping the released v1 shape
+backward-compatible is less surprising than silently tightening the schema.
 
 - full output body
 - full request/response pair
@@ -580,6 +585,33 @@ Presence / absence from that real `onScoreEvent` callback:
 | `correlationContext` | yes | useful for reduction, not imported wholesale |
 | native `targetRef` | no | Assay derives `target_ref` instead |
 
+### Fresh `scoreId` capture update (2026-04-30)
+
+After Mastra closed `mastra-ai/mastra#15206` with the note that the `ScoreId`
+field had shipped, we repeated the local proof against the newer public
+packages:
+
+- Node `22.22.2`
+- `@mastra/core` `1.29.1`
+- `@mastra/observability` `1.10.2`
+- one custom exporter implementing `onScoreEvent(event)`
+- one direct `observability.addScore(...)` emission with bounded
+  `correlationContext`
+
+Observed result:
+
+- one real `onScoreEvent` payload was captured
+- `score.scoreId` was present as a generated UUID
+- `scorerId`, `score`, `timestamp`, `traceId`, `spanId`, `scoreSource`,
+  `scoreTraceId`, `correlationContext`, and `metadata` were present
+- raw `metadata` and raw `correlationContext` remain excluded from the Assay
+  reduced artifact; only bounded refs are carried
+
+The strong checked-in fixture now uses that fresh capture profile and includes
+`score_id_ref`. The v1 importer still accepts older reduced artifacts without
+`score_id_ref`, because the schema is already released and older live captures
+did not carry the field.
+
 Capture-backed decision:
 
 - keep the lane `ScoreEvent`-first
@@ -588,8 +620,9 @@ Capture-backed decision:
   actually seen live
 - keep one passing `scorer_name`-only fixture path for contract coverage while
   that branch stays supported
-- keep richer fields such as `reason`, `scorer_name`, and `score_id_ref`
-  optional until another real callback proves them
+- keep richer fields such as `reason` and `scorer_name` optional; keep
+  `score_id_ref` optional for v1 compatibility even though it is now proven on
+  the fresh Mastra line
 - keep `target_ref` as a derived Assay anchor instead of pretending it is an
   upstream field
 
@@ -768,8 +801,8 @@ Allowed repo updates:
 - tweak fixture fields
 - tighten README wording
 - tighten or narrow required vs optional fields
-- add one new bounded optional anchor such as `score_id_ref` if the live
-  payload proves it
+- include the bounded `score_id_ref` anchor now that the newer live payload
+  proves it
 - add one short note saying the sample is now backed by one real callback
   capture
 
@@ -910,7 +943,7 @@ This recut does not:
 - [PLAN — P14 Mastra Scorer / Experiment-Result Evidence Interop](./PLAN-P14-MASTRA-SCORER-EXPERIMENT-RESULT-EVIDENCE-2026q2.md)
 - [Mastra issue #15206](https://github.com/mastra-ai/mastra/issues/15206)
 - [Maintainer exporter guidance on #15206](https://github.com/mastra-ai/mastra/issues/15206#issuecomment-4238852237)
-- [Maintainer note on `ScoreEvent` as the new path and upcoming `ScoreId`](https://github.com/mastra-ai/mastra/issues/15206#issuecomment-4252212575)
+- [Maintainer note on `ScoreEvent` as the new path and `ScoreId`](https://github.com/mastra-ai/mastra/issues/15206#issuecomment-4252212575)
 - [Mastra observability](https://mastra.ai/observability)
 - [Introducing Scorers in Mastra](https://mastra.ai/blog/mastra-scorers)
 - [Change, Run, and Compare with Experiments in Mastra Studio](https://mastra.ai/blog/mastra-experiments)

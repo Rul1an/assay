@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Evidence Portability
+
+- Refreshed the Mastra ScoreEvent sample against `@mastra/core` `1.29.1` and
+  `@mastra/observability` `1.10.2` after upstream confirmed `ScoreId` had
+  shipped. The strong fixture now carries live-backed `score_id_ref`; the v1
+  importer keeps the field optional for older reduced artifacts and
+  compatibility fixtures.
+
 ### CI / Release
 
 - Hardened the idempotent crates.io publisher so it waits for each newly
