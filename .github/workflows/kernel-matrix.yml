@@ -177,8 +177,10 @@ jobs:
 
           echo "Comparing $BASE..$HEAD"
 
-          # Check if eBPF-related files changed (not just Cargo.toml/Cargo.lock)
-          EBPF_PATTERNS="crates/assay-ebpf|crates/assay-monitor|crates/assay-evidence|scripts/ci|\.github/workflows/kernel-matrix"
+          # Check if eBPF/LSM matrix inputs changed. Keep this narrower than
+          # all scripts/ci/* so release-publish helper edits do not queue
+          # self-hosted BPF jobs when the runner is offline.
+          EBPF_PATTERNS="^crates/assay-ebpf/|^crates/assay-monitor/|^crates/assay-evidence/|^scripts/verify_lsm_docker\.sh$|^scripts/ci/(apt_ports_failover|lsm_deny_smoke)\.sh$"
 
           CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
           echo "Changed files:"
@@ -458,7 +460,7 @@ jobs:
             if [ "${EBPF_CHANGED}" = "false" ]; then
               echo "⏭️ **Matrix tests skipped** - No eBPF-related changes detected"
               echo ""
-              echo "Only Cargo.toml/Cargo.lock changed. Heavy kernel matrix tests not required."
+              echo "No eBPF/LSM matrix inputs changed. Heavy kernel matrix tests not required."
             elif [ "${MATRIX_RESULT}" = "success" ]; then
               echo "✅ **All kernel matrix tests passed**"
             elif [ "${MATRIX_RESULT}" = "skipped" ]; then

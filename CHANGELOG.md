@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
 - Hardened the idempotent crates.io publisher so it waits for each newly
   published workspace crate to become visible through the crates.io API before
   publishing the next dependent crate.
+- Narrowed self-hosted eBPF CI triggers so release-publish helper changes do
+  not leave optional BPF runner jobs queued when the self-hosted runner is
+  offline.
 
 ## [3.9.1] - 2026-04-29
 
