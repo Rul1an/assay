@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
   shipped. The strong fixture now carries live-backed `score_id_ref`; the v1
   importer keeps the field optional for older reduced artifacts and
   compatibility fixtures.
+- Added P14d as the Mastra score-receipt Trust Basis readiness freeze. The
+  existing `assay.receipt.mastra.score_event.v1` lane remains importer-only
+  with `trust_basis_claim: null`; any future
+  `external_score_receipt_boundary_visible` claim must first define exact claim
+  semantics, Trust Card impact, and Harness posture.
 
 ### Docs
 

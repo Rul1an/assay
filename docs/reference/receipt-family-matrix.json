@@ -1,6 +1,6 @@
 {
   "schema": "assay.receipt-family-matrix.v1",
-  "updated_at": "2026-04-29",
+  "updated_at": "2026-05-02",
   "families": [
     {
       "family": "external_eval_receipts",
@@ -200,7 +200,8 @@
         "the trace or span anchor is complete",
         "the score should pass or fail a gate"
       ],
-      "plan": "../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md"
+      "plan": "../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md",
+      "claim_readiness_plan": "../architecture/PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md"
     }
   ]
 }

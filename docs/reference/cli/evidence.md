@@ -178,10 +178,11 @@ The same bundle can feed the Trust Basis compiler:
 assay trust-basis generate mastra-score-receipts.tar.gz --out mastra-score.trust-basis.json
 ```
 
-P14c does not add a Trust Basis claim yet. The first Mastra compiler slice
-proves the receipt bundle is bundleable, verifiable, and readable by the Trust
-Basis path. Score-specific Trust Basis claims are a later compatibility
-decision.
+P14c does not add a Trust Basis claim. The first Mastra compiler slice proves
+the receipt bundle is bundleable, verifiable, and readable by the Trust Basis
+path. P14d freezes the current compatibility decision: score receipts remain
+importer-only until any future score-receipt Trust Basis claim has an explicit
+claim boundary, Trust Card impact, and Harness posture.
 
 Use `--import-time <RFC3339>` for deterministic fixture generation.
 
@@ -339,6 +340,7 @@ To compare the resulting Trust Basis artifact against another run, use
 - [From Promptfoo JSONL to Evidence Receipts](../../notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md)
 - [P43 CycloneDX ML-BOM model component receipt import plan](../../architecture/PLAN-P43-CYCLONEDX-MLBOM-MODEL-COMPONENT-RECEIPT-IMPORT-2026q2.md)
 - [P14c Mastra ScoreEvent receipt import plan](../../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md)
+- [P14d Mastra score receipt Trust Basis readiness freeze](../../architecture/PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md)
 - [P45b OpenFeature decision receipt Trust Basis claim plan](../../architecture/PLAN-P45B-DECISION-RECEIPT-TRUST-BASIS-CLAIM-2026q2.md)
 - [P41 OpenFeature decision receipt import plan](../../architecture/PLAN-P41-OPENFEATURE-EVALUATION-DETAILS-DECISION-RECEIPT-IMPORT-2026q2.md)
 - [P31 Promptfoo receipt import plan](../../architecture/PLAN-P31-PROMPTFOO-JSONL-COMPONENT-RESULT-RECEIPT-IMPORT-2026q2.md)
