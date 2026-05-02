@@ -1,4 +1,4 @@
-# PLAN - P9b Pydantic Reduced Case-Result Evidence Recut (2026 Q2)
+# PLAN — P9b Pydantic Reduced Case-Result Evidence Recut (2026 Q2)
 
 - **Date:** 2026-05-02
 - **Owner:** Evidence / Product
