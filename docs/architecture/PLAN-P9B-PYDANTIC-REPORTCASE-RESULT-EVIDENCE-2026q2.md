@@ -1,13 +1,14 @@
-# PLAN - P9b Pydantic ReportCase Result Evidence Recut (2026 Q2)
+# PLAN - P9b Pydantic Reduced Case-Result Evidence Recut (2026 Q2)
 
 - **Date:** 2026-05-02
 - **Owner:** Evidence / Product
-- **Status:** Proposed next execution slice
+- **Status:** Proposed seam-hardening slice
 - **Scope:** Recut the existing Pydantic Evals sample around one bounded
-  `EvaluationReport.cases[]` / `ReportCase`-derived result. This is
-  evidence-seam hardening only: importer-only if it graduates, not a public
-  receipt family, not a Trust Basis claim, not a Harness recipe, and not a
-  public integration story.
+  case-result artifact derived from `EvaluationReport.cases[]`. `ReportCase`
+  is a discovery input, not the implied v1 contract unit. This is
+  evidence-seam hardening toward a possible importer-only lane, not importer
+  work by default, not a public receipt family, not a Trust Basis claim, not a
+  Harness recipe, and not a public integration story.
 
 ## 1. Decision
 
@@ -18,12 +19,14 @@ report-wrapper shape.
 The next slice should be:
 
 ```text
-P9b - recut Pydantic sample around one ReportCase-derived result
+P9b - recut Pydantic sample around one reduced case-result artifact derived
+from EvaluationReport.cases[]
 ```
 
 The slice should not promote Pydantic into the public three-family receipt
 story. It should produce a harder, smaller candidate lane that can later be
-considered for importer-only receipt support.
+considered for importer-only receipt support only if the live recut proves the
+case-result surface can stay narrow.
 
 ## 2. Why Pydantic Next
 
@@ -46,6 +49,11 @@ That makes Pydantic a better next candidate than another deterministic score
 object lane, while still allowing Assay to stay away from Logfire,
 OpenTelemetry, span-based evaluation, prompts, completions, and runtime truth.
 
+The same docs also make the main risk clear: `ReportCase` can carry fields
+such as inputs, expected output, output, metadata, `trace_id`, and `span_id`.
+P9b must therefore derive a smaller case-result artifact from the case entry
+rather than treating `ReportCase` itself as the import contract.
+
 References:
 
 - [Pydantic Evals overview](https://pydantic.dev/docs/ai/evals/evals/)
@@ -62,8 +70,8 @@ P9b supersedes P9 for execution.
 
 P9 remains useful historical discovery. P9b is the narrower product discipline:
 
-- one report case;
-- one evaluation result bag;
+- one reduced case-result artifact derived from a report case;
+- one evaluation result bag if the live shape naturally exposes one;
 - no report-wide summary;
 - no analyses;
 - no experiment metadata;
@@ -102,13 +110,26 @@ Guardrails opens an interesting validation / safety-signal family, but it has
 the highest overclaim risk. A reader can too easily interpret "validation
 passed" as "safe" or "correct". It should not be the next candidate.
 
-## 5. P9b V1 Shape
+## 5. Stop Rule
+
+If the recut cannot make one reduced case-result artifact reviewable without
+importing report, trace, Logfire, prompt, completion, expected-output,
+model-output, or broad `ReportCase` context, stop before importer work.
+
+In that case, do not patch around the gap by adding broad context. Recut the
+candidate again or leave Pydantic as a sample-only lane.
+
+This is the important guardrail: possible importer-only support is acceptable;
+wider-than-case-result is not.
+
+## 6. P9b V1 Shape
 
 P9b should target a reduced JSON artifact derived from one
-`EvaluationReport.cases[]` / `ReportCase` result.
+`EvaluationReport.cases[]` entry.
 
 This is a reduced import artifact, not a raw upstream object and not a full
-report export.
+report export. `ReportCase` is the discovery source from which the smaller
+artifact is derived, not the artifact schema itself.
 
 Recommended shape:
 
@@ -116,8 +137,7 @@ Recommended shape:
 {
   "schema": "pydantic-evals.report-case-result.export.v1",
   "framework": "pydantic_evals",
-  "surface": "evaluation_report.cases.report_case",
-  "case_id_ref": "case:checkout-tax-valid",
+  "surface": "evaluation_report.cases.case_result",
   "case_name": "checkout tax valid",
   "evaluator_name": "Equals",
   "result": {
@@ -129,35 +149,43 @@ Recommended shape:
 }
 ```
 
-This example is illustrative. The implementation must verify the actual
-current `ReportCase` / per-evaluation result shape before freezing fixture
-fields.
+This example is illustrative, not a near-contract. The implementation must
+verify the current `ReportCase` / per-evaluation result shape before freezing
+fixture fields. `evaluator_name`, `result.passed`, `result.score`, and
+`result.reason` are provisional candidate fields pending live shape
+inspection.
 
-## 6. Required, Preferred, Optional
+## 7. Required, Preferred, Optional
 
 Required in the reduced artifact:
 
 - `schema = "pydantic-evals.report-case-result.export.v1"`;
 - `framework = "pydantic_evals"`;
-- `surface = "evaluation_report.cases.report_case"`;
-- one bounded case identity field: `case_id_ref` or `case_name`;
-- one bounded evaluator identity field when naturally exposed;
-- one result value: pass/fail or scalar score;
+- `surface = "evaluation_report.cases.case_result"`;
+- `case_name` as the docs-backed bounded case identity when available;
+- one reduced result value if live inspection exposes a bounded pass/fail or
+  scalar score without importing raw output or expected output;
 - `timestamp` from the reduced export step, not a claim that upstream exposes a
   stable per-case timestamp.
 
 Preferred:
 
-- `case_id_ref`;
-- `evaluator_name`;
-- explicit `result.passed` when the upstream result is boolean;
-- explicit `result.score` when the upstream result is scalar.
+- `evaluator_name`, pending live inspection of where the evaluator identity is
+  naturally exposed;
+- explicit `result.passed` when live inspection exposes a bounded boolean
+  result;
+- explicit `result.score` when live inspection exposes a bounded scalar result.
 
 Optional:
 
 - short `result.reason` or feedback when naturally present;
-- `case_name` as reviewer-facing display text;
+- `case_id_ref` only if the inspected live shape naturally carries a bounded
+  case identifier;
 - bounded `source_ref` if the recut needs a non-sensitive local artifact label.
+
+Do not synthesize `case_id_ref` from report bookkeeping, trace IDs, span IDs,
+or hashed prompt/output payloads. If the only stable case identity is
+`case_name`, use `case_name`.
 
 Assay-side receipt provenance, if P9b later graduates to importer-only
 support:
@@ -167,7 +195,23 @@ support:
 - `reducer_version`;
 - `imported_at`.
 
-## 7. Non-Identity And Excluded Fields
+## 8. Field Evidence Levels
+
+P9b must label candidate fields by evidence level before implementation:
+
+- **Docs-backed:** `EvaluationReport`, `EvaluationReport.cases`, and
+  case-level names such as `case_name` / `source_case_name` where present in
+  the public reporting API.
+- **Pending live inspection:** evaluator identity, pass/fail projection, scalar
+  score projection, and short reason/feedback.
+- **Downstream/export provenance:** reduced artifact timestamp, source artifact
+  label, reducer version, import timestamp, and artifact digest if later
+  importer-only support is drafted.
+
+Any field that cannot be placed in one of those buckets should stay out of the
+v1 reduced artifact.
+
+## 9. Non-Identity And Excluded Fields
 
 The following are never part of receipt identity in P9b v1:
 
@@ -194,19 +238,7 @@ The following must stay out of the reduced artifact:
 - OpenTelemetry or Logfire payloads;
 - span-based evaluator traces.
 
-## 8. Stop Rule
-
-If the recut cannot make one `ReportCase` reviewable without importing report,
-trace, Logfire, prompt, completion, or model-output context, stop before
-importer work.
-
-In that case, do not patch around the gap by adding broad context. Recut the
-candidate again or leave Pydantic as a sample-only lane.
-
-This is the important guardrail: importer-only is acceptable; wider-than-case
-is not.
-
-## 9. Execution Phases
+## 10. Execution Phases
 
 ### Phase A - Inspect The Current Upstream Shape
 
@@ -239,21 +271,26 @@ importer-only receipt event.
 P9b itself should not add a Trust Basis claim, Harness recipe, public note, or
 claim-visible receipt family.
 
-## 10. Acceptance Criteria
+## 11. Acceptance Criteria
 
 P9b is ready when:
 
-- the sample centers on one `ReportCase`-derived result, not a full
+- the sample centers on one reduced case-result artifact derived from
+  `EvaluationReport.cases[]`, not a raw `ReportCase` object and not a full
   `EvaluationReport`;
 - fixtures prove positive, negative, and malformed paths;
 - the README says which fields are docs-backed versus live-capture-backed;
+- `case_name` is treated as the docs-backed case identity, while `case_id_ref`
+  is used only if live inspection naturally exposes it;
+- evaluator identity, pass/fail, scalar score, and reason/feedback are labeled
+  provisional until live inspection proves their shape;
 - trace/span/Logfire fields are excluded rather than merely marked optional;
 - raw prompts, completions, model outputs, task inputs, expected outputs,
   analyses, and report-wide summaries are rejected or absent;
 - no Trust Basis claim or Harness recipe is added;
 - no public communication is made beyond repo-internal docs/PR text.
 
-## 11. Communication Rule
+## 12. Communication Rule
 
 No public post for P9b.
 
@@ -267,9 +304,11 @@ Pydantic issue if one of these happens:
 Use "downstream reduced artifact" language. Do not say integration, support,
 partnership, official, or Trust Basis family.
 
-## 12. Short Verdict
+## 13. Short Verdict
 
-Pydantic is next, but only as a ReportCase-bounded importer-only candidate.
+Pydantic is next, but only as a reduced case-result artifact derived from
+`EvaluationReport.cases[]`. Possible importer-only support remains contingent
+on a successful live recut.
 
 AutoEvals remains the clean fallback. AgentEvals remains the more ambitious
 second-choice. Phoenix, LangWatch, and Guardrails stay parked until the product

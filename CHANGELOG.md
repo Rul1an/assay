@@ -7,10 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Evidence Portability
 
 - Selected Pydantic Evals as the next evidence-seam hardening candidate via
-  `P9b`, but kept the scope deliberately small: one `ReportCase`-derived
-  result, importer-only if it graduates, no full `EvaluationReport` import, no
-  Logfire/trace/span payloads, no Trust Basis claim, no Harness recipe, and no
-  public receipt-family story.
+  `P9b`, but kept the scope deliberately small: one reduced case-result
+  artifact derived from `EvaluationReport.cases[]`, possible importer-only
+  support only if the live recut succeeds, no raw `ReportCase` contract, no
+  full `EvaluationReport` import, no Logfire/trace/span payloads, no Trust
+  Basis claim, no Harness recipe, and no public receipt-family story.
 - Refreshed the Mastra ScoreEvent sample against `@mastra/core` `1.29.1` and
   `@mastra/observability` `1.10.2` after upstream confirmed `ScoreId` had
   shipped. The strong fixture now carries live-backed `score_id_ref`; the v1

@@ -9,10 +9,12 @@
 
 > **2026-05-02 execution note:** The original P9 report-wrapper shape remains
 > useful discovery, but it is too broad for the next slice. P9b narrows the
-> execution candidate to one `EvaluationReport.cases[]` / `ReportCase`-derived
-> result, importer-only if it graduates, with no report-wide summaries,
-> analyses, trace/span metadata, Logfire payloads, Trust Basis claim, Harness
-> recipe, or public story.
+> execution candidate to one reduced case-result artifact derived from
+> `EvaluationReport.cases[]`. `ReportCase` is discovery input, not the implied
+> v1 contract unit. Possible importer-only support remains contingent on a
+> successful live recut, with no report-wide summaries, analyses, trace/span
+> metadata, Logfire payloads, Trust Basis claim, Harness recipe, or public
+> story.
 
 ## 1. Why this plan exists
 
