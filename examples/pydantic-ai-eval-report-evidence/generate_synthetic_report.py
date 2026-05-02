@@ -1,4 +1,4 @@
-"""Generate a tiny serialized artifact derived from a local pydantic_evals EvaluationReport."""
+"""Generate one reduced case-result artifact from a local pydantic_evals report."""
 
 from __future__ import annotations
 
@@ -13,20 +13,23 @@ from pydantic_evals.evaluators import EqualsExpected, Evaluator, EvaluatorContex
 from pydantic_evals.reporting import EvaluationReportAdapter
 
 
-EXTERNAL_SCHEMA = "pydantic-evals.evaluation-report.export.v1"
+EXTERNAL_SCHEMA = "pydantic-evals.report-case-result.export.v1"
 
 
 @dataclass
 class ExactScorePoints(Evaluator):
     """Tiny deterministic evaluator so the frozen sample has explicit scores."""
 
-    def evaluate(self, ctx: EvaluatorContext[str, str]) -> int:
-        return 100 if ctx.output == ctx.expected_output else 25
+    def evaluate(self, ctx: EvaluatorContext[str, str]) -> float:
+        return 1.0 if ctx.output == ctx.expected_output else 0.25
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate a tiny serialized artifact derived from a pydantic_evals EvaluationReport."
+        description=(
+            "Generate one reduced case-result artifact derived from "
+            "pydantic_evals EvaluationReport.cases[]."
+        )
     )
     parser.add_argument(
         "--scenario",
@@ -38,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         required=True,
-        help="Where to write the exported report artifact.",
+        help="Where to write the reduced case-result artifact.",
     )
     parser.add_argument(
         "--timestamp",
@@ -74,93 +77,99 @@ def uppercase_eval_failure(inputs: str) -> str:
     return inputs.upper()
 
 
-def _build_dataset(scenario: str) -> tuple[Dataset[str, str], str]:
+def _build_dataset(scenario: str) -> Dataset[str, str]:
     if scenario == "valid":
         cases = [
             Case(name="case-hello", inputs="hello", expected_output="HELLO"),
             Case(name="case-quiet", inputs="quiet", expected_output="QUIET"),
         ]
-        task = uppercase_eval_valid
     else:
         cases = [
             Case(name="case-hello", inputs="hello", expected_output="HELLO"),
             Case(name="case-bye", inputs="bye", expected_output="GOODBYE"),
         ]
-        task = uppercase_eval_failure
 
-    dataset = Dataset(
+    return Dataset(
         name="uppercase-demo-dataset",
         cases=cases,
         evaluators=[EqualsExpected(), ExactScorePoints()],
     )
-    return dataset, task.__name__
 
 
-def _status_for_case(case_dump: dict) -> str:
-    assertions = case_dump.get("assertions", {})
-    evaluator_failures = case_dump.get("evaluator_failures", [])
-    if evaluator_failures:
-        return "failed"
-    if assertions and all(bool(assertion["value"]) for assertion in assertions.values()):
-        return "passed"
-    return "failed"
+def _non_empty_string(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _bounded_result_from_assertion(name: str, assertion: dict) -> dict:
+    result = {
+        "kind": "assertion",
+        "evaluator_name": _non_empty_string(assertion.get("name")) or name,
+        "passed": bool(assertion["value"]),
+    }
+    reason = _non_empty_string(assertion.get("reason"))
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def _bounded_result_from_score(name: str, score: dict) -> dict:
+    result = {
+        "kind": "score",
+        "evaluator_name": _non_empty_string(score.get("name")) or name,
+        "score": score["value"],
+    }
+    reason = _non_empty_string(score.get("reason"))
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def _select_case_dump(report_dump: dict, scenario: str) -> dict:
+    cases = report_dump["cases"]
+    if scenario == "valid":
+        return cases[0]
+
+    for case_dump in cases:
+        assertions = case_dump.get("assertions", {})
+        if any(not bool(assertion["value"]) for assertion in assertions.values()):
+            return case_dump
+    return cases[-1]
 
 
 def _build_exported_artifact(scenario: str, timestamp: str) -> dict:
-    dataset, experiment_name = _build_dataset(scenario)
+    dataset = _build_dataset(scenario)
     if scenario == "valid":
         report = dataset.evaluate_sync(uppercase_eval_valid)
-        report_id = "pydantic-ai-eval-valid"
     else:
         report = dataset.evaluate_sync(uppercase_eval_failure)
-        report_id = "pydantic-ai-eval-failure"
 
     report_dump = EvaluationReportAdapter.dump_python(report)
-    case_results = []
-    pass_count = 0
-    fail_count = 0
+    case_dump = _select_case_dump(report_dump, scenario)
+    results = [
+        _bounded_result_from_assertion(name, assertion)
+        for name, assertion in sorted(case_dump.get("assertions", {}).items())
+    ]
+    results.extend(
+        _bounded_result_from_score(name, score)
+        for name, score in sorted(case_dump.get("scores", {}).items())
+    )
+    if not results:
+        raise ValueError("selected case did not expose bounded assertion or score results")
 
-    for case_dump in report_dump["cases"]:
-        status = _status_for_case(case_dump)
-        if status == "passed":
-            pass_count += 1
-        else:
-            fail_count += 1
-
-        scores = {
-            name: int(score["value"])
-            for name, score in case_dump.get("scores", {}).items()
-        }
-        case_result = {
-            "case_id": case_dump["name"],
-            "status": status,
-            "scores": scores,
-        }
-        assertions = {
-            name: bool(assertion["value"])
-            for name, assertion in case_dump.get("assertions", {}).items()
-        }
-        if assertions:
-            case_result["assertions"] = assertions
-        case_results.append(case_result)
-
-    outcome = "passed" if fail_count == 0 else "failed"
-    return {
+    artifact = {
         "schema": EXTERNAL_SCHEMA,
-        "framework": "pydantic-ai",
-        "surface": "evaluation_report",
-        "dataset_name": dataset.name,
-        "experiment_name": experiment_name,
-        "report_id": report_id,
+        "framework": "pydantic_evals",
+        "surface": "evaluation_report.cases.case_result",
+        "case_name": case_dump["name"],
+        "results": results,
         "timestamp": timestamp,
-        "outcome": outcome,
-        "summary": {
-            "case_count": len(case_results),
-            "pass_count": pass_count,
-            "fail_count": fail_count,
-        },
-        "case_results": case_results,
     }
+    source_case_name = _non_empty_string(case_dump.get("source_case_name"))
+    if source_case_name is not None:
+        artifact["source_case_name"] = source_case_name
+    return artifact
 
 
 def main() -> int:

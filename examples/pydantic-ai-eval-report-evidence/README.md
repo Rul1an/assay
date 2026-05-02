@@ -1,67 +1,97 @@
-# Pydantic AI Eval Report Evidence Sample
+# Pydantic Evals Reduced Case-Result Evidence Sample
 
-This example turns one tiny serialized artifact derived from a documented
-`EvaluationReport` result surface into bounded, reviewable external evidence
-for Assay.
+This example turns one tiny artifact derived from
+`EvaluationReport.cases[]` into bounded, reviewable external evidence for
+Assay.
 
-> **Current status:** this is the original P9 report-wrapper discovery sample.
-> The next planned slice is
-> [P9b](../../docs/architecture/PLAN-P9B-PYDANTIC-REPORTCASE-RESULT-EVIDENCE-2026q2.md),
-> which should recut the lane around one reduced case-result artifact derived
-> from `EvaluationReport.cases[]`. Treat `ReportCase` as discovery input and
-> treat the report-wrapper fixtures here as historical discovery, not the
-> target importer shape.
+The important cut is deliberate: `ReportCase` is the discovery source, not the
+artifact contract. A live inspection against `pydantic-evals==1.89.1` shows
+that report cases can carry broad fields such as `inputs`, `expected_output`,
+`output`, `trace_id`, and `span_id`. The checked-in v1 artifact excludes those
+fields and keeps only the reduced case-result boundary.
 
 It is intentionally small:
 
-- start with one local `evaluate_sync()` / `EvaluationReport` flow
-- freeze one valid artifact, one failure artifact, and one malformed case
-- map the good artifacts into Assay-shaped placeholder envelopes
-- keep per-case statuses and scores as observed eval-report data only
-- keep evaluator truth, tracing semantics, and runtime semantics out of Assay truth
+- start with one local `Dataset(...).evaluate_sync(...)` /
+  `EvaluationReport` flow
+- derive one reduced case-result artifact from one case entry
+- keep `case_name` as the docs-backed case identity
+- keep bounded assertion/score result values with evaluator names
+- reject raw task inputs, expected outputs, model outputs, trace/span payloads,
+  report summaries, and Logfire context
 
 ## What is in here
 
 - `generate_synthetic_report.py`: runs a tiny local `pydantic_evals` dataset
-  and writes a smaller serialized artifact derived from the resulting
-  `EvaluationReport`
-- `map_to_assay.py`: turns that frozen eval-report artifact into an
+  and writes one reduced case-result artifact derived from
+  `EvaluationReport.cases[]`
+- `map_to_assay.py`: validates that reduced artifact and turns it into an
   Assay-shaped placeholder envelope
-- `fixtures/valid.pydantic-ai.json`: one completed eval-report artifact with
-  all cases passing
-- `fixtures/failure.pydantic-ai.json`: one completed eval-report artifact with
-  one passing case and one failing case
-- `fixtures/malformed.pydantic-ai.json`: one malformed import case
-- `fixtures/valid.assay.ndjson`: mapped placeholder output with a fixed import time
-- `fixtures/failure.assay.ndjson`: mapped placeholder output with a fixed import time
+- `fixtures/valid.pydantic-ai.json`: one passing reduced case-result artifact
+- `fixtures/failure.pydantic-ai.json`: one failing reduced case-result artifact
+- `fixtures/malformed.pydantic-ai.json`: one intentionally broad artifact that
+  tries to include raw `expected_output` / `output`
+- `fixtures/valid.assay.ndjson`: mapped placeholder output with a fixed import
+  time
+- `fixtures/failure.assay.ndjson`: mapped placeholder output with a fixed
+  import time
+
+## Reduced Artifact Shape
+
+The checked-in artifact is not a raw `ReportCase` object and not a full
+`EvaluationReport`.
+
+```json
+{
+  "schema": "pydantic-evals.report-case-result.export.v1",
+  "framework": "pydantic_evals",
+  "surface": "evaluation_report.cases.case_result",
+  "case_name": "case-hello",
+  "results": [
+    {
+      "evaluator_name": "EqualsExpected",
+      "kind": "assertion",
+      "passed": true
+    },
+    {
+      "evaluator_name": "ExactScorePoints",
+      "kind": "score",
+      "score": 1.0
+    }
+  ],
+  "timestamp": "2026-05-02T08:00:00Z"
+}
+```
+
+Field status:
+
+- docs-backed: `EvaluationReport`, `EvaluationReport.cases[]`, `case_name`
+- live-backed in `pydantic-evals==1.89.1`: assertion result names/values and
+  score result names/values inside the dumped report case
+- downstream export metadata: `timestamp`
+- deliberately absent: `case_id_ref`, report summary, report name, dataset
+  metadata, task input, expected output, model output, traces, spans, and
+  Logfire payloads
 
 ## Why this seam
 
-This sample treats a serialized artifact derived from the documented
-`EvaluationReport` result surface as the current best first seam hypothesis for
+This sample treats a reduced case-result artifact derived from
+`EvaluationReport.cases[]` as the current best first seam hypothesis for
 `pydantic-ai` / `pydantic_evals`.
 
-That keeps the first slice on code-first eval artifacts only. It does not turn
-the sample into:
+That keeps the lane on code-first eval artifacts only. It does not turn the
+sample into:
 
 - a Logfire export lane
 - an OpenTelemetry export lane
 - a span-based evaluator lane
 - an agent runtime trace lane
 - a generalized observability sink
+- a Trust Basis claim or public receipt family
 
-The generator uses a tiny local `Dataset(...).evaluate_sync(...)` flow and then
-freezes a smaller export shape. That export shape is intentionally narrower
-than the full upstream report object.
-
-The checked-in fixtures also omit `trace_ref` on purpose. `trace_ref` may exist
-later as an opaque reference, but v1 keeps the sample on eval-result artifacts
-only.
-
-The checked-in artifact also includes a small `report_id` added by the local
-export step. That field is generator-side export metadata for the frozen sample;
-it is not a claim that upstream already guarantees a wire-format contract with
-that identifier.
+The mapper writes sample-only placeholder envelopes. It does not register a
+new Assay Evidence Contract event type and does not claim that Assay verified
+model quality, evaluator correctness, or upstream runtime semantics.
 
 ## Install the tiny local generator dependency
 
@@ -78,7 +108,7 @@ source /tmp/pydantic-ai-eval-sample-venv/bin/activate
 python examples/pydantic-ai-eval-report-evidence/generate_synthetic_report.py \
   --scenario valid \
   --output examples/pydantic-ai-eval-report-evidence/fixtures/valid.pydantic-ai.json \
-  --timestamp 2026-04-07T19:00:00Z \
+  --timestamp 2026-05-02T08:00:00Z \
   --overwrite
 ```
 
@@ -89,7 +119,7 @@ source /tmp/pydantic-ai-eval-sample-venv/bin/activate
 python examples/pydantic-ai-eval-report-evidence/generate_synthetic_report.py \
   --scenario failure \
   --output examples/pydantic-ai-eval-report-evidence/fixtures/failure.pydantic-ai.json \
-  --timestamp 2026-04-07T19:05:00Z \
+  --timestamp 2026-05-02T08:05:00Z \
   --overwrite
 ```
 
@@ -99,7 +129,7 @@ python examples/pydantic-ai-eval-report-evidence/generate_synthetic_report.py \
 python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
   examples/pydantic-ai-eval-report-evidence/fixtures/valid.pydantic-ai.json \
   --output examples/pydantic-ai-eval-report-evidence/fixtures/valid.assay.ndjson \
-  --import-time 2026-04-07T19:30:00Z \
+  --import-time 2026-05-02T08:30:00Z \
   --overwrite
 ```
 
@@ -109,7 +139,7 @@ python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
 python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
   examples/pydantic-ai-eval-report-evidence/fixtures/failure.pydantic-ai.json \
   --output examples/pydantic-ai-eval-report-evidence/fixtures/failure.assay.ndjson \
-  --import-time 2026-04-07T19:35:00Z \
+  --import-time 2026-05-02T08:35:00Z \
   --overwrite
 ```
 
@@ -119,41 +149,19 @@ python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
 python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
   examples/pydantic-ai-eval-report-evidence/fixtures/malformed.pydantic-ai.json \
   --output /tmp/pydantic-ai-malformed.assay.ndjson \
-  --import-time 2026-04-07T19:40:00Z \
+  --import-time 2026-05-02T08:40:00Z \
   --overwrite
 ```
 
-This third command is expected to fail because the malformed fixture is missing
-required keys.
+This third command is expected to fail because the malformed fixture includes
+unsupported broad case fields: `expected_output` and `output`.
 
-## Important boundary
-
-This mapper writes sample-only placeholder envelopes.
-
-It does not:
-
-- register a new Assay Evidence Contract event type
-- treat report judgments, evaluator semantics, or tracing semantics as Assay truth
-- imply that Assay independently verified model quality or evaluator correctness
-- claim that this sample already defines a stable upstream wire-format contract
-
-This sample targets the smallest honest evaluation-report surface exposed by a
-code-first eval framework, not a tracing backend, observability sink, or
-runtime truth API.
+## Important Boundary
 
 We are not asking Assay to inherit `pydantic_evals` report judgments,
 evaluator semantics, or tracing semantics as truth.
 
 For the checked-in fixture corpus, the mapper also stays inside the same
-JCS-safe subset boundary as the ADK, AGT, CrewAI, LangGraph, OpenAI Agents,
-MAF, A2A, and UCP samples, so the placeholder envelopes are honest about
-deterministic hashing without pretending to be a full RFC 8785 canonicalizer
-for arbitrary JSON input.
-
-## Checked-in fixtures
-
-- `fixtures/valid.pydantic-ai.json`: bounded eval-report export with all cases passing
-- `fixtures/failure.pydantic-ai.json`: bounded eval-report export with one failing case
-- `fixtures/malformed.pydantic-ai.json`: malformed import case
-- `fixtures/valid.assay.ndjson`: mapped placeholder output with fixed import time
-- `fixtures/failure.assay.ndjson`: mapped placeholder output with fixed import time
+JCS-safe subset boundary as the other interop samples, so the placeholder
+envelopes are honest about deterministic hashing without pretending to be a
+full RFC 8785 canonicalizer for arbitrary JSON input.

@@ -16,9 +16,9 @@
 > **2026-05-02 status note:** After the v3.6.0-v3.9.1 evidence-receipt line,
 > the next selected candidate is no longer another broad platform lane. It is
 > [P9b Pydantic Reduced Case-Result Evidence Recut](./PLAN-P9B-PYDANTIC-REPORTCASE-RESULT-EVIDENCE-2026q2.md):
-> a small reduced case-result recut of the existing Pydantic sample. This keeps
-> the current strategy artifact-first and live-recut-gated before considering
-> importer-only support or any new public receipt family.
+> a small reduced case-result recut of the existing Pydantic sample. The sample
+> recut is now the intended shape; importer-only support and any new public
+> receipt family remain later decisions.
 
 ## 1. Why this queue exists
 

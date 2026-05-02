@@ -162,9 +162,9 @@ Map a tiny Microsoft Agent Framework exported trace artifact into Assay-shaped e
 Map a tiny `mcp-agent` token-summary artifact into Assay-shaped external evidence.
 **Focus**: bounded runtime-accounting seam, upstream cost estimate only, no imported billing or workflow truth.
 
-### [Pydantic AI Eval Report Evidence](./pydantic-ai-eval-report-evidence)
-Map a tiny serialized artifact derived from a `pydantic_evals` `EvaluationReport` into Assay-shaped external evidence.
-**Focus**: code-first eval-result seam, bounded case results only, no imported evaluator or tracing truth.
+### [Pydantic Evals Reduced Case-Result Evidence](./pydantic-ai-eval-report-evidence)
+Map one reduced artifact derived from `pydantic_evals` `EvaluationReport.cases[]` into Assay-shaped external evidence.
+**Focus**: code-first case-result seam, no raw `ReportCase`, report summary, task input/output, or tracing truth.
 
 ### [Agno Accuracy Eval Evidence](./agno-accuracy-evidence)
 Map a tiny artifact derived from an Agno `AccuracyEval` / `AccuracyResult` surface into Assay-shaped external evidence.
