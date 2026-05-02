@@ -102,11 +102,18 @@ def _non_empty_string(value: object) -> str | None:
     return None
 
 
+def _assertion_passed(name: str, assertion: dict) -> bool:
+    value = assertion.get("value")
+    if not isinstance(value, bool):
+        raise ValueError(f"assertion {name} value must be a boolean")
+    return value
+
+
 def _bounded_result_from_assertion(name: str, assertion: dict) -> dict:
     result = {
         "kind": "assertion",
         "evaluator_name": _non_empty_string(assertion.get("name")) or name,
-        "passed": bool(assertion["value"]),
+        "passed": _assertion_passed(name, assertion),
     }
     reason = _non_empty_string(assertion.get("reason"))
     if reason is not None:
@@ -133,7 +140,10 @@ def _select_case_dump(report_dump: dict, scenario: str) -> dict:
 
     for case_dump in cases:
         assertions = case_dump.get("assertions", {})
-        if any(not bool(assertion["value"]) for assertion in assertions.values()):
+        if any(
+            not _assertion_passed(name, assertion)
+            for name, assertion in assertions.items()
+        ):
             return case_dump
     return cases[-1]
 
