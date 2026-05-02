@@ -321,9 +321,10 @@ run-scoped and retention-bound.
 ## Copyable GitHub Actions Proof
 
 If you want the smallest workflow-native version, use this as a repo-local
-proof over the checked-in D1 assets. It does not call upstream APIs and does
-not regenerate the recipes. It verifies the released proof bundles, writes a
-small job summary, and uploads the canonical/projection artifacts for review.
+proof over the checked-in Evidence Receipts in Action assets. It does not call
+upstream APIs and does not regenerate the recipes. It verifies the checked-in
+proof bundles, writes a small job summary, and uploads the
+canonical/projection artifacts for review.
 
 ```yaml
 name: evidence-receipts-proof

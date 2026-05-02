@@ -21,10 +21,11 @@ All notable changes to this project will be documented in this file.
   page shows the three released receipt families, their exact Trust Basis claim
   IDs, and the raw diff JSON to Markdown/JUnit projection split without adding
   a new product surface or integration claim.
-- Added a copyable GitHub Actions proof snippet to the D1 page. The snippet
-  verifies the checked-in proof bundles with the released Assay `v3.9.1`
-  binary, writes a small job summary, and uploads canonical/projection
-  artifacts without adding a required workflow or new runtime semantics.
+- Added a copyable GitHub Actions proof snippet to the Evidence Receipts in
+  Action page. The snippet verifies the checked-in proof bundles with the
+  released Assay `v3.9.1` binary, writes a small job summary, and uploads
+  canonical/projection artifacts without adding a required workflow or new
+  runtime semantics.
 
 ### CI / Release
 
