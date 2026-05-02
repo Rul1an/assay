@@ -318,6 +318,77 @@ Harness manual compatibility workflow can also be used as an example proof
 run, but it is not the primary source of truth because workflow artifacts are
 run-scoped and retention-bound.
 
+## Copyable GitHub Actions Proof
+
+If you want the smallest workflow-native version, use this as a repo-local
+proof over the checked-in D1 assets. It does not call upstream APIs and does
+not regenerate the recipes. It verifies the released proof bundles, writes a
+small job summary, and uploads the canonical/projection artifacts for review.
+
+```yaml
+name: evidence-receipts-proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Assay v3.9.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/Rul1an/assay/releases/download/v3.9.1"
+          curl -fsSLO "$base/assay-v3.9.1-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSLO "$base/assay-v3.9.1-x86_64-unknown-linux-gnu.tar.gz.sha256"
+          sha256sum -c assay-v3.9.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+          tar -xzf assay-v3.9.1-x86_64-unknown-linux-gnu.tar.gz
+          ./assay-v3.9.1-x86_64-unknown-linux-gnu/assay --version
+
+      - name: Verify checked-in proof bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSAY="./assay-v3.9.1-x86_64-unknown-linux-gnu/assay"
+          for family in promptfoo openfeature cyclonedx; do
+            "$ASSAY" evidence verify "docs/assets/evidence-receipts-in-action/$family/evidence.tar.gz"
+          done
+
+      - name: Write proof summary
+        shell: bash
+        run: |
+          {
+            echo "## Evidence Receipts Proof"
+            echo
+            echo "| Family | Trust Basis claim | Canonical artifacts | Projections |"
+            echo "| --- | --- | --- | --- |"
+            echo "| Promptfoo | \`external_eval_receipt_boundary_visible\` | bundle, trust-basis.json, diff JSON | Markdown, JUnit |"
+            echo "| OpenFeature | \`external_decision_receipt_boundary_visible\` | bundle, trust-basis.json, diff JSON | Markdown, JUnit |"
+            echo "| CycloneDX ML-BOM | \`external_inventory_receipt_boundary_visible\` | bundle, trust-basis.json, diff JSON | Markdown, JUnit |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-receipts-proof
+          path: |
+            docs/assets/evidence-receipts-in-action/manifest.json
+            docs/assets/evidence-receipts-in-action/**/evidence.tar.gz
+            docs/assets/evidence-receipts-in-action/**/trust-basis.json
+            docs/assets/evidence-receipts-in-action/**/trust-basis.diff.json
+            docs/assets/evidence-receipts-in-action/**/trust-basis-summary.md
+            docs/assets/evidence-receipts-in-action/**/junit-trust-basis.xml
+```
+
+This is a proof wrapper, not a required integration path. The full runnable
+family recipes stay in Assay Harness.
+
 ## Boundary
 
 This is a downstream evidence pattern, not an upstream integration claim.
