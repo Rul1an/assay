@@ -1,4 +1,4 @@
-"""Map a frozen pydantic-ai eval-report artifact into an Assay-shaped placeholder envelope."""
+"""Map one reduced pydantic_evals case-result artifact into an Assay-shaped envelope."""
 
 from __future__ import annotations
 
@@ -11,34 +11,36 @@ from pathlib import Path
 from typing import Any
 
 
-PLACEHOLDER_EVENT_TYPE = "example.placeholder.pydantic-ai-evaluation-report"
-PLACEHOLDER_SOURCE = "urn:example:assay:external:pydantic-ai:evaluation-report"
+PLACEHOLDER_EVENT_TYPE = "example.placeholder.pydantic-evals-report-case-result"
+PLACEHOLDER_SOURCE = "urn:example:assay:external:pydantic-evals:report-case-result"
 PLACEHOLDER_PRODUCER = "assay-example"
 PLACEHOLDER_PRODUCER_VERSION = "0.1.0"
 PLACEHOLDER_GIT = "sample"
-EXTERNAL_SCHEMA = "pydantic-evals.evaluation-report.export.v1"
+EXTERNAL_SCHEMA = "pydantic-evals.report-case-result.export.v1"
 REQUIRED_KEYS = (
     "schema",
     "framework",
     "surface",
-    "dataset_name",
-    "experiment_name",
-    "report_id",
+    "case_name",
+    "results",
     "timestamp",
-    "outcome",
-    "summary",
-    "case_results",
 )
-OPTIONAL_KEYS = {"duration_ms", "trace_ref"}
-ALLOWED_OUTCOMES = {"passed", "failed"}
-ALLOWED_CASE_STATUSES = {"passed", "failed"}
+OPTIONAL_KEYS = {"source_case_name", "source_ref"}
+ALLOWED_RESULT_KINDS = {"assertion", "score"}
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Map one pydantic-ai eval-report artifact into an Assay-shaped placeholder envelope."
+        description=(
+            "Map one reduced pydantic_evals case-result artifact into an "
+            "Assay-shaped placeholder envelope."
+        )
     )
-    parser.add_argument("input", type=Path, help="pydantic-ai eval-report artifact to read.")
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Reduced pydantic_evals case-result artifact to read.",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -53,7 +55,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--assay-run-id",
         default=None,
-        help="Optional Assay run id override. Defaults to import-pydantic-ai-<stem>.",
+        help="Optional Assay run id override. Defaults to import-pydantic-evals-<stem>.",
     )
     parser.add_argument(
         "--overwrite",
@@ -83,8 +85,8 @@ def _normalize_for_hash(value: Any) -> Any:
 
 def _canonical_json(value: Any) -> str:
     # This sample keeps the fixture corpus inside the same deterministic,
-    # integer-valued JSON subset the other interop samples use. It is not a full
-    # RFC 8785 / JCS implementation for arbitrary JSON inputs.
+    # small JSON subset the other interop samples use. It is not a full RFC
+    # 8785 / JCS implementation for arbitrary JSON inputs.
     normalized = _normalize_for_hash(value)
     return json.dumps(
         normalized,
@@ -123,117 +125,66 @@ def _parse_rfc3339_utc(value: str | None) -> str:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _validate_non_negative_int(value: Any, line_label: str, field_name: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(f"{line_label}: {field_name} must be an integer")
-    if value < 0:
-        raise ValueError(f"{line_label}: {field_name} must be >= 0")
-    return value
+def _validate_finite_number(value: Any, line_label: str, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{line_label}: {field_name} must be a number")
+    if not math.isfinite(float(value)):
+        raise ValueError(f"{line_label}: {field_name} must be finite")
 
 
-def _validate_string_map(value: Any, line_label: str, field_name: str) -> None:
-    if not isinstance(value, dict):
-        raise ValueError(f"{line_label}: {field_name} must be a JSON object")
-    for key, nested in value.items():
-        if not isinstance(key, str) or not key.strip():
-            raise ValueError(f"{line_label}: {field_name} keys must be non-empty strings")
-        if not isinstance(nested, str) or not nested.strip():
-            raise ValueError(f"{line_label}: {field_name}.{key} must be a non-empty string")
+def _validate_result_reason(result: dict[str, Any], item_label: str) -> None:
+    if "reason" not in result:
+        return
+    if not isinstance(result["reason"], str) or not result["reason"].strip():
+        raise ValueError(f"{item_label}: reason must be a non-empty string")
 
 
-def _validate_boolean_map(value: Any, line_label: str, field_name: str) -> None:
-    if not isinstance(value, dict):
-        raise ValueError(f"{line_label}: {field_name} must be a JSON object")
-    for key, nested in value.items():
-        if not isinstance(key, str) or not key.strip():
-            raise ValueError(f"{line_label}: {field_name} keys must be non-empty strings")
-        if not isinstance(nested, bool):
-            raise ValueError(f"{line_label}: {field_name}.{key} must be a boolean")
+def _validate_results(results: Any, line_label: str) -> None:
+    if not isinstance(results, list) or not results:
+        raise ValueError(f"{line_label}: results must be a non-empty list")
 
-
-def _validate_scores(scores: Any, line_label: str) -> None:
-    if not isinstance(scores, dict) or not scores:
-        raise ValueError(f"{line_label}: scores must be a non-empty JSON object")
-    for key, value in scores.items():
-        if not isinstance(key, str) or not key.strip():
-            raise ValueError(f"{line_label}: scores keys must be non-empty strings")
-        points = _validate_non_negative_int(value, line_label, f"scores.{key}")
-        if points > 100:
-            raise ValueError(f"{line_label}: scores.{key} must be <= 100")
-
-
-def _validate_summary(summary: Any, line_label: str) -> None:
-    if not isinstance(summary, dict):
-        raise ValueError(f"{line_label}: summary must be a JSON object")
-    required = {"case_count", "pass_count", "fail_count"}
-    optional = {"average_score"}
-    missing = [key for key in required if key not in summary]
-    if missing:
-        joined = ", ".join(sorted(missing))
-        raise ValueError(f"{line_label}: summary missing required keys: {joined}")
-    unknown = set(summary) - required - optional
-    if unknown:
-        joined = ", ".join(sorted(unknown))
-        raise ValueError(f"{line_label}: summary contains unsupported keys: {joined}")
-
-    case_count = _validate_non_negative_int(summary["case_count"], line_label, "summary.case_count")
-    pass_count = _validate_non_negative_int(summary["pass_count"], line_label, "summary.pass_count")
-    fail_count = _validate_non_negative_int(summary["fail_count"], line_label, "summary.fail_count")
-    if case_count != pass_count + fail_count:
-        raise ValueError(f"{line_label}: summary.case_count must equal pass_count + fail_count")
-    if "average_score" in summary:
-        average_score = _validate_non_negative_int(
-            summary["average_score"], line_label, "summary.average_score"
-        )
-        if average_score > 100:
-            raise ValueError(f"{line_label}: summary.average_score must be <= 100")
-
-
-def _validate_case_results(case_results: Any, line_label: str) -> tuple[int, int]:
-    if not isinstance(case_results, list) or not case_results:
-        raise ValueError(f"{line_label}: case_results must be a non-empty list")
-
-    pass_count = 0
-    fail_count = 0
-    seen_ids: set[str] = set()
-    for index, case_result in enumerate(case_results):
-        item_label = f"{line_label}: case_results[{index}]"
-        if not isinstance(case_result, dict):
+    seen_results: set[tuple[str, str]] = set()
+    for index, result in enumerate(results):
+        item_label = f"{line_label}: results[{index}]"
+        if not isinstance(result, dict):
             raise ValueError(f"{item_label} must be a JSON object")
-        required = {"case_id", "status", "scores"}
-        optional = {"assertions", "labels"}
-        missing = [key for key in required if key not in case_result]
+
+        required = {"kind", "evaluator_name"}
+        missing = [key for key in required if key not in result]
         if missing:
             joined = ", ".join(sorted(missing))
             raise ValueError(f"{item_label} missing required keys: {joined}")
-        unknown = set(case_result) - required - optional
+
+        kind = result["kind"]
+        if not isinstance(kind, str) or kind not in ALLOWED_RESULT_KINDS:
+            allowed = ", ".join(sorted(ALLOWED_RESULT_KINDS))
+            raise ValueError(f"{item_label}: kind must be one of: {allowed}")
+        evaluator_name = result["evaluator_name"]
+        if not isinstance(evaluator_name, str) or not evaluator_name.strip():
+            raise ValueError(f"{item_label}: evaluator_name must be a non-empty string")
+
+        result_key = (kind, evaluator_name)
+        if result_key in seen_results:
+            raise ValueError(f"{item_label}: duplicate {kind} result for {evaluator_name}")
+        seen_results.add(result_key)
+
+        _validate_result_reason(result, item_label)
+        if kind == "assertion":
+            allowed_keys = required | {"passed", "reason"}
+            if "passed" not in result:
+                raise ValueError(f"{item_label} missing required keys: passed")
+            if not isinstance(result["passed"], bool):
+                raise ValueError(f"{item_label}: passed must be a boolean")
+        else:
+            allowed_keys = required | {"score", "reason"}
+            if "score" not in result:
+                raise ValueError(f"{item_label} missing required keys: score")
+            _validate_finite_number(result["score"], item_label, "score")
+
+        unknown = set(result) - allowed_keys
         if unknown:
             joined = ", ".join(sorted(unknown))
             raise ValueError(f"{item_label} contains unsupported keys: {joined}")
-
-        case_id = case_result["case_id"]
-        if not isinstance(case_id, str) or not case_id.strip():
-            raise ValueError(f"{item_label}: case_id must be a non-empty string")
-        if case_id in seen_ids:
-            raise ValueError(f"{item_label}: duplicate case_id {case_id}")
-        seen_ids.add(case_id)
-
-        status = case_result["status"]
-        if not isinstance(status, str) or status not in ALLOWED_CASE_STATUSES:
-            allowed = ", ".join(sorted(ALLOWED_CASE_STATUSES))
-            raise ValueError(f"{item_label}: status must be one of: {allowed}")
-        if status == "passed":
-            pass_count += 1
-        else:
-            fail_count += 1
-
-        _validate_scores(case_result["scores"], item_label)
-        if "assertions" in case_result:
-            _validate_boolean_map(case_result["assertions"], item_label, "assertions")
-        if "labels" in case_result:
-            _validate_string_map(case_result["labels"], item_label, "labels")
-
-    return pass_count, fail_count
 
 
 def _validate_record(record: dict[str, Any], line_label: str) -> None:
@@ -251,33 +202,20 @@ def _validate_record(record: dict[str, Any], line_label: str) -> None:
         raise ValueError(
             f"{line_label}: expected schema {EXTERNAL_SCHEMA}, got {record['schema']}"
         )
-    if record["framework"] != "pydantic-ai":
-        raise ValueError(f"{line_label}: framework must be pydantic-ai")
-    if record["surface"] != "evaluation_report":
-        raise ValueError(f"{line_label}: surface must be evaluation_report")
-    for key in ("dataset_name", "experiment_name", "report_id"):
+    if record["framework"] != "pydantic_evals":
+        raise ValueError(f"{line_label}: framework must be pydantic_evals")
+    if record["surface"] != "evaluation_report.cases.case_result":
+        raise ValueError(
+            f"{line_label}: surface must be evaluation_report.cases.case_result"
+        )
+    for key in ("case_name",):
         if not isinstance(record[key], str) or not record[key].strip():
             raise ValueError(f"{line_label}: {key} must be a non-empty string")
-    if not isinstance(record["outcome"], str) or record["outcome"] not in ALLOWED_OUTCOMES:
-        allowed = ", ".join(sorted(ALLOWED_OUTCOMES))
-        raise ValueError(f"{line_label}: outcome must be one of: {allowed}")
+    for key in ("source_case_name", "source_ref"):
+        if key in record and (not isinstance(record[key], str) or not record[key].strip()):
+            raise ValueError(f"{line_label}: {key} must be a non-empty string")
 
-    _validate_summary(record["summary"], line_label)
-    pass_count, fail_count = _validate_case_results(record["case_results"], line_label)
-    summary = record["summary"]
-    if summary["case_count"] != len(record["case_results"]):
-        raise ValueError(f"{line_label}: summary.case_count must equal len(case_results)")
-    if summary["pass_count"] != pass_count or summary["fail_count"] != fail_count:
-        raise ValueError(f"{line_label}: summary pass/fail counts must match case_results")
-    expected_outcome = "passed" if fail_count == 0 else "failed"
-    if record["outcome"] != expected_outcome:
-        raise ValueError(f"{line_label}: outcome must match aggregated case_results status")
-
-    if "duration_ms" in record:
-        _validate_non_negative_int(record["duration_ms"], line_label, "duration_ms")
-    if "trace_ref" in record:
-        if not isinstance(record["trace_ref"], str) or not record["trace_ref"].strip():
-            raise ValueError(f"{line_label}: trace_ref must be a non-empty string")
+    _validate_results(record["results"], line_label)
 
 
 def _normalized_record(record: dict[str, Any], line_label: str) -> dict[str, Any]:
@@ -292,10 +230,11 @@ def _normalized_record(record: dict[str, Any], line_label: str) -> dict[str, Any
 def _build_event(record: dict[str, Any], assay_run_id: str, import_time: str) -> dict[str, Any]:
     normalized = _normalized_record(record, "artifact")
     data = {
-        "external_system": "pydantic-ai",
-        "external_surface": "evaluation-report",
+        "external_system": "pydantic_evals",
+        "external_surface": "evaluation_report.cases.case_result",
         "external_schema": EXTERNAL_SCHEMA,
-        "observed_upstream_time": normalized["timestamp"],
+        "case_name": normalized["case_name"],
+        "observed_export_time": normalized["timestamp"],
         "observed": record,
     }
     event = {
@@ -327,7 +266,7 @@ def main() -> int:
         import_time = _parse_rfc3339_utc(args.import_time)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
-    assay_run_id = args.assay_run_id or f"import-pydantic-ai-{args.input.stem}"
+    assay_run_id = args.assay_run_id or f"import-pydantic-evals-{args.input.stem}"
 
     try:
         record = json.loads(args.input.read_text(encoding="utf-8"))

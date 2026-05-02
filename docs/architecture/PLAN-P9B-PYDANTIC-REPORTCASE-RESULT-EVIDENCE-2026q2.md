@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-02
 - **Owner:** Evidence / Product
-- **Status:** Proposed seam-hardening slice
+- **Status:** Implemented sample recut; importer-only support remains future
 - **Scope:** Recut the existing Pydantic Evals sample around one bounded
   case-result artifact derived from `EvaluationReport.cases[]`. `ReportCase`
   is a discovery input, not the implied v1 contract unit. This is
@@ -139,21 +139,26 @@ Recommended shape:
   "framework": "pydantic_evals",
   "surface": "evaluation_report.cases.case_result",
   "case_name": "checkout tax valid",
-  "evaluator_name": "Equals",
-  "result": {
-    "passed": true,
-    "score": 1.0,
-    "reason": "matched expected output"
-  },
+  "results": [
+    {
+      "evaluator_name": "EqualsExpected",
+      "kind": "assertion",
+      "passed": true
+    },
+    {
+      "evaluator_name": "ExactScorePoints",
+      "kind": "score",
+      "score": 1.0
+    }
+  ],
   "timestamp": "2026-05-02T08:00:00Z"
 }
 ```
 
-This example is illustrative, not a near-contract. The implementation must
-verify the current `ReportCase` / per-evaluation result shape before freezing
-fixture fields. `evaluator_name`, `result.passed`, `result.score`, and
-`result.reason` are provisional candidate fields pending live shape
-inspection.
+This is the implemented sample shape after live inspection against
+`pydantic-evals==1.89.1`. The live dump exposes bounded assertion result
+names/values and score result names/values inside each case. `reason` remains
+optional and is only included when naturally present as a non-empty string.
 
 ## 7. Required, Preferred, Optional
 
@@ -163,22 +168,21 @@ Required in the reduced artifact:
 - `framework = "pydantic_evals"`;
 - `surface = "evaluation_report.cases.case_result"`;
 - `case_name` as the docs-backed bounded case identity when available;
-- one reduced result value if live inspection exposes a bounded pass/fail or
-  scalar score without importing raw output or expected output;
+- one or more reduced result values when live inspection exposes bounded
+  pass/fail assertions or scalar scores without importing raw output or
+  expected output;
 - `timestamp` from the reduced export step, not a claim that upstream exposes a
   stable per-case timestamp.
 
 Preferred:
 
-- `evaluator_name`, pending live inspection of where the evaluator identity is
-  naturally exposed;
-- explicit `result.passed` when live inspection exposes a bounded boolean
-  result;
-- explicit `result.score` when live inspection exposes a bounded scalar result.
+- `results[].evaluator_name`, live-backed from assertion/score result entries;
+- explicit `results[].passed` for assertion results;
+- explicit `results[].score` for scalar score results.
 
 Optional:
 
-- short `result.reason` or feedback when naturally present;
+- short `results[].reason` or feedback when naturally present;
 - `case_id_ref` only if the inspected live shape naturally carries a bounded
   case identifier;
 - bounded `source_ref` if the recut needs a non-sensitive local artifact label.
@@ -202,8 +206,9 @@ P9b must label candidate fields by evidence level before implementation:
 - **Docs-backed:** `EvaluationReport`, `EvaluationReport.cases`, and
   case-level names such as `case_name` / `source_case_name` where present in
   the public reporting API.
-- **Pending live inspection:** evaluator identity, pass/fail projection, scalar
-  score projection, and short reason/feedback.
+- **Live-backed in `pydantic-evals==1.89.1`:** evaluator identity, pass/fail
+  projection, scalar score projection, and short reason/feedback when present
+  on assertion/score result entries.
 - **Downstream/export provenance:** reduced artifact timestamp, source artifact
   label, reducer version, import timestamp, and artifact digest if later
   importer-only support is drafted.
@@ -282,8 +287,8 @@ P9b is ready when:
 - the README says which fields are docs-backed versus live-capture-backed;
 - `case_name` is treated as the docs-backed case identity, while `case_id_ref`
   is used only if live inspection naturally exposes it;
-- evaluator identity, pass/fail, scalar score, and reason/feedback are labeled
-  provisional until live inspection proves their shape;
+- evaluator identity, pass/fail, scalar score, and reason/feedback are derived
+  only from live-backed assertion/score result entries;
 - trace/span/Logfire fields are excluded rather than merely marked optional;
 - raw prompts, completions, model outputs, task inputs, expected outputs,
   analyses, and report-wide summaries are rejected or absent;
@@ -307,8 +312,8 @@ partnership, official, or Trust Basis family.
 ## 13. Short Verdict
 
 Pydantic is next, but only as a reduced case-result artifact derived from
-`EvaluationReport.cases[]`. Possible importer-only support remains contingent
-on a successful live recut.
+`EvaluationReport.cases[]`. P9b proves the sample recut; possible importer-only
+support remains a later decision.
 
 AutoEvals remains the clean fallback. AgentEvals remains the more ambitious
 second-choice. Phoenix, LangWatch, and Guardrails stay parked until the product

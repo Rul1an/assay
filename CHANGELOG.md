@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
   support only if the live recut succeeds, no raw `ReportCase` contract, no
   full `EvaluationReport` import, no Logfire/trace/span payloads, no Trust
   Basis claim, no Harness recipe, and no public receipt-family story.
+- Recut the Pydantic Evals sample around `pydantic-evals==1.89.1` and one
+  reduced case-result artifact. The new fixtures carry `case_name`, bounded
+  assertion/score results, and export timestamp only; broad `ReportCase`
+  fields such as raw input, expected output, model output, trace, and span data
+  remain rejected.
 - Refreshed the Mastra ScoreEvent sample against `@mastra/core` `1.29.1` and
   `@mastra/observability` `1.10.2` after upstream confirmed `ScoreId` had
   shipped. The strong fixture now carries live-backed `score_id_ref`; the v1

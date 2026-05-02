@@ -1,23 +1,16 @@
 {
-  "schema": "pydantic-evals.evaluation-report.export.v1",
-  "framework": "pydantic-ai",
-  "surface": "evaluation_report",
-  "dataset_name": "uppercase-demo-dataset",
-  "experiment_name": "uppercase_eval_valid",
-  "timestamp": "2026-04-07T19:10:00Z",
-  "outcome": "passed",
-  "summary": {
-    "case_count": 1,
-    "pass_count": 1,
-    "fail_count": 0
-  },
-  "case_results": [
+  "case_name": "case-leaky",
+  "expected_output": "HELLO",
+  "framework": "pydantic_evals",
+  "output": "hello",
+  "results": [
     {
-      "case_id": "case-hello",
-      "status": "passed",
-      "scores": {
-        "ExactScorePoints": 100
-      }
+      "evaluator_name": "EqualsExpected",
+      "kind": "assertion",
+      "passed": true
     }
-  ]
+  ],
+  "schema": "pydantic-evals.report-case-result.export.v1",
+  "surface": "evaluation_report.cases.case_result",
+  "timestamp": "2026-05-02T08:10:00Z"
 }

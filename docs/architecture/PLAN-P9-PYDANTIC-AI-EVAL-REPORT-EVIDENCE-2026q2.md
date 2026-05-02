@@ -11,10 +11,10 @@
 > useful discovery, but it is too broad for the next slice. P9b narrows the
 > execution candidate to one reduced case-result artifact derived from
 > `EvaluationReport.cases[]`. `ReportCase` is discovery input, not the implied
-> v1 contract unit. Possible importer-only support remains contingent on a
-> successful live recut, with no report-wide summaries, analyses, trace/span
-> metadata, Logfire payloads, Trust Basis claim, Harness recipe, or public
-> story.
+> v1 contract unit. The P9b sample recut is the intended follow-up shape;
+> importer-only support remains future, with no report-wide summaries,
+> analyses, trace/span metadata, Logfire payloads, Trust Basis claim, Harness
+> recipe, or public story.
 
 ## 1. Why this plan exists
 

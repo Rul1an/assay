@@ -1,37 +1,19 @@
 {
-  "case_results": [
+  "case_name": "case-bye",
+  "framework": "pydantic_evals",
+  "results": [
     {
-      "assertions": {
-        "EqualsExpected": true
-      },
-      "case_id": "case-hello",
-      "scores": {
-        "ExactScorePoints": 100
-      },
-      "status": "passed"
+      "evaluator_name": "EqualsExpected",
+      "kind": "assertion",
+      "passed": false
     },
     {
-      "assertions": {
-        "EqualsExpected": false
-      },
-      "case_id": "case-bye",
-      "scores": {
-        "ExactScorePoints": 25
-      },
-      "status": "failed"
+      "evaluator_name": "ExactScorePoints",
+      "kind": "score",
+      "score": 0.25
     }
   ],
-  "dataset_name": "uppercase-demo-dataset",
-  "experiment_name": "uppercase_eval_failure",
-  "framework": "pydantic-ai",
-  "outcome": "failed",
-  "report_id": "pydantic-ai-eval-failure",
-  "schema": "pydantic-evals.evaluation-report.export.v1",
-  "summary": {
-    "case_count": 2,
-    "fail_count": 1,
-    "pass_count": 1
-  },
-  "surface": "evaluation_report",
-  "timestamp": "2026-04-07T19:05:00Z"
+  "schema": "pydantic-evals.report-case-result.export.v1",
+  "surface": "evaluation_report.cases.case_result",
+  "timestamp": "2026-05-02T08:05:00Z"
 }
