@@ -60,7 +60,21 @@ The receipt family matrix must continue to record:
 This is the safe status until score-receipt claim semantics are deliberately
 accepted and tested in a later compatibility-expanding slice.
 
-## 3. Why not claim-visible now
+## 3. Non-goals
+
+P14d does not add:
+
+- a new Trust Basis claim
+- a Trust Card row or schema bump
+- a Harness recipe
+- a Mastra runtime integration change
+- a receipt parsing or reducer-output change
+- a P14c importer behavior change
+- compatibility expansion for existing consumers
+
+This slice is a semantic freeze, not hidden feature work.
+
+## 4. Why not claim-visible now
 
 Score receipts are tempting because the importer is real and Mastra maintainer
 guidance made the seam unusually strong:
@@ -84,7 +98,7 @@ The word "score" is easy to overread as:
 
 P14d keeps those meanings out of the claim table.
 
-## 4. Current receipt meaning
+## 5. Current receipt meaning
 
 Today, a valid Mastra score receipt means only:
 
@@ -102,13 +116,17 @@ It does not mean:
 - the trace or span anchor is complete
 - the score should pass or fail an Assay or Harness gate
 
-## 5. Reserved future claim candidate
+## 6. Reserved future claim candidate
 
 If this lane later becomes claim-visible, the likely candidate claim is:
 
 ```text
 external_score_receipt_boundary_visible
 ```
+
+The name is reserved only in planning language. P14d does not add it to any
+registry, schema, enum, Trust Basis output, Trust Card output, CLI output, or
+Harness path.
 
 The maximum acceptable v1 meaning for that claim is narrow:
 
@@ -137,10 +155,14 @@ with the existing bounded receipt predicates from P14c:
   prompts, request/response bodies, scorer configs, dashboard state, or legacy
   callback envelope
 
+This claim, if ever added, is about receipt boundary visibility only. It is not
+about score quality, score interpretation, score thresholding, evaluator
+correctness, or target outcome.
+
 Even then, the candidate claim must not say the score is correct, sufficient,
 safe, trusted, passed, or failed.
 
-## 6. P14e readiness bar
+## 7. P14e readiness bar
 
 A later P14e may add `external_score_receipt_boundary_visible` only if the
 compatibility cost is accepted deliberately.
@@ -161,7 +183,7 @@ Minimum readiness requirements:
 
 Until those are present, importer-only is the correct state.
 
-## 7. Harness posture
+## 8. Harness posture
 
 Harness does not change in P14d.
 
@@ -175,22 +197,42 @@ Trust Basis and Trust Card compatibility decision is already made. Harness
 should compare compiled Assay artifacts; it should not learn Mastra ScoreEvent
 payload semantics directly.
 
-## 8. Acceptance criteria
+Existing Harness fixtures, report snapshots, JUnit projections, and diff
+outputs remain unchanged after P14d.
+
+## 9. Artifacts touched
+
+Expected P14d artifacts:
+
+- this architecture freeze note
+- P14c backreference to the freeze decision
+- architecture index, queue note, roadmap, CLI docs, and changelog alignment
+- receipt family matrix remains `trust_basis_claim: null` for Mastra score
+  receipts, with an explanatory claim-readiness plan pointer
+- a matrix/registry test proving Mastra score receipts remain importer-only
+
+No Assay Harness files are touched in this slice.
+
+## 10. Acceptance criteria
 
 P14d is complete when:
 
 - docs state that `assay.receipt.mastra.score_event.v1` remains importer-only
 - the receipt family matrix still has `trust_basis_claim: null` for Mastra
   score receipts
+- a verification test asserts that the Mastra matrix entry remains claim-null
+- a verification test asserts that Mastra ScoreEvent receipts cannot emit any
+  current eval, decision, or inventory Trust Basis claim
 - the P14c test posture remains true: Mastra score receipts do not mutate eval,
   decision, or inventory receipt claims
 - the possible future claim `external_score_receipt_boundary_visible` is named
-  only as a reserved candidate, not as a shipped claim
+  only as a future planning candidate, not registered in code or schema
 - P14e readiness requirements are recorded before any claim-visible work starts
 - Harness is explicitly recorded as unchanged for this freeze slice
+- Harness fixtures, snapshots, reports, and projections remain unchanged
 - release notes call this a semantic freeze, not feature expansion
 
-## 9. Outward posture
+## 11. Outward posture
 
 No new Mastra comment is needed for P14d.
 
@@ -203,7 +245,7 @@ The Mastra thread already established the important seam:
 P14d is internal product semantics. It should not be framed as upstream support,
 an integration claim, or a request for new Mastra behavior.
 
-## 10. References
+## 12. References
 
 - [P14b Mastra ScoreEvent / ExportedScore Evidence Interop](./PLAN-P14B-MASTRA-SCORE-EVENT-EVIDENCE-2026q2.md)
 - [P14c Mastra ScoreEvent Receipt Import](./PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md)
