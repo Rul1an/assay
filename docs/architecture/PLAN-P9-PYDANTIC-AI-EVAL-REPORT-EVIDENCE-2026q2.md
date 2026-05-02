@@ -2,9 +2,17 @@
 
 - **Date:** 2026-04-07
 - **Owner:** Evidence / Product
-- **Status:** Planning
+- **Status:** Historical discovery; superseded for execution by
+  [P9b](./PLAN-P9B-PYDANTIC-REPORTCASE-RESULT-EVIDENCE-2026q2.md)
 - **Scope (this PR):** Define the next external interop lane after `mcp-agent`.
   No sample implementation, no outward post, no contract freeze in this slice.
+
+> **2026-05-02 execution note:** The original P9 report-wrapper shape remains
+> useful discovery, but it is too broad for the next slice. P9b narrows the
+> execution candidate to one `EvaluationReport.cases[]` / `ReportCase`-derived
+> result, importer-only if it graduates, with no report-wide summaries,
+> analyses, trace/span metadata, Logfire payloads, Trust Basis claim, Harness
+> recipe, or public story.
 
 ## 1. Why this plan exists
 
