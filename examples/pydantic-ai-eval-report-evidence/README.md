@@ -4,6 +4,14 @@ This example turns one tiny serialized artifact derived from a documented
 `EvaluationReport` result surface into bounded, reviewable external evidence
 for Assay.
 
+> **Current status:** this is the original P9 report-wrapper discovery sample.
+> The next planned slice is
+> [P9b](../../docs/architecture/PLAN-P9B-PYDANTIC-REPORTCASE-RESULT-EVIDENCE-2026q2.md),
+> which should recut the lane around one reduced case-result artifact derived
+> from `EvaluationReport.cases[]`. Treat `ReportCase` as discovery input and
+> treat the report-wrapper fixtures here as historical discovery, not the
+> target importer shape.
+
 It is intentionally small:
 
 - start with one local `evaluate_sync()` / `EvaluationReport` flow
