@@ -411,6 +411,27 @@ fn trust_basis_assert_rejects_unknown_claim_id_as_input_error() {
 }
 
 #[test]
+fn trust_basis_assert_rejects_planning_only_score_receipt_claim_candidate() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("trust-basis.json");
+    write_trust_basis_json(&input, "verified");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("assert")
+        .arg("--input")
+        .arg(&input)
+        .arg("--require")
+        .arg("external_score_receipt_boundary_visible=verified")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "unknown Trust Basis claim id \"external_score_receipt_boundary_visible\"",
+        ));
+}
+
+#[test]
 fn trust_basis_assert_rejects_duplicate_claim_identity() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("trust-basis.json");
