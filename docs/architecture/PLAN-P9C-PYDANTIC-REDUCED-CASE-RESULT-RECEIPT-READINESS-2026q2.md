@@ -19,10 +19,14 @@ freeze the rules that must be true before any later importer-only work starts.
 The important boundary is:
 
 ```text
-EvaluationReport.cases[] is the discovery surface.
+EvaluationReport.cases[] is discovery input only.
 The reduced case-result artifact is the possible import unit.
 ReportCase itself is not the contract unit.
 ```
+
+The importer unit is not fixed by the public docs alone. It remains contingent
+on live shape inspection continuing to support a reduced artifact that is
+smaller than `ReportCase`.
 
 That is the lane. Klein maar stevig.
 
@@ -89,11 +93,17 @@ The only acceptable future importer candidate is the P9b reduced artifact:
 This shape is a reduced downstream artifact. It is not a dumped upstream
 `ReportCase` object.
 
+The `surface` value is an Assay-side reduced artifact identifier. It is not an
+upstream Pydantic field name and does not claim that Pydantic publishes a
+surface with that exact identifier.
+
 ## 5. Identity Rules
 
 Required bounded identity:
 
 - `case_name`
+
+For P9c readiness, `case_name` is the only docs-backed bounded identity field.
 
 Optional only if naturally present in a future live-inspected shape:
 
@@ -114,7 +124,8 @@ If the only stable case identity is `case_name`, Pydantic remains a
 
 ## 6. Candidate Result Fields
 
-These fields remain candidate receipt fields pending readiness verification:
+These fields remain live-inspection-backed candidate receipt fields pending
+readiness verification:
 
 - `results[].evaluator_name`
 - `results[].passed`
@@ -124,6 +135,8 @@ These fields remain candidate receipt fields pending readiness verification:
 P9b live inspection backs assertion and score result names/values for the
 current sample version. P9c must keep that evidence status explicit: these are
 not assumed to be docs-hard across every future `pydantic_evals` version.
+P9c freezes that distinction rather than promoting these fields to stable
+public reporting-doc truth.
 
 `reason` is optional and may only be included when naturally present as a
 bounded, non-empty string. Do not derive it from prompt, completion, expected
@@ -194,10 +207,10 @@ P9c is complete when:
 - docs state that `EvaluationReport.cases[]` is discovery input only;
 - docs state that the reduced case-result artifact, not `ReportCase`, is the
   possible import unit;
-- `case_name` is the required v1 identity and `case_id_ref` is optional only
-  when naturally live-backed;
-- candidate result fields are labeled as live-backed/readiness-bound rather
-  than docs-hard;
+- `case_name` is the only docs-backed v1 identity and `case_id_ref` is
+  optional only when naturally live-backed;
+- candidate result fields are labeled as live-inspection-backed and
+  readiness-bound rather than docs-hard;
 - forbidden broad `ReportCase`, trace, Logfire, prompt, completion, input,
   expected-output, and model-output fields remain explicit;
 - P9d readiness requirements are recorded before importer work starts;
@@ -207,7 +220,8 @@ P9c is complete when:
 ## 11. Short Verdict
 
 Pydantic stays the best next lane, but only through the reduced case-result
-boundary.
+boundary. In that boundary, `case_name` is the only docs-backed v1 identity;
+`case_id_ref` stays out unless a later live inspection naturally exposes it.
 
 P9c freezes that boundary. P9d may implement importer-only support later, but
 only if the reduced artifact remains genuinely smaller than `ReportCase` and

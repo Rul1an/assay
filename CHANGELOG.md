@@ -20,8 +20,9 @@ All notable changes to this project will be documented in this file.
 - Added P9c as the Pydantic reduced case-result receipt readiness freeze. The
   lane stays pre-importer: `EvaluationReport.cases[]` remains discovery input,
   the reduced case-result artifact is the possible import unit, `ReportCase`
-  is not the contract unit, and any importer-only P9d work must first preserve
-  the no-trace/no-Logfire/no-output boundary.
+  is not the contract unit, `case_name` is the only docs-backed v1 identity,
+  and any importer-only P9d work must first preserve the
+  no-trace/no-Logfire/no-output boundary.
 - Refreshed the Mastra ScoreEvent sample against `@mastra/core` `1.29.1` and
   `@mastra/observability` `1.10.2` after upstream confirmed `ScoreId` had
   shipped. The strong fixture now carries live-backed `score_id_ref`; the v1
