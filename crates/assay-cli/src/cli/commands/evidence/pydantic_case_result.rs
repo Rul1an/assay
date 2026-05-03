@@ -355,12 +355,9 @@ fn optional_bounded_string(
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.is_null() {
-        return Ok(None);
-    }
     Ok(Some(validate_bounded_string(
         value.as_str().ok_or_else(|| {
-            anyhow::anyhow!("line {line_number} {field_name} must be a string or null")
+            anyhow::anyhow!("line {line_number} {field_name} must be a string when present")
         })?,
         field_name,
         max_chars,
@@ -545,6 +542,30 @@ mod tests {
         })
         .unwrap_err();
         assert!(err.to_string().contains("passed must be a boolean"));
+    }
+
+    #[test]
+    fn import_rejects_null_optional_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("pydantic-case-results.jsonl");
+        let output = dir.path().join("pydantic-case-results.tar.gz");
+        fs::write(
+            &input,
+            r#"{"schema":"pydantic-evals.report-case-result.export.v1","framework":"pydantic_evals","surface":"evaluation_report.cases.case_result","case_name":"case-hello","source_ref":null,"results":[{"kind":"assertion","evaluator_name":"EqualsExpected","passed":true}],"timestamp":"2026-05-02T08:00:00Z"}"#,
+        )
+        .unwrap();
+
+        let err = cmd_pydantic_case_result(PydanticCaseResultArgs {
+            input,
+            bundle_out: output,
+            source_artifact_ref: None,
+            run_id: "pydantic_test".to_string(),
+            import_time: Some("2026-05-03T12:00:00Z".to_string()),
+        })
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("source_ref must be a string when present"));
     }
 
     #[test]

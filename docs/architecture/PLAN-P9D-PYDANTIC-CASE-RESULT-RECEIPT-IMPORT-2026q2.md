@@ -49,7 +49,7 @@ P9d excludes:
 - prompts;
 - completions;
 - analyses;
-- failures bodies;
+- failure bodies;
 - evaluator implementation/config internals.
 
 ## 3. Non-Goals
