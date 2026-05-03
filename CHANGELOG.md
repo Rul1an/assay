@@ -27,6 +27,9 @@ All notable changes to this project will be documented in this file.
   with `trust_basis_claim: null`; any future
   `external_score_receipt_boundary_visible` claim must first define exact claim
   semantics, Trust Card impact, and Harness posture.
+- Added a Trust Basis CLI regression guard proving
+  `external_score_receipt_boundary_visible` remains a planning-only candidate,
+  not a registered claim id accepted by `assay trust-basis assert`.
 
 ### Docs
 
