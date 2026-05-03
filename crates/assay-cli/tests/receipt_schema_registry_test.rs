@@ -86,7 +86,7 @@ fn schema_cli_lists_receipt_and_input_schemas() {
     let report: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(report["schema"], "assay.evidence.schema.list.v1");
     let schemas = report["schemas"].as_array().unwrap();
-    assert_eq!(schemas.len(), 8);
+    assert_eq!(schemas.len(), 10);
 
     let names = schemas
         .iter()
@@ -96,17 +96,21 @@ fn schema_cli_lists_receipt_and_input_schemas() {
     assert!(names.contains(&"openfeature.evaluation-details.v1"));
     assert!(names.contains(&"cyclonedx.mlbom-model-component.v1"));
     assert!(names.contains(&"mastra.score-event.v1"));
+    assert!(names.contains(&"pydantic.case-result.v1"));
     assert!(names.contains(&"promptfoo-cli-jsonl-component-result.v1"));
     assert!(names.contains(&"openfeature-evaluation-details-export.v1"));
     assert!(names.contains(&"cyclonedx-mlbom-model-component-input.v1"));
     assert!(names.contains(&"mastra-score-event-export.v1"));
+    assert!(names.contains(&"pydantic-case-result-export.v1"));
 
-    let mastra = schemas
-        .iter()
-        .find(|schema| schema["name"] == "mastra.score-event.v1")
-        .unwrap();
-    assert_eq!(mastra["importer_only"], true);
-    assert!(mastra["trust_basis_claim"].is_null());
+    for name in ["mastra.score-event.v1", "pydantic.case-result.v1"] {
+        let schema = schemas
+            .iter()
+            .find(|schema| schema["name"] == name)
+            .unwrap();
+        assert_eq!(schema["importer_only"], true);
+        assert!(schema["trust_basis_claim"].is_null());
+    }
 }
 
 #[test]
@@ -129,6 +133,32 @@ fn receipt_family_matrix_keeps_mastra_score_receipts_importer_only() {
     assert_eq!(
         mastra["claim_readiness_plan"],
         "../architecture/PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md"
+    );
+}
+
+#[test]
+fn receipt_family_matrix_keeps_pydantic_case_result_receipts_importer_only() {
+    let matrix = receipt_family_matrix();
+    let pydantic = matrix["importer_only_receipts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|family| family["event_type"] == "assay.receipt.pydantic.case_result.v1")
+        .expect("Pydantic case-result receipt should stay in importer_only_receipts");
+
+    assert_eq!(pydantic["family"], "case_result_receipts");
+    assert_eq!(pydantic["source_system"], "pydantic_evals");
+    assert_eq!(
+        pydantic["source_surface"],
+        "evaluation_report.cases.case_result"
+    );
+    assert!(
+        pydantic["trust_basis_claim"].is_null(),
+        "Pydantic case-result receipts must remain importer-only until a later claim slice"
+    );
+    assert_eq!(
+        pydantic["claim_readiness_plan"],
+        "../architecture/PLAN-P9C-PYDANTIC-REDUCED-CASE-RESULT-RECEIPT-READINESS-2026q2.md"
     );
 }
 
@@ -558,5 +588,48 @@ fn mastra_input_and_receipt_schemas_validate_supported_path_without_claim_family
 
     for payload in bundle_payloads(&bundle) {
         assert_valid("receipts/mastra.score-event.v1.schema.json", &payload);
+    }
+}
+
+#[test]
+fn pydantic_input_and_receipt_schemas_validate_supported_path_without_claim_family() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("pydantic-case-results.jsonl");
+    let bundle = dir.path().join("pydantic-case-result-receipts.tar.gz");
+    fs::write(
+        &input,
+        concat!(
+            r#"{"schema":"pydantic-evals.report-case-result.export.v1","framework":"pydantic_evals","surface":"evaluation_report.cases.case_result","case_name":"case-hello","source_case_name":"source-hello","source_ref":"fixture:pydantic-case-results","results":[{"kind":"assertion","evaluator_name":"EqualsExpected","passed":true},{"kind":"score","evaluator_name":"ExactScorePoints","score":1.0,"reason":"maximum points"}],"timestamp":"2026-05-02T08:00:00Z"}"#,
+            "\n",
+            r#"{"schema":"pydantic-evals.report-case-result.export.v1","framework":"pydantic_evals","surface":"evaluation_report.cases.case_result","case_name":"case-bye","results":[{"kind":"assertion","evaluator_name":"EqualsExpected","passed":false},{"kind":"score","evaluator_name":"ExactScorePoints","score":0.25}],"timestamp":"2026-05-02T08:05:00Z"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+
+    for row in jsonl_values(&input) {
+        assert_valid("inputs/pydantic-case-result-export.v1.schema.json", &row);
+    }
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("pydantic-case-result")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("pydantic-case-results.jsonl")
+        .arg("--run-id")
+        .arg("pydantic_schema_test")
+        .arg("--import-time")
+        .arg("2026-05-03T12:00:00Z")
+        .assert()
+        .success();
+
+    for payload in bundle_payloads(&bundle) {
+        assert_valid("receipts/pydantic.case-result.v1.schema.json", &payload);
     }
 }

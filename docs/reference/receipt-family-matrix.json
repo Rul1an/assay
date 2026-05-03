@@ -1,6 +1,6 @@
 {
   "schema": "assay.receipt-family-matrix.v1",
-  "updated_at": "2026-05-02",
+  "updated_at": "2026-05-03",
   "families": [
     {
       "family": "external_eval_receipts",
@@ -202,6 +202,61 @@
       ],
       "plan": "../architecture/PLAN-P14C-MASTRA-SCOREEVENT-RECEIPT-IMPORT-2026q2.md",
       "claim_readiness_plan": "../architecture/PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md"
+    },
+    {
+      "family": "case_result_receipts",
+      "first_surface": "pydantic_reduced_case_result",
+      "event_type": "assay.receipt.pydantic.case_result.v1",
+      "receipt_schema": "assay.receipt.pydantic.case_result.v1",
+      "receipt_schema_path": "receipt-schemas/receipts/pydantic.case-result.v1.schema.json",
+      "input_schema_path": "receipt-schemas/inputs/pydantic-case-result-export.v1.schema.json",
+      "source_system": "pydantic_evals",
+      "source_surface": "evaluation_report.cases.case_result",
+      "trust_basis_claim": null,
+      "included_fields": [
+        "schema",
+        "source_system",
+        "source_surface",
+        "source_artifact_ref",
+        "source_artifact_digest",
+        "reducer_version",
+        "imported_at",
+        "case_result.case_name",
+        "case_result.source_case_name",
+        "case_result.source_ref",
+        "case_result.results.kind",
+        "case_result.results.evaluator_name",
+        "case_result.results.passed",
+        "case_result.results.score",
+        "case_result.results.reason",
+        "case_result.timestamp"
+      ],
+      "excluded_fields": [
+        "raw_ReportCase",
+        "full_EvaluationReport",
+        "inputs",
+        "expected_output",
+        "output",
+        "metadata",
+        "experiment_metadata",
+        "trace_id",
+        "span_id",
+        "Logfire_payload",
+        "prompts",
+        "completions",
+        "analyses",
+        "failures"
+      ],
+      "does_not_claim": [
+        "a Trust Basis Pydantic case-result claim is present",
+        "the evaluator judgment is correct",
+        "the model output was correct",
+        "the full ReportCase was imported",
+        "the full EvaluationReport was imported",
+        "Logfire or trace semantics are Assay truth"
+      ],
+      "plan": "../architecture/PLAN-P9D-PYDANTIC-CASE-RESULT-RECEIPT-IMPORT-2026q2.md",
+      "claim_readiness_plan": "../architecture/PLAN-P9C-PYDANTIC-REDUCED-CASE-RESULT-RECEIPT-READINESS-2026q2.md"
     }
   ]
 }

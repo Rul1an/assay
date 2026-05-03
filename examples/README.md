@@ -163,8 +163,8 @@ Map a tiny `mcp-agent` token-summary artifact into Assay-shaped external evidenc
 **Focus**: bounded runtime-accounting seam, upstream cost estimate only, no imported billing or workflow truth.
 
 ### [Pydantic Evals Reduced Case-Result Evidence](./pydantic-ai-eval-report-evidence)
-Map one reduced artifact derived from `pydantic_evals` `EvaluationReport.cases[]` into Assay-shaped external evidence.
-**Focus**: code-first case-result seam, no raw `ReportCase`, report summary, task input/output, or tracing truth.
+Map one reduced artifact derived from `pydantic_evals` `EvaluationReport.cases[]` into Assay-shaped external evidence or importer-only Pydantic case-result receipts.
+**Focus**: code-first case-result seam, no raw `ReportCase`, report summary, task input/output, tracing truth, or Trust Basis claim.
 
 ### [Agno Accuracy Eval Evidence](./agno-accuracy-evidence)
 Map a tiny artifact derived from an Agno `AccuracyEval` / `AccuracyResult` surface into Assay-shaped external evidence.
@@ -198,8 +198,8 @@ Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 Full workflow demonstration of **Regression Testing** with Baselines.
 **Features**: `--baseline`, `--export-baseline`.
 
-## 4. [Python SDK Demo](./python-sdk-demo)
-Native Python integration using `pytest` and `assay` library.
+## 4. [Python SDK Docs](../docs/python-sdk/)
+Native Python integration using `pytest` and the `assay` library.
 **Features**: `AssayClient`, `Coverage`, `pytest` integration.
 
 ## Usage

@@ -30,6 +30,8 @@ const CYCLONEDX_RECEIPT_SCHEMA: &str =
     include_packaged_schema!("receipts/cyclonedx.mlbom-model-component.v1.schema.json");
 const MASTRA_RECEIPT_SCHEMA: &str =
     include_packaged_schema!("receipts/mastra.score-event.v1.schema.json");
+const PYDANTIC_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/pydantic.case-result.v1.schema.json");
 const PROMPTFOO_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/promptfoo-cli-jsonl-component-result.v1.schema.json");
 const OPENFEATURE_INPUT_SCHEMA: &str =
@@ -38,6 +40,8 @@ const CYCLONEDX_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/cyclonedx-mlbom-model-component-input.v1.schema.json");
 const MASTRA_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/mastra-score-event-export.v1.schema.json");
+const PYDANTIC_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/pydantic-case-result-export.v1.schema.json");
 
 /// Inspect and validate supported receipt schema contracts.
 #[derive(Debug, Args, Clone)]
@@ -200,6 +204,18 @@ const SCHEMAS: &[SchemaDescriptor] = &[
         schema_json: MASTRA_RECEIPT_SCHEMA,
     },
     SchemaDescriptor {
+        name: "pydantic.case-result.v1",
+        aliases: &["assay.receipt.pydantic.case_result.v1"],
+        kind: SchemaKind::Receipt,
+        status: "experimental",
+        family: "case_result_receipts",
+        source_path: "docs/reference/receipt-schemas/receipts/pydantic.case-result.v1.schema.json",
+        description: "Assay receipt payload for one bounded Pydantic Evals reduced case-result artifact.",
+        trust_basis_claim: None,
+        importer_only: true,
+        schema_json: PYDANTIC_RECEIPT_SCHEMA,
+    },
+    SchemaDescriptor {
         name: "promptfoo-cli-jsonl-component-result.v1",
         aliases: &[],
         kind: SchemaKind::Input,
@@ -246,6 +262,18 @@ const SCHEMAS: &[SchemaDescriptor] = &[
         trust_basis_claim: None,
         importer_only: true,
         schema_json: MASTRA_INPUT_SCHEMA,
+    },
+    SchemaDescriptor {
+        name: "pydantic-case-result-export.v1",
+        aliases: &[],
+        kind: SchemaKind::Input,
+        status: "experimental",
+        family: "case_result_receipts",
+        source_path: "docs/reference/receipt-schemas/inputs/pydantic-case-result-export.v1.schema.json",
+        description: "Supported reduced Pydantic Evals case-result JSONL row shape.",
+        trust_basis_claim: None,
+        importer_only: true,
+        schema_json: PYDANTIC_INPUT_SCHEMA,
     },
 ];
 

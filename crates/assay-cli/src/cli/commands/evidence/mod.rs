@@ -8,6 +8,7 @@ pub mod openfeature_details;
 pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
+pub mod pydantic_case_result;
 pub mod schema;
 pub mod store_status;
 
@@ -101,6 +102,9 @@ pub enum EvidenceImportCmd {
     /// Import bounded Mastra ScoreEvent-derived score artifacts
     #[command(name = "mastra-score-event")]
     MastraScoreEvent(mastra_score_event::MastraScoreEventArgs),
+    /// Import bounded Pydantic Evals reduced case-result artifacts
+    #[command(name = "pydantic-case-result")]
+    PydanticCaseResult(pydantic_case_result::PydanticCaseResultArgs),
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
@@ -131,6 +135,9 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         }
         EvidenceImportCmd::OpenFeatureDetails(a) => openfeature_details::cmd_openfeature_details(a),
         EvidenceImportCmd::MastraScoreEvent(a) => mastra_score_event::cmd_mastra_score_event(a),
+        EvidenceImportCmd::PydanticCaseResult(a) => {
+            pydantic_case_result::cmd_pydantic_case_result(a)
+        }
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
 }

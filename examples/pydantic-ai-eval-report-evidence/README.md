@@ -26,7 +26,7 @@ It is intentionally small:
   and writes one reduced case-result artifact derived from
   `EvaluationReport.cases[]`
 - `map_to_assay.py`: validates that reduced artifact and turns it into an
-  Assay-shaped placeholder envelope
+  Assay-shaped placeholder envelope for sample-level inspection
 - `fixtures/valid.pydantic-ai.json`: one passing reduced case-result artifact
 - `fixtures/failure.pydantic-ai.json`: one failing reduced case-result artifact
 - `fixtures/malformed.pydantic-ai.json`: one intentionally broad artifact that
@@ -89,9 +89,12 @@ sample into:
 - a generalized observability sink
 - a Trust Basis claim or public receipt family
 
-The mapper writes sample-only placeholder envelopes. It does not register a
-new Assay Evidence Contract event type and does not claim that Assay verified
-model quality, evaluator correctness, or upstream runtime semantics.
+The sample mapper still writes sample-only placeholder envelopes. The released
+CLI importer consumes the same reduced artifact boundary and writes
+`assay.receipt.pydantic.case_result.v1` receipt events, but the lane remains
+importer-only: no Trust Basis claim, no Trust Card row, no Harness recipe, and
+no claim that Assay verified model quality, evaluator correctness, or upstream
+runtime semantics.
 
 ## Install the tiny local generator dependency
 
@@ -155,6 +158,28 @@ python3 examples/pydantic-ai-eval-report-evidence/map_to_assay.py \
 
 This third command is expected to fail because the malformed fixture includes
 unsupported broad case fields: `expected_output` and `output`.
+
+## Import as P9d receipts
+
+Use JSONL for the CLI importer:
+
+```bash
+jq -c . examples/pydantic-ai-eval-report-evidence/fixtures/valid.pydantic-ai.json \
+  > /tmp/pydantic-case-results.jsonl
+
+assay evidence import pydantic-case-result \
+  --input /tmp/pydantic-case-results.jsonl \
+  --bundle-out /tmp/pydantic-case-result-receipts.tar.gz \
+  --source-artifact-ref pydantic-case-results.jsonl \
+  --run-id p9d_pydantic_fixture
+
+assay evidence verify /tmp/pydantic-case-result-receipts.tar.gz
+assay trust-basis generate /tmp/pydantic-case-result-receipts.tar.gz
+```
+
+The Trust Basis output should verify the bundle while leaving the existing
+eval, decision, and inventory receipt claims absent. P9d makes the reduced
+case-result boundary bundleable, not claim-visible.
 
 ## Important Boundary
 

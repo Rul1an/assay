@@ -34,17 +34,17 @@ assay evidence schema validate \
   --jsonl
 ```
 
-The schema CLI covers the v3.8.0 registry:
+The schema CLI covers the current receipt schema registry:
 
 - receipt payload schemas for Promptfoo, OpenFeature, CycloneDX ML-BOM, and
-  Mastra receipts
+  Mastra and Pydantic receipts
 - importer input schemas where the reduced input artifact differs from the
   receipt payload
 - metadata such as schema `$id`, family, status, source path, short
   description, and Trust Basis claim when one exists
 
-Mastra remains importer-only in this registry. It has input and receipt schemas,
-but no public Trust Basis score receipt claim yet.
+Mastra and Pydantic remain importer-only in this registry. They have input and
+receipt schemas, but no public Trust Basis score/case-result receipt claims yet.
 
 `validate` exits `0` when the artifact matches the selected schema and exits
 `1` when the artifact is valid JSON/JSONL but fails schema validation. Invalid
@@ -256,6 +256,73 @@ To compare the resulting Trust Basis artifact against another run, use
 | Option | Description |
 |--------|-------------|
 | `--input <PATH>` | OpenFeature EvaluationDetails JSONL artifact file |
+| `--bundle-out <PATH>` | Output Assay evidence bundle path |
+| `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
+| `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |
+| `--import-time <RFC3339>` | Deterministic import timestamp override |
+
+---
+
+## Pydantic Case-Result Import
+
+Import bounded Pydantic Evals reduced case-result artifacts into a verifiable
+Assay evidence bundle:
+
+```bash
+assay evidence import pydantic-case-result \
+  --input pydantic-case-results.jsonl \
+  --bundle-out pydantic-case-result-receipts.tar.gz \
+  --source-artifact-ref pydantic-case-results.jsonl
+```
+
+The importer is intentionally strict in v1:
+
+- input must be JSONL with one reduced case-result artifact per row
+- each row must use `pydantic-evals.report-case-result.export.v1`
+- each row must use `framework = pydantic_evals`
+- each row must use `surface = evaluation_report.cases.case_result`
+- `case_name` is the only docs-backed v1 case identity
+- `case_id_ref` is not supported in P9d
+- `source_case_name` and `source_ref` are allowed only as non-identity
+  provenance aids
+- `results[]` may contain bounded assertion pass/fail entries and scalar score
+  entries only
+- raw `ReportCase`, full `EvaluationReport`, task inputs, expected outputs,
+  model outputs, report metadata, experiment metadata, trace/span references,
+  Logfire payloads, prompts, completions, analyses, failures, and evaluator
+  implementation/config bodies are excluded
+
+The importer first computes `source_artifact_digest` over the full JSONL file,
+then parses and reduces case-result artifacts. Receipts stay small while still
+binding back to the exact reduced source artifact bytes.
+
+The receipt is a case-result-boundary artifact. It does not mean the evaluator
+judgment is correct, the model output was correct, the full `ReportCase` or
+`EvaluationReport` was imported, or Logfire/trace semantics are Assay truth.
+
+The output bundle can be verified with:
+
+```bash
+assay evidence verify pydantic-case-result-receipts.tar.gz
+```
+
+The same bundle can feed the Trust Basis compiler:
+
+```bash
+assay trust-basis generate pydantic-case-result-receipts.tar.gz --out pydantic-case-result.trust-basis.json
+```
+
+P9d does not add a Trust Basis claim. Pydantic case-result receipts remain
+importer-only until any future claim slice defines exact semantics, Trust Card
+impact, and Harness posture.
+
+Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--input <PATH>` | Pydantic Evals reduced case-result JSONL artifact file |
 | `--bundle-out <PATH>` | Output Assay evidence bundle path |
 | `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
 | `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |
