@@ -23,6 +23,13 @@ All notable changes to this project will be documented in this file.
   is not the contract unit, `case_name` is the only docs-backed v1 identity,
   and any importer-only P9d work must first preserve the
   no-trace/no-Logfire/no-output boundary.
+- Added P9d importer-only support for bounded Pydantic Evals reduced
+  case-result artifacts via `assay evidence import pydantic-case-result`.
+  The new `assay.receipt.pydantic.case_result.v1` receipt lane is bundleable,
+  schema-visible, and explicitly `trust_basis_claim: null`; it does not add a
+  Trust Basis claim, Trust Card row, Harness recipe, raw `ReportCase` import,
+  full `EvaluationReport` import, Logfire/trace import, or evaluator/model
+  correctness claim.
 - Refreshed the Mastra ScoreEvent sample against `@mastra/core` `1.29.1` and
   `@mastra/observability` `1.10.2` after upstream confirmed `ScoreId` had
   shipped. The strong fixture now carries live-backed `score_id_ref`; the v1

@@ -316,6 +316,81 @@ fn test_mastra_imported_score_receipts_verify_and_feed_trust_basis_generation() 
 }
 
 #[test]
+fn test_pydantic_imported_case_result_receipts_verify_and_do_not_mutate_trust_basis_claims() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("pydantic-case-results.jsonl");
+    let bundle = dir.path().join("pydantic-case-result-receipts.tar.gz");
+    fs::write(
+        &input,
+        concat!(
+            r#"{"schema":"pydantic-evals.report-case-result.export.v1","framework":"pydantic_evals","surface":"evaluation_report.cases.case_result","case_name":"case-hello","source_case_name":"source-hello","source_ref":"fixture:pydantic-case-results","results":[{"kind":"assertion","evaluator_name":"EqualsExpected","passed":true},{"kind":"score","evaluator_name":"ExactScorePoints","score":1.0,"reason":"maximum points"}],"timestamp":"2026-05-02T08:00:00Z"}"#,
+            "\n",
+            r#"{"schema":"pydantic-evals.report-case-result.export.v1","framework":"pydantic_evals","surface":"evaluation_report.cases.case_result","case_name":"case-bye","results":[{"kind":"assertion","evaluator_name":"EqualsExpected","passed":false},{"kind":"score","evaluator_name":"ExactScorePoints","score":0.25}],"timestamp":"2026-05-02T08:05:00Z"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("pydantic-case-result")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("pydantic-case-results.jsonl")
+        .arg("--run-id")
+        .arg("pydantic_trust_basis")
+        .arg("--import-time")
+        .arg("2026-05-03T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "Pydantic case-result receipts are importer-only in P9d, not eval receipt claims"
+    );
+    assert_eq!(
+        claim(claims, "external_decision_receipt_boundary_visible")["level"],
+        "absent",
+        "Pydantic case-result receipts are not decision receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "absent",
+        "Pydantic case-result receipts are not inventory receipts"
+    );
+}
+
+#[test]
 fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("bom.cdx.json");
