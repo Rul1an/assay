@@ -273,8 +273,10 @@ P14c should not add a Trust Basis claim. First prove:
 - Trust Basis can read the bundle
 - existing eval/decision/inventory claims remain unaffected
 
-A later slice may decide whether score receipts belong under an existing family
-or need a separate claim such as `external_score_receipt_boundary_visible`.
+A later slice should decide whether score receipts remain importer-only or need
+a separate claim such as `external_score_receipt_boundary_visible`. That
+decision is now captured by
+[P14d Mastra Score Receipt Trust Basis Readiness Freeze](./PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md).
 
 ## 11. Tests
 
@@ -330,6 +332,7 @@ P14c does not:
 ## 14. References
 
 - [P14b Mastra ScoreEvent / ExportedScore Evidence Interop](./PLAN-P14B-MASTRA-SCORE-EVENT-EVIDENCE-2026q2.md)
+- [P14d Mastra Score Receipt Trust Basis Readiness Freeze](./PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md)
 - [Mastra ScoreEvent evidence sample](../../examples/mastra-score-event-evidence/README.md)
 - [Mastra PR #15757 — docs: document observability exporter event callbacks](https://github.com/mastra-ai/mastra/pull/15757)
 - [Mastra ObservabilityExporter interface docs](https://mastra.ai/reference/observability/tracing/interfaces)

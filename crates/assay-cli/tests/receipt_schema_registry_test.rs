@@ -110,6 +110,29 @@ fn schema_cli_lists_receipt_and_input_schemas() {
 }
 
 #[test]
+fn receipt_family_matrix_keeps_mastra_score_receipts_importer_only() {
+    let matrix = receipt_family_matrix();
+    let mastra = matrix["importer_only_receipts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|family| family["event_type"] == "assay.receipt.mastra.score_event.v1")
+        .expect("Mastra ScoreEvent receipt should stay in importer_only_receipts");
+
+    assert_eq!(mastra["family"], "score_receipts");
+    assert_eq!(mastra["source_system"], "mastra");
+    assert_eq!(mastra["source_surface"], "observability.score_event");
+    assert!(
+        mastra["trust_basis_claim"].is_null(),
+        "Mastra ScoreEvent receipts must remain importer-only until a later claim slice"
+    );
+    assert_eq!(
+        mastra["claim_readiness_plan"],
+        "../architecture/PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md"
+    );
+}
+
+#[test]
 fn schema_cli_paths_match_receipt_family_matrix() {
     let output = assay_schema_command()
         .arg("list")
