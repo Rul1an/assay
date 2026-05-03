@@ -75,17 +75,23 @@ Tier 0 means:
 - no extra pushes on cold threads
 - keep current live lanes breathing unless an upstream maintainer responds
 
-### Tier 1 — next best active candidate
+### Tier 1 — selected active candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 1 | `langfuse/langfuse` | Active planning | GitHub Discussion (`Support`) | bounded experiment item result / evaluation export | Best next fit after Browser Use and TAP: strong repo momentum, natural maintainer channel, and a smaller eval-result seam than trace-first observability |
+| 1 | `pydantic/pydantic-ai` / Pydantic Evals | Active readiness freeze | Existing GitHub issue | reduced case-result artifact derived from `EvaluationReport.cases[]` | Best current fit after the v3.6.0-v3.9.1 receipt line and P14d: visible name, code-first eval surface, existing Assay sample, and a small enough reduced artifact to keep `ReportCase` out of the contract boundary |
 
-### Tier 2 — clean fallback if Langfuse framing risk rises
+### Tier 2 — parked platform-adjacent candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 2 | `mastra-ai/mastra` | Queued | GitHub issue | `evaluate()` / scorer result / CI eval result | Good candidate and less platform-on-platform risky than Langfuse, but weaker channel shape because the repo has no Discussions |
+| 2 | `langfuse/langfuse` | Parked after sample-backed planning | GitHub Discussion (`Support`) | bounded experiment item result / evaluation export | Still useful, but lower immediate fit than Pydantic because it pulls harder toward platform/evaluation-session framing |
+
+### Tier 2b — completed importer-only score lane, claim semantics frozen
+
+| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
+|------|-------------|--------|-----------------|------------|-------------------|
+| 2b | `mastra-ai/mastra` | Importer-only lane implemented; Trust Basis semantics frozen | GitHub issue | `ScoreEvent` / `ExportedScore` | Maintainer-guided seam with shipped `scoreId`; no further upstream action needed unless Mastra changes the ScoreEvent/ExportedScore contract |
 
 ### Tier 3 — special-case OTel-native candidate
 

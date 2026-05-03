@@ -109,12 +109,23 @@ Optional only if naturally present in a future live-inspected shape:
 
 - `case_id_ref`
 
+Allowed provenance aids, not identity fields:
+
+- `source_case_name`
+- `source_ref`
+
+`source_case_name` and `source_ref` may help reviewers correlate the reduced
+artifact with the local export context, but they are not canonical receipt
+identity in P9c and must not be used to synthesize `case_id_ref`.
+
 Do not synthesize `case_id_ref` from:
 
 - trace IDs;
 - span IDs;
 - report ordering;
 - file positions;
+- `source_case_name`;
+- `source_ref`;
 - hashed prompts;
 - hashed completions;
 - task input or expected-output material.
@@ -190,6 +201,8 @@ A later P9d importer-only slice may start only if P9c can prove:
 - the reduced artifact shape remains smaller than `ReportCase`;
 - `case_name` is the required v1 identity;
 - `case_id_ref` remains absent unless naturally live-backed;
+- `source_case_name` and `source_ref`, if present, remain non-identity
+  provenance aids only;
 - assertion pass/fail and scalar score fields are bounded and live-backed;
 - malformed fixtures reject broad report, trace, input, expected-output, and
   model-output fields;
@@ -209,6 +222,8 @@ P9c is complete when:
   possible import unit;
 - `case_name` is the only docs-backed v1 identity and `case_id_ref` is
   optional only when naturally live-backed;
+- `source_case_name` and `source_ref` are classified as allowed non-identity
+  provenance aids, not identity fields;
 - candidate result fields are labeled as live-inspection-backed and
   readiness-bound rather than docs-hard;
 - forbidden broad `ReportCase`, trace, Logfire, prompt, completion, input,

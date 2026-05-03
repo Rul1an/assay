@@ -270,8 +270,11 @@ The following must stay out of the reduced artifact:
 
 ### Phase D - Decide Whether To Draft Importer-Only Receipt Support
 
-Only after Phase A-C are clean, decide whether a later P9c should add an
-importer-only receipt event.
+Only after Phase A-C are clean, decide whether P9c should freeze the readiness
+boundary for importer-only support.
+
+P9c is readiness only. If importer-only receipt-event work is pursued later,
+that implementation belongs to P9d, not P9c.
 
 P9b itself should not add a Trust Basis claim, Harness recipe, public note, or
 claim-visible receipt family.
