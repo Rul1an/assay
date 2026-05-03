@@ -312,8 +312,8 @@ partnership, official, or Trust Basis family.
 ## 13. Short Verdict
 
 Pydantic is next, but only as a reduced case-result artifact derived from
-`EvaluationReport.cases[]`. P9b proves the sample recut; possible importer-only
-support remains a later decision.
+`EvaluationReport.cases[]`. P9b proves the sample recut; P9c freezes the
+readiness boundary before any importer-only P9d work.
 
 AutoEvals remains the clean fallback. AgentEvals remains the more ambitious
 second-choice. Phoenix, LangWatch, and Guardrails stay parked until the product

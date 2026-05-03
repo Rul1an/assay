@@ -13,13 +13,14 @@
   next upstream interop lanes, the reasons behind that ordering, and the
   execution rules learned from the current wave.
 
-> **2026-05-02 status note:** After the v3.6.0-v3.9.1 evidence-receipt line,
-> the next selected candidates are not broad platform lanes. P9b first recut
-> the existing Pydantic sample around one reduced case-result artifact. The next
-> ready execution slice is
-> [P14d Mastra Score Receipt Trust Basis Readiness Freeze](./PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md):
-> keep the already implemented Mastra ScoreEvent receipt lane importer-only
-> until any score-derived Trust Basis claim has explicit semantics.
+> **2026-05-03 status note:** After the v3.6.0-v3.9.1 evidence-receipt line
+> and the P14d Mastra semantic freeze, the next selected candidate is Pydantic,
+> but only through
+> [P9c Pydantic Reduced Case-Result Receipt Readiness Freeze](./PLAN-P9C-PYDANTIC-REDUCED-CASE-RESULT-RECEIPT-READINESS-2026q2.md).
+> P9b recut the sample around one reduced case-result artifact derived from
+> `EvaluationReport.cases[]`; P9c freezes the readiness boundary before any
+> importer-only P9d work. `ReportCase` remains discovery input, not the
+> contract unit.
 
 ## 1. Why this queue exists
 
