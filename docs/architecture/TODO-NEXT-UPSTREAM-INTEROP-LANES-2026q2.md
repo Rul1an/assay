@@ -13,13 +13,14 @@
   next upstream interop lanes, the reasons behind that ordering, and the
   execution rules learned from the current wave.
 
-> **2026-05-02 status note:** After the v3.6.0-v3.9.1 evidence-receipt line,
-> the next selected candidates are not broad platform lanes. P9b first recut
-> the existing Pydantic sample around one reduced case-result artifact. The next
-> ready execution slice is
-> [P14d Mastra Score Receipt Trust Basis Readiness Freeze](./PLAN-P14D-MASTRA-SCORE-RECEIPT-TRUST-BASIS-READINESS-FREEZE-2026q2.md):
-> keep the already implemented Mastra ScoreEvent receipt lane importer-only
-> until any score-derived Trust Basis claim has explicit semantics.
+> **2026-05-03 status note:** After the v3.6.0-v3.9.1 evidence-receipt line
+> and the P14d Mastra semantic freeze, the next selected candidate is Pydantic,
+> but only through
+> [P9c Pydantic Reduced Case-Result Receipt Readiness Freeze](./PLAN-P9C-PYDANTIC-REDUCED-CASE-RESULT-RECEIPT-READINESS-2026q2.md).
+> P9b recut the sample around one reduced case-result artifact derived from
+> `EvaluationReport.cases[]`; P9c freezes the readiness boundary before any
+> importer-only P9d work. `ReportCase` remains discovery input, not the
+> contract unit.
 
 ## 1. Why this queue exists
 
@@ -74,17 +75,23 @@ Tier 0 means:
 - no extra pushes on cold threads
 - keep current live lanes breathing unless an upstream maintainer responds
 
-### Tier 1 — next best active candidate
+### Tier 1 — selected active candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 1 | `langfuse/langfuse` | Active planning | GitHub Discussion (`Support`) | bounded experiment item result / evaluation export | Best next fit after Browser Use and TAP: strong repo momentum, natural maintainer channel, and a smaller eval-result seam than trace-first observability |
+| 1 | `pydantic/pydantic-ai` / Pydantic Evals | Active readiness freeze | Existing GitHub issue | reduced case-result artifact derived from `EvaluationReport.cases[]` | Best current fit after the v3.6.0-v3.9.1 receipt line and P14d: visible name, code-first eval surface, existing Assay sample, and a small enough reduced artifact to keep `ReportCase` out of the contract boundary |
 
-### Tier 2 — clean fallback if Langfuse framing risk rises
+### Tier 2 — parked platform-adjacent candidate
 
 | Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
 |------|-------------|--------|-----------------|------------|-------------------|
-| 2 | `mastra-ai/mastra` | Queued | GitHub issue | `evaluate()` / scorer result / CI eval result | Good candidate and less platform-on-platform risky than Langfuse, but weaker channel shape because the repo has no Discussions |
+| 2 | `langfuse/langfuse` | Parked after sample-backed planning | GitHub Discussion (`Support`) | bounded experiment item result / evaluation export | Still useful, but lower immediate fit than Pydantic because it pulls harder toward platform/evaluation-session framing |
+
+### Tier 2b — completed importer-only score lane, claim semantics frozen
+
+| Rank | Repo / lane | Status | Primary channel | First seam | Why it ranks here |
+|------|-------------|--------|-----------------|------------|-------------------|
+| 2b | `mastra-ai/mastra` | Importer-only lane implemented; Trust Basis semantics frozen | GitHub issue | `ScoreEvent` / `ExportedScore` | Maintainer-guided seam with shipped `scoreId`; no further upstream action needed unless Mastra changes the ScoreEvent/ExportedScore contract |
 
 ### Tier 3 — special-case OTel-native candidate
 

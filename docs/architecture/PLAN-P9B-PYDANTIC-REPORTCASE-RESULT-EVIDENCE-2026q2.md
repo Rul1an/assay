@@ -270,8 +270,11 @@ The following must stay out of the reduced artifact:
 
 ### Phase D - Decide Whether To Draft Importer-Only Receipt Support
 
-Only after Phase A-C are clean, decide whether a later P9c should add an
-importer-only receipt event.
+Only after Phase A-C are clean, decide whether P9c should freeze the readiness
+boundary for importer-only support.
+
+P9c is readiness only. If importer-only receipt-event work is pursued later,
+that implementation belongs to P9d, not P9c.
 
 P9b itself should not add a Trust Basis claim, Harness recipe, public note, or
 claim-visible receipt family.
@@ -312,8 +315,8 @@ partnership, official, or Trust Basis family.
 ## 13. Short Verdict
 
 Pydantic is next, but only as a reduced case-result artifact derived from
-`EvaluationReport.cases[]`. P9b proves the sample recut; possible importer-only
-support remains a later decision.
+`EvaluationReport.cases[]`. P9b proves the sample recut; P9c freezes the
+readiness boundary before any importer-only P9d work.
 
 AutoEvals remains the clean fallback. AgentEvals remains the more ambitious
 second-choice. Phoenix, LangWatch, and Guardrails stay parked until the product
