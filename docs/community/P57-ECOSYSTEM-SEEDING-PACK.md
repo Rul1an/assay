@@ -29,8 +29,7 @@ Held until a later Assay tag:
 
 - `EVIDENCE-RECEIPTS-IN-ACTION.md` is the intended primary proof page, but it
   is not present in the public Assay `v3.9.1` tag. Do not use it in outward
-  messages until a later Assay tag, expected as docs-only `v3.9.2`, contains
-  the page.
+  messages until a later Assay tag contains the page.
 
 Main-only second-layer note:
 
@@ -83,8 +82,9 @@ Proof:
 ```
 
 Do not publish this post until `<VERSIONED_EVIDENCE_RECEIPTS_IN_ACTION_LINK>`
-resolves under a public Assay tag. The expected next clean line is a small
-docs-only `v3.9.2` Assay release.
+resolves under a public Assay tag. The expected next clean line is the
+`v3.9.2` Assay patch release; the existing `v*` release workflow builds full
+release artifacts, so do not describe that tag as docs-only.
 
 Do not add:
 
