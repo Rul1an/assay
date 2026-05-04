@@ -1,7 +1,7 @@
 # P57 Ecosystem Seeding Pack
 
-> **Status:** paused after one Promptfoo-context follow-up; ready for broader
-> controlled seeding only after a docs tag contains the primary proof page
+> **Status:** ready for controlled seeding after Assay `v3.9.2`; one
+> Promptfoo-context follow-up has already been placed
 >
 > **Last updated:** 2026-05-04
 > **Scope:** small repo-native sharing pack for the released evidence receipt
@@ -21,32 +21,21 @@ Short post line:
 
 | Role | Link | Use When |
 |---|---|---|
+| Primary proof | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | Use as the one-link repo-native proof entrypoint. This page is present in the `v3.9.2` tag. |
+| Assurance mapping | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | Use only for assurance-context replies after someone asks what review question each receipt family helps answer. |
 | Promptfoo context note | [From Promptfoo JSONL to Evidence Receipts](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) | Use only for an existing Promptfoo JSONL/assertion-results context. This note is present in the `v3.9.1` tag. |
 | Theory | [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) | Use as the read-more link when someone asks why receipts instead of broad integrations. |
 | Runnable recipe | [Promptfoo receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/PROMPTFOO_RECEIPT_PIPELINE.md) | Use when someone wants to run the smallest released recipe immediately. |
 
-Held until a later Assay tag:
+Now tagged in Assay `v3.9.2`:
 
-- `EVIDENCE-RECEIPTS-IN-ACTION.md` is the intended primary proof page, but it
-  is not present in the public Assay `v3.9.1` tag. Do not use it in outward
-  messages until a later Assay tag contains the page.
-
-Main-only second-layer note:
-
-- [Evidence Receipt Assurance Mapping](../notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md)
-  is useful for assurance-context replies, but it is not part of the released
-  `v3.9.1` truth line yet. Do not include it in the public one-link post until
-  a later Assay tag contains it.
+- `EVIDENCE-RECEIPTS-IN-ACTION.md` is the primary proof page.
+- `EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md` is the second-layer assurance note.
 
 Current allowed package:
 
-- Promptfoo context: From Promptfoo JSONL to Evidence Receipts
-- theory: Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory
-- recipe: Promptfoo receipt pipeline
-
-Post-`v3.9.2` intended package:
-
 - proof: Evidence Receipts in Action
+- Promptfoo context: From Promptfoo JSONL to Evidence Receipts
 - theory: Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory
 - recipe: Promptfoo receipt pipeline
 
@@ -78,13 +67,12 @@ can be bundled and verified, and the Trust Basis claim above it can be gated
 without teaching Harness family-specific semantics.
 
 Proof:
-<VERSIONED_EVIDENCE_RECEIPTS_IN_ACTION_LINK>
+https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md
 ```
 
-Do not publish this post until `<VERSIONED_EVIDENCE_RECEIPTS_IN_ACTION_LINK>`
-resolves under a public Assay tag. The expected next clean line is the
-`v3.9.2` Assay patch release; the existing `v*` release workflow builds full
-release artifacts, so do not describe that tag as docs-only.
+The proof link resolves under the public Assay `v3.9.2` tag. The existing `v*`
+release workflow builds full release artifacts, so do not describe `v3.9.2` as
+docs-only.
 
 Do not add:
 
@@ -97,17 +85,17 @@ Do not add:
 
 | Spot | Link to Send | One Sentence | Do Not Ask |
 |---|---|---|---|
-| Release-adjacent update | Hold until `EVIDENCE-RECEIPTS-IN-ACTION.md` is present in a public Assay tag. | We made the evidence boundary inspectable: selected Promptfoo, OpenFeature, and CycloneDX outcomes now compile into bounded receipts and Trust Basis claims. | Do not ask for generic feedback, stars, adoption, or partnership. Use a repo Discussion only if there is no suitable release/docs context. |
+| Release-adjacent update | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | We made the evidence boundary inspectable: selected Promptfoo, OpenFeature, and CycloneDX outcomes now compile into bounded receipts and Trust Basis claims. | Do not ask for generic feedback, stars, adoption, or partnership. Use a repo Discussion only if there is no suitable release/docs context. |
 | Existing Promptfoo JSONL/componentResults context | [From Promptfoo JSONL to Evidence Receipts](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) | This keeps Promptfoo as the eval runner while showing how selected assertion component outcomes become portable evidence receipts. | Never open a fresh thread just to restate the proof. Do not imply Promptfoo endorsement, official integration, or eval correctness. Add the recipe link only if someone asks to run it. |
-| Assurance / audit-context follow-up | [Evidence Receipt Assurance Mapping](../notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | This maps each released receipt family to the assurance question it can help answer and the claims it explicitly does not make. | Do not frame it as a compliance checklist or legal interpretation. Keep this internal/main-only until the mapping note is tagged. |
+| Assurance / audit-context follow-up | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | This maps each released receipt family to the assurance question it can help answer and the claims it explicitly does not make. | Do not frame it as a compliance checklist or legal interpretation. |
 
 ## Share Order
 
 1. Keep the existing Promptfoo-context follow-up on the versioned
    `FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md` note.
-2. Do not post the general repo-native note until the intended primary proof
-   page is present in a public Assay tag.
-3. After that tag exists, post the repo-native note first.
+2. Post the repo-native note first, using only the versioned `v3.9.2` proof
+   link as the primary outward link.
+3. Let the proof page act as the hub for theory, mapping, and recipes.
 4. Wait at least one day.
 5. Do at most one or two contextual follow-ups where there is already relevant
    conversation.
@@ -129,10 +117,10 @@ Do not add:
 - No broad campaign language.
 - No "would love feedback" framing.
 - No pressure to adopt.
-- No outward link to `EVIDENCE-RECEIPTS-IN-ACTION.md` until it is included in
-  a tagged Assay release.
-- Do not promote the mapping note in any outward message until it is included
-  in a tagged Assay release.
+- Link outward to `EVIDENCE-RECEIPTS-IN-ACTION.md` only through the versioned
+  `v3.9.2` URL or a later release tag.
+- Link outward to the mapping note only through the versioned `v3.9.2` URL or a
+  later release tag.
 
 The goal is only to put the released proof, theory, and runnable recipe in
 front of people who already care about evidence boundaries.
