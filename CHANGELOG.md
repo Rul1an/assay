@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.9.2] - 2026-05-04
+
+This patch release prepares the post-canonicalization evidence receipt surface
+for versioned sharing. It makes the proof page and assurance mapping note
+available under an immutable Assay tag, carries forward the released Assay
+`v3.9.1` / Assay Harness `v0.3.2` proof artifacts, and keeps the seeding pack
+under release-truth guardrails. It does not add a new public claim-visible
+receipt family, Harness family semantics, compliance claim, partnership claim,
+or broad launch surface.
+
 ### Evidence Portability
 
 - Selected Pydantic Evals as the next evidence-seam hardening candidate via
@@ -58,9 +68,19 @@ All notable changes to this project will be documented in this file.
   released Assay `v3.9.1` binary, writes a small job summary, and uploads
   canonical/projection artifacts without adding a required workflow or new
   runtime semantics.
+- Added the
+  [Evidence Receipt Assurance Mapping](docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md)
+  note to map the three released receipt families to assurance questions,
+  visible evidence boundaries, and explicit non-claims. This is not a
+  compliance checklist or legal interpretation.
+- Added the P57 ecosystem seeding pack with a one-link repo-native post,
+  release-truth link rules, stopping rules, and explicit guards against
+  promoting main-only notes as released surfaces.
 
 ### CI / Release
 
+- Added a reproducible `mkdocs build --strict` CI job while keeping repo
+  crosslinks in the existing link-checker path.
 - Hardened the idempotent crates.io publisher so it waits for each newly
   published workspace crate to become visible through the crates.io API before
   publishing the next dependent crate.
