@@ -1,10 +1,18 @@
 # Assay
 
-**Deterministic testing for AI agents.** Record traces, replay in CI, validate against policies. No API calls, no flakiness.
+**Assay compiles selected external outcomes and agent runtime signals into
+portable evidence receipts, verifiable bundles, and bounded Trust Basis
+claims.**
 
-**Product story (repo root):** Assay is positioned as a **trust compiler for agent systems** — MCP policy enforcement as the wedge, plus verifiable evidence bundles, Trust Basis, Trust Card, and CI/SARIF. See the [main README](../README.md), [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md), and [community discussion seeds](community/DISCUSSIONS.md).
+Assay is positioned as a **trust compiler for agent systems**: MCP policy
+enforcement is the wedge, while the product surface is canonical evidence,
+portable receipts, Trust Basis, Trust Card, and reviewable CI projections.
+It is not an eval runner, hosted dashboard, generic MCP/policy tool, or
+upstream truth oracle. See the [main README](../README.md), [What Assay is and
+is not](concepts/scope.md), [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md),
+and [community discussion seeds](community/DISCUSSIONS.md).
 
-**Evidence portability notes:** [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the released `v3.8.0` receipt/schema surface and the first three claim-visible receipt families. [Evidence Receipts in Action](notes/EVIDENCE-RECEIPTS-IN-ACTION.md) shows the same three-family path with small checked-in artifacts generated from released Assay/Harness versions. The `v3.9.0` line adds assertion, schema CLI, Trust Card HTML, and MCP policy/tool digest review surfaces without adding new receipt families or Trust Basis claims. [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the first Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
+**Evidence portability notes:** [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the released `v3.8.0` receipt/schema surface and the first three claim-visible receipt families. [Evidence Receipts in Action](notes/EVIDENCE-RECEIPTS-IN-ACTION.md) shows the same three-family path with small checked-in artifacts generated from released Assay/Harness versions. The [receipt family matrix](reference/receipt-family-matrix.json) and [receipt schema registry](reference/receipt-schemas/README.md) are the machine-readable receipt-family references. The `v3.9.0` line adds assertion, schema CLI, Trust Card HTML, and MCP policy/tool digest review surfaces without adding new receipt families or Trust Basis claims. [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the first Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
 
 ## 5-Minute Quickstart
 

@@ -6,6 +6,7 @@ site_name: Assay
 site_url: https://docs.assay.dev
 site_description: "CI-native evidence compiler and Trust Basis artifacts for agent systems"
 site_author: Assay Team
+exclude_docs: /README.md
 
 repo_name: Rul1an/assay
 repo_url: https://github.com/Rul1an/assay
@@ -109,6 +110,15 @@ markdown_extensions:
       custom_checkbox: true
   - pymdownx.tilde
 
+validation:
+  links:
+    # Many architecture/archive notes intentionally link to repo-root source,
+    # scripts, fixtures, and historical files outside the generated docs site.
+    # The dedicated docs link-check workflow validates changed Markdown links
+    # against the repository filesystem; this setting lets the public site build
+    # run in strict mode without treating those repo-crosslinks as site pages.
+    not_found: ignore
+
 extra:
   social:
     - icon: fontawesome/brands/github
@@ -148,6 +158,11 @@ nav:
     - Replay Engine: concepts/replay.md
     - Cache & Fingerprints: concepts/cache.md
     - Scope & Boundaries: concepts/scope.md
+    - Evidence Receipt Notes:
+      - notes/index.md
+      - Evidence Receipts Technical Note: notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md
+      - Evidence Receipt Assurance Mapping: notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md
+      - Promptfoo Receipt Note: notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md
     - Fail-Safe Config: concepts/fail-safe.md
     - Pack Registry: concepts/pack-registry.md
 
@@ -163,6 +178,8 @@ nav:
 
   - Configuration:
     - reference/config/index.md
+    - Receipt Families: reference/receipt-families.md
+    - Receipt Schema Registry: reference/receipt-schemas/README.md
     - mcp-eval.yaml: reference/config/eval-yaml.md
     - Policy Files: reference/config/policies.md
     - Sandbox Policies: reference/sandbox-policies.md
