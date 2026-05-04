@@ -2,6 +2,10 @@
 
 Assay uses [GitHub Discussions](https://github.com/Rul1an/assay/discussions) for category clarity and roadmap Q&A. Maintainers should **pin** the threads below so newcomers see the north star without scrolling the README.
 
+For the current evidence-receipts seeding slice, use the
+[P57 Ecosystem Seeding Pack](P57-ECOSYSTEM-SEEDING-PACK.md). It is a small
+proof/theory/recipe sharing pack, not a launch plan or partnership ask.
+
 ## Live discussions (March 2026)
 
 | Topic | URL |

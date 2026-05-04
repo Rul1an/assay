@@ -140,7 +140,10 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 
 - [**Getting Started**](getting-started/index.md)
 - [**Scope & Boundaries**](concepts/scope.md)
-- [**Evidence Receipts in Action**](notes/EVIDENCE-RECEIPTS-IN-ACTION.md)
+- [**Evidence Receipts Technical Note**](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md)
+- [**Evidence Receipt Assurance Mapping**](notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md)
+- [**Receipt Family Matrix**](reference/receipt-family-matrix.json)
+- [**Receipt Schema Registry**](reference/receipt-schemas/README.md)
 - [**Operator Proof Flow**](guides/operator-proof-flow.md)
 - [**Python SDK**](getting-started/python-quickstart.md)
 - [**OpenTelemetry & Langfuse**](guides/otel-langfuse.md)
