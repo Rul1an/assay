@@ -727,8 +727,8 @@ show_status() {
     echo ""
     echo "=== Actions Cache ==="
     local cache_size cache_entries
-    cache_size=$(multipass exec "$VM_NAME" -- du -sh "$ACTIONS_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
-    cache_entries=$(multipass exec "$VM_NAME" -- find "$ACTIONS_CACHE_DIR" -maxdepth 2 -type d 2>/dev/null | wc -l || echo "?")
+    cache_size=$(timeout 10 multipass exec "$VM_NAME" -- du -sh "$ACTIONS_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
+    cache_entries=$(timeout 10 multipass exec "$VM_NAME" -- find "$ACTIONS_CACHE_DIR" -maxdepth 2 -type d 2>/dev/null | wc -l || echo "?")
     echo "Cache Size: $cache_size"
     echo "Cache Entries: $cache_entries"
 

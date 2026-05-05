@@ -21,7 +21,11 @@ jobs:
       - name: Check runner status
         id: check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN can read workflow runs, but repository runner listing may
+          # require an admin-scoped token. Configure RUNNER_HEALTH_TOKEN for the
+          # full runner-status check; fall back to github.token so the monitor can
+          # still report queue state when no queued jobs are waiting.
+          GH_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN || github.token }}
         run: |
           set -euo pipefail
 
@@ -30,12 +34,26 @@ jobs:
 
           echo "Checking runner status for $RUNNER_NAME..."
 
-          # Get runner status
-          STATUS=$(gh api "repos/$REPO/actions/runners" \
+          # Get runner status. Do not collapse API/auth failures into
+          # not_found; those are monitor-health problems, not runner-health
+          # facts.
+          RUNNER_STATUS_ERROR=""
+          RUNNER_STATUS_STDERR="$(mktemp)"
+          if STATUS=$(gh api "repos/$REPO/actions/runners" \
             --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" \
-            2>/dev/null || echo "not_found")
+            2>"$RUNNER_STATUS_STDERR"); then
+            if [[ -z "$STATUS" ]]; then
+              STATUS="not_found"
+            fi
+          else
+            STATUS="unknown"
+            RUNNER_STATUS_ERROR=$(tr '\n' ' ' < "$RUNNER_STATUS_STDERR" | sed 's/[[:space:]]\+/ /g')
+            echo "::warning::Unable to query self-hosted runner status: ${RUNNER_STATUS_ERROR}"
+          fi
+          rm -f "$RUNNER_STATUS_STDERR"
 
           echo "runner_status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "runner_status_error=$RUNNER_STATUS_ERROR" >> "$GITHUB_OUTPUT"
           echo "Runner status: $STATUS"
 
           # Get queued jobs count
@@ -54,6 +72,13 @@ jobs:
             echo "healthy=false" >> "$GITHUB_OUTPUT"
             echo "❌ Runner is OFFLINE with $QUEUED queued jobs!"
             exit 1
+          elif [[ "$STATUS" == "unknown" ]] && [[ "$QUEUED" -gt 0 ]]; then
+            echo "healthy=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Runner health is UNKNOWN with $QUEUED queued jobs!"
+            exit 1
+          elif [[ "$STATUS" == "unknown" ]]; then
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Runner health is unknown but no queued jobs"
           else
             echo "healthy=true" >> "$GITHUB_OUTPUT"
             echo "⚠️ Runner is offline but no queued jobs"
@@ -65,7 +90,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPO="${{ github.repository }}"
-          TITLE="🚨 Self-hosted runner offline with queued jobs"
+          TITLE="🚨 Self-hosted runner unavailable with queued jobs"
 
           # Check if issue already exists
           EXISTING=$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq 'length')
@@ -76,11 +101,12 @@ jobs:
               --label "runner-health,urgent" \
               --body "## Runner Health Alert
 
-          The self-hosted runner \`assay-bpf-runner\` is **offline** with queued jobs waiting.
+          The self-hosted runner \`assay-bpf-runner\` is **offline or unknown** with queued jobs waiting.
 
           ### Details
           - **Runner:** assay-bpf-runner
           - **Status:** ${{ steps.check.outputs.runner_status }}
+          - **Status Error:** ${{ steps.check.outputs.runner_status_error }}
           - **Queued Jobs:** ${{ steps.check.outputs.queued_jobs }}
           - **Detected:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
