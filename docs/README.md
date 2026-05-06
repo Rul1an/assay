@@ -14,6 +14,8 @@ and [community discussion seeds](community/DISCUSSIONS.md).
 
 **Evidence portability notes:** [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the released `v3.8.0` receipt/schema surface and the first three claim-visible receipt families. [Evidence Receipts in Action](notes/EVIDENCE-RECEIPTS-IN-ACTION.md) shows the same three-family path with small checked-in artifacts generated from released Assay/Harness versions. The [receipt family matrix](reference/receipt-family-matrix.json) and [receipt schema registry](reference/receipt-schemas/README.md) are the machine-readable receipt-family references. The `v3.9.0` line adds assertion, schema CLI, Trust Card HTML, and MCP policy/tool digest review surfaces without adding new receipt families or Trust Basis claims. [From Promptfoo JSONL to Evidence Receipts](notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) explains the first Promptfoo assertion-component receipt path as a downstream evidence-portability recipe, not a Promptfoo integration or partnership claim.
 
+**Registry/discovery note:** [MCP Registry Discovery Audit](ops/MCP-REGISTRY-DISCOVERY-AUDIT.md) tracks the canonical `io.github.Rul1an/assay-mcp-server` release metadata, stale registry duplicates, and third-party directory freshness without treating any directory listing as the source of truth.
+
 ## 5-Minute Quickstart
 
 ### 1. Install
