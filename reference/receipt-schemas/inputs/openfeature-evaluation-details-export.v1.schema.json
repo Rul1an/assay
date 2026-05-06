@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/inputs/openfeature-evaluation-details-export.v1.schema.json",
+  "title": "Assay-supported OpenFeature EvaluationDetails Export Row v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "framework", "surface", "target_kind", "flag_key", "result"],
+  "properties": {
+    "schema": { "const": "openfeature.evaluation-details.export.v1" },
+    "framework": { "const": "openfeature" },
+    "surface": { "const": "evaluation_details" },
+    "target_kind": { "const": "feature_flag" },
+    "flag_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "boolean" },
+        "variant": { "$ref": "#/$defs/boundedString" },
+        "reason": { "$ref": "#/$defs/boundedString" },
+        "error_code": { "$ref": "#/$defs/boundedString" }
+      }
+    }
+  },
+  "$defs": {
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    }
+  }
+}

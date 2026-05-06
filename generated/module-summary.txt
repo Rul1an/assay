@@ -1,0 +1,16 @@
+# Assay Module Summary
+
+## Crate Overview
+
+| Crate | Purpose | Key Modules |
+|-------|---------|-------------|
+| assay-cli | CLI interface | commands/, args.rs, dispatch |
+| assay-core | Core evaluation engine | engine/, storage/, trace/, mcp/, report/ |
+| assay-metrics | Metric implementations | must_contain, semantic, regex_match, json_schema |
+| assay-mcp-server | MCP proxy server | server, proxy, policy |
+| assay-monitor | Runtime monitoring | events, ebpf_loader |
+| assay-evidence | Evidence bundles | bundle, cloud_events, jcs |
+| assay-policy | Policy compilation | compiler, tier1, tier2 |
+| assay-ebpf | eBPF programs | lsm hooks |
+| assay-sim | Attack simulation | scenarios |
+| assay-common | Shared types | exports |
