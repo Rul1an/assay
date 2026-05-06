@@ -213,8 +213,14 @@ De scan zoekt in de repo naar: `@modelcontextprotocol/sdk` (of `mcp`, `fastmcp`)
 - **Registry:** https://registry.modelcontextprotocol.io
 - **Schema:** https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json
 
-### Huidige status (2026-04)
-Dit is de primaire registry-route voor Assay, maar nog steeds **preview**. Gebruik hem alleen met een **gegenereerde** `release/server.json` uit een echte release asset set. Zie het als een publish-stap na een release, niet als iets dat al live is omdat de repo packaging klaar heeft.
+### Huidige status (2026-05)
+Dit is de primaire registry-route voor Assay, maar nog steeds **preview**.
+Gebruik hem alleen met een **gegenereerde** `release/server.json` uit een
+echte release asset set. De canonieke Assay identity is
+`io.github.Rul1an/assay-mcp-server`; oudere `io.github.Rul1an/assay`
+registry-resultaten zijn stale legacy discovery en horen deprecated te blijven,
+niet current. Zie ook de
+[MCP Registry Discovery Audit](ops/MCP-REGISTRY-DISCOVERY-AUDIT.md).
 
 ### Stappen
 
@@ -241,6 +247,10 @@ chmod +x scripts/publish-mcp-registry.sh
    ```bash
    mcp-publisher publish release/server.json
    ```
+6. Controleer de publieke registry:
+   ```bash
+   curl -fsSL 'https://registry.modelcontextprotocol.io/v0/servers?search=assay'
+   ```
 
 ### Exact invullen
 Gebruik **`release/server.json`**, niet een handmatig onderhouden rootbestand. Die metadata hoort gegenereerd te worden uit de echte MCPB release asset plus SHA-256, zodat versie, URL en package type blijven kloppen.
@@ -252,7 +262,7 @@ Gebruik **`release/server.json`**, niet een handmatig onderhouden rootbestand. D
 
 ### Troubleshooting
 - **Validate faalt** — Controleer eerst of `release/server.json` en de onderliggende `.mcpb` uit dezelfde release komen.
-- **Login faalt** — Auth opnieuw met `mcp-publisher login github`.
+- **Login faalt of token is verlopen** — Auth opnieuw met `mcp-publisher login github`.
 - **Publish faalt op namespace** — Controleer of de GitHub login overeenkomt met de `io.github.*` namespace in `release/server.json`.
 - **Preview drift** — De registry is nog preview; herlees de quickstart als de publish-flow veranderd is.
 
