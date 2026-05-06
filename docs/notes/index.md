@@ -4,6 +4,9 @@ These notes are canonical narrative entries for the current evidence-receipt
 line. They should describe the released surfaces without opening new receipt
 families or new Harness semantics.
 
+- [Claim Compilation Below Agent Experience](CLAIM-COMPILATION-BELOW-AX.md)
+  explains Assay's AX-adjacent positioning: claim compilation below
+  agent-facing contracts, docs, SDKs, MCP servers, and harnesses.
 - [Evidence Receipts in Action](EVIDENCE-RECEIPTS-IN-ACTION.md) is the static
   proof page generated from the released Assay `v3.9.1` binary and Assay
   Harness `v0.3.2` three-family path.
