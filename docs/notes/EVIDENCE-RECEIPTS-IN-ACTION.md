@@ -18,6 +18,9 @@ The useful thing is not that Assay imports everything. It does not. The useful
 thing is that Assay keeps the evidence unit small enough to review. Small
 receipts, real artifacts, no extra theater.
 
+For the strategic layer this proof sits under, see
+[Claim Compilation Below Agent Experience](CLAIM-COMPILATION-BELOW-AX.md).
+
 ## What Was Tested. What Was Decided. What the System Was Built With.
 
 | Question | Source surface | Receipt family | Trust Basis claim |
