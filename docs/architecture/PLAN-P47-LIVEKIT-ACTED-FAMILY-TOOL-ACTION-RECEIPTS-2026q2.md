@@ -86,10 +86,10 @@ Reduction unit:
 one function call + function call output pair
 ```
 
-The importer may mirror LiveKit's conceptual `zipped()` pairing, but v1 receipt
-generation is defined by the observed call/output lists and the pairing rules
-below. It must not depend on helper methods from one SDK surface as the
-semantic contract.
+The importer mirrors LiveKit's `zipped()` pairing semantics: calls and outputs
+are paired by list order. `call_id` is treated as an optional audit consistency
+check when every paired call/output entry carries one, not as the primary
+framework contract.
 
 ## 5. Frozen input shape
 
@@ -284,11 +284,13 @@ Timestamp boundary:
 1. Require `type == "function_tools_executed"` when present.
 2. Require a non-empty `function_calls` list.
 3. Require `function_call_outputs` to pair cleanly with calls.
-4. Prefer pairing by `call_id` when present on both sides.
-5. Fall back to list order only when `call_id` is absent.
+4. Pair calls and outputs by list order, matching LiveKit's `zipped()`
+   behavior.
+5. If every paired call/output entry has `call_id`, require the ids to match
+   at each index.
 6. Reject mismatched call/output counts in v1.
-7. Treat a missing output for any included call as malformed in Stage 1.
-8. Do not introduce a `missing_output` status yet.
+7. Preserve a missing or `null` output as `completed=false`.
+8. Do not infer `is_error` from a missing or `null` output.
 9. Require stable non-empty function names.
 10. Derive the receipt's `outcome.completed` and `outcome.is_error` fields from
     the paired output.
@@ -298,11 +300,9 @@ Timestamp boundary:
     not as proof that a reply or handoff was correct.
 14. Reject transcript/audio/usage fields if they appear in the reduced input.
 
-LiveKit Python permits `FunctionCallOutput | None`. P47 keeps those cases
-malformed in the first importer-only slice to avoid inventing `missing_output`
-semantics too early. A future production reducer may model this as
-`completed=false`, but that should happen only after a real captured input
-requires the richer status.
+LiveKit Python permits `FunctionCallOutput | None`. P47 preserves those cases
+as observed by setting `completed=false` and omitting `is_error`, rather than
+inventing success/failure semantics for an unknown output.
 
 ## 11. Non-claims
 
@@ -355,9 +355,8 @@ slice.
    acted-family distinction more visible?
 4. Should `has_tool_reply` and `has_agent_handoff` be copied to every receipt,
    or emitted once as event-level context in a batch receipt?
-5. Are `outcome.completed` and `outcome.is_error` enough for v1, with missing
-   output treated as malformed in this importer-only slice, or do we need richer
-   outcome values immediately?
+5. Are `outcome.completed=false` plus omitted `is_error` enough for missing
+   outputs, or do we need richer outcome values immediately?
 
 ## 14. Defaults
 
@@ -366,8 +365,8 @@ slice.
 3. Leave P16 alone for now, but document P47 as the acted-family execution
    successor.
 4. Copy event context into each receipt for review simplicity.
-5. Start with completed/error only; add richer statuses only after a real
-   fixture needs them.
+5. Start with `completed` and optional `is_error`; add richer statuses only
+   after a real fixture needs them.
 
 ## References
 

@@ -220,10 +220,12 @@ The importer is intentionally strict in v1:
 - each artifact must use `runtime_mode = agent_session`
 - optional `type` must be `function_tools_executed` when present
 - one receipt is emitted per function call / output pair
-- calls and outputs are paired by `call_id` only when every call and every
-  output entry has one; if neither side uses `call_id`, pairing falls back to
-  list order; partial `call_id` presence is malformed in v1
-- missing `FunctionCallOutput` / `null` output entries are malformed in v1
+- calls and outputs are paired by LiveKit SDK list order
+- if every paired call/output entry has `call_id`, mismatches fail the import
+  as an audit consistency check
+- partial `call_id` presence is accepted and still uses list-order pairing
+- missing `FunctionCallOutput` / `null` output entries are preserved as
+  `completed=false` without inferring `is_error`
 - raw tool arguments and outputs are accepted only as fixture input for hashing;
   receipts store `arguments_hash` / `output_hash` or explicit reviewer-safe
   refs

@@ -8,7 +8,9 @@ It is intentionally small:
 - start with one Assay-side frozen export shape derived from one
   `function_tools_executed` event
 - emit one receipt per function call / output pair
-- pair calls and outputs by `call_id` when present
+- pair calls and outputs by LiveKit SDK list order
+- use `call_id` only as an optional consistency check when every paired call
+  and output carries one
 - hash raw arguments and outputs instead of copying them into Assay output
 - keep transcripts, audio, room state, usage telemetry, and full traces out of
   the evidence boundary
@@ -20,6 +22,8 @@ It is intentionally small:
 - `fixtures/valid.livekit.json`: one successful function tool execution event
 - `fixtures/failure.livekit.json`: one function tool execution event whose
   output reports an error
+- `fixtures/missing-output.livekit.json`: one event with a `null`
+  `FunctionCallOutput`
 - `fixtures/malformed.livekit.json`: one malformed import case
 - `fixtures/valid.assay.ndjson`: pre-Stage-1 placeholder output with a fixed
   import time
@@ -69,7 +73,22 @@ assay evidence import livekit-tool-action \
 assay evidence verify /tmp/livekit-tool-action-failure.tar.gz
 ```
 
-## Check the malformed case
+## Import the missing-output artifact
+
+```bash
+assay evidence import livekit-tool-action \
+  --input examples/livekit-tool-action-evidence/fixtures/missing-output.livekit.json \
+  --bundle-out /tmp/livekit-tool-action-missing-output.tar.gz \
+  --import-time 2026-05-09T10:02:02Z \
+  --run-id livekit_tool_action_missing_output
+
+assay evidence verify /tmp/livekit-tool-action-missing-output.tar.gz
+```
+
+LiveKit's Python type allows `FunctionCallOutput | None`. The importer
+preserves that as `completed=false` and does not infer `is_error`.
+
+## Check a malformed call-id consistency case
 
 ```bash
 assay evidence import livekit-tool-action \
@@ -79,10 +98,9 @@ assay evidence import livekit-tool-action \
   --run-id livekit_tool_action_malformed
 ```
 
-This third command is expected to fail because Stage 1 treats a missing
-function-call output as malformed. LiveKit's Python type allows
-`FunctionCallOutput | None`; a future production reducer may model that as
-`completed=false`, but this importer keeps the first acted-family slice strict.
+This command is expected to fail because LiveKit pairs calls and outputs by
+list order, and the fixture has complete `call_id` values that disagree at the
+paired index.
 
 ## Important boundary
 
@@ -110,7 +128,9 @@ hashing behavior. They are fixture inputs, not receipt payload fields.
   `is_error=false`
 - `fixtures/failure.livekit.json`: bounded function-tool execution event with
   `is_error=true`
-- `fixtures/malformed.livekit.json`: malformed missing-output import case
+- `fixtures/missing-output.livekit.json`: import case with a `null`
+  `FunctionCallOutput`
+- `fixtures/malformed.livekit.json`: malformed call-id consistency case
 - `fixtures/valid.assay.ndjson`: mapped placeholder output with fixed import
   time and deterministic SHA-256 hashes
 - `fixtures/failure.assay.ndjson`: mapped placeholder output with fixed import
