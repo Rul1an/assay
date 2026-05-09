@@ -32,7 +32,6 @@ OPTIONAL_TOP_LEVEL_KEYS = {
     "type",
     "has_tool_reply",
     "has_agent_handoff",
-    "capture_context",
 }
 FORBIDDEN_TOP_LEVEL_KEY_MESSAGES = {
     "transcript": "artifact: transcript import is out of scope for LiveKit tool-action v1",
@@ -49,7 +48,6 @@ FORBIDDEN_TOP_LEVEL_KEY_MESSAGES = {
 TOP_LEVEL_KEYS = set(REQUIRED_KEYS) | OPTIONAL_TOP_LEVEL_KEYS | set(FORBIDDEN_TOP_LEVEL_KEY_MESSAGES)
 CALL_KEYS = {"id", "type", "call_id", "name", "arguments", "arguments_ref", "created_at", "group_id"}
 OUTPUT_KEYS = {"id", "type", "call_id", "name", "output", "output_ref", "is_error", "created_at"}
-CAPTURE_CONTEXT_KEYS = {"session_id"}
 MAX_REF_LENGTH = 240
 MAX_NAME_LENGTH = 160
 
@@ -175,18 +173,6 @@ def _validate_optional_bool(value: Any, field_name: str) -> bool:
     return value
 
 
-def _validate_capture_context(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("artifact: capture_context must be an object")
-    unknown = set(value) - CAPTURE_CONTEXT_KEYS
-    if unknown:
-        raise ValueError(f"artifact: unsupported capture_context keys: {', '.join(sorted(unknown))}")
-    normalized: dict[str, Any] = {}
-    if "session_id" in value:
-        normalized["session_id"] = _validate_non_empty_string(value["session_id"], "capture_context.session_id")
-    return normalized
-
-
 def _validate_call(value: Any, index: int) -> dict[str, Any]:
     label = f"function_calls[{index}]"
     if not isinstance(value, dict):
@@ -296,8 +282,6 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     for key in ("has_tool_reply", "has_agent_handoff"):
         if key in record:
             normalized[key] = _validate_optional_bool(record[key], key)
-    if "capture_context" in record:
-        normalized["capture_context"] = _validate_capture_context(record["capture_context"])
     return normalized
 
 
@@ -400,8 +384,6 @@ def _build_receipt(
         "outcome": outcome,
         "event_context": event_context,
     }
-    if "capture_context" in normalized and normalized["capture_context"]:
-        receipt["capture_context"] = normalized["capture_context"]
     return receipt
 
 

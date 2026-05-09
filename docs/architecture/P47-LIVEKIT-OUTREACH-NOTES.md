@@ -10,9 +10,12 @@ Repository: `livekit/agents`
 
 Best channel:
 
-1. LiveKit community / public discussion channel if available.
-2. GitHub issue only if maintainers point there or if a concrete SDK gap is
-   found.
+1. LiveKit community forum first.
+2. GitHub issue only if maintainers point there or if a concrete SDK or
+   documentation gap is found.
+
+Forum responses are best-effort community support, not guaranteed maintainer
+review. Treat any answer as shape feedback, not as LiveKit endorsement.
 
 Do not DM maintainers first. The ask is technical shape feedback and benefits
 from public scrutiny.

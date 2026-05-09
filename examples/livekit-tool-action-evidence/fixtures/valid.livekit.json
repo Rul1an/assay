@@ -33,8 +33,5 @@
     }
   ],
   "has_tool_reply": true,
-  "has_agent_handoff": false,
-  "capture_context": {
-    "session_id": "session_ref_demo"
-  }
+  "has_agent_handoff": false
 }

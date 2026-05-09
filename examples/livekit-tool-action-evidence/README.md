@@ -96,6 +96,9 @@ The sample is only a fixture-backed sketch of the LiveKit acted-family seam.
 The public family matrix should move only after this shape is proven with a
 small fixture set and reviewed separately.
 
+Raw arguments and outputs may appear in the local source fixtures only to prove
+hashing behavior. They are fixture inputs, not receipt payload fields.
+
 ## Checked-in fixtures
 
 - `fixtures/valid.livekit.json`: bounded function-tool execution event with

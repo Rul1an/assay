@@ -96,6 +96,11 @@ semantic contract.
 The sample uses an Assay-side frozen export shape. It is not a claim that
 LiveKit provides this exact wire contract.
 
+The frozen export shape may contain raw tool arguments and outputs for local
+fixture reduction only. These fields prove hashing/reduction behavior in the
+sample; they are not part of the future canonical receipt boundary and must
+never survive into the receipt payload.
+
 ```json
 {
   "schema": "livekit.function-tools-executed.export.v1",
@@ -160,7 +165,7 @@ Draft payload:
   "source_system": "livekit_agents",
   "source_surface": "function_tools_executed",
   "source_artifact_ref": "examples/livekit-tool-action-evidence/fixtures/valid.livekit.json",
-  "source_artifact_digest": "sha256:c835b56c1b5f8c092658c7f1ea052bea6d5e59a73d01ad5ee3dce8ed603cc736",
+  "source_artifact_digest": "sha256:ec6c293e4b4462eea1bb5e15826a60d4367617163dff5a70c3204ef2eee0ee46",
   "reducer_version": "assay-livekit-function-tools-executed@0.1.0",
   "imported_at": "2026-05-09T10:00:02.000Z",
   "function": {
@@ -217,16 +222,12 @@ Optional when naturally present:
 - `outcome.received_at`
 - `event_context.has_tool_reply`
 - `event_context.has_agent_handoff`
-- `capture_context.session_id`
 
-Out of scope by default:
+Future consideration:
 
-- `subject_ref`
-
-`subject_ref` may become an adapter-supplied reviewer aid later, but it should
-not be part of the canonical v1 receipt unless a naturally bounded source field
-is demonstrated in real captured input. Otherwise it risks smuggling
-application/business-object truth into an execution receipt.
+- `subject_ref` may become a non-canonical adapter-supplied reviewer aid later,
+  but it is out of the canonical v1 receipt boundary. Otherwise it risks
+  smuggling application/business-object truth into an execution receipt.
 
 ## 8. Excluded fields
 
@@ -239,6 +240,7 @@ V1 must exclude:
 - raw tool arguments
 - raw tool output
 - session usage
+- session identity
 - latency metrics
 - room state
 - participant identity
@@ -287,16 +289,19 @@ Timestamp boundary:
    sample.
 8. Do not introduce a `missing_output` status yet.
 9. Require stable non-empty function names.
-10. Derive runtime status from `is_error` when output is present.
+10. Derive the receipt's `outcome.completed` and `outcome.is_error` fields from
+    the paired output.
 11. Do not copy raw arguments or raw output into the receipt.
 12. If raw arguments/output are available, store only digest/ref.
 13. Copy `has_tool_reply` and `has_agent_handoff` as optional event context,
     not as proof that a reply or handoff was correct.
 14. Reject transcript/audio/usage fields if they appear in the reduced input.
 
-Note: LiveKit Python permits `FunctionCallOutput | None`. A future production
-reducer may model this as `completed=false`, but this placeholder slice keeps
-the v1 fixture stricter until a real captured input requires the richer status.
+LiveKit Python permits `FunctionCallOutput | None`. P47 keeps those cases
+malformed in the first placeholder slice to avoid inventing `missing_output`
+semantics too early. A future production reducer may model this as
+`completed=false`, but that should happen only after a real captured input
+requires the richer status.
 
 ## 11. Non-claims
 
@@ -340,8 +345,9 @@ After review, a later implementation PR may:
    acted-family distinction more visible?
 4. Should `has_tool_reply` and `has_agent_handoff` be copied to every receipt,
    or emitted once as event-level context in a batch receipt?
-5. Is `ok|error` enough for v1, with missing output treated as malformed in
-   this placeholder slice, or do we need richer status values immediately?
+5. Are `outcome.completed` and `outcome.is_error` enough for v1, with missing
+   output treated as malformed in this placeholder slice, or do we need richer
+   outcome values immediately?
 
 ## 14. Defaults
 
