@@ -82,7 +82,11 @@ assert_rg '^use super::\*;' "$TESTS" "tests module must retain parent imports"
 assert_rg 'trust_basis_contract_generated_claim_id_order_is_frozen' "$TESTS" "claim order contract missing from tests module"
 assert_rg 'trust_basis_contract_canonical_json_shape_is_frozen' "$TESTS" "canonical JSON contract missing from tests module"
 assert_rg 'trust_basis_contract_diff_report_ordering_is_frozen' "$TESTS" "diff ordering contract missing from tests module"
-assert_rg '^mod canonical;|^mod classifiers;|^mod diff;|^mod generation;|^mod types;' "$TRUST_BASIS" "production modules must remain declared"
+assert_rg '^mod canonical;' "$TRUST_BASIS" "canonical module declaration missing"
+assert_rg '^mod classifiers;' "$TRUST_BASIS" "classifiers module declaration missing"
+assert_rg '^mod diff;' "$TRUST_BASIS" "diff module declaration missing"
+assert_rg '^mod generation;' "$TRUST_BASIS" "generation module declaration missing"
+assert_rg '^mod types;' "$TRUST_BASIS" "types module declaration missing"
 assert_rg 'pub use trust_basis::' "$LIB" "root trust_basis re-export missing"
 
 facade_loc=$(wc -l < "$TRUST_BASIS" | tr -d ' ')
