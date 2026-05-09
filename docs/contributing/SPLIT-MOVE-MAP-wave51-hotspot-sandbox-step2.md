@@ -9,7 +9,7 @@ Keep `crates/assay-cli/src/cli/commands/sandbox.rs` as the command facade and mo
 | From | To | Notes |
 | --- | --- | --- |
 | `build_env_filter` | `sandbox/env.rs` | Preserves env passthrough, strict, strip exec, allowlist, and safe PATH options. |
-| `create_scoped_tmp` | `sandbox/tmp.rs` | Preserves runtime-dir fallback and owner-only permissions. |
+| `create_scoped_tmp` | `sandbox/tmp.rs` | Preserves runtime-dir fallback and owner-only permissions, with unique tempdir creation and cleanup on drop. |
 | profile begin/finish and evidence run id | `sandbox/profile.rs` | Preserves atomic writes, report generation, evidence profile naming, and deterministic run id hashing. |
 | degradation payload helpers | `sandbox/degradation.rs` | Preserves backend-unavailable and policy-conflict evidence semantics. |
 | child spawn, env application, timeout, dry-run profile handling | `sandbox/child.rs` | Preserves command execution, TMP env, Landlock pre-exec, timeout, and profile closeout behavior. |

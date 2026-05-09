@@ -56,7 +56,7 @@ rg -n 'save_atomic|evidence_profile_run_id|to_evidence_profile' "$PROFILE" >/dev
   echo "FAIL: profile finish markers missing"
   exit 1
 }
-rg -n 'XDG_RUNTIME_DIR|set_permissions|0o700' "$TMP_MOD" >/dev/null || {
+rg -n 'XDG_RUNTIME_DIR|create_dir|remove_dir_all|set_permissions|0o700' "$TMP_MOD" >/dev/null || {
   echo "FAIL: scoped tmp markers missing"
   exit 1
 }

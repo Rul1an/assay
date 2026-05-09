@@ -8,12 +8,12 @@ Step 2 splits `assay sandbox` helper responsibilities into command-private modul
 
 | File | Before | After | Delta |
 | --- | ---: | ---: | ---: |
-| `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | 404 | -375 |
+| `crates/assay-cli/src/cli/commands/sandbox.rs` | 779 | 406 | -373 |
 | `crates/assay-cli/src/cli/commands/sandbox/child.rs` | 0 | 169 | +169 |
 | `crates/assay-cli/src/cli/commands/sandbox/degradation.rs` | 0 | 39 | +39 |
 | `crates/assay-cli/src/cli/commands/sandbox/env.rs` | 0 | 29 | +29 |
 | `crates/assay-cli/src/cli/commands/sandbox/profile.rs` | 0 | 136 | +136 |
-| `crates/assay-cli/src/cli/commands/sandbox/tmp.rs` | 0 | 28 | +28 |
+| `crates/assay-cli/src/cli/commands/sandbox/tmp.rs` | 0 | 46 | +46 |
 
 ## Proof Snippets
 
@@ -30,6 +30,7 @@ rg -n 'mod (child|degradation|env|profile|tmp);|run_child\(' crates/assay-cli/sr
 rg -n 'tokio::process::Command|timeout|TMPDIR|maybe_profile_finish' crates/assay-cli/src/cli/commands/sandbox/child.rs
 rg -n 'EnvFilter::|with_strip_exec|with_allowed|with_safe_path' crates/assay-cli/src/cli/commands/sandbox/env.rs
 rg -n 'PayloadSandboxDegraded|BackendUnavailable|PolicyConflict' crates/assay-cli/src/cli/commands/sandbox/degradation.rs
+rg -n 'create_dir|remove_dir_all|set_permissions|0o700' crates/assay-cli/src/cli/commands/sandbox/tmp.rs
 ```
 
 ## Validation

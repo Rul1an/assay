@@ -4,17 +4,15 @@ use sha2::Digest;
 
 pub(super) fn maybe_profile_begin(
     args: &SandboxArgs,
+    cwd: &std::path::Path,
     assay_tmp: Option<&std::path::Path>,
 ) -> Option<ProfileCollector> {
     let _ = args.profile.as_ref()?;
 
-    let cwd = std::env::current_dir()
-        .ok()
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
     let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
 
     Some(ProfileCollector::new(ProfileConfig {
-        cwd,
+        cwd: cwd.to_path_buf(),
         home,
         assay_tmp: assay_tmp.map(|p| p.to_path_buf()),
     }))

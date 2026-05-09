@@ -162,11 +162,17 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     // PR1: Ensure trace directory exists
     // match crate::fs::ensure_assay_trace_dir() { ... } // (Optional logging)
 
+    // Determine working directory before profile initialization so suggestions
+    // are generalized relative to the same cwd used by the child process.
+    let cwd = args.workdir.clone().unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
+
     // PR5.4: Scoped /tmp with proper isolation
     let tmp_dir = create_scoped_tmp()?;
 
     // PR7: Initialize profiler if requested (passing tmp_dir for generalization)
-    profiler = maybe_profile_begin(&args, Some(&tmp_dir));
+    profiler = maybe_profile_begin(&args, &cwd, Some(tmp_dir.path()));
     if let Some(p) = &profiler {
         for event in deferred_profile_events.drain(..) {
             p.record(event);
@@ -174,17 +180,12 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 
     if !args.quiet {
-        eprintln!("Tmp:     {}", tmp_dir.display());
+        eprintln!("Tmp:     {}", tmp_dir.path().display());
         eprintln!("──────────────────");
     }
 
-    // Determine working directory
-    let cwd = args.workdir.clone().unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-    });
-
     // Check Landlock compatibility before start
-    let compat = crate::landlock_check::check_compatibility(&policy, &cwd, &tmp_dir);
+    let compat = crate::landlock_check::check_compatibility(&policy, &cwd, tmp_dir.path());
 
     #[allow(unused_assignments, unused_mut)]
     let mut actual_enforcement = active_enforcement;
@@ -229,7 +230,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         &args,
         &policy,
         &env_result,
-        &tmp_dir,
+        tmp_dir.path(),
         &cwd,
         profiler,
         actual_enforcement,
@@ -324,6 +325,34 @@ mod tests {
             )],
         };
         assert!(policy_conflict_degradation(&args, true, &compat).is_none());
+    }
+
+    #[test]
+    fn profile_begin_uses_child_workdir_as_profile_cwd() {
+        let mut args = sandbox_args();
+        args.profile = Some(std::path::PathBuf::from("sandbox-profile.yaml"));
+        let cwd = std::path::PathBuf::from("/repo/subdir");
+
+        let report = profile::maybe_profile_begin(&args, &cwd, None)
+            .expect("profile should start")
+            .finish();
+
+        assert_eq!(report.config.cwd, cwd);
+    }
+
+    #[test]
+    fn scoped_tmp_dirs_are_unique_and_cleaned_on_drop() {
+        let first = tmp::create_scoped_tmp().expect("first tmp dir");
+        let second = tmp::create_scoped_tmp().expect("second tmp dir");
+        let first_path = first.path().to_path_buf();
+        let second_path = second.path().to_path_buf();
+
+        assert_ne!(first_path, second_path);
+        assert!(first_path.exists());
+        assert!(second_path.exists());
+
+        drop(first);
+        assert!(!first_path.exists());
     }
 
     #[test]
