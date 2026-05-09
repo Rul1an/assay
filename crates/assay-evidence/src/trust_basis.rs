@@ -1182,6 +1182,95 @@ mod tests {
     }
 
     #[test]
+    fn trust_basis_contract_generated_claim_id_order_is_frozen() {
+        let bundle = make_bundle(vec![make_event(
+            "assay.process.exec",
+            "run_contract_claim_order",
+            0,
+            json!({ "hits": 1 }),
+        )]);
+
+        let trust_basis = generate_trust_basis(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+            TrustBasisOptions::default(),
+        )
+        .expect("trust basis should generate");
+
+        let claim_ids = trust_basis
+            .claims
+            .iter()
+            .map(|claim| serde_json::to_value(claim.id).expect("claim id serializes"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            claim_ids,
+            vec![
+                json!("bundle_verified"),
+                json!("signing_evidence_present"),
+                json!("provenance_backed_claims_present"),
+                json!("delegation_context_visible"),
+                json!("authorization_context_visible"),
+                json!("containment_degradation_observed"),
+                json!("external_eval_receipt_boundary_visible"),
+                json!("external_decision_receipt_boundary_visible"),
+                json!("external_inventory_receipt_boundary_visible"),
+                json!("applied_pack_findings_present"),
+            ]
+        );
+    }
+
+    #[test]
+    fn trust_basis_contract_canonical_json_shape_is_frozen() {
+        let trust_basis = TrustBasis {
+            claims: vec![
+                TrustBasisClaim {
+                    id: TrustClaimId::BundleVerified,
+                    level: TrustClaimLevel::Verified,
+                    source: TrustClaimSource::BundleVerification,
+                    boundary: TrustClaimBoundary::BundleWide,
+                    note: None,
+                },
+                TrustBasisClaim {
+                    id: TrustClaimId::DelegationContextVisible,
+                    level: TrustClaimLevel::Absent,
+                    source: TrustClaimSource::CanonicalDecisionEvidence,
+                    boundary: TrustClaimBoundary::SupportedDelegatedFlowsOnly,
+                    note: Some("contract note".to_string()),
+                },
+            ],
+        };
+
+        let canonical = String::from_utf8(
+            to_canonical_json_bytes(&trust_basis).expect("canonical trust basis json"),
+        )
+        .expect("canonical json is utf8");
+
+        assert_eq!(
+            canonical,
+            r#"{
+  "claims": [
+    {
+      "id": "bundle_verified",
+      "level": "verified",
+      "source": "bundle_verification",
+      "boundary": "bundle-wide",
+      "note": null
+    },
+    {
+      "id": "delegation_context_visible",
+      "level": "absent",
+      "source": "canonical_decision_evidence",
+      "boundary": "supported-delegated-flows-only",
+      "note": "contract note"
+    }
+  ]
+}
+"#
+        );
+    }
+
+    #[test]
     fn trust_basis_regeneration_is_byte_stable() {
         let bundle = make_bundle(vec![make_event(
             "assay.tool.decision",
@@ -1901,6 +1990,119 @@ mod tests {
                 TrustClaimId::AppliedPackFindingsPresent,
                 TrustClaimId::BundleVerified,
             ]
+        );
+    }
+
+    #[test]
+    fn trust_basis_contract_diff_report_ordering_is_frozen() {
+        let baseline = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::SigningEvidencePresent,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Absent,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    Some("baseline note"),
+                ),
+                trust_basis_claim(
+                    TrustClaimId::AuthorizationContextVisible,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+            ],
+        };
+        let candidate = TrustBasis {
+            claims: vec![
+                trust_basis_claim(
+                    TrustClaimId::ExternalEvalReceiptBoundaryVisible,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::BundleVerified,
+                    TrustClaimLevel::Verified,
+                    Some("candidate note"),
+                ),
+                trust_basis_claim(
+                    TrustClaimId::AppliedPackFindingsPresent,
+                    TrustClaimLevel::Verified,
+                    None,
+                ),
+                trust_basis_claim(
+                    TrustClaimId::SigningEvidencePresent,
+                    TrustClaimLevel::Absent,
+                    None,
+                ),
+            ],
+        };
+
+        let report = diff_trust_basis(&baseline, &candidate);
+
+        assert_eq!(report.schema, TRUST_BASIS_DIFF_SCHEMA);
+        assert_eq!(report.claim_identity, "claim.id");
+        assert_eq!(
+            report.level_order,
+            vec![
+                TrustClaimLevel::Absent,
+                TrustClaimLevel::Inferred,
+                TrustClaimLevel::SelfReported,
+                TrustClaimLevel::Verified,
+            ]
+        );
+        assert_eq!(report.summary.regressed_claims, 1);
+        assert_eq!(report.summary.improved_claims, 1);
+        assert_eq!(report.summary.removed_claims, 1);
+        assert_eq!(report.summary.added_claims, 1);
+        assert_eq!(report.summary.metadata_changes, 1);
+        assert_eq!(report.summary.unchanged_claim_count, 0);
+        assert!(report.summary.has_regressions);
+        assert_eq!(
+            report
+                .regressed_claims
+                .iter()
+                .map(|diff| diff.claim_id)
+                .collect::<Vec<_>>(),
+            vec![TrustClaimId::SigningEvidencePresent]
+        );
+        assert_eq!(
+            report
+                .improved_claims
+                .iter()
+                .map(|diff| diff.claim_id)
+                .collect::<Vec<_>>(),
+            vec![TrustClaimId::ExternalEvalReceiptBoundaryVisible]
+        );
+        assert_eq!(
+            report
+                .removed_claims
+                .iter()
+                .map(|diff| diff.claim_id)
+                .collect::<Vec<_>>(),
+            vec![TrustClaimId::AuthorizationContextVisible]
+        );
+        assert_eq!(
+            report
+                .added_claims
+                .iter()
+                .map(|diff| diff.claim_id)
+                .collect::<Vec<_>>(),
+            vec![TrustClaimId::AppliedPackFindingsPresent]
+        );
+        assert_eq!(
+            report
+                .metadata_changes
+                .iter()
+                .map(|diff| diff.claim_id)
+                .collect::<Vec<_>>(),
+            vec![TrustClaimId::BundleVerified]
         );
     }
 
