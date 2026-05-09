@@ -29,6 +29,7 @@ REQUIRED_KEYS = (
     "function_call_outputs",
 )
 OPTIONAL_TOP_LEVEL_KEYS = {
+    "type",
     "has_tool_reply",
     "has_agent_handoff",
     "capture_context",
@@ -97,7 +98,9 @@ def _normalize_for_hash(value: Any) -> Any:
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("non-finite floats are not valid in canonical JSON")
-        return value
+        if value.is_integer():
+            return int(value)
+        raise ValueError("non-integer floats are not valid in this sample's canonical JSON subset")
     if isinstance(value, dict):
         return {str(key): _normalize_for_hash(nested) for key, nested in value.items()}
     if isinstance(value, list):
@@ -265,6 +268,8 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact: surface must be function_tools_executed")
     if record.get("runtime_mode") != "agent_session":
         raise ValueError("artifact: runtime_mode must be agent_session")
+    if "type" in record and record["type"] != "function_tools_executed":
+        raise ValueError("artifact: type must be function_tools_executed when present")
 
     calls_raw = record["function_calls"]
     outputs_raw = record["function_call_outputs"]
@@ -286,6 +291,8 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         "function_call_outputs": [_validate_output(output, index) for index, output in enumerate(outputs_raw)],
     }
 
+    if "type" in record:
+        normalized["type"] = "function_tools_executed"
     for key in ("has_tool_reply", "has_agent_handoff"):
         if key in record:
             normalized[key] = _validate_optional_bool(record[key], key)
@@ -326,14 +333,14 @@ def _pair_calls_outputs(normalized: dict[str, Any]) -> list[tuple[dict[str, Any]
     return list(zip(calls, outputs))
 
 
-def _hash_or_ref(record: dict[str, Any], raw_key: str, ref_key: str) -> str | None:
+def _hash_or_ref(record: dict[str, Any], raw_key: str, ref_key: str) -> tuple[str | None, str | None]:
     if raw_key in record and ref_key in record:
         raise ValueError(f"artifact: {raw_key} and {ref_key} must not both be present")
     if raw_key in record:
-        return _sha256(record[raw_key])
+        return _sha256(record[raw_key]), None
     if ref_key in record:
-        return record[ref_key]
-    return None
+        return None, record[ref_key]
+    return None, None
 
 
 def _build_receipt(
@@ -356,17 +363,21 @@ def _build_receipt(
     for key in ("call_id", "group_id", "created_at"):
         if key in call and call[key] is not None:
             function[key] = call[key]
-    arguments_hash = _hash_or_ref(call, "arguments", "arguments_ref")
+    arguments_hash, arguments_ref = _hash_or_ref(call, "arguments", "arguments_ref")
     if arguments_hash is not None:
         function["arguments_hash"] = arguments_hash
+    if arguments_ref is not None:
+        function["arguments_ref"] = arguments_ref
 
     outcome: dict[str, Any] = {
         "completed": True,
         "is_error": output.get("is_error", False),
     }
-    output_hash = _hash_or_ref(output, "output", "output_ref")
+    output_hash, output_ref = _hash_or_ref(output, "output", "output_ref")
     if output_hash is not None:
         outcome["output_hash"] = output_hash
+    if output_ref is not None:
+        outcome["output_ref"] = output_ref
     if "created_at" in output:
         outcome["received_at"] = output["created_at"]
 

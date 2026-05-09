@@ -1,4 +1,4 @@
-# PLAN - P47 LiveKit Acted-Family Tool Action Receipts (2026 Q2)
+# PLAN — P47 LiveKit Acted-Family Tool Action Receipts (2026 Q2)
 
 - **Date:** 2026-05-09
 - **Owner:** Evidence / Product
@@ -102,6 +102,7 @@ LiveKit provides this exact wire contract.
   "framework": "livekit_agents",
   "surface": "function_tools_executed",
   "runtime_mode": "agent_session",
+  "type": "function_tools_executed",
   "event_ref": "turn-42:function_tools_executed:0",
   "created_at": 1778320801.5,
   "function_calls": [
@@ -159,7 +160,7 @@ Draft payload:
   "source_system": "livekit_agents",
   "source_surface": "function_tools_executed",
   "source_artifact_ref": "examples/livekit-tool-action-evidence/fixtures/valid.livekit.json",
-  "source_artifact_digest": "sha256:12cfa6055d536c2df588d86f031486f6b500488305f2434e8dcb655dc298b1b6",
+  "source_artifact_digest": "sha256:c835b56c1b5f8c092658c7f1ea052bea6d5e59a73d01ad5ee3dce8ed603cc736",
   "reducer_version": "assay-livekit-function-tools-executed@0.1.0",
   "imported_at": "2026-05-09T10:00:02.000Z",
   "function": {
@@ -209,8 +210,10 @@ Optional when naturally present:
 - `function.call_id`
 - `function.group_id`
 - `function.arguments_hash`
+- `function.arguments_ref`
 - `outcome.is_error`
 - `outcome.output_hash`
+- `outcome.output_ref`
 - `outcome.received_at`
 - `event_context.has_tool_reply`
 - `event_context.has_agent_handoff`

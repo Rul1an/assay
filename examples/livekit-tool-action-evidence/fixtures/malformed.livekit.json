@@ -3,6 +3,7 @@
   "framework": "livekit_agents",
   "surface": "function_tools_executed",
   "runtime_mode": "agent_session",
+  "type": "function_tools_executed",
   "event_ref": "turn-44:function_tools_executed:0",
   "created_at": 1778320921.5,
   "function_calls": [
