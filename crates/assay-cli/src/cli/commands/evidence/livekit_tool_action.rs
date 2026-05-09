@@ -6,7 +6,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use clap::Args;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -330,11 +330,7 @@ fn reduce_tool_action_event(
                 "document {document_number} function_calls[{call_index}] must be a JSON object"
             )
         })?;
-        let output = outputs[output_index].as_object().ok_or_else(|| {
-            anyhow::anyhow!(
-                "document {document_number} function_call_outputs[{output_index}] must be a JSON object"
-            )
-        })?;
+        let output = outputs[output_index].as_object();
         let payload = build_receipt(&context, call_index, output_index, call, output)?;
         payloads.push(payload);
     }
@@ -347,10 +343,9 @@ fn build_receipt(
     call_index: usize,
     output_index: usize,
     call: &Map<String, Value>,
-    output: &Map<String, Value>,
+    output: Option<&Map<String, Value>>,
 ) -> Result<Value> {
     validate_call_keys(call, context.document_number, call_index)?;
-    validate_output_keys(output, context.document_number, output_index)?;
 
     let call_name = bounded_string(
         call.get("name"),
@@ -358,18 +353,6 @@ fn build_receipt(
         MAX_NAME_CHARS,
         context.document_number,
     )?;
-    let output_name = bounded_string(
-        output.get("name"),
-        "function_call_outputs[].name",
-        MAX_NAME_CHARS,
-        context.document_number,
-    )?;
-    if call_name != output_name {
-        bail!(
-            "document {} paired call/output names differ at call index {call_index}",
-            context.document_number
-        );
-    }
 
     let mut function = Map::new();
     function.insert(
@@ -380,7 +363,7 @@ fn build_receipt(
         "call_index".to_string(),
         Value::Number((call_index as u64).into()),
     );
-    function.insert("name".to_string(), Value::String(call_name));
+    function.insert("name".to_string(), Value::String(call_name.clone()));
 
     if let Some(call_id) = optional_nullable_bounded_string(
         call.get("call_id"),
@@ -422,36 +405,54 @@ fn build_receipt(
     }
 
     let mut outcome = Map::new();
-    outcome.insert("completed".to_string(), Value::Bool(true));
-    outcome.insert(
-        "is_error".to_string(),
-        Value::Bool(required_bool(
-            output.get("is_error"),
-            "function_call_outputs[].is_error",
+    if let Some(output) = output {
+        validate_output_keys(output, context.document_number, output_index)?;
+        let output_name = bounded_string(
+            output.get("name"),
+            "function_call_outputs[].name",
+            MAX_NAME_CHARS,
             context.document_number,
-        )?),
-    );
-    if let Some(received_at) = optional_timestamp(
-        output.get("created_at"),
-        "function_call_outputs[].created_at",
-        context.document_number,
-    )? {
-        outcome.insert("received_at".to_string(), Value::String(received_at));
-    }
-    match hash_or_ref(
-        output,
-        "output",
-        "output_ref",
-        "function_call_outputs[]",
-        context.document_number,
-    )? {
-        HashOrRef::Hash(value) => {
-            outcome.insert("output_hash".to_string(), Value::String(value));
+        )?;
+        if call_name != output_name {
+            bail!(
+                "document {} paired call/output names differ at call index {call_index}",
+                context.document_number
+            );
         }
-        HashOrRef::Ref(value) => {
-            outcome.insert("output_ref".to_string(), Value::String(value));
+
+        outcome.insert("completed".to_string(), Value::Bool(true));
+        outcome.insert(
+            "is_error".to_string(),
+            Value::Bool(required_bool(
+                output.get("is_error"),
+                "function_call_outputs[].is_error",
+                context.document_number,
+            )?),
+        );
+        if let Some(received_at) = optional_timestamp(
+            output.get("created_at"),
+            "function_call_outputs[].created_at",
+            context.document_number,
+        )? {
+            outcome.insert("received_at".to_string(), Value::String(received_at));
         }
-        HashOrRef::Absent => {}
+        match hash_or_ref(
+            output,
+            "output",
+            "output_ref",
+            "function_call_outputs[]",
+            context.document_number,
+        )? {
+            HashOrRef::Hash(value) => {
+                outcome.insert("output_hash".to_string(), Value::String(value));
+            }
+            HashOrRef::Ref(value) => {
+                outcome.insert("output_ref".to_string(), Value::String(value));
+            }
+            HashOrRef::Absent => {}
+        }
+    } else {
+        outcome.insert("completed".to_string(), Value::Bool(false));
     }
 
     let mut event_context = Map::new();
@@ -485,92 +486,54 @@ fn paired_call_outputs(
     outputs: &[Value],
     document_number: usize,
 ) -> Result<Vec<(usize, usize)>> {
-    let mut calls_all_have_ids = true;
-    let mut calls_any_have_ids = false;
-    for (index, call) in calls.iter().enumerate() {
+    let mut all_pairs_have_call_ids = true;
+    let mut pair_call_ids = Vec::with_capacity(calls.len());
+
+    for (index, (call, output)) in calls.iter().zip(outputs.iter()).enumerate() {
         let call = call.as_object().ok_or_else(|| {
             anyhow::anyhow!(
                 "document {document_number} function_calls[{index}] must be a JSON object"
             )
         })?;
         validate_call_keys(call, document_number, index)?;
-        let has_id = optional_nullable_bounded_string(
+        let call_id = optional_nullable_bounded_string(
             call.get("call_id"),
             "function_calls[].call_id",
             MAX_REF_CHARS,
             document_number,
-        )?
-        .is_some();
-        calls_all_have_ids &= has_id;
-        calls_any_have_ids |= has_id;
-    }
+        )?;
 
-    let mut outputs_all_have_ids = true;
-    let mut outputs_any_have_ids = false;
-    for (index, output) in outputs.iter().enumerate() {
-        if output.is_null() {
-            bail!(
-                "document {document_number} function_call_outputs[{index}] is null; missing output is malformed in LiveKit tool-action v1"
-            );
-        }
-        let output = output.as_object().ok_or_else(|| {
-            anyhow::anyhow!(
-                "document {document_number} function_call_outputs[{index}] must be a JSON object"
-            )
-        })?;
-        validate_output_keys(output, document_number, index)?;
-        let has_id = optional_nullable_bounded_string(
-            output.get("call_id"),
-            "function_call_outputs[].call_id",
-            MAX_REF_CHARS,
-            document_number,
-        )?
-        .is_some();
-        outputs_all_have_ids &= has_id;
-        outputs_any_have_ids |= has_id;
-    }
-
-    if calls_any_have_ids || outputs_any_have_ids {
-        if !calls_all_have_ids || !outputs_all_have_ids {
-            bail!(
-                "document {document_number} call_id pairing requires every call and output to include call_id"
-            );
-        }
-        let mut output_by_id = BTreeMap::new();
-        for (index, output) in outputs.iter().enumerate() {
-            let output = output.as_object().unwrap();
-            let call_id = optional_nullable_bounded_string(
+        let output_id = if output.is_null() {
+            None
+        } else {
+            let output = output.as_object().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "document {document_number} function_call_outputs[{index}] must be a JSON object or null"
+                )
+            })?;
+            validate_output_keys(output, document_number, index)?;
+            optional_nullable_bounded_string(
                 output.get("call_id"),
                 "function_call_outputs[].call_id",
                 MAX_REF_CHARS,
                 document_number,
             )?
-            .unwrap();
-            if output_by_id.insert(call_id.clone(), index).is_some() {
-                bail!("document {document_number} duplicate output call_id {call_id:?}");
-            }
-        }
+        };
 
-        let mut seen_call_ids = BTreeSet::new();
-        let mut pairs = Vec::with_capacity(calls.len());
-        for (call_index, call) in calls.iter().enumerate() {
-            let call = call.as_object().unwrap();
-            let call_id = optional_nullable_bounded_string(
-                call.get("call_id"),
-                "function_calls[].call_id",
-                MAX_REF_CHARS,
-                document_number,
-            )?
-            .unwrap();
-            if !seen_call_ids.insert(call_id.clone()) {
-                bail!("document {document_number} duplicate call_id {call_id:?}");
+        all_pairs_have_call_ids &= call_id.is_some() && output_id.is_some();
+        pair_call_ids.push((call_id, output_id));
+    }
+
+    if all_pairs_have_call_ids {
+        for (index, (call_id, output_id)) in pair_call_ids.iter().enumerate() {
+            if call_id != output_id {
+                bail!(
+                    "document {document_number} call_id mismatch at index {index}: call has {:?}, output has {:?}",
+                    call_id.as_deref(),
+                    output_id.as_deref()
+                );
             }
-            let Some(output_index) = output_by_id.get(&call_id).copied() else {
-                bail!("document {document_number} missing output for call_id {call_id:?}");
-            };
-            pairs.push((call_index, output_index));
         }
-        return Ok(pairs);
     }
 
     Ok((0..calls.len()).map(|index| (index, index)).collect())
@@ -979,7 +942,7 @@ mod tests {
     }
 
     #[test]
-    fn import_pairs_by_call_id_before_list_order() {
+    fn import_pairs_by_list_order_and_rejects_call_id_mismatch_when_complete() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("livekit-tool-action.json");
         let output = dir.path().join("livekit-tool-action.tar.gz");
@@ -989,11 +952,33 @@ mod tests {
         )
         .unwrap();
 
+        let err = cmd_livekit_tool_action(LiveKitToolActionArgs {
+            input,
+            bundle_out: output,
+            source_artifact_ref: None,
+            run_id: "livekit_pairing_test".to_string(),
+            import_time: Some("2026-05-09T10:05:02Z".to_string()),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("call_id mismatch"));
+    }
+
+    #[test]
+    fn import_accepts_partial_call_ids_using_list_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("livekit-tool-action.json");
+        let output = dir.path().join("livekit-tool-action.tar.gz");
+        fs::write(
+            &input,
+            r#"{"schema":"livekit.function-tools-executed.export.v1","framework":"livekit_agents","surface":"function_tools_executed","runtime_mode":"agent_session","event_ref":"turn-45:function_tools_executed:0","created_at":"2026-05-09T10:05:00Z","function_calls":[{"call_id":"call_a","name":"lookup_a","arguments_ref":"arg:a"},{"name":"lookup_b","arguments_ref":"arg:b"}],"function_call_outputs":[{"name":"lookup_a","is_error":false,"output_ref":"out:a"},{"call_id":"call_b","name":"lookup_b","is_error":false,"output_ref":"out:b"}]}"#,
+        )
+        .unwrap();
+
         cmd_livekit_tool_action(LiveKitToolActionArgs {
             input,
             bundle_out: output.clone(),
             source_artifact_ref: None,
-            run_id: "livekit_pairing_test".to_string(),
+            run_id: "livekit_partial_id_test".to_string(),
             import_time: Some("2026-05-09T10:05:02Z".to_string()),
         })
         .unwrap();
@@ -1003,7 +988,7 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].payload["function"]["call_id"], "call_a");
         assert_eq!(events[0].payload["outcome"]["output_ref"], "out:a");
-        assert_eq!(events[1].payload["function"]["call_id"], "call_b");
+        assert!(events[1].payload["function"].get("call_id").is_none());
         assert_eq!(events[1].payload["outcome"]["output_ref"], "out:b");
     }
 
@@ -1037,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn import_rejects_missing_output_none() {
+    fn import_preserves_missing_output_none_without_inferring_error() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("livekit-tool-action.json");
         let output = dir.path().join("livekit-tool-action.tar.gz");
@@ -1047,15 +1032,21 @@ mod tests {
         )
         .unwrap();
 
-        let err = cmd_livekit_tool_action(LiveKitToolActionArgs {
+        cmd_livekit_tool_action(LiveKitToolActionArgs {
             input,
-            bundle_out: output,
+            bundle_out: output.clone(),
             source_artifact_ref: None,
             run_id: "livekit_missing_output_test".to_string(),
             import_time: Some("2026-05-09T10:02:02Z".to_string()),
         })
-        .unwrap_err();
-        assert!(err.to_string().contains("missing output is malformed"));
+        .unwrap();
+
+        let reader = BundleReader::open(File::open(output).unwrap()).unwrap();
+        let events = reader.events().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["outcome"]["completed"], false);
+        assert!(events[0].payload["outcome"].get("is_error").is_none());
+        assert!(events[0].payload["outcome"].get("output_hash").is_none());
     }
 
     #[test]

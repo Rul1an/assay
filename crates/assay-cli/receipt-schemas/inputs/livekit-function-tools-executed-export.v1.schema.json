@@ -30,7 +30,12 @@
     "function_call_outputs": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/functionCallOutput" }
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/functionCallOutput" },
+          { "type": "null" }
+        ]
+      }
     },
     "has_tool_reply": { "type": "boolean" },
     "has_agent_handoff": { "type": "boolean" }

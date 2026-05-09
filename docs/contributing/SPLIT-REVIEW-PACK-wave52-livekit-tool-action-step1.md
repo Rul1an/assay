@@ -2,27 +2,27 @@
 
 ## Summary
 
-Step1 starts Wave52 with a freeze-only slice for the LiveKit tool-action importer hotspot. The importer is now the largest handwritten production Rust file after Wave51, but it is also a fresh protocol-facing surface, so this PR intentionally adds no production changes.
+Step1 aligns the LiveKit tool-action importer with LiveKit's source-level
+`FunctionToolsExecutedEvent` behavior and freezes it before Wave52 module
+splitting.
 
 ## Included
 
-- Wave52 split plan
-- Step1 checklist
-- Step1 move map
-- Step1 review pack
-- Step1 reviewer gate script
+- list-order call/output pairing alignment
+- optional `call_id` consistency checking
+- `null` output preservation as `completed=false`
+- schema, docs, and fixture updates
+- Wave52 split plan, checklist, move map, and reviewer gate
 - Week 8 SOTA gate plan and optional scripts
 - OWASP MCP Top 10 test coverage map
 
 ## Excluded
 
-- production importer edits
-- test edits
-- schema/key allowlist changes
-- hash/canonical JSON changes
-- timestamp normalization changes
-- Trust Basis behavior changes
+- production module moves
 - workflow changes
+- Trust Basis classifier changes
+- public family-matrix entry
+- LiveKit endorsement claim
 
 ## Validation
 
@@ -34,9 +34,8 @@ bash scripts/ci/review-wave52-livekit-tool-action-step1.sh
 
 The script checks:
 
-- allowlist-only diff
-- no workflow/generated-file changes
-- no edits under LiveKit importer source or CLI tests
+- Step1 allowlist
+- no module extraction yet
 - `cargo fmt --check`
 - `cargo check -p assay-cli`
 - `cargo clippy -p assay-cli --all-targets -- -D warnings`
@@ -47,4 +46,5 @@ The script checks:
 
 ## Next Step
 
-After Step1 lands, perform the mechanical split behind `cmd_livekit_tool_action` and keep the receipt protocol contracts unchanged.
+After Step1 lands, perform the mechanical split behind
+`cmd_livekit_tool_action` and keep the receipt protocol contracts unchanged.
