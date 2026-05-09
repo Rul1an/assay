@@ -1,0 +1,22 @@
+{
+  "schema": "livekit.function-tools-executed.export.v1",
+  "framework": "livekit_agents",
+  "surface": "function_tools_executed",
+  "runtime_mode": "agent_session",
+  "type": "function_tools_executed",
+  "event_ref": "turn-44:function_tools_executed:0",
+  "created_at": 1778320921.5,
+  "function_calls": [
+    {
+      "call_id": "call_missing_output_01",
+      "name": "lookup_customer_order",
+      "arguments": {
+        "order_id": "ord_404"
+      },
+      "created_at": 1778320921.234
+    }
+  ],
+  "function_call_outputs": [
+    null
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "livekit.function-tools-executed.export.v1",
+  "framework": "livekit_agents",
+  "surface": "function_tools_executed",
+  "runtime_mode": "agent_session",
+  "type": "function_tools_executed",
+  "event_ref": "turn-43:function_tools_executed:0",
+  "created_at": 1778320861.5,
+  "function_calls": [
+    {
+      "id": "item_call_calendar",
+      "call_id": "call_calendar_01",
+      "name": "calendar_create_event",
+      "arguments": {
+        "calendar_ref": "primary",
+        "title": "demo hold"
+      },
+      "created_at": 1778320861.234
+    }
+  ],
+  "function_call_outputs": [
+    {
+      "id": "item_output_calendar",
+      "call_id": "call_calendar_01",
+      "name": "calendar_create_event",
+      "is_error": true,
+      "output": {
+        "error": "permission_denied"
+      },
+      "created_at": 1778320861.467
+    }
+  ],
+  "has_tool_reply": false,
+  "has_agent_handoff": false
+}
