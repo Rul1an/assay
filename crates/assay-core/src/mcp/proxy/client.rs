@@ -35,44 +35,51 @@ pub(super) fn run_client_to_server(
         // 1. Try Parse as MCP Request
         match serde_json::from_str::<JsonRpcRequest>(&line) {
             Ok(req) => {
+                let tool_params = req.tool_params();
+                let tool_name = tool_params
+                    .as_ref()
+                    .map(|params| params.name.as_str())
+                    .unwrap_or_default();
+
                 // 2. Check Policy with Identity (Phase 9)
                 let (runtime_id, tool_definition_binding) = if req.is_tool_call() {
-                    let name = req.tool_params().map(|p| p.name).unwrap_or_default();
                     let runtime_id = {
                         let cache = identity_cache.lock().unwrap();
-                        cache.get(&name).cloned()
+                        cache.get(tool_name).cloned()
                     };
                     let tool_definition_binding = {
                         let cache = tool_definition_cache.lock().unwrap();
-                        cache.get(&name).cloned()
+                        cache.get(tool_name).cloned()
                     };
                     (runtime_id, tool_definition_binding)
                 } else {
                     (None, None)
                 };
 
-                let tool_name = req.tool_params().map(|p| p.name).unwrap_or_default();
-                let tool_call_id = extract_tool_call_id(&req);
+                let tool_call_id = extract_tool_call_id(&req, tool_params.as_ref());
+                let null_arguments = serde_json::Value::Null;
+                let tool_arguments = tool_params
+                    .as_ref()
+                    .map(|params| &params.arguments)
+                    .unwrap_or(&null_arguments);
 
                 let policy_eval = policy.evaluate_with_metadata(
-                    &tool_name,
-                    &req.tool_params()
-                        .map(|p| p.arguments)
-                        .unwrap_or(serde_json::Value::Null),
+                    tool_name,
+                    tool_arguments,
                     &mut state,
                     runtime_id.as_ref(),
                 );
 
                 match policy_eval.decision {
                     PolicyDecision::Allow => {
-                        handle_allow(&req, &mut audit_log, config.verbose);
+                        handle_allow(&req, tool_params.as_ref(), &mut audit_log, config.verbose);
                         // Emit decision event (I1: always emit)
                         if req.is_tool_call() {
                             emit_decision(
                                 &emitter,
                                 &event_source,
                                 &tool_call_id,
-                                &tool_name,
+                                tool_name,
                                 Decision::Allow,
                                 reason_codes::P_POLICY_ALLOW,
                                 None,
@@ -112,7 +119,7 @@ pub(super) fn run_client_to_server(
                             tool_definition_binding.as_ref(),
                         );
                         // Then proceed as a normal allow
-                        handle_allow(&req, &mut audit_log, false);
+                        handle_allow(&req, tool_params.as_ref(), &mut audit_log, false);
                         // false = don't double log ALLOW
                     }
                     PolicyDecision::Deny {

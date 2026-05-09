@@ -2,22 +2,24 @@ use crate::mcp::audit::{AuditEvent, AuditLog};
 use crate::mcp::decision::{
     reason_codes, refresh_contract_projections, Decision, DecisionEmitter, DecisionEvent,
 };
-use crate::mcp::jsonrpc::JsonRpcRequest;
+use crate::mcp::jsonrpc::{CallToolParams, JsonRpcRequest};
 use crate::mcp::policy::PolicyMatchMetadata;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
 use std::sync::Arc;
 
-pub(super) fn handle_allow(req: &JsonRpcRequest, audit_log: &mut AuditLog, verbose: bool) {
+pub(super) fn handle_allow(
+    req: &JsonRpcRequest,
+    tool_params: Option<&CallToolParams>,
+    audit_log: &mut AuditLog,
+    verbose: bool,
+) {
     if verbose && req.is_tool_call() {
-        let tool = req
-            .tool_params()
-            .map(|p| p.name)
-            .unwrap_or_else(|| "unknown".to_string());
+        let tool = tool_params.map(|p| p.name.as_str()).unwrap_or("unknown");
         eprintln!("[assay] ALLOW {}", tool);
     }
 
     if req.is_tool_call() {
-        let tool = req.tool_params().map(|p| p.name);
+        let tool = tool_params.map(|p| p.name.clone());
         audit_log.log(&AuditEvent {
             timestamp: chrono::Utc::now().to_rfc3339(),
             decision: "allow".to_string(),
@@ -30,9 +32,12 @@ pub(super) fn handle_allow(req: &JsonRpcRequest, audit_log: &mut AuditLog, verbo
 }
 
 /// Extract tool_call_id from request (I4: idempotency key).
-pub(super) fn extract_tool_call_id(request: &JsonRpcRequest) -> String {
+pub(super) fn extract_tool_call_id(
+    request: &JsonRpcRequest,
+    tool_params: Option<&CallToolParams>,
+) -> String {
     // Try to get from params._meta.tool_call_id (MCP standard)
-    if let Some(params) = request.tool_params() {
+    if let Some(params) = tool_params {
         if let Some(meta) = params.arguments.get("_meta") {
             if let Some(id) = meta.get("tool_call_id").and_then(|v| v.as_str()) {
                 return id.to_string();
@@ -195,7 +200,10 @@ mod tests {
             }
         }));
 
-        assert_eq!(extract_tool_call_id(&request), "tc_explicit_001");
+        assert_eq!(
+            extract_tool_call_id(&request, request.tool_params().as_ref()),
+            "tc_explicit_001"
+        );
     }
 
     #[test]
@@ -219,8 +227,14 @@ mod tests {
             }
         }));
 
-        assert_eq!(extract_tool_call_id(&string_request), "req_request-a");
-        assert_eq!(extract_tool_call_id(&numeric_request), "req_42");
+        assert_eq!(
+            extract_tool_call_id(&string_request, string_request.tool_params().as_ref()),
+            "req_request-a"
+        );
+        assert_eq!(
+            extract_tool_call_id(&numeric_request, numeric_request.tool_params().as_ref()),
+            "req_42"
+        );
     }
 
     #[test]
@@ -234,7 +248,7 @@ mod tests {
             }
         }));
 
-        let generated = extract_tool_call_id(&request);
+        let generated = extract_tool_call_id(&request, request.tool_params().as_ref());
         assert!(
             generated.starts_with("gen_"),
             "missing request id should produce generated idempotency key"

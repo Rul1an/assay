@@ -189,7 +189,6 @@ impl McpProxy {
 
         // Thread B: client -> server passthrough with Policy Check
         let stdout_b = stdout.clone();
-        let config_b = config.clone();
         let emitter_b = decision_emitter.clone();
         let event_source_b = event_source.clone();
         let t_client_to_server = thread::spawn(move || {
@@ -197,7 +196,7 @@ impl McpProxy {
                 child_stdin,
                 stdout_b,
                 policy,
-                config_b,
+                config,
                 emitter_b,
                 event_source_b,
                 identity_cache_b,
