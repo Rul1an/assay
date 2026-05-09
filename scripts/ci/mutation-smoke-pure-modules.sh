@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
 if [ "${ASSAY_RUN_MUTATION_SMOKE:-0}" != "1" ]; then
   echo "[mutation-smoke] skipped: set ASSAY_RUN_MUTATION_SMOKE=1 to run targeted mutation smoke"
   exit 0

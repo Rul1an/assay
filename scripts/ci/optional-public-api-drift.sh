@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
 BASE_REV="${BASE_REV:-origin/main}"
 PACKAGES=(assay-core assay-evidence assay-registry assay-policy assay-metrics)
+
+if ! git rev-parse --verify --quiet "${BASE_REV}^{commit}" >/dev/null; then
+  echo "[api-drift] skip: BASE_REV ${BASE_REV} is not available locally"
+  exit 0
+fi
 
 ran_any=0
 

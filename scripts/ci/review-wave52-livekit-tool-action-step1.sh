@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
 BASE_REF="${BASE_REF:-origin/main}"
 
 allowed_pattern='^(docs/contributing/SPLIT-PLAN-wave52-livekit-tool-action\.md|docs/contributing/SPLIT-CHECKLIST-wave52-livekit-tool-action-step1\.md|docs/contributing/SPLIT-MOVE-MAP-wave52-livekit-tool-action-step1\.md|docs/contributing/SPLIT-REVIEW-PACK-wave52-livekit-tool-action-step1\.md|scripts/ci/review-wave52-livekit-tool-action-step1\.sh|docs/contributing/SPLIT-PLAN-week8-sota-gates-2026q2\.md|docs/security/OWASP-MCP-TOP10-TEST-MAP\.md|scripts/ci/optional-public-api-drift\.sh|scripts/ci/mutation-smoke-pure-modules\.sh|scripts/ci/review-week8-sota-gates\.sh)$'
 
+if ! git rev-parse --verify --quiet "${BASE_REF}^{commit}" >/dev/null; then
+  echo "FAIL: BASE_REF ${BASE_REF} is not available; fetch it or set BASE_REF to a local commit"
+  exit 1
+fi
+
 collect_changed() {
   {
-    git diff --name-only "$BASE_REF"...HEAD || true
+    git diff --name-only "$BASE_REF"...HEAD
     git diff --name-only || true
     git diff --cached --name-only || true
     git ls-files --others --exclude-standard || true

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
 echo "[review] Week8 SOTA gate scripts syntax"
 bash -n scripts/ci/optional-public-api-drift.sh
 bash -n scripts/ci/mutation-smoke-pure-modules.sh
