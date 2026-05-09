@@ -1,8 +1,8 @@
 use crate::bundle::VerifyLimits;
 use anyhow::Result;
-use serde::Serialize;
 use std::io::Read;
 
+mod canonical;
 mod classifiers;
 mod diff;
 mod generation;
@@ -25,12 +25,7 @@ pub fn generate_trust_basis<R: Read>(
 }
 
 pub fn to_canonical_json_bytes(trust_basis: &TrustBasis) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
-    let mut serializer = serde_json::Serializer::with_formatter(&mut output, formatter);
-    trust_basis.serialize(&mut serializer)?;
-    output.push(b'\n');
-    Ok(output)
+    canonical::to_canonical_json_bytes(trust_basis)
 }
 
 #[cfg(test)]
