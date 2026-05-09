@@ -106,17 +106,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           REPO="${{ github.repository }}"
           TITLE="🚨 Self-hosted runner health needs attention"
 
-          # Check if issue already exists
-          EXISTING=$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq 'length')
+          # Check if issue already exists. Some repos may not have the
+          # runner-health label yet, so fall back to a title match.
+          EXISTING="$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq 'length' 2>/dev/null || true)"
+          if [[ -z "$EXISTING" ]]; then
+            echo "::warning::Label 'runner-health' not found; falling back to title-based lookup."
+            EXISTING="$(gh issue list --repo "$REPO" --state open --search "$TITLE in:title" --json number --jq 'length' 2>/dev/null || echo 0)"
+          fi
 
           if [[ "$EXISTING" -eq 0 ]]; then
-            gh issue create --repo "$REPO" \
-              --title "$TITLE" \
-              --label "runner-health,urgent" \
-              --body "## Runner Health Alert
+            ISSUE_BODY="## Runner Health Alert
 
           The self-hosted runner \`assay-bpf-runner\` is **offline or unknown** while queued jobs may be waiting, or the monitor could not verify queue state.
 
@@ -152,7 +155,17 @@ jobs:
           - Network issues
 
           This issue will auto-close when the runner comes back online."
-            echo "Created health alert issue"
+
+            if gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label "runner-health,urgent" \
+              --body "$ISSUE_BODY"; then
+              echo "Created health alert issue with labels"
+            else
+              echo "::warning::Failed to apply labels (missing label or insufficient permission); creating issue without labels."
+              gh issue create --repo "$REPO" --title "$TITLE" --body "$ISSUE_BODY"
+              echo "Created health alert issue without labels"
+            fi
           else
             echo "Health alert issue already exists"
           fi
@@ -162,10 +175,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           REPO="${{ github.repository }}"
 
-          # Find and close any open runner-health issues
-          ISSUES=$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq '.[].number')
+          # Find and close any open runner-health issues. Fall back to title
+          # search when label is absent.
+          ISSUES="$(gh issue list --repo "$REPO" --state open --label "runner-health" --json number --jq '.[].number' 2>/dev/null || true)"
+          if [[ -z "$ISSUES" ]]; then
+            ISSUES="$(gh issue list --repo "$REPO" --state open --search "Self-hosted runner health needs attention in:title" --json number --jq '.[].number' 2>/dev/null || true)"
+          fi
 
           for ISSUE in $ISSUES; do
             gh issue close "$ISSUE" --repo "$REPO" \
