@@ -31,12 +31,47 @@ assert_not_rg() {
   fi
 }
 
+changed_in_review_scope() {
+  local path="$1"
+  local base_ref
+  local base
+  local candidates=()
+
+  if ! git diff --quiet -- "$path"; then
+    return 0
+  fi
+  if ! git diff --cached --quiet -- "$path"; then
+    return 0
+  fi
+
+  if [ -n "${ASSAY_REVIEW_BASE_REF:-}" ]; then
+    candidates+=("$ASSAY_REVIEW_BASE_REF")
+  fi
+  if [ -n "${GITHUB_BASE_REF:-}" ]; then
+    candidates+=("origin/${GITHUB_BASE_REF}" "$GITHUB_BASE_REF")
+  fi
+  candidates+=("origin/main" "main" "HEAD^1")
+
+  for base_ref in "${candidates[@]}"; do
+    if git rev-parse --verify -q "${base_ref}^{commit}" >/dev/null; then
+      base="$(git merge-base "$base_ref" HEAD 2>/dev/null || true)"
+      if [ -n "$base" ]; then
+        ! git diff --quiet "$base..HEAD" -- "$path"
+        return $?
+      fi
+    fi
+  done
+
+  echo "FAIL: unable to resolve review base for scope guard"
+  exit 1
+}
+
 echo "[review] workflow and generated-file guard"
-if ! git diff --quiet -- .github/workflows; then
+if changed_in_review_scope .github/workflows; then
   echo "FAIL: Wave 51 Trust Basis Step10 must not touch workflows"
   exit 1
 fi
-if ! git diff --quiet -- crates/assay-ebpf/src/vmlinux.rs; then
+if changed_in_review_scope crates/assay-ebpf/src/vmlinux.rs; then
   echo "FAIL: generated vmlinux.rs must stay out of scope"
   exit 1
 fi
