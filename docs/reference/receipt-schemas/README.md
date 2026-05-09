@@ -5,7 +5,8 @@ external receipt lanes that Assay imports.
 
 These schemas are intentionally narrower than the upstream ecosystems they
 reference. They describe the Assay-supported receipt or reduced input surface,
-not full Promptfoo, OpenFeature, CycloneDX, Mastra, or Pydantic schemas.
+not full Promptfoo, OpenFeature, CycloneDX, Mastra, Pydantic, or LiveKit
+schemas.
 
 ## Directories
 

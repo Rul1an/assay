@@ -86,7 +86,7 @@ fn schema_cli_lists_receipt_and_input_schemas() {
     let report: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(report["schema"], "assay.evidence.schema.list.v1");
     let schemas = report["schemas"].as_array().unwrap();
-    assert_eq!(schemas.len(), 10);
+    assert_eq!(schemas.len(), 12);
 
     let names = schemas
         .iter()
@@ -97,13 +97,19 @@ fn schema_cli_lists_receipt_and_input_schemas() {
     assert!(names.contains(&"cyclonedx.mlbom-model-component.v1"));
     assert!(names.contains(&"mastra.score-event.v1"));
     assert!(names.contains(&"pydantic.case-result.v1"));
+    assert!(names.contains(&"livekit.tool-action.v1"));
     assert!(names.contains(&"promptfoo-cli-jsonl-component-result.v1"));
     assert!(names.contains(&"openfeature-evaluation-details-export.v1"));
     assert!(names.contains(&"cyclonedx-mlbom-model-component-input.v1"));
     assert!(names.contains(&"mastra-score-event-export.v1"));
     assert!(names.contains(&"pydantic-case-result-export.v1"));
+    assert!(names.contains(&"livekit-function-tools-executed-export.v1"));
 
-    for name in ["mastra.score-event.v1", "pydantic.case-result.v1"] {
+    for name in [
+        "mastra.score-event.v1",
+        "pydantic.case-result.v1",
+        "livekit.tool-action.v1",
+    ] {
         let schema = schemas
             .iter()
             .find(|schema| schema["name"] == name)
@@ -201,26 +207,28 @@ fn schema_cli_paths_match_receipt_family_matrix() {
 
 #[test]
 fn packaged_schema_assets_match_docs_registry() {
-    let matrix = receipt_family_matrix();
-    let families = matrix["families"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .chain(matrix["importer_only_receipts"].as_array().unwrap().iter());
+    let output = assay_schema_command()
+        .arg("list")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).unwrap();
 
-    for family in families {
-        for key in ["receipt_schema_path", "input_schema_path"] {
-            let relative = family[key]
-                .as_str()
-                .unwrap()
-                .strip_prefix("receipt-schemas/")
-                .unwrap();
-            assert_eq!(
-                fs::read(schema_path(relative)).unwrap(),
-                fs::read(packaged_schema_path(relative)).unwrap(),
-                "packaged schema asset should match docs registry for {relative}"
-            );
-        }
+    for schema in report["schemas"].as_array().unwrap() {
+        let relative = schema["source_path"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("docs/reference/receipt-schemas/")
+            .unwrap();
+        assert_eq!(
+            fs::read(schema_path(relative)).unwrap(),
+            fs::read(packaged_schema_path(relative)).unwrap(),
+            "packaged schema asset should match docs registry for {relative}"
+        );
     }
 }
 
@@ -631,5 +639,45 @@ fn pydantic_input_and_receipt_schemas_validate_supported_path_without_claim_fami
 
     for payload in bundle_payloads(&bundle) {
         assert_valid("receipts/pydantic.case-result.v1.schema.json", &payload);
+    }
+}
+
+#[test]
+fn livekit_input_and_receipt_schemas_validate_supported_path_without_claim_family() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("livekit-tool-action.json");
+    let bundle = dir.path().join("livekit-tool-action-receipts.tar.gz");
+    fs::write(
+        &input,
+        r#"{"schema":"livekit.function-tools-executed.export.v1","framework":"livekit_agents","surface":"function_tools_executed","runtime_mode":"agent_session","type":"function_tools_executed","event_ref":"turn-42:function_tools_executed:0","created_at":1778320801.5,"function_calls":[{"id":"item_call_lookup_order","call_id":"call_lookup_order_01","name":"lookup_customer_order","arguments":{"order_id":"ord_123","include_items":true},"created_at":1778320801.234,"group_id":null}],"function_call_outputs":[{"id":"item_output_lookup_order","call_id":"call_lookup_order_01","name":"lookup_customer_order","is_error":false,"output":{"status":"shipped","items_count":2},"created_at":1778320801.467}],"has_tool_reply":true,"has_agent_handoff":false}"#,
+    )
+    .unwrap();
+
+    let input_json: Value = serde_json::from_slice(&fs::read(&input).unwrap()).unwrap();
+    assert_valid(
+        "inputs/livekit-function-tools-executed-export.v1.schema.json",
+        &input_json,
+    );
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("livekit-tool-action")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("livekit-tool-action.json")
+        .arg("--run-id")
+        .arg("livekit_schema_test")
+        .arg("--import-time")
+        .arg("2026-05-09T10:00:02Z")
+        .assert()
+        .success();
+
+    for payload in bundle_payloads(&bundle) {
+        assert_valid("receipts/livekit.tool-action.v1.schema.json", &payload);
     }
 }

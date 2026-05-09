@@ -36,15 +36,16 @@ assay evidence schema validate \
 
 The schema CLI covers the current receipt schema registry:
 
-- receipt payload schemas for Promptfoo, OpenFeature, CycloneDX ML-BOM, and
-  Mastra and Pydantic receipts
+- receipt payload schemas for Promptfoo, OpenFeature, CycloneDX ML-BOM,
+  Mastra, Pydantic, and LiveKit receipts
 - importer input schemas where the reduced input artifact differs from the
   receipt payload
 - metadata such as schema `$id`, family, status, source path, short
   description, and Trust Basis claim when one exists
 
-Mastra and Pydantic remain importer-only in this registry. They have input and
-receipt schemas, but no public Trust Basis score/case-result receipt claims yet.
+Mastra, Pydantic, and LiveKit remain importer-only in this registry. They have
+input and receipt schemas, but no public Trust Basis score, case-result, or
+acted-family receipt claims yet.
 
 `validate` exits `0` when the artifact matches the selected schema and exits
 `1` when the artifact is valid JSON/JSONL but fails schema validation. Invalid
@@ -191,6 +192,76 @@ Use `--import-time <RFC3339>` for deterministic fixture generation.
 | Option | Description |
 |--------|-------------|
 | `--input <PATH>` | Mastra reduced ScoreEvent JSONL artifact file |
+| `--bundle-out <PATH>` | Output Assay evidence bundle path |
+| `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
+| `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |
+| `--import-time <RFC3339>` | Deterministic import timestamp override |
+
+---
+
+## LiveKit Tool Action Import
+
+Import bounded LiveKit `FunctionToolsExecutedEvent`-derived artifacts into a
+verifiable Assay evidence bundle:
+
+```bash
+assay evidence import livekit-tool-action \
+  --input livekit-tool-action.json \
+  --bundle-out livekit-tool-action-receipts.tar.gz \
+  --source-artifact-ref livekit-tool-action.json
+```
+
+The importer is intentionally strict in v1:
+
+- input may be one JSON object, a JSON array of objects, or JSONL rows using
+  `livekit.function-tools-executed.export.v1`
+- each artifact must use `framework = livekit_agents`
+- each artifact must use `surface = function_tools_executed`
+- each artifact must use `runtime_mode = agent_session`
+- optional `type` must be `function_tools_executed` when present
+- one receipt is emitted per function call / output pair
+- calls and outputs are paired by `call_id` when every entry has one, otherwise
+  by list order
+- missing `FunctionCallOutput` / `null` output entries are malformed in v1
+- raw tool arguments and outputs are accepted only as fixture input for hashing;
+  receipts store `arguments_hash` / `output_hash` or explicit reviewer-safe
+  refs
+- transcripts, audio, user input, model output, room state, participant
+  identity, usage telemetry, latency telemetry, capture context, session
+  identity, full traces, and spans are excluded
+
+The importer first computes `source_artifact_digest` over the full reduced
+artifact file, then reduces each function tool action. Receipts stay small while
+still binding back to the exact source artifact bytes.
+
+The receipt is an acted-boundary candidate artifact. It does not mean the tool
+call was correct, intended, allowed, safe, or representative of the full LiveKit
+session. It also does not claim LiveKit endorsement or a stable LiveKit wire
+contract.
+
+The output bundle can be verified with:
+
+```bash
+assay evidence verify livekit-tool-action-receipts.tar.gz
+```
+
+The same bundle can feed the Trust Basis compiler:
+
+```bash
+assay trust-basis generate livekit-tool-action-receipts.tar.gz --out livekit-tool-action.trust-basis.json
+```
+
+P47 Stage 1 does not add a Trust Basis claim. LiveKit tool-action receipts
+remain importer-only until any future acted-family claim slice defines exact
+semantics, Trust Card impact, family-matrix posture, and compatibility rules.
+
+Use `--import-time <RFC3339>` for deterministic fixture generation.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--input <PATH>` | LiveKit reduced function-tool execution artifact file |
 | `--bundle-out <PATH>` | Output Assay evidence bundle path |
 | `--source-artifact-ref <REF>` | Reviewer-safe source artifact reference stored in receipts |
 | `--run-id <ID>` | Assay import run id used for receipt provenance and event ids |

@@ -391,6 +391,76 @@ fn test_pydantic_imported_case_result_receipts_verify_and_do_not_mutate_trust_ba
 }
 
 #[test]
+fn test_livekit_imported_tool_action_receipts_verify_and_do_not_mutate_trust_basis_claims() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("livekit-tool-action.json");
+    let bundle = dir.path().join("livekit-tool-action-receipts.tar.gz");
+    fs::write(
+        &input,
+        r#"{"schema":"livekit.function-tools-executed.export.v1","framework":"livekit_agents","surface":"function_tools_executed","runtime_mode":"agent_session","type":"function_tools_executed","event_ref":"turn-42:function_tools_executed:0","created_at":1778320801.5,"function_calls":[{"id":"item_call_lookup_order","call_id":"call_lookup_order_01","name":"lookup_customer_order","arguments":{"order_id":"ord_123","include_items":true},"created_at":1778320801.234,"group_id":null}],"function_call_outputs":[{"id":"item_output_lookup_order","call_id":"call_lookup_order_01","name":"lookup_customer_order","is_error":false,"output":{"status":"shipped","items_count":2},"created_at":1778320801.467}],"has_tool_reply":true,"has_agent_handoff":false}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("livekit-tool-action")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("livekit-tool-action.json")
+        .arg("--run-id")
+        .arg("livekit_trust_basis")
+        .arg("--import-time")
+        .arg("2026-05-09T10:00:02Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "LiveKit tool-action receipts are acted-family candidates, not eval receipt claims"
+    );
+    assert_eq!(
+        claim(claims, "external_decision_receipt_boundary_visible")["level"],
+        "absent",
+        "LiveKit tool-action receipts are not decision receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "absent",
+        "LiveKit tool-action receipts are not inventory receipts"
+    );
+}
+
+#[test]
 fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("bom.cdx.json");

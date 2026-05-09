@@ -2,6 +2,7 @@ pub mod cyclonedx_mlbom_model;
 pub mod diff;
 pub mod lint;
 pub mod list;
+pub mod livekit_tool_action;
 pub mod mapping;
 pub mod mastra_score_event;
 pub mod openfeature_details;
@@ -105,6 +106,9 @@ pub enum EvidenceImportCmd {
     /// Import bounded Pydantic Evals reduced case-result artifacts
     #[command(name = "pydantic-case-result")]
     PydanticCaseResult(pydantic_case_result::PydanticCaseResultArgs),
+    /// Import bounded LiveKit function tool action artifacts
+    #[command(name = "livekit-tool-action")]
+    LiveKitToolAction(livekit_tool_action::LiveKitToolActionArgs),
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
@@ -138,6 +142,7 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         EvidenceImportCmd::PydanticCaseResult(a) => {
             pydantic_case_result::cmd_pydantic_case_result(a)
         }
+        EvidenceImportCmd::LiveKitToolAction(a) => livekit_tool_action::cmd_livekit_tool_action(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
     }
 }

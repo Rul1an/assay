@@ -32,6 +32,8 @@ const MASTRA_RECEIPT_SCHEMA: &str =
     include_packaged_schema!("receipts/mastra.score-event.v1.schema.json");
 const PYDANTIC_RECEIPT_SCHEMA: &str =
     include_packaged_schema!("receipts/pydantic.case-result.v1.schema.json");
+const LIVEKIT_RECEIPT_SCHEMA: &str =
+    include_packaged_schema!("receipts/livekit.tool-action.v1.schema.json");
 const PROMPTFOO_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/promptfoo-cli-jsonl-component-result.v1.schema.json");
 const OPENFEATURE_INPUT_SCHEMA: &str =
@@ -42,6 +44,8 @@ const MASTRA_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/mastra-score-event-export.v1.schema.json");
 const PYDANTIC_INPUT_SCHEMA: &str =
     include_packaged_schema!("inputs/pydantic-case-result-export.v1.schema.json");
+const LIVEKIT_INPUT_SCHEMA: &str =
+    include_packaged_schema!("inputs/livekit-function-tools-executed-export.v1.schema.json");
 
 /// Inspect and validate supported receipt schema contracts.
 #[derive(Debug, Args, Clone)]
@@ -216,6 +220,18 @@ const SCHEMAS: &[SchemaDescriptor] = &[
         schema_json: PYDANTIC_RECEIPT_SCHEMA,
     },
     SchemaDescriptor {
+        name: "livekit.tool-action.v1",
+        aliases: &["assay.receipt.livekit.tool-action.v1"],
+        kind: SchemaKind::Receipt,
+        status: "experimental",
+        family: "acted_receipts_candidate",
+        source_path: "docs/reference/receipt-schemas/receipts/livekit.tool-action.v1.schema.json",
+        description: "Assay receipt payload for one bounded LiveKit function tool action artifact.",
+        trust_basis_claim: None,
+        importer_only: true,
+        schema_json: LIVEKIT_RECEIPT_SCHEMA,
+    },
+    SchemaDescriptor {
         name: "promptfoo-cli-jsonl-component-result.v1",
         aliases: &[],
         kind: SchemaKind::Input,
@@ -274,6 +290,18 @@ const SCHEMAS: &[SchemaDescriptor] = &[
         trust_basis_claim: None,
         importer_only: true,
         schema_json: PYDANTIC_INPUT_SCHEMA,
+    },
+    SchemaDescriptor {
+        name: "livekit-function-tools-executed-export.v1",
+        aliases: &[],
+        kind: SchemaKind::Input,
+        status: "experimental",
+        family: "acted_receipts_candidate",
+        source_path: "docs/reference/receipt-schemas/inputs/livekit-function-tools-executed-export.v1.schema.json",
+        description: "Supported reduced LiveKit FunctionToolsExecutedEvent artifact shape.",
+        trust_basis_claim: None,
+        importer_only: true,
+        schema_json: LIVEKIT_INPUT_SCHEMA,
     },
 ];
 
