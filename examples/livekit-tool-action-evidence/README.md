@@ -1,13 +1,13 @@
 # LiveKit Agents Tool Action Evidence Sample
 
 This example turns one tiny frozen artifact derived from LiveKit Agents'
-`FunctionToolsExecutedEvent` surface into Assay-shaped placeholder envelopes.
+`FunctionToolsExecutedEvent` surface into Assay tool-action receipts.
 
 It is intentionally small:
 
 - start with one Assay-side frozen export shape derived from one
   `function_tools_executed` event
-- emit one placeholder envelope per function call / output pair
+- emit one receipt per function call / output pair
 - pair calls and outputs by `call_id` when present
 - hash raw arguments and outputs instead of copying them into Assay output
 - keep transcripts, audio, room state, usage telemetry, and full traces out of
@@ -15,15 +15,15 @@ It is intentionally small:
 
 ## What is in here
 
-- `map_to_assay.py`: turns one frozen LiveKit function-tool event artifact into
-  Assay-shaped placeholder envelopes
+- `map_to_assay.py`: fixture-only sketch retained from P47 planning; the Rust
+  CLI importer below is the canonical Stage 1 path
 - `fixtures/valid.livekit.json`: one successful function tool execution event
 - `fixtures/failure.livekit.json`: one function tool execution event whose
   output reports an error
 - `fixtures/malformed.livekit.json`: one malformed import case
-- `fixtures/valid.assay.ndjson`: mapped placeholder output with a fixed import
-  time
-- `fixtures/failure.assay.ndjson`: mapped placeholder output with a fixed
+- `fixtures/valid.assay.ndjson`: pre-Stage-1 placeholder output with a fixed
+  import time
+- `fixtures/failure.assay.ndjson`: pre-Stage-1 placeholder output with a fixed
   import time
 
 ## Why this seam
@@ -43,53 +43,58 @@ The distinction matters:
 That keeps acted-family work out of broader testing-result, transcript,
 telemetry, and room-state surfaces.
 
-## Map the checked-in valid artifact
+## Import the checked-in valid artifact
 
 ```bash
-python3 examples/livekit-tool-action-evidence/map_to_assay.py \
-  examples/livekit-tool-action-evidence/fixtures/valid.livekit.json \
-  --output examples/livekit-tool-action-evidence/fixtures/valid.assay.ndjson \
+assay evidence import livekit-tool-action \
+  --input examples/livekit-tool-action-evidence/fixtures/valid.livekit.json \
+  --bundle-out /tmp/livekit-tool-action-valid.tar.gz \
+  --source-artifact-ref examples/livekit-tool-action-evidence/fixtures/valid.livekit.json \
   --import-time 2026-05-09T10:00:02Z \
-  --overwrite
+  --run-id livekit_tool_action_valid
+
+assay evidence verify /tmp/livekit-tool-action-valid.tar.gz
 ```
 
-## Map the checked-in failure artifact
+## Import the checked-in failure artifact
 
 ```bash
-python3 examples/livekit-tool-action-evidence/map_to_assay.py \
-  examples/livekit-tool-action-evidence/fixtures/failure.livekit.json \
-  --output examples/livekit-tool-action-evidence/fixtures/failure.assay.ndjson \
+assay evidence import livekit-tool-action \
+  --input examples/livekit-tool-action-evidence/fixtures/failure.livekit.json \
+  --bundle-out /tmp/livekit-tool-action-failure.tar.gz \
+  --source-artifact-ref examples/livekit-tool-action-evidence/fixtures/failure.livekit.json \
   --import-time 2026-05-09T10:01:02Z \
-  --overwrite
+  --run-id livekit_tool_action_failure
+
+assay evidence verify /tmp/livekit-tool-action-failure.tar.gz
 ```
 
 ## Check the malformed case
 
 ```bash
-python3 examples/livekit-tool-action-evidence/map_to_assay.py \
-  examples/livekit-tool-action-evidence/fixtures/malformed.livekit.json \
-  --output /tmp/livekit-tool-action-malformed.assay.ndjson \
+assay evidence import livekit-tool-action \
+  --input examples/livekit-tool-action-evidence/fixtures/malformed.livekit.json \
+  --bundle-out /tmp/livekit-tool-action-malformed.tar.gz \
   --import-time 2026-05-09T10:02:02Z \
-  --overwrite
+  --run-id livekit_tool_action_malformed
 ```
 
-This third command is expected to fail because the placeholder sample treats a
-missing function-call output as malformed. LiveKit's Python type allows
+This third command is expected to fail because Stage 1 treats a missing
+function-call output as malformed. LiveKit's Python type allows
 `FunctionCallOutput | None`; a future production reducer may model that as
-`completed=false`, but this example keeps the first acted-family fixture strict.
+`completed=false`, but this importer keeps the first acted-family slice strict.
 
 ## Important boundary
 
-This mapper writes sample-only placeholder envelopes.
+This importer writes importer-only receipts.
 
 It does not:
 
-- register a new Assay Evidence Contract event type
+- add a public receipt-family matrix entry
 - claim that LiveKit provides this exact wire contract
 - claim that the tool call was correct, intended, allowed, or safe
 - import transcripts, audio, room state, participant identity, usage telemetry,
   or full traces
-- add a public receipt-family matrix entry
 - add a Trust Basis claim
 
 The sample is only a fixture-backed sketch of the LiveKit acted-family seam.

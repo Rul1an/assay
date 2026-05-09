@@ -28,7 +28,7 @@ Two questions only:
    - Pair by `call_id` when present.
    - Fall back to order only when `call_id` is absent.
    - Treat mismatched list lengths as malformed in the first Assay-side
-     placeholder slice.
+     importer-only slice.
 2. Is serializing session events into a small `events.ndjson` capture something
    LiveKit users already do, or would adoption require a helper example?
 
@@ -59,7 +59,7 @@ capture and reduce it into reviewable tool-action receipts.
 
 No LiveKit integration ask, no endorsement ask, and no request for a roadmap
 commitment. I just want to make sure the shape interpretation is sane before
-building the reducer.
+treating this importer-only path as a durable acted-family candidate.
 
 The proposed boundary is:
 
@@ -113,5 +113,6 @@ This outreach does not need:
 
 ## Timing
 
-Post only after the P47 plan and sample fixture are merged into the Assay repo,
-so the discussion can link to stable source files rather than `/tmp` drafts.
+Post only after the P47 Stage 1 importer and fixtures are merged into the Assay
+repo, so the discussion can link to stable source files rather than `/tmp`
+drafts.
