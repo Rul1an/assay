@@ -70,6 +70,13 @@ Map a tiny artifact derived from LiveKit Agents'
 **Focus**: testing-result-first seam, bounded typed run events only, no
 imported telemetry, transcript, or room-state truth.
 
+### [LiveKit Agents Tool Action Evidence](./livekit-tool-action-evidence)
+Map a tiny artifact derived from LiveKit Agents'
+`FunctionToolsExecutedEvent` surface into Assay-shaped external evidence.
+**Focus**: acted-family candidate seam, bounded function call/output pairs
+only, no imported transcript, audio, room state, usage telemetry, or trace
+truth.
+
 ### [x402 Requirement / Verification Evidence](./x402-verification-evidence)
 Map a tiny artifact derived from x402's `PaymentRequired` plus `VerifyResponse`
 path into Assay-shaped external evidence.

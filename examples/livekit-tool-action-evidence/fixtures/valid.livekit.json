@@ -1,0 +1,37 @@
+{
+  "schema": "livekit.function-tools-executed.export.v1",
+  "framework": "livekit_agents",
+  "surface": "function_tools_executed",
+  "runtime_mode": "agent_session",
+  "type": "function_tools_executed",
+  "event_ref": "turn-42:function_tools_executed:0",
+  "created_at": 1778320801.5,
+  "function_calls": [
+    {
+      "id": "item_call_lookup_order",
+      "call_id": "call_lookup_order_01",
+      "name": "lookup_customer_order",
+      "arguments": {
+        "order_id": "ord_123",
+        "include_items": true
+      },
+      "created_at": 1778320801.234,
+      "group_id": null
+    }
+  ],
+  "function_call_outputs": [
+    {
+      "id": "item_output_lookup_order",
+      "call_id": "call_lookup_order_01",
+      "name": "lookup_customer_order",
+      "is_error": false,
+      "output": {
+        "status": "shipped",
+        "items_count": 2
+      },
+      "created_at": 1778320801.467
+    }
+  ],
+  "has_tool_reply": true,
+  "has_agent_handoff": false
+}

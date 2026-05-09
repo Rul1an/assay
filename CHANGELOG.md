@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Docs / Distribution
+
+- Added an MCP Registry discovery audit and tightened MCP Registry publish
+  docs around the canonical `io.github.Rul1an/assay-mcp-server` identity,
+  release-attached `server.json`, stale legacy registry entry handling, and
+  third-party directory freshness checks.
+
 ## [3.9.2] - 2026-05-04
 
 This patch release prepares the post-canonicalization evidence receipt surface

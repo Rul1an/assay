@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/receipts/livekit.tool-action.v1.schema.json",
+  "title": "Assay LiveKit Tool Action Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_system",
+    "source_surface",
+    "source_artifact_ref",
+    "source_artifact_digest",
+    "reducer_version",
+    "imported_at",
+    "function",
+    "outcome",
+    "event_context"
+  ],
+  "properties": {
+    "schema": { "const": "assay.receipt.livekit.tool-action.v1" },
+    "source_system": { "const": "livekit_agents" },
+    "source_surface": { "const": "function_tools_executed" },
+    "source_artifact_ref": { "$ref": "#/$defs/boundedRef" },
+    "source_artifact_digest": { "$ref": "#/$defs/sha256Digest" },
+    "reducer_version": { "const": "assay-livekit-function-tools-executed@0.1.0" },
+    "imported_at": { "type": "string", "format": "date-time" },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_ref", "call_index", "name"],
+      "properties": {
+        "event_ref": { "$ref": "#/$defs/boundedRef" },
+        "call_index": { "type": "integer", "minimum": 0 },
+        "name": { "$ref": "#/$defs/boundedName" },
+        "call_id": { "$ref": "#/$defs/boundedRef" },
+        "group_id": { "$ref": "#/$defs/boundedRef" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "arguments_hash": { "$ref": "#/$defs/sha256Digest" },
+        "arguments_ref": { "$ref": "#/$defs/boundedRef" }
+      },
+      "not": { "required": ["arguments_hash", "arguments_ref"] }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completed", "is_error"],
+      "properties": {
+        "completed": { "const": true },
+        "is_error": { "type": "boolean" },
+        "received_at": { "type": "string", "format": "date-time" },
+        "output_hash": { "$ref": "#/$defs/sha256Digest" },
+        "output_ref": { "$ref": "#/$defs/boundedRef" }
+      },
+      "not": { "required": ["output_hash", "output_ref"] }
+    },
+    "event_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_created_at"],
+      "properties": {
+        "event_created_at": { "type": "string", "format": "date-time" },
+        "has_tool_reply": { "type": "boolean" },
+        "has_agent_handoff": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "boundedRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "boundedName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}
