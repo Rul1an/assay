@@ -1,9 +1,10 @@
 use super::audit::{AuditEvent, AuditLog};
 mod decisions;
+mod server;
 mod tools;
 
 use self::decisions::{emit_decision, extract_tool_call_id, handle_allow, map_policy_code};
-use self::tools::observe_tool_definition;
+use self::server::run_server_to_client;
 use super::decision::{
     reason_codes, Decision, DecisionEmitter, FileDecisionEmitter, NullDecisionEmitter,
 };
@@ -12,7 +13,7 @@ use super::policy::{make_deny_response, McpPolicy, PolicyDecision, PolicyState};
 use super::tool_definition::ToolDefinitionBinding;
 use std::{
     collections::HashMap,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, Write},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -178,50 +179,15 @@ impl McpProxy {
 
         // Thread A: server -> client passthrough
         let stdout_a = stdout.clone();
-        let t_server_to_client = thread::spawn(move || -> io::Result<()> {
-            let mut reader = BufReader::new(child_stdout);
-            let mut line = String::new();
-
-            while reader.read_line(&mut line)? > 0 {
-                let mut processed_line = line.clone();
-
-                // Phase 9: Compute Identities on tools/list response
-                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if let Some(result) = v.get_mut("result") {
-                        if let Some(tools) = result.get_mut("tools").and_then(|t| t.as_array_mut())
-                        {
-                            for tool in tools {
-                                if let Some(observation) =
-                                    observe_tool_definition(tool, &config.server_id)
-                                {
-                                    let mut identity_cache = identity_cache_a.lock().unwrap();
-                                    identity_cache.insert(
-                                        observation.name.clone(),
-                                        observation.identity.clone(),
-                                    );
-                                    drop(identity_cache);
-
-                                    if let Some(binding) = observation.binding {
-                                        let mut binding_cache =
-                                            tool_definition_cache_a.lock().unwrap();
-                                        binding_cache.insert(observation.name, binding);
-                                    }
-                                }
-                            }
-                            processed_line =
-                                serde_json::to_string(&v).unwrap_or(line.clone()) + "\n";
-                        }
-                    }
-                }
-
-                let mut out = stdout_a
-                    .lock()
-                    .map_err(|e| io::Error::other(e.to_string()))?;
-                out.write_all(processed_line.as_bytes())?;
-                out.flush()?;
-                line.clear();
-            }
-            Ok(())
+        let server_id_a = config.server_id.clone();
+        let t_server_to_client = thread::spawn(move || {
+            run_server_to_client(
+                child_stdout,
+                stdout_a,
+                server_id_a,
+                identity_cache_a,
+                tool_definition_cache_a,
+            )
         });
 
         // Thread B: client -> server passthrough with Policy Check
