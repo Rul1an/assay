@@ -639,6 +639,10 @@ mod tests {
         }
     }
 
+    fn proxy_contract_request(value: serde_json::Value) -> JsonRpcRequest {
+        serde_json::from_value(value).expect("test JSON-RPC request should deserialize")
+    }
+
     #[test]
     fn event_source_accepts_assay_uri() {
         validate_event_source("assay://myorg/myapp").unwrap();
@@ -762,6 +766,168 @@ mod tests {
         assert_eq!(observation.identity.server_id, "server-a");
         assert!(observation.binding.is_some());
         assert!(tool.get("tool_identity").is_some());
+    }
+
+    #[test]
+    fn proxy_contract_tool_call_id_prefers_meta() {
+        let request = proxy_contract_request(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "request-a",
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {
+                    "_meta": {
+                        "tool_call_id": "tc_explicit_001"
+                    }
+                }
+            }
+        }));
+
+        assert_eq!(McpProxy::extract_tool_call_id(&request), "tc_explicit_001");
+    }
+
+    #[test]
+    fn proxy_contract_tool_call_id_uses_request_id() {
+        let string_request = proxy_contract_request(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "request-a",
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {}
+            }
+        }));
+        let numeric_request = proxy_contract_request(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {}
+            }
+        }));
+
+        assert_eq!(
+            McpProxy::extract_tool_call_id(&string_request),
+            "req_request-a"
+        );
+        assert_eq!(McpProxy::extract_tool_call_id(&numeric_request), "req_42");
+    }
+
+    #[test]
+    fn proxy_contract_unknown_tool_call_id_is_generated() {
+        let request = proxy_contract_request(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {}
+            }
+        }));
+
+        let generated = McpProxy::extract_tool_call_id(&request);
+        assert!(
+            generated.starts_with("gen_"),
+            "missing request id should produce generated idempotency key"
+        );
+    }
+
+    #[test]
+    fn proxy_contract_policy_code_mapping_is_stable() {
+        assert_eq!(
+            McpProxy::map_policy_code("E_TOOL_DENIED"),
+            reason_codes::P_TOOL_DENIED
+        );
+        assert_eq!(
+            McpProxy::map_policy_code("E_TOOL_NOT_ALLOWED"),
+            reason_codes::P_TOOL_NOT_ALLOWED
+        );
+        assert_eq!(
+            McpProxy::map_policy_code("E_ARG_SCHEMA"),
+            reason_codes::P_ARG_SCHEMA
+        );
+        assert_eq!(
+            McpProxy::map_policy_code("E_RATE_LIMIT"),
+            reason_codes::P_RATE_LIMIT
+        );
+        assert_eq!(
+            McpProxy::map_policy_code("E_TOOL_DRIFT"),
+            reason_codes::P_TOOL_DRIFT
+        );
+        assert_eq!(
+            McpProxy::map_policy_code("E_UNKNOWN_NEW_CODE"),
+            reason_codes::P_POLICY_DENY
+        );
+    }
+
+    #[test]
+    fn proxy_contract_observe_tool_definition_rejects_empty_names() {
+        let mut tool = serde_json::json!({
+            "name": "   ",
+            "description": "invalid",
+            "inputSchema": {"type": "object"}
+        });
+
+        let observation = McpProxy::observe_tool_definition(&mut tool, "server-a");
+
+        assert!(observation.is_none());
+        assert!(tool.get("tool_identity").is_none());
+    }
+
+    #[test]
+    fn proxy_contract_emit_decision_preserves_core_fields() {
+        let emitter = Arc::new(CapturingEmitter::new());
+        let emitter_trait: Arc<dyn DecisionEmitter> = emitter.clone();
+        let metadata = PolicyMatchMetadata {
+            tool_classes: vec!["fs.read".to_string()],
+            matched_tool_classes: vec!["fs.read".to_string()],
+            match_basis: crate::mcp::tool_match::MatchBasis::NameAndClass,
+            matched_rule: Some("allow-read-file".to_string()),
+            policy_version: Some("2026-05".to_string()),
+            policy_digest: Some("sha256:policy".to_string()),
+            lane: Some("local-dev".to_string()),
+            principal: Some("user:alice".to_string()),
+            auth_context_summary: Some("local session".to_string()),
+            ..PolicyMatchMetadata::default()
+        };
+
+        McpProxy::emit_decision(
+            &emitter_trait,
+            "assay://test",
+            "tc_core_fields",
+            "read_file",
+            Decision::Deny,
+            reason_codes::P_TOOL_DENIED,
+            Some("blocked by test policy".to_string()),
+            Some(serde_json::json!("request-a")),
+            &metadata,
+            None,
+        );
+
+        let events = emitter.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].source, "assay://test");
+        let data = &events[0].data;
+        assert_eq!(data.tool, "read_file");
+        assert_eq!(data.tool_call_id, "tc_core_fields");
+        assert_eq!(data.decision, Decision::Deny);
+        assert_eq!(data.reason_code, reason_codes::P_TOOL_DENIED);
+        assert_eq!(data.reason.as_deref(), Some("blocked by test policy"));
+        assert_eq!(data.request_id, Some(serde_json::json!("request-a")));
+        assert_eq!(data.tool_classes, vec!["fs.read".to_string()]);
+        assert_eq!(data.matched_tool_classes, vec!["fs.read".to_string()]);
+        assert_eq!(data.match_basis.as_deref(), Some("name+class"));
+        assert_eq!(data.matched_rule.as_deref(), Some("allow-read-file"));
+        assert_eq!(data.policy_version.as_deref(), Some("2026-05"));
+        assert_eq!(data.policy_digest.as_deref(), Some("sha256:policy"));
+        assert_eq!(
+            data.policy_snapshot_digest.as_deref(),
+            Some("sha256:policy")
+        );
+        assert_eq!(data.lane.as_deref(), Some("local-dev"));
+        assert_eq!(data.principal.as_deref(), Some("user:alice"));
+        assert_eq!(data.auth_context_summary.as_deref(), Some("local session"));
     }
 
     #[test]
