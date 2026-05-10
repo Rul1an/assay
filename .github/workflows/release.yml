@@ -572,17 +572,29 @@ jobs:
           sed -i "s|__CHANGELOG_URL__|https://github.com/${REPO}/blob/main/CHANGELOG.md|g" release_notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          name: Assay ${{ steps.version.outputs.version }}
-          tag_name: ${{ steps.version.outputs.version }}
-          target_commitish: ${{ github.sha }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-beta') }}
-          files: release/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release/*)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "::error::No release assets found in release/."
+            exit 1
+          fi
+          release_args=(
+            "$VERSION"
+            "${assets[@]}"
+            --title "Assay $VERSION"
+            --target "$GITHUB_SHA"
+            --notes-file release_notes.md
+          )
+          if [[ "$VERSION" == *-rc* || "$VERSION" == *-beta* ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
 
   # ============================================================
   # Verify LSM Enforcement (Self-Hosted Gate)
