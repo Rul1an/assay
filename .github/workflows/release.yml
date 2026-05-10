@@ -145,11 +145,6 @@ jobs:
             echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar"
           } >> "$GITHUB_ENV"
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-        with:
-          key: release-${{ matrix.target }}
-
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --package assay-cli
 
@@ -273,11 +268,6 @@ jobs:
             echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc"
             echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar"
           } >> "$GITHUB_ENV"
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-        with:
-          key: release-mcp-server-${{ matrix.target }}
 
       - name: Build assay-mcp-server binary
         run: cargo build --release --target ${{ matrix.target }} --package assay-mcp-server
@@ -703,7 +693,7 @@ jobs:
           # required inside the manylinux container and harmless on macOS,
           # where setup-python provides the same Python version.
           args: --release --out dist --locked -i python3.12 --compatibility pypi
-          sccache: 'true'
+          sccache: 'false'
           manylinux: auto
 
       - name: Upload wheels
