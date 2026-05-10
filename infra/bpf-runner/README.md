@@ -44,7 +44,7 @@ The `health_check.sh` script monitors the runner and auto-recovers from common f
 - Configure only the custom labels: `bpf-lsm,assay-bpf-runner`
 - GitHub adds read-only labels such as `self-hosted`, `Linux`, and the current architecture automatically
 
-**GitHub Actions backup:** A workflow (`runner-health.yml`) runs every 15 minutes and creates a GitHub issue if the runner is offline with queued jobs.
+**GitHub Actions backup:** A workflow (`runner-health.yml`) runs every 15 minutes and creates a GitHub issue only when the runner is unavailable with queued jobs that require the `assay-bpf-runner` label, or when the monitor cannot classify that label-specific queue. Kernel Matrix cleanup jobs also use per-ref concurrency so stale self-hosted cleanup work does not keep piling up while the runner is offline.
 
 ## "No space left on device" (Kernel Matrix CI)
 

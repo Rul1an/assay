@@ -18,91 +18,23 @@ jobs:
     name: Check Self-Hosted Runner
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
       - name: Check runner status
         id: check
         env:
-          # GITHUB_TOKEN can read queued workflow runs. Repository runner listing
-          # may require a broader token, so keep that optional token scoped to the
-          # runner-status lookup instead of reusing it for queue visibility.
+          # Repository runner listing may require a broader token, so keep that
+          # optional token scoped to runner-status lookup instead of reusing it
+          # for queue visibility.
           RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN || github.token }}
           QUEUE_TOKEN: ${{ github.token }}
+          RUNNER_NAME: assay-bpf-runner
+          REQUIRED_RUNNER_LABEL: assay-bpf-runner
         run: |
-          set -euo pipefail
-
-          REPO="${{ github.repository }}"
-          RUNNER_NAME="assay-bpf-runner"
-
-          echo "Checking runner status for $RUNNER_NAME..."
-
-          # Get runner status. Do not collapse API/auth failures into
-          # not_found; those are monitor-health problems, not runner-health
-          # facts.
-          RUNNER_STATUS_ERROR=""
-          RUNNER_STATUS_STDERR="$(mktemp)"
-          if STATUS=$(GH_TOKEN="$RUNNER_STATUS_TOKEN" gh api "repos/$REPO/actions/runners" \
-            --jq ".runners[] | select(.name == \"$RUNNER_NAME\") | .status" \
-            2>"$RUNNER_STATUS_STDERR"); then
-            if [[ -z "$STATUS" ]]; then
-              STATUS="not_found"
-            fi
-          else
-            STATUS="unknown"
-            RUNNER_STATUS_ERROR=$(tr '\n' ' ' < "$RUNNER_STATUS_STDERR" | sed 's/[[:space:]]\+/ /g')
-            echo "::warning::Unable to query self-hosted runner status: ${RUNNER_STATUS_ERROR}"
-          fi
-          rm -f "$RUNNER_STATUS_STDERR"
-
-          echo "runner_status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "runner_status_error=$RUNNER_STATUS_ERROR" >> "$GITHUB_OUTPUT"
-          echo "Runner status: $STATUS"
-
-          # Get queued jobs count
-          QUEUE_STATUS_ERROR=""
-          QUEUE_STATUS_STDERR="$(mktemp)"
-          if QUEUED=$(GH_TOKEN="$QUEUE_TOKEN" gh api "repos/$REPO/actions/runs?status=queued" \
-            --jq '.workflow_runs | length' \
-            2>"$QUEUE_STATUS_STDERR"); then
-            if [[ -z "$QUEUED" ]]; then
-              QUEUED="0"
-            fi
-          else
-            QUEUED="unknown"
-            QUEUE_STATUS_ERROR=$(tr '\n' ' ' < "$QUEUE_STATUS_STDERR" | sed 's/[[:space:]]\+/ /g')
-            echo "::warning::Unable to query queued workflow runs: ${QUEUE_STATUS_ERROR}"
-          fi
-          rm -f "$QUEUE_STATUS_STDERR"
-
-          echo "queued_jobs=$QUEUED" >> "$GITHUB_OUTPUT"
-          echo "queued_jobs_error=$QUEUE_STATUS_ERROR" >> "$GITHUB_OUTPUT"
-          echo "Queued jobs: $QUEUED"
-
-          # Determine health
-          QUEUE_IS_NUMERIC=false
-          if [[ "$QUEUED" =~ ^[0-9]+$ ]]; then
-            QUEUE_IS_NUMERIC=true
-          fi
-
-          if [[ "$STATUS" == "online" ]]; then
-            echo "healthy=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Runner is healthy"
-          elif [[ "$QUEUE_IS_NUMERIC" == "true" ]] && [[ "$QUEUED" -gt 0 ]]; then
-            echo "healthy=false" >> "$GITHUB_OUTPUT"
-            echo "❌ Runner is $STATUS with $QUEUED queued jobs!"
-            exit 1
-          elif [[ "$QUEUED" == "unknown" ]]; then
-            echo "healthy=false" >> "$GITHUB_OUTPUT"
-            echo "❌ Runner is $STATUS and queue state is unknown!"
-            exit 1
-          elif [[ "$STATUS" == "unknown" ]]; then
-            echo "healthy=true" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Runner health is unknown but no queued jobs"
-          else
-            echo "healthy=true" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Runner is $STATUS but no queued jobs"
-          fi
+          bash scripts/ci/check-runner-health.sh
 
       - name: Create issue if unhealthy
-        if: failure()
+        if: steps.check.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -122,14 +54,20 @@ jobs:
           if [[ "$EXISTING" -eq 0 ]]; then
             ISSUE_BODY="## Runner Health Alert
 
-          The self-hosted runner \`assay-bpf-runner\` is **offline or unknown** while queued jobs may be waiting, or the monitor could not verify queue state.
+          The self-hosted runner \`assay-bpf-runner\` needs attention for label-specific queue health.
 
           ### Details
           - **Runner:** assay-bpf-runner
           - **Status:** ${{ steps.check.outputs.runner_status }}
           - **Status Error:** ${{ steps.check.outputs.runner_status_error }}
-          - **Queued Jobs:** ${{ steps.check.outputs.queued_jobs }}
-          - **Queued Jobs Error:** ${{ steps.check.outputs.queued_jobs_error }}
+          - **Busy:** ${{ steps.check.outputs.runner_busy }}
+          - **Runner Labels:** ${{ steps.check.outputs.runner_labels }}
+          - **Required Label:** ${{ steps.check.outputs.required_runner_label }}
+          - **General Queued Workflow Runs:** ${{ steps.check.outputs.general_queued_runs }}
+          - **Inspected Workflow Runs:** ${{ steps.check.outputs.inspected_workflow_runs }}
+          - **Matching Queued Jobs:** ${{ steps.check.outputs.matching_queued_jobs }}
+          - **Queue Classification Error:** ${{ steps.check.outputs.queue_status_error }}
+          - **Health Reason:** ${{ steps.check.outputs.health_reason }}
           - **Detected:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
           ### Recovery Steps
@@ -155,7 +93,7 @@ jobs:
           - Runner token expired
           - Network issues
 
-          This issue will auto-close when the runner comes back online."
+          This issue will auto-close when the label-specific health alert condition clears."
 
             if gh issue create --repo "$REPO" \
               --title "$TITLE" \
@@ -192,6 +130,6 @@ jobs:
 
           for ISSUE in $ISSUES; do
             gh issue close "$ISSUE" --repo "$REPO" \
-              --comment "✅ Runner is back online. Auto-closing this alert."
+              --comment "✅ Runner health alert condition cleared. Auto-closing this alert."
             echo "Closed issue #$ISSUE"
           done
