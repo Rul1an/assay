@@ -13,10 +13,10 @@ updates:
       - "ci"
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 3
+      default-days: 7
       semver-major-days: 30
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     ignore:
       # Major version bumps need manual review (breaking changes)
       - dependency-name: "*"
@@ -46,10 +46,10 @@ updates:
       - "rust"
     open-pull-requests-limit: 10
     cooldown:
-      default-days: 3
+      default-days: 7
       semver-major-days: 30
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     ignore:
       # rand 0.9 requires coordinated updates with ed25519-dalek (crypto RNG trait changes)
       # See: docs/architecture/ADR-020-Dependency-Governance.md
@@ -85,7 +85,7 @@ updates:
       - "python"
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 3
+      default-days: 7
       semver-major-days: 30
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
