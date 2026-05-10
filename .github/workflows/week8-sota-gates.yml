@@ -49,6 +49,7 @@ jobs:
         shell: bash
         env:
           ASSAY_INSTALL_API_DRIFT_TOOLS: "1"
+          ASSAY_API_DRIFT_FAIL_ON_MISSING_BASE: "1"
           BASE_REV: ${{ inputs.base_rev }}
         run: |
           set -euo pipefail

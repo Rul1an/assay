@@ -7,13 +7,34 @@ cd "$ROOT"
 BASE_REV="${BASE_REV:-origin/main}"
 PACKAGES=(assay-core assay-evidence assay-registry assay-policy assay-metrics)
 INSTALL_TOOLS="${ASSAY_INSTALL_API_DRIFT_TOOLS:-0}"
+FAIL_ON_MISSING_BASE="${ASSAY_API_DRIFT_FAIL_ON_MISSING_BASE:-${GITHUB_ACTIONS:-0}}"
 
 if [ -n "${ASSAY_API_DRIFT_PACKAGES:-}" ]; then
   # shellcheck disable=SC2206
   PACKAGES=(${ASSAY_API_DRIFT_PACKAGES})
 fi
 
-if ! git rev-parse --verify --quiet "${BASE_REV}^{commit}" >/dev/null; then
+ensure_base_rev() {
+  if git rev-parse --verify --quiet "${BASE_REV}^{commit}" >/dev/null; then
+    return 0
+  fi
+
+  echo "[api-drift] BASE_REV ${BASE_REV} is not available locally; attempting fetch"
+  if [[ "${BASE_REV}" == origin/* ]]; then
+    local remote_branch="${BASE_REV#origin/}"
+    git fetch --no-tags origin "${remote_branch}:refs/remotes/origin/${remote_branch}" || true
+  else
+    git fetch --no-tags origin "${BASE_REV}" || git fetch --no-tags origin "${BASE_REV}:refs/temp/api-drift-baseline" || true
+  fi
+
+  git rev-parse --verify --quiet "${BASE_REV}^{commit}" >/dev/null
+}
+
+if ! ensure_base_rev; then
+  if [ "${FAIL_ON_MISSING_BASE}" = "1" ] || [ "${FAIL_ON_MISSING_BASE}" = "true" ]; then
+    echo "[api-drift] FAIL: BASE_REV ${BASE_REV} is not available after fetch" >&2
+    exit 1
+  fi
   echo "[api-drift] skip: BASE_REV ${BASE_REV} is not available locally"
   exit 0
 fi

@@ -44,6 +44,7 @@ Workflow:
 - `.github/workflows/week8-sota-gates.yml`
 - Manual `workflow_dispatch` lane.
 - Installs `cargo-semver-checks` and `cargo-public-api` on demand with `ASSAY_INSTALL_API_DRIFT_TOOLS=1`.
+- Fails closed in GitHub Actions if `base_rev` cannot be fetched for comparison.
 - Keeps this out of pull-request required checks until false-positive and cost behavior are understood.
 
 ## Gate 2 - Mutation Smoke on Pure Modules
