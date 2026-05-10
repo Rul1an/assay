@@ -12,6 +12,8 @@ on:
     - cron: '0 6 * * 1'  # Monday 6:00 UTC
   workflow_dispatch:
 
+permissions: {}
+
 # GitHub builds the prebuild image automatically based on
 # .devcontainer/devcontainer.json — you only need to configure the trigger.
 # Go to: Settings → Codespaces → Set up prebuild
