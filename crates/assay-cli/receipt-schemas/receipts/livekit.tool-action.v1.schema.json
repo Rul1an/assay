@@ -43,9 +43,9 @@
     "outcome": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["completed", "is_error"],
+      "required": ["completed"],
       "properties": {
-        "completed": { "const": true },
+        "completed": { "type": "boolean" },
         "is_error": { "type": "boolean" },
         "received_at": { "type": "string", "format": "date-time" },
         "output_hash": { "$ref": "#/$defs/sha256Digest" },

@@ -200,10 +200,10 @@ def _validate_call(value: Any, index: int) -> dict[str, Any]:
     return normalized
 
 
-def _validate_output(value: Any, index: int) -> dict[str, Any]:
+def _validate_output(value: Any, index: int) -> dict[str, Any] | None:
     label = f"function_call_outputs[{index}]"
     if value is None:
-        raise ValueError(f"artifact: {label} is missing; missing outputs are malformed in this sample")
+        return None
     if not isinstance(value, dict):
         raise ValueError(f"artifact: {label} must be an object")
     unknown = set(value) - OUTPUT_KEYS
@@ -285,36 +285,21 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _pair_calls_outputs(normalized: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+def _pair_calls_outputs(normalized: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
     calls = normalized["function_calls"]
     outputs = normalized["function_call_outputs"]
-    calls_have_ids = all("call_id" in call for call in calls)
-    outputs_have_ids = all("call_id" in output for output in outputs)
-
-    if calls_have_ids and outputs_have_ids:
-        seen_outputs: dict[str, dict[str, Any]] = {}
-        for output in outputs:
-            call_id = output["call_id"]
-            if call_id in seen_outputs:
-                raise ValueError(f"artifact: duplicate output call_id: {call_id}")
-            seen_outputs[call_id] = output
-
-        paired = []
-        seen_calls: set[str] = set()
-        for call in calls:
-            call_id = call["call_id"]
-            if call_id in seen_calls:
-                raise ValueError(f"artifact: duplicate call call_id: {call_id}")
-            seen_calls.add(call_id)
-            if call_id not in seen_outputs:
-                raise ValueError(f"artifact: missing output for call_id: {call_id}")
-            paired.append((call, seen_outputs[call_id]))
-        return paired
-
-    if calls_have_ids != outputs_have_ids:
-        raise ValueError("artifact: call_id must be present on both calls and outputs, or absent on both")
-
-    return list(zip(calls, outputs))
+    paired = list(zip(calls, outputs))
+    if all(
+        "call_id" in call and output is not None and "call_id" in output
+        for call, output in paired
+    ):
+        for index, (call, output) in enumerate(paired):
+            if call["call_id"] != output["call_id"]:
+                raise ValueError(
+                    "artifact: call_id mismatch at index "
+                    f"{index}: call has {call['call_id']!r}, output has {output['call_id']!r}"
+                )
+    return paired
 
 
 def _hash_or_ref(record: dict[str, Any], raw_key: str, ref_key: str) -> tuple[str | None, str | None]:
@@ -330,15 +315,12 @@ def _hash_or_ref(record: dict[str, Any], raw_key: str, ref_key: str) -> tuple[st
 def _build_receipt(
     normalized: dict[str, Any],
     call: dict[str, Any],
-    output: dict[str, Any],
+    output: dict[str, Any] | None,
     call_index: int,
     source_artifact_ref: str,
     source_artifact_digest: str,
     import_time: str,
 ) -> dict[str, Any]:
-    if call["name"] != output["name"]:
-        raise ValueError(f"artifact: paired call/output names differ at index {call_index}")
-
     function: dict[str, Any] = {
         "event_ref": normalized["event_ref"],
         "call_index": call_index,
@@ -353,17 +335,22 @@ def _build_receipt(
     if arguments_ref is not None:
         function["arguments_ref"] = arguments_ref
 
-    outcome: dict[str, Any] = {
-        "completed": True,
-        "is_error": output.get("is_error", False),
-    }
-    output_hash, output_ref = _hash_or_ref(output, "output", "output_ref")
-    if output_hash is not None:
-        outcome["output_hash"] = output_hash
-    if output_ref is not None:
-        outcome["output_ref"] = output_ref
-    if "created_at" in output:
-        outcome["received_at"] = output["created_at"]
+    if output is None:
+        outcome: dict[str, Any] = {"completed": False}
+    else:
+        if call["name"] != output["name"]:
+            raise ValueError(f"artifact: paired call/output names differ at index {call_index}")
+        outcome = {
+            "completed": True,
+            "is_error": output.get("is_error", False),
+        }
+        output_hash, output_ref = _hash_or_ref(output, "output", "output_ref")
+        if output_hash is not None:
+            outcome["output_hash"] = output_hash
+        if output_ref is not None:
+            outcome["output_ref"] = output_ref
+        if "created_at" in output:
+            outcome["received_at"] = output["created_at"]
 
     event_context: dict[str, Any] = {
         "event_created_at": normalized["created_at"],
