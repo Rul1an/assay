@@ -9,18 +9,68 @@ on:
 permissions: {}
 
 jobs:
-  # ===========================================================================
-  # Test 1: Pack lint with eu-ai-act-baseline
-  # ===========================================================================
-  pack_lint_baseline:
+  build_cli:
+    name: Build CLI Artifact
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build CLI
+      - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
+
+      - name: Package CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/action-contract-cli
+          cp target/release/assay dist/action-contract-cli/assay
+          chmod 0755 dist/action-contract-cli/assay
+          dist/action-contract-cli/assay --version | tee dist/action-contract-cli/assay.version
+          (
+            cd dist/action-contract-cli
+            sha256sum assay | tee assay.sha256
+            tar -czf ../assay-action-contract-cli-linux-x64.tar.gz assay assay.sha256 assay.version
+          )
+          echo "Packaged artifact:"
+          sha256sum dist/assay-action-contract-cli-linux-x64.tar.gz
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assay-action-contract-cli-linux-x64-${{ github.sha }}
+          path: dist/assay-action-contract-cli-linux-x64.tar.gz
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Test 1: Pack lint with eu-ai-act-baseline
+  # ===========================================================================
+  pack_lint_baseline:
+    runs-on: ubuntu-latest
+    needs: build_cli
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-contract-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-contract-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Verify test bundle exists
         run: |
@@ -339,8 +389,27 @@ jobs:
   # ===========================================================================
   smoke_monorepo_workdir:
     runs-on: ubuntu-latest
+    needs: build_cli
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-contract-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-contract-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       # Minimal fake config + trace in a subdir
       - name: Prepare fixtures
@@ -363,9 +432,6 @@ jobs:
           {"schema_version":1,"type":"assay.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
           JSONL
 
-      - name: Build Verdict (Current Commit)
-        run: cargo build --release --workspace --exclude assay-ebpf
-
       - name: Run action (workdir)
         env:
           ASSAY_BIN: ${{ github.workspace }}/target/release/assay
@@ -386,10 +452,29 @@ jobs:
 
   export_baseline_artifact:
     runs-on: ubuntu-latest
+    needs: build_cli
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-contract-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-contract-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Prepare fixtures
         run: |
@@ -410,9 +495,6 @@ jobs:
           cat > fixtures/export/traces/ok.jsonl <<'JSONL'
           {"schema_version":1,"type":"assay.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
           JSONL
-
-      - name: Build Verdict (Current Commit)
-        run: cargo build --release --workspace --exclude assay-ebpf
 
       - name: Export baseline
         env:
