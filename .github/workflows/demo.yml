@@ -140,6 +140,8 @@ jobs:
 
       - name: Commit and push regenerated assets
         shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -152,7 +154,6 @@ jobs:
           fi
 
           git commit -m "chore: regenerate demo assets [skip ci]"
-          TARGET_REF="${{ inputs.ref }}"
           TARGET_BRANCH="${TARGET_REF#refs/heads/}"
 
           if ! git ls-remote --exit-code --heads origin "${TARGET_BRANCH}" >/dev/null 2>&1; then

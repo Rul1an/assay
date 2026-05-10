@@ -156,13 +156,20 @@ jobs:
       - name: Get version
         id: version
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.version }}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            V="${RELEASE_VERSION_INPUT}"
           else
             V="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
+            echo "::error::Release version must be a single-line value."
+            exit 1
+          fi
+          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
@@ -278,13 +285,20 @@ jobs:
       - name: Get version
         id: version
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.version }}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            V="${RELEASE_VERSION_INPUT}"
           else
             V="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
+            echo "::error::Release version must be a single-line value."
+            exit 1
+          fi
+          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
 
       - name: Package assay-mcp-server
         shell: bash
@@ -328,13 +342,21 @@ jobs:
 
       - name: Get version
         id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.version }}"
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            V="${RELEASE_VERSION_INPUT}"
           else
             V="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
+            echo "::error::Release version must be a single-line value."
+            exit 1
+          fi
+          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
 
       - name: Install CycloneDX generator
         shell: bash

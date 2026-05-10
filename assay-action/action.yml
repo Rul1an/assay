@@ -534,15 +534,21 @@ runs:
       env:
         USER_CATEGORY: ${{ inputs.category }}
         RUNNER_OS: ${{ runner.os }}
+        WORKFLOW_NAME: ${{ github.workflow }}
+        JOB_NAME: ${{ github.job }}
       run: |
         if [ -n "$USER_CATEGORY" ]; then
-          echo "category=$USER_CATEGORY" >> $GITHUB_OUTPUT
+          CATEGORY="$USER_CATEGORY"
         else
           # Auto-generate unique category per job + OS (matrix-safe)
           # Include runner.os to prevent collisions in matrix builds
-          CATEGORY="assay-${{ github.workflow }}-${{ github.job }}-${RUNNER_OS}"
-          echo "category=$CATEGORY" >> $GITHUB_OUTPUT
+          CATEGORY="assay-${WORKFLOW_NAME}-${JOB_NAME}-${RUNNER_OS}"
         fi
+        if [[ "$CATEGORY" == *$'\n'* || "$CATEGORY" == *$'\r'* ]]; then
+          echo "::error::SARIF category must be a single-line value."
+          exit 1
+        fi
+        printf 'category=%s\n' "$CATEGORY" >> "$GITHUB_OUTPUT"
 
     - name: Upload SARIF to GitHub Security
       id: upload-sarif
