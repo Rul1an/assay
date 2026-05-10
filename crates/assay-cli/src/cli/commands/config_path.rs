@@ -4,7 +4,7 @@
 //! Supports: Claude Desktop, Cursor, and generic MCP clients.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::env;
 use std::path::PathBuf;
 
@@ -34,12 +34,9 @@ impl McpClient {
 
 /// Result of config path detection
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct ConfigDetection {
-    pub client: McpClient,
     pub config_path: PathBuf,
     pub exists: bool,
-    pub current_config: Option<Value>,
 }
 
 /// Generated MCP server configuration
@@ -114,24 +111,14 @@ fn detect_cursor_config_path() -> Option<PathBuf> {
     }
 }
 
-/// Full detection with config file reading
+/// Detect the config file path and whether it currently exists.
 pub fn detect_config(client: McpClient) -> Option<ConfigDetection> {
     let config_path = detect_config_path(client)?;
     let exists = config_path.exists();
 
-    let current_config = if exists {
-        std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-    } else {
-        None
-    };
-
     Some(ConfigDetection {
-        client,
         config_path,
         exists,
-        current_config,
     })
 }
 

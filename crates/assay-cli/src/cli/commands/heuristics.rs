@@ -1,7 +1,7 @@
 //! Learning Mode Heuristics
 //!
 //! - Entropy detection for suspicious paths
-//! - Network fanout analysis
+//! - Destination risk hints
 //!
 //! # Risk Levels
 //! | Level            | Meaning                              |
@@ -10,10 +10,8 @@
 //! | NeedsReview      | Suspicious, human should verify      |
 //! | DenyRecommended  | Likely malicious                     |
 
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Risk Classification
@@ -53,15 +51,10 @@ pub struct HeuristicsConfig {
     pub entropy_threshold: f64,
     /// Min segment length to analyze
     pub min_segment_len: usize,
-    /// Fanout thresholds (unique IPs per process)
-    pub fanout_warn: usize,
-    pub fanout_deny: usize,
     /// Safe patterns to skip
     pub allowlist: Vec<&'static str>,
     /// Suspicious ports
     pub suspicious_ports: Vec<u16>,
-    /// Port scan threshold (unique ports per process)
-    pub port_scan_threshold: usize,
 }
 
 impl Default for HeuristicsConfig {
@@ -69,11 +62,8 @@ impl Default for HeuristicsConfig {
         Self {
             entropy_threshold: 3.8,
             min_segment_len: 8,
-            fanout_warn: 10,
-            fanout_deny: 50,
             allowlist: vec!["/proc/", "/sys/", "/run/user/", ".so."],
             suspicious_ports: vec![22, 23, 445, 139, 3389, 1433, 3306, 5432],
-            port_scan_threshold: 20,
         }
     }
 }
@@ -163,74 +153,6 @@ pub fn analyze_dest(dest: &str, cfg: &HeuristicsConfig) -> RiskAssessment {
     r
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Network Fanout Analysis
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Default)]
-pub struct ProcNetStats {
-    pub ips: BTreeSet<String>,
-    pub ports: BTreeSet<u16>,
-}
-
-pub struct NetworkAnalyzer {
-    cfg: HeuristicsConfig,
-    per_pid: HashMap<u32, ProcNetStats>,
-    global: BTreeMap<String, u32>,
-}
-
-impl NetworkAnalyzer {
-    pub fn new(cfg: HeuristicsConfig) -> Self {
-        Self {
-            cfg,
-            per_pid: HashMap::new(),
-            global: BTreeMap::new(),
-        }
-    }
-
-    pub fn record(&mut self, pid: u32, dest: &str) {
-        let (ip, port) = parse_dest(dest);
-        let s = self.per_pid.entry(pid).or_default();
-        s.ips.insert(ip);
-        if let Some(p) = port {
-            s.ports.insert(p);
-        }
-        *self.global.entry(dest.to_string()).or_default() += 1;
-    }
-
-    pub fn assess_dest(&self, dest: &str) -> RiskAssessment {
-        let mut r = RiskAssessment::default();
-        if let (_, Some(port)) = parse_dest(dest) {
-            if self.cfg.suspicious_ports.contains(&port) {
-                r.add(RiskLevel::NeedsReview, format!("sensitive port {}", port));
-            }
-        }
-        r
-    }
-
-    pub fn assess_pid(&self, pid: u32) -> RiskAssessment {
-        let mut r = RiskAssessment::default();
-        if let Some(s) = self.per_pid.get(&pid) {
-            let n = s.ips.len();
-            if n >= self.cfg.fanout_deny {
-                r.add(
-                    RiskLevel::DenyRecommended,
-                    format!("{} unique IPs - scanning?", n),
-                );
-            } else if n >= self.cfg.fanout_warn {
-                r.add(RiskLevel::NeedsReview, format!("{} unique IPs", n));
-            }
-            if s.ports.len() > self.cfg.port_scan_threshold {
-                r.add(
-                    RiskLevel::DenyRecommended,
-                    format!("{} ports - port scan?", s.ports.len()),
-                );
-            }
-        }
-        r
-    }
-}
-
 pub fn parse_dest(dest: &str) -> (String, Option<u16>) {
     if dest.starts_with('[') {
         if let Some(i) = dest.find(']') {
@@ -285,20 +207,6 @@ mod tests {
             &HeuristicsConfig::default(),
         );
         assert!(r.level >= RiskLevel::NeedsReview);
-    }
-
-    #[test]
-    fn fanout_warn() {
-        let cfg = HeuristicsConfig {
-            fanout_warn: 3,
-            fanout_deny: 5,
-            ..Default::default()
-        };
-        let mut na = NetworkAnalyzer::new(cfg);
-        for i in 1..=4 {
-            na.record(1, &format!("10.0.0.{}:80", i));
-        }
-        assert!(na.assess_pid(1).level >= RiskLevel::NeedsReview);
     }
 
     #[test]
