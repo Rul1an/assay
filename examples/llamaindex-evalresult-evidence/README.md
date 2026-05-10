@@ -45,11 +45,12 @@ has richer evaluator, callback, and workflow surfaces, but v1 keeps the
 evidence boundary honest without pretending that a live provider-backed
 evaluation harness is already the smallest stable path.
 
-The checked-in fixtures also omit `target_ref`, `invalid_reason`, and every
-other optional top-level reference on purpose. Those fields may arrive later in
-a bounded sample shape, but v1 keeps the seam on one evaluator label, one
-bounded pass/fail outcome, one optional scalar score, and one short feedback
-string.
+The checked-in fixtures include `target_ref` as the bounded review anchor for
+the evaluated item. They still omit `invalid_reason` and richer optional
+evaluator metadata on purpose. Those fields may arrive later when they are
+observed or explicitly supplied, but v1 keeps the seam on one evaluator label,
+one target reference, one bounded pass/fail outcome, one optional scalar score,
+and one short feedback string.
 
 The repo corpus uses `failure` naming to match the established examples
 convention. In this lane, that file still represents a valid evaluation

@@ -2,6 +2,8 @@
   "schema": "browser-use.agent-history.export.v1",
   "framework": "browser-use",
   "surface": "agent_history_list",
+  "browser_use_version": "0.1.x",
+  "reduction_schema_version": "1.0",
   "task_label": "Collect Browser Use docs summary",
   "timestamp": "2026-04-08T11:45:00Z",
   "outcome": "succeeded",

@@ -156,6 +156,8 @@ The first sample should require:
 - `schema`
 - `framework`
 - `surface`
+- `browser_use_version`
+- `reduction_schema_version`
 - `task_label`
 - `timestamp`
 - `outcome`
@@ -181,6 +183,25 @@ The first sample may include:
 - `url_ref`
 
 ### 6.3 Important field boundaries
+
+#### `browser_use_version` and `reduction_schema_version`
+
+The frozen artifact should carry both the observed Browser Use version for the
+source run or fixture and the Assay-side reduction schema version.
+
+Those fields keep the post-run evidence import versioned without implying that
+Browser Use owns the Assay reduction format.
+
+#### Fields outside the source boundary
+
+The reducer output should distinguish fields that are absent because they are
+outside this post-run source boundary from fields that were present but empty
+or error-bearing.
+
+For v1, screenshots, DOM, HTML, model output, telemetry, and step state should
+be marked as outside the source boundary rather than emitted as empty values.
+If a later downstream question needs per-step evidence, that should become a
+separate reducer/input contract instead of widening this post-run import.
 
 #### `action_history`
 

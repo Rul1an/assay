@@ -293,7 +293,45 @@ That means:
 Implementation planning can start now, but outward Agno posting should still
 follow the one-lane-at-a-time discipline.
 
-## 12. Non-goals
+## 12. ToolAuditHook follow-up candidate
+
+On 2026-05-09, `agno-agi/agno` PR
+[#7782](https://github.com/agno-agi/agno/pull/7782) added a proposed
+`ToolAuditHook` plus a minimal JSONL fixture in response to the public audit
+hook discussion.
+
+That creates a separate candidate seam from the original P10 accuracy-eval
+lane:
+
+- source: `ToolAuditHook` JSONL records
+- anchor fields: `tool_name`, `subject`, `status`, `duration_ms`
+- privacy boundary: explicit `arguments_redacted: true` and
+  `result_redacted: true` markers when raw values are disabled
+- fixture value: downstream consumers can test against a repo-local JSONL
+  surface without asking Agno to own a signed receipt spec
+
+Treat this as **watchlist / probe-only** until the upstream PR is merged.
+
+If it merges, the right next step is still small:
+
+- import 3-5 checked-in JSONL rows
+- map them into bounded tool-audit receipts
+- preserve `subject` as a review anchor
+- treat redaction markers as evidence-boundary facts
+- claim only that an audit record was observed, bundled, and verified
+
+This must not become:
+
+- a public fourth receipt family by default
+- an Agno-specific Harness branch
+- a claim that Agno tool calls were safe or policy-correct
+- a broader tracing or AgentOS import lane
+
+The current public families remain Promptfoo, OpenFeature, and CycloneDX
+ML-BOM. `ToolAuditHook` is only a future importer-lane candidate unless a later
+release decision explicitly promotes it.
+
+## 13. Non-goals
 
 - building another trace-first sample
 - opening on `AgentAsJudgeEval` instead of the simpler accuracy path

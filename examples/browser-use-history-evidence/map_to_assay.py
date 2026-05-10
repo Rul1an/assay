@@ -16,10 +16,20 @@ PLACEHOLDER_PRODUCER = "assay-example"
 PLACEHOLDER_PRODUCER_VERSION = "0.1.0"
 PLACEHOLDER_GIT = "sample"
 EXTERNAL_SCHEMA = "browser-use.agent-history.export.v1"
+OUTSIDE_SOURCE_BOUNDARY = (
+    "screenshots",
+    "dom",
+    "html",
+    "model_output",
+    "telemetry",
+    "step_state",
+)
 REQUIRED_KEYS = (
     "schema",
     "framework",
     "surface",
+    "browser_use_version",
+    "reduction_schema_version",
     "task_label",
     "timestamp",
     "outcome",
@@ -169,6 +179,12 @@ def _validate_record(record: dict[str, Any], line_label: str) -> None:
     if record["surface"] != "agent_history_list":
         raise ValueError(f"{line_label}: surface must be agent_history_list")
 
+    _validate_non_empty_string(
+        record["browser_use_version"], line_label, "browser_use_version"
+    )
+    _validate_non_empty_string(
+        record["reduction_schema_version"], line_label, "reduction_schema_version"
+    )
     _validate_non_empty_string(record["task_label"], line_label, "task_label")
     _validate_non_empty_string(record["final_result"], line_label, "final_result")
 
@@ -212,6 +228,9 @@ def _build_event(record: dict[str, Any], assay_run_id: str, import_time: str) ->
         "external_system": "browser-use",
         "external_surface": "agent-history-list",
         "external_schema": EXTERNAL_SCHEMA,
+        "external_version": normalized["browser_use_version"],
+        "reduction_schema_version": normalized["reduction_schema_version"],
+        "outside_source_boundary": list(OUTSIDE_SOURCE_BOUNDARY),
         "observed_upstream_time": normalized["timestamp"],
         "observed": record,
     }
