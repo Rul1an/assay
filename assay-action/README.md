@@ -174,6 +174,16 @@ jobs:
 | `bundle_url` | BYOS URL (if pushed) |
 | `attestation_url` | Attestation URL (if generated) |
 
+## PATH Compatibility
+
+When the action installs the Assay CLI, v2 also adds `~/.assay/bin` to `PATH`
+for later steps in the same job. This lets workflows call `assay` directly after
+`Rul1an/assay-action@v2` runs and is treated as a v2 compatibility guarantee.
+
+A future major version may replace this implicit export with an explicit opt-in
+such as `export_path` plus an `assay_path` output, but v2 must keep the current
+behavior.
+
 ## Permissions
 
 ```yaml

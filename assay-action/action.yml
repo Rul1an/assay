@@ -349,8 +349,10 @@ runs:
       id: verify-install
       if: steps.check-existing.outputs.skip_install != 'true'
       shell: bash
-      run: |
-        echo "$HOME/.assay/bin" >> $GITHUB_PATH
+      run: | # zizmor: ignore[github-env] v2 compatibility exports a literal install dir for later caller steps
+        # v2 compatibility: later caller steps may invoke `assay` directly.
+        # Keep exporting this literal install directory until a major-version contract change.
+        printf '%s\n' "$HOME/.assay/bin" >> "$GITHUB_PATH"
         export PATH="$HOME/.assay/bin:$PATH"
 
         if ! ~/.assay/bin/assay --version; then
