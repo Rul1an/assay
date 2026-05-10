@@ -51,9 +51,9 @@ if ensure_cargo_subcommand public-api cargo-public-api; then
   echo "[api-drift] cargo-public-api diff vs ${BASE_REV}"
   for package in "${PACKAGES[@]}"; do
     echo "[api-drift] public-api package=${package}"
-    if cargo public-api diff --help 2>/dev/null | rg -- '--package|-p' >/dev/null; then
+    if cargo public-api diff --help 2>/dev/null | grep -qE -- '--package|-p'; then
       cargo public-api diff --package "${package}" "${BASE_REV}..HEAD" -sss
-    elif cargo public-api --help 2>/dev/null | rg -- '--package|-p' >/dev/null; then
+    elif cargo public-api --help 2>/dev/null | grep -qE -- '--package|-p'; then
       cargo public-api --package "${package}" diff "${BASE_REV}..HEAD" -sss
     else
       echo "[api-drift] skip package-scoped public-api diff for ${package}: installed cargo-public-api does not advertise --package"
