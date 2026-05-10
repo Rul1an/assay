@@ -196,6 +196,17 @@ MUST match one of:
 
 ## 4. Output Contract
 
+### 4.0 PATH Compatibility (v2)
+
+If the action installs the Assay CLI, it MUST add `~/.assay/bin` to `PATH` for
+subsequent steps in the same job. This is a v2 compatibility contract: workflows
+may call `assay` directly after `Rul1an/assay-action@v2` completes.
+
+This PATH export is intentionally limited to the literal install directory. A
+future major version may replace the implicit export with an explicit opt-in
+input such as `export_path` and an `assay_path` output, but v2 MUST preserve the
+current behavior.
+
 ### 4.1 Existing Outputs (v2.0)
 
 | Output | Type | Description |
