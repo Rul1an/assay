@@ -2,13 +2,17 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
+base_ref="${BASE_REF:-${GITHUB_BASE_REF:+origin/${GITHUB_BASE_REF}}}"
+if [[ -z "$base_ref" ]]; then
+  base_ref="origin/main"
+fi
 
 echo "[review] dependency hygiene guards"
 if rg -q '(^|[[:space:]])sha256[[:space:]]*=' crates/assay-core/Cargo.toml Cargo.toml; then
   echo "FAIL: direct sha256 crate dependency should stay removed; use workspace sha2 helpers instead" >&2
   exit 1
 fi
-if rg -q '^name = "sha256"$|"sha256"' Cargo.lock; then
+if rg -q '^name = "sha256"$' Cargo.lock; then
   echo "FAIL: Cargo.lock should not contain the sha256 crate after PR4 cleanup" >&2
   exit 1
 fi
@@ -37,4 +41,9 @@ cargo check -p assay-core
 cargo clippy -p assay-core --all-targets -- -D warnings
 
 echo "[review] diff hygiene"
-git diff --check
+if git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+  git diff --check "$base_ref"...HEAD
+else
+  echo "WARN: BASE_REF not found ($base_ref); checking working-tree diff only" >&2
+  git diff --check
+fi

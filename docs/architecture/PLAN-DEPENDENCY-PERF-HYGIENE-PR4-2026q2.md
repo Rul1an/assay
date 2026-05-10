@@ -1,6 +1,13 @@
-# PR4 Dependency and Perf Hygiene - 2026 Q2
+# PLAN — Dependency and Perf Hygiene PR4 (2026 Q2)
 
-## Scope
+- **Date:** 2026-05-10
+- **Owner:** Core / Maintenance
+- **Status:** Review lane
+- **Scope (current repo state):** Execute the dependency/perf hygiene PR4
+  slice without parser migrations, API gates, mutation gates, security
+  fixtures, or stale-code refactors.
+
+## 1. Scope
 
 This note records the intentionally small PR4 cleanup slice from the repo hygiene memo.
 It avoids functional parser migrations, API gates, mutation gates, security fixtures, and stale-code refactors.
@@ -19,7 +26,7 @@ Excluded:
 - Public API or semver gate changes.
 - Security fixture changes.
 
-## Before Snapshot
+## 2. Before Snapshot
 
 Command: `cargo tree -d`
 
@@ -30,7 +37,7 @@ Relevant findings before this PR:
 - `deny.toml` contained `RUSTSEC-2026-0097`, but `cargo deny check advisories bans sources` reported it as `advisory-not-detected`.
 - `deny.toml` contained `https://github.com/aya-rs/aya` in `allow-git`, but `cargo deny` reported that exact source exception as unmatched. The lockfile still contains pinned `aya-rs/aya` git sources; they are covered by the repository's `unknown-git = "warn"` policy until a precise source allowlist is reintroduced.
 
-## After Snapshot
+## 3. After Snapshot
 
 Expected review outcomes after this PR:
 
@@ -46,7 +53,7 @@ Remaining duplicate dependency families are deliberately not changed in PR4 beca
 - `reqwest` split through `jsonschema` and direct HTTP clients.
 - Windows target crate splits from platform-specific transitive dependencies.
 
-## serde_yaml Retirement Plan
+## 4. serde_yaml Retirement Plan
 
 `serde_yaml` remains in place for PR4. It is deprecated upstream and should be retired in a dedicated compatibility migration, not as a drive-by dependency cleanup.
 
