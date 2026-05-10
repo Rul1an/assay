@@ -2,6 +2,12 @@ name: Kernel Matrix CI
 
 on:
   workflow_dispatch:
+    inputs:
+      force_ebpf:
+        description: "Force the ARM artifact build and self-hosted kernel matrix"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     branches: [ "main" ]
     paths:
@@ -63,11 +69,136 @@ jobs:
           set -euo pipefail
           pre-commit run --all-files --show-diff-on-failure
 
+  # Check eBPF-related changes before any ARM artifact build or self-hosted runner work.
+  check-ebpf-changes:
+    name: Check eBPF Changes
+    runs-on: ubuntu-latest
+    outputs:
+      ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
+      skip_reason: ${{ steps.check.outputs.skip_reason }}
+      force_ebpf: ${{ steps.check.outputs.force_ebpf }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for eBPF-related changes
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_EBPF: ${{ github.event_name == 'workflow_dispatch' && inputs.force_ebpf == true }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "force_ebpf=${FORCE_EBPF}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${FORCE_EBPF}" == "true" ]]; then
+              echo "ebpf_changed=true" >> "$GITHUB_OUTPUT"
+              echo "skip_reason=" >> "$GITHUB_OUTPUT"
+              echo "✅ force_ebpf=true - running ARM artifact build and kernel matrix"
+              {
+                echo "## eBPF Change Detection"
+                echo ""
+                echo "Manual override enabled: \`force_ebpf=true\`."
+                echo "ARM artifact build and self-hosted kernel matrix will run."
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "ebpf_changed=false" >> "$GITHUB_OUTPUT"
+              echo "skip_reason=workflow_dispatch force_ebpf=false, skipping ARM artifact build and kernel matrix" >> "$GITHUB_OUTPUT"
+              echo "⏭️ workflow_dispatch force_ebpf=false - skipping ARM artifact build and kernel matrix"
+              {
+                echo "## eBPF Change Detection"
+                echo ""
+                echo "\`workflow_dispatch\` ran with \`force_ebpf=false\`."
+                echo "ARM artifact build and self-hosted kernel matrix are skipped."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE="${PR_BASE_SHA}"
+            HEAD="${HEAD_SHA}"
+          elif [[ "${EVENT_NAME}" == "push" ]]; then
+            BASE="${PUSH_BEFORE_SHA}"
+            HEAD="${HEAD_SHA}"
+          else
+            echo "::error::Unsupported event for eBPF change detection: ${EVENT_NAME}"
+            exit 1
+          fi
+
+          if [[ -z "${HEAD}" ]]; then
+            echo "::error::Unable to detect eBPF changes: HEAD_SHA is empty"
+            exit 1
+          fi
+
+          # Check if eBPF/LSM matrix inputs changed. Keep this narrower than
+          # all scripts/ci/* so release-publish helper edits do not queue
+          # self-hosted BPF jobs when the runner is offline.
+          EBPF_PATTERNS="^crates/assay-ebpf/|^crates/assay-monitor/|^crates/assay-evidence/|^scripts/verify_lsm_docker\.sh$|^scripts/ci/(apt_ports_failover|lsm_deny_smoke)\.sh$"
+
+          changed_files="$(mktemp)"
+          trap 'rm -f "$changed_files"' EXIT
+          if [[ "${EVENT_NAME}" == "push" && ( -z "${BASE}" || "${BASE}" =~ ^0+$ ) ]]; then
+            echo "Comparing first push commit ${HEAD}"
+            if ! git diff-tree --no-commit-id --name-only -r "${HEAD}" > "$changed_files"; then
+              echo "::error::Unable to diff first push commit ${HEAD}"
+              exit 1
+            fi
+          else
+            if [[ -z "${BASE}" ]]; then
+              echo "::error::Unable to detect eBPF changes: BASE sha is empty for ${EVENT_NAME}"
+              exit 1
+            fi
+            echo "Comparing ${BASE}..${HEAD}"
+            if ! git diff --name-only "${BASE}" "${HEAD}" > "$changed_files"; then
+              echo "::error::Unable to diff ${BASE}..${HEAD}"
+              exit 1
+            fi
+          fi
+
+          echo "Changed files:"
+          cat "$changed_files"
+
+          changed_count="$(grep -cve '^[[:space:]]*$' "$changed_files" || true)"
+          if grep -qE "$EBPF_PATTERNS" "$changed_files"; then
+            echo "ebpf_changed=true" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=" >> "$GITHUB_OUTPUT"
+            echo "✅ eBPF-related files changed - ARM artifact build and kernel matrix required"
+          else
+            skip_reason="ebpf_changed=false, skipping ARM artifact build and kernel matrix"
+            echo "ebpf_changed=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=${skip_reason}" >> "$GITHUB_OUTPUT"
+            echo "⏭️ ${skip_reason}"
+          fi
+
+          {
+            echo "## eBPF Change Detection"
+            echo ""
+            echo "- Event: \`${EVENT_NAME}\`"
+            echo "- Force override: \`${FORCE_EBPF}\`"
+            echo "- Changed files inspected: \`${changed_count}\`"
+            if [[ -s "$changed_files" ]]; then
+              echo ""
+              echo "<details><summary>Changed files</summary>"
+              echo ""
+              sed 's/^/- /' "$changed_files"
+              echo ""
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-artifacts:
     permissions:
       contents: read
     name: Build Artifacts (Ubuntu ARM)
-    needs: lint
+    needs: [lint, check-ebpf-changes]
+    if: needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     concurrency:
@@ -150,50 +281,6 @@ jobs:
           name: assay-dist
           path: dist/
           if-no-files-found: error
-
-  # Check if eBPF-related files were changed (skip heavy tests for pure dep bumps)
-  check-ebpf-changes:
-    name: Check eBPF Changes
-    runs-on: ubuntu-latest
-    outputs:
-      ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Check for eBPF-related changes
-        id: check
-        run: |
-          # For push events, compare with previous commit
-          # For PRs, compare with base branch
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-            HEAD="${{ github.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-            HEAD="${{ github.sha }}"
-          fi
-
-          echo "Comparing $BASE..$HEAD"
-
-          # Check if eBPF/LSM matrix inputs changed. Keep this narrower than
-          # all scripts/ci/* so release-publish helper edits do not queue
-          # self-hosted BPF jobs when the runner is offline.
-          EBPF_PATTERNS="^crates/assay-ebpf/|^crates/assay-monitor/|^crates/assay-evidence/|^scripts/verify_lsm_docker\.sh$|^scripts/ci/(apt_ports_failover|lsm_deny_smoke)\.sh$"
-
-          CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
-
-          # Check if any eBPF-related file changed
-          if echo "$CHANGED_FILES" | grep -qE "$EBPF_PATTERNS"; then
-            echo "ebpf_changed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ eBPF-related files changed - full matrix test required"
-          else
-            echo "ebpf_changed=false" >> "$GITHUB_OUTPUT"
-            echo "⏭️ Only dependency changes - skipping heavy matrix tests"
-          fi
 
   cleanup-runner:
     name: Free disk (before matrix)
@@ -446,12 +533,19 @@ jobs:
   summary:
     name: Kernel Matrix Summary
     runs-on: ubuntu-latest
-    needs: [lint, build-artifacts, check-ebpf-changes, matrix-test]
+    needs: [lint, check-ebpf-changes, build-artifacts, cleanup-runner, matrix-test]
     if: always()
     steps:
       - name: Report Status
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          CHECK_RESULT: ${{ needs.check-ebpf-changes.result }}
           EBPF_CHANGED: ${{ needs.check-ebpf-changes.outputs.ebpf_changed }}
+          FORCE_EBPF: ${{ needs.check-ebpf-changes.outputs.force_ebpf }}
+          SKIP_REASON: ${{ needs.check-ebpf-changes.outputs.skip_reason }}
+          BUILD_RESULT: ${{ needs.build-artifacts.result }}
+          CLEANUP_RESULT: ${{ needs.cleanup-runner.result }}
           MATRIX_RESULT: ${{ needs.matrix-test.result }}
         shell: bash
         run: |
@@ -459,33 +553,51 @@ jobs:
           {
             echo "## Kernel Matrix CI Summary"
             echo ""
+            echo "- Lint: \`${LINT_RESULT}\`"
+            echo "- eBPF detection: \`${CHECK_RESULT}\`"
+            echo "- eBPF changed: \`${EBPF_CHANGED:-unknown}\`"
+            echo "- Force override: \`${FORCE_EBPF:-false}\`"
+            echo "- ARM artifact build: \`${BUILD_RESULT}\`"
+            echo "- Self-hosted cleanup: \`${CLEANUP_RESULT}\`"
+            echo "- Kernel matrix: \`${MATRIX_RESULT}\`"
+            echo ""
 
             if [ "${EBPF_CHANGED}" = "false" ]; then
-              echo "⏭️ **Matrix tests skipped** - No eBPF-related changes detected"
+              echo "⏭️ **Kernel Matrix heavy lane skipped**"
               echo ""
-              echo "No eBPF/LSM matrix inputs changed. Heavy kernel matrix tests not required."
+              echo "${SKIP_REASON:-ebpf_changed=false, skipping ARM artifact build and kernel matrix}"
             elif [ "${MATRIX_RESULT}" = "success" ]; then
               echo "✅ **All kernel matrix tests passed**"
-            elif [ "${MATRIX_RESULT}" = "skipped" ]; then
-              echo "⏭️ **Matrix tests skipped** (fork PR or no eBPF changes)"
+            elif [ "${EVENT_NAME}" = "pull_request" ] && [ "${MATRIX_RESULT}" = "skipped" ]; then
+              echo "⏭️ **Self-hosted kernel matrix skipped for pull_request**"
+              echo ""
+              echo "The ARM artifact build still ran because eBPF-related inputs changed."
             else
-              echo "❌ **Matrix tests failed**"
+              echo "❌ **Kernel Matrix CI did not complete successfully**"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Fail if matrix tests actually failed
-          if [ "${EBPF_CHANGED}" = "true" ] && [ "${MATRIX_RESULT}" = "failure" ]; then
+          if [ "${CHECK_RESULT}" != "success" ]; then
+            echo "eBPF change detection did not complete successfully: ${CHECK_RESULT}"
             exit 1
           fi
 
-      - name: Check lint status
-        if: needs.lint.result == 'failure'
-        run: |
-          echo "Lint failed"
-          exit 1
+          if [ "${LINT_RESULT}" != "success" ]; then
+            echo "Lint did not complete successfully: ${LINT_RESULT}"
+            exit 1
+          fi
 
-      - name: Check build status
-        if: needs.build-artifacts.result == 'failure'
-        run: |
-          echo "Build failed"
-          exit 1
+          if [ "${EBPF_CHANGED}" = "true" ] && [ "${BUILD_RESULT}" != "success" ]; then
+            echo "ARM artifact build did not complete successfully: ${BUILD_RESULT}"
+            exit 1
+          fi
+
+          if [ "${EBPF_CHANGED}" = "true" ] && [ "${EVENT_NAME}" != "pull_request" ] && [ "${CLEANUP_RESULT}" != "success" ]; then
+            echo "Self-hosted cleanup did not complete successfully: ${CLEANUP_RESULT}"
+            exit 1
+          fi
+
+          if [ "${EBPF_CHANGED}" = "true" ] && [ "${EVENT_NAME}" != "pull_request" ] && [ "${MATRIX_RESULT}" != "success" ]; then
+            echo "Kernel matrix did not complete successfully: ${MATRIX_RESULT}"
+            exit 1
+          fi
