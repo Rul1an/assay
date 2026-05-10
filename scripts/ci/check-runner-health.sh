@@ -8,6 +8,12 @@ runner_status_token="${RUNNER_STATUS_TOKEN:-${GH_TOKEN:-}}"
 queue_token="${QUEUE_TOKEN:-${GH_TOKEN:-}}"
 output_file="${GITHUB_OUTPUT:-/dev/null}"
 summary_file="${GITHUB_STEP_SUMMARY:-/dev/null}"
+tmpdir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
 
 if [[ -z "$repo" ]]; then
   echo "ERROR: GITHUB_REPOSITORY or REPO is required" >&2
@@ -38,10 +44,10 @@ runner_status_error=""
 runner_busy="unknown"
 runner_labels=""
 
-runner_status_stderr="$(mktemp)"
-runner_json="$(mktemp)"
-if GH_TOKEN="$runner_status_token" gh api "repos/$repo/actions/runners?per_page=100" >"$runner_json" 2>"$runner_status_stderr"; then
-  selected_runner="$(jq -c --arg name "$runner_name" '.runners[]? | select(.name == $name)' "$runner_json")"
+runner_status_stderr="$tmpdir/runner-status.stderr"
+runner_json="$tmpdir/runners.json"
+if GH_TOKEN="$runner_status_token" gh api --paginate "repos/$repo/actions/runners?per_page=100" >"$runner_json" 2>"$runner_status_stderr"; then
+  selected_runner="$(jq -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"
   if [[ -z "$selected_runner" ]]; then
     runner_status="not_found"
   else
@@ -53,28 +59,27 @@ else
   runner_status_error="$(sanitize_error <"$runner_status_stderr")"
   echo "::warning::Unable to query self-hosted runner status: ${runner_status_error}" >&2
 fi
-rm -f "$runner_status_stderr" "$runner_json"
 
-matching_jobs="$(mktemp)"
-queue_stderr="$(mktemp)"
+matching_jobs="$tmpdir/matching-jobs.tsv"
+queue_stderr="$tmpdir/queue.stderr"
 queue_status_error=""
 general_queued_runs=0
 inspected_workflow_runs=0
 
 for run_status in queued in_progress; do
-  runs_json="$(mktemp)"
-  if GH_TOKEN="$queue_token" gh api "repos/$repo/actions/runs?status=${run_status}&per_page=50" >"$runs_json" 2>>"$queue_stderr"; then
+  runs_json="$tmpdir/runs-${run_status}.json"
+  if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs?status=${run_status}&per_page=100" >"$runs_json" 2>>"$queue_stderr"; then
     run_rows="$(jq -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"
     if [[ "$run_status" == "queued" ]]; then
-      general_queued_runs="$(printf '%s\n' "$run_rows" | count_nonempty_lines)"
+      general_queued_runs="$(jq -r '.workflow_runs[]?.id' "$runs_json" | count_nonempty_lines)"
     fi
 
     while IFS=$'\t' read -r run_id run_name _status run_url; do
       [[ -n "${run_id:-}" ]] || continue
       inspected_workflow_runs=$((inspected_workflow_runs + 1))
 
-      jobs_json="$(mktemp)"
-      if GH_TOKEN="$queue_token" gh api "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
+      jobs_json="$tmpdir/jobs-${run_id}.json"
+      if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
         jq -r \
           --arg label "$required_runner_label" \
           --arg run_name "$run_name" \
@@ -89,17 +94,14 @@ for run_status in queued in_progress; do
       else
         echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
       fi
-      rm -f "$jobs_json"
     done <<<"$run_rows"
   fi
-  rm -f "$runs_json"
 done
 
 if [[ -s "$queue_stderr" ]]; then
   queue_status_error="$(sanitize_error <"$queue_stderr")"
   echo "::warning::Unable to fully classify queued jobs: ${queue_status_error}" >&2
 fi
-rm -f "$queue_stderr"
 
 matching_queued_jobs="$(count_nonempty_lines <"$matching_jobs")"
 health_reason="clear"
@@ -155,8 +157,6 @@ write_output "health_reason" "$health_reason"
     echo '```'
   fi
 } >>"$summary_file"
-
-rm -f "$matching_jobs"
 
 if [[ "$healthy" != "true" ]]; then
   echo "Runner health alert: ${health_reason}" >&2
