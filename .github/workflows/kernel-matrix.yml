@@ -204,6 +204,9 @@ jobs:
       needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-cleanup-runner
+      cancel-in-progress: true
     steps:
       - name: Nuke _actions cache (force fresh download for next job)
         shell: bash
