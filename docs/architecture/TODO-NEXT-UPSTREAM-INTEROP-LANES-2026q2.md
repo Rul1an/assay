@@ -144,6 +144,13 @@ That lane is already in motion, so the queue no longer starts with Agno even
 though Agno remains the strongest general-purpose next-lane choice in the
 ranking.
 
+2026-05-09 addendum: `agno-agi/agno` PR
+[#7782](https://github.com/agno-agi/agno/pull/7782) also opened a separate
+`ToolAuditHook` JSONL fixture seam. Keep that as a post-merge watchlist /
+probe-only candidate under the P10 plan. It must not become a new public
+receipt family, an Agno-specific Harness branch, or a broader tracing /
+AgentOS lane by default.
+
 ## 5. Historical note on Browser Use
 
 `browser-use/browser-use` was not the highest strategic priority overall, but

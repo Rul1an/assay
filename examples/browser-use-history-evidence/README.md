@@ -12,6 +12,8 @@ It is intentionally small:
 - map the good artifacts into Assay-shaped placeholder envelopes
 - keep `action_history`, `final_result`, and `errors` as observed Browser Use
   run-result data only
+- carry both the observed Browser Use version and the Assay reduction schema
+  version with the frozen artifact
 - keep screenshots, DOM/HTML dumps, structured output payloads, telemetry, and
   observability semantics out of Assay truth
 
@@ -49,6 +51,15 @@ The checked-in fixtures also omit every optional reference on purpose. Those
 fields may exist later in a bounded sample shape, but v1 keeps the seam on
 small action-history reductions, a short final result representation, and
 bounded error observations only.
+
+Each checked-in artifact also carries `browser_use_version` and
+`reduction_schema_version`. Those fields make the post-run evidence boundary
+explicit without implying that Browser Use owns this frozen reduction format.
+
+The mapped Assay-shaped output also carries an `outside_source_boundary` list
+for screenshots, DOM, HTML, model output, telemetry, and step state. That makes
+their absence explicit as a boundary choice, not accidental data loss or
+redaction.
 
 ## Map the checked-in valid artifact
 
