@@ -2,6 +2,11 @@ use assert_cmd::prelude::*;
 use std::process::Command;
 use tempfile::tempdir;
 
+#[cfg(unix)]
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 #[test]
 fn test_profile_cli_workflow() -> anyhow::Result<()> {
     let tmp = tempdir()?;
@@ -77,7 +82,8 @@ fn test_profile_json_output() -> anyhow::Result<()> {
 fn owasp_mcp05_sandbox_keeps_shell_metacharacters_as_argv() -> anyhow::Result<()> {
     let tmp = tempdir()?;
     let sentinel = tmp.path().join("injection-sentinel");
-    let injection_arg = format!("; touch {}", sentinel.display());
+    let quoted_sentinel = shell_single_quote(&sentinel.to_string_lossy());
+    let injection_arg = format!("; touch {quoted_sentinel}");
 
     let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
     cmd.arg("sandbox")

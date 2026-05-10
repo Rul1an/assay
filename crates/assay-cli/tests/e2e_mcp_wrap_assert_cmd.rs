@@ -3,7 +3,7 @@ use anyhow::Context;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
@@ -79,6 +79,26 @@ fn read_json_line(
             continue;
         }
         return Ok(serde_json::from_str::<Value>(line)?);
+    }
+}
+
+fn wait_child_with_timeout(child: &mut Child, timeout: Duration) -> anyhow::Result<ExitStatus> {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            let status = child.wait()?;
+            anyhow::bail!(
+                "child did not exit within {:?}; killed with status {status}",
+                timeout
+            );
+        }
+
+        std::thread::sleep(Duration::from_millis(25));
     }
 }
 
@@ -179,7 +199,8 @@ enforcement:
     send_line(&mut stdin, &req)?;
     let _ = read_json_line(&mut reader, Duration::from_secs(5))?;
     drop(stdin);
-    let _ = child.wait();
+    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    assert!(status.success(), "proxy exited with status {status}");
 
     let audit = std::fs::read_to_string(&audit_log)?;
     let decisions = std::fs::read_to_string(&decision_log)?;
