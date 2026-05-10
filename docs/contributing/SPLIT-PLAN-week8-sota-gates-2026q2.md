@@ -39,6 +39,14 @@ Rule:
 - Required for release candidates and public facade refactors.
 - Optional/non-blocking for early mechanical split PRs until CI has the tool cache.
 
+Workflow:
+
+- `.github/workflows/week8-sota-gates.yml`
+- Manual `workflow_dispatch` lane.
+- Installs `cargo-semver-checks` and `cargo-public-api` on demand with `ASSAY_INSTALL_API_DRIFT_TOOLS=1`.
+- Fails closed in GitHub Actions if `base_rev` cannot be fetched for comparison.
+- Keeps this out of pull-request required checks until false-positive and cost behavior are understood.
+
 ## Gate 2 - Mutation Smoke on Pure Modules
 
 Script:
@@ -58,6 +66,13 @@ Rule:
 - Keep mutation smoke targeted to pure or near-pure modules.
 - Do not run full-workspace mutation testing in PR CI.
 - Use this to catch weak assertions after module extraction, especially where branch logic was moved mechanically.
+
+Workflow:
+
+- `.github/workflows/week8-sota-gates.yml`
+- Manual `workflow_dispatch` lane behind `run_mutation_smoke=true`.
+- Installs `cargo-mutants` on demand with `ASSAY_INSTALL_MUTATION_TOOLS=1`.
+- Does not run by default because mutation testing is intentionally heavier and should be reviewer-initiated.
 
 ## Gate 3 - OWASP MCP Test Mapping
 

@@ -10,8 +10,13 @@ if [ "${ASSAY_RUN_MUTATION_SMOKE:-0}" != "1" ]; then
 fi
 
 if ! cargo mutants --version >/dev/null 2>&1; then
-  echo "[mutation-smoke] skipped: cargo-mutants is not installed"
-  exit 0
+  if [ "${ASSAY_INSTALL_MUTATION_TOOLS:-0}" = "1" ]; then
+    echo "[mutation-smoke] installing cargo-mutants"
+    cargo install --locked cargo-mutants
+  else
+    echo "[mutation-smoke] skipped: cargo-mutants is not installed"
+    exit 0
+  fi
 fi
 
 COMMON=(--timeout 60 --minimum-test-timeout 20 --jobs "${ASSAY_MUTATION_JOBS:-2}")
