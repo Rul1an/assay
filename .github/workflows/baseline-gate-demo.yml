@@ -28,9 +28,11 @@ jobs:
 
       - name: Fetch baseline from base branch (anti-tamper)
         shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          BASE="${{ github.base_ref }}"
+          BASE="${BASE_REF}"
           git fetch origin "$BASE" --depth=1 || echo "Base not found"
 
           # In a real setup we'd fetch baseline from artifact/main

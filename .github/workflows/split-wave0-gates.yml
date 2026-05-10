@@ -42,10 +42,12 @@ jobs:
 
       - id: detect
         shell: bash
+        env:
+          SIMULATED_CHANGED_FILES: ${{ inputs.simulated_changed_files }}
         run: |
           set -euo pipefail
           changed_file="$RUNNER_TEMP/changed_files.txt"
-          simulated="${{ inputs.simulated_changed_files }}"
+          simulated="${SIMULATED_CHANGED_FILES}"
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             if [[ -n "${simulated}" ]]; then
