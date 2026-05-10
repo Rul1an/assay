@@ -29,6 +29,15 @@ repos:
         stages: [manual]
 
   # --- Tooling hooks (remote) ---
+  - repo: local
+    hooks:
+      - id: mcpregistry-secret-hygiene
+        name: MCP registry local token hygiene
+        entry: scripts/ci/check-mcpregistry-secret-hygiene.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
   # typos (spellcheck)
   - repo: https://github.com/crate-ci/typos
     rev: v1.42.1

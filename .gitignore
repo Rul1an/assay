@@ -11,6 +11,7 @@ docs/DISTRIBUTION-CHANNELS.md
 .claude/
 .obsidian/
 .cursor/
+.mcpregistry_*
 _v.txt
 ai-agent-eval-plugin/
 /Assay/

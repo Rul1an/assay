@@ -68,3 +68,15 @@ Assay runs in untrusted environments (CI/CD, agent sandboxes).
 | PyPI | Trusted Publishing |
 | Dependencies | `cargo-deny` audit in CI |
 | Releases | GitHub Actions, no manual tokens |
+
+## Local Credential Hygiene
+
+MCP registry token files named `.mcpregistry_*` are local-only secrets. They are
+ignored by git and must never be committed, copied into logs, or uploaded as CI
+artifacts. If such files may have appeared in shell history, terminal logs, or
+shared artifacts, rotate the underlying credentials before continuing.
+
+Run `scripts/ci/check-mcpregistry-secret-hygiene.sh` before publishing changes
+that touch registry auth or release workflows. Set
+`ASSAY_FAIL_ON_LOCAL_MCPREGISTRY_TOKENS=1` when a hard-fail local preflight is
+preferred.
