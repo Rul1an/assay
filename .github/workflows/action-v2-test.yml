@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   build-assay-cli:
@@ -49,6 +48,9 @@ jobs:
     name: Test (no bundles - soft exit)
     runs-on: ubuntu-latest
     needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -80,6 +82,9 @@ jobs:
     name: Test (with valid bundle)
     runs-on: ubuntu-latest
     needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -148,6 +153,9 @@ jobs:
     name: Test (with compliance pack)
     runs-on: ubuntu-latest
     needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -205,6 +213,9 @@ jobs:
     name: Test (missing compliance pack failure mode)
     runs-on: ubuntu-latest
     needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -268,6 +279,9 @@ jobs:
     name: Test (invalid compliance pack failure mode)
     runs-on: ubuntu-latest
     needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
