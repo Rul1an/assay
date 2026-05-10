@@ -111,7 +111,7 @@ fn detect_cursor_config_path() -> Option<PathBuf> {
     }
 }
 
-/// Full detection with config file reading
+/// Detect the config file path and whether it currently exists.
 pub fn detect_config(client: McpClient) -> Option<ConfigDetection> {
     let config_path = detect_config_path(client)?;
     let exists = config_path.exists();
