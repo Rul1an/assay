@@ -6,15 +6,36 @@ cd "$ROOT"
 
 BASE_REV="${BASE_REV:-origin/main}"
 PACKAGES=(assay-core assay-evidence assay-registry assay-policy assay-metrics)
+INSTALL_TOOLS="${ASSAY_INSTALL_API_DRIFT_TOOLS:-0}"
+
+if [ -n "${ASSAY_API_DRIFT_PACKAGES:-}" ]; then
+  # shellcheck disable=SC2206
+  PACKAGES=(${ASSAY_API_DRIFT_PACKAGES})
+fi
 
 if ! git rev-parse --verify --quiet "${BASE_REV}^{commit}" >/dev/null; then
   echo "[api-drift] skip: BASE_REV ${BASE_REV} is not available locally"
   exit 0
 fi
 
+ensure_cargo_subcommand() {
+  local subcommand="$1"
+  local crate="$2"
+  if cargo "${subcommand}" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ "${INSTALL_TOOLS}" = "1" ]; then
+    echo "[api-drift] installing ${crate}"
+    cargo install --locked "${crate}"
+    cargo "${subcommand}" --version >/dev/null
+    return 0
+  fi
+  return 1
+}
+
 ran_any=0
 
-if cargo semver-checks --version >/dev/null 2>&1; then
+if ensure_cargo_subcommand semver-checks cargo-semver-checks; then
   ran_any=1
   echo "[api-drift] cargo-semver-checks vs ${BASE_REV}"
   for package in "${PACKAGES[@]}"; do
@@ -25,7 +46,7 @@ else
   echo "[api-drift] skip cargo-semver-checks: cargo subcommand not installed"
 fi
 
-if cargo public-api --version >/dev/null 2>&1; then
+if ensure_cargo_subcommand public-api cargo-public-api; then
   ran_any=1
   echo "[api-drift] cargo-public-api diff vs ${BASE_REV}"
   for package in "${PACKAGES[@]}"; do

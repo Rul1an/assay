@@ -1,0 +1,90 @@
+name: Week 8 SOTA Gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_rev:
+        description: "Git revision to compare public API drift against"
+        required: false
+        default: "origin/main"
+        type: string
+      run_public_api_drift:
+        description: "Run semver/public-api drift checks with tools installed on demand"
+        required: false
+        default: true
+        type: boolean
+      run_mutation_smoke:
+        description: "Run targeted cargo-mutants smoke on pure modules"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: week8-sota-gates-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  public-api-drift:
+    name: Public API drift
+    if: inputs.run_public_api_drift == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Run optional public API drift gate
+        shell: bash
+        env:
+          ASSAY_INSTALL_API_DRIFT_TOOLS: "1"
+          BASE_REV: ${{ inputs.base_rev }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/optional-public-api-drift.sh
+          {
+            echo "## Public API drift"
+            echo "- base_rev: ${BASE_REV}"
+            echo "- packages: assay-core assay-evidence assay-registry assay-policy assay-metrics"
+            echo "- tools: cargo-semver-checks, cargo-public-api"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  mutation-smoke:
+    name: Mutation smoke pure modules
+    if: inputs.run_mutation_smoke == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Run targeted mutation smoke
+        shell: bash
+        env:
+          ASSAY_INSTALL_MUTATION_TOOLS: "1"
+          ASSAY_RUN_MUTATION_SMOKE: "1"
+          ASSAY_MUTATION_JOBS: "2"
+        run: |
+          set -euo pipefail
+          bash scripts/ci/mutation-smoke-pure-modules.sh
+          {
+            echo "## Mutation smoke"
+            echo "- targets: trust_basis/diff.rs, trust_basis/classifiers.rs, sandbox/degradation.rs"
+            echo "- jobs: ${ASSAY_MUTATION_JOBS}"
+          } >> "$GITHUB_STEP_SUMMARY"
