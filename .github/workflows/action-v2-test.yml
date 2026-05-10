@@ -13,14 +13,62 @@ permissions:
   security-events: write
 
 jobs:
-  test-no-bundles:
-    name: Test (no bundles - soft exit)
+  build-assay-cli:
+    name: Build Assay CLI Artifact
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build Assay CLI
+      - name: Build Assay CLI once
         run: cargo build --release -p assay-cli
+
+      - name: Package CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/action-v2-cli
+          cp target/release/assay dist/action-v2-cli/assay
+          chmod 0755 dist/action-v2-cli/assay
+          dist/action-v2-cli/assay --version | tee dist/action-v2-cli/assay.version
+          (
+            cd dist/action-v2-cli
+            sha256sum assay | tee assay.sha256
+            tar -czf ../assay-action-v2-cli-linux-x64.tar.gz assay assay.sha256 assay.version
+          )
+          echo "Packaged artifact:"
+          sha256sum dist/assay-action-v2-cli-linux-x64.tar.gz
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist/assay-action-v2-cli-linux-x64.tar.gz
+          if-no-files-found: error
+
+  test-no-bundles:
+    name: Test (no bundles - soft exit)
+    runs-on: ubuntu-latest
+    needs: build-assay-cli
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Add CLI to PATH
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
@@ -31,11 +79,27 @@ jobs:
   test-with-bundle:
     name: Test (with valid bundle)
     runs-on: ubuntu-latest
+    needs: build-assay-cli
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build Assay CLI
-        run: cargo build --release -p assay-cli
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Setup evidence directory with fixture
         run: |
@@ -83,11 +147,27 @@ jobs:
   test-with-pack:
     name: Test (with compliance pack)
     runs-on: ubuntu-latest
+    needs: build-assay-cli
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build Assay CLI
-        run: cargo build --release -p assay-cli
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Setup evidence directory with fixture
         run: |
@@ -124,11 +204,27 @@ jobs:
   test-missing-pack-fails-cleanly:
     name: Test (missing compliance pack failure mode)
     runs-on: ubuntu-latest
+    needs: build-assay-cli
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build Assay CLI
-        run: cargo build --release -p assay-cli
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Setup evidence directory with fixture
         run: |
@@ -171,11 +267,27 @@ jobs:
   test-invalid-pack-fails-cleanly:
     name: Test (invalid compliance pack failure mode)
     runs-on: ubuntu-latest
+    needs: build-assay-cli
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Build Assay CLI
-        run: cargo build --release -p assay-cli
+      - name: Download CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
 
       - name: Setup evidence directory with fixture
         run: |
