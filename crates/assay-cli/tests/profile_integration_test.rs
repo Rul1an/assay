@@ -2,6 +2,11 @@ use assert_cmd::prelude::*;
 use std::process::Command;
 use tempfile::tempdir;
 
+#[cfg(unix)]
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 #[test]
 fn test_profile_cli_workflow() -> anyhow::Result<()> {
     let tmp = tempdir()?;
@@ -68,6 +73,34 @@ fn test_profile_json_output() -> anyhow::Result<()> {
     assert!(out_evidence.exists());
     let json_content = std::fs::read_to_string(out_json)?;
     assert!(json_content.contains("\"api_version\": 1"));
+
+    Ok(())
+}
+
+#[test]
+#[cfg(unix)]
+fn owasp_mcp05_sandbox_keeps_shell_metacharacters_as_argv() -> anyhow::Result<()> {
+    let tmp = tempdir()?;
+    let sentinel = tmp.path().join("injection-sentinel");
+    let quoted_sentinel = shell_single_quote(&sentinel.to_string_lossy());
+    let injection_arg = format!("; touch {quoted_sentinel}");
+
+    let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
+    cmd.arg("sandbox")
+        .arg("--quiet")
+        .arg("--")
+        .arg("sh")
+        .arg("-c")
+        .arg("printf safe")
+        .arg(&injection_arg);
+
+    let output = cmd.unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "safe");
+    assert!(
+        !sentinel.exists(),
+        "sandbox command construction executed shell metacharacters from argv"
+    );
 
     Ok(())
 }
