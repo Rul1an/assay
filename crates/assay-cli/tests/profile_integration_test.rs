@@ -71,3 +71,30 @@ fn test_profile_json_output() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[cfg(unix)]
+fn owasp_mcp05_sandbox_keeps_shell_metacharacters_as_argv() -> anyhow::Result<()> {
+    let tmp = tempdir()?;
+    let sentinel = tmp.path().join("injection-sentinel");
+    let injection_arg = format!("; touch {}", sentinel.display());
+
+    let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
+    cmd.arg("sandbox")
+        .arg("--quiet")
+        .arg("--")
+        .arg("sh")
+        .arg("-c")
+        .arg("printf safe")
+        .arg(&injection_arg);
+
+    let output = cmd.unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "safe");
+    assert!(
+        !sentinel.exists(),
+        "sandbox command construction executed shell metacharacters from argv"
+    );
+
+    Ok(())
+}

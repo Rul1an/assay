@@ -106,6 +106,98 @@ fn extract_error_code(resp: &Value) -> Option<String> {
 }
 
 #[test]
+fn owasp_mcp01_token_args_do_not_leak_to_proxy_logs() -> anyhow::Result<()> {
+    let assay = bin_path("assay")?;
+    let server = bin_path("assay-mcp-server")?;
+    assert!(assay.exists(), "missing binary: {}", assay.display());
+    assert!(server.exists(), "missing binary: {}", server.display());
+
+    let tmp = TempDir::new()?;
+    let policy_path = tmp.path().join("proxy-policy.yaml");
+    let policy_root = tmp.path().join("policy-root");
+    let audit_log = tmp.path().join("audit.ndjson");
+    let decision_log = tmp.path().join("decisions.ndjson");
+    std::fs::create_dir_all(&policy_root)?;
+
+    std::fs::write(
+        &policy_path,
+        r#"
+version: "2.0"
+name: "owasp-mcp01-token-log-fixture"
+tools:
+  allow: ["assay_check_args"]
+enforcement:
+  unconstrained_tools: allow
+"#,
+    )?;
+
+    let mut child = Command::new(&assay)
+        .args([
+            "mcp",
+            "wrap",
+            "--policy",
+            policy_path.to_string_lossy().as_ref(),
+            "--event-source",
+            "assay://tests/owasp-mcp01",
+            "--audit-log",
+            audit_log.to_string_lossy().as_ref(),
+            "--decision-log",
+            decision_log.to_string_lossy().as_ref(),
+            "--",
+            server.to_string_lossy().as_ref(),
+            "--policy-root",
+            policy_root.to_string_lossy().as_ref(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| format!("failed to spawn {}", assay.display()))?;
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let secret = "ghp_assay_fixture_DO_NOT_LEAK_0123456789";
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": "token-log-fixture",
+        "method": "tools/call",
+        "params": {
+            "name": "assay_check_args",
+            "arguments": {
+                "tool": "read_file",
+                "arguments": {
+                    "path": "/workspace/report.md",
+                    "authorization": secret
+                },
+                "policy": "version: \"2.0\"\ntools:\n  allow: [\"read_file\"]\nenforcement:\n  unconstrained_tools: allow\n"
+            }
+        }
+    });
+
+    send_line(&mut stdin, &req)?;
+    let _ = read_json_line(&mut reader, Duration::from_secs(5))?;
+    drop(stdin);
+    let _ = child.wait();
+
+    let audit = std::fs::read_to_string(&audit_log)?;
+    let decisions = std::fs::read_to_string(&decision_log)?;
+    assert!(
+        !audit.contains(secret),
+        "audit log leaked raw token-like argument: {audit}"
+    );
+    assert!(
+        !decisions.contains(secret),
+        "decision log leaked raw token-like argument: {decisions}"
+    );
+    assert!(audit.contains("assay_check_args"));
+    assert!(decisions.contains("assay_check_args"));
+
+    Ok(())
+}
+
+#[test]
 fn e2e_wrap_denies_wildcard_contains() -> anyhow::Result<()> {
     // Ensure binaries exist (nice error if not built)
     let assay = bin_path("assay")?;
