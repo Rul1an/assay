@@ -36,6 +36,7 @@ jobs:
       - name: Checkout target ref
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref }}
 
       - name: Install VHS runtime dependencies (pinned)
@@ -123,6 +124,7 @@ jobs:
       - name: Checkout target ref
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref }}
 
       - name: Download generated assets
@@ -142,10 +144,12 @@ jobs:
         shell: bash
         env:
           TARGET_REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
 
           git add -A demo/output
           if git diff --cached --quiet; then
@@ -156,9 +160,11 @@ jobs:
           git commit -m "chore: regenerate demo assets [skip ci]"
           TARGET_BRANCH="${TARGET_REF#refs/heads/}"
 
-          if ! git ls-remote --exit-code --heads origin "${TARGET_BRANCH}" >/dev/null 2>&1; then
+          if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            ls-remote --exit-code --heads origin "${TARGET_BRANCH}" >/dev/null 2>&1; then
             echo "Ref '${TARGET_REF}' is not a pushable remote branch."
             exit 1
           fi
 
-          git push origin "HEAD:${TARGET_BRANCH}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            push origin "HEAD:${TARGET_BRANCH}"
