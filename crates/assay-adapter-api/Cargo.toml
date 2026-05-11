@@ -7,6 +7,7 @@ repository.workspace = true
 authors.workspace = true
 description = "Protocol adapter API contracts for Assay evidence translation."
 readme.workspace = true
+publish = false
 
 [dependencies]
 assay-evidence = { path = "../assay-evidence", version = "3.0.0" }

@@ -7,6 +7,7 @@ repository.workspace = true
 authors.workspace = true
 description = "ACP protocol adapter for Assay evidence translation."
 readme.workspace = true
+publish = false
 
 [dependencies]
 assay-adapter-api = { path = "../assay-adapter-api", version = "3.0.0" }
