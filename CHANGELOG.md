@@ -4,12 +4,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-05-11
+
+This minor release turns the post-`v3.9.2` audit/refactor sweep into a
+versioned line. It focuses on maintainability, workflow security, evidence
+boundary tests, and release-operability. It does **not** add a new public
+claim-visible Trust Basis family, trust score, hosted service, compliance
+claim, or MCP registry publication claim.
+
+### Evidence Portability
+
+- Added the first bounded LiveKit tool-action importer slice for the P47
+  acted-family exploration. The importer keeps call/action pairing explicit and
+  stays in the same receipt-boundary discipline as the existing external
+  surfaces: bounded evidence in, no raw upstream transcript or transport state
+  as Assay truth, and no new Trust Basis claim family in this release.
+- Tightened external sample boundaries so fixture/documentation examples remain
+  clear about what is released, what is importer-only, and what remains
+  planning or probe material.
+
+### Refactor / Maintainability
+
+- Completed the Wave 51 hotspot split across the runner, sandbox, MCP proxy,
+  and Trust Basis areas while preserving stable public facades. The work moved
+  large implementation blocks into focused internal modules and added split
+  review artifacts/gates so future changes can be reviewed by boundary instead
+  of by monolithic files.
+- Added MCP proxy characterization contracts before splitting policy branches,
+  and froze Trust Basis behavior before moving generation, classifiers,
+  canonical serialization, and tests into a more maintainable layout.
+- Removed stale CLI/dead paths and pruned dependency hygiene drift without
+  changing supported behavior.
+
+### Security / Assurance
+
+- Hardened local MCP registry credential hygiene: `.mcpregistry_*` token files
+  are ignored, nested tracked/unignored token paths are guarded, and security
+  docs now call out rotation when local credentials may have leaked.
+- Added high-signal OWASP MCP security fixtures for token/log exposure,
+  metadata/tool poisoning, and sandbox command-injection boundaries.
+- Added opt-in public API and mutation smoke gates for critical pure modules,
+  including Trust Basis classifiers/diff logic and sandbox degradation helpers.
+
+### CI / Release
+
+- Reworked self-hosted runner health into a label-specific monitor that reports
+  real `assay-bpf-runner` backlog instead of generic GitHub queue pressure.
+- Skipped expensive Kernel Matrix artifact/self-hosted work before eBPF diff
+  detection when no eBPF files changed.
+- Reused built CLI artifacts across action contract tests instead of rebuilding
+  the release binary in every consumer job.
+- Added a high-confidence `zizmor` workflow-security lane, removed
+  high-confidence template-injection patterns, narrowed workflow permissions,
+  disabled persisted checkout credentials where not needed, and removed the
+  `pull_request_target` Dependabot maintenance path.
+- Replaced the third-party release creation action with native `gh release`
+  commands and disabled release build caches to remove cache-poisoning ambiguity
+  from the publish lane.
+
 ### Docs / Distribution
 
+- Led the README with explicit evidence levels (`verified`, `self_reported`,
+  `inferred`, `absent`) and a compact "what ships today" table before the
+  deeper Trust Compiler lineage.
 - Added an MCP Registry discovery audit and tightened MCP Registry publish
   docs around the canonical `io.github.Rul1an/assay-mcp-server` identity,
   release-attached `server.json`, stale legacy registry entry handling, and
   third-party directory freshness checks.
+- Documented the GitHub Action PATH compatibility contract and kept
+  release-truth wording explicit about what is merged, released, and separately
+  published.
 
 ## [3.9.2] - 2026-05-04
 
