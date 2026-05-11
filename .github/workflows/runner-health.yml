@@ -39,9 +39,19 @@ jobs:
         if: steps.check.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUNNER_STATUS: ${{ steps.check.outputs.runner_status }}
+          RUNNER_STATUS_ERROR: ${{ steps.check.outputs.runner_status_error }}
+          RUNNER_BUSY: ${{ steps.check.outputs.runner_busy }}
+          RUNNER_LABELS: ${{ steps.check.outputs.runner_labels }}
+          REQUIRED_RUNNER_LABEL: ${{ steps.check.outputs.required_runner_label }}
+          GENERAL_QUEUED_RUNS: ${{ steps.check.outputs.general_queued_runs }}
+          INSPECTED_WORKFLOW_RUNS: ${{ steps.check.outputs.inspected_workflow_runs }}
+          MATCHING_QUEUED_JOBS: ${{ steps.check.outputs.matching_queued_jobs }}
+          QUEUE_STATUS_ERROR: ${{ steps.check.outputs.queue_status_error }}
+          HEALTH_REASON: ${{ steps.check.outputs.health_reason }}
         run: |
           set -euo pipefail
-          REPO="${{ github.repository }}"
           TITLE="🚨 Self-hosted runner health needs attention"
 
           # Check if issue already exists. Some repos may not have the
@@ -54,23 +64,25 @@ jobs:
           fi
 
           if [[ "$EXISTING" -eq 0 ]]; then
-            ISSUE_BODY="## Runner Health Alert
+            detected_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            ISSUE_BODY="$(cat <<EOF
+          ## Runner Health Alert
 
           The self-hosted runner \`assay-bpf-runner\` needs attention for label-specific queue health.
 
           ### Details
           - **Runner:** assay-bpf-runner
-          - **Status:** ${{ steps.check.outputs.runner_status }}
-          - **Status Error:** ${{ steps.check.outputs.runner_status_error }}
-          - **Busy:** ${{ steps.check.outputs.runner_busy }}
-          - **Runner Labels:** ${{ steps.check.outputs.runner_labels }}
-          - **Required Label:** ${{ steps.check.outputs.required_runner_label }}
-          - **General Queued Workflow Runs:** ${{ steps.check.outputs.general_queued_runs }}
-          - **Inspected Workflow Runs:** ${{ steps.check.outputs.inspected_workflow_runs }}
-          - **Matching Queued Jobs:** ${{ steps.check.outputs.matching_queued_jobs }}
-          - **Queue Classification Error:** ${{ steps.check.outputs.queue_status_error }}
-          - **Health Reason:** ${{ steps.check.outputs.health_reason }}
-          - **Detected:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          - **Status:** ${RUNNER_STATUS}
+          - **Status Error:** ${RUNNER_STATUS_ERROR}
+          - **Busy:** ${RUNNER_BUSY}
+          - **Runner Labels:** ${RUNNER_LABELS}
+          - **Required Label:** ${REQUIRED_RUNNER_LABEL}
+          - **General Queued Workflow Runs:** ${GENERAL_QUEUED_RUNS}
+          - **Inspected Workflow Runs:** ${INSPECTED_WORKFLOW_RUNS}
+          - **Matching Queued Jobs:** ${MATCHING_QUEUED_JOBS}
+          - **Queue Classification Error:** ${QUEUE_STATUS_ERROR}
+          - **Health Reason:** ${HEALTH_REASON}
+          - **Detected:** ${detected_at}
 
           ### Recovery Steps
 
@@ -95,7 +107,9 @@ jobs:
           - Runner token expired
           - Network issues
 
-          This issue will auto-close when the label-specific health alert condition clears."
+          This issue will auto-close when the label-specific health alert condition clears.
+          EOF
+          )"
 
             if gh issue create --repo "$REPO" \
               --title "$TITLE" \
@@ -118,9 +132,9 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          REPO="${{ github.repository }}"
           TITLE="🚨 Self-hosted runner health needs attention"
 
           # Find and close any open runner-health issues. Fall back to title
