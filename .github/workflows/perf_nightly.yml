@@ -120,11 +120,13 @@ jobs:
           retention-days: 90
 
       - name: Trend summary
+        env:
+          FORENSIC_STATUS: ${{ steps.forensic.outputs.forensic_status }}
         run: |
           {
             echo "## Trend Analysis"
             echo ""
-            echo "Status: ${{ steps.forensic.outputs.forensic_status }}"
+            echo "Status: ${FORENSIC_STATUS}"
             echo ""
             echo "View historical artifacts to track trends over time."
             echo ""
