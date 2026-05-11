@@ -128,20 +128,26 @@ jobs:
           fail_on: none
 
       - name: Check outputs
+        env:
+          ASSAY_VERIFIED: ${{ steps.assay.outputs.verified }}
+          ASSAY_FINDINGS_ERROR: ${{ steps.assay.outputs.findings_error }}
+          ASSAY_FINDINGS_WARN: ${{ steps.assay.outputs.findings_warn }}
         run: |
-          echo "Verified: ${{ steps.assay.outputs.verified }}"
-          echo "Errors: ${{ steps.assay.outputs.findings_error }}"
-          echo "Warnings: ${{ steps.assay.outputs.findings_warn }}"
+          echo "Verified: ${ASSAY_VERIFIED}"
+          echo "Errors: ${ASSAY_FINDINGS_ERROR}"
+          echo "Warnings: ${ASSAY_FINDINGS_WARN}"
 
           # Verify outputs are set correctly
-          if [ "${{ steps.assay.outputs.verified }}" != "true" ]; then
+          if [ "${ASSAY_VERIFIED}" != "true" ]; then
             echo "ERROR: Expected verified=true"
             exit 1
           fi
 
       - name: Verify reports created
+        env:
+          ASSAY_REPORTS_DIR: ${{ steps.assay.outputs.reports_dir }}
         run: |
-          echo "Reports dir: ${{ steps.assay.outputs.reports_dir }}"
+          echo "Reports dir: ${ASSAY_REPORTS_DIR}"
           echo "Checking .assay-reports/ directory..."
           ls -la .assay-reports/ || echo "Directory not found"
 
@@ -202,17 +208,21 @@ jobs:
           pack: eu-ai-act-baseline
 
       - name: Validate pack outputs
+        env:
+          PACK_STATUS: ${{ steps.assay_pack.outputs.pack_status }}
+          RESOLVED_PACK_REFS: ${{ steps.assay_pack.outputs.resolved_pack_refs }}
+          PACK_SCORE: ${{ steps.assay_pack.outputs.pack_score }}
         run: |
-          echo "Pack status: ${{ steps.assay_pack.outputs.pack_status }}"
-          echo "Resolved packs: ${{ steps.assay_pack.outputs.resolved_pack_refs }}"
-          echo "Pack score: ${{ steps.assay_pack.outputs.pack_score }}"
+          echo "Pack status: ${PACK_STATUS}"
+          echo "Resolved packs: ${RESOLVED_PACK_REFS}"
+          echo "Pack score: ${PACK_SCORE}"
 
-          if [ "${{ steps.assay_pack.outputs.pack_status }}" != "success" ]; then
+          if [ "${PACK_STATUS}" != "success" ]; then
             echo "ERROR: expected pack_status=success"
             exit 1
           fi
 
-          if [ -z "${{ steps.assay_pack.outputs.resolved_pack_refs }}" ]; then
+          if [ -z "${RESOLVED_PACK_REFS}" ]; then
             echo "ERROR: expected resolved_pack_refs to be set"
             exit 1
           fi
@@ -265,22 +275,26 @@ jobs:
           pack: definitely-not-a-real-pack
 
       - name: Validate failure mode outputs
+        env:
+          STEP_OUTCOME: ${{ steps.assay_missing_pack.outcome }}
+          PACK_STATUS: ${{ steps.assay_missing_pack.outputs.pack_status }}
+          PACK_ERROR_KIND: ${{ steps.assay_missing_pack.outputs.pack_error_kind }}
         run: |
-          echo "Step outcome: ${{ steps.assay_missing_pack.outcome }}"
-          echo "Pack status: ${{ steps.assay_missing_pack.outputs.pack_status }}"
-          echo "Pack error kind: ${{ steps.assay_missing_pack.outputs.pack_error_kind }}"
+          echo "Step outcome: ${STEP_OUTCOME}"
+          echo "Pack status: ${PACK_STATUS}"
+          echo "Pack error kind: ${PACK_ERROR_KIND}"
 
-          if [ "${{ steps.assay_missing_pack.outcome }}" != "failure" ]; then
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
             echo "ERROR: expected action step to fail on missing pack"
             exit 1
           fi
 
-          if [ "${{ steps.assay_missing_pack.outputs.pack_status }}" != "missing_pack" ]; then
+          if [ "${PACK_STATUS}" != "missing_pack" ]; then
             echo "ERROR: expected pack_status=missing_pack"
             exit 1
           fi
 
-          if [ "${{ steps.assay_missing_pack.outputs.pack_error_kind }}" != "missing_pack" ]; then
+          if [ "${PACK_ERROR_KIND}" != "missing_pack" ]; then
             echo "ERROR: expected pack_error_kind=missing_pack"
             exit 1
           fi
@@ -344,22 +358,26 @@ jobs:
           pack: ./invalid-pack.yaml
 
       - name: Validate invalid-pack failure mode outputs
+        env:
+          STEP_OUTCOME: ${{ steps.assay_invalid_pack.outcome }}
+          PACK_STATUS: ${{ steps.assay_invalid_pack.outputs.pack_status }}
+          PACK_ERROR_KIND: ${{ steps.assay_invalid_pack.outputs.pack_error_kind }}
         run: |
-          echo "Step outcome: ${{ steps.assay_invalid_pack.outcome }}"
-          echo "Pack status: ${{ steps.assay_invalid_pack.outputs.pack_status }}"
-          echo "Pack error kind: ${{ steps.assay_invalid_pack.outputs.pack_error_kind }}"
+          echo "Step outcome: ${STEP_OUTCOME}"
+          echo "Pack status: ${PACK_STATUS}"
+          echo "Pack error kind: ${PACK_ERROR_KIND}"
 
-          if [ "${{ steps.assay_invalid_pack.outcome }}" != "failure" ]; then
+          if [ "${STEP_OUTCOME}" != "failure" ]; then
             echo "ERROR: expected action step to fail on invalid pack"
             exit 1
           fi
 
-          if [ "${{ steps.assay_invalid_pack.outputs.pack_status }}" != "invalid_pack" ]; then
+          if [ "${PACK_STATUS}" != "invalid_pack" ]; then
             echo "ERROR: expected pack_status=invalid_pack"
             exit 1
           fi
 
-          if [ "${{ steps.assay_invalid_pack.outputs.pack_error_kind }}" != "invalid_pack" ]; then
+          if [ "${PACK_ERROR_KIND}" != "invalid_pack" ]; then
             echo "ERROR: expected pack_error_kind=invalid_pack"
             exit 1
           fi
