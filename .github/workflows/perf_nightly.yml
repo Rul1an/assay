@@ -130,5 +130,5 @@ jobs:
             echo ""
             echo "View historical artifacts to track trends over time."
             echo ""
-            echo "Bencher dashboard: https://bencher.dev/perf/${{ secrets.BENCHER_PROJECT }}"
+            echo "Bencher dashboard: configured through BENCHER_PROJECT"
           } >> "$GITHUB_STEP_SUMMARY"
