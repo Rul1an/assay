@@ -64,6 +64,8 @@ jobs:
 
       - name: Prove cache hit (job summary)
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.assay-cache.outputs.cache-hit }}
         run: |
-          echo "cache-hit=${{ steps.assay-cache.outputs.cache-hit }}"
-          echo "cache-hit=${{ steps.assay-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "cache-hit=${CACHE_HIT}"
+          echo "cache-hit=${CACHE_HIT}" >> "$GITHUB_STEP_SUMMARY"

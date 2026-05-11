@@ -105,8 +105,10 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true' && steps.create_pr.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          CREATED_PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
+          REPO: ${{ github.repository }}
         run: |
-          pr_number="${{ steps.create_pr.outputs.pull-request-number }}"
+          pr_number="${CREATED_PR_NUMBER}"
           head_sha="$(gh pr view "$pr_number" --json headRefOid --jq '.headRefOid')"
           payload_file="$(mktemp)"
           jq -n \
@@ -122,7 +124,7 @@ jobs:
                 summary: $summary
               }
             }' > "$payload_file"
-          gh api "repos/${{ github.repository }}/check-runs" \
+          gh api "repos/${REPO}/check-runs" \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             --input "$payload_file"
@@ -132,4 +134,5 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true' && steps.create_pr.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr merge "${{ steps.create_pr.outputs.pull-request-number }}" --auto --squash
+          CREATED_PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
+        run: gh pr merge "$CREATED_PR_NUMBER" --auto --squash

@@ -251,9 +251,11 @@ jobs:
           if-no-files-found: ignore
       - name: Prove cache hit (job summary)
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
         run: |
-          echo "cache-hit=${{ steps.rust-cache.outputs.cache-hit }}"
-          echo "cache-hit=${{ steps.rust-cache.outputs.cache-hit }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "cache-hit=${CACHE_HIT}"
+          echo "cache-hit=${CACHE_HIT}" >> "$GITHUB_STEP_SUMMARY"
 
   test:
     name: Build + Test (${{ matrix.os }})
