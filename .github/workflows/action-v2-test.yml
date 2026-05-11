@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'assay-action/**'
+      - 'tests/fixtures/evidence/**'
       - '.github/workflows/action-v2-test.yml'
 
 permissions:
