@@ -595,8 +595,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          assets=(release/*)
+          assets=()
+          while IFS= read -r -d '' asset; do
+            assets+=("$asset")
+          done < <(find release -maxdepth 1 -type f -print0 | sort -z)
           if [[ ${#assets[@]} -eq 0 ]]; then
             echo "::error::No release assets found in release/."
             exit 1
