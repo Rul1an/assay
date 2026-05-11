@@ -30,7 +30,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install Linux deps
         shell: bash
         run: |
@@ -39,7 +39,7 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -o Acquire::Retries=10 -o Acquire::http::Timeout=60 -o Acquire::https::Timeout=60
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt
       - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
