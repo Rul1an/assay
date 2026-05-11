@@ -5,6 +5,7 @@ edition = "2021"
 description = "Python bindings for Assay trace capture, policy coverage, and explanation helpers."
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lints]
 workspace = true

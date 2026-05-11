@@ -19,6 +19,12 @@ The release workflow can publish crates to crates.io through:
 
 At the moment, that publish list does **not** include the adapter crates.
 
+Historical note: `assay-adapter-api` has already appeared on crates.io
+through `3.2.3`. That historical publication does not define the current
+release-line contract. Current `main` treats every ADR-026 adapter crate,
+including `assay-adapter-api`, as source/workspace-internal until a future
+distribution freeze explicitly changes that.
+
 ## Decision
 For the current ADR-026 line, the adapter crates remain **workspace-internal open-core crates**.
 
@@ -42,7 +48,7 @@ This means:
 
 ## Distribution Contract (v1)
 Until a new freeze slice says otherwise:
-- `assay-adapter-api` is not published to crates.io
+- `assay-adapter-api` is not published to crates.io by current release automation; historical crates.io versions may exist
 - `assay-adapter-acp` is not published to crates.io
 - `assay-adapter-a2a` is not published to crates.io
 - `assay-adapter-ucp` is not published to crates.io

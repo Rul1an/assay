@@ -39,7 +39,8 @@ If budget is exceeded:
 
 ## Semver allowlist (public crates)
 
-Wave 0 semver gate runs on this allowlist:
+Wave 0 semver gate runs on the library-API subset of the current public
+crates.io contract:
 
 - `assay-common`
 - `assay-policy`
@@ -49,6 +50,13 @@ Wave 0 semver gate runs on this allowlist:
 - `assay-evidence`
 
 Checks are still conditional on touched/global change detection.
+
+The full current crates.io publish contract is enforced separately by
+`scripts/ci/check-public-crate-policy.sh` and `scripts/ci/publish_idempotent.sh`.
+Binary- or operational-facing crates such as `assay-cli`, `assay-monitor`,
+`assay-mcp-server`, and `assay-sim` are published, but are not part of this
+Wave 0 library semver allowlist unless a future gate slice adds stable library
+API coverage for them.
 
 ## Nightly safety lane (Wave 0.1)
 

@@ -14,17 +14,26 @@ This document outlines the canonical checklist for releasing new versions of Ass
 - [ ] **Lints**: Run `cargo clippy --workspace --all-targets` to ensure no new warnings.
 
 ### 2. Permissions Check (Crucial)
-- [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the new version tag.
-- [ ] **Crate Ownership**: Verify `crates.io` ownership for *all* workspace members:
-  - `assay-core`
-  - `assay-cli`
+- [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:
   - `assay-common`
-  - `assay-monitor`
-  - `assay-ebpf` (if published separately)
-  - `assay-mcp-server`
+  - `assay-registry`
+  - `assay-evidence`
+  - `assay-core`
   - `assay-metrics`
   - `assay-policy`
+  - `assay-mcp-server`
+  - `assay-monitor`
+  - `assay-sim`
+  - `assay-cli`
+- [ ] **Non-crates.io workspace members**: Confirm these remain `publish = false` unless a dedicated distribution freeze changes the contract:
+  - `assay-adapter-api` (historical crates.io versions exist, but the current release line does not publish it)
+  - `assay-adapter-acp`
+  - `assay-adapter-a2a`
+  - `assay-adapter-ucp`
+  - `assay-it` (distributed through PyPI wheels, not crates.io)
+  - `assay-ebpf`
   - `assay-xtask`
+- [ ] **Public Crate Policy Check**: Run `bash scripts/ci/check-public-crate-policy.sh`.
 - [ ] **Token Scopes**: If using a token fallback, ensure it has `publish-update` scope.
 
 ### 3. Execution
@@ -60,6 +69,10 @@ This document outlines the canonical checklist for releasing new versions of Ass
 ### HTTP 403 Forbidden
 *   **Cause**: Missing ownership or Trusted Publishing not configured for a specific crate.
 *   **Fix**: Go to crates.io settings for the failing crate and add the GitHub repository as a Trusted Publisher.
+
+### Token not valid for crate
+*   **Cause**: A crate in the current public release contract is missing a Trusted Publishing grant.
+*   **Fix**: Configure crates.io Trusted Publishing for that crate. The release intentionally fails instead of silently skipping a public crate and creating release drift.
 
 ### "Crate already uploaded"
 *   **Cause**: Partial failure in a previous run.
