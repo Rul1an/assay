@@ -15,6 +15,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Cache Assay store (baseline-gate)
         id: assay-cache
@@ -30,10 +32,13 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           BASE="${BASE_REF}"
-          git fetch origin "$BASE" --depth=1 || echo "Base not found"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            fetch origin "$BASE" --depth=1 || echo "Base not found"
 
           # In a real setup we'd fetch baseline from artifact/main
           # For this demo we use local baseline.json
