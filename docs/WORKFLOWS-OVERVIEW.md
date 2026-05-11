@@ -20,7 +20,7 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 | **Smoke Install** | `smoke-install.yml` | pull_request, push (main), workflow_dispatch | assay | E2E: install from source, migrate --check, assay ci (contract pass.yaml), JUnit artifact + test reporter. |
 | **Parity Tests** | `parity.yml` | push (main, paths: assay-core, assay-metrics, assay-mcp-server), pull_request, workflow_dispatch | parity, integration-parity | Batch vs streaming parity (assay run vs MCP server); latency benchmark; release blocker. |
 | **Kernel Matrix CI** | `kernel-matrix.yml` | pull_request (paths: eBPF/CLI/evidence/sim/monitor/scripts/Cargo.*), push (main, debug/**) | lint, build-artifacts, matrix-test | Pre-commit lint, build eBPF+CLI op Ubuntu ARM, matrix-test op self-hosted (kernels 5.15, 6.6). |
-| **Action v2 Test** | `action-v2-test.yml` | workflow_dispatch, push (main, paths: assay-action/**, workflow) | test-no-bundles, test-with-bundle | Test assay-action: zonder bundles (soft exit), met bundle (outputs verified/findings). |
+| **Action v2 Test** | `action-v2-test.yml` | workflow_dispatch, push (main, paths: assay-action/**, tests/fixtures/evidence/**, .github/workflows/action-v2-test.yml) | test-no-bundles, test-with-bundle | Test assay-action: zonder bundles (soft exit), met bundle (outputs verified/findings). |
 | **assay-action-contract-tests** | `action-tests.yml` | workflow_dispatch, push (main), pull_request | pack_lint_baseline, fork_pr_sarif_skip, oidc_provider_detection, attestation_conditional, coverage_calculation, smoke_monorepo_workdir, export_baseline_artifact | Contract tests voor GitHub Action: pack lint (eu-ai-act-baseline), fork/SARIF-skip, OIDC/store-URL, attestation logic, coverage, monorepo workdir, baseline artifact. |
 
 **Branch protection (main):** Required status checks voor merge zijn **CI**, **Smoke Install (E2E)**, **assay-action-contract-tests** en **MCP Security (Assay)**. Zie [Branch protection setup](BRANCH-PROTECTION-SETUP.md).
@@ -298,7 +298,7 @@ flowchart TB
 | Aspect | Beschrijving |
 |--------|---------------|
 | **Doel** | assay-action testen: zonder bundles (soft exit) en met bundle (outputs). |
-| **Triggers** | workflow_dispatch; push main (paths: assay-action/**, workflow). |
+| **Triggers** | workflow_dispatch; push main (paths: assay-action/**, tests/fixtures/evidence/**, workflow). |
 | **Jobs** | **test-no-bundles**, **test-with-bundle:** build CLI, (optioneel) fixture in .assay/evidence, run action, check outputs. |
 | **Assessment** | Paths beperken tot action-wijzigingen; twee scenario’s voor betere dekking. |
 

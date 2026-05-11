@@ -15,9 +15,11 @@ fn create_event(event_type: &str, subject: &str, seq: u64) -> EvidenceEvent {
         "ci-test-run-001",
         seq,
         serde_json::json!({
+            "build_id": "ci-test-run-001",
             "test": true,
             "seq": seq,
-            "subject": subject
+            "subject": subject,
+            "version": "fixture-1.0.0"
         }),
     );
     event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
@@ -62,8 +64,10 @@ fn generate_test_bundle_fixture() {
             "ci-test-run-001",
             4,
             serde_json::json!({
+                "build_id": "ci-test-run-001",
                 "event_count": 5,
-                "status": "ok"
+                "status": "ok",
+                "version": "fixture-1.0.0"
             }),
         );
         finish_event.time = Utc.timestamp_opt(1700000004, 0).unwrap();

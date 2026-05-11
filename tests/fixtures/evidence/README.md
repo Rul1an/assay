@@ -23,6 +23,7 @@ These fixtures are the **normative compliance target** for Evidence Contract v1.
 
 - **Command (from workspace root):**
   `cargo test -p assay-evidence --test generate_fixture -- --ignored --nocapture`
+- **CI pack signal:** The generated smoke events include `data.build_id` and `data.version` so `action-v2-test.yml` produces clean SARIF with the default `cicd-starter` pack.
 - **Toolchain:** Use the same Rust version and crate features as CI (see `rust-toolchain.toml` or CI workflow).
 - **Pinned hashes (exact location):** `crates/assay-evidence/tests/determinism_test.rs`, test `test_golden_hash`. These pins apply to the *in-memory* bundle generated in that test, not to `test-bundle.tar.gz`. The three pinned values are the hex strings in the `assert_eq!` calls: (1) `hash_bytes(&manifest)`, (2) `hash_bytes(&events)`, (3) `_container_hash`. To find them: `rg "assert_eq!" crates/assay-evidence/tests/determinism_test.rs -A 1` and look at the block inside `test_golden_hash`. Update these assertions only when the writer or event *format* changes.
 
