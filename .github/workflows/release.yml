@@ -171,8 +171,9 @@ jobs:
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           ARCHIVE_NAME="assay-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${ARCHIVE_NAME}"
           cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "dist/${ARCHIVE_NAME}/"
@@ -184,8 +185,10 @@ jobs:
       - name: Package (Windows)
         if: matrix.archive == 'zip'
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $VERSION = "${{ steps.version.outputs.version }}"
+          $VERSION = $env:VERSION
           $ARCHIVE_NAME = "assay-${VERSION}-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist\${ARCHIVE_NAME}"
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.artifact }}" "dist\${ARCHIVE_NAME}\"
@@ -296,8 +299,9 @@ jobs:
 
       - name: Package assay-mcp-server
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           ARCHIVE_NAME="assay-mcp-server-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${ARCHIVE_NAME}"
           cp "target/${{ matrix.target }}/release/assay-mcp-server" "dist/${ARCHIVE_NAME}/"
@@ -360,9 +364,10 @@ jobs:
 
       - name: Generate CycloneDX SBOM bundle
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
 
           cargo cyclonedx \
             --format json \
@@ -392,9 +397,10 @@ jobs:
 
       - name: Build assay-mcp-server MCPB
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
           bash scripts/ci/build_mcpb_bundle.sh \
             --version-tag "${VERSION}" \
             --linux-x86-archive "release/assay-mcp-server-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
@@ -403,12 +409,14 @@ jobs:
 
       - name: Render generated registry metadata
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
           MCPB_FILE="release/assay-mcp-server-${VERSION}-linux.mcpb"
           MCPB_SHA="$(cut -d' ' -f1 "${MCPB_FILE}.sha256")"
-          MCPB_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/$(basename "${MCPB_FILE}")"
+          MCPB_URL="https://github.com/${REPO}/releases/download/${VERSION}/$(basename "${MCPB_FILE}")"
           bash scripts/ci/render_registry_server_json.sh \
             --version-tag "${VERSION}" \
             --mcpb-url "${MCPB_URL}" \
@@ -526,11 +534,12 @@ jobs:
         id: notes
         env:
           REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           cat > release_notes.md << 'EOF'
-          ## Assay ${{ steps.version.outputs.version }}
+          ## Assay __VERSION__
 
           Deterministic policy enforcement, canonical evidence, and reviewable trust artifacts for AI agent systems.
 
@@ -565,7 +574,19 @@ jobs:
 
           See [CHANGELOG.md](__CHANGELOG_URL__) for details.
           EOF
-          sed -i "s|__CHANGELOG_URL__|https://github.com/${REPO}/blob/main/CHANGELOG.md|g" release_notes.md
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          notes = Path("release_notes.md")
+          text = notes.read_text()
+          text = text.replace("__VERSION__", os.environ["VERSION"])
+          text = text.replace(
+              "__CHANGELOG_URL__",
+              f"https://github.com/{os.environ['REPO']}/blob/main/CHANGELOG.md",
+          )
+          notes.write_text(text)
+          PY
 
       - name: Create GitHub Release
         env:
