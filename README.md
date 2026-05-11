@@ -21,9 +21,9 @@
 
 Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and what can you honestly **prove** about that run afterward?
 
-**Assay compiles agent runtime signals and selected external outcomes into verifiable evidence and bounded Trust Basis claims.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The product story is broader: canonical **evidence**, **bounded trust claims** (what is verified vs merely visible), and outputs you can hand to CI, security review, or audit — without a hosted backend.
+**Assay turns agent tool/runtime outcomes into reviewable evidence artifacts with explicit evidence levels: `verified`, `self_reported`, `inferred`, or `absent`.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The broader output is canonical **evidence**, bounded Trust Basis claims, Trust Cards, SARIF, and CI gates you can hand to review without a hosted backend.
 
-**Positioning:** Assay is best understood as a **CI-native protocol-governance layer**: canonical evidence compiler + protocol-aware policy checks. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer. See [What Assay is and is not](docs/concepts/scope.md) for the current boundary.
+**Positioning:** Assay is a **CI-native evidence compiler for agent governance**. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer. See [What Assay is and is not](docs/concepts/scope.md) for the current boundary.
 
 | | |
 |---|---|
@@ -33,7 +33,29 @@ Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and wh
 
 No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
 
-> **Trust Compiler line:** Release **v3.8.0** is the first machine-readable receipt-contract line for the three-family evidence-portability surface. The **v3.9.0** line makes that surface directly assertable, inspectable, reviewable, and digest-bound on supported MCP decision evidence. The **v3.9.1** patch line publishes the public three-family evidence receipts note under an immutable release tag; the **v3.9.2** patch line prepares the proof page, assurance mapping note, and P57 seeding pack for the same release-truth discipline without adding a new public claim-visible family. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`), **`v3.5.1`** as the official-MCP-Registry publication foundation for `assay-mcp-server`, **`v3.6.0`** as the first external-eval receipt lane for Promptfoo assertion-component results, and **`v3.7.0`** as the first claim-visible runtime decision and model inventory/provenance line. **`v3.8.0`** adds JSON Schema contracts for the bounded receipt/import surfaces; **`v3.9.0`** adds `trust-basis assert`, `evidence schema` CLI access, static Trust Card HTML, and policy/tool digest visibility for supported MCP decisions. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+## Evidence levels
+
+Trust claims use explicit **epistemology**, not a single “safety score”:
+
+| Level | Meaning |
+|-------|---------|
+| `verified` | Backed by direct evidence or offline verification in the bundle/path |
+| `self_reported` | Emitted by the system without stronger independent corroboration |
+| `inferred` | Derived from bounded, documented rules |
+| `absent` | No trustworthy evidence supports the claim |
+
+Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge as the main output. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
+
+## What ships today
+
+| Output | Role |
+|--------|------|
+| **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run (see CLI note below the diagram). |
+| **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
+| **External receipts** | Selected eval outcomes, runtime decision details, and inventory/provenance surfaces as bounded evidence receipts with JSON Schema contracts. |
+| **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
+| **Trust Card** | `trustcard.json` / `trustcard.md` / `trustcard.html` — same claims, review-friendly artifacts. |
+| **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
 
 > **Repository truth:** release notes and [CHANGELOG.md](CHANGELOG.md) remain the authority for what is actually public. `main` may carry release-prep commits before a tag is cut; crates.io publication is separate from repository merge state.
 
@@ -96,29 +118,12 @@ assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 
 In the `v3.8.0` and later lines, supported external eval outcomes, runtime decision details, and model inventory/provenance surfaces can enter this compiler path as bounded receipts rather than full upstream truth, with machine-readable JSON Schema contracts for the supported receipt/import surfaces. The first three claim-visible families are Promptfoo assertion-component results, OpenFeature boolean `EvaluationDetails`, and CycloneDX ML-BOM model components; [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the three-family surface, and [Evidence Receipts in Action](docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) shows the same path with small checked-in artifacts generated from released Assay/Harness versions. The `v3.9.0` line adds direct Trust Basis assertions, CLI schema inspection/validation, static Trust Card HTML, and MCP policy/tool digest visibility as review surfaces; those additions do not create new receipt families or new Trust Basis claims.
 
-## What you get
+<details>
+<summary>Trust Compiler release line</summary>
 
-| Output | Role |
-|--------|------|
-| **Policy gate** | MCP `wrap` — deterministic allow/deny before tools run (see CLI note above the diagram). |
-| **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
-| **External receipts** | `v3.8.0` and later: selected eval outcomes, runtime decision details, and inventory/provenance surfaces as bounded evidence receipts with JSON Schema contracts. |
-| **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
-| **Trust Card** | `trustcard.json` / `trustcard.md` / `trustcard.html` — same claims, review-friendly artifacts. |
-| **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
+Release **v3.8.0** is the first machine-readable receipt-contract line for the three-family evidence-portability surface. The **v3.9.0** line makes that surface directly assertable, inspectable, reviewable, and digest-bound on supported MCP decision evidence. The **v3.9.1** patch line publishes the public three-family evidence receipts note under an immutable release tag; the **v3.9.2** patch line prepares the proof page, assurance mapping note, and P57 seeding pack for the same release-truth discipline without adding a new public claim-visible family. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`), **`v3.5.1`** as the official-MCP-Registry publication foundation for `assay-mcp-server`, **`v3.6.0`** as the first external-eval receipt lane for Promptfoo assertion-component results, and **`v3.7.0`** as the first claim-visible runtime decision and model inventory/provenance line. **`v3.8.0`** adds JSON Schema contracts for the bounded receipt/import surfaces; **`v3.9.0`** adds `trust-basis assert`, `evidence schema` CLI access, static Trust Card HTML, and policy/tool digest visibility for supported MCP decisions. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
 
-## Evidence levels (trust vocabulary)
-
-Trust claims use explicit **epistemology**, not a single “safety score”:
-
-| Level | Meaning |
-|-------|---------|
-| `verified` | Backed by direct evidence or offline verification in the bundle/path |
-| `self_reported` | Emitted by the system without stronger independent corroboration |
-| `inferred` | Derived from bounded, documented rules |
-| `absent` | No trustworthy evidence supports the claim |
-
-Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge as the main output. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
+</details>
 
 ## Is This For Me?
 
