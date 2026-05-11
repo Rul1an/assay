@@ -19,6 +19,15 @@ families or new Harness semantics.
   explains the first Promptfoo assertion-component receipt path as a downstream
   evidence-portability recipe.
 
+Operational status:
+
+- [State of Assay — 2026-05-11](STATE-OF-ASSAY-2026-05-11.md) records the
+  post-`v3.10.0` posture shift from hardening target to stable base layer,
+  and locates the next governance focus in Assay-Harness alignment.
+- [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
+  dismissed Security-tab alerts so the dismiss-state stays traceable rather
+  than implicit.
+
 For machine-readable receipt-family truth, use the
 [receipt family matrix](../reference/receipt-family-matrix.json) and
 [receipt schema registry](../reference/receipt-schemas/README.md).
