@@ -215,6 +215,7 @@ nav:
 
   - Use Cases:
     - use-cases/index.md
+    - Promptfoo JSONL Receipts: use-cases/evidence-receipts-from-promptfoo-jsonl.md
     - CI Regression Gate: use-cases/ci-gate.md
     - Trace-Driven Debugging: use-cases/debugging.md
     - Air-Gapped Enterprise: use-cases/air-gapped.md

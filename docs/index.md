@@ -14,6 +14,9 @@ enforcement is the wedge: Assay can sit between an agent and its tools, make
 deterministic allow/deny decisions, and preserve the evidence chain for CI,
 security review, and audit without a hosted backend.
 
+If you already have machine-readable AI run artifacts, start with the smallest
+receipt path: [Promptfoo JSONL to evidence receipts](use-cases/evidence-receipts-from-promptfoo-jsonl.md).
+
 ---
 
 ## Install
@@ -49,6 +52,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
     Compile verified bundles into Trust Basis claims and import bounded external receipt families for eval outcomes, runtime decisions, and model inventory.
 
     [:octicons-arrow-right-24: Receipt Matrix](reference/receipt-family-matrix.json)
+    [:octicons-arrow-right-24: Promptfoo JSONL Receipts](use-cases/evidence-receipts-from-promptfoo-jsonl.md)
 
 -   :material-key:{ .lg .middle } __Tool Signing__
 
@@ -141,6 +145,7 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 - [**Getting Started**](getting-started/index.md)
 - [**Scope & Boundaries**](concepts/scope.md)
 - [**Evidence Receipts Technical Note**](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md)
+- [**Promptfoo JSONL to Evidence Receipts**](use-cases/evidence-receipts-from-promptfoo-jsonl.md)
 - [**Evidence Receipt Assurance Mapping**](notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md)
 - [**Receipt Family Matrix**](reference/receipt-family-matrix.json)
 - [**Receipt Schema Registry**](reference/receipt-schemas/README.md)

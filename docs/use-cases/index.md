@@ -42,6 +42,15 @@ Assay is designed for teams building production AI agents. Here are the most com
 
     [:octicons-arrow-right-24: Learn more](self-correction.md)
 
+-   :material-receipt-text:{ .lg .middle } __Promptfoo JSONL Receipts__
+
+    ---
+
+    Turn selected Promptfoo assertion component results into bounded evidence
+    receipts for CI review.
+
+    [:octicons-arrow-right-24: Learn more](evidence-receipts-from-promptfoo-jsonl.md)
+
 </div>
 
 ---
@@ -54,6 +63,7 @@ Assay is designed for teams building production AI agents. Here are the most com
 | Trace-Driven Debugging | Fast root cause analysis | On-call Engineer |
 | Air-Gapped Enterprise | Compliance, privacy | Security, FinTech |
 | Agent Self-Correction | Runtime guardrails | Agent Developer |
+| Promptfoo JSONL Receipts | Reviewable eval evidence boundary | Platform, Security |
 
 ---
 
@@ -98,4 +108,5 @@ Assay is designed for teams building production AI agents. Here are the most com
 
 - [Quick Start](../getting-started/quickstart.md)
 - [Core Concepts](../concepts/index.md)
+- [Evidence Receipts from Promptfoo JSONL](evidence-receipts-from-promptfoo-jsonl.md)
 - [MCP Integration](../mcp/index.md)
