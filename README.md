@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>CI-native evidence compiler for MCP and A2A governance</strong><br />
-    <span>Deterministic policy enforcement, canonical evidence, and reviewable trust artifacts for agent systems.</span>
+    <strong>Evidence compiler for agent review artifacts</strong><br />
+    <span>Portable evidence receipts, verifiable bundles, and bounded Trust Basis claims for agent systems.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -20,23 +20,51 @@
 
 ---
 
-Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and what can you honestly **prove** about that run afterward?
+Use Assay if you already have machine-readable AI outcomes or agent tool-call tests and want a small reviewable artifact boundary in CI.
 
-**Assay turns agent tool/runtime outcomes into reviewable evidence artifacts with explicit evidence levels: `verified`, `self_reported`, `inferred`, or `absent`.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The broader output is canonical **evidence**, bounded Trust Basis claims, Trust Cards, SARIF, and CI gates you can hand to review without a hosted backend.
+Start with the path that matches what you already have:
 
-Already have machine-readable AI run artifacts? Start with the smallest adoption path: [Promptfoo JSONL to evidence receipts](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md).
+| You have | Use this when | What you get | Next click |
+|---|---|---|---|
+| Promptfoo JSONL from CI evals | You want smaller PR evidence than a full eval export | Eval outcome receipts, verified bundle, Trust Basis diff | [Promptfoo JSONL](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) |
+| MCP tool calls | You are ready to put a policy file around tool execution | Allow/deny audit trail and evidence for observed tool behavior | [MCP Quick Start](examples/mcp-quickstart/) |
+| A GitHub PR gate | You want CI to block regressions from checked artifacts | Trust Basis diff, gate status, SARIF/JUnit-ready output | [CI Guide](docs/guides/github-action.md) |
 
-**Positioning:** Assay is a **CI-native evidence compiler for agent governance**. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer. See [What Assay is and is not](docs/concepts/scope.md) for the current boundary.
+The core workflow is intentionally small: import or record a bounded outcome, bundle and verify it, compile `trust-basis.json`, then gate the Trust Basis diff. Assay does not make the upstream tool the source of truth; it makes the evidence boundary inspectable.
 
-| | |
-|---|---|
-| **Enforce** | Intercept MCP tool calls, apply policy, **ALLOW** / **DENY** deterministically. |
-| **Compile** | Turn traces, decisions, and bundles into **canonical evidence** — not raw OTel or ad hoc logs as truth. |
-| **Prove** | Export **tamper-evident bundles**, **Trust Basis** (`trust-basis.json`), **Trust Card** (`trustcard.json` / `trustcard.md` / `trustcard.html`), SARIF, and CI gates. |
+```text
+Trust Basis Gate
+Status: OK
+Bundles verified: 1
+Regressed claims: 0
+```
 
-No hosted backend. No API keys for core flows. **Deterministic** — same input, same decision, every time.
+Assay is not a trust-score engine, a generic eval dashboard, or a hosted observability product. See [What Assay is and is not](docs/concepts/scope.md) for the boundary.
 
-## Evidence levels
+## Is This For Me?
+
+**Yes, if you:**
+- already have eval output, runtime decisions, inventory artifacts, or MCP tool-call tests
+- want a CI review artifact instead of a dashboard-only result
+- need bounded auditability, not a scalar trust badge
+
+**Not yet, if you:**
+- need Assay to judge model correctness or policy quality for you
+- want a hosted dashboard as the primary product
+- want a compliance claim instead of a bounded evidence boundary
+
+## Install
+
+```bash
+cargo install assay-cli
+```
+
+CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). Python SDK: `pip install assay-it`.
+
+No hosted backend. No API keys for core flows. Deterministic: same input, same decision.
+
+<details>
+<summary>Evidence levels and non-goals</summary>
 
 Trust claims use explicit **epistemology**, not a single “safety score”:
 
@@ -48,6 +76,8 @@ Trust claims use explicit **epistemology**, not a single “safety score”:
 | `absent` | No trustworthy evidence supports the claim |
 
 Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge as the main output. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
+
+</details>
 
 ## What ships today
 
@@ -106,40 +136,28 @@ The bundle is tamper-evident and cryptographically verifiable. Signed mandate ev
 
 ### Trust artifacts from a verified bundle
 
-Install from [crates.io](https://crates.io/crates/assay-cli) or source (`cargo install --path crates/assay-cli`), then:
+After a bundle verifies, compile the claim artifact:
 
 ```bash
 # Machine-readable claim basis (deterministic, claim-first)
 assay trust-basis generate demo/fixtures/bundle.tar.gz > trust-basis.json
-
-# Human + machine Trust Card (schema v5 — ten trust claims; key by `id`, not row count)
-assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
-# → trust-out/trustcard.json , trust-out/trustcard.md , trust-out/trustcard.html
 ```
 
-`trust-basis.json` emits claims from a bounded, versioned vocabulary for this schema (examples: `bundle_verified`, `delegation_context_visible`, `authorization_context_visible`, `containment_degradation_observed`, `external_eval_receipt_boundary_visible`, `external_decision_receipt_boundary_visible`, `external_inventory_receipt_boundary_visible`, …). Claim `id` values are stable across runs, but consumers **must not** rely on row count or ordering; always key by `id`. It is **not** a scalar trust score. The Trust Card is a deterministic render of the same claim rows plus frozen non-goals; `trustcard.json` is canonical, while Markdown and static HTML are reviewer projections. **Contract versions, pack floors, and release checklist:** [docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [docs/reference/receipt-family-matrix.json](docs/reference/receipt-family-matrix.json).
+`trust-basis.json` is the canonical output for CI and review. Claim `id` values are stable across runs; consumers should key by `id`, not row count or order. It is not a scalar trust score.
 
-In the `v3.8.0` and later lines, supported external eval outcomes, runtime decision details, and model inventory/provenance surfaces can enter this compiler path as bounded receipts rather than full upstream truth, with machine-readable JSON Schema contracts for the supported receipt/import surfaces. The first three claim-visible families are Promptfoo assertion-component results, OpenFeature boolean `EvaluationDetails`, and CycloneDX ML-BOM model components; [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) explains the three-family surface, and [Evidence Receipts in Action](docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) shows the same path with small checked-in artifacts generated from released Assay/Harness versions. The `v3.9.0` line adds direct Trust Basis assertions, CLI schema inspection/validation, static Trust Card HTML, and MCP policy/tool digest visibility as review surfaces; those additions do not create new receipt families or new Trust Basis claims. The `v3.10.0` line is a release of hardening and maintainability: Wave 51 module splits, workflow-security gates, OWASP MCP fixtures, release-lane cleanup, and the first bounded LiveKit tool-action importer slice. It does not add a new claim-visible Trust Basis family.
+The current claim-visible receipt families are Promptfoo assertion-component results, OpenFeature boolean `EvaluationDetails`, and CycloneDX ML-BOM model components. See the [receipt-family matrix](docs/reference/receipt-family-matrix.json), the [three-family note](docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md), and [Evidence Receipts in Action](docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md).
 
 <details>
-<summary>Trust Compiler release line</summary>
+<summary>Trust Card details</summary>
 
-Release **v3.8.0** is the first machine-readable receipt-contract line for the three-family evidence-portability surface. The **v3.9.0** line makes that surface directly assertable, inspectable, reviewable, and digest-bound on supported MCP decision evidence. The **v3.9.1** patch line publishes the public three-family evidence receipts note under an immutable release tag; the **v3.9.2** patch line prepares the proof page, assurance mapping note, and P57 seeding pack for the same release-truth discipline without adding a new public claim-visible family. The **v3.10.0** line hardens the repository and release posture around that surface: Wave 51 internal splits, security fixtures/gates, runner and workflow-security cleanup, and a bounded LiveKit tool-action importer slice without a new claim-visible Trust Basis family. It carries forward **v3.3.0** as the first release that shipped **both** built-in evidence lint companion packs (`mcp-signal-followup`, `a2a-signal-followup`), **v3.4.0** as the public line for **`G4-A` Phase 1** (`payload.discovery`), built-in **`P2c`** (`a2a-discovery-card-followup`), **`K1-A` Phase 1** (`payload.handoff`), **`v3.5.0`** as the first public release of **`K2-A` Phase 1** (`episode_start.meta.mcp.authorization_discovery`), **`v3.5.1`** as the official-MCP-Registry publication foundation for `assay-mcp-server`, **`v3.6.0`** as the first external-eval receipt lane for Promptfoo assertion-component results, and **`v3.7.0`** as the first claim-visible runtime decision and model inventory/provenance line. **`v3.8.0`** adds JSON Schema contracts for the bounded receipt/import surfaces; **`v3.9.0`** adds `trust-basis assert`, `evidence schema` CLI access, static Trust Card HTML, and policy/tool digest visibility for supported MCP decisions. Pack YAML still distinguishes the substrate floor `>=3.2.3` from the G4-A / P2c floor `>=3.3.0` — see [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md).
+```bash
+assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
+# -> trust-out/trustcard.json , trust-out/trustcard.md , trust-out/trustcard.html
+```
+
+The Trust Card is a deterministic render of the same claim rows plus frozen non-goals; `trustcard.json` is canonical, while Markdown and static HTML are reviewer projections. Contract versions, pack floors, and release checklist: [MIGRATION — Trust Compiler 3.2](docs/architecture/MIGRATION-TRUST-COMPILER-3.2.md), [receipt-family matrix](docs/reference/receipt-family-matrix.json). Release history belongs in [CHANGELOG.md](CHANGELOG.md).
 
 </details>
-
-## Is This For Me?
-
-**Yes, if you:**
-- Build with Claude Desktop, Cursor, Windsurf, or any MCP client
-- Ship agents that call tools and you need to control which ones
-- Want a CI gate that catches tool-call regressions before production
-- Need **bounded auditability and trust artifacts**, not only sampled observability
-
-**Not yet, if you:**
-- Don't use MCP (Assay is MCP-native; other protocols use adapters)
-- Need a hosted dashboard (Assay is CLI-first and offline)
-- Want a magic trust score or badge as the main output
 
 ## Add to Cursor in 30 Seconds
 
@@ -198,7 +216,10 @@ Legacy `constraints:` policies still work. Use `assay policy migrate` for the v2
 
 See [Policy Files](docs/reference/config/policies.md).
 
-## OpenTelemetry In, Canonical Evidence Out
+<details>
+<summary>Other import paths and protocol adapters</summary>
+
+### OpenTelemetry in, canonical evidence out
 
 Assay ingests OpenTelemetry JSONL, builds replayable traces, and exports **canonical evidence** — OTel is a bridge, not the sole semantic authority.
 
@@ -210,6 +231,20 @@ assay trace ingest-otel \
 ```
 
 See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
+
+### Protocol adapters
+
+Assay ships adapters that map protocol events into **canonical evidence**:
+
+| Protocol | Adapter | What it maps |
+|----------|---------|--------------|
+| **ACP** (OpenAI/Stripe) | `assay-adapter-acp` | Checkout events, payment intents, tool calls |
+| **A2A** (Google) | `assay-adapter-a2a` | Agent capabilities, task delegation, artifacts |
+| **UCP** (Google/Shopify) | `assay-adapter-ucp` | Discover/buy/post-purchase state transitions |
+
+Adapter crates are workspace / binary-driven, not published as separate `crates.io` packages.
+
+</details>
 
 ## Add to CI
 
@@ -230,7 +265,7 @@ jobs:
 
 PRs that violate policy get blocked; SARIF can surface in the Security tab.
 
-## Why Assay (trust compiler)
+## Why Assay
 
 | | |
 |---|---|
@@ -241,21 +276,8 @@ PRs that violate policy get blocked; SARIF can surface in the Security tab.
 | **MCP-native wedge** | `assay mcp wrap` is the fast path (the `mcp` group is hidden from `assay --help`; use `assay mcp --help`). Adapters extend the same engine. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 
-## Beyond MCP: Protocol Adapters
-
-Assay ships adapters that map protocol events into **canonical evidence** (same policy and evidence story, different transports):
-
-| Protocol | Adapter | What it maps |
-|----------|---------|--------------|
-| **ACP** (OpenAI/Stripe) | `assay-adapter-acp` | Checkout events, payment intents, tool calls |
-| **A2A** (Google) | `assay-adapter-a2a` | Agent capabilities, task delegation, artifacts |
-| **UCP** (Google/Shopify) | `assay-adapter-ucp` | Discover/buy/post-purchase state transitions |
-
-Adapter crates are **workspace / binary–driven** (not published as separate `crates.io` packages); consume them via this repo or released **assay** builds.
-
-Governance stays protocol-agnostic; **the evidence and claim layer stays the same** as protocols evolve.
-
-## Measured Latency
+<details>
+<summary>Measured latency</summary>
 
 On the M1 Pro/macOS fragmented-IPI harness, protected tool-decision path:
 
@@ -264,13 +286,7 @@ On the M1 Pro/macOS fragmented-IPI harness, protected tool-decision path:
 
 These are tool-decision timings, not end-to-end model latency. (See [Research & experiments](#research-mappings-experiments) for methodology context.)
 
-## Install
-
-```bash
-cargo install assay-cli
-```
-
-CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). Python SDK: `pip install assay-it`
+</details>
 
 ## Learn More
 
