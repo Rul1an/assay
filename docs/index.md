@@ -16,6 +16,8 @@ security review, and audit without a hosted backend.
 
 If you already have machine-readable AI run artifacts, start with the smallest
 receipt path: [Promptfoo JSONL to evidence receipts](use-cases/evidence-receipts-from-promptfoo-jsonl.md).
+For runtime flag decisions, use the second adoption path:
+[OpenFeature EvaluationDetails to CI Review Artifact](use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md).
 
 ---
 
@@ -53,6 +55,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 
     [:octicons-arrow-right-24: Receipt Matrix](reference/receipt-family-matrix.json)
     [:octicons-arrow-right-24: Promptfoo JSONL Receipts](use-cases/evidence-receipts-from-promptfoo-jsonl.md)
+    [:octicons-arrow-right-24: OpenFeature Decision Receipts](use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md)
 
 -   :material-key:{ .lg .middle } __Tool Signing__
 
@@ -146,6 +149,7 @@ sudo assay monitor --policy policy.yaml --pid <agent-pid>
 - [**Scope & Boundaries**](concepts/scope.md)
 - [**Evidence Receipts Technical Note**](notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md)
 - [**Promptfoo JSONL to Evidence Receipts**](use-cases/evidence-receipts-from-promptfoo-jsonl.md)
+- [**OpenFeature EvaluationDetails to CI Review Artifact**](use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md)
 - [**Evidence Receipt Assurance Mapping**](notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md)
 - [**Receipt Family Matrix**](reference/receipt-family-matrix.json)
 - [**Receipt Schema Registry**](reference/receipt-schemas/README.md)
