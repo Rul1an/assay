@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-05-17
+
+This patch release packages the post-`v3.10.0` three-family adoption surface
+under one versioned Assay line. It focuses on release-truth and shareability:
+the proof page, longform receipt note, assurance mapping note, and three
+search-intent adoption pages now travel together under the same tag. It does
+**not** add runtime behavior, a new claim-visible receipt family, Harness
+semantics, a compliance claim, a partnership claim, or a hosted surface.
+
+### Docs / Adoption
+
+- Added three compact adoption paths for the released claim-visible receipt
+  families:
+  - [Evidence Receipts from Promptfoo JSONL](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md)
+    for selected eval outcome receipts.
+  - [OpenFeature EvaluationDetails to CI Review Artifact](docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md)
+    for bounded runtime decision receipts.
+  - [CycloneDX ML-BOM Model to Inventory Receipt](docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md)
+    for selected model inventory/provenance-reference receipts.
+- Updated README, docs homepage, use-cases index, and MkDocs navigation so the
+  three adoption routes appear in the intended order: Promptfoo first,
+  OpenFeature second, CycloneDX third.
+- Tightened the P57 ecosystem seeding pack around one release-truth line:
+  outward links for proof, theory, mapping, and adoption surfaces should use
+  this tag or a later release tag rather than `main`.
+
 ## [3.10.0] - 2026-05-11
 
 This minor release turns the post-`v3.9.2` audit/refactor sweep into a

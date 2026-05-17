@@ -1,9 +1,9 @@
 # P57 Ecosystem Seeding Pack
 
-> **Status:** ready for controlled seeding after Assay `v3.9.2`; one
-> Promptfoo-context follow-up has already been placed
+> **Status:** ready for controlled seeding after Assay `v3.10.1` is tagged;
+> one Promptfoo-context follow-up has already been placed
 >
-> **Last updated:** 2026-05-04
+> **Last updated:** 2026-05-17
 > **Scope:** small repo-native sharing pack for the released evidence receipt
 > surface. This is not a launch plan, campaign, partnership claim, compliance
 > claim, or new product wedge.
@@ -21,22 +21,29 @@ Short post line:
 
 | Role | Link | Use When |
 |---|---|---|
-| Primary proof | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | Use as the one-link repo-native proof entrypoint. This page is present in the `v3.9.2` tag. |
-| Assurance mapping | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | Use only for assurance-context replies after someone asks what review question each receipt family helps answer. |
-| Promptfoo context note | [From Promptfoo JSONL to Evidence Receipts](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) | Use only for an existing Promptfoo JSONL/assertion-results context. This note is present in the `v3.9.1` tag. |
-| Theory | [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) | Use as the read-more link when someone asks why receipts instead of broad integrations. |
+| Primary proof | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | Use as the one-link repo-native proof entrypoint after the `v3.10.1` tag is live. |
+| Theory | [Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPTS-FOR-AI-OUTCOMES-RUNTIME-DECISIONS-MODEL-INVENTORY.md) | Use as the read-more link when someone asks why receipts instead of broad integrations. |
+| Assurance mapping | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | Use only for assurance-context replies after someone asks what review question each receipt family helps answer. |
+| Promptfoo adoption | [Evidence Receipts from Promptfoo JSONL](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) | Use when someone wants the smallest eval-output adoption path. |
+| OpenFeature adoption | [OpenFeature EvaluationDetails to CI Review Artifact](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md) | Use when someone asks about runtime flag decision boundaries. |
+| CycloneDX adoption | [CycloneDX ML-BOM Model to Inventory Receipt](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) | Use when someone asks what model inventory/provenance boundary existed. |
+| Promptfoo context note | [From Promptfoo JSONL to Evidence Receipts](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) | Use only for an existing Promptfoo JSONL/assertion-results context. |
 | Runnable recipe | [Promptfoo receipt pipeline](https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/PROMPTFOO_RECEIPT_PIPELINE.md) | Use when someone wants to run the smallest released recipe immediately. |
 
-Now tagged in Assay `v3.9.2`:
+Do not use the `v3.10.1` links outward until the tag exists. Once tagged, this
+is the current released link set for the three-family adoption surface.
 
 - `EVIDENCE-RECEIPTS-IN-ACTION.md` is the primary proof page.
 - `EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md` is the second-layer assurance note.
+- the three use-case pages are the adoption surfaces for Promptfoo,
+  OpenFeature, and CycloneDX.
 
 Current allowed package:
 
 - proof: Evidence Receipts in Action
 - Promptfoo context: From Promptfoo JSONL to Evidence Receipts
 - theory: Evidence Receipts for AI Outcomes, Runtime Decisions, and Model Inventory
+- adoption: Promptfoo, OpenFeature, and CycloneDX use-case pages
 - recipe: Promptfoo receipt pipeline
 
 ## Repo-Native Post
@@ -67,12 +74,13 @@ can be bundled and verified, and the Trust Basis claim above it can be gated
 without teaching Harness family-specific semantics.
 
 Proof:
-https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md
+https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md
 ```
 
-The proof link resolves under the public Assay `v3.9.2` tag. The existing `v*`
-release workflow builds full release artifacts, so do not describe `v3.9.2` as
-docs-only.
+The proof link must resolve under the public Assay `v3.10.1` tag before this
+post is used. The existing `v*` release workflow builds full release artifacts,
+so describe the release as a docs/adoption packaging line, not as a bare
+documentation tag.
 
 Do not add:
 
@@ -85,15 +93,17 @@ Do not add:
 
 | Spot | Link to Send | One Sentence | Do Not Ask |
 |---|---|---|---|
-| Release-adjacent update | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | We made the evidence boundary inspectable: selected Promptfoo, OpenFeature, and CycloneDX outcomes now compile into bounded receipts and Trust Basis claims. | Do not ask for generic feedback, stars, adoption, or partnership. Use a repo Discussion only if there is no suitable release/docs context. |
-| Existing Promptfoo JSONL/componentResults context | [From Promptfoo JSONL to Evidence Receipts](https://github.com/Rul1an/assay/blob/v3.9.1/docs/notes/FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md) | This keeps Promptfoo as the eval runner while showing how selected assertion component outcomes become portable evidence receipts. | Never open a fresh thread just to restate the proof. Do not imply Promptfoo endorsement, official integration, or eval correctness. Add the recipe link only if someone asks to run it. |
-| Assurance / audit-context follow-up | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.9.2/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | This maps each released receipt family to the assurance question it can help answer and the claims it explicitly does not make. | Do not frame it as a compliance checklist or legal interpretation. |
+| Release-adjacent update | [Evidence Receipts in Action](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) | We made the evidence boundary inspectable: selected Promptfoo, OpenFeature, and CycloneDX outcomes now compile into bounded receipts and Trust Basis claims. | Do not ask for generic feedback, stars, adoption, or partnership. Use a repo Discussion only if there is no suitable release/docs context. |
+| Existing Promptfoo JSONL/componentResults context | [Evidence Receipts from Promptfoo JSONL](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) | This keeps Promptfoo as the eval runner while showing how selected assertion component outcomes become portable evidence receipts. | Never open a fresh thread just to restate the proof. Do not imply Promptfoo endorsement, official integration, or eval correctness. Add the recipe link only if someone asks to run it. |
+| OpenFeature runtime-decision context | [OpenFeature EvaluationDetails to CI Review Artifact](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md) | This keeps OpenFeature as the decision API while showing how one bounded boolean EvaluationDetails outcome becomes a reviewable decision receipt. | Do not imply provider support, targeting-rule correctness, or official OpenFeature endorsement. |
+| CycloneDX model-inventory context | [CycloneDX ML-BOM Model to Inventory Receipt](https://github.com/Rul1an/assay/blob/v3.10.1/docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) | This shows what model inventory/provenance-reference boundary existed without importing full BOM truth. | Do not imply BOM completeness, model safety, provenance sufficiency, or official CycloneDX endorsement. |
+| Assurance / audit-context follow-up | [Evidence Receipt Assurance Mapping](https://github.com/Rul1an/assay/blob/v3.10.1/docs/notes/EVIDENCE-RECEIPT-ASSURANCE-MAPPING.md) | This maps each released receipt family to the assurance question it can help answer and the claims it explicitly does not make. | Do not frame it as a compliance checklist or legal interpretation. |
 
 ## Share Order
 
 1. Keep the existing Promptfoo-context follow-up on the versioned
    `FROM-PROMPTFOO-JSONL-TO-EVIDENCE-RECEIPTS.md` note.
-2. Post the repo-native note first, using only the versioned `v3.9.2` proof
+2. Post the repo-native note first, using only the versioned `v3.10.1` proof
    link as the primary outward link.
 3. Let the proof page act as the hub for theory, mapping, and recipes.
 4. Wait at least one day.
@@ -118,9 +128,9 @@ Do not add:
 - No "would love feedback" framing.
 - No pressure to adopt.
 - Link outward to `EVIDENCE-RECEIPTS-IN-ACTION.md` only through the versioned
-  `v3.9.2` URL or a later release tag.
-- Link outward to the mapping note only through the versioned `v3.9.2` URL or a
-  later release tag.
+  `v3.10.1` URL or a later release tag.
+- Link outward to the mapping note and adoption pages only through the
+  versioned `v3.10.1` URL or a later release tag.
 
 The goal is only to put the released proof, theory, and runnable recipe in
 front of people who already care about evidence boundaries.
