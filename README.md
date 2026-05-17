@@ -13,6 +13,7 @@
     <a href="#see-it-work">See It Work</a> ·
     <a href="docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md">Promptfoo JSONL</a> ·
     <a href="docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md">OpenFeature</a> ·
+    <a href="docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md">CycloneDX ML-BOM</a> ·
     <a href="examples/mcp-quickstart/">Quick Start</a> ·
     <a href="docs/guides/github-action.md">CI Guide</a> ·
     <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
@@ -29,6 +30,7 @@ Start with the path that matches what you already have:
 |---|---|---|---|
 | Promptfoo JSONL from CI evals | You want smaller PR evidence than a full eval export | Eval outcome receipts, verified bundle, Trust Basis diff | [Promptfoo JSONL](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) |
 | OpenFeature boolean `EvaluationDetails` | You want CI evidence for a runtime flag decision boundary | Decision receipt, verified bundle, Trust Basis diff | [OpenFeature EvaluationDetails](docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md) |
+| CycloneDX ML-BOM model component | You want CI evidence for the model inventory/provenance boundary that existed | Inventory receipt, verified bundle, Trust Basis diff | [CycloneDX ML-BOM](docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) |
 | MCP tool calls | You are ready to put a policy file around tool execution | Allow/deny audit trail and evidence for observed tool behavior | [MCP Quick Start](examples/mcp-quickstart/) |
 | A GitHub PR gate | You want CI to block regressions from checked artifacts | Trust Basis diff, gate status, SARIF/JUnit-ready output | [CI Guide](docs/guides/github-action.md) |
 
@@ -294,6 +296,7 @@ These are tool-decision timings, not end-to-end model latency. (See [Research & 
 
 - [Promptfoo JSONL to Evidence Receipts](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) — smallest adoption path for existing eval artifacts
 - [OpenFeature EvaluationDetails to CI Review Artifact](docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md) — runtime decision receipt path
+- [CycloneDX ML-BOM Model to Inventory Receipt](docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) — model inventory/provenance receipt path
 - [MCP Quickstart](examples/mcp-quickstart/) — filesystem server walkthrough
 - [Policy Files](docs/reference/config/policies.md) — YAML schema for `assay mcp wrap`
 - [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md) — traces → replay and evidence

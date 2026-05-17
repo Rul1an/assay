@@ -60,6 +60,15 @@ Assay is designed for teams building production AI agents. Here are the most com
 
     [:octicons-arrow-right-24: Learn more](openfeature-evaluationdetails-to-ci-review-artifact.md)
 
+-   :material-package-variant-closed:{ .lg .middle } __CycloneDX Inventory Receipts__
+
+    ---
+
+    Turn selected CycloneDX ML-BOM model components into bounded
+    inventory/provenance receipts for CI review.
+
+    [:octicons-arrow-right-24: Learn more](cyclonedx-mlbom-model-to-inventory-receipt.md)
+
 </div>
 
 ---
@@ -74,6 +83,7 @@ Assay is designed for teams building production AI agents. Here are the most com
 | Agent Self-Correction | Runtime guardrails | Agent Developer |
 | Promptfoo JSONL Receipts | Reviewable eval evidence boundary | Platform, Security |
 | OpenFeature Decision Receipts | Reviewable runtime decision boundary | Platform, Security |
+| CycloneDX Inventory Receipts | Reviewable model inventory/provenance boundary | Platform, Security |
 
 ---
 
@@ -120,4 +130,5 @@ Assay is designed for teams building production AI agents. Here are the most com
 - [Core Concepts](../concepts/index.md)
 - [Evidence Receipts from Promptfoo JSONL](evidence-receipts-from-promptfoo-jsonl.md)
 - [OpenFeature EvaluationDetails to CI Review Artifact](openfeature-evaluationdetails-to-ci-review-artifact.md)
+- [CycloneDX ML-BOM Model to Inventory Receipt](cyclonedx-mlbom-model-to-inventory-receipt.md)
 - [MCP Integration](../mcp/index.md)
