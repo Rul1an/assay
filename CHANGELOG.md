@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-05-17
+
+This patch release carries the same three-family adoption surface as `v3.10.1`
+and fixes the release asset preflight so Windows `.sha256` files with CRLF line
+endings are accepted when the checksum target and hash are otherwise correct.
+It does **not** add runtime behavior, a new claim-visible receipt family,
+Harness semantics, or a new external claim.
+
+### Release Operations
+
+- Tolerated CRLF line endings when parsing release checksum target filenames.
+- Added a regression test for the Windows `.zip.sha256` shape that blocked the
+  `v3.10.1` GitHub Release creation after the build matrix had succeeded.
+- Updated the P57 seeding pack to use the `v3.10.2` release-truth line for
+  outward proof, theory, mapping, and adoption links.
+
 ## [3.10.1] - 2026-05-17
 
 This patch release packages the post-`v3.10.0` three-family adoption surface
