@@ -51,6 +51,15 @@ Assay is designed for teams building production AI agents. Here are the most com
 
     [:octicons-arrow-right-24: Learn more](evidence-receipts-from-promptfoo-jsonl.md)
 
+-   :material-toggle-switch:{ .lg .middle } __OpenFeature Decision Receipts__
+
+    ---
+
+    Turn bounded boolean OpenFeature EvaluationDetails outcomes into runtime
+    decision receipts for CI review.
+
+    [:octicons-arrow-right-24: Learn more](openfeature-evaluationdetails-to-ci-review-artifact.md)
+
 </div>
 
 ---
@@ -64,6 +73,7 @@ Assay is designed for teams building production AI agents. Here are the most com
 | Air-Gapped Enterprise | Compliance, privacy | Security, FinTech |
 | Agent Self-Correction | Runtime guardrails | Agent Developer |
 | Promptfoo JSONL Receipts | Reviewable eval evidence boundary | Platform, Security |
+| OpenFeature Decision Receipts | Reviewable runtime decision boundary | Platform, Security |
 
 ---
 
@@ -109,4 +119,5 @@ Assay is designed for teams building production AI agents. Here are the most com
 - [Quick Start](../getting-started/quickstart.md)
 - [Core Concepts](../concepts/index.md)
 - [Evidence Receipts from Promptfoo JSONL](evidence-receipts-from-promptfoo-jsonl.md)
+- [OpenFeature EvaluationDetails to CI Review Artifact](openfeature-evaluationdetails-to-ci-review-artifact.md)
 - [MCP Integration](../mcp/index.md)
