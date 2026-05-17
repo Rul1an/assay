@@ -98,6 +98,14 @@ valid_dir="${tmp_root}/valid"
 build_valid_assets "$valid_dir"
 expect_pass "$valid_dir"
 
+crlf_checksum_dir="${tmp_root}/crlf-checksum"
+cp -R "$valid_dir" "$crlf_checksum_dir"
+crlf_target="assay-${VERSION}-x86_64-pc-windows-msvc.zip"
+printf '%s  %s\r\n' \
+  "$(compute_sha256 "${crlf_checksum_dir}/${crlf_target}")" \
+  "$crlf_target" >"${crlf_checksum_dir}/${crlf_target}.sha256"
+expect_pass "$crlf_checksum_dir"
+
 missing_checksum_dir="${tmp_root}/missing-checksum"
 cp -R "$valid_dir" "$missing_checksum_dir"
 rm "${missing_checksum_dir}/assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
