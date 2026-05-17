@@ -11,6 +11,7 @@
   </p>
   <p align="center">
     <a href="#see-it-work">See It Work</a> ·
+    <a href="docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md">Promptfoo JSONL</a> ·
     <a href="examples/mcp-quickstart/">Quick Start</a> ·
     <a href="docs/guides/github-action.md">CI Guide</a> ·
     <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
@@ -22,6 +23,8 @@
 Your MCP agent calls `read_file`, `exec`, `web_search` — but should it, and what can you honestly **prove** about that run afterward?
 
 **Assay turns agent tool/runtime outcomes into reviewable evidence artifacts with explicit evidence levels: `verified`, `self_reported`, `inferred`, or `absent`.** The wedge is familiar: sit between the agent and MCP servers, **allow or deny** tool calls from policy, and record every decision. The broader output is canonical **evidence**, bounded Trust Basis claims, Trust Cards, SARIF, and CI gates you can hand to review without a hosted backend.
+
+Already have machine-readable AI run artifacts? Start with the smallest adoption path: [Promptfoo JSONL to evidence receipts](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md).
 
 **Positioning:** Assay is a **CI-native evidence compiler for agent governance**. It is **not** a trust-score engine, a generic eval dashboard, or an observability product with a thin security veneer. See [What Assay is and is not](docs/concepts/scope.md) for the current boundary.
 
@@ -271,6 +274,7 @@ CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-securi
 
 ## Learn More
 
+- [Promptfoo JSONL to Evidence Receipts](docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md) — smallest adoption path for existing eval artifacts
 - [MCP Quickstart](examples/mcp-quickstart/) — filesystem server walkthrough
 - [Policy Files](docs/reference/config/policies.md) — YAML schema for `assay mcp wrap`
 - [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md) — traces → replay and evidence
