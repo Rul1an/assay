@@ -106,6 +106,14 @@ printf '%s  %s\r\n' \
   "$crlf_target" >"${crlf_checksum_dir}/${crlf_target}.sha256"
 expect_pass "$crlf_checksum_dir"
 
+embedded_cr_target_dir="${tmp_root}/embedded-cr-target"
+cp -R "$valid_dir" "$embedded_cr_target_dir"
+printf '%s  %s\r%s\n' \
+  "$(compute_sha256 "${embedded_cr_target_dir}/${crlf_target}")" \
+  "assay-${VERSION}-x86_64-pc-windows-msvc" \
+  ".zip" >"${embedded_cr_target_dir}/${crlf_target}.sha256"
+expect_fail "embedded carriage return in checksum target" "$embedded_cr_target_dir"
+
 missing_checksum_dir="${tmp_root}/missing-checksum"
 cp -R "$valid_dir" "$missing_checksum_dir"
 rm "${missing_checksum_dir}/assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
