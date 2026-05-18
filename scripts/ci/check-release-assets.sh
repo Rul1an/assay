@@ -28,7 +28,7 @@ basename_from_checksum_line() {
   line="${line#* }"
   line="${line#"${line%%[![:space:]]*}"}"
   line="${line#\\*}"
-  line="${line//$'\r'/}"
+  line="${line%$'\r'}"
   basename "$line"
 }
 
