@@ -1,6 +1,7 @@
 use crate::{CgroupCorrelationStatus, KernelLayerStatus, RunnerSpikeArchive};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -14,6 +15,7 @@ pub struct RunSpec {
     pub platform: String,
     pub agent_shim: String,
     pub command: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -65,6 +67,7 @@ impl RunSpec {
             platform: std::env::consts::OS.to_string(),
             agent_shim: "none".to_string(),
             command,
+            env: BTreeMap::new(),
         }
     }
 
@@ -80,6 +83,11 @@ impl RunSpec {
 
     pub fn with_agent_shim(mut self, agent_shim: impl Into<String>) -> Self {
         self.agent_shim = agent_shim.into();
+        self
+    }
+
+    pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
         self
     }
 
@@ -125,6 +133,7 @@ impl RunSpec {
 
         let mut child = Command::new(&self.command[0])
             .args(&self.command[1..])
+            .envs(&self.env)
             .spawn()
             .map_err(|source| RunExecutionError::Spawn {
                 command: self.command[0].clone(),
@@ -163,6 +172,7 @@ impl RunSpec {
                 "type": "run_started",
                 "agent_shim": &self.agent_shim,
                 "command": &self.command,
+                "env_keys": self.env.keys().collect::<Vec<_>>(),
                 "window_elapsed_ms": window_elapsed.as_millis() as u64
             }),
         )?;
