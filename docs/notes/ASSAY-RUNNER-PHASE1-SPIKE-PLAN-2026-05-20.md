@@ -346,6 +346,19 @@ event log through the same hidden runner boundary. That only freezes the
 `openai-agents` shim has passed until the subprocess transport and
 deterministic fixture are wired.
 
+The next S5 implementation slice proves the transport boundary with a
+deterministic SDK fixture:
+
+```text
+tests/fixtures/runner-spike/sdk-event-wrapper.sh
+scripts/ci/runner-spike-sdk-contract-acceptance.sh
+```
+
+Runner supplies `ASSAY_RUNNER_SDK_EVENT_LOG`, `ASSAY_RUNNER_RUN_ID`, and
+`ASSAY_RUNNER_SDK_EVENT_SCHEMA` to the measured subprocess. The subprocess
+writes normalized SDK NDJSON to that path; stdout and stderr remain
+diagnostic only.
+
 Keep it thin:
 
 - emit normalized SDK events

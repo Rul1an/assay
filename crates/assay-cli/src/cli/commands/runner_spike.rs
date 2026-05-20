@@ -1,4 +1,4 @@
-use assay_runner_spike::RunSpec;
+use assay_runner_spike::{RunSpec, SDK_EVENT_SCHEMA};
 use clap::{Args, Subcommand};
 use std::fs::File;
 use std::path::PathBuf;
@@ -80,6 +80,13 @@ fn build_spec(args: &RunnerSpikeRunArgs) -> RunSpec {
     let mut spec = RunSpec::new(args.command.clone()).with_agent_shim(args.agent_shim.clone());
     if let Some(run_id) = &args.run_id {
         spec = spec.with_run_id(run_id.clone());
+    }
+    if let Some(path) = &args.sdk_event_log {
+        let run_id = spec.run_id.clone();
+        spec = spec
+            .with_env("ASSAY_RUNNER_SDK_EVENT_LOG", path.display().to_string())
+            .with_env("ASSAY_RUNNER_RUN_ID", run_id)
+            .with_env("ASSAY_RUNNER_SDK_EVENT_SCHEMA", SDK_EVENT_SCHEMA);
     }
     spec
 }
@@ -253,6 +260,7 @@ fn spawn_child_in_cgroup(
     let procs_path = CString::new(cgroup.procs_path().as_os_str().as_bytes())?;
     let mut command = tokio::process::Command::new(&spec.command[0]);
     command.args(&spec.command[1..]);
+    command.envs(&spec.env);
 
     unsafe {
         command.pre_exec(move || write_self_to_cgroup(&procs_path));
