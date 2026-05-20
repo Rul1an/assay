@@ -386,12 +386,18 @@ tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js
 tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-three-run-determinism.sh
+scripts/ci/runner-spike-openai-agents-sdk-policy-mismatch.sh
+scripts/ci/runner-spike-openai-agents-sdk-policy-mismatch-three-run-determinism.sh
 ```
 
 This proves the `@openai/agents` runtime hook path and the runner-supplied SDK
 event stream without a live LLM request. It still is not the full delegated
 Linux kernel+policy+SDK acceptance gate: that requires the privileged eBPF host
 to run the kernel capture alongside the JavaScript shim.
+The OpenAI Agents mismatch verifier intentionally emits the SDK tool-call id
+`tc_runner_sdk_only_001` while policy keeps `tc_runner_policy_001`, and must
+observe the same `sdk_tool_call_without_policy_binding:<tool_call_id>`
+ambiguity across three deterministic runs.
 
 Keep it thin:
 
