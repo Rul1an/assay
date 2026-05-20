@@ -27,6 +27,9 @@ Operational status:
 - [Assay-Runner Product Candidate Memo](ASSAY-RUNNER-PRODUCT-CANDIDATE-2026-05-18.md)
   records an internal, Phase-1-spike-gated measured-run product candidate
   beside Assay-Harness; it is not a public roadmap commitment.
+- [Assay-Runner Phase 1 Spike Plan](ASSAY-RUNNER-PHASE1-SPIKE-PLAN-2026-05-20.md)
+  expands that candidate into a bounded internal spike contract with
+  workstreams, health semantics, scenario gates, and kill criteria.
 - [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
   dismissed Security-tab alerts so the dismiss-state stays traceable rather
   than implicit.
