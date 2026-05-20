@@ -16,6 +16,7 @@ flowchart TB
         assay_monitor["assay-monitor"]
         assay_policy["assay-policy"]
         assay_registry["assay-registry"]
+        assay_runner_spike["assay-runner-spike"]
         assay_sim["assay-sim"]
         assay_xtask["assay-xtask"]
     end
@@ -34,6 +35,7 @@ flowchart TB
     assay_cli --> assay_metrics
     assay_cli --> assay_monitor
     assay_cli --> assay_policy
+    assay_cli --> assay_runner_spike
     assay_cli --> assay_sim
     assay_core --> assay_adapter_api
     assay_core --> assay_common
