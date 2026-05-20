@@ -399,6 +399,20 @@ The OpenAI Agents mismatch verifier intentionally emits the SDK tool-call id
 observe the same `sdk_tool_call_without_policy_binding:<tool_call_id>`
 ambiguity across three deterministic runs.
 
+The full delegated-host S5 gate combines the real JavaScript SDK fixture with
+clean cgroup kernel capture and the MCP policy fixture:
+
+```text
+scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh
+scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh
+```
+
+That gate is Linux/eBPF-only. It may skip on ordinary hosted CI, and S5 is not
+complete until this gate passes on a delegated cgroup host with
+`kernel_layer=complete`, `policy_layer=present`, `sdk_layer=self_reported`,
+`cgroup_correlation=clean`, empty correlation ambiguities, and stable
+health/surface/correlation/policy/SDK artifacts across three runs.
+
 Keep it thin:
 
 - emit normalized SDK events
