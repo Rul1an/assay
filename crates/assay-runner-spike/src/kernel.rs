@@ -1,4 +1,7 @@
-use crate::{CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus, RunnerSpikeArchive};
+use crate::{
+    run::is_safe_run_id, CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus,
+    RunnerSpikeArchive,
+};
 use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
     EVENT_OPENAT,
@@ -34,8 +37,12 @@ pub struct KernelLayerCapture {
 pub enum KernelLayerError {
     #[error("kernel layer run_id must not be empty")]
     EmptyRunId,
+    #[error("kernel layer run_id may only contain ASCII letters, digits, '_' and '-'")]
+    UnsafeRunId,
     #[error("kernel layer run_id mismatch: expected {expected}, found {actual}")]
     RunIdMismatch { expected: String, actual: String },
+    #[error("invalid capability surface: {0}")]
+    CapabilitySurface(#[from] crate::surface::CapabilitySurfaceError),
     #[error("kernel event serialization failed: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -52,6 +59,9 @@ impl KernelLayerBuilder {
         let run_id = run_id.into();
         if run_id.is_empty() {
             return Err(KernelLayerError::EmptyRunId);
+        }
+        if !is_safe_run_id(&run_id) {
+            return Err(KernelLayerError::UnsafeRunId);
         }
         Ok(Self {
             capability_surface: CapabilitySurface::new(run_id.clone()),
@@ -114,27 +124,35 @@ impl KernelLayerCapture {
     /// cgroup attribution health; non-clean cgroup correlation downgrades the
     /// kernel layer to absent because scoped kernel attribution is not complete.
     pub fn apply_to_archive(
-        &self,
+        self,
         archive: &mut RunnerSpikeArchive,
         cgroup_correlation: CgroupCorrelationStatus,
     ) -> Result<(), KernelLayerError> {
-        if archive.run_id != self.run_id {
+        let KernelLayerCapture {
+            run_id,
+            kernel_layer_ndjson,
+            capability_surface,
+            event_count,
+            ringbuf_drops,
+        } = self;
+
+        if archive.run_id != run_id {
             return Err(KernelLayerError::RunIdMismatch {
                 expected: archive.run_id.clone(),
-                actual: self.run_id.clone(),
+                actual: run_id,
             });
         }
 
-        archive.kernel_layer_ndjson = self.kernel_layer_ndjson.clone();
-        archive
-            .capability_surface
-            .merge_from(&self.capability_surface);
-        archive.observation_health.ringbuf_drops = self.ringbuf_drops;
+        archive.kernel_layer_ndjson = kernel_layer_ndjson;
+        archive.capability_surface.merge_from(&capability_surface)?;
         if archive.observation_health.platform == "linux" {
+            archive.observation_health.ringbuf_drops =
+                health_ringbuf_drops(ringbuf_drops, cgroup_correlation);
             archive.observation_health.kernel_layer =
-                kernel_layer_for(self.ringbuf_drops, cgroup_correlation);
+                kernel_layer_for(ringbuf_drops, cgroup_correlation);
             archive.observation_health.cgroup_correlation = cgroup_correlation;
         } else {
+            archive.observation_health.ringbuf_drops = 0;
             archive.observation_health.kernel_layer = KernelLayerStatus::Absent;
             archive.observation_health.cgroup_correlation = CgroupCorrelationStatus::Partial;
         }
@@ -142,8 +160,8 @@ impl KernelLayerCapture {
             !note.starts_with("contract_only_mode:") && !note.starts_with("s2_kernel_capture:")
         });
         archive.observation_health.notes.push(kernel_capture_note(
-            self.event_count,
-            self.ringbuf_drops,
+            event_count,
+            ringbuf_drops,
             cgroup_correlation,
         ));
         Ok(())
@@ -237,6 +255,14 @@ fn kernel_layer_for(
     }
 }
 
+fn health_ringbuf_drops(ringbuf_drops: u64, cgroup_correlation: CgroupCorrelationStatus) -> u64 {
+    if cgroup_correlation == CgroupCorrelationStatus::Clean {
+        ringbuf_drops
+    } else {
+        0
+    }
+}
+
 fn kernel_capture_note(
     event_count: u64,
     ringbuf_drops: u64,
@@ -302,6 +328,14 @@ mod tests {
             .capability_surface
             .process_execs
             .contains("/usr/bin/true"));
+    }
+
+    #[test]
+    fn builder_rejects_unsafe_run_id() {
+        assert!(matches!(
+            KernelLayerBuilder::new("../bad"),
+            Err(KernelLayerError::UnsafeRunId)
+        ));
     }
 
     #[test]
@@ -385,12 +419,12 @@ mod tests {
             .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
             .unwrap();
 
-        assert_eq!(capture.ringbuf_drops, 4);
         assert_eq!(
             archive.observation_health.kernel_layer,
             KernelLayerStatus::PartialRingbufDrops
         );
         assert_eq!(archive.observation_health.ringbuf_drops, 4);
+        archive.observation_health.validate().unwrap();
     }
 
     #[test]
@@ -444,11 +478,13 @@ mod tests {
             archive.observation_health.cgroup_correlation,
             CgroupCorrelationStatus::Partial
         );
+        assert_eq!(archive.observation_health.ringbuf_drops, 0);
         assert!(archive
             .observation_health
             .notes
             .iter()
             .any(|note| note.contains("kernel_layer downgraded to absent")));
+        archive.observation_health.validate().unwrap();
     }
 
     #[test]
@@ -486,10 +522,13 @@ mod tests {
 
     #[test]
     fn apply_on_non_linux_keeps_kernel_absent() {
-        let capture = KernelLayerBuilder::new("run_001").unwrap().finish(
-            &MonitorStatsSnapshot::default(),
-            &MonitorStatsSnapshot::default(),
-        );
+        let after = MonitorStatsSnapshot {
+            tracepoint_ringbuf_dropped: 2,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&MonitorStatsSnapshot::default(), &after);
         let mut archive = RunnerSpikeArchive::empty("run_001", "macos");
 
         capture
@@ -504,5 +543,7 @@ mod tests {
             archive.observation_health.cgroup_correlation,
             CgroupCorrelationStatus::Partial
         );
+        assert_eq!(archive.observation_health.ringbuf_drops, 0);
+        archive.observation_health.validate().unwrap();
     }
 }

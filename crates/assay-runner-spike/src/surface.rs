@@ -26,6 +26,8 @@ pub enum CapabilitySurfaceError {
     InvalidSchema,
     #[error("run_id must not be empty")]
     EmptyRunId,
+    #[error("capability surface run_id mismatch: expected {expected}, found {actual}")]
+    RunIdMismatch { expected: String, actual: String },
 }
 
 impl CapabilitySurface {
@@ -61,7 +63,16 @@ impl CapabilitySurface {
         self.policy_decisions.insert(decision.into());
     }
 
-    pub fn merge_from(&mut self, other: &Self) {
+    pub fn merge_from(&mut self, other: &Self) -> Result<(), CapabilitySurfaceError> {
+        self.validate()?;
+        other.validate()?;
+        if self.run_id != other.run_id {
+            return Err(CapabilitySurfaceError::RunIdMismatch {
+                expected: self.run_id.clone(),
+                actual: other.run_id.clone(),
+            });
+        }
+
         self.filesystem_prefixes
             .extend(other.filesystem_prefixes.iter().cloned());
         self.network_endpoints
@@ -71,6 +82,7 @@ impl CapabilitySurface {
         self.mcp_tools.extend(other.mcp_tools.iter().cloned());
         self.policy_decisions
             .extend(other.policy_decisions.iter().cloned());
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), CapabilitySurfaceError> {
@@ -138,7 +150,7 @@ mod tests {
         second.add_filesystem_prefix("/tmp/a");
         second.add_process_exec("/usr/bin/true");
 
-        first.merge_from(&second);
+        first.merge_from(&second).unwrap();
 
         assert_eq!(
             first.filesystem_prefixes.into_iter().collect::<Vec<_>>(),
@@ -147,6 +159,20 @@ mod tests {
         assert_eq!(
             first.process_execs.into_iter().collect::<Vec<_>>(),
             vec!["/usr/bin/true"]
+        );
+    }
+
+    #[test]
+    fn merge_from_rejects_run_id_mismatch() {
+        let mut first = CapabilitySurface::new("run_001");
+        let second = CapabilitySurface::new("run_002");
+
+        assert_eq!(
+            first.merge_from(&second),
+            Err(CapabilitySurfaceError::RunIdMismatch {
+                expected: "run_001".to_string(),
+                actual: "run_002".to_string(),
+            })
         );
     }
 }

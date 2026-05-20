@@ -91,11 +91,7 @@ impl RunSpec {
         if self.run_id.contains(':') {
             return Err(RunSpecError::RunIdContainsColon);
         }
-        if !self
-            .run_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-        {
+        if !is_safe_run_id(&self.run_id) {
             return Err(RunSpecError::RunIdContainsUnsafeCharacter);
         }
         if !matches!(self.agent_shim.as_str(), "none" | "openai-agents") {
@@ -176,6 +172,12 @@ impl RunSpec {
 
 fn generate_run_id() -> String {
     format!("run_{}", Uuid::new_v4().simple())
+}
+
+pub(crate) fn is_safe_run_id(run_id: &str) -> bool {
+    run_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 fn append_event(
