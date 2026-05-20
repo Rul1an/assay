@@ -37,6 +37,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Policy(args) => super::policy::run(args).await,
         Command::Generate(args) => super::generate::run(args),
         Command::Record(args) => super::record::run(args).await,
+        Command::RunnerSpike(args) => super::runner_spike::run(args).await,
         Command::Profile(args) => super::profile::run(args),
         Command::Sandbox(args) => super::sandbox::run(args).await,
         Command::Evidence(args) => super::evidence::run(args).await,

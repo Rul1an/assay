@@ -1,0 +1,263 @@
+use crate::RunnerSpikeArchive;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::process::Command;
+use std::time::Instant;
+use thiserror::Error;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunSpec {
+    pub run_id: String,
+    pub platform: String,
+    pub agent_shim: String,
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RunSpecError {
+    #[error("command must not be empty")]
+    EmptyCommand,
+    #[error("run_id must not be empty")]
+    EmptyRunId,
+    #[error("run_id must not contain ':'")]
+    RunIdContainsColon,
+    #[error("unsupported agent shim {0:?}")]
+    UnsupportedAgentShim(String),
+}
+
+#[derive(Debug, Error)]
+pub enum RunExecutionError {
+    #[error(transparent)]
+    Spec(#[from] RunSpecError),
+    #[error("failed to spawn command {command:?}: {source}")]
+    Spawn {
+        command: String,
+        source: std::io::Error,
+    },
+    #[error("failed to wait for command {command:?}: {source}")]
+    Wait {
+        command: String,
+        source: std::io::Error,
+    },
+    #[error("failed to serialize runner event: {0}")]
+    EventSerialization(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcome {
+    pub archive: RunnerSpikeArchive,
+    pub exit_code: Option<i32>,
+    pub signal: Option<i32>,
+    pub success: bool,
+}
+
+impl RunSpec {
+    pub fn new(command: Vec<String>) -> Self {
+        Self {
+            run_id: generate_run_id(),
+            platform: std::env::consts::OS.to_string(),
+            agent_shim: "none".to_string(),
+            command,
+        }
+    }
+
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = run_id.into();
+        self
+    }
+
+    pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
+        self.platform = platform.into();
+        self
+    }
+
+    pub fn with_agent_shim(mut self, agent_shim: impl Into<String>) -> Self {
+        self.agent_shim = agent_shim.into();
+        self
+    }
+
+    pub fn validate(&self) -> Result<(), RunSpecError> {
+        if self.command.is_empty() {
+            return Err(RunSpecError::EmptyCommand);
+        }
+        if self.run_id.is_empty() {
+            return Err(RunSpecError::EmptyRunId);
+        }
+        if self.run_id.contains(':') {
+            return Err(RunSpecError::RunIdContainsColon);
+        }
+        if !matches!(self.agent_shim.as_str(), "none" | "openai-agents") {
+            return Err(RunSpecError::UnsupportedAgentShim(self.agent_shim.clone()));
+        }
+        Ok(())
+    }
+
+    pub fn skeleton_archive(&self) -> Result<RunnerSpikeArchive, RunSpecError> {
+        self.validate()?;
+        let mut archive = RunnerSpikeArchive::empty(self.run_id.clone(), self.platform.clone());
+        archive.observation_health = archive.observation_health.with_agent_shim(&self.agent_shim);
+        Ok(archive)
+    }
+
+    pub fn run_contract_only(&self) -> Result<RunOutcome, RunExecutionError> {
+        self.validate()?;
+        let mut archive = self.skeleton_archive()?;
+        let clock = Instant::now();
+
+        append_event(
+            &mut archive,
+            json!({
+                "schema": "assay.runner.event.v0",
+                "run_id": self.run_id,
+                "seq": 0_u64,
+                "type": "run_started",
+                "agent_shim": self.agent_shim,
+                "command": self.command,
+                "window_elapsed_ms": 0_u64
+            }),
+        )?;
+
+        let mut child = Command::new(&self.command[0])
+            .args(&self.command[1..])
+            .spawn()
+            .map_err(|source| RunExecutionError::Spawn {
+                command: self.command[0].clone(),
+                source,
+            })?;
+        let status = child.wait().map_err(|source| RunExecutionError::Wait {
+            command: self.command[0].clone(),
+            source,
+        })?;
+
+        let exit_code = status.code();
+        let signal = exit_signal(&status);
+        let success = status.success();
+        append_event(
+            &mut archive,
+            json!({
+                "schema": "assay.runner.event.v0",
+                "run_id": self.run_id,
+                "seq": 1_u64,
+                "type": "run_finished",
+                "exit_code": exit_code,
+                "signal": signal,
+                "success": success,
+                "window_elapsed_ms": clock.elapsed().as_millis() as u64
+            }),
+        )?;
+
+        Ok(RunOutcome {
+            archive,
+            exit_code,
+            signal,
+            success,
+        })
+    }
+}
+
+fn generate_run_id() -> String {
+    format!("run_{}", Uuid::new_v4().simple())
+}
+
+fn append_event(
+    archive: &mut RunnerSpikeArchive,
+    event: serde_json::Value,
+) -> Result<(), serde_json::Error> {
+    serde_json::to_writer(&mut archive.events_ndjson, &event)?;
+    archive.events_ndjson.push(b'\n');
+    Ok(())
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SdkLayerStatus;
+
+    #[test]
+    fn generated_run_id_is_stream_safe() {
+        let spec = RunSpec::new(vec!["true".to_string()]);
+
+        assert!(spec.run_id.starts_with("run_"));
+        assert!(!spec.run_id.contains(':'));
+        assert_eq!(spec.platform, std::env::consts::OS);
+    }
+
+    #[test]
+    fn run_spec_rejects_empty_command() {
+        let spec = RunSpec::new(Vec::new());
+
+        assert_eq!(spec.validate(), Err(RunSpecError::EmptyCommand));
+    }
+
+    #[test]
+    fn run_spec_rejects_colon_run_id() {
+        let spec = RunSpec::new(vec!["true".to_string()]).with_run_id("bad:run");
+
+        assert_eq!(spec.validate(), Err(RunSpecError::RunIdContainsColon));
+    }
+
+    #[test]
+    fn run_spec_rejects_unknown_agent_shim() {
+        let spec = RunSpec::new(vec!["true".to_string()]).with_agent_shim("typo-shim");
+
+        assert_eq!(
+            spec.validate(),
+            Err(RunSpecError::UnsupportedAgentShim("typo-shim".to_string()))
+        );
+    }
+
+    #[test]
+    fn none_shim_skeleton_archive_has_absent_sdk_layer() {
+        let archive = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_platform("linux")
+            .with_agent_shim("none")
+            .skeleton_archive()
+            .unwrap();
+
+        assert_eq!(archive.run_id, "run_001");
+        assert_eq!(archive.observation_health.sdk_layer, SdkLayerStatus::Absent);
+    }
+
+    #[test]
+    fn sdk_shim_skeleton_archive_stays_absent_until_events_are_consumed() {
+        let archive = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_platform("linux")
+            .with_agent_shim("openai-agents")
+            .skeleton_archive()
+            .unwrap();
+
+        assert_eq!(archive.observation_health.sdk_layer, SdkLayerStatus::Absent);
+    }
+
+    #[test]
+    fn contract_only_run_records_lifecycle_events_and_exit_code() {
+        let outcome = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_platform("linux")
+            .run_contract_only()
+            .unwrap();
+        let events = String::from_utf8(outcome.archive.events_ndjson).unwrap();
+
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(outcome.success);
+        assert!(events.contains("\"type\":\"run_started\""));
+        assert!(events.contains("\"type\":\"run_finished\""));
+        assert!(outcome.archive.kernel_layer_ndjson.is_empty());
+        assert!(outcome.archive.policy_layer_ndjson.is_empty());
+        assert!(outcome.archive.sdk_layer_ndjson.is_empty());
+    }
+}
