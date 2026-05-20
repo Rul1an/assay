@@ -183,6 +183,7 @@ dependencies = [
  "assay-metrics",
  "assay-monitor",
  "assay-policy",
+ "assay-runner-spike",
  "assay-sim",
  "assert_cmd",
  "async-trait",
@@ -436,6 +437,20 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "assay-runner-spike"
+version = "3.10.2"
+dependencies = [
+ "flate2",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
