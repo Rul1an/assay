@@ -1,0 +1,64 @@
+name: Runner Spike SDK
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-spike-sdk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk-policy-determinism:
+    name: SDK+policy determinism
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install Linux deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Build assay CLI
+        run: cargo build -p assay-cli --no-default-features
+
+      - name: SDK contract acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay" \
+            scripts/ci/runner-spike-sdk-contract-acceptance.sh
+
+      - name: SDK+policy three-run determinism
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay" \
+            scripts/ci/runner-spike-sdk-policy-three-run-determinism.sh
