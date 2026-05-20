@@ -385,6 +385,7 @@ deterministic model provider to force one `read_file` function-tool call:
 tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js
 tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh
+scripts/ci/runner-spike-openai-agents-sdk-policy-three-run-determinism.sh
 ```
 
 This proves the `@openai/agents` runtime hook path and the runner-supplied SDK
