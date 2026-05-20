@@ -321,6 +321,8 @@ Acceptance:
 - policy event includes a stable `tool_call_id`
 - kernel capability set is congruent with the allowed tool call
 - correlation report joins policy to kernel by `run_id`, window, and cgroup
+- the fixture verifies with
+  `scripts/ci/runner-spike-kernel-policy-acceptance.sh`
 
 ### S5: `openai-agents` Shim
 

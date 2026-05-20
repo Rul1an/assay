@@ -41,6 +41,10 @@ pub struct RunnerSpikeRunArgs {
     #[arg(long, hide = true, default_value_t = 100)]
     pub kernel_drain_ms: u64,
 
+    /// Hidden S4 spike path: ingest assay mcp wrap --decision-log output.
+    #[arg(long, hide = true)]
+    pub policy_decision_log: Option<PathBuf>,
+
     /// Command to run.
     #[arg(allow_hyphen_values = true, required = true, trailing_var_arg = true)]
     pub command: Vec<String>,
@@ -78,7 +82,8 @@ fn cmd_run_contract_only(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
     let spec = build_spec(&args);
     let output = bundle_output_path(&args, &spec.run_id);
 
-    let outcome = spec.run_contract_only()?;
+    let mut outcome = spec.run_contract_only()?;
+    apply_policy_decision_log_if_requested(&spec, &args, &mut outcome.archive)?;
     let mut file = File::create(&output)?;
     outcome.archive.write(&mut file)?;
     let exit_status = exit_status_label(outcome.exit_code, outcome.signal);
@@ -203,6 +208,7 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     let after_stats = monitor.snapshot_stats()?;
     let capture = builder.finish(&before_stats, &after_stats);
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
+    apply_policy_decision_log_if_requested(&spec, &args, &mut archive)?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
 
     let mut file = File::create(&output)?;
@@ -344,6 +350,27 @@ fn write_u32_decimal(value: u32, buf: &mut [u8; 32]) -> usize {
         buf[idx] = scratch[len - idx - 1];
     }
     len
+}
+
+fn apply_policy_decision_log_if_requested(
+    spec: &RunSpec,
+    args: &RunnerSpikeRunArgs,
+    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+) -> anyhow::Result<()> {
+    let Some(path) = args.policy_decision_log.as_ref() else {
+        return Ok(());
+    };
+
+    let bytes = std::fs::read(path).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to read runner-spike policy decision log {}: {error}",
+            path.display()
+        )
+    })?;
+    let capture =
+        assay_runner_spike::PolicyLayerCapture::from_decision_ndjson(spec.run_id.clone(), &bytes)?;
+    capture.apply_to_archive(archive)?;
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
