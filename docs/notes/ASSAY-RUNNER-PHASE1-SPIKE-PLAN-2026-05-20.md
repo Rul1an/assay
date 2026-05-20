@@ -359,6 +359,19 @@ Runner supplies `ASSAY_RUNNER_SDK_EVENT_LOG`, `ASSAY_RUNNER_RUN_ID`, and
 writes normalized SDK NDJSON to that path; stdout and stderr remain
 diagnostic only.
 
+The following S5 slice cross-checks SDK self-report against the existing
+policy layer:
+
+```text
+tests/fixtures/runner-spike/sdk-policy-agent.sh
+scripts/ci/runner-spike-sdk-policy-correlation.sh
+```
+
+When a policy layer is present, every SDK tool-call id must match an existing
+policy correlation binding. A missing binding marks the correlation report
+partial with `sdk_tool_call_without_policy_binding:<tool_call_id>`. SDK events
+still do not create bindings or promote kernel/policy claims by themselves.
+
 Keep it thin:
 
 - emit normalized SDK events
