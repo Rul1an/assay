@@ -35,9 +35,12 @@ jobs:
       contents: read
     env:
       CARGO_INCREMENTAL: 0
-      PATH: /opt/rust/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 
     steps:
+      - name: Prepend Rust to PATH
+        shell: bash
+        run: echo "/opt/rust/bin" >> "$GITHUB_PATH"
+
       - name: Pre-clean delegated runner
         shell: bash
         run: |
@@ -45,33 +48,35 @@ jobs:
           sudo pkill -x assay 2>/dev/null || true
           sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
           sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} + 2>/dev/null || true
           sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
-          sudo docker system prune -af --volumes 2>/dev/null || true
-          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
-
-      # Avoid actions/checkout here: this self-hosted lane has historically
-      # hit root-owned _actions cache state before the first action step.
-      - name: Checkout repository
-        shell: bash
-        env:
-          GH_REPO: ${{ github.repository }}
-          GH_SHA: ${{ github.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
-          if find . -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-            echo "ERROR: workspace not empty after delegated checkout cleanup"
-            find . -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+          if find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after delegated pre-clean"
+            find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
             exit 1
           fi
-          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
-            clone --depth 1 "https://github.com/${GH_REPO}.git" .
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
-            fetch origin "${GH_SHA}"
-          git checkout --detach "${GH_SHA}"
+          # Destructive on shared runners: this lane assumes assay-bpf-runner is
+          # dedicated to eBPF validation and may wipe Docker plus Actions caches.
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo chattr -R -i /opt/actions-runner/_work/_actions 2>/dev/null || true
+          sudo rm -rf /opt/actions-runner/_work/_actions 2>/dev/null || true
+          sudo mkdir -p /opt/actions-runner/_work/_actions 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" /opt/actions-runner/_work/_actions 2>/dev/null || true
+          if [ -n "${RUNNER_WORKDIR:-}" ]; then
+            sudo chattr -R -i "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+            sudo rm -rf "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+            sudo mkdir -p "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_WORKDIR}/_actions" 2>/dev/null || true
+          fi
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
+      # The pre-clean step removes root-owned _actions cache state before this
+      # action is loaded, so checkout can stay token-safe with no credentials
+      # persisted or embedded in manual git command arguments.
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
       - name: Preflight delegated host
         shell: bash
