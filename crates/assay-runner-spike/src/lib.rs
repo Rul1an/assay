@@ -9,6 +9,7 @@ mod health;
 mod kernel;
 mod policy;
 mod run;
+mod sdk;
 mod surface;
 
 pub use archive::{
@@ -27,4 +28,5 @@ pub use health::{
 pub use kernel::{KernelLayerBuilder, KernelLayerCapture, KernelLayerError, KERNEL_EVENT_SCHEMA};
 pub use policy::{PolicyLayerCapture, PolicyLayerError, PolicyLayerEvent, POLICY_EVENT_SCHEMA};
 pub use run::{RunExecutionError, RunOutcome, RunSpec, RunSpecError, RUN_EVENT_SCHEMA};
+pub use sdk::{SdkLayerCapture, SdkLayerError, SdkLayerEvent, SDK_EVENT_SCHEMA};
 pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};
