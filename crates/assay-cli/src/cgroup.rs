@@ -59,7 +59,31 @@ impl CgroupManager {
             return Err(anyhow!("Could not verify own cgroup path: {:?}", root_path));
         }
 
+        let root_path = Self::nearest_domain_root(&mount_point, root_path)?;
+
         Ok(Self { root_path })
+    }
+
+    fn nearest_domain_root(mount_point: &Path, mut path: PathBuf) -> Result<PathBuf> {
+        loop {
+            let cgroup_type = fs::read_to_string(path.join("cgroup.type"))
+                .with_context(|| format!("Failed to read cgroup type for {}", path.display()))?;
+            if cgroup_type.trim() == "domain" {
+                return Ok(path);
+            }
+
+            if path == mount_point {
+                return Err(anyhow!(
+                    "Could not find domain cgroup root at or above {}",
+                    path.display()
+                ));
+            }
+
+            path = path
+                .parent()
+                .ok_or_else(|| anyhow!("Could not ascend from cgroup path {}", path.display()))?
+                .to_path_buf();
+        }
     }
 
     /// Creates a new ephemeral cgroup.
@@ -233,5 +257,54 @@ impl Drop for SessionCgroup {
         if let Err(e) = self.remove() {
             eprintln!("Failed to clean up cgroup session: {:?}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CgroupManager;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_cgroup_tree(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("assay-cgroup-{name}-{stamp}"));
+        fs::create_dir_all(&path).expect("create temp cgroup tree");
+        path
+    }
+
+    #[test]
+    fn nearest_domain_root_accepts_domain_cgroup() {
+        let root = temp_cgroup_tree("domain");
+        fs::write(root.join("cgroup.type"), "domain\n").expect("write cgroup type");
+
+        let resolved =
+            CgroupManager::nearest_domain_root(&root, root.clone()).expect("resolve domain root");
+
+        assert_eq!(resolved, root);
+        fs::remove_dir_all(resolved).expect("remove temp cgroup tree");
+    }
+
+    #[test]
+    fn nearest_domain_root_ascends_from_domain_threaded_service() {
+        let root = temp_cgroup_tree("domain-threaded");
+        let system_slice = root.join("system.slice");
+        let service = system_slice.join("actions.runner.example.service");
+        fs::create_dir_all(&service).expect("create fake service cgroup");
+        fs::write(root.join("cgroup.type"), "domain\n").expect("write root cgroup type");
+        fs::write(system_slice.join("cgroup.type"), "domain\n")
+            .expect("write system slice cgroup type");
+        fs::write(service.join("cgroup.type"), "domain threaded\n")
+            .expect("write service cgroup type");
+
+        let resolved =
+            CgroupManager::nearest_domain_root(&root, service).expect("resolve domain root");
+
+        assert_eq!(resolved, system_slice);
+        fs::remove_dir_all(root).expect("remove temp cgroup tree");
     }
 }
