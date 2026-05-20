@@ -294,7 +294,9 @@ Acceptance:
 - `policy_layer=absent`
 - `kernel_layer=complete` on Linux when no drops occur
 - `cgroup_correlation=clean`
-- `assay evidence verify` succeeds
+- the bundle verifies with `assay evidence verify` or, until runner-spike
+  archives are carried by `assay-evidence`, with the temporary
+  `scripts/ci/runner-spike-kernel-only-acceptance.sh` verifier
 
 ### S4: `none + kernel+policy`
 
