@@ -1,10 +1,12 @@
 use crate::{CgroupCorrelationStatus, KernelLayerStatus, RunnerSpikeArchive};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, ExitStatus};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use uuid::Uuid;
+
+pub const RUN_EVENT_SCHEMA: &str = "assay.runner.event.v0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunSpec {
@@ -119,18 +121,7 @@ impl RunSpec {
         let mut archive = self.skeleton_archive()?;
         let clock = Instant::now();
 
-        append_event(
-            &mut archive,
-            json!({
-                "schema": "assay.runner.event.v0",
-                "run_id": self.run_id,
-                "seq": 0_u64,
-                "type": "run_started",
-                "agent_shim": self.agent_shim,
-                "command": self.command,
-                "window_elapsed_ms": 0_u64
-            }),
-        )?;
+        self.append_run_started(&mut archive, 0, Duration::ZERO)?;
 
         let mut child = Command::new(&self.command[0])
             .args(&self.command[1..])
@@ -147,19 +138,7 @@ impl RunSpec {
         let exit_code = status.code();
         let signal = exit_signal(&status);
         let success = status.success();
-        append_event(
-            &mut archive,
-            json!({
-                "schema": "assay.runner.event.v0",
-                "run_id": self.run_id,
-                "seq": 1_u64,
-                "type": "run_finished",
-                "exit_code": exit_code,
-                "signal": signal,
-                "success": success,
-                "window_elapsed_ms": clock.elapsed().as_millis() as u64
-            }),
-        )?;
+        self.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
 
         Ok(RunOutcome {
             archive,
@@ -167,6 +146,50 @@ impl RunSpec {
             signal,
             success,
         })
+    }
+
+    pub fn append_run_started(
+        &self,
+        archive: &mut RunnerSpikeArchive,
+        seq: u64,
+        window_elapsed: Duration,
+    ) -> Result<(), RunExecutionError> {
+        append_event(
+            archive,
+            json!({
+                "schema": RUN_EVENT_SCHEMA,
+                "run_id": &self.run_id,
+                "seq": seq,
+                "type": "run_started",
+                "agent_shim": &self.agent_shim,
+                "command": &self.command,
+                "window_elapsed_ms": window_elapsed.as_millis() as u64
+            }),
+        )?;
+        Ok(())
+    }
+
+    pub fn append_run_finished(
+        &self,
+        archive: &mut RunnerSpikeArchive,
+        seq: u64,
+        status: &ExitStatus,
+        window_elapsed: Duration,
+    ) -> Result<(), RunExecutionError> {
+        append_event(
+            archive,
+            json!({
+                "schema": RUN_EVENT_SCHEMA,
+                "run_id": &self.run_id,
+                "seq": seq,
+                "type": "run_finished",
+                "exit_code": status.code(),
+                "signal": exit_signal(status),
+                "success": status.success(),
+                "window_elapsed_ms": window_elapsed.as_millis() as u64
+            }),
+        )?;
+        Ok(())
     }
 }
 
