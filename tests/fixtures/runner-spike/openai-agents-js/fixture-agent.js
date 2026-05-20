@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { Agent, Runner, Usage, tool } = require('@openai/agents');
+
+const SDK_NAME = '@openai/agents';
+const SDK_VERSION = '0.11.4';
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} must be set`);
+  }
+  return value;
+}
+
+function appendEvent(logPath, event) {
+  fs.appendFileSync(logPath, `${JSON.stringify(event)}\n`, 'utf8');
+}
+
+function makeEmitter({ logPath, runId, schema }) {
+  let seq = 0;
+  return (event) => {
+    appendEvent(logPath, {
+      schema,
+      run_id: runId,
+      seq,
+      source: 'openai-agents-js-fixture',
+      sdk_name: SDK_NAME,
+      sdk_version: SDK_VERSION,
+      ...event,
+    });
+    seq += 1;
+  };
+}
+
+class DeterministicToolCallModel {
+  constructor({ toolCallId, fixturePath }) {
+    this.toolCallId = toolCallId;
+    this.fixturePath = fixturePath;
+  }
+
+  async getResponse(_request) {
+    return {
+      usage: new Usage({ requests: 1 }),
+      responseId: 'assay-runner-openai-agents-fixture-response',
+      output: [
+        {
+          type: 'function_call',
+          callId: this.toolCallId,
+          name: 'read_file',
+          status: 'completed',
+          arguments: JSON.stringify({ path: this.fixturePath }),
+        },
+      ],
+    };
+  }
+
+  async *getStreamedResponse(_request) {
+    throw new Error('streaming is intentionally unsupported by the deterministic fixture');
+  }
+}
+
+async function main() {
+  const workDir = process.argv[2];
+  if (!workDir) {
+    throw new Error('usage: fixture-agent.js <work-dir>');
+  }
+
+  const logPath = requiredEnv('ASSAY_RUNNER_SDK_EVENT_LOG');
+  const runId = requiredEnv('ASSAY_RUNNER_RUN_ID');
+  const schema = requiredEnv('ASSAY_RUNNER_SDK_EVENT_SCHEMA');
+  const toolCallId = process.env.ASSAY_RUNNER_SDK_TOOL_CALL_ID || 'tc_runner_policy_001';
+
+  fs.mkdirSync(workDir, { recursive: true });
+  const fixturePath = path.join(workDir, 'openai-agents-input.txt');
+  fs.writeFileSync(fixturePath, 'openai agents fixture input\n', 'utf8');
+  fs.writeFileSync(path.join(workDir, 'openai-agents-wrapper-ran.txt'), 'openai-agents fixture ran\n', 'utf8');
+  fs.writeFileSync(logPath, '', 'utf8');
+
+  const emit = makeEmitter({ logPath, runId, schema });
+  const readFile = tool({
+    name: 'read_file',
+    description: 'Read the deterministic runner-spike fixture file.',
+    strict: false,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    execute: async (input) => fs.readFileSync(input.path, 'utf8'),
+  });
+
+  const agent = new Agent({
+    name: 'AssayRunnerSpikeFixture',
+    instructions: 'Call read_file exactly once.',
+    model: new DeterministicToolCallModel({ toolCallId, fixturePath }),
+    tools: [readFile],
+    toolUseBehavior: { stopAtToolNames: ['read_file'] },
+  });
+
+  const runner = new Runner({
+    tracingDisabled: true,
+    traceIncludeSensitiveData: false,
+    toolExecution: { maxFunctionToolConcurrency: 1 },
+  });
+
+  runner.on('agent_tool_start', (_context, _agent, startedTool, details) => {
+    emit({
+      event_type: 'tool_call_started',
+      tool_call_id: details.toolCall.callId,
+      tool: startedTool.name,
+    });
+  });
+  runner.on('agent_tool_end', (_context, _agent, finishedTool, _result, details) => {
+    emit({
+      event_type: 'tool_call_completed',
+      tool_call_id: details.toolCall.callId,
+      tool: finishedTool.name,
+    });
+  });
+
+  try {
+    await runner.run(agent, 'Read the deterministic fixture file.', { maxTurns: 2 });
+    emit({ event_type: 'run_finished' });
+  } catch (error) {
+    emit({ event_type: 'run_failed' });
+    throw error;
+  }
+}
+
+main().catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+});

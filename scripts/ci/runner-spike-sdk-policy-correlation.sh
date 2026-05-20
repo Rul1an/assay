@@ -36,6 +36,9 @@ DECISION_LOG="$TMP_ROOT/policy-decisions.ndjson"
 RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_sdk_policy_correlation}"
 SDK_TOOL_CALL_ID="${ASSAY_RUNNER_ACCEPTANCE_SDK_TOOL_CALL_ID:-tc_runner_policy_001}"
 EXPECT_SDK_POLICY_MISMATCH="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_POLICY_MISMATCH:-0}"
+AGENT_SCRIPT="${ASSAY_RUNNER_ACCEPTANCE_AGENT_SCRIPT:-$ROOT/tests/fixtures/runner-spike/sdk-policy-agent.sh}"
+EXPECTED_SDK_SOURCE="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_SOURCE:-}"
+EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-}"
 
 export ASSAY_BIN
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
@@ -48,12 +51,12 @@ export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
   --policy-decision-log "$DECISION_LOG" \
   --run-id "$RUN_ID" \
   --output "$BUNDLE" \
-  -- "$ROOT/tests/fixtures/runner-spike/sdk-policy-agent.sh" "$WORK_DIR"
+  -- "$AGENT_SCRIPT" "$WORK_DIR"
 
 mkdir -p "$EXTRACT_DIR"
 tar -xzf "$BUNDLE" -C "$EXTRACT_DIR"
 
-python3 - "$EXTRACT_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECT_SDK_POLICY_MISMATCH" <<'PY'
+python3 - "$EXTRACT_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECT_SDK_POLICY_MISMATCH" "$EXPECTED_SDK_SOURCE" "$EXPECTED_SDK_VERSION" <<'PY'
 import hashlib
 import json
 import sys
@@ -63,6 +66,8 @@ extract_dir = Path(sys.argv[1])
 run_id = sys.argv[2]
 sdk_tool_call_id = sys.argv[3]
 expect_sdk_policy_mismatch = sys.argv[4] == "1"
+expected_sdk_source = sys.argv[5]
+expected_sdk_version = sys.argv[6]
 policy_tool_call_id = "tc_runner_policy_001"
 
 
@@ -109,6 +114,12 @@ sdk_tool_calls = {event.get("tool_call_id") for event in sdk_events if event.get
 policy_tool_calls = {event.get("tool_call_id") for event in policy_events}
 expect(sdk_tool_calls == {sdk_tool_call_id}, f"sdk tool_call_id mismatch: {sdk_tool_calls!r}")
 expect(policy_tool_calls == {policy_tool_call_id}, f"policy tool_call_id mismatch: {policy_tool_calls!r}")
+if expected_sdk_source:
+    sdk_sources = {event.get("source") for event in sdk_events}
+    expect(sdk_sources == {expected_sdk_source}, f"sdk source mismatch: {sdk_sources!r}")
+if expected_sdk_version:
+    sdk_versions = {event.get("sdk_version") for event in sdk_events}
+    expect(sdk_versions == {expected_sdk_version}, f"sdk version mismatch: {sdk_versions!r}")
 
 expect("read_file" in set(surface.get("mcp_tools", [])), "read_file MCP tool missing")
 expect("allow:read_file" in set(surface.get("policy_decisions", [])), "allow:read_file policy decision missing")

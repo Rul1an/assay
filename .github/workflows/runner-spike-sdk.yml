@@ -46,6 +46,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/fixtures/runner-spike/openai-agents-js/package-lock.json
+
+      - name: Install openai-agents fixture deps
+        working-directory: tests/fixtures/runner-spike/openai-agents-js
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Build assay CLI
         run: cargo build -p assay-cli --no-default-features
 
@@ -69,3 +80,10 @@ jobs:
           set -euo pipefail
           ASSAY_BIN="$PWD/target/debug/assay" \
             scripts/ci/runner-spike-sdk-policy-mismatch-three-run-determinism.sh
+
+      - name: OpenAI Agents SDK+policy correlation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay" \
+            scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh

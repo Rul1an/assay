@@ -377,6 +377,21 @@ still do not create bindings or promote kernel/policy claims by themselves.
 The mismatch verifier intentionally emits a distinct SDK tool-call id and must
 observe that partial-correlation ambiguity across three deterministic runs.
 
+The first real JavaScript SDK slice runs the same correlation gate through a
+Node subprocess that imports `@openai/agents` directly and uses a local
+deterministic model provider to force one `read_file` function-tool call:
+
+```text
+tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js
+tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh
+scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh
+```
+
+This proves the `@openai/agents` runtime hook path and the runner-supplied SDK
+event stream without a live LLM request. It still is not the full delegated
+Linux kernel+policy+SDK acceptance gate: that requires the privileged eBPF host
+to run the kernel capture alongside the JavaScript shim.
+
 Keep it thin:
 
 - emit normalized SDK events
