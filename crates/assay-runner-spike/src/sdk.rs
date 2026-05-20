@@ -1,6 +1,7 @@
 use crate::{run::is_safe_run_id, RunnerSpikeArchive, SdkLayerStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const SDK_EVENT_SCHEMA: &str = "assay.runner.sdk_event.v0";
@@ -185,10 +186,13 @@ impl SdkLayerCapture {
             .observation_health
             .notes
             .retain(|note| !note.starts_with("s5_sdk_capture:"));
-        archive
-            .observation_health
-            .notes
-            .push(format!("s5_sdk_capture: sdk_events={}", events.len()));
+        let sdk_tool_call_ids = sdk_tool_call_ids(&events);
+        mark_sdk_policy_mismatches(archive, &sdk_tool_call_ids);
+        archive.observation_health.notes.push(format!(
+            "s5_sdk_capture: sdk_events={} sdk_tool_calls={}",
+            events.len(),
+            sdk_tool_call_ids.len()
+        ));
         Ok(())
     }
 }
@@ -269,6 +273,37 @@ fn validate_tool_call_fields(
     Ok(())
 }
 
+fn sdk_tool_call_ids(events: &[SdkLayerEvent]) -> BTreeSet<String> {
+    events
+        .iter()
+        .filter_map(|event| event.tool_call_id.clone())
+        .collect()
+}
+
+fn mark_sdk_policy_mismatches(
+    archive: &mut RunnerSpikeArchive,
+    sdk_tool_call_ids: &BTreeSet<String>,
+) {
+    if archive.policy_layer_ndjson.is_empty() {
+        return;
+    }
+
+    let policy_binding_ids = archive
+        .correlation_report
+        .bindings
+        .iter()
+        .map(|binding| binding.tool_call_id.clone())
+        .collect::<BTreeSet<_>>();
+
+    for tool_call_id in sdk_tool_call_ids {
+        if !policy_binding_ids.contains(tool_call_id) {
+            archive.correlation_report.mark_partial(format!(
+                "sdk_tool_call_without_policy_binding:{tool_call_id}"
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,7 +346,62 @@ mod tests {
             .observation_health
             .notes
             .iter()
-            .any(|note| note == "s5_sdk_capture: sdk_events=2"));
+            .any(|note| note == "s5_sdk_capture: sdk_events=2 sdk_tool_calls=1"));
+    }
+
+    #[test]
+    fn sdk_policy_matching_tool_call_keeps_existing_correlation_status() {
+        let capture = SdkLayerCapture::from_sdk_ndjson("run_001", SDK_EVENTS).unwrap();
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.policy_layer_ndjson = b"{\"schema\":\"assay.runner.policy_event.v0\"}\n".to_vec();
+        archive
+            .correlation_report
+            .add_binding(crate::CorrelationBinding {
+                tool_call_id: "tc_runner_policy_001".to_string(),
+                policy_decision: Some("allow".to_string()),
+                kernel_event_count: 1,
+                window: crate::BindingWindow {
+                    start: "run_started".to_string(),
+                    end: "run_finished".to_string(),
+                },
+            });
+
+        capture.apply_to_archive(&mut archive).unwrap();
+
+        assert_eq!(
+            archive.correlation_report.status,
+            crate::CorrelationStatus::Clean
+        );
+        assert!(archive.correlation_report.ambiguities.is_empty());
+    }
+
+    #[test]
+    fn sdk_policy_mismatched_tool_call_marks_correlation_partial() {
+        let capture = SdkLayerCapture::from_sdk_ndjson("run_001", SDK_EVENTS).unwrap();
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.policy_layer_ndjson = b"{\"schema\":\"assay.runner.policy_event.v0\"}\n".to_vec();
+        archive
+            .correlation_report
+            .add_binding(crate::CorrelationBinding {
+                tool_call_id: "tc_different_policy_call".to_string(),
+                policy_decision: Some("allow".to_string()),
+                kernel_event_count: 1,
+                window: crate::BindingWindow {
+                    start: "run_started".to_string(),
+                    end: "run_finished".to_string(),
+                },
+            });
+
+        capture.apply_to_archive(&mut archive).unwrap();
+
+        assert_eq!(
+            archive.correlation_report.status,
+            crate::CorrelationStatus::Partial
+        );
+        assert!(archive
+            .correlation_report
+            .ambiguities
+            .contains(&"sdk_tool_call_without_policy_binding:tc_runner_policy_001".to_string()));
     }
 
     #[test]
