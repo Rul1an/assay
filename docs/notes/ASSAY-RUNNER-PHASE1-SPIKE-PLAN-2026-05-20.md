@@ -323,6 +323,8 @@ Acceptance:
 - correlation report joins policy to kernel by `run_id`, window, and cgroup
 - the fixture verifies with
   `scripts/ci/runner-spike-kernel-policy-acceptance.sh`
+- three repeated fixture runs verify with
+  `scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh`
 
 ### S5: `openai-agents` Shim
 

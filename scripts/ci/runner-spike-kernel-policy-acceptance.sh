@@ -21,17 +21,25 @@ if [ ! -x "$ASSAY_BIN" ]; then
   cargo build -p assay-cli --no-default-features
 fi
 
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-kernel-policy.XXXXXX")"
-cleanup() {
-  rm -rf -- "$TMP_ROOT"
-}
+if [ -n "${ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR:-}" ]; then
+  TMP_ROOT="$ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR"
+  mkdir -p "$TMP_ROOT"
+  cleanup() {
+    :
+  }
+else
+  TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-kernel-policy.XXXXXX")"
+  cleanup() {
+    rm -rf -- "$TMP_ROOT"
+  }
+fi
 trap cleanup EXIT
 
-WORK_DIR="$TMP_ROOT/work"
+WORK_DIR="${ASSAY_RUNNER_ACCEPTANCE_WORK_DIR:-$TMP_ROOT/work}"
 EXTRACT_DIR="$TMP_ROOT/extract"
 BUNDLE="$TMP_ROOT/runner-kernel-policy.tar.gz"
 DECISION_LOG="$TMP_ROOT/policy-decisions.ndjson"
-RUN_ID="run_kernel_policy_acceptance"
+RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_kernel_policy_acceptance}"
 
 export ASSAY_BIN
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
