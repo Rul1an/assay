@@ -87,3 +87,10 @@ jobs:
           set -euo pipefail
           ASSAY_BIN="$PWD/target/debug/assay" \
             scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh
+
+      - name: OpenAI Agents SDK+policy three-run determinism
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay" \
+            scripts/ci/runner-spike-openai-agents-sdk-policy-three-run-determinism.sh

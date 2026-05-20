@@ -5,8 +5,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Agent, Runner, Usage, tool } = require('@openai/agents');
 
-const SDK_NAME = '@openai/agents';
-const SDK_VERSION = '0.11.4';
+const { name: SDK_NAME, version: SDK_VERSION } = loadSdkMetadata();
+
+function loadSdkMetadata() {
+  let directory = path.dirname(require.resolve('@openai/agents'));
+  for (;;) {
+    const packageJson = path.join(directory, 'package.json');
+    if (fs.existsSync(packageJson)) {
+      const metadata = JSON.parse(fs.readFileSync(packageJson, 'utf8'));
+      if (metadata.name === '@openai/agents') {
+        return metadata;
+      }
+    }
+
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      throw new Error('could not locate @openai/agents package metadata');
+    }
+    directory = parent;
+  }
+}
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -110,6 +128,8 @@ async function main() {
     toolExecution: { maxFunctionToolConcurrency: 1 },
   });
 
+  // @openai/agents 0.11.x hook names map to assay.runner.sdk_event.v0:
+  // agent_tool_start -> tool_call_started, agent_tool_end -> tool_call_completed.
   runner.on('agent_tool_start', (_context, _agent, startedTool, details) => {
     emit({
       event_type: 'tool_call_started',

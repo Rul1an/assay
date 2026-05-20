@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if ! command -v node >/dev/null 2>&1; then
+  echo "SKIP: runner-spike OpenAI Agents fixture requires Node.js 22 or newer; node was not found on PATH." >&2
+  exit 40
+fi
+
 if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'; then
   echo "SKIP: runner-spike OpenAI Agents fixture requires Node.js 22 or newer." >&2
   exit 40
