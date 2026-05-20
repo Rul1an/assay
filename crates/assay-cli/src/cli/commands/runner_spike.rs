@@ -169,6 +169,7 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     spec.append_run_started(&mut archive, 0, Duration::ZERO)?;
 
     let mut child = spawn_child_in_cgroup(&spec, &session_cgroup)?;
+    let mut cgroup_correlation = CgroupCorrelationStatus::Clean;
 
     let status = loop {
         tokio::select! {
@@ -176,9 +177,13 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
             event = stream.next() => {
                 match event {
                     Some(Ok(event)) => builder.push_monitor_event(&event)?,
-                    Some(Err(error)) => eprintln!("Warning: failed to parse kernel event: {error}"),
+                    Some(Err(error)) => {
+                        eprintln!("Warning: failed to parse kernel event: {error}");
+                        cgroup_correlation = CgroupCorrelationStatus::Partial;
+                    }
                     None => {
                         eprintln!("Warning: kernel event stream closed before child exit.");
+                        cgroup_correlation = CgroupCorrelationStatus::Partial;
                         break child.wait().await?;
                     }
                 }
@@ -186,15 +191,18 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
         }
     };
 
-    drain_kernel_events(
+    let drain_complete = drain_kernel_events(
         &mut stream,
         &mut builder,
         Duration::from_millis(args.kernel_drain_ms),
     )
     .await?;
+    if !drain_complete {
+        cgroup_correlation = CgroupCorrelationStatus::Partial;
+    }
     let after_stats = monitor.snapshot_stats()?;
     let capture = builder.finish(&before_stats, &after_stats);
-    capture.apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)?;
+    capture.apply_to_archive(&mut archive, cgroup_correlation)?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
 
     let mut file = File::create(&output)?;
@@ -204,10 +212,11 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     let exit_status = exit_status_label(exit_code, signal);
 
     println!(
-        "wrote runner-spike bundle: {} (run_id={}, status={}, kernel_capture=clean)",
+        "wrote runner-spike bundle: {} (run_id={}, status={}, kernel_capture={})",
         output.display(),
         spec.run_id,
-        exit_status
+        exit_status,
+        cgroup_correlation_label(cgroup_correlation)
     );
 
     Ok(exit_status_code(exit_code, signal))
@@ -239,9 +248,10 @@ async fn drain_kernel_events(
     stream: &mut assay_monitor::EventStream,
     builder: &mut assay_runner_spike::KernelLayerBuilder,
     duration: std::time::Duration,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     use tokio_stream::StreamExt;
 
+    let mut complete = true;
     let deadline = tokio::time::sleep(duration);
     tokio::pin!(deadline);
     loop {
@@ -250,38 +260,69 @@ async fn drain_kernel_events(
             event = stream.next() => {
                 match event {
                     Some(Ok(event)) => builder.push_monitor_event(&event)?,
-                    Some(Err(error)) => eprintln!("Warning: failed to parse kernel event while draining: {error}"),
-                    None => break,
+                    Some(Err(error)) => {
+                        eprintln!("Warning: failed to parse kernel event while draining: {error}");
+                        complete = false;
+                    }
+                    None => {
+                        complete = false;
+                        break;
+                    }
                 }
             }
         }
     }
-    Ok(())
+    Ok(complete)
 }
 
 #[cfg(target_os = "linux")]
 fn write_self_to_cgroup(procs_path: &std::ffi::CStr) -> std::io::Result<()> {
-    let fd = unsafe { libc::open(procs_path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    let fd = retry_open_write_only(procs_path)?;
 
     let pid = unsafe { libc::getpid() } as u32;
     let mut buf = [0_u8; 32];
     let len = write_u32_decimal(pid, &mut buf);
-    let written = unsafe { libc::write(fd, buf.as_ptr().cast(), len) };
-    let write_error = if written < 0 || written as usize != len {
-        Some(std::io::Error::last_os_error())
-    } else {
-        None
-    };
+    let write_result = retry_write_all(fd, &buf[..len]);
     let close_result = unsafe { libc::close(fd) };
 
-    match (write_error, close_result) {
+    match (write_result.err(), close_result) {
         (Some(error), _) => Err(error),
         (None, -1) => Err(std::io::Error::last_os_error()),
         (None, _) => Ok(()),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn retry_open_write_only(path: &std::ffi::CStr) -> std::io::Result<i32> {
+    loop {
+        let fd = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) };
+        if fd >= 0 {
+            return Ok(fd);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EINTR) {
+            return Err(error);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn retry_write_all(fd: i32, mut bytes: &[u8]) -> std::io::Result<()> {
+    while !bytes.is_empty() {
+        let written = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+        if written < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(error);
+        }
+        if written == 0 {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        }
+        bytes = &bytes[written as usize..];
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -303,6 +344,15 @@ fn write_u32_decimal(value: u32, buf: &mut [u8; 32]) -> usize {
         buf[idx] = scratch[len - idx - 1];
     }
     len
+}
+
+#[cfg(target_os = "linux")]
+fn cgroup_correlation_label(status: CgroupCorrelationStatus) -> &'static str {
+    match status {
+        CgroupCorrelationStatus::Clean => "clean",
+        CgroupCorrelationStatus::Partial => "partial",
+        CgroupCorrelationStatus::Failed => "failed",
+    }
 }
 
 #[cfg(target_os = "linux")]
