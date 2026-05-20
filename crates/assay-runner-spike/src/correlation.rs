@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 pub const CORRELATION_REPORT_SCHEMA: &str = "assay.runner.correlation_report.v0";
 
@@ -33,6 +34,14 @@ pub struct CorrelationReport {
     pub ambiguities: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CorrelationReportError {
+    #[error("correlation report schema must be {CORRELATION_REPORT_SCHEMA}")]
+    InvalidSchema,
+    #[error("run_id must not be empty")]
+    EmptyRunId,
+}
+
 impl CorrelationReport {
     pub fn clean(run_id: impl Into<String>) -> Self {
         Self {
@@ -58,6 +67,16 @@ impl CorrelationReport {
     pub fn mark_failed(&mut self, ambiguity: impl Into<String>) {
         self.status = CorrelationStatus::Failed;
         self.ambiguities.push(ambiguity.into());
+    }
+
+    pub fn validate(&self) -> Result<(), CorrelationReportError> {
+        if self.schema != CORRELATION_REPORT_SCHEMA {
+            return Err(CorrelationReportError::InvalidSchema);
+        }
+        if self.run_id.is_empty() {
+            return Err(CorrelationReportError::EmptyRunId);
+        }
+        Ok(())
     }
 }
 
@@ -86,6 +105,17 @@ mod tests {
         assert_eq!(
             report.ambiguities,
             vec!["cgroup_correlation_failed", "sdk_layer_absent"]
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unexpected_schema() {
+        let mut report = CorrelationReport::clean("run_001");
+        report.schema = "assay.runner.correlation_report.v_future".to_string();
+
+        assert_eq!(
+            report.validate(),
+            Err(CorrelationReportError::InvalidSchema)
         );
     }
 }

@@ -1,4 +1,4 @@
-use crate::RunnerSpikeArchive;
+use crate::{CgroupCorrelationStatus, KernelLayerStatus, RunnerSpikeArchive};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::process::Command;
@@ -21,7 +21,11 @@ pub enum RunSpecError {
     #[error("run_id must not be empty")]
     EmptyRunId,
     #[error("run_id must not contain ':'")]
+    // Colons are used as prefix separators in policy_decisions values such as
+    // "allow:filesystem.read_file"; banning them keeps future join keys simple.
     RunIdContainsColon,
+    #[error("run_id may only contain ASCII letters, digits, '_' and '-'")]
+    RunIdContainsUnsafeCharacter,
     #[error("unsupported agent shim {0:?}")]
     UnsupportedAgentShim(String),
 }
@@ -87,6 +91,13 @@ impl RunSpec {
         if self.run_id.contains(':') {
             return Err(RunSpecError::RunIdContainsColon);
         }
+        if !self
+            .run_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            return Err(RunSpecError::RunIdContainsUnsafeCharacter);
+        }
         if !matches!(self.agent_shim.as_str(), "none" | "openai-agents") {
             return Err(RunSpecError::UnsupportedAgentShim(self.agent_shim.clone()));
         }
@@ -97,6 +108,13 @@ impl RunSpec {
         self.validate()?;
         let mut archive = RunnerSpikeArchive::empty(self.run_id.clone(), self.platform.clone());
         archive.observation_health = archive.observation_health.with_agent_shim(&self.agent_shim);
+        archive.observation_health.kernel_layer = KernelLayerStatus::Absent;
+        archive.observation_health = archive
+            .observation_health
+            .with_cgroup_correlation(CgroupCorrelationStatus::Partial);
+        archive.observation_health.notes.push(
+            "contract_only_mode: kernel and cgroup capture not wired in this revision".to_string(),
+        );
         Ok(archive)
     }
 
@@ -209,6 +227,16 @@ mod tests {
     }
 
     #[test]
+    fn run_spec_rejects_path_like_run_id() {
+        let spec = RunSpec::new(vec!["true".to_string()]).with_run_id("../bad");
+
+        assert_eq!(
+            spec.validate(),
+            Err(RunSpecError::RunIdContainsUnsafeCharacter)
+        );
+    }
+
+    #[test]
     fn run_spec_rejects_unknown_agent_shim() {
         let spec = RunSpec::new(vec!["true".to_string()]).with_agent_shim("typo-shim");
 
@@ -259,5 +287,29 @@ mod tests {
         assert!(outcome.archive.kernel_layer_ndjson.is_empty());
         assert!(outcome.archive.policy_layer_ndjson.is_empty());
         assert!(outcome.archive.sdk_layer_ndjson.is_empty());
+    }
+
+    #[test]
+    fn contract_only_bundle_does_not_claim_kernel_observation() {
+        let outcome = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_platform("linux")
+            .run_contract_only()
+            .unwrap();
+
+        assert_eq!(
+            outcome.archive.observation_health.kernel_layer,
+            KernelLayerStatus::Absent
+        );
+        assert_eq!(
+            outcome.archive.observation_health.cgroup_correlation,
+            CgroupCorrelationStatus::Partial
+        );
+        assert!(outcome
+            .archive
+            .observation_health
+            .notes
+            .iter()
+            .any(|note| note.contains("contract_only_mode")));
     }
 }

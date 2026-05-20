@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use thiserror::Error;
 
 pub const CAPABILITY_SURFACE_SCHEMA: &str = "assay.runner.capability_surface.v0";
 
@@ -12,6 +13,14 @@ pub struct CapabilitySurface {
     pub process_execs: BTreeSet<String>,
     pub mcp_tools: BTreeSet<String>,
     pub policy_decisions: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CapabilitySurfaceError {
+    #[error("capability surface schema must be {CAPABILITY_SURFACE_SCHEMA}")]
+    InvalidSchema,
+    #[error("run_id must not be empty")]
+    EmptyRunId,
 }
 
 impl CapabilitySurface {
@@ -45,6 +54,16 @@ impl CapabilitySurface {
 
     pub fn add_policy_decision(&mut self, decision: impl Into<String>) {
         self.policy_decisions.insert(decision.into());
+    }
+
+    pub fn validate(&self) -> Result<(), CapabilitySurfaceError> {
+        if self.schema != CAPABILITY_SURFACE_SCHEMA {
+            return Err(CapabilitySurfaceError::InvalidSchema);
+        }
+        if self.run_id.is_empty() {
+            return Err(CapabilitySurfaceError::EmptyRunId);
+        }
+        Ok(())
     }
 }
 
@@ -80,6 +99,17 @@ mod tests {
                 "mcp_tools": ["filesystem.read_file", "filesystem.write_file"],
                 "policy_decisions": ["allow:filesystem.read_file", "deny:filesystem.write_file"]
             })
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unexpected_schema() {
+        let mut surface = CapabilitySurface::new("run_001");
+        surface.schema = "assay.runner.capability_surface.v_future".to_string();
+
+        assert_eq!(
+            surface.validate(),
+            Err(CapabilitySurfaceError::InvalidSchema)
         );
     }
 }

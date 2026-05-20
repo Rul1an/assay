@@ -53,16 +53,30 @@ fn cmd_run(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
     let outcome = spec.run_contract_only()?;
     let mut file = File::create(&output)?;
     outcome.archive.write(&mut file)?;
+    let exit_status = exit_status_label(outcome.exit_code, outcome.signal);
 
     println!(
-        "wrote runner-spike bundle: {} (run_id={}, exit_code={})",
+        "wrote runner-spike bundle: {} (run_id={}, status={})",
         output.display(),
         spec.run_id,
-        outcome
-            .exit_code
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "signal".to_string())
+        exit_status
     );
 
-    Ok(outcome.exit_code.unwrap_or(1))
+    Ok(exit_status_code(outcome.exit_code, outcome.signal))
+}
+
+fn exit_status_label(exit_code: Option<i32>, signal: Option<i32>) -> String {
+    match (exit_code, signal) {
+        (Some(code), _) => format!("exit_code:{code}"),
+        (None, Some(signal)) => format!("signal:{signal}"),
+        (None, None) => "unknown".to_string(),
+    }
+}
+
+fn exit_status_code(exit_code: Option<i32>, signal: Option<i32>) -> i32 {
+    match (exit_code, signal) {
+        (Some(code), _) => code,
+        (None, Some(signal)) => 128 + signal,
+        (None, None) => 1,
+    }
 }

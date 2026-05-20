@@ -67,11 +67,11 @@ impl ObservationHealth {
             schema: OBSERVATION_HEALTH_SCHEMA.to_string(),
             run_id: run_id.into(),
             platform: platform.into(),
-            kernel_layer: KernelLayerStatus::Complete,
+            kernel_layer: KernelLayerStatus::Absent,
             ringbuf_drops: 0,
             policy_layer: PolicyLayerStatus::Absent,
             sdk_layer: SdkLayerStatus::Absent,
-            cgroup_correlation: CgroupCorrelationStatus::Clean,
+            cgroup_correlation: CgroupCorrelationStatus::Partial,
             notes: Vec::new(),
         }
         .normalized()
@@ -136,6 +136,9 @@ impl ObservationHealth {
         if self.platform != "linux" {
             self.kernel_layer = KernelLayerStatus::Absent;
         }
+        // The SDK layer is intentionally not derived from the declared shim.
+        // A shim can crash before emitting events, which legitimately leaves
+        // sdk_layer=absent even when the requested shim was not "none".
     }
 }
 
@@ -149,6 +152,14 @@ mod tests {
 
         assert_eq!(health.kernel_layer, KernelLayerStatus::PartialRingbufDrops);
         assert_eq!(health.ringbuf_drops, 2);
+    }
+
+    #[test]
+    fn new_defaults_do_not_claim_observation() {
+        let health = ObservationHealth::new("run_001", "linux");
+
+        assert_eq!(health.kernel_layer, KernelLayerStatus::Absent);
+        assert_eq!(health.cgroup_correlation, CgroupCorrelationStatus::Partial);
     }
 
     #[test]

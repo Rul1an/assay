@@ -15,12 +15,12 @@ pub use archive::{
     KERNEL_LAYER_PATH, MANIFEST_PATH, OBSERVATION_HEALTH_PATH, POLICY_LAYER_PATH, SDK_LAYER_PATH,
 };
 pub use correlation::{
-    BindingWindow, CorrelationBinding, CorrelationReport, CorrelationStatus,
-    CORRELATION_REPORT_SCHEMA,
+    BindingWindow, CorrelationBinding, CorrelationReport, CorrelationReportError,
+    CorrelationStatus, CORRELATION_REPORT_SCHEMA,
 };
 pub use health::{
     CgroupCorrelationStatus, KernelLayerStatus, ObservationHealth, PolicyLayerStatus,
     SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
 };
 pub use run::{RunExecutionError, RunOutcome, RunSpec, RunSpecError};
-pub use surface::{CapabilitySurface, CAPABILITY_SURFACE_SCHEMA};
+pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};

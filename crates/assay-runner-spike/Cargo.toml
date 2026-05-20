@@ -15,8 +15,8 @@ serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
-flate2 = "1.1"
-tar = "0.4"
+flate2 = { workspace = true }
+tar = { workspace = true }
 uuid = { workspace = true }
 
 [lints]

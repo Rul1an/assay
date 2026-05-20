@@ -57,6 +57,10 @@ pub enum RunnerSpikeArchiveError {
     },
     #[error("invalid observation health: {0}")]
     ObservationHealth(#[from] crate::health::ObservationHealthError),
+    #[error("invalid capability surface: {0}")]
+    CapabilitySurface(#[from] crate::surface::CapabilitySurfaceError),
+    #[error("invalid correlation report: {0}")]
+    CorrelationReport(#[from] crate::correlation::CorrelationReportError),
     #[error("json serialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("archive io failed: {0}")]
@@ -88,7 +92,7 @@ impl RunnerSpikeArchive {
         let mut tar = create_deterministic_tar(writer);
         write_entry(&mut tar, MANIFEST_PATH, &manifest_bytes)?;
         for (path, bytes) in files {
-            write_entry(&mut tar, path, &bytes)?;
+            write_entry(&mut tar, path, bytes.as_slice())?;
         }
         let encoder = tar.into_inner()?;
         encoder.finish()?;
@@ -121,28 +125,58 @@ impl RunnerSpikeArchive {
             &self.correlation_report.run_id,
         )?;
         self.observation_health.validate()?;
+        self.capability_surface.validate()?;
+        self.correlation_report.validate()?;
         Ok(())
     }
 
-    fn archive_files(&self) -> Result<BTreeMap<&'static str, Vec<u8>>, RunnerSpikeArchiveError> {
+    fn archive_files(
+        &self,
+    ) -> Result<BTreeMap<&'static str, ArchiveFileContent<'_>>, RunnerSpikeArchiveError> {
         let mut files = BTreeMap::new();
-        files.insert(EVENTS_PATH, self.events_ndjson.clone());
-        files.insert(KERNEL_LAYER_PATH, self.kernel_layer_ndjson.clone());
-        files.insert(POLICY_LAYER_PATH, self.policy_layer_ndjson.clone());
-        files.insert(SDK_LAYER_PATH, self.sdk_layer_ndjson.clone());
+        files.insert(
+            EVENTS_PATH,
+            ArchiveFileContent::Borrowed(&self.events_ndjson),
+        );
+        files.insert(
+            KERNEL_LAYER_PATH,
+            ArchiveFileContent::Borrowed(&self.kernel_layer_ndjson),
+        );
+        files.insert(
+            POLICY_LAYER_PATH,
+            ArchiveFileContent::Borrowed(&self.policy_layer_ndjson),
+        );
+        files.insert(
+            SDK_LAYER_PATH,
+            ArchiveFileContent::Borrowed(&self.sdk_layer_ndjson),
+        );
         files.insert(
             CAPABILITY_SURFACE_PATH,
-            serde_json::to_vec(&self.capability_surface)?,
+            ArchiveFileContent::Owned(serde_json::to_vec(&self.capability_surface)?),
         );
         files.insert(
             OBSERVATION_HEALTH_PATH,
-            serde_json::to_vec(&self.observation_health)?,
+            ArchiveFileContent::Owned(serde_json::to_vec(&self.observation_health)?),
         );
         files.insert(
             CORRELATION_REPORT_PATH,
-            serde_json::to_vec(&self.correlation_report)?,
+            ArchiveFileContent::Owned(serde_json::to_vec(&self.correlation_report)?),
         );
         Ok(files)
+    }
+}
+
+enum ArchiveFileContent<'a> {
+    Borrowed(&'a [u8]),
+    Owned(Vec<u8>),
+}
+
+impl ArchiveFileContent<'_> {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(bytes) => bytes,
+            Self::Owned(bytes) => bytes,
+        }
     }
 }
 
@@ -161,10 +195,14 @@ fn ensure_run_id(
     })
 }
 
-fn build_manifest(run_id: &str, files: &BTreeMap<&'static str, Vec<u8>>) -> ArchiveManifest {
+fn build_manifest(
+    run_id: &str,
+    files: &BTreeMap<&'static str, ArchiveFileContent<'_>>,
+) -> ArchiveManifest {
     let files = files
         .iter()
-        .map(|(path, bytes)| {
+        .map(|(path, content)| {
+            let bytes = content.as_slice();
             (
                 (*path).to_string(),
                 ArchiveFile {
@@ -301,6 +339,38 @@ mod tests {
             err,
             RunnerSpikeArchiveError::ObservationHealth(
                 crate::health::ObservationHealthError::RingbufDropsRequirePartialKernelLayer
+            )
+        ));
+    }
+
+    #[test]
+    fn write_rejects_invalid_capability_surface_schema() {
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.capability_surface.schema = "assay.runner.capability_surface.v_future".to_string();
+        let mut bytes = Vec::new();
+
+        let err = archive.write(&mut bytes).unwrap_err();
+
+        assert!(matches!(
+            err,
+            RunnerSpikeArchiveError::CapabilitySurface(
+                crate::surface::CapabilitySurfaceError::InvalidSchema
+            )
+        ));
+    }
+
+    #[test]
+    fn write_rejects_invalid_correlation_report_schema() {
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.correlation_report.schema = "assay.runner.correlation_report.v_future".to_string();
+        let mut bytes = Vec::new();
+
+        let err = archive.write(&mut bytes).unwrap_err();
+
+        assert!(matches!(
+            err,
+            RunnerSpikeArchiveError::CorrelationReport(
+                crate::correlation::CorrelationReportError::InvalidSchema
             )
         ));
     }
