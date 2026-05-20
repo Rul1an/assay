@@ -6,6 +6,7 @@
 mod archive;
 mod correlation;
 mod health;
+mod kernel;
 mod run;
 mod surface;
 
@@ -22,5 +23,6 @@ pub use health::{
     CgroupCorrelationStatus, KernelLayerStatus, ObservationHealth, PolicyLayerStatus,
     SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
 };
+pub use kernel::{KernelLayerBuilder, KernelLayerCapture, KernelLayerError, KERNEL_EVENT_SCHEMA};
 pub use run::{RunExecutionError, RunOutcome, RunSpec, RunSpecError};
 pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};

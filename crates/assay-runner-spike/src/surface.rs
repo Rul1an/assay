@@ -8,6 +8,11 @@ pub const CAPABILITY_SURFACE_SCHEMA: &str = "assay.runner.capability_surface.v0"
 pub struct CapabilitySurface {
     pub schema: String,
     pub run_id: String,
+    /// Set of filesystem paths the agent touched.
+    ///
+    /// v0 stores full paths from observed file events. Projection onto
+    /// directory prefixes for capability-diff is a later transformation; the
+    /// field name is kept stable for the v0 schema.
     pub filesystem_prefixes: BTreeSet<String>,
     pub network_endpoints: BTreeSet<String>,
     pub process_execs: BTreeSet<String>,
@@ -54,6 +59,18 @@ impl CapabilitySurface {
 
     pub fn add_policy_decision(&mut self, decision: impl Into<String>) {
         self.policy_decisions.insert(decision.into());
+    }
+
+    pub fn merge_from(&mut self, other: &Self) {
+        self.filesystem_prefixes
+            .extend(other.filesystem_prefixes.iter().cloned());
+        self.network_endpoints
+            .extend(other.network_endpoints.iter().cloned());
+        self.process_execs
+            .extend(other.process_execs.iter().cloned());
+        self.mcp_tools.extend(other.mcp_tools.iter().cloned());
+        self.policy_decisions
+            .extend(other.policy_decisions.iter().cloned());
     }
 
     pub fn validate(&self) -> Result<(), CapabilitySurfaceError> {
@@ -110,6 +127,26 @@ mod tests {
         assert_eq!(
             surface.validate(),
             Err(CapabilitySurfaceError::InvalidSchema)
+        );
+    }
+
+    #[test]
+    fn merge_from_preserves_deterministic_sets() {
+        let mut first = CapabilitySurface::new("run_001");
+        first.add_filesystem_prefix("/tmp/b");
+        let mut second = CapabilitySurface::new("run_001");
+        second.add_filesystem_prefix("/tmp/a");
+        second.add_process_exec("/usr/bin/true");
+
+        first.merge_from(&second);
+
+        assert_eq!(
+            first.filesystem_prefixes.into_iter().collect::<Vec<_>>(),
+            vec!["/tmp/a", "/tmp/b"]
+        );
+        assert_eq!(
+            first.process_execs.into_iter().collect::<Vec<_>>(),
+            vec!["/usr/bin/true"]
         );
     }
 }

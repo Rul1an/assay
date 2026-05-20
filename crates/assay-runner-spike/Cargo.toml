@@ -10,6 +10,8 @@ readme.workspace = true
 publish = false
 
 [dependencies]
+assay-common = { workspace = true, features = ["std"] }
+assay-monitor = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
