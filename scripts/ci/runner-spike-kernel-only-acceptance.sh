@@ -16,16 +16,24 @@ if [ ! -f "$ASSAY_EBPF_PATH" ]; then
   exit 40
 fi
 
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-kernel-only.XXXXXX")"
-cleanup() {
-  rm -rf "$TMP_ROOT"
-}
+if [ -n "${ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR:-}" ]; then
+  TMP_ROOT="$ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR"
+  mkdir -p "$TMP_ROOT"
+  cleanup() {
+    :
+  }
+else
+  TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-kernel-only.XXXXXX")"
+  cleanup() {
+    rm -rf -- "$TMP_ROOT"
+  }
+fi
 trap cleanup EXIT
 
-WORK_DIR="$TMP_ROOT/work"
+WORK_DIR="${ASSAY_RUNNER_ACCEPTANCE_WORK_DIR:-$TMP_ROOT/work}"
 EXTRACT_DIR="$TMP_ROOT/extract"
 BUNDLE="$TMP_ROOT/runner-kernel-only.tar.gz"
-RUN_ID="run_kernel_only_acceptance"
+RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_kernel_only_acceptance}"
 
 cargo run -p assay-cli --no-default-features -- \
   runner-spike run \
@@ -46,7 +54,7 @@ import sys
 from pathlib import Path
 
 extract_dir = Path(sys.argv[1])
-work_dir = Path(sys.argv[2])
+work_dir = Path(sys.argv[2]).resolve()
 run_id = sys.argv[3]
 
 
@@ -97,9 +105,23 @@ expect(
     f"cgroup_correlation must be clean, got {health['cgroup_correlation']!r}",
 )
 
-expect((extract_dir / "layers/policy.ndjson").read_text(encoding="utf-8") == "", "policy layer must be empty")
+expect(
+    (extract_dir / "layers/policy.ndjson").read_text(encoding="utf-8") == "",
+    "policy layer must be empty",
+)
 expect((extract_dir / "layers/sdk.ndjson").read_text(encoding="utf-8") == "", "sdk layer must be empty")
-expect((extract_dir / "layers/kernel.ndjson").stat().st_size > 0, "kernel layer must contain events")
+
+kernel_events = (extract_dir / "layers/kernel.ndjson").read_text(encoding="utf-8").splitlines()
+expect(kernel_events, "kernel layer must contain events")
+for line_number, line in enumerate(kernel_events, start=1):
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError as error:
+        fail(f"kernel event {line_number} is not valid JSON: {error}")
+    expect(
+        event.get("schema") == "assay.runner.kernel_event.v0",
+        f"kernel event {line_number} has unexpected schema: {event.get('schema')!r}",
+    )
 
 filesystem = set(surface.get("filesystem_prefixes", []))
 processes = set(surface.get("process_execs", []))

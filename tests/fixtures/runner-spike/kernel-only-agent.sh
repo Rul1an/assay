@@ -17,5 +17,3 @@ cat "$input_file" >/dev/null
 printf '%s\n' "assay runner kernel-only fixture output" > "$output_file"
 
 /usr/bin/env ASSAY_RUNNER_KERNEL_ONLY_FIXTURE=1 >/dev/null
-
-printf '%s\n' "$output_file"
