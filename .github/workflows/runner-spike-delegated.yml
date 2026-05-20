@@ -27,21 +27,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  phase1-delegated-gates:
-    name: Phase 1 delegated gates (${{ inputs.gates }})
+  prepare-delegated-runner:
+    name: Prepare delegated runner
     runs-on: [self-hosted, linux, assay-bpf-runner]
-    timeout-minutes: 90
+    timeout-minutes: 15
     permissions:
       contents: read
-    env:
-      CARGO_INCREMENTAL: 0
-
     steps:
-      - name: Prepend Rust to PATH
-        shell: bash
-        run: echo "/opt/rust/bin" >> "$GITHUB_PATH"
-
-      - name: Pre-clean delegated runner
+      - name: Pre-clean delegated runner caches
         shell: bash
         run: |
           set +e
@@ -70,9 +63,42 @@ jobs:
           fi
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
 
-      # The pre-clean step removes root-owned _actions cache state before this
-      # action is loaded, so checkout can stay token-safe with no credentials
-      # persisted or embedded in manual git command arguments.
+  phase1-delegated-gates:
+    name: Phase 1 delegated gates (${{ inputs.gates }})
+    needs: prepare-delegated-runner
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: 0
+
+    steps:
+      - name: Prepend Rust to PATH
+        shell: bash
+        run: |
+          echo "/home/github-runner/.cargo/bin" >> "$GITHUB_PATH"
+          echo "/opt/rust/bin" >> "$GITHUB_PATH"
+
+      - name: Pre-clean delegated workspace
+        shell: bash
+        run: |
+          set +e
+          sudo pkill -x assay 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} + 2>/dev/null || true
+          sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
+          if find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after delegated pre-clean"
+            find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
+      # The separate prepare job removes root-owned _actions cache state before
+      # this job's actions are loaded. Do not delete _actions in this job:
+      # GitHub downloads action repositories during "Set up job", before steps.
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
@@ -123,6 +149,7 @@ jobs:
         run: |
           set -euo pipefail
           if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-image
             cargo xtask build-ebpf --docker
           else
             cargo xtask build-ebpf
