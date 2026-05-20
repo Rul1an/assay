@@ -24,6 +24,9 @@ Operational status:
 - [State of Assay — 2026-05-11](STATE-OF-ASSAY-2026-05-11.md) records the
   post-`v3.10.0` posture shift from hardening target to stable base layer,
   and locates the next governance focus in Assay-Harness alignment.
+- [Assay-Runner Product Candidate Memo](ASSAY-RUNNER-PRODUCT-CANDIDATE-2026-05-18.md)
+  records an internal, Phase-1-spike-gated measured-run product candidate
+  beside Assay-Harness; it is not a public roadmap commitment.
 - [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
   dismissed Security-tab alerts so the dismiss-state stays traceable rather
   than implicit.
