@@ -8,8 +8,9 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 work_dir=$1
+sdk_tool_call_id="${ASSAY_RUNNER_SDK_TOOL_CALL_ID:-tc_runner_policy_001}"
 
-ASSAY_RUNNER_SDK_TOOL_CALL_ID=tc_runner_policy_001 \
+ASSAY_RUNNER_SDK_TOOL_CALL_ID="$sdk_tool_call_id" \
   "$ROOT/tests/fixtures/runner-spike/sdk-event-wrapper.sh" "$work_dir"
 
 "$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh" "$work_dir"

@@ -34,10 +34,13 @@ BUNDLE="$TMP_ROOT/runner-sdk-policy.tar.gz"
 SDK_LOG="$TMP_ROOT/sdk-events.ndjson"
 DECISION_LOG="$TMP_ROOT/policy-decisions.ndjson"
 RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_sdk_policy_correlation}"
+SDK_TOOL_CALL_ID="${ASSAY_RUNNER_ACCEPTANCE_SDK_TOOL_CALL_ID:-tc_runner_policy_001}"
+EXPECT_SDK_POLICY_MISMATCH="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_POLICY_MISMATCH:-0}"
 
 export ASSAY_BIN
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
 export ASSAY_RUNNER_RUN_ID="$RUN_ID"
+export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
 
 "$ASSAY_BIN" runner-spike run \
   --agent-shim openai-agents \
@@ -50,7 +53,7 @@ export ASSAY_RUNNER_RUN_ID="$RUN_ID"
 mkdir -p "$EXTRACT_DIR"
 tar -xzf "$BUNDLE" -C "$EXTRACT_DIR"
 
-python3 - "$EXTRACT_DIR" "$RUN_ID" <<'PY'
+python3 - "$EXTRACT_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECT_SDK_POLICY_MISMATCH" <<'PY'
 import hashlib
 import json
 import sys
@@ -58,6 +61,9 @@ from pathlib import Path
 
 extract_dir = Path(sys.argv[1])
 run_id = sys.argv[2]
+sdk_tool_call_id = sys.argv[3]
+expect_sdk_policy_mismatch = sys.argv[4] == "1"
+policy_tool_call_id = "tc_runner_policy_001"
 
 
 def fail(message: str) -> None:
@@ -101,19 +107,27 @@ expect(len(policy_events) == 1, f"expected one policy event, got {len(policy_eve
 
 sdk_tool_calls = {event.get("tool_call_id") for event in sdk_events if event.get("tool_call_id")}
 policy_tool_calls = {event.get("tool_call_id") for event in policy_events}
-expect(sdk_tool_calls == {"tc_runner_policy_001"}, f"sdk tool_call_id mismatch: {sdk_tool_calls!r}")
-expect(policy_tool_calls == {"tc_runner_policy_001"}, f"policy tool_call_id mismatch: {policy_tool_calls!r}")
+expect(sdk_tool_calls == {sdk_tool_call_id}, f"sdk tool_call_id mismatch: {sdk_tool_calls!r}")
+expect(policy_tool_calls == {policy_tool_call_id}, f"policy tool_call_id mismatch: {policy_tool_calls!r}")
 
 expect("read_file" in set(surface.get("mcp_tools", [])), "read_file MCP tool missing")
 expect("allow:read_file" in set(surface.get("policy_decisions", [])), "allow:read_file policy decision missing")
 
 bindings = correlation.get("bindings", [])
 expect(len(bindings) == 1, f"expected one policy correlation binding, got {len(bindings)}")
-expect(bindings[0]["tool_call_id"] == "tc_runner_policy_001", "binding tool_call_id mismatch")
-expect(
-    not any(item.startswith("sdk_tool_call_without_policy_binding:") for item in correlation.get("ambiguities", [])),
-    f"sdk/policy mismatch ambiguity present: {correlation.get('ambiguities', [])!r}",
-)
+expect(bindings[0]["tool_call_id"] == policy_tool_call_id, "binding tool_call_id mismatch")
+ambiguities = correlation.get("ambiguities", [])
+expected_ambiguity = f"sdk_tool_call_without_policy_binding:{sdk_tool_call_id}"
+if expect_sdk_policy_mismatch:
+    expect(sdk_tool_call_id != policy_tool_call_id, "mismatch mode must use a distinct SDK tool_call_id")
+    expect(correlation["status"] == "partial", f"correlation status must be partial, got {correlation['status']!r}")
+    expect(expected_ambiguity in ambiguities, f"expected mismatch ambiguity missing: {ambiguities!r}")
+else:
+    expect(sdk_tool_call_id == policy_tool_call_id, "match mode must use the policy tool_call_id")
+    expect(
+        not any(item.startswith("sdk_tool_call_without_policy_binding:") for item in ambiguities),
+        f"sdk/policy mismatch ambiguity present: {ambiguities!r}",
+    )
 
 print("runner-spike SDK+policy correlation verified")
 PY
