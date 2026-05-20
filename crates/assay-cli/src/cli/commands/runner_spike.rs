@@ -102,8 +102,7 @@ fn cmd_run_contract_only(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
     let output = bundle_output_path(&args, &spec.run_id);
 
     let mut outcome = spec.run_contract_only()?;
-    apply_policy_decision_log_if_requested(&spec, &args, &mut outcome.archive)?;
-    apply_sdk_event_log_if_requested(&spec, &args, &mut outcome.archive)?;
+    apply_policy_then_sdk_logs_if_requested(&spec, &args, &mut outcome.archive)?;
     let mut file = File::create(&output)?;
     outcome.archive.write(&mut file)?;
     let exit_status = exit_status_label(outcome.exit_code, outcome.signal);
@@ -228,8 +227,7 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     let after_stats = monitor.snapshot_stats()?;
     let capture = builder.finish(&before_stats, &after_stats);
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
-    apply_policy_decision_log_if_requested(&spec, &args, &mut archive)?;
-    apply_sdk_event_log_if_requested(&spec, &args, &mut archive)?;
+    apply_policy_then_sdk_logs_if_requested(&spec, &args, &mut archive)?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
 
     let mut file = File::create(&output)?;
@@ -372,6 +370,19 @@ fn write_u32_decimal(value: u32, buf: &mut [u8; 32]) -> usize {
         buf[idx] = scratch[len - idx - 1];
     }
     len
+}
+
+fn apply_policy_then_sdk_logs_if_requested(
+    spec: &RunSpec,
+    args: &RunnerSpikeRunArgs,
+    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+) -> anyhow::Result<()> {
+    // Policy must be applied before SDK: SDK cross-checks read policy
+    // correlation bindings and the mismatch determinism gate relies on stable
+    // ambiguity ordering.
+    apply_policy_decision_log_if_requested(spec, args, archive)?;
+    apply_sdk_event_log_if_requested(spec, args, archive)?;
+    Ok(())
 }
 
 fn apply_policy_decision_log_if_requested(
