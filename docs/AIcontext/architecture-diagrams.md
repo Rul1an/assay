@@ -876,6 +876,8 @@ flowchart TB
     assay_metrics --> assay_core
     assay_monitor --> assay_common
     assay_monitor --> assay_policy
+    assay_runner_spike --> assay_common
+    assay_runner_spike --> assay_monitor
     assay_sim --> assay_adapter_api
     assay_sim --> assay_core
     assay_sim --> assay_evidence
