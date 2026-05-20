@@ -365,6 +365,7 @@ policy layer:
 ```text
 tests/fixtures/runner-spike/sdk-policy-agent.sh
 scripts/ci/runner-spike-sdk-policy-correlation.sh
+scripts/ci/runner-spike-sdk-policy-three-run-determinism.sh
 ```
 
 When a policy layer is present, every SDK tool-call id must match an existing
