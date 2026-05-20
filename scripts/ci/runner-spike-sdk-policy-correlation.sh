@@ -14,18 +14,26 @@ else
   ASSAY_BIN="$ROOT/target/debug/assay"
 fi
 
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-sdk-policy.XXXXXX")"
-cleanup() {
-  rm -rf -- "$TMP_ROOT"
-}
+if [ -n "${ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR:-}" ]; then
+  TMP_ROOT="$ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR"
+  mkdir -p "$TMP_ROOT"
+  cleanup() {
+    :
+  }
+else
+  TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-sdk-policy.XXXXXX")"
+  cleanup() {
+    rm -rf -- "$TMP_ROOT"
+  }
+fi
 trap cleanup EXIT
 
-WORK_DIR="$TMP_ROOT/work"
+WORK_DIR="${ASSAY_RUNNER_ACCEPTANCE_WORK_DIR:-$TMP_ROOT/work}"
 EXTRACT_DIR="$TMP_ROOT/extract"
 BUNDLE="$TMP_ROOT/runner-sdk-policy.tar.gz"
 SDK_LOG="$TMP_ROOT/sdk-events.ndjson"
 DECISION_LOG="$TMP_ROOT/policy-decisions.ndjson"
-RUN_ID="run_sdk_policy_correlation"
+RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_sdk_policy_correlation}"
 
 export ASSAY_BIN
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
