@@ -45,6 +45,10 @@ pub struct RunnerSpikeRunArgs {
     #[arg(long, hide = true)]
     pub policy_decision_log: Option<PathBuf>,
 
+    /// Hidden S5 spike path: ingest normalized SDK event NDJSON.
+    #[arg(long, hide = true)]
+    pub sdk_event_log: Option<PathBuf>,
+
     /// Command to run.
     #[arg(allow_hyphen_values = true, required = true, trailing_var_arg = true)]
     pub command: Vec<String>,
@@ -57,11 +61,19 @@ pub async fn run(args: RunnerSpikeArgs) -> anyhow::Result<i32> {
 }
 
 async fn cmd_run(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
+    validate_runner_spike_args(&args)?;
     if args.kernel_capture {
         return cmd_run_with_kernel_capture(args).await;
     }
 
     cmd_run_contract_only(args)
+}
+
+fn validate_runner_spike_args(args: &RunnerSpikeRunArgs) -> anyhow::Result<()> {
+    if args.sdk_event_log.is_some() && args.agent_shim == "none" {
+        anyhow::bail!("runner-spike --sdk-event-log requires an SDK agent shim");
+    }
+    Ok(())
 }
 
 fn build_spec(args: &RunnerSpikeRunArgs) -> RunSpec {
@@ -84,6 +96,7 @@ fn cmd_run_contract_only(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
 
     let mut outcome = spec.run_contract_only()?;
     apply_policy_decision_log_if_requested(&spec, &args, &mut outcome.archive)?;
+    apply_sdk_event_log_if_requested(&spec, &args, &mut outcome.archive)?;
     let mut file = File::create(&output)?;
     outcome.archive.write(&mut file)?;
     let exit_status = exit_status_label(outcome.exit_code, outcome.signal);
@@ -209,6 +222,7 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     let capture = builder.finish(&before_stats, &after_stats);
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
     apply_policy_decision_log_if_requested(&spec, &args, &mut archive)?;
+    apply_sdk_event_log_if_requested(&spec, &args, &mut archive)?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
 
     let mut file = File::create(&output)?;
@@ -369,6 +383,27 @@ fn apply_policy_decision_log_if_requested(
     })?;
     let capture =
         assay_runner_spike::PolicyLayerCapture::from_decision_ndjson(spec.run_id.clone(), &bytes)?;
+    capture.apply_to_archive(archive)?;
+    Ok(())
+}
+
+fn apply_sdk_event_log_if_requested(
+    spec: &RunSpec,
+    args: &RunnerSpikeRunArgs,
+    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+) -> anyhow::Result<()> {
+    let Some(path) = args.sdk_event_log.as_ref() else {
+        return Ok(());
+    };
+
+    let bytes = std::fs::read(path).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to read runner-spike SDK event log {}: {error}",
+            path.display()
+        )
+    })?;
+    let capture =
+        assay_runner_spike::SdkLayerCapture::from_sdk_ndjson(spec.run_id.clone(), &bytes)?;
     capture.apply_to_archive(archive)?;
     Ok(())
 }

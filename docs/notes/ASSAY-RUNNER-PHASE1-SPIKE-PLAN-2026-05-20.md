@@ -340,6 +340,12 @@ Transport is fixed for the spike:
 - stdout/stderr remain diagnostic channels; they are not the canonical SDK
   event stream
 
+The first S5 implementation slice may ingest a prewritten normalized SDK
+event log through the same hidden runner boundary. That only freezes the
+`assay.runner.sdk_event.v0` contract; it is not enough to claim the
+`openai-agents` shim has passed until the subprocess transport and
+deterministic fixture are wired.
+
 Keep it thin:
 
 - emit normalized SDK events
