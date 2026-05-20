@@ -99,8 +99,16 @@ impl SessionCgroup {
         self.id
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn procs_path(&self) -> PathBuf {
+        self.path.join("cgroup.procs")
+    }
+
     pub fn add_process(&self, pid: u32) -> Result<()> {
-        let procs_path = self.path.join("cgroup.procs");
+        let procs_path = self.procs_path();
         fs::write(&procs_path, pid.to_string()).context("Failed to add PID")?;
         Ok(())
     }
@@ -223,7 +231,7 @@ impl SessionCgroup {
 impl Drop for SessionCgroup {
     fn drop(&mut self) {
         if let Err(e) = self.remove() {
-            eprintln!("Values to clean up cgroup session: {:?}", e);
+            eprintln!("Failed to clean up cgroup session: {:?}", e);
         }
     }
 }
