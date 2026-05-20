@@ -443,6 +443,8 @@ dependencies = [
 name = "assay-runner-spike"
 version = "3.10.2"
 dependencies = [
+ "assay-common",
+ "assay-monitor",
  "flate2",
  "hex",
  "serde",
