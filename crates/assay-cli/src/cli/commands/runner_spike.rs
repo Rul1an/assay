@@ -347,7 +347,9 @@ fn write_u32_decimal(value: u32, buf: &mut [u8; 32]) -> usize {
 }
 
 #[cfg(target_os = "linux")]
-fn cgroup_correlation_label(status: CgroupCorrelationStatus) -> &'static str {
+fn cgroup_correlation_label(status: assay_runner_spike::CgroupCorrelationStatus) -> &'static str {
+    use assay_runner_spike::CgroupCorrelationStatus;
+
     match status {
         CgroupCorrelationStatus::Clean => "clean",
         CgroupCorrelationStatus::Partial => "partial",
