@@ -1,0 +1,193 @@
+name: Runner Spike Delegated
+
+on:
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: "Delegated Phase 1 gate set to run"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - kernel-only
+          - kernel-policy
+          - openai-agents-kernel-policy
+      build_ebpf:
+        description: "Build target/assay-ebpf.o before running the gates"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-spike-delegated-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  phase1-delegated-gates:
+    name: Phase 1 delegated gates (${{ inputs.gates }})
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: 0
+      PATH: /opt/rust/bin:/usr/local/bin:/usr/bin:/bin:$PATH
+
+    steps:
+      - name: Pre-clean delegated runner
+        shell: bash
+        run: |
+          set +e
+          sudo pkill -x assay 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
+      # Avoid actions/checkout here: this self-hosted lane has historically
+      # hit root-owned _actions cache state before the first action step.
+      - name: Checkout repository
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+          if find . -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after delegated checkout cleanup"
+            find . -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+            clone --depth 1 "https://github.com/${GH_REPO}.git" .
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+            fetch origin "${GH_SHA}"
+          git checkout --detach "${GH_SHA}"
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in cargo git node npm python3 rustc sudo tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "ERROR: delegated runner must expose cgroup v2 at /sys/fs/cgroup" >&2
+            exit 1
+          fi
+          echo "Delegated runner preflight passed"
+          {
+            echo "- kernel: $(uname -r)"
+            echo "- node: $(node --version)"
+            echo "- rustc: $(rustc --version)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install OpenAI Agents fixture deps
+        working-directory: tests/fixtures/runner-spike/openai-agents-js
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build assay CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli --no-default-features
+
+      - name: Build eBPF artifact
+        if: inputs.build_ebpf
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-ebpf --docker
+          else
+            cargo xtask build-ebpf
+          fi
+          test -f target/assay-ebpf.o
+
+      - name: Verify eBPF artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f target/assay-ebpf.o ]; then
+            echo "ERROR: target/assay-ebpf.o is required for delegated runner-spike gates." >&2
+            echo "Run with build_ebpf=true or prepare the artifact before dispatch." >&2
+            exit 1
+          fi
+          ls -lh target/assay-ebpf.o target/debug/assay
+
+      - name: Run delegated Phase 1 gates
+        shell: bash
+        env:
+          GATES: ${{ inputs.gates }}
+        run: |
+          set -euo pipefail
+          assay_bin="$PWD/target/debug/assay"
+          ebpf_path="$PWD/target/assay-ebpf.o"
+
+          run_gate() {
+            local label="$1"
+            local script="$2"
+            echo "=== runner-spike delegated gate: ${label} ==="
+            sudo -E env \
+              "PATH=$PATH" \
+              "ASSAY_BIN=$assay_bin" \
+              "ASSAY_EBPF_PATH=$ebpf_path" \
+              bash "$script"
+            echo "- ${label}: passed" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          case "$GATES" in
+            all)
+              run_gate "kernel-only three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
+              run_gate "kernel+policy three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
+              run_gate "OpenAI Agents kernel+policy+SDK three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+              ;;
+            kernel-only)
+              run_gate "kernel-only three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
+              ;;
+            kernel-policy)
+              run_gate "kernel+policy three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
+              ;;
+            openai-agents-kernel-policy)
+              run_gate "OpenAI Agents kernel+policy+SDK three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+              ;;
+            *)
+              echo "ERROR: unsupported delegated gate selection: $GATES" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Cleanup delegated runner
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo pkill -x assay 2>/dev/null || true
+          sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true

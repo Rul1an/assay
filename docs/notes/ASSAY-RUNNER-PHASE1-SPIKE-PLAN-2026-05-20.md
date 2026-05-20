@@ -405,6 +405,7 @@ clean cgroup kernel capture and the MCP policy fixture:
 ```text
 scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh
 scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh
+.github/workflows/runner-spike-delegated.yml
 ```
 
 That gate is Linux/eBPF-only. It may skip on ordinary hosted CI, and S5 is not
@@ -412,6 +413,12 @@ complete until this gate passes on a delegated cgroup host with
 `kernel_layer=complete`, `policy_layer=present`, `sdk_layer=self_reported`,
 `cgroup_correlation=clean`, empty correlation ambiguities, and stable
 health/surface/correlation/policy/SDK artifacts across three runs.
+
+The delegated workflow is `workflow_dispatch`-only and runs on
+`[self-hosted, linux, assay-bpf-runner]` so ordinary PR CI cannot be blocked by
+runner availability. A skip from the underlying scripts is a failure in that
+lane: the delegated host is the place where Linux, cgroup v2, Node 22, and the
+eBPF artifact are expected to exist.
 
 Keep it thin:
 
