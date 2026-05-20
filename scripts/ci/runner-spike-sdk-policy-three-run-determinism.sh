@@ -11,22 +11,25 @@ cleanup() {
 trap cleanup EXIT
 
 WORK_DIR="$TMP_ROOT/work"
-RUN_ID="run_sdk_policy_determinism"
+RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_sdk_policy_determinism}"
+CORRELATION_SCRIPT="${ASSAY_RUNNER_ACCEPTANCE_CORRELATION_SCRIPT:-$ROOT/scripts/ci/runner-spike-sdk-policy-correlation.sh}"
+LABEL="${ASSAY_RUNNER_ACCEPTANCE_LABEL:-SDK+policy}"
 
 for run in 1 2 3; do
-  echo "=== runner-spike SDK+policy determinism run $run/3 ==="
+  echo "=== runner-spike $LABEL determinism run $run/3 ==="
   ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR="$TMP_ROOT/run-$run" \
     ASSAY_RUNNER_ACCEPTANCE_WORK_DIR="$WORK_DIR" \
     ASSAY_RUNNER_ACCEPTANCE_RUN_ID="$RUN_ID" \
-    "$ROOT/scripts/ci/runner-spike-sdk-policy-correlation.sh"
+    "$CORRELATION_SCRIPT"
 done
 
-python3 - "$TMP_ROOT" <<'PY'
+python3 - "$TMP_ROOT" "$LABEL" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 tmp_root = Path(sys.argv[1])
+label = sys.argv[2]
 
 
 def fail(message: str) -> None:
@@ -75,7 +78,7 @@ for run in (2, 3):
             "the deterministic MCP policy fixture should emit byte-stable policy events."
         )
 
-print("runner-spike SDK+policy three-run determinism verified")
+print(f"runner-spike {label} three-run determinism verified")
 PY
 
-echo "PASS: runner-spike SDK+policy three-run determinism"
+echo "PASS: runner-spike $LABEL three-run determinism"

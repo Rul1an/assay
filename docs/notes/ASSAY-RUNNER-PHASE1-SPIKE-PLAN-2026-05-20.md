@@ -366,12 +366,16 @@ policy layer:
 tests/fixtures/runner-spike/sdk-policy-agent.sh
 scripts/ci/runner-spike-sdk-policy-correlation.sh
 scripts/ci/runner-spike-sdk-policy-three-run-determinism.sh
+scripts/ci/runner-spike-sdk-policy-mismatch.sh
+scripts/ci/runner-spike-sdk-policy-mismatch-three-run-determinism.sh
 ```
 
 When a policy layer is present, every SDK tool-call id must match an existing
 policy correlation binding. A missing binding marks the correlation report
 partial with `sdk_tool_call_without_policy_binding:<tool_call_id>`. SDK events
 still do not create bindings or promote kernel/policy claims by themselves.
+The mismatch verifier intentionally emits a distinct SDK tool-call id and must
+observe that partial-correlation ambiguity across three deterministic runs.
 
 Keep it thin:
 
