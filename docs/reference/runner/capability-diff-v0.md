@@ -240,9 +240,24 @@ This must produce:
 
 The golden shape for this case is
 [`golden/capability-diff-s5-idempotent-v0.json`](golden/capability-diff-s5-idempotent-v0.json).
-The read-only validation entry point is
-`scripts/ci/assay_runner_capability_diff_validate.py`; it projects the diff from
-the existing S5 golden artifacts and compares it to that frozen output shape.
+The read-only validation and reference projection entry point is
+`scripts/ci/assay_runner_capability_diff_validate.py`.
+
+Without explicit inputs, the helper projects the diff from the existing S5
+golden artifacts and compares it to that frozen output shape. With explicit
+`--base-dir` and `--head-dir` inputs, or with explicit base/head artifact
+paths, it emits a v0 capability diff over normalized evidence only. Directory
+inputs must contain `observation-health.json`, `capability-surface.json`, and
+`correlation-report.json`.
+
+Example:
+
+```bash
+python3 scripts/ci/assay_runner_capability_diff_validate.py \
+  --base-dir /path/to/base-normalized-evidence \
+  --head-dir /path/to/head-normalized-evidence \
+  --output /tmp/capability-diff.json
+```
 
 ## Notes Vocabulary
 
