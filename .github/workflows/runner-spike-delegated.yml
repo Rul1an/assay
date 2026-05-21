@@ -72,6 +72,8 @@ jobs:
       contents: read
     env:
       CARGO_INCREMENTAL: 0
+      ASSAY_RUNNER_DELEGATED_PROOF_ROOT: /tmp/assay-runner-proof-${{ github.run_id }}
+      ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD: ${{ github.workspace }}/assay-runner-proof-upload
 
     steps:
       - name: Prepend Rust to PATH
@@ -175,38 +177,55 @@ jobs:
           set -euo pipefail
           assay_bin="$PWD/target/debug/assay"
           ebpf_path="$PWD/target/assay-ebpf.o"
+          rm -rf "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD"
+          mkdir -p "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT/gates"
 
           run_gate() {
-            local label="$1"
-            local script="$2"
+            local key="$1"
+            local label="$2"
+            local script="$3"
+            local gate_dir="$ASSAY_RUNNER_DELEGATED_PROOF_ROOT/gates/$key"
             echo "=== runner-spike delegated gate: ${label} ==="
+            rm -rf "$gate_dir"
+            mkdir -p "$gate_dir"
+            set +e
             sudo -E env \
               "PATH=$PATH" \
               "ASSAY_BIN=$assay_bin" \
               "ASSAY_EBPF_PATH=$ebpf_path" \
-              bash "$script"
+              "ASSAY_RUNNER_DELEGATED_PROOF_GATE_DIR=$gate_dir" \
+              bash "$script" 2>&1 | tee "$gate_dir/gate.log"
+            local status="${PIPESTATUS[0]}"
+            sudo chown -R "$(id -u):$(id -g)" "$gate_dir" 2>/dev/null || true
+            set -e
+            if [ "$status" -eq 0 ]; then
+              echo "passed" > "$gate_dir/status.txt"
+            else
+              echo "failed" > "$gate_dir/status.txt"
+              return "$status"
+            fi
             echo "- ${label}: passed" >> "$GITHUB_STEP_SUMMARY"
           }
 
           case "$GATES" in
             all)
-              run_gate "kernel-only three-run determinism" \
+              run_gate "kernel-only" "kernel-only three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
-              run_gate "kernel+policy three-run determinism" \
+              run_gate "kernel-policy" "kernel+policy three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
-              run_gate "OpenAI Agents kernel+policy+SDK three-run determinism" \
+              run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
               ;;
             kernel-only)
-              run_gate "kernel-only three-run determinism" \
+              run_gate "kernel-only" "kernel-only three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
               ;;
             kernel-policy)
-              run_gate "kernel+policy three-run determinism" \
+              run_gate "kernel-policy" "kernel+policy three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
               ;;
             openai-agents-kernel-policy)
-              run_gate "OpenAI Agents kernel+policy+SDK three-run determinism" \
+              run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
               ;;
             *)
@@ -214,6 +233,42 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Build delegated proof pack
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          workflow_sha="${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}"
+          python3 scripts/ci/assay_runner_delegated_proof_pack.py \
+            --proof-root "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" \
+            --output-dir "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD" \
+            --gates "${{ inputs.gates }}" \
+            --build-ebpf "${{ inputs.build_ebpf }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-url "$run_url" \
+            --ref "$GITHUB_REF" \
+            --head-sha "$GITHUB_SHA" \
+            --workflow-sha "$workflow_sha" \
+            --workflow-name "$GITHUB_WORKFLOW" \
+            --retention-days 365
+          {
+            echo "### Delegated proof pack"
+            echo "- artifact: assay-runner-delegated-proof-pack-${GITHUB_RUN_ID}"
+            echo "- manifest: assay-runner-proof-upload/manifest.json"
+            echo "- retention-days: 365"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload delegated proof pack
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: assay-runner-delegated-proof-pack-${{ github.run_id }}
+          path: assay-runner-proof-upload
+          if-no-files-found: warn
+          retention-days: 365
 
       - name: Cleanup delegated runner
         if: always()

@@ -9,10 +9,18 @@ if [ "$(uname -s)" != "Linux" ]; then
   exit 40
 fi
 
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-kernel-policy-determinism.XXXXXX")"
-cleanup() {
-  rm -rf -- "$TMP_ROOT"
-}
+if [ -n "${ASSAY_RUNNER_DELEGATED_PROOF_GATE_DIR:-}" ]; then
+  TMP_ROOT="$ASSAY_RUNNER_DELEGATED_PROOF_GATE_DIR"
+  mkdir -p "$TMP_ROOT"
+  cleanup() {
+    :
+  }
+else
+  TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-kernel-policy-determinism.XXXXXX")"
+  cleanup() {
+    rm -rf -- "$TMP_ROOT"
+  }
+fi
 trap cleanup EXIT
 
 WORK_DIR="$TMP_ROOT/work"
