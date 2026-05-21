@@ -115,7 +115,8 @@ expansion:
 2. maintain the telemetry-versus-evidence filter contract in that reference
 3. maintain the delegated runner runbook for provisioning and failure triage:
    [`ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md`](../ops/ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md)
-4. classify when delegated CI is required for runner-impacting changes
+4. classify when delegated CI is required for runner-impacting changes:
+   [`Runner CI lane contract`](../reference/runner/ci-lanes.md)
 5. write an acceptance fixture contract for future SDK fixtures
 6. define the Assay-Runner boundary and extraction map
 
