@@ -125,15 +125,18 @@ The OpenAI Agents fixture also sets `OPENAI_AGENTS_DISABLE_TRACING=1`. The
 runner bundle does not claim OpenAI tracing export behavior in Phase 2A.
 
 Environment values that can affect fixture output or normalized evidence are
-part of fixture review. New fixture wrappers should pin or explicitly justify:
+part of fixture review. New fixture wrappers should pin or explicitly justify
+each stability point:
 
-- `TZ=UTC`
-- `LANG=C` and `LC_ALL=C`, unless locale behavior is the evidence under test
-- a stable `TMPDIR` root for control files
-- a stable `HOME` when SDK or package tooling reads user configuration
-- a fixed Node major/minor line for JavaScript fixtures
-- a stable current working directory before measured work begins
-- a stable `umask` when file modes can enter evidence or golden artifacts
+| Review point | Current v0 source | Risk if it drifts |
+|---|---|---|
+| `TZ=UTC` | review requirement; not part of the evidence claim unless a wrapper sets it | wall-clock formatting can drift at timezone or DST boundaries |
+| `LANG=C` and `LC_ALL=C` | review requirement; locale paths are filtered from evidence | localized tool output can change bytes and path probes |
+| stable `TMPDIR` | wrappers use `${TMPDIR:-/tmp}` for run and control roots | host migration can move control paths or leak absolute temp paths into diagnostics |
+| stable `HOME` | delegated runner user default; fixtures must not read user config as evidence | SDK/package tooling can observe user-local config or paths |
+| fixed Node major/minor line | Node 22+ preflight plus fixture dependency review | runtime startup behavior and SDK hooks can change across Node lines |
+| stable current working directory | acceptance scripts `cd` to the repository root before dispatching fixtures | relative paths and package metadata lookup can drift after script refactors |
+| stable `umask` | host default unless fixture file modes become evidence | file-mode-sensitive evidence or future golden artifacts can drift |
 
 The accepted v0 fixture does not claim general locale, timezone, or user-home
 coverage. It claims deterministic normalized artifacts for the delegated Linux
@@ -221,8 +224,10 @@ diff is diagnostic only; it must not loosen the pass condition.
 
 The v0 machine-readable golden shapes for these artifacts are listed in
 [`golden/index.md`](golden/index.md). They are canonical examples for field
-presence, serialization shape, and status vocabulary. The delegated three-run
-comparison remains the executable determinism check for real fixture instances.
+presence and serialization shape; their example values are illustrative unless
+the artifact contract explicitly defines the value vocabulary. The delegated
+three-run comparison remains the executable determinism check for real fixture
+instances.
 
 Passing delegated determinism requires:
 
@@ -234,9 +239,12 @@ Passing delegated determinism requires:
 
 ## Correlation Clock Rule
 
-Kernel, policy, and SDK correlation windows use one canonical runner clock and
-runner-defined phase markers. SDK-provided timestamps are informational only
-and are never the primary join key for v0 correlation.
+Kernel, policy, and SDK correlation windows use runner-defined phase markers
+derived from the measured run lifecycle, not SDK-provided wall-clock timestamps.
+SDK timestamps are informational only and are never the primary join key for v0
+correlation. Choosing a concrete runtime clock source such as
+`CLOCK_MONOTONIC` is runner-side mechanics and belongs in the boundary map
+before it becomes a v0 artifact contract requirement.
 
 ## Dependency Upgrade Contract
 
