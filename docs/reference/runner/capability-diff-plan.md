@@ -22,6 +22,11 @@ The first slice must stay deliberately small. It should freeze the diff
 contract before adding a broad diff engine, second runtime, macOS path, or
 public reporting surface.
 
+The promoted v0 contract is
+[`capability-diff-v0.md`](capability-diff-v0.md). It intentionally chose a
+surface-level shape rather than the earlier draft per-binding shape because
+the current v0 artifacts do not carry per-binding capability values.
+
 ## Inputs
 
 The v0 diff contract should consume normalized runner artifacts, not raw
@@ -80,63 +85,29 @@ The contract may describe `added`, `removed`, and `unchanged` capability values
 between two evidence sets. It must not decide whether a change is acceptable;
 that remains policy, reviewer, or Harness responsibility.
 
-## Candidate Output Shape
+## Output Shape Direction
 
-The next PR may use a candidate shape like this as a draft, but this page does
-not freeze it:
+The v0 contract should choose the smallest shape the current artifacts can
+honestly support:
 
-```json
-{
-  "schema": "assay.runner.capability_diff.v0_draft",
-  "base_run_id": "run_base",
-  "head_run_id": "run_head",
-  "status": "clean",
-  "basis": {
-    "requires_stable_tool_call_id": true,
-    "uses_raw_telemetry": false
-  },
-  "bindings": [
-    {
-      "tool_call_id": "tc_runner_policy_001",
-      "policy_decision": "allow",
-      "added": {
-        "filesystem_paths": [],
-        "network_endpoints": [],
-        "process_execs": [],
-        "mcp_tools": []
-      },
-      "removed": {
-        "filesystem_paths": [],
-        "network_endpoints": [],
-        "process_execs": [],
-        "mcp_tools": []
-      },
-      "ambiguities": []
-    }
-  ],
-  "summary": {
-    "added_count": 0,
-    "removed_count": 0,
-    "unbound_count": 0
-  },
-  "notes": []
-}
-```
+- surface-level `added`, `removed`, and `unchanged` sets
+- binding-id stability by `tool_call_id`
+- explicit preconditions separate from scope claims
+- explicit `unbound` buckets without inventing per-binding path attribution
 
-The contract PR should either promote a shape like this to a versioned contract
-or deliberately choose a smaller one. The mini-plan does not require this exact
-field set. If the contract keeps a `basis` object, it should distinguish
-preconditions such as stable binding identity from scope claims such as whether
-raw telemetry is used.
+The contract must not claim per-binding filesystem, process, endpoint, or tool
+diffs until a versioned input supplies per-binding capability values.
 
 ## Status Semantics
 
-The first contract should define three states:
+The promoted v0 contract defines five states:
 
 | Status | Rule |
 |---|---|
 | `clean` | Both input evidence sets have complete health, `sdk_layer=self_reported`, clean correlation, internally consistent run ids, and stable binding ids |
-| `partial` | At least one input can be parsed but has partial health, partial correlation, or unbound evidence that prevents a clean claim |
+| `partial:health` | At least one input can be parsed but has incomplete health such as ring-buffer drops or incomplete cgroup correlation |
+| `partial:correlation` | Health is sufficient to parse, but at least one correlation report is partial, ambiguous, or lacks stable binding identity |
+| `partial:unbound` | Reserved for a future per-binding capability artifact; v0 producers must not emit this status from run-global capability-surface values |
 | `failed` | Required artifacts are missing, schema strings are unsupported, run ids are inconsistent, or binding identity is unusable |
 
 `ringbuf_drops > 0` must not be softened into a clean diff. A partial diff may
@@ -180,14 +151,12 @@ These should be answered by the contract PR, not by this mini-plan:
   both?
 - Does v0 diff include process and network categories, or start with
   filesystem plus MCP/tool categories only?
-- Where does a future declared-capability input live?
+- Where does a future declared-capability input live? This remains outside v0
+  and belongs in a separate Phase 2C+ contract slice.
 - Is the first implementation a Runner helper, a Harness projection, or an
   Assay-side reference checker?
-- Should unbound evidence be represented per category, per binding window, or
-  only as a top-level ambiguity?
-- Should `partial` remain a single status or become a family such as
-  `partial:health`, `partial:correlation`, and `partial:unbound`? These have
-  different triage paths, but a single status may be enough for v0.
+- Should unbound evidence be represented only per category for v0, or can a
+  future input safely support per-binding-window unbound evidence?
 
 The boundary map currently places capability-diff projection semantics on the
 Trust Basis / Harness side while Runner delivers clean input bundles. The
@@ -200,7 +169,7 @@ relocate the boundary.
 2. Draft `capability-diff-v0.md` with one golden shape.
 3. Add read-only validation: `diff(S5_acceptance, S5_acceptance)` must produce
    `status=clean` with zero added, removed, or unbound entries, and the output
-   must validate against the candidate contract schema.
+   must validate against the v0 contract schema.
 4. Implement a narrow projection only after the contract review settles.
 5. Revisit second-runtime fixtures after the diff contract has one clean
    consumer.
