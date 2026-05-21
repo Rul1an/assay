@@ -340,6 +340,57 @@ for SDK-level uniqueness guarantees, not for provider ID uniqueness in
 general; underlying provider IDs may still satisfy `run-window unique` under
 the right configuration even when the wrapper SDK does not guarantee it.
 
+### Candidate: OpenAI TypeScript SDK direct
+
+The OpenAI TypeScript SDK direct path means using
+[`openai-node`](https://github.com/openai/openai-node) (the `openai` npm
+package) against the Chat Completions API with a custom client tool, not
+through `@openai/agents-js` and not through Assistants/Responses higher-level
+surfaces. This isolates the smallest possible second-runtime surface using
+OpenAI as the underlying provider, paralleling the Anthropic SDK direct and
+OpenAI Python SDK direct evaluations above.
+
+| # | Requirement | Outcome | Evidence |
+|---|---|---|---|
+| 1 | Offline execution | qualifies | Cassette-replay via `nock` or MSW (TypeScript) at the HTTPS layer against `api.openai.com`. Live API key is required only during one-time cassette recording (curation step), never during delegated acceptance. Restrictions: non-streaming `client.chat.completions.create()` only (streaming cassettes complicate determinism); `openai` SDK version pinned via `package.json`/lockfile; cassette request/response shape stable across compatible SDK patch versions; re-recording is maintainer-controlled, analogous to the [`@openai/agents` bump flow in `fixtures-v0.md`](fixtures-v0.md#dependency-upgrade-contract). |
+| 2 | Stable identity | insufficient evidence | One of three level-3 sub-conditions passes via public TypeScript SDK JSDoc; two are gaps. See Stable identity detail below. |
+| 3 | Comparable surface | not yet evaluated | Row 2 blocks overall outcome; remaining rows recorded as `not yet evaluated` to avoid speculative claims. Re-evaluate when row 2 is unblocked. |
+| 4 | Deterministic dependency lock | not yet evaluated | Row 2 blocks overall outcome. |
+| 5 | Linux/eBPF fit | not yet evaluated | Row 2 blocks overall outcome. |
+| 6 | Small event shape | not yet evaluated | Row 2 blocks overall outcome. |
+| 7 | Evidence boundary fit | not yet evaluated | Row 2 blocks overall outcome. |
+
+**Stable identity detail (row 2):**
+
+The candidate identity field is the `id` field on `ChatCompletionMessageFunctionToolCall`
+in the [openai-node TypeScript SDK](https://github.com/openai/openai-node/blob/200211197931763ed43b7ff41839b53e4dbfdf6e/src/resources/chat/completions/completions.ts).
+The interface is declared with the interface-level JSDoc *"A call to a function tool created by the model."*
+
+- Field name: `ChatCompletionMessageFunctionToolCall.id`
+- Source: `tool_calls` array on the assistant message of a Chat Completions API response, accessed via the TypeScript SDK type
+- **runtime-generated evidence:** `insufficient evidence`. The TypeScript JSDoc for the field reads literally *"The ID of the tool call."* — identical wording to the Python SDK docstring. The enclosing interface comment *"A call to a function tool created by the model."* is suggestive of model-side creation, but it documents the object as a whole rather than the `id` field specifically. The example value's `call_` prefix matches OpenAI's other server-issued identifier conventions, and the SDK has no documented client-side generation path. However, no public docs sentence or typed SDK annotation explicitly states that the OpenAI API server generates the `id` field. Per the level-3 strict reading codified in the [Stable Identity Checklist](#stable-identity--level-3-checklist), implicit chain-of-reasoning evidence does not satisfy `runtime-generated`.
+- **binding-intended evidence:** `qualifies`. The TypeScript JSDoc for [`ChatCompletionToolMessageParam.tool_call_id`](https://github.com/openai/openai-node/blob/200211197931763ed43b7ff41839b53e4dbfdf6e/src/resources/chat/completions/completions.ts) reads literally *"Tool call that this message is responding to."* — identical wording to the Python SDK. The official Function Calling guide demonstrates the binding mechanism in code using the SDK type.
+- **run-window unique evidence:** `insufficient evidence`. The TypeScript JSDoc for the `id` field reads only *"The ID of the tool call."* — no "unique" claim, identical to the Python SDK gap. The official Function Calling guide does not provide an explicit uniqueness guarantee for parallel tool calls within a single response. Per the level-3 strict reading, an implicit uniqueness expectation does not satisfy `run-window unique`.
+
+**Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
+Not applicable. Overall outcome below is `insufficient evidence`, so no first fixture PR may be opened from this evaluation.
+
+**Overall outcome:** `insufficient evidence`
+
+Per the lowest-row-wins rule in [Evaluation Discipline](#evaluation-discipline),
+row 2's `insufficient evidence` determines the candidate's overall outcome.
+Rows 3-7 remain `not yet evaluated` because evaluating them would not change
+the overall outcome and would invite optimistic interpretation. They become
+relevant only if both `runtime-generated` and `run-window unique` evidence
+improves.
+
+**Notes:** Two OpenAI direct-SDK evaluations now show the same level-3
+identity profile: Python (#1301) and TypeScript (this PR) both document
+binding intent, but neither provides explicit public evidence for
+`runtime-generated` or `run-window unique`. This observation is scoped to
+OpenAI direct SDKs and the public documentation reviewed here; it does not
+claim anything about other providers.
+
 ## Selection Outcome
 
 **No candidate currently qualifies.**
@@ -352,6 +403,7 @@ Evaluated candidates and their overall outcomes:
 | PydanticAI | `does not qualify` |
 | OpenAI Python SDK direct | `insufficient evidence` |
 | Vercel AI SDK | `does not qualify as independent runtime` (path A); provider-wrapper path (B) is `insufficient evidence` and not a selection path |
+| OpenAI TypeScript SDK direct | `insufficient evidence` |
 
 The selection issue
 [`#1295`](https://github.com/Rul1an/assay/issues/1295) remains open until a
