@@ -6,8 +6,10 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/openai-agents-js"
+FIXTURE_AGENT="${ASSAY_RUNNER_OPENAI_FIXTURE_AGENT:-$FIXTURE_DIR/fixture-agent.js}"
+POLICY_AGENT="${ASSAY_RUNNER_POLICY_AGENT:-$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh}"
 
 : "${ASSAY_RUNNER_SDK_TOOL_CALL_ID:=tc_runner_policy_001}"
 export ASSAY_RUNNER_SDK_TOOL_CALL_ID
@@ -24,5 +26,12 @@ if [ ! -d "$FIXTURE_DIR/node_modules/@openai/agents" ]; then
   exit 69
 fi
 
-node "$FIXTURE_DIR/fixture-agent.js" "$1"
-"$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh" "$1"
+export NODE_PATH="$FIXTURE_DIR/node_modules${NODE_PATH:+:$NODE_PATH}"
+node "$FIXTURE_AGENT" "$1"
+# The delegated full S5 gate captures the SDK fixture and policy fixture in one
+# cgroup. Give the kernel-event reader a short phase boundary between the Node
+# SDK burst and the policy subprocess so both fixture-input reads are captured
+# without ring-buffer pressure. The bundle does not claim timing. Keep the
+# default conservative because this path only runs in acceptance fixtures.
+sleep "${ASSAY_RUNNER_PHASE_DRAIN_SLEEP:-1}"
+"$POLICY_AGENT" "$1"

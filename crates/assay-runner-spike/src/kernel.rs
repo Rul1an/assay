@@ -4,10 +4,11 @@ use crate::{
 };
 use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
-    EVENT_OPENAT,
+    EVENT_INODE_RESOLVED, EVENT_OPENAT,
 };
 use assay_monitor::MonitorStatsSnapshot;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use thiserror::Error;
 
@@ -31,6 +32,35 @@ pub struct KernelLayerCapture {
     pub capability_surface: CapabilitySurface,
     pub event_count: u64,
     pub ringbuf_drops: u64,
+    drop_breakdown: RingbufDropBreakdown,
+    emitted_breakdown: RingbufEmittedBreakdown,
+    tracepoint_hook_breakdown: TracepointHookBreakdown,
+    filtered_loader_events: u64,
+    filtered_loader_top: Vec<(String, u64)>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RingbufDropBreakdown {
+    tracepoint: u64,
+    lsm: u64,
+    socket: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RingbufEmittedBreakdown {
+    tracepoint: u64,
+    lsm: u64,
+    socket: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TracepointHookBreakdown {
+    openat_emitted: u64,
+    openat_dropped: u64,
+    openat2_emitted: u64,
+    openat2_dropped: u64,
+    connect_emitted: u64,
+    connect_dropped: u64,
 }
 
 #[derive(Debug, Error)]
@@ -52,6 +82,8 @@ pub struct KernelLayerBuilder {
     next_seq: u64,
     kernel_layer_ndjson: Vec<u8>,
     capability_surface: CapabilitySurface,
+    filtered_loader_events: u64,
+    filtered_loader_values: BTreeMap<String, u64>,
 }
 
 impl KernelLayerBuilder {
@@ -68,11 +100,30 @@ impl KernelLayerBuilder {
             run_id,
             next_seq: 0,
             kernel_layer_ndjson: Vec::new(),
+            filtered_loader_events: 0,
+            filtered_loader_values: BTreeMap::new(),
         })
     }
 
     pub fn push_monitor_event(&mut self, event: &MonitorEvent) -> Result<(), KernelLayerError> {
+        if event.event_type == EVENT_INODE_RESOLVED {
+            return Ok(());
+        }
+
         let decoded = decode_monitor_event(event);
+        if decoded.kind == "openat"
+            && decoded
+                .value
+                .as_deref()
+                .is_some_and(is_loader_telemetry_path)
+        {
+            if let Some(path) = decoded.value {
+                self.filtered_loader_events += 1;
+                *self.filtered_loader_values.entry(path).or_insert(0) += 1;
+            }
+            return Ok(());
+        }
+
         match (decoded.kind.as_str(), decoded.value.as_deref()) {
             ("openat", Some(path)) | ("file_blocked", Some(path)) => {
                 self.capability_surface.add_filesystem_prefix(path);
@@ -112,6 +163,11 @@ impl KernelLayerBuilder {
             capability_surface: self.capability_surface,
             event_count: self.next_seq,
             ringbuf_drops: ringbuf_drop_delta(before, after),
+            drop_breakdown: ringbuf_drop_breakdown(before, after),
+            emitted_breakdown: ringbuf_emitted_breakdown(before, after),
+            tracepoint_hook_breakdown: tracepoint_hook_breakdown(before, after),
+            filtered_loader_events: self.filtered_loader_events,
+            filtered_loader_top: top_filtered_loader_values(self.filtered_loader_values, 5),
         }
     }
 }
@@ -134,6 +190,11 @@ impl KernelLayerCapture {
             capability_surface,
             event_count,
             ringbuf_drops,
+            drop_breakdown,
+            emitted_breakdown,
+            tracepoint_hook_breakdown,
+            filtered_loader_events,
+            filtered_loader_top,
         } = self;
 
         if archive.run_id != run_id {
@@ -159,11 +220,19 @@ impl KernelLayerCapture {
         archive.observation_health.notes.retain(|note| {
             !note.starts_with("contract_only_mode:") && !note.starts_with("s2_kernel_capture:")
         });
-        archive.observation_health.notes.push(kernel_capture_note(
-            event_count,
-            ringbuf_drops,
-            cgroup_correlation,
-        ));
+        archive
+            .observation_health
+            .notes
+            .push(kernel_capture_note(KernelCaptureNote {
+                event_count,
+                ringbuf_drops,
+                drop_breakdown,
+                emitted_breakdown,
+                tracepoint_hook_breakdown,
+                filtered_loader_events,
+                filtered_loader_top,
+                cgroup_correlation,
+            }));
         Ok(())
     }
 }
@@ -236,10 +305,136 @@ fn decode_sockaddr_endpoint(bytes: &[u8]) -> Option<String> {
     }
 }
 
+/// Filter dynamic-loader and libc-internal telemetry from runner-spike evidence.
+///
+/// The monitor layer may observe these openat events, but they describe runtime
+/// loader behavior rather than agent-attribution evidence. Keeping them in the
+/// runner-spike bundle makes determinism depend on cargo RPATHs, libc locale
+/// probing, Python interpreter bootstrap, and kernel introspection rather than
+/// on the fixture's behavior.
+fn is_loader_telemetry_path(path: &str) -> bool {
+    path == "/etc/ld.so.cache"
+        || path == "/etc/localtime"
+        || path == "/etc/ssl/openssl.cnf"
+        || path == "/usr/pyvenv.cfg"
+        || path == "/usr/bin/pyvenv.cfg"
+        || path == "/usr/bin/python3._pth"
+        || path == "/usr/bin/python3.12._pth"
+        || path == "/usr/bin/pybuilddir.txt"
+        || path.starts_with("/lib/")
+        || path.starts_with("/lib32/")
+        || path.starts_with("/lib64/")
+        || path.starts_with("/usr/lib/")
+        || path.starts_with("/usr/share/locale/")
+        || path.contains("/node_modules/")
+        || path.starts_with("/proc/")
+        || path.starts_with("/sys/")
+        || path.starts_with("/dev/")
+        || (path.contains("/.rustup/toolchains/") && is_shared_object_path(path))
+        || (path.contains("/target/")
+            && (path.contains("/build/") || path.contains("/debug/") || path.contains("/release/"))
+            && is_shared_object_path(path))
+}
+
+fn is_shared_object_path(path: &str) -> bool {
+    path.ends_with(".so") || path.contains(".so.")
+}
+
 fn ringbuf_drop_delta(before: &MonitorStatsSnapshot, after: &MonitorStatsSnapshot) -> u64 {
     after
         .total_ringbuf_dropped()
         .saturating_sub(before.total_ringbuf_dropped())
+}
+
+fn ringbuf_drop_breakdown(
+    before: &MonitorStatsSnapshot,
+    after: &MonitorStatsSnapshot,
+) -> RingbufDropBreakdown {
+    RingbufDropBreakdown {
+        tracepoint: u64::from(
+            after
+                .tracepoint_ringbuf_dropped
+                .saturating_sub(before.tracepoint_ringbuf_dropped),
+        ),
+        lsm: u64::from(
+            after
+                .lsm_ringbuf_dropped
+                .saturating_sub(before.lsm_ringbuf_dropped),
+        ),
+        socket: after
+            .socket_ringbuf_dropped
+            .saturating_sub(before.socket_ringbuf_dropped),
+    }
+}
+
+fn ringbuf_emitted_breakdown(
+    before: &MonitorStatsSnapshot,
+    after: &MonitorStatsSnapshot,
+) -> RingbufEmittedBreakdown {
+    RingbufEmittedBreakdown {
+        tracepoint: u64::from(
+            after
+                .tracepoint_events_emitted
+                .saturating_sub(before.tracepoint_events_emitted),
+        ),
+        lsm: u64::from(
+            after
+                .lsm_events_emitted
+                .saturating_sub(before.lsm_events_emitted),
+        ),
+        socket: after
+            .socket_events_emitted
+            .saturating_sub(before.socket_events_emitted),
+    }
+}
+
+fn tracepoint_hook_breakdown(
+    before: &MonitorStatsSnapshot,
+    after: &MonitorStatsSnapshot,
+) -> TracepointHookBreakdown {
+    TracepointHookBreakdown {
+        openat_emitted: u64::from(
+            after
+                .openat_events_emitted
+                .saturating_sub(before.openat_events_emitted),
+        ),
+        openat_dropped: u64::from(
+            after
+                .openat_ringbuf_dropped
+                .saturating_sub(before.openat_ringbuf_dropped),
+        ),
+        openat2_emitted: u64::from(
+            after
+                .openat2_events_emitted
+                .saturating_sub(before.openat2_events_emitted),
+        ),
+        openat2_dropped: u64::from(
+            after
+                .openat2_ringbuf_dropped
+                .saturating_sub(before.openat2_ringbuf_dropped),
+        ),
+        connect_emitted: u64::from(
+            after
+                .connect_events_emitted
+                .saturating_sub(before.connect_events_emitted),
+        ),
+        connect_dropped: u64::from(
+            after
+                .connect_ringbuf_dropped
+                .saturating_sub(before.connect_ringbuf_dropped),
+        ),
+    }
+}
+
+fn top_filtered_loader_values(values: BTreeMap<String, u64>, limit: usize) -> Vec<(String, u64)> {
+    let mut values: Vec<_> = values.into_iter().collect();
+    values.sort_by(|(left_path, left_count), (right_path, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    values.truncate(limit);
+    values
 }
 
 fn kernel_layer_for(
@@ -263,14 +458,54 @@ fn health_ringbuf_drops(ringbuf_drops: u64, cgroup_correlation: CgroupCorrelatio
     }
 }
 
-fn kernel_capture_note(
+struct KernelCaptureNote {
     event_count: u64,
     ringbuf_drops: u64,
+    drop_breakdown: RingbufDropBreakdown,
+    emitted_breakdown: RingbufEmittedBreakdown,
+    tracepoint_hook_breakdown: TracepointHookBreakdown,
+    filtered_loader_events: u64,
+    filtered_loader_top: Vec<(String, u64)>,
     cgroup_correlation: CgroupCorrelationStatus,
-) -> String {
+}
+
+fn kernel_capture_note(input: KernelCaptureNote) -> String {
+    let KernelCaptureNote {
+        event_count,
+        ringbuf_drops,
+        drop_breakdown,
+        emitted_breakdown,
+        tracepoint_hook_breakdown,
+        filtered_loader_events,
+        filtered_loader_top,
+        cgroup_correlation,
+    } = input;
+
     match cgroup_correlation {
-        CgroupCorrelationStatus::Clean => {
+        CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
             format!("s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops}")
+        }
+        CgroupCorrelationStatus::Clean => {
+            let filtered_top = filtered_loader_top
+                .into_iter()
+                .map(|(path, count)| format!("{count}x:{path}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
+                drop_breakdown.tracepoint,
+                drop_breakdown.lsm,
+                drop_breakdown.socket,
+                emitted_breakdown.tracepoint,
+                emitted_breakdown.lsm,
+                emitted_breakdown.socket,
+                tracepoint_hook_breakdown.openat_emitted,
+                tracepoint_hook_breakdown.openat_dropped,
+                tracepoint_hook_breakdown.openat2_emitted,
+                tracepoint_hook_breakdown.openat2_dropped,
+                tracepoint_hook_breakdown.connect_emitted,
+                tracepoint_hook_breakdown.connect_dropped,
+            )
         }
         CgroupCorrelationStatus::Partial | CgroupCorrelationStatus::Failed => format!(
             "s2_kernel_capture: monitor_events={event_count} cgroup_correlation={cgroup_correlation:?} kernel_layer downgraded to absent"
@@ -310,6 +545,67 @@ mod tests {
             .filesystem_prefixes
             .contains("/tmp/assay-known-file"));
         assert_eq!(capture.ringbuf_drops, 0);
+    }
+
+    #[test]
+    fn openat_loader_telemetry_is_not_runner_spike_evidence() {
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        for path in [
+            "/etc/ld.so.cache",
+            "/etc/localtime",
+            "/etc/ssl/openssl.cnf",
+            "/lib/aarch64-linux-gnu/libc.so.6",
+            "/usr/lib/locale/C.UTF-8/LC_IDENTIFICATION",
+            "/usr/share/locale/locale.alias",
+            "/proc/self/maps",
+            "/sys/fs/cgroup/cgroup.controllers",
+            "/dev/null",
+            "/usr/pyvenv.cfg",
+            "/usr/bin/pyvenv.cfg",
+            "/usr/bin/python3._pth",
+            "/usr/bin/python3.12._pth",
+            "/usr/bin/pybuilddir.txt",
+            "/opt/actions-runner/_work/assay/assay/tests/fixtures/runner-spike/openai-agents-js/node_modules/@openai/agents/package.json",
+            "/home/github-runner/.rustup/toolchains/stable/lib/libc.so.6",
+            "/opt/actions-runner/_work/assay/assay/target/debug/build/ring/out/libc.so.6",
+            "/opt/actions-runner/_work/assay/assay/target/debug/deps/libc.so.6",
+        ] {
+            builder
+                .push_monitor_event(&event(EVENT_OPENAT, format!("{path}\0").as_bytes()))
+                .unwrap();
+        }
+
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+
+        assert_eq!(capture.event_count, 0);
+        assert!(capture.kernel_layer_ndjson.is_empty());
+        assert!(capture.capability_surface.filesystem_prefixes.is_empty());
+    }
+
+    #[test]
+    fn file_blocked_loader_path_is_preserved_as_policy_evidence() {
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&event(
+                EVENT_FILE_BLOCKED,
+                b"/lib/aarch64-linux-gnu/libc.so.6\0",
+            ))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+
+        assert_eq!(capture.event_count, 1);
+        assert!(capture
+            .capability_surface
+            .filesystem_prefixes
+            .contains("/lib/aarch64-linux-gnu/libc.so.6"));
     }
 
     #[test]
@@ -503,6 +799,25 @@ mod tests {
         assert!(String::from_utf8(capture.kernel_layer_ndjson)
             .unwrap()
             .contains("\"value\":null"));
+    }
+
+    #[test]
+    fn inode_resolved_telemetry_is_not_runner_spike_evidence() {
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&event(EVENT_INODE_RESOLVED, &[1, 2, 3, 4]))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+
+        assert_eq!(capture.event_count, 0);
+        assert!(capture.kernel_layer_ndjson.is_empty());
+        assert!(capture.capability_surface.filesystem_prefixes.is_empty());
+        assert!(capture.capability_surface.network_endpoints.is_empty());
+        assert!(capture.capability_surface.process_execs.is_empty());
     }
 
     #[test]

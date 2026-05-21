@@ -3,7 +3,8 @@ use crate::{
     inc_stat, CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS,
 };
 use assay_common::{
-    KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED,
+    MONITOR_STAT_LSM_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
@@ -242,7 +243,17 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         return Err(-1); // EPERM
     }
 
-    // Event 112: Inode Resolved (Telemetry)
+    // Event 112: Inode Resolved (Telemetry). It is enabled by default for the
+    // monitor CLI, but runner-spike disables it because it is not attribution
+    // evidence and can flood the LSM ring buffer on tiny fixtures.
+    let emit_inode_resolved = unsafe { CONFIG.get(&KEY_EMIT_INODE_RESOLVED) }
+        .copied()
+        .unwrap_or(1)
+        != 0;
+    if !emit_inode_resolved {
+        return Ok(0);
+    }
+
     let mut ino_data = [0u8; 64];
 
     // ABI: s_dev(u64) | i_ino(u64) | i_gen(u32)

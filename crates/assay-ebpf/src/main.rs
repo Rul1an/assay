@@ -15,7 +15,10 @@ pub mod socket_lsm;
 pub mod vmlinux;
 
 use assay_common::{
-    MonitorEvent, EVENT_CONNECT, KEY_MONITOR_ALL, MONITOR_STATS_LEN,
+    MonitorEvent, EVENT_CONNECT, EVENT_OPENAT, KEY_DEDUP_OPEN_PATHS, KEY_MONITOR_ALL,
+    MONITOR_STATS_LEN, MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
     MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
@@ -39,8 +42,12 @@ pub(crate) fn inc_stat(index: u32) {
     }
 }
 
+// Tracepoint openat can burst during dynamic linker, locale, and subprocess
+// startup before runner-spike filters loader telemetry in userspace. Keep
+// enough headroom to preserve zero-drop attribution semantics across delegated
+// multi-process runs.
 #[map]
-static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
+static EVENTS: RingBuf = RingBuf::with_byte_size(32 * 1024 * 1024, 0);
 
 #[map]
 pub static TP_HIT: Array<u64> = Array::with_max_entries(1, 0);
@@ -52,6 +59,9 @@ pub static MONITORED_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0)
 /// Key: Cgroup ID (u64), Value: 1 (present)
 #[map]
 pub static MONITORED_CGROUPS: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0);
+
+#[map]
+pub static OPEN_PATH_SEEN: HashMap<u64, u8> = HashMap::with_max_entries(4096, 0);
 
 /// Configuration Map for dynamic offsets.
 /// Key 0: openat filename offset (default 24)
@@ -83,6 +93,7 @@ const KEY_OFFSET_FORK_PARENT: u32 = 2;
 const KEY_OFFSET_FORK_CHILD: u32 = 3;
 const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
 const DEFAULT_OFFSET: u32 = 24;
+const OPEN_PATH_FILTER_LEN: usize = 96;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
@@ -174,7 +185,12 @@ fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
         unsafe { *hits += 1 };
     }
 
-    Ok(0)
+    emit_open_path(
+        ctx,
+        KEY_OFFSET_FILENAME_OPENAT2,
+        MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
+        MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+    )
 }
 
 fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
@@ -182,7 +198,154 @@ fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
         unsafe { *hits += 1 };
     }
 
+    emit_open_path(
+        ctx,
+        KEY_OFFSET_FILENAME,
+        MONITOR_STAT_OPENAT_EVENTS_EMITTED,
+        MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+    )
+}
+
+fn emit_open_path(
+    ctx: TracePointContext,
+    offset_key: u32,
+    emitted_stat: u32,
+    dropped_stat: u32,
+) -> Result<u32, u32> {
+    if !is_monitored() {
+        return Ok(0);
+    }
+
+    let filename_offset = unsafe { CONFIG.get(&offset_key) }
+        .map(|v| *v as usize)
+        .unwrap_or(DEFAULT_OFFSET as usize);
+
+    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
+    if filename_ptr == 0 {
+        return Ok(0);
+    }
+
+    let mut path_prefix = [0u8; OPEN_PATH_FILTER_LEN];
+    let prefix_result = unsafe {
+        aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
+            filename_ptr as *const u8,
+            &mut path_prefix,
+        )
+    };
+    if prefix_result.is_err() {
+        return Ok(0);
+    }
+    if is_loader_telemetry_open_path(&path_prefix) {
+        return Ok(0);
+    }
+    if should_dedup_open_path(&path_prefix) {
+        return Ok(0);
+    }
+
+    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
+        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
+        let read_result = unsafe {
+            write_event_header(ev, current_tgid(), EVENT_OPENAT);
+            aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
+                filename_ptr as *const u8,
+                &mut (*ev).data,
+            )
+        };
+        if read_result.is_err() {
+            entry.discard(0);
+            return Ok(0);
+        }
+        entry.submit(0);
+        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
+        inc_stat(emitted_stat);
+    } else {
+        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
+        inc_stat(dropped_stat);
+    }
+
     Ok(0)
+}
+
+#[inline(always)]
+fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+    let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
+        .copied()
+        .unwrap_or(0)
+        != 0;
+    if !dedup {
+        return false;
+    }
+
+    let key = hash_open_path(path);
+    if unsafe { OPEN_PATH_SEEN.get(&key) }.is_some() {
+        return true;
+    }
+    let seen = 1u8;
+    let _ = OPEN_PATH_SEEN.insert(&key, &seen, 0);
+    false
+}
+
+#[inline(always)]
+fn hash_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for index in 0..OPEN_PATH_FILTER_LEN {
+        let byte = path[index];
+        if byte == 0 {
+            break;
+        }
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3u64);
+    }
+    hash
+}
+
+#[inline(always)]
+fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+    // Dynamic linker and libc config probes flooded delegated runs without
+    // carrying runner-spike attribution evidence.
+    bytes_start_with(path, b"/etc/ld.so.cache\0")
+        || bytes_start_with(path, b"/etc/localtime\0")
+        || bytes_start_with(path, b"/etc/ssl/openssl.cnf\0")
+        // Python runtime bootstrap files are control-plane noise from the MCP
+        // fixture process, not agent file access.
+        || bytes_start_with(path, b"/usr/pyvenv.cfg\0")
+        // System library and locale lookups dominated the openat stream and
+        // varied with loader state across otherwise identical fixtures.
+        || bytes_start_with(path, b"/lib/")
+        || bytes_start_with(path, b"/lib32/")
+        || bytes_start_with(path, b"/lib64/")
+        || bytes_start_with(path, b"/usr/bin/pyvenv.cfg\0")
+        || bytes_start_with(path, b"/usr/bin/python3._pth\0")
+        || bytes_start_with(path, b"/usr/bin/python3.12._pth\0")
+        || bytes_start_with(path, b"/usr/bin/pybuilddir.txt\0")
+        // The OpenAI Agents fixture's vendored dependency tree is SDK runtime
+        // plumbing; SDK evidence is recorded from the normalized SDK layer.
+        || bytes_start_with(
+            path,
+            b"/opt/actions-runner/_work/assay/assay/tests/fixtures/runner-spike/openai-agents-js/node_modules",
+        )
+        || bytes_start_with(path, b"/usr/local/lib/")
+        || bytes_start_with(path, b"/usr/local/share/locale/")
+        || bytes_start_with(path, b"/usr/lib/")
+        || bytes_start_with(path, b"/usr/share/locale/")
+        // Kernel and device introspection paths are monitor/runtime plumbing,
+        // not filesystem capability evidence for the fixture.
+        || bytes_start_with(path, b"/proc/")
+        || bytes_start_with(path, b"/sys/")
+        || bytes_start_with(path, b"/dev/")
+}
+
+#[inline(always)]
+fn bytes_start_with(path: &[u8; OPEN_PATH_FILTER_LEN], prefix: &[u8]) -> bool {
+    for index in 0..OPEN_PATH_FILTER_LEN {
+        if index >= prefix.len() {
+            return true;
+        }
+        if path[index] != prefix[index] {
+            return false;
+        }
+    }
+    false
 }
 
 #[tracepoint]
@@ -213,6 +376,14 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
             .map(|x| raw_sockaddr = x);
     }
 
+    // Runner-spike only normalizes IPv4/IPv6 endpoints into attribution
+    // evidence. AF_UNIX and other connect telemetry is runtime plumbing, so
+    // skip it before reserving tracepoint ring buffer space.
+    let family = u16::from_ne_bytes([raw_sockaddr[0], raw_sockaddr[1]]);
+    if family != 2 && family != 10 {
+        return Ok(0);
+    }
+
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
@@ -229,8 +400,10 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
         }
         entry.submit(0);
         inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
+        inc_stat(MONITOR_STAT_CONNECT_EVENTS_EMITTED);
     } else {
         inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
+        inc_stat(MONITOR_STAT_CONNECT_RINGBUF_DROPPED);
     }
 
     Ok(0)

@@ -19,6 +19,9 @@ WORK_DIR="$TMP_ROOT/work"
 RUN_ID="run_kernel_policy_determinism"
 
 for run in 1 2 3; do
+  # Keep the fixture path stable, but reset its state so create-vs-open-existing
+  # syscalls do not pollute kernel determinism.
+  rm -rf -- "$WORK_DIR"
   echo "=== runner-spike kernel+policy determinism run $run/3 ==="
   ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR="$TMP_ROOT/run-$run" \
     ASSAY_RUNNER_ACCEPTANCE_WORK_DIR="$WORK_DIR" \
@@ -28,6 +31,7 @@ done
 
 python3 - "$TMP_ROOT" <<'PY'
 import json
+import difflib
 import sys
 from pathlib import Path
 
@@ -36,6 +40,34 @@ tmp_root = Path(sys.argv[1])
 
 def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
+
+
+def fail_json_change(relative_path: str, baseline, current, run: int, hint: str = "") -> None:
+    print(f"FAIL: {relative_path} changed between run 1 and run {run}{hint}")
+    baseline_lines = json.dumps(baseline, indent=2, sort_keys=True).splitlines()
+    current_lines = json.dumps(current, indent=2, sort_keys=True).splitlines()
+    for line in difflib.unified_diff(
+        baseline_lines,
+        current_lines,
+        fromfile=f"run-1/{relative_path}",
+        tofile=f"run-{run}/{relative_path}",
+        lineterm="",
+    ):
+        print(line)
+    raise SystemExit(1)
+
+
+def fail_text_change(relative_path: str, baseline: str, current: str, run: int) -> None:
+    print(f"FAIL: {relative_path} changed between run 1 and run {run}")
+    for line in difflib.unified_diff(
+        baseline.splitlines(),
+        current.splitlines(),
+        fromfile=f"run-1/{relative_path}",
+        tofile=f"run-{run}/{relative_path}",
+        lineterm="",
+    ):
+        print(line)
+    raise SystemExit(1)
 
 
 def read_json(path: Path):
@@ -58,17 +90,21 @@ for run in (2, 3):
     )
 
     if health != baseline_health:
-        fail(
-            f"observation-health.json changed between run 1 and run {run}; "
+        fail_json_change(
+            "observation-health.json",
+            baseline_health,
+            health,
+            run,
+            "; "
             "this can indicate event_count drift on a noisy host. "
-            "Phase 1 requires a clean deterministic run."
+            "Phase 1 requires a clean deterministic run.",
         )
     if surface != baseline_surface:
-        fail(f"capability-surface.json changed between run 1 and run {run}")
+        fail_json_change("capability-surface.json", baseline_surface, surface, run)
     if correlation != baseline_correlation:
-        fail(f"correlation-report.json changed between run 1 and run {run}")
+        fail_json_change("correlation-report.json", baseline_correlation, correlation, run)
     if policy != baseline_policy:
-        fail(f"layers/policy.ndjson changed between run 1 and run {run}")
+        fail_text_change("layers/policy.ndjson", baseline_policy, policy, run)
 
 print("runner-spike kernel+policy three-run determinism verified")
 PY

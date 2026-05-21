@@ -158,6 +158,14 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
         eprintln!("Failed to configure eBPF defaults: {error}");
         return Ok(40);
     }
+    if let Err(error) = monitor.set_emit_inode_resolved(false) {
+        eprintln!("Failed to disable runner-spike inode telemetry: {error}");
+        return Ok(40);
+    }
+    if let Err(error) = monitor.set_dedup_open_paths(true) {
+        eprintln!("Failed to enable runner-spike open path dedupe: {error}");
+        return Ok(40);
+    }
     if let Err(error) = monitor.attach() {
         eprintln!("Failed to attach eBPF probes: {error}");
         return Ok(40);
@@ -224,6 +232,9 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     if !drain_complete {
         cgroup_correlation = CgroupCorrelationStatus::Partial;
     }
+    // Closing the receiver lets the monitor listener break out of blocking_send
+    // before snapshot_stats() tries to lock the shared BPF state again.
+    drop(stream);
     let after_stats = monitor.snapshot_stats()?;
     let capture = builder.finish(&before_stats, &after_stats);
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
@@ -258,7 +269,7 @@ fn spawn_child_in_cgroup(
     let procs_path = CString::new(cgroup.procs_path().as_os_str().as_bytes())?;
     let mut command = tokio::process::Command::new(&spec.command[0]);
     command.args(&spec.command[1..]);
-    command.envs(&spec.env);
+    apply_kernel_capture_child_env(&mut command, spec);
 
     unsafe {
         command.pre_exec(move || write_self_to_cgroup(&procs_path));
@@ -267,6 +278,27 @@ fn spawn_child_in_cgroup(
     command
         .spawn()
         .map_err(|error| anyhow::anyhow!("failed to spawn child in runner cgroup: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn apply_kernel_capture_child_env(command: &mut tokio::process::Command, spec: &RunSpec) {
+    // `cargo run` injects dynamic-loader search paths into the parent process.
+    // If inherited by the fixture, every shell/tool startup emits thousands of
+    // loader/locale openat events that are not runner-spike attribution
+    // evidence and vary across runs. Keep PATH and caller env intact, but
+    // remove loader hooks and pin locale behavior before applying spec env.
+    for key in [
+        "LD_AUDIT",
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "LOCPATH",
+        "GCONV_PATH",
+    ] {
+        command.env_remove(key);
+    }
+    command.env("LC_ALL", "C");
+    command.env("LANG", "C");
+    command.envs(&spec.env);
 }
 
 #[cfg(target_os = "linux")]
