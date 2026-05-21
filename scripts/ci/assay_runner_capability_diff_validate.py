@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Validate the Assay-Runner capability-diff v0 golden shape.
+"""Validate and project the Assay-Runner capability-diff v0 shape.
 
 This is a read-only contract validator. It consumes normalized runner golden
 artifacts and verifies that the S5 idempotence projection matches the frozen
-capability-diff v0 golden JSON.
+capability-diff v0 golden JSON. It can also project the same v0 diff shape from
+two explicit normalized evidence sets without reading raw telemetry or proof
+packs.
 """
 
 from __future__ import annotations
@@ -36,6 +38,10 @@ DEFAULT_SURFACE = GOLDEN_DIR / "capability-surface-openai-agents-kernel-policy-v
 DEFAULT_CORRELATION = GOLDEN_DIR / "correlation-report-openai-agents-kernel-policy-v0.json"
 DEFAULT_EXPECTED = GOLDEN_DIR / "capability-diff-s5-idempotent-v0.json"
 
+HEALTH_NAME = "observation-health.json"
+SURFACE_NAME = "capability-surface.json"
+CORRELATION_NAME = "correlation-report.json"
+
 
 class ValidationError(Exception):
     pass
@@ -51,6 +57,14 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValidationError(f"{path} must contain a JSON object")
     return data
+
+
+def write_json(data: dict[str, Any], output: Path | None) -> None:
+    text = json.dumps(data, indent=2) + "\n"
+    if output is None:
+        print(text, end="")
+        return
+    output.write_text(text)
 
 
 def stable(values: set[str]) -> list[str]:
@@ -279,6 +293,80 @@ def default_idempotence_diff() -> dict[str, Any]:
     return project_capability_diff(health, surface, correlation, health, surface, correlation)
 
 
+def load_evidence_set(
+    *,
+    directory: Path | None,
+    health_path: Path | None,
+    surface_path: Path | None,
+    correlation_path: Path | None,
+    label: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if directory is not None:
+        if any(path is not None for path in (health_path, surface_path, correlation_path)):
+            raise ValidationError(f"{label} must use either --{label}-dir or explicit paths, not both")
+        health_path = directory / HEALTH_NAME
+        surface_path = directory / SURFACE_NAME
+        correlation_path = directory / CORRELATION_NAME
+
+    missing = [
+        name
+        for name, path in (
+            ("health", health_path),
+            ("surface", surface_path),
+            ("correlation", correlation_path),
+        )
+        if path is None
+    ]
+    if missing:
+        joined = ", ".join(missing)
+        raise ValidationError(f"{label} evidence is missing required artifact path(s): {joined}")
+
+    assert health_path is not None
+    assert surface_path is not None
+    assert correlation_path is not None
+    return load_json(health_path), load_json(surface_path), load_json(correlation_path)
+
+
+def custom_projection(args: argparse.Namespace) -> dict[str, Any] | None:
+    path_args = (
+        args.base_dir,
+        args.head_dir,
+        args.base_health,
+        args.base_surface,
+        args.base_correlation,
+        args.head_health,
+        args.head_surface,
+        args.head_correlation,
+    )
+    if not any(path_args):
+        return None
+
+    base_health, base_surface, base_correlation = load_evidence_set(
+        directory=args.base_dir,
+        health_path=args.base_health,
+        surface_path=args.base_surface,
+        correlation_path=args.base_correlation,
+        label="base",
+    )
+    head_health, head_surface, head_correlation = load_evidence_set(
+        directory=args.head_dir,
+        health_path=args.head_health,
+        surface_path=args.head_surface,
+        correlation_path=args.head_correlation,
+        label="head",
+    )
+    diff = project_capability_diff(
+        base_health,
+        base_surface,
+        base_correlation,
+        head_health,
+        head_surface,
+        head_correlation,
+    )
+    validate_policy_consistency(diff)
+    return diff
+
+
 def validate_default_golden() -> None:
     actual = default_idempotence_diff()
     expected = load_json(DEFAULT_EXPECTED)
@@ -327,6 +415,10 @@ def self_test() -> None:
     else:
         raise ValidationError("missing tool_call_id must fail validation")
 
+    explicit = project_capability_diff(health, surface, correlation, health, surface, correlation)
+    if explicit != default_idempotence_diff():
+        raise ValidationError("explicit S5 projection must match default idempotence projection")
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -336,19 +428,47 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="print the projected S5 idempotence diff JSON after validation",
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write projected capability-diff JSON to this path instead of stdout",
+    )
+    parser.add_argument(
+        "--base-dir",
+        type=Path,
+        help=f"directory containing base {HEALTH_NAME}, {SURFACE_NAME}, and {CORRELATION_NAME}",
+    )
+    parser.add_argument(
+        "--head-dir",
+        type=Path,
+        help=f"directory containing head {HEALTH_NAME}, {SURFACE_NAME}, and {CORRELATION_NAME}",
+    )
+    parser.add_argument("--base-health", type=Path, help="base observation-health.json path")
+    parser.add_argument("--base-surface", type=Path, help="base capability-surface.json path")
+    parser.add_argument("--base-correlation", type=Path, help="base correlation-report.json path")
+    parser.add_argument("--head-health", type=Path, help="head observation-health.json path")
+    parser.add_argument("--head-surface", type=Path, help="head capability-surface.json path")
+    parser.add_argument("--head-correlation", type=Path, help="head correlation-report.json path")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
+        projected = custom_projection(args)
+        if projected is not None:
+            write_json(projected, args.output)
+            return 0
+
         if args.self_test:
             self_test()
         else:
             validate_default_golden()
         if args.print:
-            print(json.dumps(default_idempotence_diff(), indent=2))
+            write_json(default_idempotence_diff(), args.output)
             return 0
+        if args.output is not None:
+            raise ValidationError("--output requires --print or explicit base/head inputs")
     except ValidationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -174,6 +174,7 @@ relocate the boundary.
 5. Revisit second-runtime fixtures after the diff contract has one clean
    consumer.
 
-Step 3 is implemented by `scripts/ci/assay_runner_capability_diff_validate.py`,
-which remains a read-only contract validator over golden artifacts rather than a
-runner execution path.
+Step 3 is implemented by `scripts/ci/assay_runner_capability_diff_validate.py`.
+Step 4 starts by letting the same helper project v0 diffs from explicit
+base/head normalized evidence directories. It remains an Assay-side reference
+projection over normalized artifacts rather than a runner execution path.
