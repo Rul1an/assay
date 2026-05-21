@@ -1,0 +1,57 @@
+name: Assay-Runner Lane Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to classify"
+        required: true
+        type: number
+
+permissions: {}
+
+jobs:
+  lane-check:
+    name: lane-check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Checkout base helper
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+
+      - name: Bootstrap helper for first same-repo rollout
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f scripts/ci/assay_runner_lane_check.py ]; then
+            exit 0
+          fi
+          echo "::warning::Base helper is missing; bootstrapping lane-check helper from same-repo PR head."
+          git fetch --depth=1 origin "${{ github.event.pull_request.head.sha }}"
+          git checkout FETCH_HEAD -- scripts/ci/assay_runner_lane_check.py
+
+      - name: Verify lane-check helper exists
+        shell: bash
+        run: test -f scripts/ci/assay_runner_lane_check.py
+
+      - name: Self-test lane classifier
+        shell: bash
+        run: python3 scripts/ci/assay_runner_lane_check.py --self-test
+
+      - name: Check PR delegated lane proof
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+        run: python3 scripts/ci/assay_runner_lane_check.py --comment
