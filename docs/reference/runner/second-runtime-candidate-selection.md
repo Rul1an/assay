@@ -9,8 +9,11 @@
 candidate section below is a placeholder. The evaluation form is fixed; the
 content is added one candidate per iteration.
 
-This page implements the deliverable defined by
-<https://github.com/Rul1an/assay/issues/1295>.
+This page lays down the evaluation form for the deliverable defined by
+<https://github.com/Rul1an/assay/issues/1295>. The deliverable's acceptance
+criteria (candidate evaluations and binary outcomes) are not yet met by
+this skeleton; per-candidate PRs land under `## Candidates` to complete
+the deliverable iteratively.
 
 ## Evaluation Discipline
 
@@ -98,6 +101,11 @@ candidate row-by-row and reach the same overall outcome.
 - runtime-generated evidence: <link or quote>
 - binding-intended evidence: <link or quote>
 - run-window unique evidence: <link or quote>
+
+**Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
+`gates=all` per [`second-runtime-plan.md` § Suggested PR Sequence](second-runtime-plan.md#suggested-pr-sequence)
+step 4. A narrower gate is later coordinated work; do not introduce it as a
+side effect of the first fixture PR.
 
 **Overall outcome:** `qualifies` / `does not qualify` / `insufficient evidence`
 
