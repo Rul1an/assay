@@ -86,7 +86,19 @@ Fields:
 | `policy_layer` | enum | yes | `present` or `absent` |
 | `sdk_layer` | enum | yes | `present`, `self_reported`, or `absent` |
 | `cgroup_correlation` | enum | yes | `clean`, `partial`, or `failed` |
-| `notes` | array[string] | yes | Stable human-readable capture notes used by delegated determinism |
+| `notes` | array[string] | yes | Stable code-prefixed capture notes used by delegated determinism |
+
+`sdk_layer=self_reported` is the accepted v0 value for the OpenAI Agents SDK
+fixture because SDK events are emitted by the fixture/runtime path itself.
+`sdk_layer=present` remains in the v0 enum vocabulary for a future directly
+corroborated SDK layer, but the accepted S5 fixture does not use it.
+
+`notes` are strings in v0, but they are not arbitrary prose. The token before
+the first colon is the machine-readable note code, for example
+`s2_kernel_capture`, `s4_policy_capture`, or `s5_sdk_capture`. Text after the
+colon is a stable deterministic message for reviewers and diffs. A future v1
+may split these into `{code, message}` objects, but v0 consumers should parse
+the code prefix when they need machine-readable note identity.
 
 Validation rules:
 
@@ -105,7 +117,7 @@ Passing Linux/eBPF example:
   "kernel_layer": "complete",
   "ringbuf_drops": 0,
   "policy_layer": "present",
-  "sdk_layer": "present",
+  "sdk_layer": "self_reported",
   "cgroup_correlation": "clean",
   "notes": [
     "s2_kernel_capture: monitor_events=4 ringbuf_drops=0",
@@ -129,15 +141,17 @@ Fields:
 |---|---|---:|---|
 | `schema` | string | yes | Must equal `assay.runner.capability_surface.v0` |
 | `run_id` | string | yes | Non-empty run identifier shared by all archive artifacts |
-| `filesystem_prefixes` | array[string] | yes | Stable sorted set of observed filesystem evidence values |
+| `filesystem_paths` | array[string] | yes | Stable sorted set of observed filesystem evidence values |
 | `network_endpoints` | array[string] | yes | Stable sorted set of observed network endpoints |
 | `process_execs` | array[string] | yes | Stable sorted set of observed process execution values |
 | `mcp_tools` | array[string] | yes | Stable sorted set of observed MCP/tool names |
 | `policy_decisions` | array[string] | yes | Stable sorted set of policy decision summaries |
 
-`filesystem_prefixes` stores full observed v0 path values despite the legacy
-field name. Projection onto directory prefixes is a later capability-diff
-transformation, not part of this artifact contract.
+`filesystem_paths` stores full observed v0 path values, not directory-prefix
+projections. During Phase 2A consolidation this field was renamed from the
+earlier internal `filesystem_prefixes` label because the old name implied a
+projection the artifact never provided. Prefix projection remains a later
+capability-diff transformation, not part of this artifact contract.
 
 Example:
 
@@ -145,7 +159,7 @@ Example:
 {
   "schema": "assay.runner.capability_surface.v0",
   "run_id": "run_kernel_policy_determinism",
-  "filesystem_prefixes": [
+  "filesystem_paths": [
     "/tmp/assay-runner-kernel-policy/work/input.txt",
     "/tmp/assay-runner-kernel-policy/work/output.txt"
   ],
@@ -154,10 +168,10 @@ Example:
     "/usr/bin/cat"
   ],
   "mcp_tools": [
-    "filesystem.read_file"
+    "read_file"
   ],
   "policy_decisions": [
-    "allow:filesystem.read_file"
+    "allow:read_file"
   ]
 }
 ```
@@ -191,8 +205,9 @@ Binding fields:
 | `window.end` | string | yes | Inclusive window end marker |
 
 Correlation windows use runner-defined phase markers from one canonical runner
-clock. SDK-provided timestamps are informational only and are not the primary
-join key for v0 correlation.
+clock. SDK-provided timestamps are informational only and MUST NOT be used as
+primary join keys for v0 correlation. They also MUST NOT be used as an ordering
+fallback to disambiguate call-id-less tool bindings.
 
 Clean v0 correlation requires a stable `tool_call_id` for every tool-call
 binding. The first Phase 2B capability-diff contract inherits this rule: it may

@@ -155,7 +155,7 @@ for line_number, event in enumerate(kernel_events, start=1):
         f"kernel event {line_number} has unexpected schema: {event.get('schema')!r}",
     )
 
-filesystem = set(surface.get("filesystem_prefixes", []))
+filesystem = set(surface.get("filesystem_paths", []))
 expect(str(work_dir / "input.txt") in filesystem, "fixture input read was not recorded")
 
 print("runner-spike kernel-only archive verified")

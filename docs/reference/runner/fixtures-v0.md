@@ -57,9 +57,10 @@ kernel plus policy plus SDK fixture shape deliberately:
 | Correlation report | `status=clean`, `ambiguities=[]`, one binding | delegated acceptance fails with status, ambiguity, or binding-count mismatch |
 | Correlation window | `{"start":"run_started","end":"run_finished"}` | delegated acceptance fails with `binding window mismatch` |
 
-These counts and values are part of the accepted v0 S5 fixture instance.
-Changing them is not a copy-edit; it changes the deterministic instance that
-proved Phase 1 and requires an explicit fixture-instance review.
+These counts and values are part of the accepted v0 S5 fixture instance: the
+historical/proven fixture shape, not the general fixture law. Changing them is
+not a copy-edit; it changes the deterministic instance that proved Phase 1 and
+requires an explicit fixture-instance review.
 
 ## Contract Principles
 
@@ -242,8 +243,10 @@ Passing delegated determinism requires:
 
 Kernel, policy, and SDK correlation windows use runner-defined phase markers
 derived from the measured run lifecycle, not SDK-provided wall-clock timestamps.
-SDK timestamps are informational only and are never the primary join key for v0
-correlation. Choosing a concrete runtime clock source such as
+SDK timestamps are informational only and MUST NOT be used as primary join keys
+for v0 correlation. They also MUST NOT be used as an ordering fallback to
+disambiguate call-id-less tool bindings. Choosing a concrete runtime clock
+source such as
 `CLOCK_MONOTONIC` is runner-side mechanics and belongs in the boundary map
 before it becomes a v0 artifact contract requirement.
 
@@ -310,5 +313,5 @@ The v0 fixture contract does not define:
 - production-load or long-running process behavior
 - external plugin or third-party SDK fixture authoring
 
-Each of those requires a separate contract decision before it can become part
+Each non-goal requires a separate contract decision before it can become part
 of Assay-Runner.

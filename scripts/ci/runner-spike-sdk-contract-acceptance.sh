@@ -116,7 +116,7 @@ for seq, line in enumerate(sdk_events):
         expect(event["tool"] == "read_file", f"sdk event {seq} tool mismatch")
 
 expect((work_dir / "sdk-wrapper-ran.txt").read_text(encoding="utf-8").strip() == "sdk wrapper fixture ran", "sdk wrapper fixture did not run")
-expect(surface.get("filesystem_prefixes", []) == [], "sdk-only fixture must not add filesystem capabilities")
+expect(surface.get("filesystem_paths", []) == [], "sdk-only fixture must not add filesystem capabilities")
 expect(correlation.get("bindings", []) == [], "sdk-only fixture must not add correlation bindings")
 
 print("runner-spike SDK contract archive verified")

@@ -198,7 +198,7 @@ expect(
     "source decision tool_call_id mismatch",
 )
 
-filesystem = set(surface.get("filesystem_prefixes", []))
+filesystem = set(surface.get("filesystem_paths", []))
 expect(str(work_dir / "policy-input.txt") in filesystem, "fixture policy input read was not recorded")
 expect("read_file" in set(surface.get("mcp_tools", [])), "read_file MCP tool was not recorded")
 expect(

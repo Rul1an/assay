@@ -48,7 +48,7 @@ changed layer:
 | Kernel fixture control path or kernel-only acceptance assertion | `kernel-only` |
 | Policy capture or policy-to-kernel coherence | `kernel-policy` |
 | OpenAI Agents SDK fixture, SDK event schema, SDK version assertion, or `tool_call_id` binding | `openai-agents-kernel-policy` |
-| `crates/assay-monitor/**`, `crates/assay-ebpf/**`, eBPF build/attach path, cgroup placement, telemetry filter, cross-layer archive, artifact schema, correlation report, workflow/security model, runner scripts, BPF/runtime dependency bump, or final release/acceptance proof | `all` |
+| `crates/assay-monitor/**`, `crates/assay-ebpf/**`, `crates/assay-xtask/**`, eBPF build/attach path, cgroup placement, telemetry filter, cross-layer archive, artifact schema, correlation report, workflow/security model, runner scripts, BPF/runtime dependency bump, or final release/acceptance proof | `all` |
 
 If a change touches multiple surfaces, run the highest required gate. If the
 right gate is ambiguous, default to `all`.
