@@ -21,6 +21,7 @@ from typing import Iterable
 
 
 CONTRACT_DOC = "docs/reference/runner/ci-lanes.md"
+DEPENDABOT_FLOW_DOC = "docs/reference/runner/dependabot-lane-flow.md"
 DELEGATED_WORKFLOW_NAME = "Runner Spike Delegated"
 COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
 
@@ -54,6 +55,7 @@ class PullRequest:
     number: int
     title: str
     body: str
+    author_login: str
     head_sha: str
     files: tuple[str, ...]
 
@@ -219,6 +221,7 @@ def load_pr(api: GitHubApi, number: int) -> PullRequest:
         number=number,
         title=str(pr.get("title") or ""),
         body=str(pr.get("body") or ""),
+        author_login=str((pr.get("user") or {}).get("login") or ""),
         head_sha=str(pr["head"]["sha"]),
         files=tuple(str(item["filename"]) for item in files),
     )
@@ -306,6 +309,7 @@ def comment_body(classification: Classification, pr: PullRequest, passed: bool, 
             if passed
             else "FAIL: delegated runner proof is required before merge."
         )
+        dependabot = dependabot_guidance(pr, classification) if not passed else ""
         proof = f"""
 
 Expected delegated gate: `{classification.gate.label}`
@@ -318,6 +322,7 @@ Assay-Runner delegated proof:
 - run: https://github.com/Rul1an/assay/actions/runs/<run_id>
 - sha: {pr.head_sha}
 ```
+{dependabot}
 """
     reasons = "\n".join(f"- {reason}" for reason in classification.reasons[:12])
     if not reasons:
@@ -333,6 +338,32 @@ Changed-path classification:
 {reasons}
 
 Contract: [`{CONTRACT_DOC}`](https://github.com/Rul1an/assay/blob/main/{CONTRACT_DOC})
+"""
+
+
+def is_dependabot_pr(pr: PullRequest) -> bool:
+    # GitHub normally reports Dependabot as dependabot[bot]; keep the app form
+    # for older API surfaces that expose the GitHub App slug instead.
+    return pr.author_login in {"dependabot[bot]", "app/dependabot"}
+
+
+def dependabot_guidance(pr: PullRequest, classification: Classification) -> str:
+    if not is_dependabot_pr(pr):
+        return ""
+    return f"""
+Dependabot maintainer flow:
+
+1. Review the dependency surface and update any coupled runner fixture
+   assertions on a maintainer branch if needed.
+2. Dispatch `Runner Spike Delegated` manually with `gates={classification.gate.label}`
+   after the PR head SHA is final.
+3. Add a maintainer comment with the run URL, `gate: {classification.gate.label}`,
+   and the current PR head SHA. Dependabot does not need to edit its own PR body.
+4. If Dependabot rebases or force-pushes, rerun the delegated gate because the
+   recorded proof must match the new head SHA.
+
+Flow reference:
+[`{DEPENDABOT_FLOW_DOC}`](https://github.com/Rul1an/assay/blob/main/{DEPENDABOT_FLOW_DOC})
 """
 
 
@@ -459,6 +490,21 @@ def self_test() -> None:
     assert "head_sha" in delegated_run_diagnostic({**valid_run, "head_sha": "def456"}, "1", "abc123")
     assert "conclusion" in delegated_run_diagnostic({**valid_run, "conclusion": "failure"}, "1", "abc123")
     assert "workflow name" in delegated_run_diagnostic({**valid_run, "name": "CI"}, "1", "abc123")
+
+    dependabot_pr = PullRequest(
+        number=1,
+        title="Bump @openai/agents",
+        body="",
+        author_login="dependabot[bot]",
+        head_sha="abc123",
+        files=("tests/fixtures/runner-spike/openai-agents-js/package-lock.json",),
+    )
+    guidance = dependabot_guidance(
+        dependabot_pr,
+        Classification(Gate.OPENAI_AGENTS_KERNEL_POLICY, ()),
+    )
+    assert "Dependabot maintainer flow" in guidance
+    assert "gates=openai-agents-kernel-policy" in guidance
 
 
 def main() -> int:
