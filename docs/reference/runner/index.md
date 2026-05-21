@@ -15,5 +15,6 @@ Phase 2B capability-diff planning slice.
 - [Runner capability-diff Phase 2B plan](capability-diff-plan.md)
 - [Runner capability-diff v0 contract](capability-diff-v0.md)
 - [Runner second runtime Phase 2B plan](second-runtime-plan.md)
+- [Runner second runtime candidate selection](second-runtime-candidate-selection.md)
 - [Assay-Runner boundary and extraction map](boundary-map.md)
 - [Phase 1 delegated proof pack](proof-packs/phase1-delegated-2026-05-21.md)
