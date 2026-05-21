@@ -334,47 +334,63 @@ impl LinuxMonitor {
     }
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
-        let bpf_shared = self.bpf.clone();
         let (tx, rx) = mpsc::channel(1024);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let (mut events_ring_buf, mut lsm_ring_buf) = {
+            let mut bpf = self.bpf.lock().unwrap();
+            let events_map = bpf
+                .take_map("EVENTS")
+                .ok_or(MonitorError::MapNotFound { name: "EVENTS" })?;
+            let lsm_events_map = bpf
+                .take_map("LSM_EVENTS")
+                .ok_or(MonitorError::MapNotFound { name: "LSM_EVENTS" })?;
+            (
+                RingBuf::try_from(events_map)?,
+                RingBuf::try_from(lsm_events_map)?,
+            )
+        };
 
         std::thread::spawn(move || {
+            let mut ready = false;
             'outer: loop {
-                {
-                    let mut bpf = bpf_shared.lock().unwrap();
-
-                    // Poll Tracepoint Events
-                    if let Some(map) = bpf.map_mut("EVENTS") {
-                        if let Ok(mut ring_buf) = RingBuf::try_from(map) {
-                            while let Some(item) = ring_buf.next() {
-                                if item.is_empty() {
-                                    continue;
-                                }
-                                let ev = events::parse_event(&item);
-                                if tx.blocking_send(ev).is_err() {
-                                    break 'outer;
-                                }
-                            }
-                        }
+                // Poll Tracepoint Events. Keep the RingBuf object alive across
+                // polls so its consumer position advances; recreating it would
+                // replay the same kernel records and inflate runner-spike
+                // event counts.
+                while let Some(item) = events_ring_buf.next() {
+                    if item.is_empty() {
+                        continue;
                     }
-
-                    // Poll LSM Events
-                    if let Some(map) = bpf.map_mut("LSM_EVENTS") {
-                        if let Ok(mut ring_buf) = RingBuf::try_from(map) {
-                            while let Some(item) = ring_buf.next() {
-                                if item.is_empty() {
-                                    continue;
-                                }
-                                let ev = events::parse_event(&item);
-                                if tx.blocking_send(ev).is_err() {
-                                    break 'outer;
-                                }
-                            }
-                        }
+                    let ev = events::parse_event(&item);
+                    if tx.blocking_send(ev).is_err() {
+                        break 'outer;
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+
+                // Poll LSM Events with the same persistent-consumer discipline.
+                while let Some(item) = lsm_ring_buf.next() {
+                    if item.is_empty() {
+                        continue;
+                    }
+                    let ev = events::parse_event(&item);
+                    if tx.blocking_send(ev).is_err() {
+                        break 'outer;
+                    }
+                }
+                if !ready {
+                    let _ = ready_tx.send(());
+                    ready = true;
+                }
+                // Runner-spike fixtures can emit very short openat bursts.
+                // Keep poll latency low so zero-drop capture does not depend
+                // on an oversized kernel ring buffer.
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
         });
+
+        ready_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .map_err(|_| MonitorError::ReaderDied)?;
 
         Ok(ReceiverStream::new(rx))
     }
