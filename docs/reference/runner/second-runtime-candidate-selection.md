@@ -114,17 +114,71 @@ side effect of the first fixture PR.
 
 ## Candidates
 
-*Placeholder. No candidate has been added yet. Each candidate evaluation lands
-in its own PR following the Candidate Evaluation Form above.*
+### Candidate: Anthropic SDK direct
+
+The Anthropic SDK direct path means using
+[`anthropic-sdk-python`](https://github.com/anthropics/anthropic-sdk-python)
+or `@anthropic-ai/sdk` against the Messages API with a custom client tool, not
+through `@openai/agents-js` and not through `Anthropic Agent SDK` higher-level
+wrappers. This isolates the smallest possible second-runtime surface.
+
+| # | Requirement | Outcome | Evidence |
+|---|---|---|---|
+| 1 | Offline execution | qualifies | Cassette-replay via [VCR.py](https://vcrpy.readthedocs.io/en/latest/usage.html) (Python) or `nock`/MSW (TypeScript) works at the HTTPS layer against `api.anthropic.com`. Live API key is required only during one-time cassette recording (curation step), never during delegated acceptance. `record_mode='none'` guarantees no network calls during fixture execution. Restrictions: non-streaming `client.messages.create()` only (streaming cassettes complicate determinism); `anthropic-version` header pinned; re-recording is maintainer-controlled, analogous to the [`@openai/agents` bump flow in `fixtures-v0.md`](fixtures-v0.md#dependency-upgrade-contract). |
+| 2 | Stable identity | insufficient evidence | Two of three level-3 conditions pass; one is implicit only. See Stable identity detail below. |
+| 3 | Comparable surface | not yet evaluated | Row 2 blocks overall outcome; remaining rows recorded as `not yet evaluated` to avoid speculative claims. Re-evaluate when row 2 is unblocked. |
+| 4 | Deterministic dependency lock | not yet evaluated | Row 2 blocks overall outcome. |
+| 5 | Linux/eBPF fit | not yet evaluated | Row 2 blocks overall outcome. |
+| 6 | Small event shape | not yet evaluated | Row 2 blocks overall outcome. |
+| 7 | Evidence boundary fit | not yet evaluated | Row 2 blocks overall outcome. |
+
+**Stable identity detail (row 2):**
+
+The candidate identity field is `tool_use.id` in the
+[Messages API tool_use content block](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
+Example value from public docs: `"toolu_01A09q90qw90lq917835lq9"`.
+
+- Field name: `tool_use.id`
+- Source: `tool_use` content block in the assistant message of a Messages API response
+- **runtime-generated evidence:** `insufficient evidence`. Public docs describe the `id` as a field on the `tool_use` block contained in the API response, and the SDK has no documented client-side generation path. The example value's `toolu_` prefix matches Anthropic's other server-issued identifier conventions (`msg_`, etc.). However, no public docs sentence explicitly states that the Anthropic API server generates this field. Per the level-3 strict reading codified in the [Stable Identity Checklist](#stable-identity--level-3-checklist), implicit chain-of-reasoning evidence does not satisfy `runtime-generated`. A `qualifies` outcome requires either an explicit docs statement or a typed SDK schema annotation that names the field as server-generated.
+- **binding-intended evidence:** `qualifies`. The [handle-tool-calls docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) state literally: *"`id`: A unique identifier for this particular tool use block. This will be used to match up the tool results later."* The same docs define `tool_result.tool_use_id` as *"The `id` of the tool use request this is a result for."* A 400-error message documented in the same page (*"tool_use ids were found without tool_result blocks immediately after"*) confirms that the API enforces the binding contract at request validation time.
+- **run-window unique evidence:** `qualifies`. The [handle-tool-calls docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) state literally: *"A unique identifier for this particular tool use block."*
+
+**Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
+Not applicable. Overall outcome below is `insufficient evidence`, so no first fixture PR may be opened from this evaluation.
+
+**Overall outcome:** `insufficient evidence`
+
+Per the lowest-row-wins rule in [Evaluation Discipline](#evaluation-discipline),
+row 2's `insufficient evidence` determines the candidate's overall outcome.
+Rows 3-7 remain `not yet evaluated` because evaluating them would not change
+the overall outcome and would invite optimistic interpretation. They become
+relevant only if `runtime-generated` evidence improves.
+
+**Notes:** Anthropic SDK direct is technically promising on rows 1, 2.b, 2.c.
+The single blocker is the absence of one explicit docs sentence or typed schema
+annotation that names `tool_use.id` as server-generated. This evaluation is
+recorded so the same research does not have to be repeated when the docs or
+SDK schema improve.
 
 ## Selection Outcome
 
-*Filled in only after at least one candidate evaluation reaches `qualifies`.
-A `does not qualify` or `insufficient evidence` outcome for all evaluated
-candidates leaves this section as a placeholder stating "no candidate
-currently qualifies"; the selection issue
+**No candidate currently qualifies.**
+
+Evaluated candidates and their overall outcomes:
+
+| Candidate | Overall outcome |
+|---|---|
+| Anthropic SDK direct | `insufficient evidence` |
+
+The selection issue
 [`#1295`](https://github.com/Rul1an/assay/issues/1295) remains open until a
-qualifying candidate exists.*
+candidate evaluation reaches `qualifies` AND this section is explicitly
+updated to name that candidate as the selected second runtime.
+
+Re-evaluation of an `insufficient evidence` outcome happens in a separate PR
+that cites the new public evidence which closes the previous gap; it does
+not happen by reinterpreting the same evidence more optimistically.
 
 ## Non-Goals For This Note
 
