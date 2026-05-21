@@ -212,6 +212,55 @@ ID fallback is a disqualifying pattern under the level-3 rule. Frameworks that
 expose a strict provider-backed mode (no fallback, propagate-or-fail) may
 qualify on row 2 even if their default mode does not.
 
+### Candidate: OpenAI Python SDK direct
+
+The OpenAI Python SDK direct path means using
+[`openai-python`](https://github.com/openai/openai-python) against the Chat
+Completions API with a custom client tool, not through `@openai/agents-js` and
+not through Assistants/Responses higher-level surfaces. This isolates the
+smallest possible second-runtime surface using OpenAI as the underlying
+provider, paralleling the Anthropic SDK direct evaluation above.
+
+| # | Requirement | Outcome | Evidence |
+|---|---|---|---|
+| 1 | Offline execution | qualifies | Cassette-replay via [VCR.py](https://vcrpy.readthedocs.io/en/latest/usage.html) (Python) at the HTTPS layer against `api.openai.com`. Live API key is required only during one-time cassette recording (curation step), never during delegated acceptance. `record_mode='none'` guarantees no network calls during fixture execution. Restrictions: non-streaming `client.chat.completions.create()` only (streaming cassettes complicate determinism); `openai-python` SDK version pinned via `requirements.txt`/lockfile; cassette request/response shape stable across compatible SDK patch versions; re-recording is maintainer-controlled, analogous to the [`@openai/agents` bump flow in `fixtures-v0.md`](fixtures-v0.md#dependency-upgrade-contract). |
+| 2 | Stable identity | insufficient evidence | One of three level-3 sub-conditions passes via public docs; two are gaps. See Stable identity detail below. |
+| 3 | Comparable surface | not yet evaluated | Row 2 blocks overall outcome; remaining rows recorded as `not yet evaluated` to avoid speculative claims. Re-evaluate when row 2 is unblocked. |
+| 4 | Deterministic dependency lock | not yet evaluated | Row 2 blocks overall outcome. |
+| 5 | Linux/eBPF fit | not yet evaluated | Row 2 blocks overall outcome. |
+| 6 | Small event shape | not yet evaluated | Row 2 blocks overall outcome. |
+| 7 | Evidence boundary fit | not yet evaluated | Row 2 blocks overall outcome. |
+
+**Stable identity detail (row 2):**
+
+The candidate identity field is `tool_calls[].id` in
+[`ChatCompletionMessageFunctionToolCall`](https://github.com/openai/openai-python/blob/main/src/openai/types/chat/chat_completion_message_function_tool_call.py).
+Example value reported in public sources: `"call_DdmO9pD3xa9XTPNJ32zg2hcA"`.
+
+- Field name: `ChatCompletionMessageFunctionToolCall.id`
+- Source: `tool_calls` array on the assistant message of a Chat Completions API response
+- **runtime-generated evidence:** `insufficient evidence`. The typed SDK docstring for the field reads literally *"The ID of the tool call."* — four words, with no mention of who generates the value. The example value's `call_` prefix matches OpenAI's other server-issued identifier conventions, and the SDK has no documented client-side generation path. However, no public docs sentence or typed SDK annotation explicitly states that the OpenAI API server generates this field. Per the level-3 strict reading codified in the [Stable Identity Checklist](#stable-identity--level-3-checklist), implicit chain-of-reasoning evidence does not satisfy `runtime-generated`.
+- **binding-intended evidence:** `qualifies`. The typed SDK docstring for [`ChatCompletionToolMessageParam.tool_call_id`](https://github.com/openai/openai-python/blob/main/src/openai/types/chat/chat_completion_tool_message_param.py) reads literally *"Tool call that this message is responding to."* The Function Calling guide demonstrates the binding mechanism in code with `tool_call_id=tool_call.id`, establishing the documented binding contract between the assistant's tool call and the user's tool response message.
+- **run-window unique evidence:** `insufficient evidence`. Unlike the Anthropic SDK direct evaluation, the OpenAI typed SDK docstring does **not** contain the word "unique" — it reads only *"The ID of the tool call."* The official Function Calling guide does not provide an explicit uniqueness guarantee for parallel tool calls within a single response; secondary sources describe parallel tool calls each having "a unique id" but this could not be verified verbatim in primary OpenAI documentation. Per the level-3 strict reading, an implicit uniqueness expectation does not satisfy `run-window unique`.
+
+**Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
+Not applicable. Overall outcome below is `insufficient evidence`, so no first fixture PR may be opened from this evaluation.
+
+**Overall outcome:** `insufficient evidence`
+
+Per the lowest-row-wins rule in [Evaluation Discipline](#evaluation-discipline),
+row 2's `insufficient evidence` determines the candidate's overall outcome.
+Rows 3-7 remain `not yet evaluated` because evaluating them would not change
+the overall outcome and would invite optimistic interpretation. They become
+relevant only if both `runtime-generated` and `run-window unique` evidence
+improves.
+
+**Notes:** This evaluation found two level-3 identity gaps where the Anthropic
+SDK direct evaluation found one. That comparison is observational only: it
+reflects the public documentation reviewed here, not a claim about the
+underlying provider behavior. No broader direct-SDK pattern claim is made;
+two data points are too few to support a pattern observation.
+
 ## Selection Outcome
 
 **No candidate currently qualifies.**
@@ -222,6 +271,7 @@ Evaluated candidates and their overall outcomes:
 |---|---|
 | Anthropic SDK direct | `insufficient evidence` |
 | PydanticAI | `does not qualify` |
+| OpenAI Python SDK direct | `insufficient evidence` |
 
 The selection issue
 [`#1295`](https://github.com/Rul1an/assay/issues/1295) remains open until a
