@@ -173,3 +173,7 @@ relocate the boundary.
 4. Implement a narrow projection only after the contract review settles.
 5. Revisit second-runtime fixtures after the diff contract has one clean
    consumer.
+
+Step 3 is implemented by `scripts/ci/assay_runner_capability_diff_validate.py`,
+which remains a read-only contract validator over golden artifacts rather than a
+runner execution path.

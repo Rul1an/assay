@@ -240,6 +240,9 @@ This must produce:
 
 The golden shape for this case is
 [`golden/capability-diff-s5-idempotent-v0.json`](golden/capability-diff-s5-idempotent-v0.json).
+The read-only validation entry point is
+`scripts/ci/assay_runner_capability_diff_validate.py`; it projects the diff from
+the existing S5 golden artifacts and compares it to that frozen output shape.
 
 ## Notes Vocabulary
 
