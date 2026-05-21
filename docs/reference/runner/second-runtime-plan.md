@@ -46,9 +46,9 @@ A candidate runtime must satisfy all of these before code is added:
 | Small event shape | The fixture should produce one binding first; multi-tool or branching traces are later work |
 | Evidence boundary fit | The normalizer must not broaden evidence boundaries to make the runtime look comparable |
 
-If stable identity is absent, do not add order-based matching in the second
-runtime PR. That decision belongs in a separate correlation fallback contract,
-not in fixture plumbing.
+If stable identity is absent, do not add order-based or timestamp-based
+matching in the second runtime PR. That decision belongs in a separate
+correlation fallback contract, not in fixture plumbing.
 
 ## Expected Artifact Shape
 
@@ -178,7 +178,7 @@ runtime candidates against the Candidate Requirements table above. It does
 not propose code; it produces the selection note that step 2 of the
 Suggested PR Sequence requires.
 
-The Ring-Buffer drop debug follow-up tracked in
+The ring-buffer drop debug follow-up tracked in
 <https://github.com/Rul1an/assay/issues/1271> remains independent of this
 line. It must not weaken the `ringbuf_drops=0` clean-health bar for any
 second-runtime fixture.
