@@ -72,10 +72,18 @@ If a runner-impacting PR cannot get a delegated run because the host is
 unavailable, leave the PR open. Merge only docs-only or clearly
 non-runner-impacting changes without delegated proof.
 
-This page is advisory until enforcement is added. The follow-up for path-aware
-review or status-check pressure is tracked in
-<https://github.com/Rul1an/assay/issues/1274>. Ring-buffer drop diagnostics
-remain a separate follow-up tracked in
+The `Assay-Runner Lane Check / lane-check` workflow provides the
+machine-visible path classification and delegated proof check for this
+contract. To make the contract hard-blocking, repository branch protection must
+mark that check as required.
+
+The executable path mapping lives in
+`scripts/ci/assay_runner_lane_check.py` and must mirror the decision table on
+this page. Changes to this contract and changes to the classifier must land in
+the same PR; the helper's `--self-test` is the drift canary for the known
+runner-impacting surfaces.
+
+Ring-buffer drop diagnostics remain a separate follow-up tracked in
 <https://github.com/Rul1an/assay/issues/1271>; that issue must not weaken the
 `ringbuf_drops=0` delegated acceptance rule.
 
