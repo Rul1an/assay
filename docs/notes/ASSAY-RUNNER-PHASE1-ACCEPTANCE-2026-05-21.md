@@ -110,8 +110,9 @@ Phase 2 should consolidate this proof before any repository split or platform
 expansion:
 
 1. freeze versioned v0 references for `observation-health`,
-   `capability-surface`, and `correlation-report`
-2. document the telemetry-versus-evidence filter contract
+   `capability-surface`, and `correlation-report`:
+   [`Runner artifact v0 contracts`](../reference/runner/artifacts-v0.md)
+2. maintain the telemetry-versus-evidence filter contract in that reference
 3. maintain the delegated runner runbook for provisioning and failure triage:
    [`ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md`](../ops/ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md)
 4. classify when delegated CI is required for runner-impacting changes
