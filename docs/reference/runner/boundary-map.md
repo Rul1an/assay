@@ -1,0 +1,212 @@
+# Assay-Runner Boundary And Extraction Map
+
+> Internal Phase 2A reference. This page defines the current Assay-Runner
+> boundary candidate after the delegated Linux/eBPF Phase 1 proof. It is not a
+> repository-split plan and does not create a released product surface.
+
+Phase 1 proved that Assay can produce deterministic measured-run bundles on a
+delegated Linux/eBPF host. Phase 2A keeps that proof reviewable while the
+runner boundary is consolidated. Extraction is only possible after the
+boundary is stable; it is not the goal of this document.
+
+## Core Rule
+
+Assay remains the owner of artifact semantics.
+
+Runner may own measured execution, layer capture orchestration, cgroup-scoped
+process placement, and correlation mechanics. Runner must not become an
+independent authority for what an Assay evidence artifact means.
+
+Implications:
+
+- artifact schemas stay owned by Assay core/reference docs
+- archive verification stays an Assay responsibility
+- runner-generated bundles must remain verifiable through Assay evidence
+  semantics
+- runner projection or capability diff may consume artifacts, but must not
+  redefine them
+
+## Boundary Table
+
+| Layer | Stays In Assay Core | Runner Candidate Owns | Shared Contract |
+|---|---|---|---|
+| Archive semantics | manifest shape, digest semantics, bundle verification | archive assembly for measured runs | archive manifest schema and run-id consistency |
+| Observation health | field set, status values, strict health semantics | computing health from capture results | `observation-health.v0` |
+| Capability surface | artifact schema, evidence categories, deterministic set serialization | deriving the surface from normalized runner events | `capability-surface.v0` |
+| Correlation report | schema, status values, ambiguity semantics | producing bindings from SDK/policy/kernel windows | `correlation-report.v0` |
+| Kernel monitor and eBPF | monitor implementation, BPF programs, stats model | selecting capture window, cgroup scope, and normalizer filters for runner proof | monitor event schema, drop accounting, cgroup health |
+| Policy decisions | MCP/proxy policy semantics and decision event shape | including policy logs in measured-run archives | policy event schema and `tool_call_id` extraction |
+| SDK events | normalized SDK event schema | shim-specific event adapters and fixture capture | `assay.runner.sdk_event.v0` |
+| Acceptance fixtures | fixture contract and delegated acceptance semantics | fixture programs and control paths for runner proof | fixture v0 contract |
+| CI discipline | repository-required checks and ordinary CI | delegated proof lane selection and run recording | CI lane contract |
+| Operational runbook | security posture and hosted runner policy | delegated host procedure and failure triage | delegated runbook |
+| Capability diff | Trust Basis / Harness projection semantics | measured-run capability input bundles | future Phase 2B diff contract |
+
+## Dependency Direction
+
+Allowed dependency direction:
+
+```text
+Assay core semantics
+  -> runner measured execution
+  -> harness/report projection
+```
+
+Forbidden direction:
+
+```text
+runner implementation detail
+  -> redefines Assay artifact meaning
+```
+
+Runner code may depend on Assay core crates or exported contracts. Assay core
+must not depend on a publishable runner crate for artifact interpretation. If a
+core crate needs a helper currently living in runner-spike code, move the
+helper to the appropriate core module first and cover that move with tests.
+
+## Current In-Repo Ownership
+
+The current spike surfaces remain in `Rul1an/assay`:
+
+| Path | Current role | Boundary classification |
+|---|---|---|
+| `crates/assay-runner-spike/` | publish-disabled measured-run spike crate | candidate runner orchestration, not extractable yet |
+| `crates/assay-runner-spike/src/run.rs` | measured command execution, run id, archive handoff | runner candidate orchestration |
+| `crates/assay-runner-spike/src/kernel.rs` | kernel capture normalization and health application | runner candidate mechanics using Assay monitor semantics |
+| `crates/assay-runner-spike/src/policy.rs` | policy log normalization and binding into the archive | runner candidate mechanics using Assay policy semantics |
+| `crates/assay-runner-spike/src/sdk.rs` | SDK log normalization and SDK/policy mismatch marking | runner candidate mechanics using shared SDK event semantics |
+| `crates/assay-runner-spike/src/correlation.rs` | correlation-report data structures and validation | shared contract candidate; schema semantics must be Assay-owned before extraction |
+| `crates/assay-runner-spike/src/surface.rs` | capability-surface data structures and deterministic set storage | shared contract candidate; artifact semantics must be Assay-owned before extraction |
+| `crates/assay-runner-spike/src/health.rs` | observation-health data structures and validation | shared contract candidate; status meanings must be Assay-owned before extraction |
+| `crates/assay-runner-spike/src/archive.rs` | runner archive assembly and manifest validation | boundary conflict: assembly is runner mechanics, manifest semantics are Assay-owned |
+| `crates/assay-runner-spike/src/lib.rs` | re-export surface for the spike crate | temporary in-repo facade, not a stable external API |
+| `crates/assay-monitor/` | monitor reader, stats, event decoding | Assay core monitor substrate |
+| `crates/assay-ebpf/` | eBPF programs | Assay core monitor substrate |
+| `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface |
+| `crates/assay-cli/src/cgroup.rs` | CLI-owned cgroup v2 placement helper for runner sessions | runner-adjacent process placement; extract only with a stable cgroup API |
+| `crates/assay-evidence/**` | evidence artifact verification and existing bundle semantics | Assay core artifact semantics |
+| `crates/assay-core/**` | MCP, policy, runtime, and shared decision semantics | Assay core semantics |
+| `tests/fixtures/runner-spike/` | deterministic acceptance fixtures | candidate runner fixtures under shared fixture contract |
+| `scripts/ci/runner-spike-*.sh` | acceptance and determinism wrappers | candidate runner gates under shared CI lane contract |
+| `.github/workflows/runner-spike-delegated.yml` | manual delegated Linux/eBPF workflow | repository-owned proof lane |
+| `docs/reference/runner/*.md` | Phase 2A contracts | shared internal contracts |
+| `docs/ops/ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md` | delegated host runbook | shared operational contract |
+
+## Active Boundary Conflicts
+
+These are the known hard cases. Do not resolve them by moving code first and
+explaining the ownership later.
+
+| Conflict | Why it is hard | Current rule |
+|---|---|---|
+| `archive.rs` | the runner assembles archives, but manifest shape, digest meaning, and verification are artifact semantics | keep assembly in the runner candidate; move or duplicate manifest semantics only through an Assay-owned shared contract |
+| `health.rs` and `observation-health.json` | the runner measures drops and cgroup health, but `kernel_layer=complete` and related status meanings are Assay claims | Assay owns the status definitions; runner computes whether a measured run satisfies them |
+| telemetry-versus-evidence filters | the runner implements event-type and path filters, but deciding what counts as evidence is artifact semantics | Assay owns the evidence taxonomy and rationale; runner owns the implementation and diagnostics |
+| `tool_call_id` fallback semantics | fallback would change correlation mechanics and `correlation-report.json` ambiguity semantics at the same time | v0 clean correlation requires stable tool-call ids; call-id-less support remains blocked on issue #1275 |
+
+If a future PR touches one of these conflicts, reviewers should require a
+contract update or an explicit statement that the PR does not change the
+boundary.
+
+## What Must Never Move Alone
+
+The following cannot be moved to a separate runner repository without an
+explicit shared-contract replacement:
+
+- artifact schema definitions
+- archive verification semantics
+- observation-health status meanings
+- telemetry-versus-evidence filter rationale
+- CI lane decision table
+- fixture v0 contract
+- delegated proof acceptance note
+
+If extraction happens later, these must either stay in Assay core or become a
+versioned shared contract package consumed by both repositories.
+
+## Extraction Readiness Criteria
+
+Do not create a separate Assay-Runner repository until all of the following are
+true:
+
+| Check | Ready when |
+|---|---|
+| Contract stability | artifact, fixture, CI-lane, and boundary contracts have no semantic churn for one consolidation window |
+| CI classification | runner-impacting changes can be classified by the CI lane contract without discussion |
+| Delegated proof recording | delegated workflow run URL, commit SHA, selected gate, and result are recorded on runner-impacting PRs |
+| Shared schema ownership | `assay.runner.*.v0` schemas have an owner and release/versioning path importable by both Assay and any future runner repo |
+| Dependency direction | no Assay core crate depends on a publishable runner crate for artifact interpretation |
+| CLI coupling | runner orchestration does not require private `assay-cli` types or hidden command internals across a repo boundary |
+| Cgroup API | cgroup placement uses a stable API rather than `assay-cli`-local helpers |
+| Monitor API | runner capture can depend on a stable monitor API without copying monitor/eBPF internals |
+| Archive verification | runner archives verify through Assay evidence semantics without copying verification logic |
+| Boundary API stability | two consecutive minor releases, or an equivalent internal stabilization window, pass without breaking the boundary API |
+| External consumer | at least one non-spike consumer can read the runner bundle contract without depending on spike implementation details |
+| Call-id decision | the call-id-less correlation decision in
+   <https://github.com/Rul1an/assay/issues/1275> is either resolved or clearly
+   excluded from the extracted v0 scope |
+| Drop diagnostics | the ring-buffer debug follow-up in
+   <https://github.com/Rul1an/assay/issues/1271> is either implemented or
+   explicitly accepted as post-extraction operational work |
+| CI enforcement path | the CI-lane enforcement follow-up in
+   <https://github.com/Rul1an/assay/issues/1274> has a chosen implementation
+   path, even if full enforcement is deferred |
+| Maintainer explainability | a maintainer can explain which crate owns each boundary row above without reading the Phase 1 history |
+
+If the boundary map remains materially unstable after a 4-6 week consolidation
+window, treat that as evidence that extraction is premature. Do not force a
+repository split while the ownership line is still moving.
+
+## Extraction Blocking Conditions
+
+Extraction is blocked if any of these are true:
+
+- `assay.runner.*.v0` schemas still need breaking changes to remain useful
+- delegated CI selection still depends on reviewer intuition rather than the
+  CI lane contract
+- fixture stability requires undocumented local knowledge
+- `tool_call_id` fallback semantics are being decided implicitly
+- `assay-runner-spike` still owns schema definitions that both Assay and a
+  future runner repository would need to import
+- runner orchestration still depends on `assay-cli`-local cgroup helpers
+  without a stable API boundary
+- `cargo build -p assay-runner-spike` requires more Assay internals than a
+  deliberate shared schema/monitor contract allows
+- macOS or Windows support is being treated as a port rather than a separate
+  platform spike
+- a separate repo would need to copy Assay evidence verification logic
+- runner code cannot be tested without private host state that is absent from
+  the delegated runbook
+- there is no non-spike consumer of the runner bundle format
+
+## Future Split Shape
+
+If extraction becomes justified, the likely shape is:
+
+| Area | Future owner |
+|---|---|
+| Artifact schemas and verification | Assay core or shared contract crate |
+| Monitor/eBPF substrate | Assay core unless runner needs a separately versioned monitor package |
+| Runner orchestration CLI | Assay-Runner candidate |
+| Deterministic runner fixtures | Assay-Runner candidate, governed by shared fixture contract |
+| Delegated CI workflow | Depends on repository ownership of the dedicated runner |
+| Capability diff projection | Assay-Harness or a later Runner/Harness shared surface |
+
+The first extracted release, if it ever exists, should be narrow: Linux/eBPF
+delegated measured runs with the existing `none`, `kernel+policy`, and
+OpenAI Agents fixture paths. It should not bundle macOS, live LLM calls,
+fleet operations, or OTel mappings into the first boundary.
+
+## Non-Goals
+
+This boundary map does not:
+
+- choose an external product name
+- create a new repository
+- promise publication or packaging
+- define macOS or Windows measurement
+- define live LLM or cassette semantics
+- define OTel mappings
+- change delegated acceptance criteria
+
+Those decisions require separate contracts after the Linux boundary is stable.

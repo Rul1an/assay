@@ -35,7 +35,7 @@ Operational status:
   claims, kill-criterion outcomes, and regression anchors for Phase 2.
 - [Assay-Runner reference](../reference/runner/index.md) collects internal
   Phase 2A references, including the artifact v0 contracts, fixture contract,
-  and CI lane contract for delegated runner work.
+  CI lane contract, and boundary map for delegated runner work.
 - [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
   dismissed Security-tab alerts so the dismiss-state stays traceable rather
   than implicit.
