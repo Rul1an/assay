@@ -102,7 +102,7 @@ explaining the ownership later.
 | `archive.rs` | the runner assembles archives, but manifest shape, digest meaning, and verification are artifact semantics | keep assembly in the runner candidate; move or duplicate manifest semantics only through an Assay-owned shared contract |
 | `health.rs` and `observation-health.json` | the runner measures drops and cgroup health, but `kernel_layer=complete` and related status meanings are Assay claims | Assay owns the status definitions; runner computes whether a measured run satisfies them |
 | telemetry-versus-evidence filters | the runner implements event-type and path filters, but deciding what counts as evidence is artifact semantics | Assay owns the evidence taxonomy and rationale; runner owns the implementation and diagnostics |
-| `tool_call_id` fallback semantics | fallback would change correlation mechanics and `correlation-report.json` ambiguity semantics at the same time | v0 clean correlation requires stable tool-call ids; call-id-less support remains blocked on issue #1275 |
+| `tool_call_id` fallback semantics | fallback would change correlation mechanics and `correlation-report.json` ambiguity semantics at the same time | v0 clean correlation and the first Phase 2B capability-diff contract require stable tool-call ids; call-id-less support is out of scope until a separate fallback contract exists |
 
 If a future PR touches one of these conflicts, reviewers should require a
 contract update or an explicit statement that the PR does not change the
@@ -142,9 +142,7 @@ true:
 | Archive verification | runner archives verify through Assay evidence semantics without copying verification logic |
 | Boundary API stability | two consecutive minor releases, or an equivalent internal stabilization window, pass without breaking the boundary API |
 | External consumer | at least one non-spike consumer can read the runner bundle contract without depending on spike implementation details |
-| Call-id decision | the call-id-less correlation decision in
-   <https://github.com/Rul1an/assay/issues/1275> is either resolved or clearly
-   excluded from the extracted v0 scope |
+| Call-id decision | call-id-less correlation is explicitly excluded from the extracted v0 scope unless a later fallback contract replaces that rule |
 | Drop diagnostics | the ring-buffer debug follow-up in
    <https://github.com/Rul1an/assay/issues/1271> is either implemented or
    explicitly accepted as post-extraction operational work |

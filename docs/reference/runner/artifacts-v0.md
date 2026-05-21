@@ -186,6 +186,14 @@ Correlation windows use runner-defined phase markers from one canonical runner
 clock. SDK-provided timestamps are informational only and are not the primary
 join key for v0 correlation.
 
+Clean v0 correlation requires a stable `tool_call_id` for every tool-call
+binding. The first Phase 2B capability-diff contract inherits this rule: it may
+diff clean bindings by `tool_call_id`, but it must not introduce deterministic
+order-fallback for call-id-less agent runtimes. If a runtime cannot provide a
+stable tool-call id, the runner must report a partial or failed correlation
+state until a separate call-id-less fixture and contract explicitly define the
+fallback semantics.
+
 Example:
 
 ```json
