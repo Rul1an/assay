@@ -16,6 +16,11 @@ layer streams in the archive. It is not a claim that raw kernel telemetry, raw
 ring-buffer delivery, dynamic loader behavior, or the eBPF object are
 byte-identical across runs.
 
+Machine-readable golden-shape examples are listed in
+[`golden/index.md`](golden/index.md). They are not substitutes for delegated
+acceptance runs; they freeze the v0 field set, value vocabulary, and
+serialization shape that docs and tests should preserve.
+
 ## Contract Principles
 
 1. **Monitor observes broadly.** Kernel, policy, and SDK monitors may observe
@@ -175,6 +180,10 @@ Binding fields:
 | `kernel_event_count` | integer | yes | Count of normalized kernel events in the binding window |
 | `window.start` | string | yes | Inclusive window start marker |
 | `window.end` | string | yes | Inclusive window end marker |
+
+Correlation windows use runner-defined phase markers from one canonical runner
+clock. SDK-provided timestamps are informational only and are not the primary
+join key for v0 correlation.
 
 Example:
 

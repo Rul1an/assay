@@ -1,0 +1,15 @@
+{
+  "schema": "assay.runner.observation_health.v0",
+  "run_id": "run_openai_agents_kernel_policy_determinism",
+  "platform": "linux",
+  "kernel_layer": "complete",
+  "ringbuf_drops": 0,
+  "policy_layer": "present",
+  "sdk_layer": "self_reported",
+  "cgroup_correlation": "clean",
+  "notes": [
+    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0",
+    "s4_policy_capture: policy_events=1",
+    "s5_sdk_capture: sdk_events=3 sdk_tool_calls=1"
+  ]
+}

@@ -21,7 +21,23 @@ policy, and SDK correlation without introducing accidental host noise.
 The three delegated determinism wrappers run the relevant acceptance path
 three times and compare normalized artifacts byte-for-byte.
 
-## Proven Full S5 Fixture Shape
+## Fixture Contract Versus Accepted Instances
+
+This page separates two layers:
+
+- **Fixture contract:** rules that every runner acceptance fixture must follow:
+  deterministic invocation, stable identifiers, no live secrets, normalized
+  artifact determinism, and explicit telemetry-versus-evidence boundaries.
+- **Accepted fixture instance:** the exact shape proven by the current Phase 1
+  full S5 fixture, including SDK version, event counts, tool name, tool-call id,
+  and health-note text.
+
+Changing the general fixture discipline is a contract change. Updating a
+single accepted instance, for example during an `@openai/agents` dependency
+bump, is still reviewable but should be handled as an instance update as long
+as the general contract remains intact.
+
+## Accepted Full S5 Fixture Instance
 
 The Phase 1 `openai-agents-kernel-policy` acceptance path fixes the full
 kernel plus policy plus SDK fixture shape deliberately:
@@ -41,9 +57,9 @@ kernel plus policy plus SDK fixture shape deliberately:
 | Correlation report | `status=clean`, `ambiguities=[]`, one binding | delegated acceptance fails with status, ambiguity, or binding-count mismatch |
 | Correlation window | `{"start":"run_started","end":"run_finished"}` | delegated acceptance fails with `binding window mismatch` |
 
-These counts and values are part of the v0 fixture contract. Changing them is
-not a copy-edit; it changes the accepted deterministic fixture shape and
-requires an explicit contract review.
+These counts and values are part of the accepted v0 S5 fixture instance.
+Changing them is not a copy-edit; it changes the deterministic instance that
+proved Phase 1 and requires an explicit fixture-instance review.
 
 ## Contract Principles
 
@@ -107,6 +123,21 @@ validate required variables before doing measured work.
 
 The OpenAI Agents fixture also sets `OPENAI_AGENTS_DISABLE_TRACING=1`. The
 runner bundle does not claim OpenAI tracing export behavior in Phase 2A.
+
+Environment values that can affect fixture output or normalized evidence are
+part of fixture review. New fixture wrappers should pin or explicitly justify:
+
+- `TZ=UTC`
+- `LANG=C` and `LC_ALL=C`, unless locale behavior is the evidence under test
+- a stable `TMPDIR` root for control files
+- a stable `HOME` when SDK or package tooling reads user configuration
+- a fixed Node major/minor line for JavaScript fixtures
+- a stable current working directory before measured work begins
+- a stable `umask` when file modes can enter evidence or golden artifacts
+
+The accepted v0 fixture does not claim general locale, timezone, or user-home
+coverage. It claims deterministic normalized artifacts for the delegated Linux
+host and the fixture environment asserted by the acceptance wrappers.
 
 ## Filesystem Evidence Contract
 
@@ -188,6 +219,11 @@ The full S5 determinism wrapper compares exactly:
 Wrappers should print self-describing diffs when these artifacts drift. The
 diff is diagnostic only; it must not loosen the pass condition.
 
+The v0 machine-readable golden shapes for these artifacts are listed in
+[`golden/index.md`](golden/index.md). They are canonical examples for field
+presence, serialization shape, and status vocabulary. The delegated three-run
+comparison remains the executable determinism check for real fixture instances.
+
 Passing delegated determinism requires:
 
 - `kernel_layer=complete` when kernel capture is in scope
@@ -195,6 +231,12 @@ Passing delegated determinism requires:
 - `cgroup_correlation=clean`
 - stable normalized evidence across all three runs
 - no delegated skip treated as success
+
+## Correlation Clock Rule
+
+Kernel, policy, and SDK correlation windows use one canonical runner clock and
+runner-defined phase markers. SDK-provided timestamps are informational only
+and are never the primary join key for v0 correlation.
 
 ## Dependency Upgrade Contract
 
@@ -220,6 +262,14 @@ ids into `assay.runner.sdk_event.v0`.
 
 Dependency bumps must not relax event-schema validation, sequence validation,
 or three-run determinism.
+
+## Second-Order Fixtures
+
+Negative, adversarial, or S7-style fixtures are second-order contract tests.
+They are useful before widening the runner claim, but they must not silently
+complicate the happy-path S5 acceptance fixture. The happy path remains the
+small deterministic proof that kernel, policy, and SDK evidence can be
+captured, correlated, and reproduced byte-for-byte.
 
 ## Adding Or Changing A Fixture
 
