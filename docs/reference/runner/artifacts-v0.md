@@ -1,0 +1,227 @@
+# Runner Artifact v0 Contracts
+
+> Internal Phase 2A reference. These contracts describe the normalized
+> runner-spike artifacts proven by the delegated Linux/eBPF Phase 1 acceptance
+> run. They are not a public Assay-Runner release contract.
+
+The Phase 1 delegated proof writes a deterministic archive containing three
+load-bearing JSON artifacts:
+
+- `observation-health.json`
+- `capability-surface.json`
+- `correlation-report.json`
+
+The determinism claim is over these normalized artifacts and the normalized
+layer streams in the archive. It is not a claim that raw kernel telemetry, raw
+ring-buffer delivery, dynamic loader behavior, or the eBPF object are
+byte-identical across runs.
+
+## Contract Principles
+
+1. **Monitor observes broadly.** Kernel, policy, and SDK monitors may observe
+   more than the runner-spike bundle is willing to claim as evidence.
+2. **Normalizer claims narrowly.** The runner-spike normalizer keeps only
+   events that support the measured-run attribution claim.
+3. **Passing health stays strict.** A passing Linux/eBPF delegated run requires
+   complete kernel capture, zero ring-buffer drops, and clean cgroup
+   correlation.
+4. **v0 artifacts are deterministic.** Set-like fields serialize in stable
+   order; three-run delegated determinism compares the normalized JSON
+   artifacts byte-for-byte.
+5. **Unsupported expansion is a contract change.** New artifact fields,
+   schema strings, layer status values, or evidence categories require an
+   explicit Phase 2 contract review.
+
+## Telemetry Versus Evidence
+
+The monitor layer may observe telemetry that is useful for debugging but not
+for the runner-spike capability claim. The normalizer excludes this telemetry
+from `capability-surface.json` and `layers/kernel.ndjson`.
+
+| Filter level | Examples | Reason |
+|---|---|---|
+| Event type | `EVENT_INODE_RESOLVED` | Kernel-internal resolution telemetry; it does not add an agent capability claim |
+| Dynamic loader paths | `/etc/ld.so.cache`, `/lib/*`, `/lib32/*`, `/lib64/*`, `/usr/lib/*` | Runtime loader behavior rather than agent-selected behavior |
+| Locale/runtime paths | `/usr/share/locale/*`, `/etc/localtime`, Python bootstrap probes | libc/interpreter initialization noise |
+| Toolchain/RPATH paths | `.rustup/toolchains/*/*.so*`, `target/*/{build,debug,release}/*.so*` | Cargo/Rust loader behavior |
+| Runtime dependency trees | `node_modules/*` | SDK/runtime implementation detail, not a runner capability claim |
+| Kernel and device introspection | `/proc/*`, `/sys/*`, `/dev/*` | Runtime plumbing and host introspection |
+
+Policy-denied paths remain evidence. For example, a `file_blocked` policy
+event for `/lib/.../libc.so.6` is preserved because the policy decision is the
+claim, even though ordinary loader `openat` telemetry for that path is
+filtered.
+
+## `observation-health.json`
+
+Schema string:
+
+```text
+assay.runner.observation_health.v0
+```
+
+Fields:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `schema` | string | yes | Must equal `assay.runner.observation_health.v0` |
+| `run_id` | string | yes | Non-empty run identifier shared by all archive artifacts |
+| `platform` | string | yes | Platform name used by the runner-spike path; Phase 1 accepted `linux` |
+| `kernel_layer` | enum | yes | `complete`, `partial_ringbuf_drops`, or `absent` |
+| `ringbuf_drops` | integer | yes | Total ring-buffer drops for the measured kernel capture window |
+| `policy_layer` | enum | yes | `present` or `absent` |
+| `sdk_layer` | enum | yes | `present`, `self_reported`, or `absent` |
+| `cgroup_correlation` | enum | yes | `clean`, `partial`, or `failed` |
+| `notes` | array[string] | yes | Stable human-readable capture notes used by delegated determinism |
+
+Validation rules:
+
+- `run_id` must not be empty.
+- `ringbuf_drops > 0` requires `kernel_layer=partial_ringbuf_drops`.
+- non-`linux` platforms require `kernel_layer=absent`.
+- `cgroup_correlation=failed` is not valid for a passing Phase 1 run.
+
+Passing Linux/eBPF example:
+
+```json
+{
+  "schema": "assay.runner.observation_health.v0",
+  "run_id": "run_openai_agents_kernel_policy_determinism",
+  "platform": "linux",
+  "kernel_layer": "complete",
+  "ringbuf_drops": 0,
+  "policy_layer": "present",
+  "sdk_layer": "present",
+  "cgroup_correlation": "clean",
+  "notes": [
+    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0",
+    "s4_policy_capture: policy_events=1",
+    "s5_sdk_capture: sdk_events=3 sdk_tool_calls=1"
+  ]
+}
+```
+
+## `capability-surface.json`
+
+Schema string:
+
+```text
+assay.runner.capability_surface.v0
+```
+
+Fields:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `schema` | string | yes | Must equal `assay.runner.capability_surface.v0` |
+| `run_id` | string | yes | Non-empty run identifier shared by all archive artifacts |
+| `filesystem_prefixes` | array[string] | yes | Stable sorted set of observed filesystem evidence values |
+| `network_endpoints` | array[string] | yes | Stable sorted set of observed network endpoints |
+| `process_execs` | array[string] | yes | Stable sorted set of observed process execution values |
+| `mcp_tools` | array[string] | yes | Stable sorted set of observed MCP/tool names |
+| `policy_decisions` | array[string] | yes | Stable sorted set of policy decision summaries |
+
+`filesystem_prefixes` stores full observed v0 path values despite the legacy
+field name. Projection onto directory prefixes is a later capability-diff
+transformation, not part of this artifact contract.
+
+Example:
+
+```json
+{
+  "schema": "assay.runner.capability_surface.v0",
+  "run_id": "run_kernel_policy_determinism",
+  "filesystem_prefixes": [
+    "/tmp/assay-runner-kernel-policy/work/input.txt",
+    "/tmp/assay-runner-kernel-policy/work/output.txt"
+  ],
+  "network_endpoints": [],
+  "process_execs": [
+    "/usr/bin/cat"
+  ],
+  "mcp_tools": [
+    "filesystem.read_file"
+  ],
+  "policy_decisions": [
+    "allow:filesystem.read_file"
+  ]
+}
+```
+
+## `correlation-report.json`
+
+Schema string:
+
+```text
+assay.runner.correlation_report.v0
+```
+
+Fields:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `schema` | string | yes | Must equal `assay.runner.correlation_report.v0` |
+| `run_id` | string | yes | Non-empty run identifier shared by all archive artifacts |
+| `status` | enum | yes | `clean`, `partial`, or `failed` |
+| `bindings` | array[object] | yes | Stable correlation bindings from SDK/policy windows to kernel evidence |
+| `ambiguities` | array[string] | yes | Stable list of unresolved correlation issues |
+
+Binding fields:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `tool_call_id` | string | yes | Tool-call id used to bind SDK and policy layers |
+| `policy_decision` | string or null | yes | Matched policy decision summary, when present |
+| `kernel_event_count` | integer | yes | Count of normalized kernel events in the binding window |
+| `window.start` | string | yes | Inclusive window start marker |
+| `window.end` | string | yes | Inclusive window end marker |
+
+Example:
+
+```json
+{
+  "schema": "assay.runner.correlation_report.v0",
+  "run_id": "run_openai_agents_kernel_policy_determinism",
+  "status": "clean",
+  "bindings": [
+    {
+      "tool_call_id": "tc_read_fixture_input",
+      "policy_decision": "allow:filesystem.read_file",
+      "kernel_event_count": 2,
+      "window": {
+        "start": "policy:seq=1",
+        "end": "sdk:seq=3"
+      }
+    }
+  ],
+  "ambiguities": []
+}
+```
+
+## Archive Relationship
+
+The archive manifest is deterministic and uses:
+
+```text
+assay.runner.archive_manifest.v0
+```
+
+The manifest records each archive path, byte length, and `sha256:` digest.
+The three v0 JSON artifacts must all share the archive `run_id`.
+
+## Dependency Upgrade Flow
+
+The OpenAI Agents acceptance fixture pins and asserts the SDK version used by
+the delegated gate. For dependency bumps:
+
+1. Update the fixture dependency.
+2. Run the SDK fixture locally enough to verify package metadata loading.
+3. Update the expected SDK version in the acceptance wrapper only in the same
+   change that updates the dependency.
+4. Dispatch `Runner Spike Delegated` with
+   `gates=openai-agents-kernel-policy` and `build_ebpf=true`.
+5. Merge only after the delegated gate proves SDK, policy, and kernel
+   correlation remains byte-stable over three runs.
+
+Version bumps must not silently relax schema validation or determinism
+assertions.

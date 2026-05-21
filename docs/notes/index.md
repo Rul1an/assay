@@ -33,6 +33,9 @@ Operational status:
 - [Assay-Runner Phase 1 Acceptance](ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md)
   records the delegated Linux/eBPF `gates=all` acceptance run, bounded
   claims, kill-criterion outcomes, and regression anchors for Phase 2.
+- [Assay-Runner reference](../reference/runner/index.md) collects internal
+  Phase 2A references, including the artifact v0 contracts for
+  `observation-health`, `capability-surface`, and `correlation-report`.
 - [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
   dismissed Security-tab alerts so the dismiss-state stays traceable rather
   than implicit.
