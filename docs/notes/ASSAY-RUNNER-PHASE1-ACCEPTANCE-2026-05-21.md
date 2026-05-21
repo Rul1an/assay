@@ -112,7 +112,8 @@ expansion:
 1. freeze versioned v0 references for `observation-health`,
    `capability-surface`, and `correlation-report`
 2. document the telemetry-versus-evidence filter contract
-3. add a delegated runner runbook for provisioning and failure triage
+3. maintain the delegated runner runbook for provisioning and failure triage:
+   [`ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md`](../ops/ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md)
 4. classify when delegated CI is required for runner-impacting changes
 5. write an acceptance fixture contract for future SDK fixtures
 6. define the Assay-Runner boundary and extraction map
