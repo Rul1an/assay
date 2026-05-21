@@ -13,5 +13,6 @@ Phase 2B capability-diff planning slice.
 - [Runner CI lane contract](ci-lanes.md)
 - [Runner Dependabot lane flow](dependabot-lane-flow.md)
 - [Runner capability-diff Phase 2B plan](capability-diff-plan.md)
+- [Runner capability-diff v0 contract](capability-diff-v0.md)
 - [Assay-Runner boundary and extraction map](boundary-map.md)
 - [Phase 1 delegated proof pack](proof-packs/phase1-delegated-2026-05-21.md)

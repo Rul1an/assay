@@ -10,3 +10,4 @@ the artifact contract explicitly defines a field's allowed value vocabulary.
 - [`observation-health-openai-agents-kernel-policy-v0.json`](observation-health-openai-agents-kernel-policy-v0.json)
 - [`capability-surface-openai-agents-kernel-policy-v0.json`](capability-surface-openai-agents-kernel-policy-v0.json)
 - [`correlation-report-openai-agents-kernel-policy-v0.json`](correlation-report-openai-agents-kernel-policy-v0.json)
+- [`capability-diff-s5-idempotent-v0.json`](capability-diff-s5-idempotent-v0.json)
