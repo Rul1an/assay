@@ -94,8 +94,9 @@ async function main() {
 
   fs.mkdirSync(workDir, { recursive: true });
   const fixturePath = path.join(workDir, 'openai-agents-input.txt');
-  fs.writeFileSync(fixturePath, 'openai agents fixture input\n', 'utf8');
-  fs.writeFileSync(path.join(workDir, 'openai-agents-wrapper-ran.txt'), 'openai-agents fixture ran\n', 'utf8');
+  if (!fs.existsSync(fixturePath)) {
+    fs.writeFileSync(fixturePath, 'openai agents fixture input\n', 'utf8');
+  }
   fs.writeFileSync(logPath, '', 'utf8');
 
   const emit = makeEmitter({ logPath, runId, schema });

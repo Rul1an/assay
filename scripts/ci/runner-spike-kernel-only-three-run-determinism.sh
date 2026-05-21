@@ -19,6 +19,9 @@ WORK_DIR="$TMP_ROOT/work"
 RUN_ID="run_kernel_only_determinism"
 
 for run in 1 2 3; do
+  # Keep the fixture path stable, but reset its state so create-vs-open-existing
+  # syscalls do not pollute kernel determinism.
+  rm -rf -- "$WORK_DIR"
   echo "=== runner-spike kernel-only determinism run $run/3 ==="
   ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR="$TMP_ROOT/run-$run" \
     ASSAY_RUNNER_ACCEPTANCE_WORK_DIR="$WORK_DIR" \
@@ -28,7 +31,9 @@ done
 
 python3 - "$TMP_ROOT" <<'PY'
 import json
+import difflib
 import sys
+from collections import Counter
 from pathlib import Path
 
 tmp_root = Path(sys.argv[1])
@@ -38,8 +43,48 @@ def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
 
 
+def fail_json_change(relative_path: str, baseline, current, run: int, hint: str = "") -> None:
+    print(f"FAIL: {relative_path} changed between run 1 and run {run}{hint}")
+    baseline_lines = json.dumps(baseline, indent=2, sort_keys=True).splitlines()
+    current_lines = json.dumps(current, indent=2, sort_keys=True).splitlines()
+    for line in difflib.unified_diff(
+        baseline_lines,
+        current_lines,
+        fromfile=f"run-1/{relative_path}",
+        tofile=f"run-{run}/{relative_path}",
+        lineterm="",
+    ):
+        print(line)
+    raise SystemExit(1)
+
+
 def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def print_kernel_event_summary(run: int) -> None:
+    path = tmp_root / f"run-{run}" / "extract" / "layers" / "kernel.ndjson"
+    kind_counts = Counter()
+    event_type_counts = Counter()
+    value_counts = Counter()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        kind = event.get("kind", "<missing>")
+        event_type = str(event.get("event_type", "<missing>"))
+        kind_counts[kind] += 1
+        event_type_counts[event_type] += 1
+        if event.get("value") is not None:
+            value_counts[(kind, event["value"])] += 1
+    print(f"kernel.ndjson event summary for run {run}:")
+    print("  kind_counts:")
+    for kind, count in kind_counts.most_common():
+        print(f"    {kind}: {count}")
+    print("  event_type_counts:")
+    for event_type, count in event_type_counts.most_common():
+        print(f"    {event_type}: {count}")
+    print("  top_values:")
+    for (kind, value), count in value_counts.most_common(20):
+        print(f"    {kind}: {count} {value}")
 
 
 baseline_health = read_json(tmp_root / "run-1" / "extract" / "observation-health.json")
@@ -49,13 +94,18 @@ for run in (2, 3):
     health = read_json(tmp_root / f"run-{run}" / "extract" / "observation-health.json")
     surface = read_json(tmp_root / f"run-{run}" / "extract" / "capability-surface.json")
     if health != baseline_health:
-        fail(
-            f"observation-health.json changed between run 1 and run {run}; "
-            "this can indicate event_count drift on a noisy host. "
-            "Phase 1 requires a clean deterministic run."
+        print_kernel_event_summary(1)
+        print_kernel_event_summary(run)
+        fail_json_change(
+            "observation-health.json",
+            baseline_health,
+            health,
+            run,
+            "; this can indicate event_count drift on a noisy host. "
+            "Phase 1 requires a clean deterministic run.",
         )
     if surface != baseline_surface:
-        fail(f"capability-surface.json changed between run 1 and run {run}")
+        fail_json_change("capability-surface.json", baseline_surface, surface, run)
 
 print("runner-spike kernel-only three-run determinism verified")
 PY

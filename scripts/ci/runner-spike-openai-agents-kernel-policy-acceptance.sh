@@ -41,23 +41,37 @@ fi
 if [ -n "${ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR:-}" ]; then
   TMP_ROOT="$ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR"
   mkdir -p "$TMP_ROOT"
-  cleanup() {
+  cleanup_tmp_root() {
     :
   }
 else
   TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-kernel-policy.XXXXXX")"
-  cleanup() {
+  cleanup_tmp_root() {
     rm -rf -- "$TMP_ROOT"
   }
 fi
-trap cleanup EXIT
+
+if [ -d /dev/shm ]; then
+  CONTROL_ROOT="$(mktemp -d /dev/shm/assay-runner-openai-agents-control.XXXXXX)"
+else
+  CONTROL_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-control.XXXXXX")"
+fi
+cleanup_all() {
+  cleanup_tmp_root
+  rm -rf -- "$CONTROL_ROOT"
+}
+trap cleanup_all EXIT
 
 WORK_DIR="${ASSAY_RUNNER_ACCEPTANCE_WORK_DIR:-$TMP_ROOT/work}"
 EXTRACT_DIR="$TMP_ROOT/extract"
 BUNDLE="$TMP_ROOT/runner-openai-agents-kernel-policy.tar.gz"
-SDK_LOG="$TMP_ROOT/sdk-events.ndjson"
-DECISION_LOG="$TMP_ROOT/policy-decisions.ndjson"
+SDK_LOG="$CONTROL_ROOT/sdk-events.ndjson"
+DECISION_LOG="$CONTROL_ROOT/policy-decisions.ndjson"
 RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_openai_agents_kernel_policy_acceptance}"
+AGENT_SCRIPT="$CONTROL_ROOT/openai-agents-sdk-policy-agent.sh"
+OPENAI_FIXTURE_AGENT="$CONTROL_ROOT/fixture-agent.js"
+POLICY_AGENT="$CONTROL_ROOT/mcp-policy-agent.sh"
+MCP_FILE_SERVER="$CONTROL_ROOT/mcp_file_server.py"
 # The full S5 gate requires the SDK and policy layers to share the policy
 # fixture's stable tool_call_id. Mismatch behavior is covered by separate gates.
 SDK_TOOL_CALL_ID="tc_runner_policy_001"
@@ -65,9 +79,23 @@ EXPECTED_SDK_SOURCE="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_SOURCE:-openai-agents-
 EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-0.11.4}"
 
 export ASSAY_BIN
+export ASSAY_FIXTURE_ROOT="$ROOT"
+export ASSAY_RUNNER_OPENAI_FIXTURE_AGENT="$OPENAI_FIXTURE_AGENT"
+export ASSAY_RUNNER_MCP_FILE_SERVER="$MCP_FILE_SERVER"
+export ASSAY_RUNNER_POLICY_AGENT="$POLICY_AGENT"
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
 export ASSAY_RUNNER_RUN_ID="$RUN_ID"
 export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
+
+cp "$ROOT/tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh" "$AGENT_SCRIPT"
+cp "$ROOT/tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js" "$OPENAI_FIXTURE_AGENT"
+cp "$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh" "$POLICY_AGENT"
+cp "$ROOT/tests/fixtures/runner-spike/mcp_file_server.py" "$MCP_FILE_SERVER"
+chmod +x "$AGENT_SCRIPT" "$OPENAI_FIXTURE_AGENT" "$POLICY_AGENT" "$MCP_FILE_SERVER"
+
+mkdir -p "$WORK_DIR"
+printf '%s\n' "openai agents fixture input" > "$WORK_DIR/openai-agents-input.txt"
+printf '%s\n' "assay runner policy fixture input" > "$WORK_DIR/policy-input.txt"
 
 "$ASSAY_BIN" runner-spike run \
   --agent-shim openai-agents \
@@ -77,7 +105,7 @@ export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
   --policy-decision-log "$DECISION_LOG" \
   --run-id "$RUN_ID" \
   --output "$BUNDLE" \
-  -- "$ROOT/tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh" "$WORK_DIR"
+  -- "$AGENT_SCRIPT" "$WORK_DIR"
 
 mkdir -p "$EXTRACT_DIR"
 tar -xzf "$BUNDLE" -C "$EXTRACT_DIR"
@@ -86,6 +114,7 @@ python3 - "$EXTRACT_DIR" "$WORK_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECTED_SD
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 extract_dir = Path(sys.argv[1])
@@ -111,10 +140,39 @@ def read_json(path: str):
     return json.loads((extract_dir / path).read_text(encoding="utf-8"))
 
 
+def read_kernel_events():
+    events = []
+    for line_number, line in enumerate(
+        (extract_dir / "layers/kernel.ndjson").read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            fail(f"kernel event {line_number} is not valid JSON: {error}")
+    return events
+
+
+def print_kernel_event_summary(events) -> None:
+    kind_counts = Counter(event.get("kind") for event in events)
+    value_counts = Counter(
+        (event.get("kind"), event.get("value"))
+        for event in events
+        if event.get("value") is not None
+    )
+    print("kernel event kind counts:")
+    for kind, count in kind_counts.most_common():
+        print(f"  {kind}: {count}")
+    print("top kernel event values:")
+    for (kind, value), count in value_counts.most_common(20):
+        print(f"  {kind}: {count} {value}")
+
+
 manifest = read_json("manifest.json")
 health = read_json("observation-health.json")
 surface = read_json("capability-surface.json")
 correlation = read_json("correlation-report.json")
+kernel_events = read_kernel_events()
 
 expect(manifest["schema"] == "assay.runner.archive_manifest.v0", "unexpected manifest schema")
 expect(health["schema"] == "assay.runner.observation_health.v0", "unexpected health schema")
@@ -136,6 +194,10 @@ for relative_path, entry in manifest["files"].items():
     expect(entry["bytes"] == len(payload), f"manifest byte count mismatch for {relative_path}")
     expect(entry["sha256"] == digest, f"manifest sha256 mismatch for {relative_path}")
 
+if health["kernel_layer"] != "complete" or health["ringbuf_drops"] != 0:
+    print("observation-health:")
+    print(json.dumps(health, indent=2, sort_keys=True))
+    print_kernel_event_summary(kernel_events)
 expect(health["kernel_layer"] == "complete", f"kernel_layer must be complete, got {health['kernel_layer']!r}")
 expect(health["ringbuf_drops"] == 0, f"ringbuf_drops must be 0, got {health['ringbuf_drops']!r}")
 expect(health["policy_layer"] == "present", f"policy_layer must be present, got {health['policy_layer']!r}")
@@ -149,10 +211,8 @@ expect(
     "sdk capture note missing",
 )
 
-kernel_events = (extract_dir / "layers/kernel.ndjson").read_text(encoding="utf-8").splitlines()
 expect(kernel_events, "kernel layer must contain events")
-for line_number, line in enumerate(kernel_events, start=1):
-    event = json.loads(line)
+for line_number, event in enumerate(kernel_events, start=1):
     expect(
         event.get("schema") == "assay.runner.kernel_event.v0",
         f"kernel event {line_number} has unexpected schema: {event.get('schema')!r}",
