@@ -1,7 +1,7 @@
 # Assay-Runner Phase 1 Spike Plan
 
-> **Status:** internal execution plan, spike only, not a public roadmap
-> commitment
+> **Status:** accepted on 2026-05-21 for the delegated Linux/eBPF Phase 1
+> path; internal spike record, not a public roadmap commitment
 > **Date:** 2026-05-20
 > **Scope:** expands the Phase 1 proof spike from
 > [`ASSAY-RUNNER-PRODUCT-CANDIDATE-2026-05-18.md`](./ASSAY-RUNNER-PRODUCT-CANDIDATE-2026-05-18.md);
@@ -14,6 +14,16 @@ It answers one question:
 > low-ambiguity layer correlation and honest observation health?
 
 If the answer is no, this track stops.
+
+## Phase 1 Result
+
+Phase 1 passed on delegated Linux/eBPF hardware on 2026-05-21.
+
+The acceptance record is
+[`ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md`](./ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md).
+It records workflow run `26211485614`, commit `56571045`, and `gates=all`
+passing for `kernel-only`, `kernel+policy`, and
+`OpenAI Agents kernel+policy+SDK`.
 
 ## Non-Goals
 
