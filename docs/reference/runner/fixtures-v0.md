@@ -271,6 +271,9 @@ ids into `assay.runner.sdk_event.v0`.
 Dependency bumps must not relax event-schema validation, sequence validation,
 or three-run determinism.
 
+When the bump arrives as a Dependabot PR, follow the maintainer steps in the
+[Dependabot lane flow](dependabot-lane-flow.md) for delegated-proof recording.
+
 ## Second-Order Fixtures
 
 Negative, adversarial, or S7-style fixtures are second-order contract tests.

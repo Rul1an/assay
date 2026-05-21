@@ -83,6 +83,12 @@ this page. Changes to this contract and changes to the classifier must land in
 the same PR; the helper's `--self-test` is the drift canary for the known
 runner-impacting surfaces.
 
+Dependabot PRs follow the same proof rules, but need maintainer action because
+Dependabot cannot dispatch the delegated lane or record proof itself. See the
+[Runner Dependabot lane flow](dependabot-lane-flow.md) for the required
+maintainer steps. Do not auto-dispatch the self-hosted delegated workflow from
+Dependabot PRs without a separate security design review.
+
 Ring-buffer drop diagnostics remain a separate follow-up tracked in
 <https://github.com/Rul1an/assay/issues/1271>; that issue must not weaken the
 `ringbuf_drops=0` delegated acceptance rule.

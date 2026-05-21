@@ -10,4 +10,5 @@ reviewable while the runner boundary is consolidated.
 - [Runner artifact golden shapes](golden/index.md)
 - [Runner acceptance fixture v0 contract](fixtures-v0.md)
 - [Runner CI lane contract](ci-lanes.md)
+- [Runner Dependabot lane flow](dependabot-lane-flow.md)
 - [Assay-Runner boundary and extraction map](boundary-map.md)
