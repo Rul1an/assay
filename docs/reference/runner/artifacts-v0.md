@@ -18,8 +18,9 @@ byte-identical across runs.
 
 Machine-readable golden-shape examples are listed in
 [`golden/index.md`](golden/index.md). They are not substitutes for delegated
-acceptance runs; they freeze the v0 field set, value vocabulary, and
-serialization shape that docs and tests should preserve.
+acceptance runs; they freeze the v0 field set and serialization shape that
+docs and tests should preserve. Example values are illustrative unless this
+contract explicitly defines a field's allowed value vocabulary.
 
 ## Contract Principles
 
@@ -195,11 +196,11 @@ Example:
   "bindings": [
     {
       "tool_call_id": "tc_read_fixture_input",
-      "policy_decision": "allow:filesystem.read_file",
+      "policy_decision": "allow",
       "kernel_event_count": 2,
       "window": {
-        "start": "policy:seq=1",
-        "end": "sdk:seq=3"
+        "start": "run_started",
+        "end": "run_finished"
       }
     }
   ],
