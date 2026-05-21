@@ -172,7 +172,10 @@ relocate the boundary.
    must validate against the v0 contract schema.
 4. Implement a narrow projection only after the contract review settles.
 5. Revisit second-runtime fixtures after the diff contract has one clean
-   consumer.
+   consumer. Entry discipline for that line is defined in
+   [`second-runtime-plan.md`](second-runtime-plan.md); cross-runtime
+   capability-diff (e.g. `diff(second_runtime, S5)`) is intentionally out of
+   Phase 2B scope.
 
 Step 3 is implemented by `scripts/ci/assay_runner_capability_diff_validate.py`.
 Step 4 starts by letting the same helper project v0 diffs from explicit
