@@ -1,0 +1,79 @@
+{
+  "schema": "assay.runner.phase1_proof_pack.v0",
+  "kind": "delegated_phase1_acceptance_manifest",
+  "created_at": "2026-05-21T12:51:08Z",
+  "source": {
+    "workflow": "Runner Spike Delegated",
+    "run_id": 26211485614,
+    "run_url": "https://github.com/Rul1an/assay/actions/runs/26211485614",
+    "event": "workflow_dispatch",
+    "head_branch": "codex/assay-runner-drop-kernel-stream-before-stats",
+    "head_sha": "56571045825de586c459469bfb07ac403611b225",
+    "commit_short": "56571045",
+    "conclusion": "success",
+    "created_at": "2026-05-21T07:17:44Z",
+    "updated_at": "2026-05-21T07:32:39Z",
+    "workflow_database_id": 280387331
+  },
+  "jobs": [
+    {
+      "name": "Prepare delegated runner",
+      "database_id": 77123206996,
+      "conclusion": "success",
+      "started_at": "2026-05-21T07:18:03Z",
+      "completed_at": "2026-05-21T07:19:23Z"
+    },
+    {
+      "name": "Phase 1 delegated gates (all)",
+      "database_id": 77123449435,
+      "conclusion": "success",
+      "started_at": "2026-05-21T07:19:27Z",
+      "completed_at": "2026-05-21T07:32:38Z"
+    }
+  ],
+  "proof_modes": [
+    {
+      "gate": "kernel-only",
+      "acceptance_runs": 3,
+      "three_run_determinism": "pass"
+    },
+    {
+      "gate": "kernel-policy",
+      "acceptance_runs": 3,
+      "three_run_determinism": "pass"
+    },
+    {
+      "gate": "openai-agents-kernel-policy",
+      "acceptance_runs": 3,
+      "three_run_determinism": "pass"
+    }
+  ],
+  "retained_evidence": {
+    "workflow_metadata": "phase1-delegated-2026-05-21.workflow-metadata.json",
+    "workflow_metadata_sha256": "sha256:4cfe08a6c2ad02d8806e9e75796a2c745852e068b450cec2b0b828fa171da2ea",
+    "workflow_log_gzip": "phase1-delegated-2026-05-21.workflow-log.txt.gz",
+    "workflow_log_raw_sha256": "sha256:6ae5cb27c2619f2d9542b8683ee26ce34ca100189810c70ab52bece94a9105d5",
+    "workflow_log_gzip_sha256": "sha256:4b66b2b9d5d63e27a28bf26d35e56f55e53e15bfee7fd9241ff2474539dd6c0e",
+    "log_excerpt": "phase1-delegated-2026-05-21.log-excerpt.txt",
+    "log_excerpt_sha256": "sha256:8b54efed802e5ffa017105b85a08149fd187946753b3f8cfacd6491a22dd71be",
+    "golden_shapes": [
+      {
+        "path": "../golden/observation-health-openai-agents-kernel-policy-v0.json",
+        "sha256": "sha256:4a4897b58835aa04c596a1d7a07beabce1dd1d6fe9154f70579fe46477589f57"
+      },
+      {
+        "path": "../golden/capability-surface-openai-agents-kernel-policy-v0.json",
+        "sha256": "sha256:f24c1483b46375ef4d21ee0e000acdc1b5123fe9f01f9c908d6426907a8fa21a"
+      },
+      {
+        "path": "../golden/correlation-report-openai-agents-kernel-policy-v0.json",
+        "sha256": "sha256:5fc2410240ffdaa4ced3341ee0752f735bb58396f392cd381bb339c7f4680de3"
+      }
+    ]
+  },
+  "limitations": {
+    "raw_runner_archives_retained": false,
+    "raw_runner_archive_reason": "The historical workflow run did not upload GitHub artifacts, and the runner wrote temporary archive tarballs under /tmp paths that were cleaned after the job.",
+    "does_not_replace_re_dispatch": true
+  }
+}

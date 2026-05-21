@@ -38,6 +38,14 @@ contract explicitly defines a field's allowed value vocabulary.
    schema strings, layer status values, or evidence categories require an
    explicit Phase 2 contract review.
 
+## Phase 1 Proof-Pack Manifest
+
+The `assay.runner.phase1_proof_pack.v0` manifest is a hand-curated retention
+record for the Phase 1 delegated acceptance run. It is not emitted by the
+runner and is not part of the runner archive schema. Its purpose is to retain
+workflow metadata, logs, excerpts, and digest links for the historical
+delegated proof after GitHub Actions log retention changes.
+
 ## Telemetry Versus Evidence
 
 The monitor layer may observe telemetry that is useful for debugging but not
