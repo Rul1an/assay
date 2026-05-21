@@ -177,7 +177,7 @@ Binding fields:
 | Field | Type | Required | Semantics |
 |---|---|---:|---|
 | `tool_call_id` | string | yes | Tool-call id used to bind SDK and policy layers |
-| `policy_decision` | string or null | yes | Matched policy decision summary, when present |
+| `policy_decision` | string or null | yes | Matched coarse policy outcome, when present (`allow` or `deny` in v0 accepted fixtures) |
 | `kernel_event_count` | integer | yes | Count of normalized kernel events in the binding window |
 | `window.start` | string | yes | Inclusive window start marker |
 | `window.end` | string | yes | Inclusive window end marker |
@@ -195,7 +195,7 @@ Example:
   "status": "clean",
   "bindings": [
     {
-      "tool_call_id": "tc_read_fixture_input",
+      "tool_call_id": "tc_runner_policy_001",
       "policy_decision": "allow",
       "kernel_event_count": 2,
       "window": {
