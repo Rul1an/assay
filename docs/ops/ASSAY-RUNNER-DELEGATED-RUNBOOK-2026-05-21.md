@@ -90,6 +90,7 @@ as a small runbook or workflow edit.
    - commit SHA
    - selected `gates`
    - pass/fail result
+   - uploaded proof-pack artifact name, when present
    - relevant PASS lines or failure diagnostics
 
 Recommended progression during diagnosis:
@@ -115,6 +116,28 @@ artifact restore or copy step.
 On a fresh host, the Docker-based eBPF image/artifact build can take a few
 minutes. That is expected; do not cancel the run just because the build step is
 quiet for the first minute or two.
+
+## Delegated Proof Pack
+
+Future delegated runs upload a first-class proof-pack artifact named
+`assay-runner-delegated-proof-pack-<run_id>`. The upload happens before
+delegated-runner cleanup and uses `if: always()` semantics, so failed runs
+retain whatever archives, selected JSON artifacts, PASS lines, and gate status
+metadata were produced before failure.
+
+The proof pack is operational evidence, not normalized runner evidence. It
+remains separate from the runner archive schema unless a future artifact
+contract explicitly says otherwise. Its manifest distinguishes historical
+verification from current-state verification:
+
+- historical verification: the proof pack is sufficient to review what happened
+  for the recorded run, commit, inputs, and retained artifacts
+- current-state verification: a fresh delegated dispatch is still required for
+  a new commit, host state, dependency set, or workflow version
+
+Artifact retention is configured to 365 days. The manifest records the
+configured retention, total pack size, archive digests, selected JSON digests,
+and any gates that were missing, failed, skipped, or incomplete.
 
 ## Skip Semantics
 

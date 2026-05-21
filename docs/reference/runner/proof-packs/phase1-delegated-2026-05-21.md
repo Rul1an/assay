@@ -69,5 +69,6 @@ review requires fresh delegated proof.
 
 Future delegated acceptance workflows should upload a first-class proof-pack
 artifact during the run so archive digests and selected extracted JSON
-artifacts are retained at the time of execution. That workflow follow-up is
-tracked in <https://github.com/Rul1an/assay/issues/1287>.
+artifacts are retained at the time of execution. The current delegated workflow
+does this for new runs; this historical pack remains limited because the
+original run cleaned its temporary archive paths before any upload step existed.
