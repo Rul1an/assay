@@ -63,7 +63,7 @@
       },
       {
         "path": "../golden/capability-surface-openai-agents-kernel-policy-v0.json",
-        "sha256": "sha256:f24c1483b46375ef4d21ee0e000acdc1b5123fe9f01f9c908d6426907a8fa21a"
+        "sha256": "sha256:f11e0e9673154d44e751e9409cc6686f791adc804373de201a8be6e69af38692"
       },
       {
         "path": "../golden/correlation-report-openai-agents-kernel-policy-v0.json",

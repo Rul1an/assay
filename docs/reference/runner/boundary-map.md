@@ -64,6 +64,14 @@ must not depend on a publishable runner crate for artifact interpretation. If a
 core crate needs a helper currently living in runner-spike code, move the
 helper to the appropriate core module first and cover that move with tests.
 
+Additional extraction rule:
+
+1. If a runner candidate module contains artifact schema or data-structure
+   definitions needed by both Assay and a future runner repository, those
+   definitions must migrate to an Assay-owned shared contract before
+   extraction. The runner may fill those structures, but it may not be the sole
+   owner of their meaning across a repository boundary.
+
 ## Current In-Repo Ownership
 
 The current spike surfaces remain in `Rul1an/assay`:
@@ -146,9 +154,9 @@ true:
 | Drop diagnostics | the ring-buffer debug follow-up in
    <https://github.com/Rul1an/assay/issues/1271> is either implemented or
    explicitly accepted as post-extraction operational work |
-| CI enforcement path | the CI-lane enforcement follow-up in
-   <https://github.com/Rul1an/assay/issues/1274> has a chosen implementation
-   path, even if full enforcement is deferred |
+| CI enforcement path | the Assay-Runner lane-check required status and
+   reviewer workflow are active; future refinements are tracked separately
+   rather than blocking the v0 boundary |
 | Maintainer explainability | a maintainer can explain which crate owns each boundary row above without reading the Phase 1 history |
 
 If the boundary map remains materially unstable after a 4-6 week consolidation

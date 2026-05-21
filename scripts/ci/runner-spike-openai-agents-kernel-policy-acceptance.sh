@@ -263,7 +263,7 @@ expect(
     "sdk event sequence mismatch",
 )
 
-filesystem = set(surface.get("filesystem_prefixes", []))
+filesystem = set(surface.get("filesystem_paths", []))
 expect(str(work_dir / "openai-agents-input.txt") in filesystem, "OpenAI Agents fixture input read was not recorded")
 expect(str(work_dir / "policy-input.txt") in filesystem, "policy fixture input read was not recorded")
 expect("read_file" in set(surface.get("mcp_tools", [])), "read_file MCP tool was not recorded")

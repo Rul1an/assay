@@ -55,6 +55,12 @@ The manifest records SHA-256 digests for the fetched workflow metadata,
 gzipped workflow log, raw workflow log content, log excerpt, and v0
 golden-shape JSON files.
 
+The retained capability-surface golden shape follows the Phase 2A precision
+rename from `filesystem_prefixes` to `filesystem_paths`. Because the historical
+run did not retain raw runner archives, this proof pack preserves the delegated
+run proof plus the current v0 contract anchors; it does not claim a byte replay
+of the pre-rename raw capability-surface archive.
+
 ## Limits
 
 This pack does not claim to contain the original `runner-*.tar.gz` archives

@@ -11,9 +11,8 @@ pub struct CapabilitySurface {
     /// Set of filesystem paths the agent touched.
     ///
     /// v0 stores full paths from observed file events. Projection onto
-    /// directory prefixes for capability-diff is a later transformation; the
-    /// field name is kept stable for the v0 schema.
-    pub filesystem_prefixes: BTreeSet<String>,
+    /// directory prefixes for capability-diff is a later transformation.
+    pub filesystem_paths: BTreeSet<String>,
     pub network_endpoints: BTreeSet<String>,
     pub process_execs: BTreeSet<String>,
     pub mcp_tools: BTreeSet<String>,
@@ -35,7 +34,7 @@ impl CapabilitySurface {
         Self {
             schema: CAPABILITY_SURFACE_SCHEMA.to_string(),
             run_id: run_id.into(),
-            filesystem_prefixes: BTreeSet::new(),
+            filesystem_paths: BTreeSet::new(),
             network_endpoints: BTreeSet::new(),
             process_execs: BTreeSet::new(),
             mcp_tools: BTreeSet::new(),
@@ -43,8 +42,8 @@ impl CapabilitySurface {
         }
     }
 
-    pub fn add_filesystem_prefix(&mut self, prefix: impl Into<String>) {
-        self.filesystem_prefixes.insert(prefix.into());
+    pub fn add_filesystem_path(&mut self, path: impl Into<String>) {
+        self.filesystem_paths.insert(path.into());
     }
 
     pub fn add_network_endpoint(&mut self, endpoint: impl Into<String>) {
@@ -73,8 +72,8 @@ impl CapabilitySurface {
             });
         }
 
-        self.filesystem_prefixes
-            .extend(other.filesystem_prefixes.iter().cloned());
+        self.filesystem_paths
+            .extend(other.filesystem_paths.iter().cloned());
         self.network_endpoints
             .extend(other.network_endpoints.iter().cloned());
         self.process_execs
@@ -104,16 +103,16 @@ mod tests {
     #[test]
     fn capability_surface_serializes_sets_deterministically() {
         let mut surface = CapabilitySurface::new("run_001");
-        surface.add_filesystem_prefix("/tmp/z");
-        surface.add_filesystem_prefix("/tmp/a");
+        surface.add_filesystem_path("/tmp/z");
+        surface.add_filesystem_path("/tmp/a");
         surface.add_network_endpoint("b.example:443");
         surface.add_network_endpoint("a.example:443");
         surface.add_process_exec("/usr/bin/z");
         surface.add_process_exec("/usr/bin/a");
-        surface.add_mcp_tool("filesystem.write_file");
-        surface.add_mcp_tool("filesystem.read_file");
-        surface.add_policy_decision("deny:filesystem.write_file");
-        surface.add_policy_decision("allow:filesystem.read_file");
+        surface.add_mcp_tool("write_file");
+        surface.add_mcp_tool("read_file");
+        surface.add_policy_decision("deny:write_file");
+        surface.add_policy_decision("allow:read_file");
 
         let value = serde_json::to_value(&surface).expect("surface serializes");
 
@@ -122,11 +121,11 @@ mod tests {
             json!({
                 "schema": CAPABILITY_SURFACE_SCHEMA,
                 "run_id": "run_001",
-                "filesystem_prefixes": ["/tmp/a", "/tmp/z"],
+                "filesystem_paths": ["/tmp/a", "/tmp/z"],
                 "network_endpoints": ["a.example:443", "b.example:443"],
                 "process_execs": ["/usr/bin/a", "/usr/bin/z"],
-                "mcp_tools": ["filesystem.read_file", "filesystem.write_file"],
-                "policy_decisions": ["allow:filesystem.read_file", "deny:filesystem.write_file"]
+                "mcp_tools": ["read_file", "write_file"],
+                "policy_decisions": ["allow:read_file", "deny:write_file"]
             })
         );
     }
@@ -145,15 +144,15 @@ mod tests {
     #[test]
     fn merge_from_preserves_deterministic_sets() {
         let mut first = CapabilitySurface::new("run_001");
-        first.add_filesystem_prefix("/tmp/b");
+        first.add_filesystem_path("/tmp/b");
         let mut second = CapabilitySurface::new("run_001");
-        second.add_filesystem_prefix("/tmp/a");
+        second.add_filesystem_path("/tmp/a");
         second.add_process_exec("/usr/bin/true");
 
         first.merge_from(&second).unwrap();
 
         assert_eq!(
-            first.filesystem_prefixes.into_iter().collect::<Vec<_>>(),
+            first.filesystem_paths.into_iter().collect::<Vec<_>>(),
             vec!["/tmp/a", "/tmp/b"]
         );
         assert_eq!(

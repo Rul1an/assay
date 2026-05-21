@@ -138,9 +138,10 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
         "crates/assay-runner-spike/",
         "crates/assay-monitor/",
         "crates/assay-ebpf/",
+        "crates/assay-xtask/",
     )
     if any(starts(path, prefix) for prefix in all_prefixes):
-        return Gate.ALL, f"{path}: shared runner/eBPF/monitor code requires gates=all"
+        return Gate.ALL, f"{path}: shared runner/eBPF/monitor/xtask code requires gates=all"
 
     if path in {
         ".github/workflows/runner-spike-delegated.yml",
@@ -460,6 +461,7 @@ def self_test() -> None:
         (["tests/fixtures/runner-spike/mcp-policy-agent.sh"], Gate.KERNEL_POLICY),
         (["tests/fixtures/runner-spike/openai-agents-js/package-lock.json"], Gate.OPENAI_AGENTS_KERNEL_POLICY),
         (["crates/assay-monitor/src/lib.rs"], Gate.ALL),
+        (["crates/assay-xtask/src/main.rs"], Gate.ALL),
         (["scripts/ci/runner-spike-sdk-policy-correlation.sh"], Gate.ALL),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh", "crates/assay-ebpf/src/main.rs"], Gate.ALL),
     ]

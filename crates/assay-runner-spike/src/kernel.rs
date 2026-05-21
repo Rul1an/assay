@@ -126,7 +126,7 @@ impl KernelLayerBuilder {
 
         match (decoded.kind.as_str(), decoded.value.as_deref()) {
             ("openat", Some(path)) | ("file_blocked", Some(path)) => {
-                self.capability_surface.add_filesystem_prefix(path);
+                self.capability_surface.add_filesystem_path(path);
             }
             ("connect", Some(endpoint)) | ("connect_blocked", Some(endpoint)) => {
                 self.capability_surface.add_network_endpoint(endpoint);
@@ -542,7 +542,7 @@ mod tests {
             .contains("\"kind\":\"openat\""));
         assert!(capture
             .capability_surface
-            .filesystem_prefixes
+            .filesystem_paths
             .contains("/tmp/assay-known-file"));
         assert_eq!(capture.ringbuf_drops, 0);
     }
@@ -583,7 +583,7 @@ mod tests {
 
         assert_eq!(capture.event_count, 0);
         assert!(capture.kernel_layer_ndjson.is_empty());
-        assert!(capture.capability_surface.filesystem_prefixes.is_empty());
+        assert!(capture.capability_surface.filesystem_paths.is_empty());
     }
 
     #[test]
@@ -604,7 +604,7 @@ mod tests {
         assert_eq!(capture.event_count, 1);
         assert!(capture
             .capability_surface
-            .filesystem_prefixes
+            .filesystem_paths
             .contains("/lib/aarch64-linux-gnu/libc.so.6"));
     }
 
@@ -648,7 +648,7 @@ mod tests {
 
         assert!(capture
             .capability_surface
-            .filesystem_prefixes
+            .filesystem_paths
             .contains("/etc/passwd"));
     }
 
@@ -815,7 +815,7 @@ mod tests {
 
         assert_eq!(capture.event_count, 0);
         assert!(capture.kernel_layer_ndjson.is_empty());
-        assert!(capture.capability_surface.filesystem_prefixes.is_empty());
+        assert!(capture.capability_surface.filesystem_paths.is_empty());
         assert!(capture.capability_surface.network_endpoints.is_empty());
         assert!(capture.capability_surface.process_execs.is_empty());
     }
