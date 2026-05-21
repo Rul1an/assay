@@ -192,11 +192,12 @@ The Rust SDK event parser permits non-tool lifecycle events such as
 acceptance then requires the SDK tool-call id to equal the policy
 `tool_call_id` and the correlation binding id.
 
-For Phase 2A v0, `tool_call_id` is required for clean SDK-to-policy correlation
-of tool-call events. Call-id-less agent support is deliberately undecided and
-tracked in <https://github.com/Rul1an/assay/issues/1275>. Do not merge a
-correlation contract slice that silently chooses an order-based fallback
-without resolving that issue.
+For Phase 2A v0 and the first Phase 2B capability-diff contract,
+`tool_call_id` is required for clean SDK-to-policy correlation of tool-call
+events. Call-id-less agent support is out of scope for this contract. A future
+order-based fallback requires a separate fixture, explicit ambiguity semantics,
+and a new contract decision; it must not be added as a small extension to the
+accepted S5 fixture.
 
 The OpenAI Agents fixture must keep tool concurrency bounded to one. A future
 fixture that exercises parallel tool calls is a new contract test, not a small
@@ -289,7 +290,7 @@ Before merging a fixture change, reviewers should be able to answer:
 - What new evidence value does this fixture intentionally add?
 - Which normalized artifact should change?
 - Which paths are control plumbing and should not become evidence?
-- Is `tool_call_id` stable, or is this blocked on issue #1275?
+- Is `tool_call_id` stable? If not, this is outside the v0 fixture contract.
 - Does the fixture run without network credentials or live LLM calls?
 - Does the narrow delegated gate pass?
 - If the change touches shared capture, cgroup, monitor, normalizer, or
@@ -305,7 +306,7 @@ The v0 fixture contract does not define:
 - macOS or Windows attribution fixtures
 - live LLM/cassette behavior
 - parallel tool-call correlation
-- call-id-less fallback semantics
+- call-id-less fallback semantics and order-based binding identity
 - production-load or long-running process behavior
 - external plugin or third-party SDK fixture authoring
 

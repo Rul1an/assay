@@ -76,8 +76,9 @@ Dependabot-specific maintainer path for delegated-proof recording.
   broader runner surface that requires `gates=all`;
 - keep live model calls and live credentials out of the fixture.
 
-If the bump changes tool-call identity behavior, stop and use issue #1275 as
-the decision gate before merging a correlation-contract change.
+If the bump changes tool-call identity behavior, stop. The v0 contract requires
+stable `tool_call_id`; supporting call-id-less behavior requires a separate
+fallback contract, fixture, and ambiguity model.
 
 ## BPF or Runtime Dependency Bumps
 
