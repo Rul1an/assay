@@ -3,7 +3,7 @@
 > **Status:** internal product-candidate memo, Phase-1-spike gated, not a
 > public roadmap commitment
 > **Date:** 2026-05-18
-> **Last updated:** 2026-05-20
+> **Last updated:** 2026-05-21
 > **Scope:** records a possible measured-run product track beside
 > Assay-Harness; no external publication, repo split, or build commitment is
 > implied.
@@ -198,6 +198,16 @@ Examples:
 
 In that case, this memo becomes the documented dead branch. No further product
 build follows.
+
+### Phase 1 Result
+
+Phase 1 passed on delegated Linux/eBPF hardware on 2026-05-21. The acceptance
+record is
+[`ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md`](./ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md).
+
+This result moves the internal track from proof spike to Phase 2A
+consolidation. It still does not imply a public product launch, repository
+split, hosted service, macOS support, or live LLM support.
 
 ## Phase 2: Capability Diff
 

@@ -30,6 +30,9 @@ Operational status:
 - [Assay-Runner Phase 1 Spike Plan](ASSAY-RUNNER-PHASE1-SPIKE-PLAN-2026-05-20.md)
   expands that candidate into a bounded internal spike contract with
   workstreams, health semantics, scenario gates, and kill criteria.
+- [Assay-Runner Phase 1 Acceptance](ASSAY-RUNNER-PHASE1-ACCEPTANCE-2026-05-21.md)
+  records the delegated Linux/eBPF `gates=all` acceptance run, bounded
+  claims, kill-criterion outcomes, and regression anchors for Phase 2.
 - [Code-scanning dismissal ledger](SCANNER-DISMISSALS.md) tracks deliberately
   dismissed Security-tab alerts so the dismiss-state stays traceable rather
   than implicit.
