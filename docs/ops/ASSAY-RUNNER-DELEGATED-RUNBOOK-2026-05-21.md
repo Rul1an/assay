@@ -102,6 +102,10 @@ Recommended progression during diagnosis:
 Use `all` once the narrower failing gate has been fixed. This avoids mixing
 multiple failure signals in the same diagnostic run.
 
+For merge-time gate selection, use the
+[`Runner CI lane contract`](../reference/runner/ci-lanes.md). It classifies
+which runner surfaces require delegated proof and which minimum gate applies.
+
 For acceptance or regression evidence, use `build_ebpf=true`. The prepare and
 workspace cleanup steps remove `target/`, so a previously built
 `target/assay-ebpf.o` will not survive the documented workflow path.
