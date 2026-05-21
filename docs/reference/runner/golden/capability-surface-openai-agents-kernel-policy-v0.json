@@ -1,0 +1,16 @@
+{
+  "schema": "assay.runner.capability_surface.v0",
+  "run_id": "run_openai_agents_kernel_policy_determinism",
+  "filesystem_prefixes": [
+    "/tmp/assay-runner-openai-agents-kernel-policy/work/openai-agents-input.txt",
+    "/tmp/assay-runner-openai-agents-kernel-policy/work/policy-input.txt"
+  ],
+  "network_endpoints": [],
+  "process_execs": [],
+  "mcp_tools": [
+    "read_file"
+  ],
+  "policy_decisions": [
+    "allow:read_file"
+  ]
+}
