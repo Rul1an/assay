@@ -363,13 +363,13 @@ OpenAI Python SDK direct evaluations above.
 **Stable identity detail (row 2):**
 
 The candidate identity field is the `id` field on `ChatCompletionMessageFunctionToolCall`
-in the [openai-node TypeScript SDK](https://github.com/openai/openai-node/blob/master/src/resources/chat/completions/completions.ts).
+in the [openai-node TypeScript SDK](https://github.com/openai/openai-node/blob/200211197931763ed43b7ff41839b53e4dbfdf6e/src/resources/chat/completions/completions.ts).
 The interface is declared with the interface-level JSDoc *"A call to a function tool created by the model."*
 
 - Field name: `ChatCompletionMessageFunctionToolCall.id`
 - Source: `tool_calls` array on the assistant message of a Chat Completions API response, accessed via the TypeScript SDK type
 - **runtime-generated evidence:** `insufficient evidence`. The TypeScript JSDoc for the field reads literally *"The ID of the tool call."* — identical wording to the Python SDK docstring. The enclosing interface comment *"A call to a function tool created by the model."* is suggestive of model-side creation, but it documents the object as a whole rather than the `id` field specifically. The example value's `call_` prefix matches OpenAI's other server-issued identifier conventions, and the SDK has no documented client-side generation path. However, no public docs sentence or typed SDK annotation explicitly states that the OpenAI API server generates the `id` field. Per the level-3 strict reading codified in the [Stable Identity Checklist](#stable-identity--level-3-checklist), implicit chain-of-reasoning evidence does not satisfy `runtime-generated`.
-- **binding-intended evidence:** `qualifies`. The TypeScript JSDoc for [`ChatCompletionToolMessageParam.tool_call_id`](https://github.com/openai/openai-node/blob/master/src/resources/chat/completions/completions.ts) reads literally *"Tool call that this message is responding to."* — identical wording to the Python SDK. The official Function Calling guide demonstrates the binding mechanism in code using the SDK type.
+- **binding-intended evidence:** `qualifies`. The TypeScript JSDoc for [`ChatCompletionToolMessageParam.tool_call_id`](https://github.com/openai/openai-node/blob/200211197931763ed43b7ff41839b53e4dbfdf6e/src/resources/chat/completions/completions.ts) reads literally *"Tool call that this message is responding to."* — identical wording to the Python SDK. The official Function Calling guide demonstrates the binding mechanism in code using the SDK type.
 - **run-window unique evidence:** `insufficient evidence`. The TypeScript JSDoc for the `id` field reads only *"The ID of the tool call."* — no "unique" claim, identical to the Python SDK gap. The official Function Calling guide does not provide an explicit uniqueness guarantee for parallel tool calls within a single response. Per the level-3 strict reading, an implicit uniqueness expectation does not satisfy `run-window unique`.
 
 **Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
