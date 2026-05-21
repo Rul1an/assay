@@ -1,7 +1,11 @@
 use crate::events::{self, EventStream};
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
-    KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL,
+    MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+    MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
     MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
     SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
     SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
@@ -103,6 +107,18 @@ impl LinuxMonitor {
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         let val = if enabled { 1 } else { 0 };
         let config = std::collections::HashMap::from([(KEY_MONITOR_ALL, val)]);
+        self.set_config(&config)
+    }
+
+    pub fn set_emit_inode_resolved(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        let val = if enabled { 1 } else { 0 };
+        let config = std::collections::HashMap::from([(KEY_EMIT_INODE_RESOLVED, val)]);
+        self.set_config(&config)
+    }
+
+    pub fn set_dedup_open_paths(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        let val = if enabled { 1 } else { 0 };
+        let config = std::collections::HashMap::from([(KEY_DEDUP_OPEN_PATHS, val)]);
         self.set_config(&config)
     }
 
@@ -318,6 +334,24 @@ impl LinuxMonitor {
             .unwrap_or(0);
         stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
         stats.lsm_ringbuf_dropped = array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
+        stats.openat_events_emitted = array
+            .get(&MONITOR_STAT_OPENAT_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.openat_ringbuf_dropped = array
+            .get(&MONITOR_STAT_OPENAT_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.openat2_events_emitted = array
+            .get(&MONITOR_STAT_OPENAT2_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.openat2_ringbuf_dropped = array
+            .get(&MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.connect_events_emitted = array
+            .get(&MONITOR_STAT_CONNECT_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.connect_ringbuf_dropped = array
+            .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
             name: "SOCKET_STATS",

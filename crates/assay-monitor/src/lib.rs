@@ -20,6 +20,12 @@ pub struct MonitorStatsSnapshot {
     pub tracepoint_ringbuf_dropped: u32,
     pub lsm_events_emitted: u32,
     pub lsm_ringbuf_dropped: u32,
+    pub openat_events_emitted: u32,
+    pub openat_ringbuf_dropped: u32,
+    pub openat2_events_emitted: u32,
+    pub openat2_ringbuf_dropped: u32,
+    pub connect_events_emitted: u32,
+    pub connect_ringbuf_dropped: u32,
     pub socket_checks: u64,
     pub socket_blocked_cidr: u64,
     pub socket_blocked_port: u64,
@@ -141,6 +147,28 @@ impl Monitor {
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         return self.inner.set_monitor_all(enabled);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = enabled;
+            Ok(())
+        }
+    }
+
+    pub fn set_emit_inode_resolved(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.set_emit_inode_resolved(enabled);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = enabled;
+            Ok(())
+        }
+    }
+
+    pub fn set_dedup_open_paths(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        return self.inner.set_dedup_open_paths(enabled);
 
         #[cfg(not(target_os = "linux"))]
         {
