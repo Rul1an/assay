@@ -12,3 +12,4 @@ reviewable while the runner boundary is consolidated.
 - [Runner CI lane contract](ci-lanes.md)
 - [Runner Dependabot lane flow](dependabot-lane-flow.md)
 - [Assay-Runner boundary and extraction map](boundary-map.md)
+- [Phase 1 delegated proof pack](proof-packs/phase1-delegated-2026-05-21.md)

@@ -126,9 +126,16 @@ OpenTelemetry mappings, macOS support, live LLM calls, and repository
 extraction are outside Phase 2A. They should only start after the Linux runner
 boundary is documented and stable.
 
-## Proof Pack Gap
+## Proof Pack
 
 This acceptance note records the workflow run, commit, and pass/fail evidence.
-It does not yet retain a durable standalone proof pack containing bundle
-digests and selected JSON artifacts. Phase 2 should add a small delegated proof
-pack artifact so future acceptance reviews do not depend only on workflow logs.
+Phase 2B hygiene adds a small durable proof manifest:
+[`Phase 1 delegated proof pack`](../reference/runner/proof-packs/phase1-delegated-2026-05-21.md).
+
+The proof pack preserves workflow metadata, the full workflow log, PASS-line
+evidence, and v0 golden-shape JSON digests. It does not contain the original
+`runner-*.tar.gz` archives because the historical workflow run did not upload
+GitHub artifacts and the delegated host wrote the archives to temporary paths
+cleaned after the job. Future delegated acceptance workflows should upload a
+first-class proof pack artifact during the run; that workflow follow-up is
+tracked in <https://github.com/Rul1an/assay/issues/1287>.
