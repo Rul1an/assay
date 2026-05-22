@@ -339,7 +339,7 @@ running anything.
 
 ## Further Reading
 
-- [Phase 1 + 2 retrospective](../../notes/ASSAY-RUNNER-PHASE-1-AND-2-RETROSPECTIVE-2026-05-22.md) — the long-form story
+- [Phase 1 + 2 retrospective](../../../notes/ASSAY-RUNNER-PHASE-1-AND-2-RETROSPECTIVE-2026-05-22.md) — the long-form story
 - [Assay-Runner reference index](../index.md) — all internal contracts
 - [Runner artifact v0 contracts](../artifacts-v0.md) — full schema specs
 - [Runner cross-runtime diff v0 contract](../cross-runtime-diff-v0.md)
