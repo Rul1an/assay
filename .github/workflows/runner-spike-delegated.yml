@@ -149,6 +149,10 @@ jobs:
           # delegated host. Offline scope per #1307: install may use network
           # here during workflow setup; fixture execution itself is
           # cassette-replay only.
+          if ! python3 -m pip --version >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y python3-pip
+          fi
           rm -rf .python-deps
           python3 -m pip install --require-hashes --target .python-deps -r requirements.txt
 
