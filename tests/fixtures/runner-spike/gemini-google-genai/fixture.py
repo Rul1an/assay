@@ -26,6 +26,7 @@ The caller (shell wrapper) is responsible for:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -93,8 +94,22 @@ def vcr_config() -> vcr.VCR:
     return vcr.VCR(
         filter_headers=HEADER_FILTERS,
         filter_query_parameters=QUERY_FILTERS,
+        decode_compressed_response=True,
         record_mode="none",
     )
+
+
+def read_api_key_from_env() -> str:
+    """Read the Gemini API key for maintainer-only cassette recording."""
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        value = os.environ.get(var)
+        if value:
+            return value
+    sys.stderr.write(
+        "fixture: GEMINI_API_KEY (or GOOGLE_API_KEY) must be set for "
+        "maintainer record mode. Delegated replay mode must not set either.\n"
+    )
+    sys.exit(64)
 
 
 def build_function_tool() -> Any:
@@ -170,6 +185,42 @@ def extract_function_call(response: Any) -> tuple[str, str]:
     return fc_id, fc_name
 
 
+def record_fixture_cassette(work_dir: Path) -> int:
+    """Maintainer-only canonical fixture cassette recording.
+
+    This records exactly the request shape replayed by the delegated fixture:
+    same model pin, same non-streaming generate_content() call, same
+    work-dir-relative prompt. It does not emit SDK events or run the policy
+    layer; those are delegated replay concerns.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    fixture_path = work_dir / "gemini-input.txt"
+    if not fixture_path.exists():
+        fixture_path.write_text("gemini google-genai fixture input\n", encoding="utf-8")
+
+    CASSETTE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CASSETTE_PATH.unlink(missing_ok=True)
+
+    cfg = vcr_config()
+    cfg.record_mode = "all"
+    with cfg.use_cassette(str(CASSETTE_PATH)):
+        client = genai.Client(api_key=read_api_key_from_env())
+        response = call_model(client, str(fixture_path))
+
+    tool_call_id, tool_name = extract_function_call(response)
+    result = {
+        "schema": "assay.runner.gemini_fixture_record.v0",
+        "cassette": str(CASSETTE_PATH),
+        "model_pin": MODEL_PIN,
+        "function_call": {
+            "id": tool_call_id,
+            "name": tool_name,
+        },
+    }
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def emit_event(log_path: Path, run_id: str, schema: str, seq: int, payload: dict[str, Any]) -> None:
     """Append a normalized SDK event matching assay.runner.sdk_event.v0."""
     sdk_name, sdk_version = load_sdk_metadata()
@@ -187,11 +238,20 @@ def emit_event(log_path: Path, run_id: str, schema: str, seq: int, payload: dict
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        sys.stderr.write("usage: fixture.py <work-dir>\n")
-        return 64
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="maintainer-only: record the canonical fixture cassette",
+    )
+    parser.add_argument("work_dir", help="fixture work directory")
+    args = parser.parse_args()
 
-    work_dir = Path(sys.argv[1])
+    work_dir = Path(args.work_dir)
+
+    if args.record:
+        return record_fixture_cassette(work_dir)
+
     work_dir.mkdir(parents=True, exist_ok=True)
 
     fixture_path = work_dir / "gemini-input.txt"

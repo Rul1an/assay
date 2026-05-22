@@ -71,6 +71,25 @@ The probe writes its outcome to `probe-results/identity-probe-<UTC-date>.json`.
 That outcome file is the artifact the maintainer commits alongside the
 cassette to anchor the probe result in repo history.
 
+## Recording the canonical fixture cassette
+
+After the identity probe passes, record the canonical delegated-replay
+cassette with the same fixture code the acceptance script will use:
+
+```sh
+GEMINI_API_KEY=<live-key> python3 fixture.py --record /tmp/assay-runner-gemini-fixture-record
+unset GEMINI_API_KEY
+```
+
+This writes `cassettes/fixture.yaml`. It is separate from
+`cassettes/identity-probe.yaml`: the probe cassette proves the level-3
+identity assumption, while the fixture cassette is the source of truth for
+delegated acceptance replay.
+
+Before committing `cassettes/fixture.yaml`, run the same redaction checks as
+for the probe cassette and verify that the cassette contains exactly one
+human-reviewable `functionCall.id`.
+
 ## Required curation steps before commit
 
 After a successful probe run:
