@@ -484,6 +484,14 @@ def self_test() -> None:
         (["tests/fixtures/runner-spike/gemini-google-genai/fixture.py"], Gate.ALL),
         (["tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh"], Gate.ALL),
         (["scripts/ci/runner-spike-gemini-google-genai-acceptance.sh"], Gate.ALL),
+        # Read-only contract validators under scripts/ci/ do not exercise
+        # the kernel, eBPF, or runner runtime path. They project over
+        # normalized evidence files only. The cross-runtime-diff v0
+        # validator was added by the Phase 2C implementation slice
+        # (cross-runtime-diff-v0.md) and must not silently elevate to a
+        # delegated gate via a future classifier refactor.
+        (["scripts/ci/assay_runner_cross_runtime_diff_validate.py"], Gate.NONE),
+        (["scripts/ci/assay_runner_capability_diff_validate.py"], Gate.NONE),
     ]
     for files, expected in cases:
         got = classify_files(files).gate
