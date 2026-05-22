@@ -67,6 +67,32 @@ REQUIRED_NOTES: tuple[str, ...] = (
     "cross_runtime_diff_work_dir_prefix_canonicalized: filesystem_paths normalized via the A1 work-dir prefix rule",
 )
 
+ALLOWED_STATUSES: frozenset[str] = frozenset({
+    "clean",
+    "partial:health",
+    "partial:correlation",
+    "partial:unbound",
+    "failed",
+})
+
+PRECONDITION_KEYS: tuple[str, ...] = (
+    "base_health_clean",
+    "head_health_clean",
+    "base_correlation_clean",
+    "head_correlation_clean",
+    "stable_tool_call_ids_required",
+    "stable_tool_call_ids_present",
+    "runtimes_distinct",
+)
+
+EXPECTED_SCOPE_V0: dict[str, Any] = {
+    "projection": "surface_set",
+    "uses_raw_telemetry": False,
+    "uses_proof_pack": False,
+    "per_binding_capability_values": False,
+    "cross_runtime": True,
+}
+
 HEALTH_NAME = "observation-health.json"
 SURFACE_NAME = "capability-surface.json"
 CORRELATION_NAME = "correlation-report.json"
@@ -457,9 +483,40 @@ def validate_diff_structure(diff: dict[str, Any]) -> None:
     if diff["base_runtime"] == diff["head_runtime"]:
         raise ValidationError("base_runtime must differ from head_runtime")
 
+    if diff.get("status") not in ALLOWED_STATUSES:
+        raise ValidationError(
+            f"status must be one of {sorted(ALLOWED_STATUSES)}, got {diff.get('status')!r}"
+        )
+
+    preconditions = diff["preconditions"]
+    if not isinstance(preconditions, dict):
+        raise ValidationError("preconditions must be an object")
+    actual_precondition_keys = set(preconditions)
+    expected_precondition_keys = set(PRECONDITION_KEYS)
+    missing_pre = expected_precondition_keys - actual_precondition_keys
+    extra_pre = actual_precondition_keys - expected_precondition_keys
+    if missing_pre:
+        raise ValidationError(
+            f"preconditions missing required keys: {sorted(missing_pre)}"
+        )
+    if extra_pre:
+        raise ValidationError(
+            f"preconditions has unknown keys: {sorted(extra_pre)}"
+        )
+    for key in PRECONDITION_KEYS:
+        value = preconditions[key]
+        if not isinstance(value, bool):
+            raise ValidationError(
+                f"preconditions.{key} must be boolean, got {type(value).__name__}"
+            )
+
     scope = diff["scope"]
-    if scope.get("cross_runtime") is not True:
-        raise ValidationError("scope.cross_runtime must be true")
+    if not isinstance(scope, dict):
+        raise ValidationError("scope must be an object")
+    if scope != EXPECTED_SCOPE_V0:
+        raise ValidationError(
+            f"scope must equal v0 expected scope. expected: {EXPECTED_SCOPE_V0}, got: {scope}"
+        )
 
     canonicalization = diff["canonicalization"]
     for category in SURFACE_CATEGORIES:
@@ -562,6 +619,27 @@ def validate_diff_structure(diff: dict[str, Any]) -> None:
                 raise ValidationError(
                     f"sdk_metadata leaked into surface.{category}.{key}: {sorted(leaked)}"
                 )
+
+
+def validate_clean_diff(diff: dict[str, Any]) -> None:
+    """Assert clean-only invariants on top of structural validation.
+
+    Use this when the diff is expected to be `status=clean`: the committed
+    v0 golden, the self-test projection result, and any explicit projection
+    over evidence that is known to be clean on both sides. For projections
+    where partial/failed outcomes are legitimate, call only
+    `validate_diff_structure`.
+    """
+    validate_diff_structure(diff)
+    if diff["status"] != "clean":
+        raise ValidationError(
+            f"clean diff required, got status={diff['status']!r}"
+        )
+    for key in PRECONDITION_KEYS:
+        if diff["preconditions"][key] is not True:
+            raise ValidationError(
+                f"clean diff requires preconditions.{key}=true, got {diff['preconditions'][key]!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -700,10 +778,10 @@ def _expect_raises(label: str, fn) -> None:
 
 def self_test() -> None:
     expected = load_json(EXPECTED_GOLDEN)
-    validate_diff_structure(expected)
+    validate_clean_diff(expected)
 
     actual = project_s5_gemini_self_test()
-    validate_diff_structure(actual)
+    validate_clean_diff(actual)
 
     if actual != expected:
         actual_text = json.dumps(actual, indent=2)
@@ -734,16 +812,13 @@ def self_test() -> None:
     if canonicalize_path("/workbench/foo.txt", "/work/") != "/workbench/foo.txt":
         raise ValidationError("canonicalize_path leaked across path boundary (/work/ vs /workbench/)")
 
-    # B3 forbidden keys: binding_ids must contain only 'comparison'
-    for forbidden in ("added", "removed", "changed", "unchanged"):
-        if forbidden in actual["binding_ids"]:
-            raise ValidationError(
-                f"B3 violation: binding_ids contains forbidden key {forbidden!r}"
-            )
-    if forbidden in actual["policy_outcomes"]:
-        raise ValidationError(
-            f"policy_outcomes contains forbidden cross-runtime key {forbidden!r}"
-        )
+    # B3 forbidden keys: binding_ids and policy_outcomes must contain only 'comparison'
+    for container in ("binding_ids", "policy_outcomes"):
+        for forbidden in ("added", "removed", "changed", "unchanged"):
+            if forbidden in actual[container]:
+                raise ValidationError(
+                    f"B3 violation: {container} contains forbidden key {forbidden!r}"
+                )
 
     # C1 no leak: SDK metadata values cannot appear in surface.*
     sdk_strings = {
@@ -830,6 +905,74 @@ def self_test() -> None:
         lambda: parse_sdk_metadata(
             (json.dumps({"schema": "other.schema", "sdk_name": "a"}),),
             source="<inline-empty>",
+        ),
+    )
+
+    # Drift regression tests: validate_clean_diff must catch load-bearing field drift.
+    # Mutate a deep copy of the committed golden and assert each drift is caught.
+    def _mutated(mutate) -> dict[str, Any]:
+        clone = json.loads(json.dumps(expected))
+        mutate(clone)
+        return clone
+
+    _expect_raises(
+        "status drift to failed",
+        lambda: validate_clean_diff(_mutated(lambda d: d.__setitem__("status", "failed"))),
+    )
+    _expect_raises(
+        "status drift to partial:health",
+        lambda: validate_clean_diff(_mutated(lambda d: d.__setitem__("status", "partial:health"))),
+    )
+    _expect_raises(
+        "status drift to invented value",
+        lambda: validate_clean_diff(_mutated(lambda d: d.__setitem__("status", "eventually_clean"))),
+    )
+    _expect_raises(
+        "preconditions.runtimes_distinct=false drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["preconditions"].__setitem__("runtimes_distinct", False))
+        ),
+    )
+    _expect_raises(
+        "preconditions extra key drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["preconditions"].__setitem__("invented_key", True))
+        ),
+    )
+    _expect_raises(
+        "preconditions missing key drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["preconditions"].pop("runtimes_distinct"))
+        ),
+    )
+    _expect_raises(
+        "scope.uses_raw_telemetry=true drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["scope"].__setitem__("uses_raw_telemetry", True))
+        ),
+    )
+    _expect_raises(
+        "scope.cross_runtime=false drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["scope"].__setitem__("cross_runtime", False))
+        ),
+    )
+    _expect_raises(
+        "policy_outcomes.added forbidden key drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["policy_outcomes"].__setitem__("added", []))
+        ),
+    )
+    _expect_raises(
+        "policy_outcomes.changed forbidden key drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["policy_outcomes"].__setitem__("changed", []))
+        ),
+    )
+    _expect_raises(
+        "binding_ids.added forbidden key drift",
+        lambda: validate_clean_diff(
+            _mutated(lambda d: d["binding_ids"].__setitem__("added", []))
         ),
     )
 
@@ -1028,7 +1171,7 @@ def main(argv: list[str]) -> int:
             raise ValidationError(
                 "--output requires --self-test or explicit base/head inputs"
             )
-        validate_diff_structure(load_json(EXPECTED_GOLDEN))
+        validate_clean_diff(load_json(EXPECTED_GOLDEN))
     except ValidationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
