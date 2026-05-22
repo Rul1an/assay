@@ -1,12 +1,10 @@
-use crate::{
-    run::is_safe_run_id, CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus,
-    RunnerSpikeArchive,
-};
+use crate::{run::is_safe_run_id, RunnerSpikeArchive};
 use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
     EVENT_INODE_RESOLVED, EVENT_OPENAT,
 };
 use assay_monitor::MonitorStatsSnapshot;
+use assay_runner_schema::{CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};

@@ -1,4 +1,5 @@
-use crate::{CgroupCorrelationStatus, KernelLayerStatus, RunnerSpikeArchive};
+use crate::RunnerSpikeArchive;
+use assay_runner_schema::{CgroupCorrelationStatus, KernelLayerStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -239,7 +240,7 @@ fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SdkLayerStatus;
+    use assay_runner_schema::SdkLayerStatus;
 
     #[test]
     fn generated_run_id_is_stream_safe() {

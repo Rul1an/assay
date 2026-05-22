@@ -84,13 +84,14 @@ The current spike surfaces remain in `Rul1an/assay`:
 | `crates/assay-runner-schema/src/correlation.rs` | correlation-report data structures and validation | shared contract; hosted by the schema crate since Slice 1 |
 | `crates/assay-runner-schema/src/sdk_event.rs` | SDK event schema string and `SdkLayerEvent` shape | shared contract; hosted by the schema crate since Slice 1 |
 | `crates/assay-runner-schema/src/archive_manifest.rs` | archive manifest schema string, archive file path constants, `ArchiveFile`, `ArchiveManifest` | shared contract (manifest semantics half of the archive boundary conflict); hosted by the schema crate since Slice 1 |
-| `crates/assay-runner-spike/` | publish-disabled measured-run spike crate | candidate runner orchestration, not extractable yet |
-| `crates/assay-runner-spike/src/run.rs` | measured command execution, run id, archive handoff | runner candidate orchestration |
-| `crates/assay-runner-spike/src/kernel.rs` | kernel capture normalization and health application | runner candidate mechanics using Assay monitor semantics |
-| `crates/assay-runner-spike/src/policy.rs` | policy log normalization and binding into the archive | runner candidate mechanics using Assay policy semantics |
-| `crates/assay-runner-spike/src/sdk.rs` | SDK ndjson parsing and SDK/policy mismatch marking (event types now live in `assay-runner-schema`) | runner candidate mechanics consuming shared SDK event semantics from the schema crate |
-| `crates/assay-runner-spike/src/archive.rs` | runner archive assembly (manifest semantics now live in `assay-runner-schema`) | runner candidate mechanics; the assembly half of the archive boundary conflict — Slice 2 of [`extraction-roadmap.md`](extraction-roadmap.md#slice-2--cratesassay-runner-core) moves this into `assay-runner-core` |
-| `crates/assay-runner-spike/src/lib.rs` | re-export surface for the spike crate, including `pub use assay_runner_schema::*` for the moved types | temporary in-repo facade, not a stable external API |
+| `crates/assay-runner-core/` | publish-disabled runner mechanics crate (Phase 2D Slice 2) | runner candidate orchestration, archive assembly, and layer normalizers; consumes `assay-runner-schema` for v0 types; the mechanics half of the runner v0 contract layer |
+| `crates/assay-runner-core/src/run.rs` | measured command execution, run id, archive handoff | runner candidate orchestration; hosted by the core crate since Slice 2 |
+| `crates/assay-runner-core/src/kernel.rs` | kernel capture normalization and health application | runner candidate mechanics using Assay monitor semantics; hosted by the core crate since Slice 2 |
+| `crates/assay-runner-core/src/policy.rs` | policy log normalization and binding into the archive | runner candidate mechanics using Assay policy semantics; hosted by the core crate since Slice 2 |
+| `crates/assay-runner-core/src/sdk.rs` | SDK ndjson parsing and SDK/policy mismatch marking | runner candidate mechanics; consumes `SdkLayerEvent`/`SDK_EVENT_SCHEMA` from the schema crate; hosted by the core crate since Slice 2 |
+| `crates/assay-runner-core/src/archive.rs` | runner archive assembly and writing | runner candidate mechanics; consumes manifest types from the schema crate; hosted by the core crate since Slice 2 |
+| `crates/assay-runner-spike/` | publish-disabled compatibility wrapper crate | thin re-export wrapper around `assay-runner-schema` and `assay-runner-core` so existing `assay_runner_spike::Type` call sites continue to compile during the staged extraction |
+| `crates/assay-runner-spike/src/lib.rs` | `pub use` re-exports of every name previously hosted by this crate | only file in the crate; assay-cli and fixture wrappers import through this re-export surface until a later slice redirects them to depend on `assay-runner-core` and `assay-runner-schema` directly |
 | `crates/assay-monitor/` | monitor reader, stats, event decoding | Assay core monitor substrate |
 | `crates/assay-ebpf/` | eBPF programs | Assay core monitor substrate |
 | `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface |
@@ -110,7 +111,7 @@ explaining the ownership later.
 
 | Conflict | Why it is hard | Current rule |
 |---|---|---|
-| `archive.rs` | the runner assembles archives, but manifest shape, digest meaning, and verification are artifact semantics | Partially resolved by Phase 2D Slice 1: manifest schema constants, `ArchiveFile`, and `ArchiveManifest` moved to `assay-runner-schema`. Assembly (`RunnerSpikeArchive`, `RunnerSpikeArchiveError`, `write`) still lives in `assay-runner-spike` and moves into `assay-runner-core` at [Slice 2](extraction-roadmap.md#slice-2--cratesassay-runner-core) |
+| `archive.rs` | the runner assembles archives, but manifest shape, digest meaning, and verification are artifact semantics | Fully resolved by Phase 2D Slices 1 + 2: manifest schema constants, `ArchiveFile`, and `ArchiveManifest` moved to `assay-runner-schema` in Slice 1; assembly (`RunnerSpikeArchive`, `RunnerSpikeArchiveError`, `write`) moved to `assay-runner-core` in Slice 2. Archive verification continues to use the existing Assay evidence path; the runner side no longer mixes assembly mechanics with manifest semantics ownership |
 | `health.rs` and `observation-health.json` | the runner measures drops and cgroup health, but `kernel_layer=complete` and related status meanings are Assay claims | Assay owns the status definitions; runner computes whether a measured run satisfies them |
 | telemetry-versus-evidence filters | the runner implements event-type and path filters, but deciding what counts as evidence is artifact semantics | Assay owns the evidence taxonomy and rationale; runner owns the implementation and diagnostics |
 | `tool_call_id` fallback semantics | fallback would change correlation mechanics and `correlation-report.json` ambiguity semantics at the same time | v0 clean correlation and the first Phase 2B capability-diff contract require stable tool-call ids; call-id-less support is out of scope until a separate fallback contract exists |

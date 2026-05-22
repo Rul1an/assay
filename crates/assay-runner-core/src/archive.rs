@@ -309,7 +309,7 @@ mod tests {
     fn write_rejects_invalid_observation_health() {
         let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
         archive.observation_health.ringbuf_drops = 1;
-        archive.observation_health.kernel_layer = crate::KernelLayerStatus::Complete;
+        archive.observation_health.kernel_layer = assay_runner_schema::KernelLayerStatus::Complete;
         let mut bytes = Vec::new();
 
         let err = archive.write(&mut bytes).unwrap_err();

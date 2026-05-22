@@ -43,12 +43,14 @@ Current structural blockers, in priority order:
    unchanged. See
    [`extraction-roadmap.md` § Slice 1](extraction-roadmap.md#slice-1--cratesassay-runner-schema)
    and the updated boundary-map ownership table.
-2. **Partially resolved by Phase 2D Slice 1.** Archive manifest
-   semantics (schema constants, `ArchiveFile`, `ArchiveManifest`)
-   moved to `assay-runner-schema`. Archive assembly mechanics
-   (`RunnerSpikeArchive`, `write`, normalizers) still live in
-   `assay-runner-spike` and move to `assay-runner-core` at
-   [Slice 2](extraction-roadmap.md#slice-2--cratesassay-runner-core).
+2. **Resolved by Phase 2D Slices 1 + 2.** Archive manifest semantics
+   (schema constants, `ArchiveFile`, `ArchiveManifest`) moved to
+   `assay-runner-schema` in Slice 1. Archive assembly mechanics
+   (`RunnerSpikeArchive`, `write`, normalizers, `RunSpec`
+   orchestration) moved to `assay-runner-core` in Slice 2. The
+   archive boundary conflict is now fully resolved on the runner
+   side; verification continues through the existing Assay evidence
+   path.
 3. Cgroup placement still depends on `crates/assay-cli/src/cgroup.rs`. A
    stable cgroup API is required before extraction.
 4. There is no non-spike external consumer of the runner bundle format. The

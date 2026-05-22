@@ -1,5 +1,5 @@
-use crate::{run::is_safe_run_id, RunnerSpikeArchive, SdkLayerStatus};
-use assay_runner_schema::{SdkLayerEvent, SDK_EVENT_SCHEMA};
+use crate::{run::is_safe_run_id, RunnerSpikeArchive};
+use assay_runner_schema::{SdkLayerEvent, SdkLayerStatus, SDK_EVENT_SCHEMA};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -292,7 +292,7 @@ fn mark_sdk_policy_mismatches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{KernelLayerStatus, PolicyLayerStatus};
+    use assay_runner_schema::{KernelLayerStatus, PolicyLayerStatus};
 
     const SDK_EVENTS: &[u8] = br#"{"schema":"assay.runner.sdk_event.v0","run_id":"run_001","seq":0,"event_type":"tool_call_started","source":"openai-agents","sdk_name":"@openai/agents","sdk_version":"0.0.0-fixture","tool_call_id":"tc_runner_policy_001","tool":"read_file"}
 {"schema":"assay.runner.sdk_event.v0","run_id":"run_001","seq":1,"event_type":"tool_call_completed","source":"openai-agents","sdk_name":"@openai/agents","sdk_version":"0.0.0-fixture","tool_call_id":"tc_runner_policy_001","tool":"read_file"}
@@ -341,11 +341,11 @@ mod tests {
         archive.policy_layer_ndjson = b"{\"schema\":\"assay.runner.policy_event.v0\"}\n".to_vec();
         archive
             .correlation_report
-            .add_binding(crate::CorrelationBinding {
+            .add_binding(assay_runner_schema::CorrelationBinding {
                 tool_call_id: "tc_runner_policy_001".to_string(),
                 policy_decision: Some("allow".to_string()),
                 kernel_event_count: 1,
-                window: crate::BindingWindow {
+                window: assay_runner_schema::BindingWindow {
                     start: "run_started".to_string(),
                     end: "run_finished".to_string(),
                 },
@@ -355,7 +355,7 @@ mod tests {
 
         assert_eq!(
             archive.correlation_report.status,
-            crate::CorrelationStatus::Clean
+            assay_runner_schema::CorrelationStatus::Clean
         );
         assert!(archive.correlation_report.ambiguities.is_empty());
     }
@@ -367,11 +367,11 @@ mod tests {
         archive.policy_layer_ndjson = b"{\"schema\":\"assay.runner.policy_event.v0\"}\n".to_vec();
         archive
             .correlation_report
-            .add_binding(crate::CorrelationBinding {
+            .add_binding(assay_runner_schema::CorrelationBinding {
                 tool_call_id: "tc_different_policy_call".to_string(),
                 policy_decision: Some("allow".to_string()),
                 kernel_event_count: 1,
-                window: crate::BindingWindow {
+                window: assay_runner_schema::BindingWindow {
                     start: "run_started".to_string(),
                     end: "run_finished".to_string(),
                 },
@@ -381,7 +381,7 @@ mod tests {
 
         assert_eq!(
             archive.correlation_report.status,
-            crate::CorrelationStatus::Partial
+            assay_runner_schema::CorrelationStatus::Partial
         );
         assert!(archive
             .correlation_report
