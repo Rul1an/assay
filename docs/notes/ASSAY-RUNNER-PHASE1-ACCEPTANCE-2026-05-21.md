@@ -202,15 +202,23 @@ The Gemini delegated run is a second-runtime fixture acceptance only. It does
 not extend the Phase 1 OpenAI Agents claim above and does not establish a
 third runtime as eligible.
 
-### Phase 2C — cross-runtime diff (parked behind decision gate)
+### Phase 2C — cross-runtime diff decision resolved
 
 - [Runner cross-runtime diff Phase 2C plan](../reference/runner/cross-runtime-diff-plan.md)
-- Decision gate: <https://github.com/Rul1an/assay/issues/1310>
+- [Runner cross-runtime diff Phase 2C decisions (A1+B3+C1)](../reference/runner/cross-runtime-diff-decisions.md)
+- Decision gate (resolved): <https://github.com/Rul1an/assay/issues/1310>
+  (closed by [#1312](https://github.com/Rul1an/assay/pull/1312))
 
-Phase 2C has no acceptance run, no contract slice, and no implementation work
-in progress. The contract slice is intentionally blocked behind the decision
-gate above until the three open interpretation questions (path projection,
-binding-id comparability, SDK metadata placement) are resolved.
+The three open interpretation questions (path projection, binding-id
+comparability, SDK metadata placement) were resolved as **A1 + B3 + C1**:
+prefix-only path canonicalization, binding ids out of scope for
+cross-runtime comparability, SDK metadata as side-band runtime
+provenance.
+
+Phase 2C has no acceptance run, no contract slice, and no implementation
+work landed yet. The contract slice PR is now *unblocked* under
+A1 + B3 + C1 per step 4 of `cross-runtime-diff-plan.md` § Suggested
+Slice Sequence, but it remains a separate, future change.
 
 ### Open backlog independent of this line
 
