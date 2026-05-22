@@ -148,31 +148,35 @@ spike internals.
 
 ## Design Decision C — Smoke test
 
-**Decision.** Slice 6B introduces one new self-test case in
-`scripts/ci/assay_runner_lane_check.py` and a CI-time
-build-flag-only check. No new workflow, no new gate, no new
-delegated proof requirement beyond what the existing lane-check
-already enforces.
+**Decision.** Slice 6B introduces **one new lane-check self-test
+scenario**; the existing CI `cargo build -p assay-cli` remains the
+compile proof. No new workflow, no new gate, no new delegated
+proof requirement beyond what the existing lane-check already
+enforces, and no new build-flag plumbing.
 
-Two concrete checks Slice 6B adds:
+The one new check Slice 6B adds:
 
-1. **Mechanical absence check.** A new self-test scenario in
-   `assay_runner_lane_check.py`'s `--self-test` that scans
-   `crates/assay-cli/` for residual `assay_runner_spike::`
-   references and `crates/assay-cli/Cargo.toml` for the
-   `assay-runner-spike` dependency. Either appearing fails the
-   self-test with a clear "Assay still consumes spike internals"
-   message.
+- **Mechanical absence check** in
+  `scripts/ci/assay_runner_lane_check.py`'s `--self-test`. The
+  scenario scans `crates/assay-cli/` for residual
+  `assay_runner_spike::` references and
+  `crates/assay-cli/Cargo.toml` for the `assay-runner-spike`
+  dependency. Either appearing fails the self-test with a clear
+  "Assay still consumes spike internals" message.
 
-2. **`cargo build -p assay-cli` with spike-removed sanity check.**
-   Run during the existing CI workflow, after the lane-check
-   classifier confirms the PR is Runner-impacting. The check
-   compiles `assay-cli` against the current workspace; success
-   proves external-style consumption holds. (If Slice 6B chooses
-   end state (2), the wrapper is deleted and `cargo build` for
-   `-p assay-cli` exercises this automatically. If Slice 6B
-   chooses end state (1), the smoke test compiles `assay-cli`
-   normally and the absence check above is the active guard.)
+The existing CI surface stays the compile proof:
+
+- The existing CI workflow already runs `cargo build -p assay-cli`
+  on every Runner-impacting PR (including this slice category)
+  because the lane-check classifier routes it that way. If
+  `assay-cli` no longer depends on the spike crate, that build
+  succeeding IS the proof of external-style consumption. No
+  additional flag, feature, or `cargo build` invocation is
+  introduced by Slice 6B.
+
+The combination — absence check enforces the discipline; existing
+build proves it compiles — covers both directions without adding
+new CI surface.
 
 **Why no new workflow.** The existing Runner CI lane already
 classifies any change to `crates/assay-runner-*` or
