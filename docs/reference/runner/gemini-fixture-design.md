@@ -170,8 +170,17 @@ Constraints inherited from the
 - the policy `tool_call_id` MUST equal the SDK `tool_call_id` (which
   equals `FunctionCall.id` from the cassette)
 - write policy decisions to `ASSAY_RUNNER_POLICY_DECISION_LOG`
-- one normalized policy event in the captured stream
-- policy decision: `allow:read_file` (same coarse outcome as S5)
+
+For parity with the
+[Accepted Full S5 Fixture Instance](fixtures-v0.md#accepted-full-s5-fixture-instance),
+the Gemini fixture should also preserve these stricter invariants (these
+are S5 accepted-instance values, not general contract rules):
+
+- exactly one normalized policy event in the captured stream
+- per-event `decision = allow` (coarse policy outcome)
+- the corresponding `policy_decisions` summary in `capability-surface.json`
+  is `allow:read_file` (the namespaced summary string is the surface
+  representation, distinct from the per-event coarse outcome above)
 
 The implementation PR may share the existing MCP file server used by the
 S5 fixture, or provide a Gemini-specific wrapper if scope reasons require.
@@ -202,8 +211,14 @@ v0 artifact family as S5:
 
 ### `capability-surface.json` expected shape
 
-- exactly one normalized filesystem path under the work directory (the
-  `read_file` target)
+- a bounded, deterministic set of normalized filesystem paths under the
+  work directory:
+  - the `read_file` target the Gemini function call is replayed against
+  - if the shared S5 policy-agent / MCP file-server wrapper is reused (per
+    the option above), one additional deterministic wrapper input path
+    (parallel to S5's `policy-input.txt` companion file)
+  - exact path count is determined by the wrapper choice and frozen by
+    the cassette + fixture script in the implementation PR
 - `mcp_tools` contains `read_file`
 - `policy_decisions` contains `allow:read_file`
 
