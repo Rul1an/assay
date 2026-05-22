@@ -289,7 +289,7 @@ and the consumer side of runner evidence.
 
 **Hard gates before this slice may open:**
 
-1. All 14 [`Extraction Readiness Criteria`](boundary-map.md#extraction-readiness-criteria)
+1. All 15 [`Extraction Readiness Criteria`](boundary-map.md#extraction-readiness-criteria)
    in the boundary map are green.
 2. Zero of the 11 [`Extraction Blocking Conditions`](boundary-map.md#extraction-blocking-conditions)
    are true.
