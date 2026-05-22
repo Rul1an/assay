@@ -98,7 +98,7 @@ eventual real second consumer.
 
 **What this means for external consumers.** Anyone consuming the
 Runner candidate writes the same kind of composition that
-`assay-cli/src/cli/commands/runner_spike.rs` writes today: import
+`crates/assay-cli/src/cli/commands/runner_spike.rs` writes today: import
 types from schema + core + linux, construct a `RunSpec`, manage
 cgroup placement through `CgroupManager`/`SessionCgroup`, drive the
 process, and assemble the archive via `RunnerSpikeArchive`. The
@@ -296,8 +296,8 @@ blocker.
 - the spike wrapper's final fate (keep vs delete) — Slice 6B chooses
 - the public crates' API surface beyond what Assay currently
   imports — future external consumers may demand more
-- whether `assay-cli/src/cli/commands/runner_spike.rs` ever moves
-  out of `assay-cli` (Slice 4 deferred-trait territory)
+- whether `crates/assay-cli/src/cli/commands/runner_spike.rs` ever moves
+  out of `crates/assay-cli/` (Slice 4 deferred-trait territory)
 - macOS or Windows platform work — separate readiness checkpoint
 - a `PlatformAdapter` trait — Slice 4 deferred, triggers unchanged
 - a public runner entrypoint or façade — Slice 4 deferred
