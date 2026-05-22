@@ -275,7 +275,9 @@ v0 does not include:
   separate Phase 2C+ slice
 - per-binding path/process/endpoint attribution
 - call-id-less order fallback
-- second runtime support
+- second runtime support; cross-runtime semantics are contracted
+  separately in
+  [`cross-runtime-diff-v0.md`](cross-runtime-diff-v0.md)
 - macOS runner support
 - raw telemetry diffing
 - proof-pack ingestion as a required input

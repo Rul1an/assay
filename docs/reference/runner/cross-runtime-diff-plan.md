@@ -4,11 +4,14 @@
 > small. It does not freeze a schema, propose code, propose a CI lane change,
 > or pre-approve a Phase 2C implementation PR.
 >
-> **Decision resolved.** The central open question recorded below has been
-> answered in [`cross-runtime-diff-decisions.md`](cross-runtime-diff-decisions.md)
-> with combination **A1 + B3 + C1**. The Phase 2C contract slice PR may now
-> proceed under that combination; this mini-plan remains the scope and
-> non-goal record.
+> **Decision resolved and contract frozen.** The central open question
+> recorded below has been answered in
+> [`cross-runtime-diff-decisions.md`](cross-runtime-diff-decisions.md)
+> with combination **A1 + B3 + C1**, and the Phase 2C contract slice is
+> frozen in [`cross-runtime-diff-v0.md`](cross-runtime-diff-v0.md) with a
+> golden shape at
+> [`golden/cross-runtime-diff-s5-gemini-v0.json`](golden/cross-runtime-diff-s5-gemini-v0.json).
+> This mini-plan remains the scope and non-goal record.
 
 Phase 2B closed with two qualifying runtime fixtures landed under delegated
 `gates=all`:
@@ -283,6 +286,8 @@ them:
 ## References
 
 - [Cross-runtime diff Phase 2C decisions (A1+B3+C1)](cross-runtime-diff-decisions.md)
+- [Cross-runtime diff v0 contract](cross-runtime-diff-v0.md)
+- [Cross-runtime diff v0 golden shape (S5 ↔ Gemini)](golden/cross-runtime-diff-s5-gemini-v0.json)
 - [Runner capability-diff Phase 2B plan](capability-diff-plan.md)
 - [Runner capability-diff v0 contract](capability-diff-v0.md)
 - [Runner second runtime Phase 2B plan](second-runtime-plan.md)
