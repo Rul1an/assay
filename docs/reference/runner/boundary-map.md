@@ -97,8 +97,7 @@ The current spike surfaces remain in `Rul1an/assay`:
 | `crates/assay-cli/src/cgroup.rs` | removed in Phase 2D Slice 3 | the placement primitives moved to `assay-runner-linux`; `crates/assay-cli/src/cli/commands/runner_spike.rs` now imports `CgroupManager`/`SessionCgroup` from `assay_runner_linux` |
 | `crates/assay-monitor/` | monitor reader, stats, event decoding | Assay core monitor substrate |
 | `crates/assay-ebpf/` | eBPF programs | Assay core monitor substrate |
-| `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface |
-| `crates/assay-cli/src/cgroup.rs` | CLI-owned cgroup v2 placement helper for runner sessions | runner-adjacent process placement; extract only with a stable cgroup API |
+| `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface; consumes `CgroupManager`/`SessionCgroup` from `assay-runner-linux` since Slice 3 |
 | `crates/assay-evidence/**` | evidence artifact verification and existing bundle semantics | Assay core artifact semantics |
 | `crates/assay-core/**` | MCP, policy, runtime, and shared decision semantics | Assay core semantics |
 | `tests/fixtures/runner-spike/` | deterministic acceptance fixtures | candidate runner fixtures under shared fixture contract |
