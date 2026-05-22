@@ -1,37 +1,16 @@
-use crate::{CapabilitySurface, CorrelationReport, ObservationHealth};
+use assay_runner_schema::{
+    ArchiveFile, ArchiveManifest, CapabilitySurface, CapabilitySurfaceError, CorrelationReport,
+    CorrelationReportError, ObservationHealth, ObservationHealthError, ARCHIVE_MANIFEST_SCHEMA,
+    CAPABILITY_SURFACE_PATH, CORRELATION_REPORT_PATH, EVENTS_PATH, KERNEL_LAYER_PATH,
+    MANIFEST_PATH, OBSERVATION_HEALTH_PATH, POLICY_LAYER_PATH, SDK_LAYER_PATH,
+};
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Write;
 use tar::{Builder, Header};
 use thiserror::Error;
-
-pub const ARCHIVE_MANIFEST_SCHEMA: &str = "assay.runner.archive_manifest.v0";
-
-pub const MANIFEST_PATH: &str = "manifest.json";
-pub const EVENTS_PATH: &str = "events.ndjson";
-pub const KERNEL_LAYER_PATH: &str = "layers/kernel.ndjson";
-pub const POLICY_LAYER_PATH: &str = "layers/policy.ndjson";
-pub const SDK_LAYER_PATH: &str = "layers/sdk.ndjson";
-pub const CAPABILITY_SURFACE_PATH: &str = "capability-surface.json";
-pub const OBSERVATION_HEALTH_PATH: &str = "observation-health.json";
-pub const CORRELATION_REPORT_PATH: &str = "correlation-report.json";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArchiveFile {
-    pub path: String,
-    pub sha256: String,
-    pub bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArchiveManifest {
-    pub schema: String,
-    pub run_id: String,
-    pub files: BTreeMap<String, ArchiveFile>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerSpikeArchive {
@@ -56,11 +35,11 @@ pub enum RunnerSpikeArchiveError {
         actual: String,
     },
     #[error("invalid observation health: {0}")]
-    ObservationHealth(#[from] crate::health::ObservationHealthError),
+    ObservationHealth(#[from] ObservationHealthError),
     #[error("invalid capability surface: {0}")]
-    CapabilitySurface(#[from] crate::surface::CapabilitySurfaceError),
+    CapabilitySurface(#[from] CapabilitySurfaceError),
     #[error("invalid correlation report: {0}")]
-    CorrelationReport(#[from] crate::correlation::CorrelationReportError),
+    CorrelationReport(#[from] CorrelationReportError),
     #[error("json serialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("archive io failed: {0}")]
@@ -338,7 +317,7 @@ mod tests {
         assert!(matches!(
             err,
             RunnerSpikeArchiveError::ObservationHealth(
-                crate::health::ObservationHealthError::RingbufDropsRequirePartialKernelLayer
+                assay_runner_schema::ObservationHealthError::RingbufDropsRequirePartialKernelLayer
             )
         ));
     }
@@ -354,7 +333,7 @@ mod tests {
         assert!(matches!(
             err,
             RunnerSpikeArchiveError::CapabilitySurface(
-                crate::surface::CapabilitySurfaceError::InvalidSchema
+                assay_runner_schema::CapabilitySurfaceError::InvalidSchema
             )
         ));
     }
@@ -370,7 +349,7 @@ mod tests {
         assert!(matches!(
             err,
             RunnerSpikeArchiveError::CorrelationReport(
-                crate::correlation::CorrelationReportError::InvalidSchema
+                assay_runner_schema::CorrelationReportError::InvalidSchema
             )
         ));
     }

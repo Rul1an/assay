@@ -72,7 +72,7 @@ pub enum KernelLayerError {
     #[error("kernel layer run_id mismatch: expected {expected}, found {actual}")]
     RunIdMismatch { expected: String, actual: String },
     #[error("invalid capability surface: {0}")]
-    CapabilitySurface(#[from] crate::surface::CapabilitySurfaceError),
+    CapabilitySurface(#[from] assay_runner_schema::CapabilitySurfaceError),
     #[error("kernel event serialization failed: {0}")]
     Json(#[from] serde_json::Error),
 }

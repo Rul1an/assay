@@ -136,6 +136,7 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
 
     all_prefixes = (
         "crates/assay-runner-spike/",
+        "crates/assay-runner-schema/",
         "crates/assay-monitor/",
         "crates/assay-ebpf/",
         "crates/assay-xtask/",
@@ -492,6 +493,13 @@ def self_test() -> None:
         # delegated gate via a future classifier refactor.
         (["scripts/ci/assay_runner_cross_runtime_diff_validate.py"], Gate.NONE),
         (["scripts/ci/assay_runner_capability_diff_validate.py"], Gate.NONE),
+        # Phase 2D Slice 1 extracted the v0 schema data structures from
+        # crates/assay-runner-spike/ into crates/assay-runner-schema/.
+        # The schema crate hosts contract types that the runner archive
+        # asserts at delegated acceptance time, so schema changes are
+        # runner-impacting and require gates=all just like the spike crate.
+        (["crates/assay-runner-schema/src/lib.rs"], Gate.ALL),
+        (["crates/assay-runner-schema/Cargo.toml"], Gate.ALL),
     ]
     for files, expected in cases:
         got = classify_files(files).gate

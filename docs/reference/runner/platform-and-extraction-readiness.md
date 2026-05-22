@@ -36,10 +36,19 @@ shape of the gap.
 
 Current structural blockers, in priority order:
 
-1. `assay.runner.*.v0` schemas still live in `crates/assay-runner-spike/src/`.
-   They must move to an Assay-owned shared crate before extraction.
-2. Archive verification still crosses an unresolved boundary conflict between
-   runner assembly and Assay artifact semantics (`archive.rs`).
+1. **Resolved by Phase 2D Slice 1.** `assay.runner.*.v0` schema data
+   structures moved from `crates/assay-runner-spike/src/` to a new
+   publish-disabled crate `crates/assay-runner-schema/`. The spike
+   crate re-exports the moved types so existing call sites compile
+   unchanged. See
+   [`extraction-roadmap.md` § Slice 1](extraction-roadmap.md#slice-1--cratesassay-runner-schema)
+   and the updated boundary-map ownership table.
+2. **Partially resolved by Phase 2D Slice 1.** Archive manifest
+   semantics (schema constants, `ArchiveFile`, `ArchiveManifest`)
+   moved to `assay-runner-schema`. Archive assembly mechanics
+   (`RunnerSpikeArchive`, `write`, normalizers) still live in
+   `assay-runner-spike` and move to `assay-runner-core` at
+   [Slice 2](extraction-roadmap.md#slice-2--cratesassay-runner-core).
 3. Cgroup placement still depends on `crates/assay-cli/src/cgroup.rs`. A
    stable cgroup API is required before extraction.
 4. There is no non-spike external consumer of the runner bundle format. The
