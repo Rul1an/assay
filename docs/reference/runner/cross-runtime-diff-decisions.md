@@ -131,22 +131,36 @@ This decision note does not:
 
 ## What This Unlocks
 
-The next discoverable step is the Phase 2C contract slice PR
-(step 4 in `cross-runtime-diff-plan.md` § Suggested Slice Sequence).
-That PR may proceed under this decision combination. It must:
+> **Contract slice landed.** The decision combination resolved here was
+> frozen as the v0 contract in
+> [`cross-runtime-diff-v0.md`](cross-runtime-diff-v0.md), with golden
+> shape at
+> [`golden/cross-runtime-diff-s5-gemini-v0.json`](golden/cross-runtime-diff-s5-gemini-v0.json).
+> The next discoverable step is the cross-runtime projector
+> implementation slice (described below as the "later implementation
+> slice").
 
-- freeze `cross-runtime-diff-v0` either as a new section in
-  `capability-diff-v0.md` or as a sibling document, whichever the
-  contract author judges cleaner
-- include a golden shape for the cross-runtime `S5 ↔ Gemini` case
-- implement A1 path canonicalization as a syntactic prefix rule with
-  no per-runtime knowledge
-- treat binding ids per B3 — out of cross-runtime comparison entirely
-- treat SDK metadata per C1 — side-band, not added/removed/unchanged
-- preserve all `capability-diff-v0` preconditions (clean health,
-  within-runtime stable binding identity, idempotent `diff(X, X)`)
-- not introduce a new fixture, new delegated gate, or new lane-check
-  rule
+The contract slice PR landed under this decision combination. It:
+
+- froze `cross-runtime-diff-v0` as a sibling document next to
+  `capability-diff-v0.md`
+- includes a golden shape for the cross-runtime `S5 ↔ Gemini` case
+- defines A1 path canonicalization as a declared syntactic prefix rule
+  with no per-runtime knowledge
+- treats binding ids per B3 — out of cross-runtime comparison entirely
+- treats SDK metadata per C1 — side-band, not added/removed/unchanged
+- preserves all `capability-diff-v0` preconditions on each side (clean
+  health, within-runtime stable binding identity)
+- did not introduce a new fixture, new delegated gate, or new
+  lane-check rule
+
+### Later implementation slice
+
+A future projector implementation PR may extend or wrap
+`scripts/ci/assay_runner_capability_diff_validate.py` (or introduce a
+separate cross-runtime projector) to produce and validate the golden
+shape from the S5 and Gemini accepted fixture evidence sets. That PR
+remains separate; it is **not** part of the contract slice.
 
 ## What Remains Forbidden In The Contract Slice PR
 
