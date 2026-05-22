@@ -619,15 +619,35 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
                 f"Slice 6B spike-absence invariant: {exc}. The Cargo.toml "
                 "must be valid utf-8."
             ) from exc
-        # Match `assay-runner-spike` only when it appears as a top-level
-        # dependency key, not when it appears inside a comment or string.
-        # Cargo dep keys look like: `assay-runner-spike = ...`
-        if re.search(r"(?m)^assay-runner-spike\s*=", cargo_text):
+        # Match `assay-runner-spike` as a dependency in any of the
+        # common Cargo.toml forms a regression could re-introduce it
+        # under. Covers:
+        #   1. Inline form (with or without leading whitespace):
+        #      `assay-runner-spike = ...`
+        #      `  assay-runner-spike = { workspace = true }`
+        #   2. Section-header form, for [dependencies], [dev-dependencies],
+        #      [build-dependencies], and target-conditional dependencies:
+        #      `[dependencies.assay-runner-spike]`
+        #      `[dev-dependencies.assay-runner-spike]`
+        #      `[build-dependencies.assay-runner-spike]`
+        #      `[target.'cfg(unix)'.dependencies.assay-runner-spike]`
+        # Comments and string literals do not match because the regex is
+        # anchored at the start of a line via (?m)^.
+        spike_inline = r"(?m)^\s*assay-runner-spike\s*="
+        spike_table_header = (
+            r"(?m)^\s*\[(?:dependencies|dev-dependencies|"
+            r"build-dependencies|target\.[^\]]+?\.dependencies)"
+            r"\.assay-runner-spike\]"
+        )
+        if re.search(spike_inline, cargo_text) or re.search(
+            spike_table_header, cargo_text
+        ):
             raise AssertionError(
                 "Assay still consumes spike internals: "
                 "`crates/assay-cli/Cargo.toml` declares `assay-runner-spike` "
-                "as a dependency. Phase 2D Slice 6B requires assay-cli to "
-                "depend on assay-runner-{schema,core,linux} directly. "
+                "as a dependency (inline or table-header form). Phase 2D "
+                "Slice 6B requires assay-cli to depend on "
+                "assay-runner-{schema,core,linux} directly. "
                 "See docs/reference/runner/assay-consumes-runner-external.md."
             )
 
