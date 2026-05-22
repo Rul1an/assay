@@ -28,7 +28,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 40
 fi
 
-GEMINI_FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/gemini-google-genai"
+GEMINI_FIXTURE_DIR="$ROOT/runner-fixtures/gemini-google-genai"
 GEMINI_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-python3}"
 if ! command -v "$GEMINI_PYTHON" >/dev/null 2>&1; then
   echo "SKIP: Gemini fixture Python interpreter not found: $GEMINI_PYTHON." >&2
@@ -106,6 +106,12 @@ EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-2.6.0}"
 
 export ASSAY_BIN
 export ASSAY_FIXTURE_ROOT="$ROOT"
+# Export the fixture directory explicitly so the wrapper's
+# `${ASSAY_RUNNER_GEMINI_FIXTURE_DIR:-$(dirname BASH_SOURCE)}` default
+# resolves to the runner-fixtures path even though the script is
+# copied to $CONTROL_ROOT for execution (BASH_SOURCE would otherwise
+# point at the temp control root). Slice 5A defensive export.
+export ASSAY_RUNNER_GEMINI_FIXTURE_DIR="$GEMINI_FIXTURE_DIR"
 export ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON="$GEMINI_PYTHON"
 export ASSAY_RUNNER_GEMINI_PYTHONPATH="$GEMINI_PYTHONPATH"
 export ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT="$GEMINI_FIXTURE_DIR/fixture.py"
@@ -115,8 +121,8 @@ export ASSAY_RUNNER_MCP_FILE_SERVER="$MCP_FILE_SERVER"
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
 export ASSAY_RUNNER_RUN_ID="$RUN_ID"
 
-cp "$ROOT/tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh" "$AGENT_SCRIPT"
-cp "$ROOT/tests/fixtures/runner-spike/gemini-google-genai/policy-wrapper.sh" "$POLICY_WRAPPER"
+cp "$ROOT/runner-fixtures/gemini-google-genai/sdk-policy-agent.sh" "$AGENT_SCRIPT"
+cp "$ROOT/runner-fixtures/gemini-google-genai/policy-wrapper.sh" "$POLICY_WRAPPER"
 cp "$ROOT/tests/fixtures/runner-spike/mcp_file_server.py" "$MCP_FILE_SERVER"
 chmod +x "$AGENT_SCRIPT" "$POLICY_WRAPPER" "$MCP_FILE_SERVER"
 

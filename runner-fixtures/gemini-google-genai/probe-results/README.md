@@ -56,5 +56,5 @@ identity guarantee held over time and across `google-genai` SDK bumps,
 Gemini model updates, or cassette re-recordings.
 
 Re-running the probe (after a model or SDK bump per the bump flow in
-[`fixtures-v0.md` § Dependency Upgrade Contract](../../../../../docs/reference/runner/fixtures-v0.md#dependency-upgrade-contract))
+[`fixtures-v0.md` § Dependency Upgrade Contract](../../../docs/reference/runner/fixtures-v0.md#dependency-upgrade-contract))
 adds a new outcome file alongside the old one; it does not replace it.

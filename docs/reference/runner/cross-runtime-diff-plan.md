@@ -69,7 +69,7 @@ Two evidence sets, each from a clean delegated `gates=all` run:
 | Source | Acceptance script | Cassette | Tool call id source |
 |---|---|---|---|
 | S5 OpenAI Agents | `scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh` | DeterministicToolCallModel (hardcoded `tc_runner_policy_001`) | fixture-chosen; v0 accepted stable fixture binding id |
-| Gemini google-genai | `scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` | `tests/fixtures/runner-spike/gemini-google-genai/cassettes/fixture.yaml` (cassette-recorded `ho0csecf`) | provider-generated; level-3 qualifying per second-runtime selection |
+| Gemini google-genai | `scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` | `runner-fixtures/gemini-google-genai/cassettes/fixture.yaml` (cassette-recorded `ho0csecf`) | provider-generated; level-3 qualifying per second-runtime selection |
 
 A Phase 2C diff over these two sets has structurally different binding ids
 (`tc_runner_policy_001` vs `ho0csecf`), structurally different SDK package
