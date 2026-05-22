@@ -24,4 +24,5 @@ Phase 2B capability-diff planning slice.
 - [Assay-Runner boundary and extraction map](boundary-map.md)
 - [Runner platform and extraction readiness](platform-and-extraction-readiness.md)
 - [Assay-Runner extraction roadmap (Phase 2D slice sequence)](extraction-roadmap.md)
+- [Assay consumes Runner as external — Slice 6A design note](assay-consumes-runner-external.md)
 - [Phase 1 delegated proof pack](proof-packs/phase1-delegated-2026-05-21.md)
