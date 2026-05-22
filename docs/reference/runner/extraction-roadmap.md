@@ -68,9 +68,11 @@ A PR is *Runner-impacting* when it changes any of:
 - `tests/fixtures/runner-spike/`
 - `.github/workflows/runner-spike-delegated.yml` or
   `.github/workflows/runner-spike-sdk.yml`
-- `docs/reference/runner/*.md` (this includes the contracts, the
-  boundary map, this roadmap, and any future runner schema or golden
-  file under `docs/reference/runner/`)
+- `docs/reference/runner/**` (recursive — this includes the
+  contracts (`*.md`), the boundary map, this roadmap, the v0 goldens
+  under `docs/reference/runner/golden/*.json`, the v0 JSON Schemas
+  under `docs/reference/runner/schema/*.json`, and any future
+  subdirectory under `docs/reference/runner/`)
 
 This is broader than the lane-check classifier's `Gate.NONE` boundary,
 because lane-check decides whether a PR needs delegated proof and not
@@ -305,11 +307,11 @@ consumer, satisfied by Assay itself in external-style consumption).
 
 ### Slice 7 — Repository split (gated)
 
-**Scope.** Create `Rul1an/assay-runner` and move the runner crates,
-fixtures, delegated workflow templates, schemas, golden examples,
-proof-pack format, and runner docs into it. Assay keeps Harness,
-policy/trust-basis interpretation, higher-level CLI, product docs,
-and the consumer side of runner evidence.
+**Scope.** Create a separate Assay-Runner repository and move the
+runner crates, fixtures, delegated workflow templates, schemas,
+golden examples, proof-pack format, and runner docs into it. Assay
+keeps Harness, policy/trust-basis interpretation, higher-level CLI,
+product docs, and the consumer side of runner evidence.
 
 **Hard gates before this slice may open:**
 
