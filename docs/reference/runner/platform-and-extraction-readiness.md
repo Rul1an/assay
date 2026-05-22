@@ -41,7 +41,7 @@ Current structural blockers, in priority order:
    publish-disabled crate `crates/assay-runner-schema/`. The spike
    crate re-exports the moved types so existing call sites compile
    unchanged. See
-   [`extraction-roadmap.md` § Slice 1](extraction-roadmap.md#slice-1--cratesassay-runner-schema)
+   [`extraction-roadmap.md` § Slice 1](extraction-roadmap.md#slice-1-cratesassay-runner-schema-landed)
    and the updated boundary-map ownership table.
 2. **Resolved by Phase 2D Slices 1 + 2.** Archive manifest semantics
    (schema constants, `ArchiveFile`, `ArchiveManifest`) moved to
@@ -60,13 +60,13 @@ Current structural blockers, in priority order:
    imports `CgroupManager` and `SessionCgroup` directly from
    `assay_runner_linux`; `assay-runner-core` does not depend on
    `assay-cli` for cgroup placement. See
-   [`extraction-roadmap.md` § Slice 3](extraction-roadmap.md#slice-3--cgroup-api-extraction).
+   [`extraction-roadmap.md` § Slice 3](extraction-roadmap.md#slice-3-cgroup-api-extraction-landed).
 4. There is no non-spike external consumer of the runner bundle format. The
    capability-diff projection helper is an internal consumer.
 
 Phase 2D Slice 4 landed as a boundary-freeze docs slice rather than
 as a code-extraction slice (see
-[`extraction-roadmap.md` § Slice 4](extraction-roadmap.md#slice-4--platform-composition-boundary--landed-re-scoped)).
+[`extraction-roadmap.md` § Slice 4](extraction-roadmap.md#slice-4-platform-composition-boundary-landed-re-scoped)).
 It does not resolve any of the four named blockers; it documents
 that `assay-monitor` and `assay-ebpf` stay Assay-owned shared
 substrate and that the `PlatformAdapter` trait is deferred until a
