@@ -138,7 +138,7 @@ The probe tooling is checked in so:
 - the cassette redaction contract is enforced by code, not by
   out-of-band convention
 - future maintainers re-recording the cassette (per the bump flow in
-  [`fixtures-v0.md` § Dependency Upgrade Contract](../../../../docs/reference/runner/fixtures-v0.md#dependency-upgrade-contract))
+  [`fixtures-v0.md` § Dependency Upgrade Contract](../../docs/reference/runner/fixtures-v0.md#dependency-upgrade-contract))
   follow the same discipline
 
 ## References
@@ -146,6 +146,6 @@ The probe tooling is checked in so:
 - Issue requiring the probe:
   <https://github.com/Rul1an/assay/issues/1307>
 - Candidate selection that the probe verifies:
-  [`second-runtime-candidate-selection.md` § Candidate: Gemini Python `google-genai` direct](../../../../docs/reference/runner/second-runtime-candidate-selection.md#candidate-gemini-python-google-genai-direct)
+  [`second-runtime-candidate-selection.md` § Candidate: Gemini Python `google-genai` direct](../../docs/reference/runner/second-runtime-candidate-selection.md#candidate-gemini-python-google-genai-direct)
 - Fixture design that scopes the probe:
-  [`gemini-fixture-design.md`](../../../../docs/reference/runner/gemini-fixture-design.md)
+  [`gemini-fixture-design.md`](../../docs/reference/runner/gemini-fixture-design.md)
