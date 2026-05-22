@@ -51,10 +51,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: tests/fixtures/runner-spike/openai-agents-js/package-lock.json
+          cache-dependency-path: runner-fixtures/openai-agents/package-lock.json
 
       - name: Install openai-agents fixture deps
-        working-directory: tests/fixtures/runner-spike/openai-agents-js
+        working-directory: runner-fixtures/openai-agents
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Build assay CLI

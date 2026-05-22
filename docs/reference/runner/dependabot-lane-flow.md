@@ -22,8 +22,8 @@ remains `workflow_dispatch` only.
 
 Treat these dependency changes as runner-impacting:
 
-- `tests/fixtures/runner-spike/openai-agents-js/package.json`
-- `tests/fixtures/runner-spike/openai-agents-js/package-lock.json`
+- `runner-fixtures/openai-agents/package.json`
+- `runner-fixtures/openai-agents/package-lock.json`
 - `@openai/agents`, `zod`, and related OpenAI Agents fixture dependencies
 - `aya`, `aya-ebpf`, `aya-log-ebpf`, and BPF/runtime dependency bumps
 - workspace dependency bumps that can affect `assay-runner-spike`,

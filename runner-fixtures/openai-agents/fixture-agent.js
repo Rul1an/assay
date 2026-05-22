@@ -45,7 +45,7 @@ function makeEmitter({ logPath, runId, schema }) {
       schema,
       run_id: runId,
       seq,
-      source: 'openai-agents-js-fixture',
+      source: 'openai-agents-fixture',
       sdk_name: SDK_NAME,
       sdk_version: SDK_VERSION,
       ...event,

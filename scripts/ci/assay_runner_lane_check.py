@@ -187,9 +187,11 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
     }:
         return Gate.KERNEL_POLICY, f"{path}: policy fixture requires gates=kernel-policy"
 
-    if path.startswith("tests/fixtures/runner-spike/openai-agents-js/") or path == (
-        "tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh"
-    ):
+    if path.startswith("runner-fixtures/openai-agents/"):
+        # OpenAI Agents fixture moved from tests/fixtures/runner-spike/
+        # openai-agents-js/ to runner-fixtures/openai-agents/ in Phase 2D
+        # Slice 5B. The `-js` suffix was dropped because the fixture
+        # identity is the runtime, not the implementation language.
         return (
             Gate.OPENAI_AGENTS_KERNEL_POLICY,
             f"{path}: OpenAI Agents fixture requires gates=openai-agents-kernel-policy",
@@ -484,7 +486,7 @@ def self_test() -> None:
         (["docs/reference/runner/ci-lanes.md"], Gate.NONE),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh"], Gate.KERNEL_ONLY),
         (["tests/fixtures/runner-spike/mcp-policy-agent.sh"], Gate.KERNEL_POLICY),
-        (["tests/fixtures/runner-spike/openai-agents-js/package-lock.json"], Gate.OPENAI_AGENTS_KERNEL_POLICY),
+        (["runner-fixtures/openai-agents/package-lock.json"], Gate.OPENAI_AGENTS_KERNEL_POLICY),
         (["crates/assay-monitor/src/lib.rs"], Gate.ALL),
         (["crates/assay-xtask/src/main.rs"], Gate.ALL),
         (["scripts/ci/runner-spike-sdk-policy-correlation.sh"], Gate.ALL),
@@ -562,7 +564,7 @@ def self_test() -> None:
         body="",
         author_login="dependabot[bot]",
         head_sha="abc123",
-        files=("tests/fixtures/runner-spike/openai-agents-js/package-lock.json",),
+        files=("runner-fixtures/openai-agents/package-lock.json",),
     )
     guidance = dependabot_guidance(
         dependabot_pr,

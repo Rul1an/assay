@@ -362,14 +362,14 @@ Likely causes:
 Actions:
 
 - inspect `Install OpenAI Agents fixture deps`
-- run `node --check tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js`
+- run `node --check runner-fixtures/openai-agents/fixture-agent.js`
 - validate the installed package metadata
 - for dependency bumps, update the expected version only after the delegated
   `openai-agents-kernel-policy` gate passes
 
 For `@openai/agents` version drift, check both sources:
 
-- `tests/fixtures/runner-spike/openai-agents-js/package.json`
+- `runner-fixtures/openai-agents/package.json`
 - the acceptance wrapper's expected SDK version environment, when set
 
 The fixture emits SDK metadata from the installed package. The acceptance gate

@@ -19,7 +19,7 @@ if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0
   exit 40
 fi
 
-OPENAI_FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/openai-agents-js"
+OPENAI_FIXTURE_DIR="$ROOT/runner-fixtures/openai-agents"
 if [ ! -d "$OPENAI_FIXTURE_DIR/node_modules/@openai/agents" ]; then
   echo "SKIP: missing fixture dependency '@openai/agents' under $OPENAI_FIXTURE_DIR/node_modules." >&2
   echo "Hint: run 'npm ci --ignore-scripts --no-audit --no-fund' in $OPENAI_FIXTURE_DIR." >&2
@@ -75,11 +75,17 @@ MCP_FILE_SERVER="$CONTROL_ROOT/mcp_file_server.py"
 # The full S5 gate requires the SDK and policy layers to share the policy
 # fixture's stable tool_call_id. Mismatch behavior is covered by separate gates.
 SDK_TOOL_CALL_ID="tc_runner_policy_001"
-EXPECTED_SDK_SOURCE="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_SOURCE:-openai-agents-js-fixture}"
+EXPECTED_SDK_SOURCE="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_SOURCE:-openai-agents-fixture}"
 EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-0.11.4}"
 
 export ASSAY_BIN
 export ASSAY_FIXTURE_ROOT="$ROOT"
+# Export fixture directory explicitly so the wrapper's
+# `${ASSAY_RUNNER_OPENAI_FIXTURE_DIR:-$(dirname BASH_SOURCE)}` default
+# resolves to the runner-fixtures path even when the script is copied
+# to $CONTROL_ROOT (BASH_SOURCE would otherwise point at the temp
+# control root). Same defensive pattern as Slice 5A for Gemini.
+export ASSAY_RUNNER_OPENAI_FIXTURE_DIR="$OPENAI_FIXTURE_DIR"
 export ASSAY_RUNNER_OPENAI_FIXTURE_AGENT="$OPENAI_FIXTURE_AGENT"
 export ASSAY_RUNNER_MCP_FILE_SERVER="$MCP_FILE_SERVER"
 export ASSAY_RUNNER_POLICY_AGENT="$POLICY_AGENT"
@@ -87,8 +93,8 @@ export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
 export ASSAY_RUNNER_RUN_ID="$RUN_ID"
 export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
 
-cp "$ROOT/tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh" "$AGENT_SCRIPT"
-cp "$ROOT/tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js" "$OPENAI_FIXTURE_AGENT"
+cp "$ROOT/runner-fixtures/openai-agents/sdk-policy-agent.sh" "$AGENT_SCRIPT"
+cp "$ROOT/runner-fixtures/openai-agents/fixture-agent.js" "$OPENAI_FIXTURE_AGENT"
 cp "$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh" "$POLICY_AGENT"
 cp "$ROOT/tests/fixtures/runner-spike/mcp_file_server.py" "$MCP_FILE_SERVER"
 chmod +x "$AGENT_SCRIPT" "$OPENAI_FIXTURE_AGENT" "$POLICY_AGENT" "$MCP_FILE_SERVER"
