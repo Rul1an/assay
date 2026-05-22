@@ -53,7 +53,7 @@ pub enum PolicyLayerError {
     #[error("policy decision line {line} missing required field {field}")]
     MissingRequiredField { line: usize, field: String },
     #[error("invalid capability surface: {0}")]
-    CapabilitySurface(#[from] crate::surface::CapabilitySurfaceError),
+    CapabilitySurface(#[from] assay_runner_schema::CapabilitySurfaceError),
     #[error("policy event serialization failed: {0}")]
     Json(#[from] serde_json::Error),
 }

@@ -440,11 +440,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "assay-runner-schema"
+version = "3.10.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "assay-runner-spike"
 version = "3.10.2"
 dependencies = [
  "assay-common",
  "assay-monitor",
+ "assay-runner-schema",
  "flate2",
  "hex",
  "serde",

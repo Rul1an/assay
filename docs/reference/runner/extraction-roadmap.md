@@ -124,7 +124,10 @@ Each slice is a separate PR. Each slice's PR body MUST cite this
 roadmap by section and state which blocker it resolves (or the boundary
 row it moves) per the Per-PR Discipline Rule above.
 
-### Slice 1 — `crates/assay-runner-schema`
+### Slice 1 — `crates/assay-runner-schema` ✅ LANDED
+
+> Resolves blocker #1 fully; partial resolution of blocker #2 (manifest
+> semantics half). The assembly half of blocker #2 moves in Slice 2.
 
 **Scope.** Move data structures and constants for the `assay.runner.*.v0`
 schemas out of `crates/assay-runner-spike/src/` into a new
