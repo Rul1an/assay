@@ -106,6 +106,12 @@ EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-2.6.0}"
 
 export ASSAY_BIN
 export ASSAY_FIXTURE_ROOT="$ROOT"
+# Export the fixture directory explicitly so the wrapper's
+# `${ASSAY_RUNNER_GEMINI_FIXTURE_DIR:-$(dirname BASH_SOURCE)}` default
+# resolves to the runner-fixtures path even though the script is
+# copied to $CONTROL_ROOT for execution (BASH_SOURCE would otherwise
+# point at the temp control root). Slice 5A defensive export.
+export ASSAY_RUNNER_GEMINI_FIXTURE_DIR="$GEMINI_FIXTURE_DIR"
 export ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON="$GEMINI_PYTHON"
 export ASSAY_RUNNER_GEMINI_PYTHONPATH="$GEMINI_PYTHONPATH"
 export ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT="$GEMINI_FIXTURE_DIR/fixture.py"
