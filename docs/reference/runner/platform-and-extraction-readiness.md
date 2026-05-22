@@ -57,6 +57,13 @@ Triggers for reopening extraction readiness review:
 Until those triggers fire, extraction stays closed by default. "We could
 extract now" is not a trigger.
 
+The forward-looking slice sequence that resolves the structural blockers
+above is in
+[`extraction-roadmap.md`](extraction-roadmap.md). That document does not
+extract anything; it only sequences the work and binds every
+Runner-impacting PR to a per-PR discipline rule that moves boundaries
+toward extraction-readiness without weakening acceptance gates.
+
 ## macOS Proof Readiness
 
 macOS is a separate platform spike, not a port of Linux. The Phase 1 spike
