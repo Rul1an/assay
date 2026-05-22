@@ -489,7 +489,7 @@ Re-evaluation of an `insufficient evidence` outcome for previously-evaluated
 candidates happens in a separate PR that cites new public evidence which
 closes the previous gap; it does not happen by reinterpreting the same
 evidence more optimistically. The selection of Gemini does not close those
-prior evaluations — it makes them historical evidence for the level-3 lat's
+prior evaluations — it makes them historical evidence for the level-3 rule's
 properties rather than active candidates.
 
 ## Non-Goals For This Note
