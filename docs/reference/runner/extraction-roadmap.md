@@ -435,9 +435,13 @@ product docs, and the consumer side of runner evidence.
    in the boundary map are green.
 2. Zero of the 11 [`Extraction Blocking Conditions`](boundary-map.md#extraction-blocking-conditions)
    are true.
-3. Slices 1-6 have all landed and have passed at least one consolidation
-   window (4-6 weeks) without semantic churn on the boundaries they
-   touched.
+3. Slices 1-6 have all landed and have passed the consolidation
+   burn-in recorded in
+   [`phase-2d-consolidation-audit.md`](phase-2d-consolidation-audit.md)
+   without semantic churn on the boundaries they touched. The
+   consolidation window is an evidence requirement, not a calendar
+   requirement; 4-6 weeks of idle calendar time alone does not
+   satisfy this gate.
 4. A concrete external use case exists (per the trigger in
    [`platform-and-extraction-readiness.md`](platform-and-extraction-readiness.md#extraction-readiness)).
    "We could split now" is not a trigger.
@@ -599,7 +603,7 @@ readiness hold simultaneously, not just the technical one:
 | Readiness type | What it covers |
 |---|---|
 | **Technical** | Slices 1-6 landed: schema crate, core crate, cgroup/platform boundary, fixture package boundary, archive verification without copying Assay internals |
-| **Process** | CI lane classification stable, delegated proof recording stable, ringbuf diagnostics explicitly decided per [`#1271`](https://github.com/Rul1an/assay/issues/1271), 4-6 weeks without contract churn, maintainers can explain the boundary without archaeology |
+| **Process** | CI lane classification stable, delegated proof recording stable, ringbuf diagnostics explicitly decided per [`#1271`](https://github.com/Rul1an/assay/issues/1271), consolidation burn-in satisfied per [`phase-2d-consolidation-audit.md`](phase-2d-consolidation-audit.md) (not 4-6 weeks of idle calendar time), maintainers can explain the boundary without archaeology |
 | **Product** | Assay consumes Runner as an external dependency (Slice 6), at least one real non-spike external consumer or use case exists, the split is justified because someone needs Runner standalone — not because the split is technically possible |
 
 The hardest gate is the **product** one. Slices 1-6 are work the
