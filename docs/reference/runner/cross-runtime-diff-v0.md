@@ -45,9 +45,15 @@ The kernzin:
 ## Inputs
 
 A v0 cross-runtime diff compares two evidence sets, named `base` and
-`head`, **each recorded from a different runtime fixture**. Each set
-must provide the same normalized artifacts required by
-[`capability-diff-v0`](capability-diff-v0.md):
+`head`, **each recorded from a different runtime fixture**. Each side
+provides two kinds of input plus one declared projector configuration
+value.
+
+### Primary capability-surface inputs
+
+Each side must provide the same normalized artifacts required by
+[`capability-diff-v0`](capability-diff-v0.md). These artifacts are the
+exclusive source for `surface.*` set comparisons:
 
 | Artifact | Role |
 |---|---|
@@ -55,15 +61,44 @@ must provide the same normalized artifacts required by
 | `capability-surface.json` | Provides the observed capability sets to compare across runtimes |
 | `correlation-report.json` | Provides stable within-runtime binding identity through `tool_call_id` |
 
-Raw kernel telemetry, workflow logs, proof-pack metadata, and normalized
-layer streams are diagnostic context only. They are not primary v0
+### Required side-band provenance input
+
+`sdk_metadata` is reported as side-band runtime provenance per C1, so
+v0 cross-runtime diff extends the input set with one required side-band
+provenance artifact per side:
+
+| Artifact | Role |
+|---|---|
+| `layers/sdk.ndjson` | Source of `sdk_name` and `sdk_version` for the [side-band `sdk_metadata` block](#sdk-metadata-side-band-provenance) |
+
+`layers/sdk.ndjson` is **not** a capability-surface input. The
+projector MUST consult it exclusively to populate the side-band
+`sdk_metadata` block. Set comparisons in `surface.*` MUST NOT consume
+`layers/*` streams. This preserves the
+[`capability-diff-v0` boundary](capability-diff-v0.md#inputs) that
+layer streams are diagnostic for capability projection, while making
+the SDK-metadata sourcing for cross-runtime explicit and reproducible.
+
+### Declared per-side projector configuration
+
+Per A1, exactly one canonicalization rule applies to `filesystem_paths`:
+the work-dir prefix is replaced with `<work>/`. The prefix MUST be
+declared per side; the projector MUST NOT infer it from input path
+values, mktemp templates, or runtime-name heuristics. See
+[Per-Side Prefix Declaration](#per-side-prefix-declaration).
+
+### Excluded inputs
+
+Raw kernel telemetry, workflow logs, proof-pack metadata, and
+`layers/policy.ndjson` are diagnostic context only. They are not v0
 cross-runtime diff inputs.
 
-The v0 cross-runtime diff is a pure projection over normalized evidence.
-Workflow run URLs, commit SHAs, generation timestamps, and cassette
-provenance are intentionally not part of this schema. Consumers that
-need forensic anchoring should pair the diff with proof-pack manifests
-from both sides.
+The v0 cross-runtime diff is a pure projection over normalized evidence
+plus one declared per-side configuration value. Workflow run URLs,
+commit SHAs, generation timestamps, and cassette provenance are
+intentionally not part of this schema. Consumers that need forensic
+anchoring should pair the diff with proof-pack manifests from both
+sides.
 
 ## Contract Principles
 
@@ -108,9 +143,9 @@ Fields:
 | `scope` | object | yes | Declares what evidence domain this diff used; includes the `cross_runtime` flag |
 | `canonicalization` | object | yes | Declares which canonicalization rule was applied per surface category |
 | `surface` | object | yes | Added, removed, and unchanged capability-surface values by category, after canonicalization |
-| `binding_ids` | object | yes | Out-of-scope marker; see [Binding Ids — Out Of Scope](#binding-ids--out-of-scope) |
-| `policy_outcomes` | object | yes | Out-of-scope marker; see [Policy Outcomes — Out Of Scope](#policy-outcomes--out-of-scope) |
-| `sdk_metadata` | object | yes | Side-band runtime provenance; see [SDK Metadata — Side-Band Provenance](#sdk-metadata--side-band-provenance) |
+| `binding_ids` | object | yes | Out-of-scope marker; see [Binding Ids — Out Of Scope](#binding-ids-out-of-scope) |
+| `policy_outcomes` | object | yes | Out-of-scope marker; see [Policy Outcomes — Out Of Scope](#policy-outcomes-out-of-scope) |
+| `sdk_metadata` | object | yes | Side-band runtime provenance; see [SDK Metadata — Side-Band Provenance](#sdk-metadata-side-band-provenance) |
 | `unbound` | object | yes | Evidence buckets that could not be safely compared in v0 |
 | `non_claims` | array[string] | yes | Stable code-prefixed non-claim assertions; see [Non-Claims](#non-claims) |
 | `ambiguities` | array[string] | yes | Stable code-prefixed ambiguity strings |
@@ -189,7 +224,7 @@ rule:
 
 | Rule | Applies to | Operational definition |
 |---|---|---|
-| `work_dir_prefix_only` | `filesystem_paths` | Match any path beginning with an acceptance-script work-directory prefix and replace that prefix with the canonical placeholder `<work>/`. The prefix set is the set of `mktemp -d` templates declared by the v0-accepted acceptance scripts; see [Configured Prefixes](#configured-prefixes) |
+| `work_dir_prefix_only` | `filesystem_paths` | For each side independently, strip the side's declared work-dir prefix from any path that begins with that prefix and replace it with the canonical placeholder `<work>/`. The prefix is a per-side declared input; see [Per-Side Prefix Declaration](#per-side-prefix-declaration) |
 
 For every category v0 declares a canonicalization key:
 
@@ -206,21 +241,48 @@ without updating this contract. Implementations MUST NOT apply a rule
 implicitly: the `canonicalization` block declares what was applied; the
 projector emits exactly that.
 
-### Configured Prefixes
+### Per-Side Prefix Declaration
 
-The work-dir prefix set is declared, not inferred. v0 accepts these
-acceptance-script prefixes:
+The work-dir prefix used to canonicalize `filesystem_paths` is **not**
+a global, contract-frozen set of strings. The acceptance and
+three-run-determinism wrappers create work directories with
+`mktemp -d` (including randomized suffixes and platform-dependent
+`TMPDIR` resolution), and may be further overridden by
+`ASSAY_RUNNER_ACCEPTANCE_WORK_DIR`. A static prefix list cannot match
+real run paths and would silently fail to canonicalize.
 
-- `/tmp/assay-runner-openai-agents-kernel-policy/work/`
-- `/tmp/assay-runner-gemini-google-genai-kernel-policy/work/`
+Instead, the projector accepts the prefix as a declared, required,
+per-side configuration value:
 
-Adding a new prefix requires updating this contract together with the
-acceptance script that produces it. The projector MUST NOT discover
-prefixes heuristically from input values.
+| Configuration value | Required | Shape |
+|---|---:|---|
+| `base_work_dir_prefix` | yes | Absolute filesystem path, non-empty, ending with `/`. The exact prefix used by the base side's wrapper for `WORK_DIR` |
+| `head_work_dir_prefix` | yes | Absolute filesystem path, non-empty, ending with `/`. The exact prefix used by the head side's wrapper for `WORK_DIR` |
 
-A path that matches none of the configured prefixes is emitted
-unchanged. A non-matching path is not an error; it simply means the
-canonicalization rule did not apply.
+Operational rules:
+
+- The two prefixes MUST be declared by the side that produced the
+  evidence (e.g. wrapper-emitted manifest, environment variable, or
+  CLI flag). The projector MUST NOT infer them from input path values,
+  mktemp templates, or runtime-name heuristics.
+- The projector MUST treat the prefixes as opaque syntactic strings.
+  It MUST NOT decode them for runtime intent, fixture name, or
+  determinism-vs-acceptance variant.
+- Absent, empty, or non-absolute prefix on either side → `status=failed`.
+- A path that does not begin with its side's declared prefix is emitted
+  unchanged. Non-matching paths are not an error; they simply mean the
+  side's evidence contains paths outside the work directory (these
+  remain rare under the existing telemetry-versus-evidence filter, but
+  are not forbidden by v0).
+- The wiring mechanism (manifest file, env var, CLI flag, or future
+  declared-input artifact) is implementation detail and out of scope
+  for this contract. v0 freezes the *shape and discipline* of the
+  declaration, not the transport.
+- Prefix values MUST NOT appear in the output. The `canonicalization`
+  block records only the *rule* that was applied per category. This
+  keeps the golden shape stable across runs whose mktemp suffixes
+  differ. Forensic reproduction of the prefix value, if needed, lives
+  in the proof-pack manifest, not the diff output.
 
 ## Surface Diff
 
@@ -294,14 +356,25 @@ capability-surface added/removed/unchanged.
 }
 ```
 
-`sdk_name` and `sdk_version` are sourced from each side's normalized
-SDK layer or fixture metadata in the same way as the runner's existing
-fixture acceptance. They are visible for diagnostics; they MUST NOT
-participate in any `surface.added`/`removed`/`unchanged` projection.
+`sdk_name` and `sdk_version` are sourced exclusively from each side's
+`layers/sdk.ndjson` file, declared as a [required side-band provenance
+input](#required-side-band-provenance-input) above. They are read from
+SDK events whose schema is `assay.runner.sdk_event.v0`. When the layer
+stream contains multiple events with consistent `sdk_name` and
+`sdk_version` values (the v0 expected case for the accepted fixtures),
+the projector emits those values; when the layer stream contains
+inconsistent values within a single side, the projector MUST emit
+`status=failed` rather than picking one silently.
+
+These values are visible for diagnostics; they MUST NOT participate in
+any `surface.added`/`removed`/`unchanged` projection.
 
 Adding further `sdk_metadata` fields (e.g. SDK feature flags) requires
 a separate contract update. v0 accepts exactly `sdk_name` and
-`sdk_version` under `base` and `head`.
+`sdk_version` under `base` and `head`. Sourcing `sdk_metadata` from
+anywhere other than `layers/sdk.ndjson` (for example from fixture
+filenames, environment variables, or proof-pack metadata) is
+explicitly forbidden in v0.
 
 ## Unbound Evidence
 
@@ -345,7 +418,7 @@ contract conformance check.
 | `partial:health` | At least one evidence set can be parsed but has incomplete health (e.g. ring-buffer drops, incomplete cgroup correlation) |
 | `partial:correlation` | Health is sufficient to parse, but at least one within-runtime correlation report is partial, ambiguous, or lacks stable binding identity |
 | `partial:unbound` | Reserved for a future per-binding capability artifact; v0 producers MUST NOT emit this status from run-global capability-surface values |
-| `failed` | Required artifacts are missing, schema strings are unsupported, run ids are internally inconsistent, deterministic parsing fails, `base_runtime == head_runtime`, or `base_runtime`/`head_runtime` is not in the [runtime identifier table](#runtime-identifiers) |
+| `failed` | Required artifacts are missing (including `layers/sdk.ndjson` on either side), schema strings are unsupported, run ids are internally inconsistent, deterministic parsing fails, `base_runtime == head_runtime`, `base_runtime`/`head_runtime` is not in the [runtime identifier table](#runtime-identifiers), `base_work_dir_prefix` or `head_work_dir_prefix` is absent, empty, or not an absolute path ending with `/`, or `layers/sdk.ndjson` on a single side contains inconsistent `sdk_name`/`sdk_version` values |
 
 `partial:*` diffs may be useful for triage, but they are not clean
 evidence for any further claim. `ringbuf_drops > 0` always prevents
@@ -360,11 +433,12 @@ meaning-preserving:
   MUST produce the same output as applying them once. Formally, for the
   projector `P`: `P(P(x)) == P(x)` for any valid input `x`.
 - **Meaning-preserving.** The rules MUST only remove explicitly
-  declared fixture plumbing as listed in
-  [Configured Prefixes](#configured-prefixes). They MUST NOT infer
-  semantic equivalence, synthesize binding identity, rewrite tool
-  names, rewrite policy decision summaries, or alter capability values
-  beyond the A1 prefix rule.
+  declared fixture plumbing as defined by the per-side prefix
+  declaration in
+  [Per-Side Prefix Declaration](#per-side-prefix-declaration). They
+  MUST NOT infer semantic equivalence, synthesize binding identity,
+  rewrite tool names, rewrite policy decision summaries, or alter
+  capability values beyond the A1 prefix rule.
 
 Intra-runtime idempotence (`diff(X, X)` where both sides come from the
 same runtime fixture) is **not** an acceptance check for this contract.
