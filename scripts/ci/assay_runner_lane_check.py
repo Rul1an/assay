@@ -573,6 +573,72 @@ def self_test() -> None:
     assert "Dependabot maintainer flow" in guidance
     assert "gates=openai-agents-kernel-policy" in guidance
 
+    # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
+    # longer consumes the assay-runner-spike wrapper. The check is
+    # encoded here in self_test rather than as a runtime workflow step
+    # so it travels with the lane-check helper and runs on every PR
+    # touching the classifier itself, including any future PR that
+    # might silently re-introduce a spike dependency.
+    _assert_assay_cli_does_not_consume_spike()
+
+
+def _assert_assay_cli_does_not_consume_spike() -> None:
+    """Slice 6B invariant: assay-cli must consume the Runner candidate
+    only through its public schema/core/linux crates, never through
+    the assay-runner-spike compatibility wrapper.
+
+    Two mechanical conditions:
+
+    1. `crates/assay-cli/Cargo.toml` does not declare
+       `assay-runner-spike` as a dependency.
+    2. No source file under `crates/assay-cli/` references the
+       `assay_runner_spike::` path.
+
+    Either condition appearing means external-style consumption has
+    silently regressed; the assertion failure message names exactly
+    which condition fires.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+
+    cli_cargo = root / "crates" / "assay-cli" / "Cargo.toml"
+    if cli_cargo.exists():
+        cargo_text = cli_cargo.read_text()
+        # Match `assay-runner-spike` only when it appears as a top-level
+        # dependency key, not when it appears inside a comment or string.
+        # Cargo dep keys look like: `assay-runner-spike = ...`
+        if re.search(r"(?m)^assay-runner-spike\s*=", cargo_text):
+            raise AssertionError(
+                "Assay still consumes spike internals: "
+                "`crates/assay-cli/Cargo.toml` declares `assay-runner-spike` "
+                "as a dependency. Phase 2D Slice 6B requires assay-cli to "
+                "depend on assay-runner-{schema,core,linux} directly. "
+                "See docs/reference/runner/assay-consumes-runner-external.md."
+            )
+
+    cli_src = root / "crates" / "assay-cli" / "src"
+    if cli_src.is_dir():
+        offenders: list[str] = []
+        for path in cli_src.rglob("*.rs"):
+            try:
+                content = path.read_text()
+            except OSError:
+                continue
+            if "assay_runner_spike::" in content:
+                offenders.append(str(path.relative_to(root)))
+        if offenders:
+            joined = ", ".join(offenders)
+            raise AssertionError(
+                "Assay still consumes spike internals: "
+                f"the following file(s) under `crates/assay-cli/src/` "
+                f"reference `assay_runner_spike::`: {joined}. "
+                "Phase 2D Slice 6B requires assay-cli to import from "
+                "assay-runner-{schema,core,linux} directly. See "
+                "docs/reference/runner/assay-consumes-runner-external.md."
+            )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()

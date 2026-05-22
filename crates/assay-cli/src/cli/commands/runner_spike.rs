@@ -1,4 +1,5 @@
-use assay_runner_spike::{RunSpec, SDK_EVENT_SCHEMA};
+use assay_runner_core::RunSpec;
+use assay_runner_schema::SDK_EVENT_SCHEMA;
 use clap::{Args, Subcommand};
 use std::fs::File;
 use std::path::PathBuf;
@@ -126,8 +127,9 @@ async fn cmd_run_with_kernel_capture(_args: RunnerSpikeRunArgs) -> anyhow::Resul
 #[cfg(target_os = "linux")]
 async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
     use assay_monitor::Monitor;
+    use assay_runner_core::KernelLayerBuilder;
     use assay_runner_linux::CgroupManager;
-    use assay_runner_spike::{CgroupCorrelationStatus, KernelLayerBuilder};
+    use assay_runner_schema::CgroupCorrelationStatus;
     use std::time::{Duration, Instant};
     use tokio_stream::StreamExt;
 
@@ -304,7 +306,7 @@ fn apply_kernel_capture_child_env(command: &mut tokio::process::Command, spec: &
 #[cfg(target_os = "linux")]
 async fn drain_kernel_events(
     stream: &mut assay_monitor::EventStream,
-    builder: &mut assay_runner_spike::KernelLayerBuilder,
+    builder: &mut assay_runner_core::KernelLayerBuilder,
     duration: std::time::Duration,
 ) -> anyhow::Result<bool> {
     use tokio_stream::StreamExt;
@@ -407,7 +409,7 @@ fn write_u32_decimal(value: u32, buf: &mut [u8; 32]) -> usize {
 fn apply_policy_then_sdk_logs_if_requested(
     spec: &RunSpec,
     args: &RunnerSpikeRunArgs,
-    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+    archive: &mut assay_runner_core::RunnerSpikeArchive,
 ) -> anyhow::Result<()> {
     // Policy must be applied before SDK: SDK cross-checks read policy
     // correlation bindings and the mismatch determinism gate relies on stable
@@ -420,7 +422,7 @@ fn apply_policy_then_sdk_logs_if_requested(
 fn apply_policy_decision_log_if_requested(
     spec: &RunSpec,
     args: &RunnerSpikeRunArgs,
-    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+    archive: &mut assay_runner_core::RunnerSpikeArchive,
 ) -> anyhow::Result<()> {
     let Some(path) = args.policy_decision_log.as_ref() else {
         return Ok(());
@@ -433,7 +435,7 @@ fn apply_policy_decision_log_if_requested(
         )
     })?;
     let capture =
-        assay_runner_spike::PolicyLayerCapture::from_decision_ndjson(spec.run_id.clone(), &bytes)?;
+        assay_runner_core::PolicyLayerCapture::from_decision_ndjson(spec.run_id.clone(), &bytes)?;
     capture.apply_to_archive(archive)?;
     Ok(())
 }
@@ -441,7 +443,7 @@ fn apply_policy_decision_log_if_requested(
 fn apply_sdk_event_log_if_requested(
     spec: &RunSpec,
     args: &RunnerSpikeRunArgs,
-    archive: &mut assay_runner_spike::RunnerSpikeArchive,
+    archive: &mut assay_runner_core::RunnerSpikeArchive,
 ) -> anyhow::Result<()> {
     let Some(path) = args.sdk_event_log.as_ref() else {
         return Ok(());
@@ -453,15 +455,14 @@ fn apply_sdk_event_log_if_requested(
             path.display()
         )
     })?;
-    let capture =
-        assay_runner_spike::SdkLayerCapture::from_sdk_ndjson(spec.run_id.clone(), &bytes)?;
+    let capture = assay_runner_core::SdkLayerCapture::from_sdk_ndjson(spec.run_id.clone(), &bytes)?;
     capture.apply_to_archive(archive)?;
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn cgroup_correlation_label(status: assay_runner_spike::CgroupCorrelationStatus) -> &'static str {
-    use assay_runner_spike::CgroupCorrelationStatus;
+fn cgroup_correlation_label(status: assay_runner_schema::CgroupCorrelationStatus) -> &'static str {
+    use assay_runner_schema::CgroupCorrelationStatus;
 
     match status {
         CgroupCorrelationStatus::Clean => "clean",
