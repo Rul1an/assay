@@ -17,6 +17,23 @@ discipline, SDK metadata consistency).
 
 The script never reads raw telemetry, never reads proof packs, never reaches
 the network, and never writes outside its declared `--output` path.
+
+Failure semantics
+-----------------
+
+The contract documents a `status=failed` value for invalid inputs such as
+unknown runtime identifiers, same-runtime diffs, absent/invalid work-dir
+prefixes, missing `layers/sdk.ndjson`, or inconsistent SDK metadata. This
+reference projector instead raises `ValidationError` on those conditions
+and does not emit a partially-formed diff object. The choice is deliberate
+and mirrors the sibling `assay_runner_capability_diff_validate.py`
+behaviour: structural prerequisites raise; runtime conditions (health,
+correlation) downgrade to `partial:*` via the normal status semantics.
+
+The contract's `failed` status remains documented for future projector
+implementations that prefer surfacing structural problems as data rather
+than exit codes. v0 producers that emit `status=failed` MUST still
+populate every required envelope field; this script does not, by choice.
 """
 
 from __future__ import annotations
@@ -543,9 +560,22 @@ def validate_diff_structure(diff: dict[str, Any]) -> None:
             if not isinstance(section.get(key), list):
                 raise ValidationError(f"surface.{category}.{key} must be an array")
             values = section[key]
+            # Validate element types BEFORE sorting so mixed-type lists
+            # produce a ValidationError, not an unhandled TypeError that
+            # would bypass main()'s ValidationError handler.
+            for index, item in enumerate(values):
+                if not isinstance(item, str):
+                    raise ValidationError(
+                        f"surface.{category}.{key}[{index}] must be a string, "
+                        f"got {type(item).__name__}"
+                    )
             if sorted(values) != values:
                 raise ValidationError(
                     f"surface.{category}.{key} must serialize in stable lexicographic order"
+                )
+            if len(set(values)) != len(values):
+                raise ValidationError(
+                    f"surface.{category}.{key} must not contain duplicates"
                 )
 
     binding_ids = diff["binding_ids"]
@@ -787,8 +817,22 @@ def self_test() -> None:
         actual_text = json.dumps(actual, indent=2)
         expected_text = json.dumps(expected, indent=2)
         raise ValidationError(
-            "S5 ↔ Gemini projection does not match committed golden\n"
+            "S5 ↔ Gemini projection does not match committed golden (structural)\n"
             f"actual:\n{actual_text}\nexpected:\n{expected_text}"
+        )
+
+    # Byte-equal check on top of structural equality. Python dict equality is
+    # order-insensitive, but byte determinism of the serialized JSON IS
+    # load-bearing per the contract (golden compared byte-for-byte across
+    # implementations). Compare the projector's serialized form (using the
+    # exact write_json formatting: indent=2, single trailing newline) to the
+    # raw file bytes of the committed golden.
+    actual_serialized = json.dumps(actual, indent=2) + "\n"
+    expected_bytes = EXPECTED_GOLDEN.read_text()
+    if actual_serialized != expected_bytes:
+        raise ValidationError(
+            "S5 ↔ Gemini projection does not match committed golden byte-for-byte. "
+            "Key order, indentation, or whitespace drift detected."
         )
 
     # Property assertions
@@ -975,6 +1019,44 @@ def self_test() -> None:
             _mutated(lambda d: d["binding_ids"].__setitem__("added", []))
         ),
     )
+
+    # Finding 3 regression: surface arrays must reject non-string elements
+    # and duplicates as ValidationError (not unhandled TypeError from sorted())
+    _expect_raises(
+        "surface array contains non-string element",
+        lambda: validate_diff_structure(
+            _mutated(lambda d: d["surface"]["filesystem_paths"]["added"].append(42))
+        ),
+    )
+    _expect_raises(
+        "surface array contains bool element",
+        lambda: validate_diff_structure(
+            _mutated(lambda d: d["surface"]["mcp_tools"]["unchanged"].append(True))
+        ),
+    )
+    _expect_raises(
+        "surface array contains duplicate values",
+        lambda: validate_diff_structure(
+            _mutated(
+                lambda d: d["surface"]["mcp_tools"]["unchanged"].append(
+                    d["surface"]["mcp_tools"]["unchanged"][0]
+                )
+            )
+        ),
+    )
+
+    # Finding 2 regression: byte-equal check must catch key-order drift even
+    # when dict equality (==) would pass. Reverse the top-level key order of
+    # the expected golden and serialize: structurally equal, byte-different.
+    reversed_order = {key: expected[key] for key in reversed(list(expected))}
+    if reversed_order == expected:
+        reversed_text = json.dumps(reversed_order, indent=2) + "\n"
+        expected_text = EXPECTED_GOLDEN.read_text()
+        if reversed_text == expected_text:
+            raise ValidationError(
+                "byte-equal regression: reversed-key serialization should differ "
+                "from committed golden bytes"
+            )
 
 
 # ---------------------------------------------------------------------------
