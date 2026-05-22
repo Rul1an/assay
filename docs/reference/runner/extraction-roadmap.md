@@ -376,6 +376,13 @@ Resolves: cleaner separation when Slice 7 needs to split the repo.
 
 ### Slice 6 — Assay consumes Runner as external
 
+> Slice 6 splits into a docs-only design note (6A) and a mechanical
+> implementation PR (6B). The design note settles the five
+> questions (public Runner API surface, forbidden imports, smoke
+> test, what stays in assay-cli, kill criteria) before any imports
+> are rewritten. See [`assay-consumes-runner-external.md`](assay-consumes-runner-external.md)
+> for the design note (Phase 2D Slice 6A).
+
 **Scope.** Within the same monorepo, restructure dependencies so that
 Assay CLI and Assay-Harness depend on the *public API* of
 `assay-runner-core` (and `assay-runner-schema`), not on internal
