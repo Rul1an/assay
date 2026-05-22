@@ -1,11 +1,19 @@
 # Gemini Identity Probe Cassettes
 
 This directory holds checked-in cassettes for the Gemini identity preservation
-probe and (in a later PR) the Gemini second-runtime fixture.
+probe and the Gemini second-runtime fixture.
 
-**Cassette content is added by maintainer curation only.** This README is a
-placeholder so the directory exists in repo; it does not contain any cassette
-data yet.
+**Cassette content is added by maintainer curation only.** Cassettes are
+curated artifacts with auth headers and query parameters redacted before
+commit, and they are the source of truth for offline replay during delegated
+acceptance.
+
+Current cassettes:
+
+- `identity-probe.yaml` — one-shot record/replay verifying the level-3 identity
+  assumption from #1305 (see `MAINTAINER-PROBE.md`)
+- `fixture.yaml` — canonical Gemini second-runtime fixture cassette replayed
+  by `fixture.py` during delegated `gates=all` acceptance
 
 ## Redaction contract
 

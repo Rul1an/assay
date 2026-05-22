@@ -42,6 +42,12 @@ if [ ! -d "$GEMINI_PYTHONPATH" ]; then
   exit 40
 fi
 
+# Export fixture-local deps for every Python invocation in this script,
+# including the verification heredoc that runs extract_cassette_tool_call_id.py
+# (which imports PyYAML). Without this, the script silently relies on system
+# PyYAML, which delegated runners do not guarantee.
+export PYTHONPATH="$GEMINI_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
+
 GEMINI_CASSETTE="$GEMINI_FIXTURE_DIR/cassettes/fixture.yaml"
 if [ ! -f "$GEMINI_CASSETTE" ]; then
   echo "SKIP: Gemini fixture cassette not found at $GEMINI_CASSETTE." >&2

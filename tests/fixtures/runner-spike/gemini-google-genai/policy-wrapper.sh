@@ -24,7 +24,7 @@ fi
 : "${ASSAY_RUNNER_RUN_ID:?ASSAY_RUNNER_RUN_ID must be set}"
 : "${ASSAY_RUNNER_SDK_TOOL_CALL_ID:?ASSAY_RUNNER_SDK_TOOL_CALL_ID must be set (Gemini fixture binds policy id to SDK id from cassette)}"
 
-ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
 MCP_FILE_SERVER="${ASSAY_RUNNER_MCP_FILE_SERVER:-$ROOT/tests/fixtures/runner-spike/mcp_file_server.py}"
 work_dir=$1
 mkdir -p "$work_dir"

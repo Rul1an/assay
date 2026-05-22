@@ -20,7 +20,7 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 
-ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/gemini-google-genai"
 FIXTURE_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-python3}"
 FIXTURE_SCRIPT="${ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT:-$FIXTURE_DIR/fixture.py}"

@@ -310,12 +310,17 @@ mod tests {
     }
 
     #[test]
-    fn gemini_shim_is_accepted_and_records_self_reported_sdk_layer_after_events() {
+    fn gemini_shim_is_accepted_in_allowlist() {
         // The Gemini Python google-genai second-runtime fixture (selected by
         // #1305 via #1306) carries its own bundle metadata via the
         // `gemini-google-genai` shim identifier. Reusing `openai-agents` would
         // mislead any downstream tool that reads `agent_shim` from the bundle.
         // Keep the allowlist explicit; do not relax validation more broadly.
+        //
+        // This test asserts only the allowlist acceptance plus the skeleton
+        // archive's default SDK-layer state (Absent). SDK-layer transition to
+        // SelfReported on event application is covered by the SDK-capture
+        // tests in src/sdk.rs and src/health.rs, not here.
         let archive = RunSpec::new(vec!["true".to_string()])
             .with_run_id("run_001")
             .with_platform("linux")
@@ -323,8 +328,6 @@ mod tests {
             .skeleton_archive()
             .unwrap();
 
-        // Skeleton archive (no SDK events consumed yet) still reports Absent;
-        // SDK capture transitions to SelfReported once events are applied.
         assert_eq!(archive.observation_health.sdk_layer, SdkLayerStatus::Absent);
     }
 
