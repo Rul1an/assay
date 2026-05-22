@@ -53,10 +53,15 @@ layers simultaneously and bound together by a stable `tool_call_id`:
 - **SDK layer.** Normalized agent tool-call events: what the SDK
   claimed it did.
 
-The run produces one archive containing five canonical JSON artifacts
-plus two ndjson layer streams. Schemas are frozen as
-`assay.runner.*.v0`. The archive verifies through the existing Assay
-evidence path; runner bundles do not have their own verifier.
+The run produces one deterministic `.tar.gz` archive containing three
+load-bearing v0 JSON artifacts (`observation-health.json`,
+`capability-surface.json`, `correlation-report.json`), an archive
+manifest (`manifest.json` with file digests), a whole-archive event
+stream (`events.ndjson`), and three per-layer event streams
+(`layers/kernel.ndjson`, `layers/policy.ndjson`, `layers/sdk.ndjson`).
+Schemas are frozen as `assay.runner.*.v0`. The archive verifies through
+the existing Assay evidence path; runner bundles do not have their own
+verifier.
 
 The most load-bearing artifact is **observation health**. It is the
 contract that the bundle is *not lying about gaps*. If the kernel

@@ -19,7 +19,7 @@ If you arrived here from
 or the AgentSight
 [Issue #44](https://github.com/eunomia-bpf/agentsight/issues/44),
 this is the conceptual companion to the
-[Phase 1 + 2 retrospective](../../notes/ASSAY-RUNNER-PHASE-1-AND-2-RETROSPECTIVE-2026-05-22.md).
+[Phase 1 + 2 retrospective](../../../notes/ASSAY-RUNNER-PHASE-1-AND-2-RETROSPECTIVE-2026-05-22.md).
 
 ## What This Is Not
 
@@ -32,26 +32,41 @@ this is the conceptual companion to the
 
 ## What One Measured Run Produces
 
-A measured run produces one archive (tar) containing five canonical
-artifacts plus two ndjson layer streams. All five JSON artifacts are
-content-addressed and verifiable through the existing Assay evidence
-path. The schemas are frozen as `assay.runner.*.v0`.
+A measured run produces one deterministic `.tar.gz` archive. The archive
+contains, per the
+[`assay.runner.archive_manifest.v0`](../boundary-map.md) layout (see also
+the schema constants in `crates/assay-runner-schema/src/archive_manifest.rs`):
+
+- **Three load-bearing v0 JSON artifacts** that reviewers and CI gates
+  read: `observation-health.json`, `capability-surface.json`,
+  `correlation-report.json`. Each carries an `assay.runner.*.v0` schema
+  string.
+- **One archive manifest**: `manifest.json` (schema
+  `assay.runner.archive_manifest.v0`) listing every file in the archive
+  with its SHA-256 and byte count.
+- **One whole-archive event stream**: `events.ndjson`.
+- **Three per-layer event streams**: `layers/kernel.ndjson`,
+  `layers/policy.ndjson`, `layers/sdk.ndjson`.
 
 ```text
-run-archive.tar
-├── manifest.json                 # archive manifest with file digests
+run-archive.tar.gz
+├── manifest.json                 # archive manifest (schema, run_id, files[])
 ├── observation-health.json       # honest health-of-observation report
 ├── capability-surface.json       # what the run touched (paths/tools/decisions)
 ├── correlation-report.json       # SDK/policy/kernel correlation by tool_call_id
+├── events.ndjson                 # whole-archive event stream
 └── layers/
     ├── kernel.ndjson             # cgroup-scoped normalized kernel events
     ├── policy.ndjson             # MCP allow/deny decisions
     └── sdk.ndjson                # normalized SDK tool-call events
 ```
 
-The five JSON files are what reviewers, CI gates, and cross-runtime diff
-projections actually read. The ndjson streams are the layer-level evidence
-the JSON files are computed from.
+The three load-bearing JSON files are what reviewers, CI gates, and
+cross-runtime diff projections actually read. The ndjson streams are the
+layer-level evidence the JSON files are computed from. The archive
+verifies through the existing Assay evidence path: every file is hashed
+and recorded in `manifest.json`, and the runner does not ship its own
+verifier.
 
 ## Observation Health — Honesty About Gaps
 
