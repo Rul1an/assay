@@ -53,11 +53,35 @@ those other documents, not here.
 
 ## Per-PR Discipline Rule
 
-From now on, every Runner-impacting PR (any PR that the
-[`Runner CI lane check`](ci-lanes.md) classifies as anything other than
-`Gate.NONE` for unrelated docs) MUST include a short "Extraction
-boundary impact" section in its body that takes exactly one of three
-shapes:
+From now on, every **Runner-impacting** PR MUST include a short
+"Extraction boundary impact" section in its body that takes exactly
+one of three shapes.
+
+A PR is *Runner-impacting* when it changes any of:
+
+- `crates/assay-runner-spike/` (or any future `crates/assay-runner-*/`)
+- `crates/assay-monitor/` or `crates/assay-ebpf/` (Assay-owned runner
+  substrate that the boundary table calls out)
+- `crates/assay-cli/src/cgroup.rs` or `crates/assay-cli/src/cli/commands/runner_spike.rs`
+- `scripts/ci/runner-spike-*.sh` or
+  `scripts/ci/assay_runner_*_validate.py`
+- `tests/fixtures/runner-spike/`
+- `.github/workflows/runner-spike-delegated.yml` or
+  `.github/workflows/runner-spike-sdk.yml`
+- `docs/reference/runner/*.md` (this includes the contracts, the
+  boundary map, this roadmap, and any future runner schema or golden
+  file under `docs/reference/runner/`)
+
+This is broader than the lane-check classifier's `Gate.NONE` boundary,
+because lane-check decides whether a PR needs delegated proof and not
+whether it changes extraction boundaries. Many Gate.NONE PRs
+(e.g. edits to `docs/reference/runner/boundary-map.md` itself, or to a
+runner schema sidecar) DO move extraction boundaries and therefore
+fall under the discipline rule below. The two checks are
+complementary, not overlapping.
+
+The Extraction boundary impact section must take exactly one of
+three shapes:
 
 A. **Resolves a blocker.** Cite which structural blocker from
    [`platform-and-extraction-readiness.md` § Extraction Readiness](platform-and-extraction-readiness.md#extraction-readiness)
@@ -107,15 +131,15 @@ publish-ready crate `crates/assay-runner-schema`.
 Crate contents:
 
 - `assay.runner.observation_health.v0` types (from
-  `assay-runner-spike/src/health.rs`)
+  `crates/assay-runner-spike/src/health.rs`)
 - `assay.runner.capability_surface.v0` types (from
-  `assay-runner-spike/src/surface.rs`)
+  `crates/assay-runner-spike/src/surface.rs`)
 - `assay.runner.correlation_report.v0` types (from
-  `assay-runner-spike/src/correlation.rs`)
+  `crates/assay-runner-spike/src/correlation.rs`)
 - `assay.runner.sdk_event.v0` types (currently inline in
-  `assay-runner-spike/src/sdk.rs`)
+  `crates/assay-runner-spike/src/sdk.rs`)
 - Archive manifest schema constants and value types (currently inline
-  in `assay-runner-spike/src/archive.rs`; this is the manifest semantics
+  in `crates/assay-runner-spike/src/archive.rs`; this is the manifest semantics
   half of the archive boundary conflict from
   [`boundary-map.md` § Active Boundary Conflicts](boundary-map.md#active-boundary-conflicts))
 - Schema string constants and version constants
@@ -151,11 +175,11 @@ semantics half).
 Crate contents:
 
 - `RunSpec` and execution orchestration (from
-  `assay-runner-spike/src/run.rs`)
+  `crates/assay-runner-spike/src/run.rs`)
 - Archive assembly and writing (from
-  `assay-runner-spike/src/archive.rs`, *after* manifest schema moved
+  `crates/assay-runner-spike/src/archive.rs`, *after* manifest schema moved
   to `assay-runner-schema` in Slice 1)
-- Normalizers: kernel, policy, SDK (from `assay-runner-spike/src/`
+- Normalizers: kernel, policy, SDK (from `crates/assay-runner-spike/src/`
   using schema types)
 - Re-export surface for current `assay-runner-spike` consumers
 
@@ -378,6 +402,102 @@ target.
 
 No code, fixture, or workflow change opens Slice 1. That PR is the
 opening. This document only sequences and disciplines.
+
+## Phase 2D Visibility — Standalone Usefulness vs Repository Extraction
+
+A common misreading of this roadmap is to treat "extraction" and
+"standalone usefulness" as the same thing. They are not. This section
+exists to make the distinction explicit before any future PR
+conflates them.
+
+### Where Assay-Runner can be useful on its own
+
+Assay-Runner can be valuable to users who do not need
+Assay-Harness, Trust Basis compilation, or the higher-level Assay
+product surfaces. Plausible scenarios:
+
+- **Own policy engine.** An organisation already has an internal
+  policy / review layer and wants only reliable agent-run evidence:
+  `observation-health`, `capability-surface`, `correlation-report`.
+  Their own governance interprets acceptability.
+- **Agent runtime benchmarking.** Comparing OpenAI Agents, Gemini,
+  Anthropic, Vercel AI SDK, etc. on observed capabilities without
+  Assay's acceptability semantics.
+- **Runtime-security / research tooling.** Using eBPF + SDK/policy
+  correlation as a measurement instrument without adopting the full
+  Assay product layer.
+- **CI attestation.** A CI platform produces a proof-pack artifact on
+  agent runs so downstream systems can review later.
+- **Regulated environments.** Evidence generation runs in a
+  restricted environment while policy interpretation happens
+  elsewhere.
+- **Agent framework maintainers.** Adding a Runner fixture to make a
+  Python/JS agent framework measurable, without learning Harness.
+
+### Standalone usefulness is not the same as repository extraction
+
+> **Kernzin.** Standalone usefulness is not the same as repository
+> extraction. Phase 2D's first goal is to make Assay-Runner externally
+> consumable *inside* the monorepo; a separate repository is only
+> justified after a real external consumer exists.
+
+Standalone usefulness is achieved by Slices 1-6 of this roadmap:
+
+- own crates (Slices 1-4)
+- own docs and schemas (already on `main`)
+- own fixture package (Slice 5)
+- own public API consumed externally even within the monorepo
+  (Slice 6)
+- own CI lane (already on `main` via the lane-check classifier)
+
+That is roughly 80% of the standalone-product experience without the
+governance, branch-protection, release-cycle, and CI surface costs of
+a repository split.
+
+### Why repository extraction is the wrong first goal
+
+A premature repo split has five specific costs that the roadmap
+chooses to avoid:
+
+1. **Contract churn.** While `assay.runner.*.v0` schemas are still
+   moving (Slice 1 moves their crate hosting), a separate repo makes
+   every schema change cross-repository.
+2. **Dual CI / governance.** Two PR streams, two release cycles,
+   two branch-protection surfaces, two security-policy files.
+3. **Boundary not yet proven.** Until Assay itself consumes Runner
+   through a public API (Slice 6), publishing a boundary externally
+   means publishing the wrong one.
+4. **No external consumer.** Optimising for a hypothetical user is
+   worse than optimising for the consumer who actually arrives.
+5. **Evidence / Harness interaction is still informative.**
+   Harness/Trust-Basis consumption is still surfacing useful pressure
+   on Runner contracts. Early split freezes the wrong abstractions.
+
+### When repository extraction is justified
+
+Repository extraction is justified only when **all three** types of
+readiness hold simultaneously, not just the technical one:
+
+| Readiness type | What it covers |
+|---|---|
+| **Technical** | Slices 1-6 landed: schema crate, core crate, cgroup/platform boundary, fixture package boundary, archive verification without copying Assay internals |
+| **Process** | CI lane classification stable, delegated proof recording stable, ringbuf diagnostics explicitly decided per [`#1271`](https://github.com/Rul1an/assay/issues/1271), 4-6 weeks without contract churn, maintainers can explain the boundary without archaeology |
+| **Product** | Assay consumes Runner as an external dependency (Slice 6), at least one real non-spike external consumer or use case exists, the split is justified because someone needs Runner standalone — not because the split is technically possible |
+
+The hardest gate is the **product** one. Slices 1-6 are work the
+maintainers control; the external consumer is not. A roadmap that
+treats the product gate as a foregone conclusion is wrong about its
+own kill criteria above.
+
+### What this section does NOT do
+
+- It does not name an external consumer.
+- It does not pre-approve a repository name, license, or publication
+  target.
+- It does not claim Runner is "released" or "published".
+- It does not loosen any acceptance gate or v0 contract.
+- It does not change the Slice sequence or the per-PR discipline
+  rule above.
 
 ## References
 
