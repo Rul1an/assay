@@ -64,6 +64,15 @@ Current structural blockers, in priority order:
 4. There is no non-spike external consumer of the runner bundle format. The
    capability-diff projection helper is an internal consumer.
 
+Phase 2D Slice 4 landed as a boundary-freeze docs slice rather than
+as a code-extraction slice (see
+[`extraction-roadmap.md` § Slice 4](extraction-roadmap.md#slice-4--platform-composition-boundary--landed-re-scoped)).
+It does not resolve any of the four named blockers; it documents
+that `assay-monitor` and `assay-ebpf` stay Assay-owned shared
+substrate and that the `PlatformAdapter` trait is deferred until a
+second platform spike opens, `assay-runner-core` gains a platform
+call site, or an external consumer requires non-CLI composition.
+
 Triggers for reopening extraction readiness review:
 
 - An external party concretely asks to consume the runner bundle format

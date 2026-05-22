@@ -249,31 +249,84 @@ cgroup placement.
 
 Resolves: blocker #3 fully.
 
-### Slice 4 — Platform adapter boundary
+### Slice 4 — Platform composition boundary ✅ LANDED (re-scoped)
 
-**Scope.** Make the runner's Linux-specific surface explicit, so future
-macOS or Windows work has a documented adapter contract instead of
-ad-hoc parallel paths.
+> **Re-scope note.** The original Slice 4 text below proposed moving
+> the eBPF monitor adapter into `crates/assay-runner-linux` and
+> introducing a `PlatformAdapter` trait in `assay-runner-core`. After
+> Slices 1-3 landed, that framing no longer matched the actual code
+> shape:
+>
+> - `assay-monitor` is **shared Assay measurement substrate**: it is
+>   consumed by the runner candidate AND by Assay's own
+>   `assay monitor` standalone CLI command. Moving it into a runner
+>   crate would break the non-runner consumer.
+> - `assay-ebpf` is **Assay-owned Linux kernel program substrate**;
+>   it is the kernel-side counterpart of the shared measurement
+>   substrate.
+> - `assay-runner-core` itself has no platform-specific call sites
+>   today. The cgroup/process-spawn composition lives in
+>   `assay-cli/src/cli/commands/runner_spike.rs`. A `PlatformAdapter`
+>   trait in core would have no caller inside core, only in CLI.
+>
+> Slice 4 therefore landed as a **boundary-freeze docs slice**, not
+> as a code-extraction slice. It explicitly confirms that
+> `assay-monitor` and `assay-ebpf` stay Assay-owned, that
+> `assay-runner-linux` remains placement-primitives-only, and that
+> the runner composition currently lives in `assay-cli` as a
+> temporary layer until Slice 6.
 
-Probable shape: `crates/assay-runner-linux` (if not already created by
-Slice 3 Option B), containing:
+**Actual scope (boundary-freeze).**
 
-- cgroup setup/placement
-- eBPF program loading and monitor adapter
-- event capture session shape
+1. **Boundary-map ownership lines made explicit.** Each of the four
+   ownership rows below now states its role unambiguously:
+   - `assay-monitor` → shared Assay measurement substrate (runner +
+     standalone Assay command).
+   - `assay-ebpf` → Assay-owned Linux kernel program substrate.
+   - `assay-runner-linux` → runner Linux **placement primitives
+     only**; no eBPF/monitor inside.
+   - `assay-cli/src/cli/commands/runner_spike.rs` → temporary
+     composition layer until Slice 6.
+2. **`PlatformAdapter` trait deferred.** Not introduced. The trait
+   has no current consumer inside `assay-runner-core` and no second
+   implementation to validate it against. Premature abstraction risks
+   freezing a shape that does not match the eventual macOS/Windows
+   reality.
+3. **No code move.** `assay-monitor` and `assay-ebpf` stay in their
+   current crates. `assay-runner-linux` remains cgroup-only.
+   `runner_spike.rs` composition helpers (pre-exec PID writers,
+   retry helpers) stay in CLI because they are tightly coupled to
+   the spawn flow that lives there.
 
-`assay-runner-core` then depends on a platform-adapter trait, with
-`assay-runner-linux` as the only implementation.
+**Re-open triggers (when to revisit the deferred trait).**
 
-**Out of scope for this slice:** any macOS or Windows code. The
-adapter trait must be small enough that a future macOS or Windows
-spike can implement it without modifying `assay-runner-core`, but the
-roadmap does NOT open those platform spikes here (see
-[`platform-and-extraction-readiness.md`](platform-and-extraction-readiness.md)
-for those triggers).
+The `PlatformAdapter` trait is deferred until **any one** of:
 
-Resolves: structural readiness for macOS/Windows work without
-re-fragmenting the runner core.
+1. A second platform spike (macOS or Windows) opens under
+   [`platform-and-extraction-readiness.md`](platform-and-extraction-readiness.md).
+   The trait then has a real second implementation to validate against
+   and is no longer speculative.
+2. `assay-runner-core` itself gains a platform-abstraction call site
+   (today it has none — the cgroup/spawn composition lives in
+   `assay-cli`, not in core). If core acquires a platform-dependent
+   surface, the trait gains a real caller.
+3. An external consumer of `assay-runner-core` requires a non-CLI
+   composition path. That would mean Slice 6 has opened a public
+   runner entrypoint that bypasses `assay-cli/src/cli/commands/runner_spike.rs`
+   and that entrypoint needs to express platform variability through
+   a trait rather than a direct dependency.
+
+Until at least one of those fires, the platform boundary stays as
+described in the boundary-map: `assay-runner-linux` is the Linux
+placement crate, `assay-monitor` is shared substrate, and the
+composition lives in `assay-cli`.
+
+**Resolves.** Structural clarity about what is and is not in the
+runner platform crate. Does NOT resolve any of the four named
+extraction blockers — blocker #3 was already resolved by Slice 3,
+and #4 is Slice 6 territory. Slice 4's value is preventing
+premature abstraction and documenting where future platform work
+will plug in.
 
 ### Slice 5 — Fixture package boundary
 
