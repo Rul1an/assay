@@ -1,0 +1,6 @@
+# Direct fixture dependencies for the Gemini google-genai second-runtime line.
+# Compile with:
+#   uv pip compile --universal --generate-hashes --custom-compile-command "uv pip compile --universal --generate-hashes --output-file requirements.txt requirements.in" --output-file requirements.txt requirements.in
+
+google-genai==2.6.0
+vcrpy==8.0.0

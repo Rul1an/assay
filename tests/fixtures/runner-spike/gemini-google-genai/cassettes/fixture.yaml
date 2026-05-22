@@ -1,0 +1,75 @@
+interactions:
+- request:
+    body: '{"contents": [{"parts": [{"text": "Read the deterministic fixture file
+      at /tmp/assay-runner-gemini-fixture-record/gemini-input.txt."}], "role": "user"}],
+      "tools": [{"functionDeclarations": [{"description": "Read the deterministic
+      runner-spike fixture file.", "name": "read_file", "parameters": {"properties":
+      {"path": {"type": "STRING"}}, "required": ["path"], "type": "OBJECT"}}]}], "toolConfig":
+      {"functionCallingConfig": {"allowedFunctionNames": ["read_file"], "mode": "ANY"}},
+      "generationConfig": {}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '504'
+      Content-Type:
+      - application/json
+      Host:
+      - generativelanguage.googleapis.com
+      user-agent:
+      - google-genai-sdk/2.6.0 gl-python/3.14.3
+      x-goog-api-client:
+      - google-genai-sdk/2.6.0 gl-python/3.14.3
+      x-goog-api-key:
+      - REDACTED
+    method: POST
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent
+  response:
+    body:
+      string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
+        [\n          {\n            \"functionCall\": {\n              \"name\": \"read_file\",\n
+        \             \"args\": {\n                \"path\": \"/tmp/assay-runner-gemini-fixture-record/gemini-input.txt\"\n
+        \             },\n              \"id\": \"ho0csecf\"\n            },\n            \"thoughtSignature\":
+        \"EuICCt8CAQw51seSdnh5WSkufYj7dRPIXVLPbDAYJIZnTV9EQnHJ1CEwLSJnrSEUTzRJNw1CQH8KevO2Si1OxTiqse8ZEYb4TbO3ExNulH78P+tc3hLL0DBWqDvsJamwM1dxopS4yMVw0GxuJRRRTN5rMeKI8vj0LkinCCTkfdqPL0TRHp+F8kqBWHHyXECIrAvNegNtHQEqh9nk1FHbT/WU7PiaCg/0TuuxUc+QeoxCECEG6PK9bD7AFsbt0OBl7eA+S9nWGMxVJ398FgGUzCLBnhJSPNWM+Lxbx7gVIevGR0hlRUnucJLx6J52IXeP8lAduSwapcAQwiCOkg1OA/1WwzVGvbuWu0xn+ENwQp0WHtgSTcB8N7wuLyf4kwo6Z59Drh1ufkdfLKvBh5iBnugsKu3NSywnhIL1lR3Xw/XcS4XxKHPUBBICXL4+Zhxk+OeO+Lrcu3r2FbTEHyPRmXHKffcb\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"index\": 0,\n      \"finishMessage\": \"Model generated
+        function call(s).\"\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\":
+        74,\n    \"candidatesTokenCount\": 35,\n    \"totalTokenCount\": 199,\n    \"promptTokensDetails\":
+        [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 74\n
+        \     }\n    ],\n    \"thoughtsTokenCount\": 90,\n    \"serviceTier\": \"standard\"\n
+        \ },\n  \"modelVersion\": \"gemini-3.5-flash\",\n  \"responseId\": \"IBoQaouADYOZvdIP4YPL8Qk\"\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Fri, 22 May 2026 08:56:01 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=1125
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-Gemini-Service-Tier:
+      - standard
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '1357'
+    status:
+      code: 200
+      message: OK
+version: 1

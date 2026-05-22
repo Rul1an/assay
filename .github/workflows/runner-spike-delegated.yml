@@ -150,8 +150,7 @@ jobs:
           # per #1307: install may use network here during workflow setup,
           # fixture execution itself is cassette-replay only.
           python3 -m venv .venv
-          .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install --require-hashes -r requirements.txt
 
       - name: Build assay CLI
         shell: bash
