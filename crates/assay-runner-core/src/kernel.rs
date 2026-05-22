@@ -564,7 +564,7 @@ mod tests {
             "/usr/bin/python3._pth",
             "/usr/bin/python3.12._pth",
             "/usr/bin/pybuilddir.txt",
-            "/opt/actions-runner/_work/assay/assay/tests/fixtures/runner-spike/openai-agents-js/node_modules/@openai/agents/package.json",
+            "/opt/actions-runner/_work/assay/assay/runner-fixtures/openai-agents/node_modules/@openai/agents/package.json",
             "/home/github-runner/.rustup/toolchains/stable/lib/libc.so.6",
             "/opt/actions-runner/_work/assay/assay/target/debug/build/ring/out/libc.so.6",
             "/opt/actions-runner/_work/assay/assay/target/debug/deps/libc.so.6",

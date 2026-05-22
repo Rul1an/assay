@@ -322,7 +322,7 @@ fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
         // plumbing; SDK evidence is recorded from the normalized SDK layer.
         || bytes_start_with(
             path,
-            b"/opt/actions-runner/_work/assay/assay/tests/fixtures/runner-spike/openai-agents-js/node_modules",
+            b"/opt/actions-runner/_work/assay/assay/runner-fixtures/openai-agents/node_modules",
         )
         || bytes_start_with(path, b"/usr/local/lib/")
         || bytes_start_with(path, b"/usr/local/share/locale/")

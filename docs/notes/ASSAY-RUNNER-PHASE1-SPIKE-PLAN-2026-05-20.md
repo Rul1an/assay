@@ -392,8 +392,8 @@ Node subprocess that imports `@openai/agents` directly and uses a local
 deterministic model provider to force one `read_file` function-tool call:
 
 ```text
-tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js
-tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh
+runner-fixtures/openai-agents/fixture-agent.js
+runner-fixtures/openai-agents/sdk-policy-agent.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-correlation.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-three-run-determinism.sh
 scripts/ci/runner-spike-openai-agents-sdk-policy-mismatch.sh

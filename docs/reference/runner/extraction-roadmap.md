@@ -342,11 +342,17 @@ will plug in.
 >   the runtime prefix because it now lives inside the runtime
 >   package). Acceptance scripts, workflow install path, lane-check
 >   classifier rules, and runner reference docs updated accordingly.
-> - **Slice 5B — S5 OpenAI Agents fixture move + rename.** Pending.
->   `tests/fixtures/runner-spike/openai-agents-js/` moves to
->   `runner-fixtures/openai-agents/` (dropping the `-js` suffix
->   because the fixture identity is the runtime, not the
->   implementation language).
+> - **Slice 5B — S5 OpenAI Agents fixture move + rename** ✅ LANDED.
+>   `tests/fixtures/runner-spike/openai-agents-js/` moved to
+>   `runner-fixtures/openai-agents/` and the wrapper
+>   `tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh`
+>   moved to `runner-fixtures/openai-agents/sdk-policy-agent.sh`,
+>   dropping the `-js` suffix because the fixture identity is the
+>   runtime, not the implementation language. Slice 5B also renamed
+>   the SDK source-identity string emitted by the fixture from
+>   `openai-agents-js-fixture` to `openai-agents-fixture` so the
+>   on-disk fixture identity, the package-boundary directory name,
+>   and the recorded evidence stay consistent.
 
 **Scope.** Move `tests/fixtures/runner-spike/` into a runner-owned
 fixtures layout that is structured as if it were a separate package.

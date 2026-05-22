@@ -15,8 +15,8 @@ policy, and SDK correlation without introducing accidental host noise.
 |---|---|---|
 | `tests/fixtures/runner-spike/kernel-only-agent.sh` | kernel | deterministic filesystem and process evidence |
 | `tests/fixtures/runner-spike/mcp-policy-agent.sh` | policy plus kernel | deterministic MCP `read_file` policy decision |
-| `tests/fixtures/runner-spike/openai-agents-sdk-policy-agent.sh` | SDK plus policy plus kernel | combines the real OpenAI Agents SDK fixture with the policy fixture |
-| `tests/fixtures/runner-spike/openai-agents-js/fixture-agent.js` | SDK | deterministic local-model OpenAI Agents tool call |
+| `runner-fixtures/openai-agents/sdk-policy-agent.sh` | SDK plus policy plus kernel | combines the real OpenAI Agents SDK fixture with the policy fixture |
+| `runner-fixtures/openai-agents/fixture-agent.js` | SDK | deterministic local-model OpenAI Agents tool call |
 
 The three delegated determinism wrappers run the relevant acceptance path
 three times and compare normalized artifacts byte-for-byte.
@@ -50,7 +50,7 @@ kernel plus policy plus SDK fixture shape deliberately:
 | SDK stream | exactly three normalized SDK events | delegated acceptance fails with `expected three sdk events, got N` |
 | SDK sequence numbers | contiguous `seq` values starting at `0` | SDK parsing fails with a sequence-mismatch error before archive acceptance |
 | SDK event order | `tool_call_started`, `tool_call_completed`, `run_finished` | delegated acceptance fails with `sdk event sequence mismatch` |
-| SDK source | `openai-agents-js-fixture` unless explicitly overridden for diagnosis | delegated acceptance fails with `sdk event N source mismatch` |
+| SDK source | `openai-agents-fixture` unless explicitly overridden for diagnosis (renamed from `openai-agents-js-fixture` in Phase 2D Slice 5B to align with the `runner-fixtures/openai-agents/` package boundary — fixture identity, not language identity) | delegated acceptance fails with `sdk event N source mismatch` |
 | SDK package | `sdk_name=@openai/agents`, `sdk_version=0.11.4` for the accepted v0 fixture | delegated acceptance fails with `sdk_name mismatch` or `sdk_version mismatch` |
 | Tool | `read_file` | delegated acceptance fails with `sdk tool mismatch` or policy tool mismatch |
 | Tool-call binding | one shared id: `tc_runner_policy_001` | delegated acceptance fails with SDK, policy, or binding `tool_call_id` mismatch |
@@ -256,8 +256,8 @@ Fixture dependencies are part of the evidence surface when they affect emitted
 SDK events, hook names, package metadata, or policy correlation. For
 `@openai/agents` bumps:
 
-1. update `tests/fixtures/runner-spike/openai-agents-js/package.json` and
-   `tests/fixtures/runner-spike/openai-agents-js/package-lock.json` together
+1. update `runner-fixtures/openai-agents/package.json` and
+   `runner-fixtures/openai-agents/package-lock.json` together
 2. verify the fixture can load installed package metadata
 3. update the expected SDK version assertion
    (`ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION`, defaulted by the acceptance

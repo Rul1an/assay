@@ -133,7 +133,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install OpenAI Agents fixture deps
-        working-directory: tests/fixtures/runner-spike/openai-agents-js
+        working-directory: runner-fixtures/openai-agents
         shell: bash
         run: |
           set -euo pipefail

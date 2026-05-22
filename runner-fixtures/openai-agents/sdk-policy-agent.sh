@@ -6,8 +6,14 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 
-ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/openai-agents-js"
+# The wrapper lives inside the fixture package since Phase 2D Slice 5B:
+# `runner-fixtures/openai-agents/sdk-policy-agent.sh`. FIXTURE_DIR is
+# the directory of this script. ROOT is two levels up
+# (runner-fixtures/ -> repo root) and is used to locate the shared
+# cross-runtime policy agent that has not yet moved to the fixtures
+# package boundary (Slice 5C territory).
+FIXTURE_DIR="${ASSAY_RUNNER_OPENAI_FIXTURE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$FIXTURE_DIR/../.." && pwd)}"
 FIXTURE_AGENT="${ASSAY_RUNNER_OPENAI_FIXTURE_AGENT:-$FIXTURE_DIR/fixture-agent.js}"
 POLICY_AGENT="${ASSAY_RUNNER_POLICY_AGENT:-$ROOT/tests/fixtures/runner-spike/mcp-policy-agent.sh}"
 
