@@ -175,7 +175,9 @@ relocate the boundary.
    consumer. Entry discipline for that line is defined in
    [`second-runtime-plan.md`](second-runtime-plan.md); cross-runtime
    capability-diff (e.g. `diff(second_runtime, S5)`) is intentionally out of
-   Phase 2B scope.
+   Phase 2B scope. The Phase 2C cross-runtime mini-plan that follows from
+   that boundary is in
+   [`cross-runtime-diff-plan.md`](cross-runtime-diff-plan.md).
 
 Step 3 is implemented by `scripts/ci/assay_runner_capability_diff_validate.py`.
 Step 4 starts by letting the same helper project v0 diffs from explicit
