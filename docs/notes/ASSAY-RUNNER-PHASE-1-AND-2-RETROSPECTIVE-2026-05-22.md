@@ -8,9 +8,9 @@
 > Honest about the gaps.
 
 Phase 1 ran roughly from `2026-05-18` (the candidate memo) to `2026-05-21`
-(delegated acceptance). Phase 2 ran from `2026-05-22` (this document is
-written on the day the Phase 2D consolidation audit landed) backwards through
-2A, 2B, 2C, and 2D as a continuous arc. This note collapses the whole arc
+(delegated acceptance). Phase 2 ran forward through 2A, 2B, 2C, and ended
+with 2D on `2026-05-22` (the day the Phase 2D consolidation audit landed,
+and the day this document was written). This note collapses the whole arc
 into one read, because the per-phase docs are accurate but they don't tell
 the story from outside.
 
@@ -93,7 +93,7 @@ we hadn't tested*.
 ## Phase 2 — Keeping The Proof Reviewable
 
 Phase 1 produced a proof. Phase 2 had to make sure that proof did not rot
-the moment it stopped being the centre of attention. Four sub-phases came
+the moment it stopped being the center of attention. Four sub-phases came
 out of that, each with a different concern.
 
 ### Phase 2A — Freeze the contracts
