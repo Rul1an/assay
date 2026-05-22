@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Rul1an/assay/blob/main/docs/reference/runner/schema/cross-runtime-diff-v0-clean.schema.json",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/runner/schema/cross-runtime-diff-v0-clean.schema.json",
   "title": "Assay-Runner cross-runtime diff v0 (clean output)",
   "description": "Machine-readable schema for the clean output shape of assay.runner.cross_runtime_diff.v0. Mirrors the contract at docs/reference/runner/cross-runtime-diff-v0.md. Cross-field invariants that JSON Schema cannot express (stable lexicographic sort within surface arrays, SDK metadata leak-prevention into surface) remain in the projector at scripts/ci/assay_runner_cross_runtime_diff_validate.py. This schema covers clean output only; partial:* and failed status shapes are out of scope for this slice and require their own future schema files if/when they become emit-states.",
   "type": "object",
