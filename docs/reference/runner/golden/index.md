@@ -12,3 +12,8 @@ the artifact contract explicitly defines a field's allowed value vocabulary.
 - [`correlation-report-openai-agents-kernel-policy-v0.json`](correlation-report-openai-agents-kernel-policy-v0.json)
 - [`capability-diff-s5-idempotent-v0.json`](capability-diff-s5-idempotent-v0.json)
 - [`cross-runtime-diff-s5-gemini-v0.json`](cross-runtime-diff-s5-gemini-v0.json)
+
+The machine-readable schema for the v0 clean-output shape lives next to
+the contract document, not in this golden directory:
+
+- [`../schema/cross-runtime-diff-v0-clean.schema.json`](../schema/cross-runtime-diff-v0-clean.schema.json)
