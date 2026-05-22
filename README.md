@@ -307,7 +307,7 @@ These are tool-decision timings, not end-to-end model latency. (See [Research & 
 
 ## Internal: Assay-Runner
 
-Assay-Runner is an internal measured-run subsystem used by Assay's delegated Linux/eBPF acceptance path. It is **not a standalone product**. As of Phase 2D, the runner candidate is split into extraction-ready crates (`assay-runner-schema`, `assay-runner-core`, `assay-runner-linux`) plus the `runner-fixtures/` package tree, but all of these remain `publish = false` and live inside this repository.
+Assay-Runner is an internal measured-run subsystem used by Assay's delegated Linux/eBPF acceptance path. It is **not a standalone product**. As of Phase 2D, the runner candidate is split into extraction-ready Rust crates (`assay-runner-schema`, `assay-runner-core`, `assay-runner-linux`) — all `publish = false` — plus the `runner-fixtures/` package tree (Node fixture marked `"private": true`; Python fixture has no distribution surface). Everything stays inside this repository.
 
 - [Assay-Runner reference index](docs/reference/runner/index.md) — internal contracts, boundary map, slice history
 - [Phase 2D consolidation audit](docs/reference/runner/phase-2d-consolidation-audit.md) — current burn-in criteria; the extraction question is closed until the criteria are observed and at least one concrete external use case appears

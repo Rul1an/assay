@@ -1,11 +1,12 @@
 # Assay-Runner Reference
 
 > **Status:** Assay-Runner is an internal measured-run subsystem of Assay,
-> now split into extraction-ready crates (`assay-runner-schema`,
-> `assay-runner-core`, `assay-runner-linux`) plus the `runner-fixtures/`
-> package tree. All of these are `publish = false` and live inside this
-> repository. Not a standalone product. No release commitment. The
-> extraction question is gated by the
+> now split into extraction-ready Rust crates (`assay-runner-schema`,
+> `assay-runner-core`, `assay-runner-linux`) — all `publish = false` —
+> plus the `runner-fixtures/` package tree (Node fixture marked
+> `"private": true`; Python fixture has no distribution surface).
+> Everything stays inside this repository. Not a standalone product.
+> No release commitment. The extraction question is gated by the
 > [Phase 2D consolidation audit](phase-2d-consolidation-audit.md).
 
 Internal reference material for the Assay-Runner measured-run candidate.
