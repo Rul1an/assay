@@ -143,7 +143,7 @@ into second-runtime work:
 
 | Item | Why deferred |
 |---|---|
-| Cross-runtime capability-diff (`diff(second_runtime, S5)`) | requires a contract for what "same capability" means across runtimes; not a fixture-implementation question |
+| Cross-runtime capability-diff (`diff(second_runtime, S5)`) | requires a contract for what "same capability" means across runtimes; not a fixture-implementation question. The Phase 2C mini-plan that opens this question is [`cross-runtime-diff-plan.md`](cross-runtime-diff-plan.md). |
 | Declared-capability input | new artifact category; needs its own schema and contract slice |
 | Call-id-less fallback semantics | tracked as a separate correlation-contract decision; must not be introduced as fixture plumbing |
 | macOS or Windows measurement | a separate platform spike with its own kill criteria and CI lane contract |
