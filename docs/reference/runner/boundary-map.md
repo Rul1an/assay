@@ -92,10 +92,12 @@ The current spike surfaces remain in `Rul1an/assay`:
 | `crates/assay-runner-core/src/archive.rs` | runner archive assembly and writing | runner candidate mechanics; consumes manifest types from the schema crate; hosted by the core crate since Slice 2 |
 | `crates/assay-runner-spike/` | publish-disabled compatibility wrapper crate | thin re-export wrapper around `assay-runner-schema` and `assay-runner-core` so existing `assay_runner_spike::Type` call sites continue to compile during the staged extraction |
 | `crates/assay-runner-spike/src/lib.rs` | `pub use` re-exports of every name previously hosted by this crate | only file in the crate; assay-cli and fixture wrappers import through this re-export surface until a later slice redirects them to depend on `assay-runner-core` and `assay-runner-schema` directly |
+| `crates/assay-runner-linux/` | publish-disabled Linux platform adapter crate (Phase 2D Slice 3) | runner candidate Linux-only platform primitives; currently hosts cgroup v2 placement (`CgroupManager`, `SessionCgroup`). eBPF monitor adapter remains in `assay-monitor` for now; macOS/Windows adapters are out of scope until separate platform spikes open |
+| `crates/assay-runner-linux/src/cgroup.rs` | cgroup v2 placement primitives | hosted by the Linux platform crate since Slice 3 (previously at `crates/assay-cli/src/cgroup.rs`) |
+| `crates/assay-cli/src/cgroup.rs` | removed in Phase 2D Slice 3 | the placement primitives moved to `assay-runner-linux`; `crates/assay-cli/src/cli/commands/runner_spike.rs` now imports `CgroupManager`/`SessionCgroup` from `assay_runner_linux` |
 | `crates/assay-monitor/` | monitor reader, stats, event decoding | Assay core monitor substrate |
 | `crates/assay-ebpf/` | eBPF programs | Assay core monitor substrate |
-| `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface |
-| `crates/assay-cli/src/cgroup.rs` | CLI-owned cgroup v2 placement helper for runner sessions | runner-adjacent process placement; extract only with a stable cgroup API |
+| `crates/assay-cli/src/cli/commands/runner_spike.rs` | hidden CLI command | candidate runner CLI surface; consumes `CgroupManager`/`SessionCgroup` from `assay-runner-linux` since Slice 3 |
 | `crates/assay-evidence/**` | evidence artifact verification and existing bundle semantics | Assay core artifact semantics |
 | `crates/assay-core/**` | MCP, policy, runtime, and shared decision semantics | Assay core semantics |
 | `tests/fixtures/runner-spike/` | deterministic acceptance fixtures | candidate runner fixtures under shared fixture contract |

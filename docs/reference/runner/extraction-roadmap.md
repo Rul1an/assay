@@ -217,10 +217,21 @@ Resolves: blocker #2 fully (archive assembly relocates without crossing
 back into Assay artifact semantics; manifest semantics already moved
 in Slice 1).
 
-### Slice 3 — Cgroup API extraction
+### Slice 3 — Cgroup API extraction ✅ LANDED
+
+> Resolves blocker #3 fully. Executed via Option B (`crates/assay-runner-linux`
+> introduced immediately) with an extremely narrow scope: only cgroup
+> placement moved. eBPF monitor adapter remains in `assay-monitor`;
+> macOS/Windows adapters are out of scope until their separate platform
+> spikes open under `platform-and-extraction-readiness.md`.
 
 **Scope.** Move `crates/assay-cli/src/cgroup.rs` to a stable cgroup
-API surface that `assay-runner-core` depends on directly.
+API surface in `assay-runner-linux` that `assay-cli` consumes
+directly. `assay-runner-core` does not consume the cgroup API
+because the placement call sites live in `assay-cli`'s
+`runner_spike.rs` orchestration command, not inside core. The
+exit invariant remains the same: no runner crate (current or
+future-extracted) depends on `assay-cli` for cgroup placement.
 
 Two execution paths are acceptable. Choose at slice-open time, not
 here:

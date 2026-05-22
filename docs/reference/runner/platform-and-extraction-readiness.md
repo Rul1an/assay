@@ -51,8 +51,16 @@ Current structural blockers, in priority order:
    archive boundary conflict is now fully resolved on the runner
    side; verification continues through the existing Assay evidence
    path.
-3. Cgroup placement still depends on `crates/assay-cli/src/cgroup.rs`. A
-   stable cgroup API is required before extraction.
+3. **Resolved by Phase 2D Slice 3.** Cgroup placement primitives
+   (`CgroupManager`, `SessionCgroup`) moved from
+   `crates/assay-cli/src/cgroup.rs` into a new publish-disabled crate
+   `crates/assay-runner-linux/`. The runner candidate now consumes
+   the cgroup API from a Linux platform adapter crate rather than
+   from inside `assay-cli`. `crates/assay-cli/src/cli/commands/runner_spike.rs`
+   imports `CgroupManager` and `SessionCgroup` directly from
+   `assay_runner_linux`; `assay-runner-core` does not depend on
+   `assay-cli` for cgroup placement. See
+   [`extraction-roadmap.md` § Slice 3](extraction-roadmap.md#slice-3--cgroup-api-extraction).
 4. There is no non-spike external consumer of the runner bundle format. The
    capability-diff projection helper is an internal consumer.
 

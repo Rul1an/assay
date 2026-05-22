@@ -41,6 +41,7 @@ assay-metrics = { workspace = true }
 assay-evidence = { workspace = true }
 assay-mcp-server = { workspace = true }
 assay-runner-spike = { workspace = true }
+assay-runner-linux = { workspace = true }
 assay-sim = { workspace = true, optional = true }
 
 dialoguer = "0.12"

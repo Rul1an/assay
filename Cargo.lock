@@ -183,6 +183,7 @@ dependencies = [
  "assay-metrics",
  "assay-monitor",
  "assay-policy",
+ "assay-runner-linux",
  "assay-runner-spike",
  "assay-sim",
  "assert_cmd",
@@ -454,6 +455,15 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "assay-runner-linux"
+version = "3.10.2"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nix 0.27.1",
 ]
 
 [[package]]
