@@ -1,3 +1,10 @@
+// Cgroup v2 placement uses raw libc syscalls (pidfd_open, pidfd_send_signal)
+// for race-free PID handling during graceful kill. The same allow lived on
+// `assay-cli/src/main.rs` before the Slice 3 move. The workspace default
+// remains `unsafe_code = "deny"`; this crate is the platform adapter where
+// such syscalls are intentional and unavoidable.
+#![allow(unsafe_code)]
+
 //! Linux-only platform adapter for the Assay-Runner candidate.
 //!
 //! This crate is the Phase 2D Slice 3 result of the Assay-Runner extraction
