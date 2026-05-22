@@ -172,7 +172,7 @@ It introduces a new fixture, not a new contract or a new artifact category.
 - [Runner second runtime Phase 2B plan](../reference/runner/second-runtime-plan.md)
 - [Runner second runtime candidate selection](../reference/runner/second-runtime-candidate-selection.md)
 - [Runner Gemini fixture design](../reference/runner/gemini-fixture-design.md)
-- Fixture root: `tests/fixtures/runner-spike/gemini-google-genai/`
+- Fixture root: `runner-fixtures/gemini-google-genai/`
 
 Delegated `gates=all` proof for the Gemini fixture:
 
@@ -185,7 +185,7 @@ Delegated `gates=all` proof for the Gemini fixture:
 | Mode | `gates=all` (includes `gemini-google-genai-kernel-policy`) |
 | Proof-pack artifact | `assay-runner-delegated-proof-pack-26280889075` |
 | Host class | `assay-bpf-runner` self-hosted Linux runner |
-| Identity source | cassette-derived `FunctionCall.id`, level-3 stable identity verified by the maintainer probe outcome under `tests/fixtures/runner-spike/gemini-google-genai/probe-results/` |
+| Identity source | cassette-derived `FunctionCall.id`, level-3 stable identity verified by the maintainer probe outcome under `runner-fixtures/gemini-google-genai/probe-results/` |
 
 Scope discipline for this landing:
 

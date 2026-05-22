@@ -54,9 +54,11 @@ Constraints:
   the measured process tree
 
 Suggested location for the implementation:
-`tests/fixtures/runner-spike/gemini-google-genai-agent.sh` plus a Python
-script it invokes. Exact file names are an implementation-PR concern; the
-shape above is the contract.
+`runner-fixtures/gemini-google-genai/sdk-policy-agent.sh` plus a Python
+script it invokes (final location after the Phase 2D Slice 5A fixture
+package boundary; the original draft pointed to
+`tests/fixtures/runner-spike/gemini-google-genai-agent.sh`). Exact file
+names are an implementation-PR concern; the shape above is the contract.
 
 ## Cassette Strategy
 

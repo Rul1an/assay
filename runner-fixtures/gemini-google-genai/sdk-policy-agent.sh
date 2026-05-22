@@ -20,8 +20,10 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 
-ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/gemini-google-genai"
+# The wrapper lives inside the fixture package since Phase 2D Slice 5A:
+# `runner-fixtures/gemini-google-genai/sdk-policy-agent.sh`. The
+# FIXTURE_DIR is the directory of this script.
+FIXTURE_DIR="${ASSAY_RUNNER_GEMINI_FIXTURE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 FIXTURE_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-python3}"
 FIXTURE_SCRIPT="${ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT:-$FIXTURE_DIR/fixture.py}"
 EXTRACT_SCRIPT="${ASSAY_RUNNER_GEMINI_EXTRACT_SCRIPT:-$FIXTURE_DIR/extract_cassette_tool_call_id.py}"

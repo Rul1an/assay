@@ -328,7 +328,25 @@ and #4 is Slice 6 territory. Slice 4's value is preventing
 premature abstraction and documenting where future platform work
 will plug in.
 
-### Slice 5 — Fixture package boundary
+### Slice 5 — Fixture package boundary 🟡 IN PROGRESS
+
+> Slice 5 splits into two sub-PRs to keep each fixture's move
+> reviewable in isolation:
+>
+> - **Slice 5A — Gemini fixture move** ✅ LANDED. Gemini Python
+>   google-genai fixture moved from
+>   `tests/fixtures/runner-spike/gemini-google-genai/` to
+>   `runner-fixtures/gemini-google-genai/`. The wrapper renamed from
+>   `gemini-google-genai-sdk-policy-agent.sh` to
+>   `runner-fixtures/gemini-google-genai/sdk-policy-agent.sh` (dropped
+>   the runtime prefix because it now lives inside the runtime
+>   package). Acceptance scripts, workflow install path, lane-check
+>   classifier rules, and runner reference docs updated accordingly.
+> - **Slice 5B — S5 OpenAI Agents fixture move + rename.** Pending.
+>   `tests/fixtures/runner-spike/openai-agents-js/` moves to
+>   `runner-fixtures/openai-agents/` (dropping the `-js` suffix
+>   because the fixture identity is the runtime, not the
+>   implementation language).
 
 **Scope.** Move `tests/fixtures/runner-spike/` into a runner-owned
 fixtures layout that is structured as if it were a separate package.

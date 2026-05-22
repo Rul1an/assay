@@ -41,7 +41,7 @@ except ImportError as exc:  # pragma: no cover - environment guard
     sys.stderr.write(
         f"fixture: required dependency missing ({exc.name}).\n"
         "Install fixture-local dependencies first in an active venv:\n"
-        "  pip install -r tests/fixtures/runner-spike/gemini-google-genai/requirements.txt\n"
+        "  pip install -r runner-fixtures/gemini-google-genai/requirements.txt\n"
     )
     sys.exit(2)
 

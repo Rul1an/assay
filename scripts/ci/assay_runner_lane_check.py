@@ -195,13 +195,20 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
             f"{path}: OpenAI Agents fixture requires gates=openai-agents-kernel-policy",
         )
 
-    if path.startswith("tests/fixtures/runner-spike/gemini-google-genai/") or path == (
-        "tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh"
-    ):
+    if path.startswith("runner-fixtures/gemini-google-genai/"):
         # Gemini fixture surface runs under `gates=all` per #1307 non-goal:
-        # no new narrower delegated gate name. Explicit rule above the
-        # ambiguous-fallback for diagnostic clarity.
+        # no new narrower delegated gate name. The fixture moved from
+        # `tests/fixtures/runner-spike/gemini-google-genai/` to
+        # `runner-fixtures/gemini-google-genai/` in Phase 2D Slice 5A so
+        # the fixture package is structured as a Runner-owned asset.
         return Gate.ALL, f"{path}: Gemini google-genai fixture requires gates=all"
+
+    if path.startswith("runner-fixtures/"):
+        # Top-level Runner-owned fixture package introduced in Phase 2D
+        # Slice 5A. Any new fixture under this directory that has not been
+        # given an explicit narrower rule above defaults to gates=all to
+        # match the existing fixture-surface discipline.
+        return Gate.ALL, f"{path}: runner-fixtures asset requires gates=all"
 
     if path.startswith("tests/fixtures/runner-spike/"):
         return Gate.ALL, f"{path}: ambiguous runner fixture surface defaults to gates=all"
@@ -483,9 +490,11 @@ def self_test() -> None:
         (["scripts/ci/runner-spike-sdk-policy-correlation.sh"], Gate.ALL),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh", "crates/assay-ebpf/src/main.rs"], Gate.ALL),
         # Gemini Python google-genai fixture paths route to gates=all per
-        # #1307 (no new narrower delegated gate name).
-        (["tests/fixtures/runner-spike/gemini-google-genai/fixture.py"], Gate.ALL),
-        (["tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh"], Gate.ALL),
+        # #1307 (no new narrower delegated gate name). The Gemini fixture
+        # moved from tests/fixtures/runner-spike/gemini-google-genai/ to
+        # runner-fixtures/gemini-google-genai/ in Phase 2D Slice 5A.
+        (["runner-fixtures/gemini-google-genai/fixture.py"], Gate.ALL),
+        (["runner-fixtures/gemini-google-genai/sdk-policy-agent.sh"], Gate.ALL),
         (["scripts/ci/runner-spike-gemini-google-genai-acceptance.sh"], Gate.ALL),
         # Read-only contract validators under scripts/ci/ do not exercise
         # the kernel, eBPF, or runner runtime path. They project over
