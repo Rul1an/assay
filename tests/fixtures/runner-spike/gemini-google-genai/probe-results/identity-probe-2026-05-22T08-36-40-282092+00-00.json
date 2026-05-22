@@ -1,0 +1,15 @@
+{
+  "error": null,
+  "function_call": {
+    "args_keys": [
+      "path"
+    ],
+    "id": "ihtkccp2",
+    "name": "read_file"
+  },
+  "mode": "record-and-replay",
+  "model_pin": "gemini-3.5-flash",
+  "passed": true,
+  "schema": "assay.runner.gemini_identity_probe.v0",
+  "timestamp_utc": "2026-05-22T08:36:40.282092+00:00"
+}

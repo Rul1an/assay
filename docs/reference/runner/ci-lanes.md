@@ -30,6 +30,7 @@ dedicated and destructive cleanup is part of the contract.
 | Runner cgroup placement, domain-root resolution, or process spawn discipline | yes | yes | yes |
 | Policy correlation, policy event normalization, or policy-to-kernel coherence rule | yes | yes | yes |
 | OpenAI Agents fixture dependency, SDK event normalization, SDK version assertion, or `tool_call_id` binding | yes | yes | yes |
+| Gemini Python `google-genai` fixture dependency, SDK event normalization, SDK version assertion, cassette content, or `tool_call_id` binding | yes | yes | yes |
 | Acceptance fixture behavior or control paths | yes | yes | case-by-case; required when observed evidence can change |
 | Delegated workflow, runner labels, cleanup, checkout, sudo environment, preflight, or `scripts/ci/runner-spike-*.sh` | yes | yes | yes |
 | `@openai/agents`, `zod`, or fixture `package-lock.json` bump | yes | yes | yes |
@@ -48,6 +49,7 @@ changed layer:
 | Kernel fixture control path or kernel-only acceptance assertion | `kernel-only` |
 | Policy capture or policy-to-kernel coherence | `kernel-policy` |
 | OpenAI Agents SDK fixture, SDK event schema, SDK version assertion, or `tool_call_id` binding | `openai-agents-kernel-policy` |
+| Gemini Python `google-genai` fixture, SDK event schema, SDK version assertion, cassette content, or `tool_call_id` binding | `all` (no narrower Gemini-specific gate exists in v0; a narrower gate is a separate coordinated decision per #1307) |
 | `crates/assay-monitor/**`, `crates/assay-ebpf/**`, `crates/assay-xtask/**`, eBPF build/attach path, cgroup placement, telemetry filter, cross-layer archive, artifact schema, correlation report, workflow/security model, runner scripts, BPF/runtime dependency bump, or final release/acceptance proof | `all` |
 
 If a change touches multiple surfaces, run the highest required gate. If the

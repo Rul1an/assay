@@ -1,0 +1,74 @@
+interactions:
+- request:
+    body: '{"contents": [{"parts": [{"text": "Read the deterministic fixture file
+      at /tmp/probe-input.txt."}], "role": "user"}], "tools": [{"functionDeclarations":
+      [{"description": "Read the deterministic runner-spike fixture file.", "name":
+      "read_file", "parameters": {"properties": {"path": {"type": "STRING"}}, "required":
+      ["path"], "type": "OBJECT"}}]}], "toolConfig": {"functionCallingConfig": {"allowedFunctionNames":
+      ["read_file"], "mode": "ANY"}}, "generationConfig": {}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '468'
+      Content-Type:
+      - application/json
+      Host:
+      - generativelanguage.googleapis.com
+      user-agent:
+      - google-genai-sdk/2.6.0 gl-python/3.14.3
+      x-goog-api-client:
+      - google-genai-sdk/2.6.0 gl-python/3.14.3
+      x-goog-api-key:
+      - REDACTED
+    method: POST
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent
+  response:
+    body:
+      string: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\":
+        [\n          {\n            \"functionCall\": {\n              \"name\": \"read_file\",\n
+        \             \"args\": {\n                \"path\": \"/tmp/probe-input.txt\"\n
+        \             },\n              \"id\": \"ihtkccp2\"\n            },\n            \"thoughtSignature\":
+        \"EuMBCuABAQw51sfgeqGqZwfGl5WtPo5RJdRdeCzKiCsCvO/ava1ngBQJHA8JnP4jW7H1E2LWeWJe0x2tncAQo/xeTrPxZA9Dz/gkvoRKVYtoxVEz5zHSepMK4m5XuURNIhtHvgsjsmLiqz7VfeSFksid4o9YylAHDwittXB2cc58R/JGVGX2tVbGYVXRmACVZIQsa0pLxs1Ip7rYVYVjcB5XyZvKm/eR+Ygj3IWR6y4Gv517afAnqnrWpmOSwE1wMxUvmvVZPehp53/1kSboZEHyNwTPZEKe+EV3IuzIUYszCx5QbQ0=\"\n
+        \         }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\":
+        \"STOP\",\n      \"index\": 0,\n      \"finishMessage\": \"Model generated
+        function call(s).\"\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\":
+        62,\n    \"candidatesTokenCount\": 23,\n    \"totalTokenCount\": 136,\n    \"promptTokensDetails\":
+        [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 62\n
+        \     }\n    ],\n    \"thoughtsTokenCount\": 51,\n    \"serviceTier\": \"standard\"\n
+        \ },\n  \"modelVersion\": \"gemini-3.5-flash\",\n  \"responseId\": \"lxUQarX_GqmtxN8P2o-LgAw\"\n}\n"
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Fri, 22 May 2026 08:36:40 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=899
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-Gemini-Service-Tier:
+      - standard
+      X-XSS-Protection:
+      - '0'
+      content-length:
+      - '1153'
+    status:
+      code: 200
+      message: OK
+version: 1
