@@ -1,5 +1,13 @@
 # Assay-Runner Reference
 
+> **Status:** Assay-Runner is an internal measured-run subsystem of Assay,
+> now split into extraction-ready crates (`assay-runner-schema`,
+> `assay-runner-core`, `assay-runner-linux`) plus the `runner-fixtures/`
+> package tree. All of these are `publish = false` and live inside this
+> repository. Not a standalone product. No release commitment. The
+> extraction question is gated by the
+> [Phase 2D consolidation audit](phase-2d-consolidation-audit.md).
+
 Internal reference material for the Assay-Runner measured-run candidate.
 
 Assay-Runner is not a released product surface yet. These references freeze

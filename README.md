@@ -305,6 +305,15 @@ These are tool-decision timings, not end-to-end model latency. (See [Research & 
 - [ADR-033: Trust compiler positioning](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md)
 - [RFC-005: Trust compiler MVP & Trust Card](docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md)
 
+## Internal: Assay-Runner
+
+Assay-Runner is an internal measured-run subsystem used by Assay's delegated Linux/eBPF acceptance path. It is **not a standalone product**. As of Phase 2D, the runner candidate is split into extraction-ready crates (`assay-runner-schema`, `assay-runner-core`, `assay-runner-linux`) plus the `runner-fixtures/` package tree, but all of these remain `publish = false` and live inside this repository.
+
+- [Assay-Runner reference index](docs/reference/runner/index.md) — internal contracts, boundary map, slice history
+- [Phase 2D consolidation audit](docs/reference/runner/phase-2d-consolidation-audit.md) — current burn-in criteria; the extraction question is closed until the criteria are observed and at least one concrete external use case appears
+
+No release commitment. No timeline. No external demand has been measured.
+
 ## Research, mappings & experiments
 
 **Bounded context:** numbers below support **mapping and experiments**, not a product “security score.”
