@@ -137,6 +137,7 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
     all_prefixes = (
         "crates/assay-runner-spike/",
         "crates/assay-runner-schema/",
+        "crates/assay-runner-core/",
         "crates/assay-monitor/",
         "crates/assay-ebpf/",
         "crates/assay-xtask/",
@@ -500,6 +501,13 @@ def self_test() -> None:
         # runner-impacting and require gates=all just like the spike crate.
         (["crates/assay-runner-schema/src/lib.rs"], Gate.ALL),
         (["crates/assay-runner-schema/Cargo.toml"], Gate.ALL),
+        # Phase 2D Slice 2 extracted runner orchestration, archive
+        # assembly, and layer normalizers from crates/assay-runner-spike/
+        # into crates/assay-runner-core/. Core hosts the mechanics half
+        # of the measured-run path and must be classified the same as
+        # the spike crate for delegated proof requirements.
+        (["crates/assay-runner-core/src/lib.rs"], Gate.ALL),
+        (["crates/assay-runner-core/Cargo.toml"], Gate.ALL),
     ]
     for files, expected in cases:
         got = classify_files(files).gate

@@ -1,6 +1,6 @@
-use crate::{
-    run::is_safe_run_id, BindingWindow, CapabilitySurface, CorrelationBinding, PolicyLayerStatus,
-    RunnerSpikeArchive,
+use crate::{run::is_safe_run_id, RunnerSpikeArchive};
+use assay_runner_schema::{
+    BindingWindow, CapabilitySurface, CorrelationBinding, PolicyLayerStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -237,7 +237,7 @@ fn observed_type(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CgroupCorrelationStatus, KernelLayerStatus};
+    use assay_runner_schema::{CgroupCorrelationStatus, KernelLayerStatus};
 
     const DECISION: &[u8] = br#"{"specversion":"1.0","id":"evt_decision_001","type":"assay.tool.decision","source":"assay://runner-spike/run_001","time":"2026-05-20T00:00:00Z","data":{"tool":"read_file","decision":"allow","reason_code":"P_TOOL_ALLOWED","tool_call_id":"tc_runner_policy_001"}}
 "#;
@@ -334,7 +334,7 @@ mod tests {
 
         assert_eq!(
             archive.correlation_report.status,
-            crate::CorrelationStatus::Partial
+            assay_runner_schema::CorrelationStatus::Partial
         );
         assert!(archive
             .correlation_report

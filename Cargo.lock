@@ -440,16 +440,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "assay-runner-schema"
-version = "3.10.2"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "assay-runner-spike"
+name = "assay-runner-core"
 version = "3.10.2"
 dependencies = [
  "assay-common",
@@ -463,6 +454,23 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "assay-runner-schema"
+version = "3.10.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "assay-runner-spike"
+version = "3.10.2"
+dependencies = [
+ "assay-runner-core",
+ "assay-runner-schema",
 ]
 
 [[package]]

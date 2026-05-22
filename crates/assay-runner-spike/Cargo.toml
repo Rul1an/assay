@@ -5,22 +5,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Internal spike contracts for measured Assay runner experiments."
+description = "Compatibility wrapper crate that re-exports the Assay-Runner candidate surface from assay-runner-schema (Slice 1) and assay-runner-core (Slice 2)."
 readme.workspace = true
 publish = false
 
 [dependencies]
-assay-common = { workspace = true, features = ["std"] }
-assay-monitor = { workspace = true }
+assay-runner-core = { workspace = true }
 assay-runner-schema = { workspace = true }
-serde = { workspace = true, features = ["derive", "std"] }
-serde_json = { workspace = true, features = ["std"] }
-sha2 = { workspace = true }
-hex = { workspace = true }
-thiserror = { workspace = true }
-flate2 = { workspace = true }
-tar = { workspace = true }
-uuid = { workspace = true }
 
 [lints]
 workspace = true

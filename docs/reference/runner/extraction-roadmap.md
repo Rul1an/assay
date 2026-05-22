@@ -171,7 +171,10 @@ Compatibility:
 Resolves: blocker #1 fully; partial progress on blocker #2 (manifest
 semantics half).
 
-### Slice 2 — `crates/assay-runner-core`
+### Slice 2 — `crates/assay-runner-core` ✅ LANDED
+
+> Resolves blocker #2 fully (archive boundary conflict completely
+> resolved together with Slice 1's manifest semantics move).
 
 **Scope.** Move runner orchestration and archive assembly into a new
 `crates/assay-runner-core` crate that depends on
