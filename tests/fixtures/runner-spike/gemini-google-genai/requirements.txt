@@ -1,0 +1,19 @@
+# Fixture-local Python dependencies for the Gemini identity preservation probe
+# and (in later PRs) the Gemini second-runtime fixture.
+#
+# Maintainer-curation only. The probe and fixture execute outside delegated CI
+# during recording; delegated acceptance replays the checked-in cassette and
+# does not require these packages to be installed in the workflow if the
+# wrapper script handles its own venv.
+#
+# Pin discipline:
+#   - exact version pins for all direct deps to keep cassette compatibility
+#     stable across maintainer machines
+#   - --require-hashes is intentionally omitted in this first scaffolding PR
+#     because the implementation PR will choose a final lockfile format
+#     (pip+requirements.txt --hash, uv.lock, or poetry.lock) per #1307. This
+#     file is a minimum-viable pinned baseline for the identity probe; it is
+#     not the final delegated-acceptance lockfile.
+
+google-genai==2.6.0
+vcrpy==8.0.0
