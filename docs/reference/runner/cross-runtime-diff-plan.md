@@ -3,6 +3,12 @@
 > Internal Phase 2C planning note. This page is design-only and intentionally
 > small. It does not freeze a schema, propose code, propose a CI lane change,
 > or pre-approve a Phase 2C implementation PR.
+>
+> **Decision resolved.** The central open question recorded below has been
+> answered in [`cross-runtime-diff-decisions.md`](cross-runtime-diff-decisions.md)
+> with combination **A1 + B3 + C1**. The Phase 2C contract slice PR may now
+> proceed under that combination; this mini-plan remains the scope and
+> non-goal record.
 
 Phase 2B closed with two qualifying runtime fixtures landed under delegated
 `gates=all`:
@@ -99,6 +105,13 @@ This slice inherits from `capability-diff-v0`:
    intra-runtime idempotence.
 
 ## The Central Open Question
+
+> **Status.** Resolved in
+> [`cross-runtime-diff-decisions.md`](cross-runtime-diff-decisions.md)
+> as **A1 + B3 + C1**. The three interpretation choices below remain as
+> the original question record so the decision note has a stable
+> reference; the contract slice PR follows the decisions note, not
+> these choices.
 
 The mini-plan **does not answer** this; it only records it for the
 follow-up contract PR to settle:
@@ -269,6 +282,7 @@ them:
 
 ## References
 
+- [Cross-runtime diff Phase 2C decisions (A1+B3+C1)](cross-runtime-diff-decisions.md)
 - [Runner capability-diff Phase 2B plan](capability-diff-plan.md)
 - [Runner capability-diff v0 contract](capability-diff-v0.md)
 - [Runner second runtime Phase 2B plan](second-runtime-plan.md)
