@@ -226,7 +226,12 @@ in Slice 1).
 > spikes open under `platform-and-extraction-readiness.md`.
 
 **Scope.** Move `crates/assay-cli/src/cgroup.rs` to a stable cgroup
-API surface that `assay-runner-core` depends on directly.
+API surface in `assay-runner-linux` that `assay-cli` consumes
+directly. `assay-runner-core` does not consume the cgroup API
+because the placement call sites live in `assay-cli`'s
+`runner_spike.rs` orchestration command, not inside core. The
+exit invariant remains the same: no runner crate (current or
+future-extracted) depends on `assay-cli` for cgroup placement.
 
 Two execution paths are acceptable. Choose at slice-open time, not
 here:
