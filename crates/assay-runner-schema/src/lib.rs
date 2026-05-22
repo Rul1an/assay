@@ -9,7 +9,7 @@
 //! - `assay.runner.correlation_report.v0`
 //! - `assay.runner.sdk_event.v0`
 //! - `assay.runner.archive_manifest.v0` (manifest semantics only; archive
-//!   assembly mechanics remain in `assay-runner-spike` until Slice 2)
+//!   assembly mechanics live in `assay-runner-core` since Phase 2D Slice 2)
 //!
 //! The crate is `publish = false` until Slice 7 (repository extraction). It
 //! has no eBPF, monitor, CLI, fixture, filesystem-I/O, or projection-logic

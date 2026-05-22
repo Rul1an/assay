@@ -573,6 +573,111 @@ def self_test() -> None:
     assert "Dependabot maintainer flow" in guidance
     assert "gates=openai-agents-kernel-policy" in guidance
 
+    # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
+    # longer consumes the assay-runner-spike wrapper. The check is
+    # encoded here in self_test rather than as a runtime workflow step
+    # so it travels with the lane-check helper and runs on every PR
+    # touching the classifier itself, including any future PR that
+    # might silently re-introduce a spike dependency.
+    _assert_assay_cli_does_not_consume_spike()
+
+
+def _assert_assay_cli_does_not_consume_spike() -> None:
+    """Slice 6B invariant: assay-cli must consume the Runner candidate
+    only through its public schema/core/linux crates, never through
+    the assay-runner-spike compatibility wrapper.
+
+    Two mechanical conditions:
+
+    1. `crates/assay-cli/Cargo.toml` does not declare
+       `assay-runner-spike` as a dependency.
+    2. No source file under `crates/assay-cli/` references the
+       `assay_runner_spike::` path.
+
+    Either condition appearing means external-style consumption has
+    silently regressed; the assertion failure message names exactly
+    which condition fires.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+
+    # Read with explicit utf-8 encoding so the self-test does not raise
+    # UnicodeDecodeError under a non-UTF-8 locale (Rust source files in
+    # the assay-cli crate contain non-ASCII characters such as em-dashes
+    # in comments). On a genuine decoding failure, surface a clear
+    # AssertionError naming the file rather than letting a UnicodeDecodeError
+    # traceback hide the self-test contract.
+    cli_cargo = root / "crates" / "assay-cli" / "Cargo.toml"
+    if cli_cargo.exists():
+        try:
+            cargo_text = cli_cargo.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise AssertionError(
+                f"Could not read {cli_cargo} as utf-8 while checking the "
+                f"Slice 6B spike-absence invariant: {exc}. The Cargo.toml "
+                "must be valid utf-8."
+            ) from exc
+        # Match `assay-runner-spike` as a dependency in any of the
+        # common Cargo.toml forms a regression could re-introduce it
+        # under. Covers:
+        #   1. Inline form (with or without leading whitespace):
+        #      `assay-runner-spike = ...`
+        #      `  assay-runner-spike = { workspace = true }`
+        #   2. Section-header form, for [dependencies], [dev-dependencies],
+        #      [build-dependencies], and target-conditional dependencies:
+        #      `[dependencies.assay-runner-spike]`
+        #      `[dev-dependencies.assay-runner-spike]`
+        #      `[build-dependencies.assay-runner-spike]`
+        #      `[target.'cfg(unix)'.dependencies.assay-runner-spike]`
+        # Comments and string literals do not match because the regex is
+        # anchored at the start of a line via (?m)^.
+        spike_inline = r"(?m)^\s*assay-runner-spike\s*="
+        spike_table_header = (
+            r"(?m)^\s*\[(?:dependencies|dev-dependencies|"
+            r"build-dependencies|target\.[^\]]+?\.dependencies)"
+            r"\.assay-runner-spike\]"
+        )
+        if re.search(spike_inline, cargo_text) or re.search(
+            spike_table_header, cargo_text
+        ):
+            raise AssertionError(
+                "Assay still consumes spike internals: "
+                "`crates/assay-cli/Cargo.toml` declares `assay-runner-spike` "
+                "as a dependency (inline or table-header form). Phase 2D "
+                "Slice 6B requires assay-cli to depend on "
+                "assay-runner-{schema,core,linux} directly. "
+                "See docs/reference/runner/assay-consumes-runner-external.md."
+            )
+
+    cli_src = root / "crates" / "assay-cli" / "src"
+    if cli_src.is_dir():
+        offenders: list[str] = []
+        for path in cli_src.rglob("*.rs"):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            except UnicodeDecodeError as exc:
+                raise AssertionError(
+                    f"Could not read {path} as utf-8 while checking the "
+                    f"Slice 6B spike-absence invariant: {exc}. assay-cli "
+                    "source files must be valid utf-8."
+                ) from exc
+            if "assay_runner_spike::" in content:
+                offenders.append(str(path.relative_to(root)))
+        if offenders:
+            joined = ", ".join(offenders)
+            raise AssertionError(
+                "Assay still consumes spike internals: "
+                f"the following file(s) under `crates/assay-cli/src/` "
+                f"reference `assay_runner_spike::`: {joined}. "
+                "Phase 2D Slice 6B requires assay-cli to import from "
+                "assay-runner-{schema,core,linux} directly. See "
+                "docs/reference/runner/assay-consumes-runner-external.md."
+            )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()

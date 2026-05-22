@@ -374,14 +374,29 @@ test-tree-internal paths.
 
 Resolves: cleaner separation when Slice 7 needs to split the repo.
 
-### Slice 6 — Assay consumes Runner as external
+### Slice 6 — Assay consumes Runner as external ✅ LANDED
 
-> Slice 6 splits into a docs-only design note (6A) and a mechanical
-> implementation PR (6B). The design note settles the five
-> questions (public Runner API surface, forbidden imports, smoke
-> test, what stays in assay-cli, kill criteria) before any imports
-> are rewritten. See [`assay-consumes-runner-external.md`](assay-consumes-runner-external.md)
-> for the design note (Phase 2D Slice 6A).
+> Resolves blocker #4 fully. Slice 6 split into two PRs per
+> maintainer review:
+>
+> - **Slice 6A — design note** (#1324, merged). Pinned the five
+>   design decisions (public Runner API surface = direct
+>   schema/core/linux; forbidden `assay_runner_spike::` imports
+>   inside `crates/assay-cli/`; lane-check self-test mechanical
+>   absence check; `runner_spike.rs` composition stays in
+>   `assay-cli` per Slice 4 boundary-freeze; four kill criteria).
+>   See [`assay-consumes-runner-external.md`](assay-consumes-runner-external.md).
+> - **Slice 6B — implementation**. Mechanical cutover: 11 import
+>   edits in `crates/assay-cli/src/cli/commands/runner_spike.rs`,
+>   removed `assay-runner-spike` from `crates/assay-cli/Cargo.toml`,
+>   added `assay-runner-core` + `assay-runner-schema` as direct
+>   `assay-cli` dependencies (was: transitively via the wrapper),
+>   added the mechanical absence self-test to
+>   `scripts/ci/assay_runner_lane_check.py`. `cargo tree -p
+>   assay-cli` confirms no `assay-runner-spike` in the dependency
+>   tree. `assay-runner-spike` kept as legacy alias (default
+>   end-state per the design note); a future PR may delete the
+>   crate entirely.
 
 **Scope.** Within the same monorepo, restructure dependencies so that
 Assay CLI and Assay-Harness depend on the *public API* of

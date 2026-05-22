@@ -61,8 +61,25 @@ Current structural blockers, in priority order:
    `assay_runner_linux`; `assay-runner-core` does not depend on
    `assay-cli` for cgroup placement. See
    [`extraction-roadmap.md` § Slice 3](extraction-roadmap.md#slice-3-cgroup-api-extraction-landed).
-4. There is no non-spike external consumer of the runner bundle format. The
-   capability-diff projection helper is an internal consumer.
+4. **Resolved by Phase 2D Slice 6B.** `assay-cli` no longer
+   consumes the Runner candidate through the `assay-runner-spike`
+   compatibility wrapper. It depends on `assay-runner-schema`,
+   `assay-runner-core`, and `assay-runner-linux` directly, with no
+   `assay_runner_spike::` imports in any `crates/assay-cli/` source
+   file and no `assay-runner-spike` dependency in
+   `crates/assay-cli/Cargo.toml`. The mechanical absence check in
+   `scripts/ci/assay_runner_lane_check.py --self-test` enforces
+   this invariant going forward. This demonstrates that Assay
+   itself can consume the Runner candidate as an external dependency
+   even while both still live in the same workspace, which is the
+   target of Slice 6 per
+   [`extraction-roadmap.md` § Slice 6](extraction-roadmap.md#slice-6--assay-consumes-runner-as-external-landed)
+   and
+   [`assay-consumes-runner-external.md`](assay-consumes-runner-external.md).
+   The capability-diff projection helper remains an internal
+   consumer; Slice 6B's resolution is about removing the spike
+   wrapper from Assay's production dependency tree, not about
+   replacing every internal consumer with an external one.
 
 Phase 2D Slice 4 landed as a boundary-freeze docs slice rather than
 as a code-extraction slice (see
