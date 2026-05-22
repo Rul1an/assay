@@ -125,8 +125,8 @@ async fn cmd_run_with_kernel_capture(_args: RunnerSpikeRunArgs) -> anyhow::Resul
 
 #[cfg(target_os = "linux")]
 async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
-    use crate::cgroup::CgroupManager;
     use assay_monitor::Monitor;
+    use assay_runner_linux::CgroupManager;
     use assay_runner_spike::{CgroupCorrelationStatus, KernelLayerBuilder};
     use std::time::{Duration, Instant};
     use tokio_stream::StreamExt;
@@ -261,7 +261,7 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
 #[cfg(target_os = "linux")]
 fn spawn_child_in_cgroup(
     spec: &RunSpec,
-    cgroup: &crate::cgroup::SessionCgroup,
+    cgroup: &assay_runner_linux::SessionCgroup,
 ) -> anyhow::Result<tokio::process::Child> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;

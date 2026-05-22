@@ -3,7 +3,6 @@ use clap::Parser;
 
 pub mod backend;
 pub mod caps;
-pub mod cgroup;
 mod cli;
 pub mod diagnostics;
 mod env_filter;

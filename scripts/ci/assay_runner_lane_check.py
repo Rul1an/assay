@@ -138,6 +138,7 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
         "crates/assay-runner-spike/",
         "crates/assay-runner-schema/",
         "crates/assay-runner-core/",
+        "crates/assay-runner-linux/",
         "crates/assay-monitor/",
         "crates/assay-ebpf/",
         "crates/assay-xtask/",
@@ -508,6 +509,15 @@ def self_test() -> None:
         # the spike crate for delegated proof requirements.
         (["crates/assay-runner-core/src/lib.rs"], Gate.ALL),
         (["crates/assay-runner-core/Cargo.toml"], Gate.ALL),
+        # Phase 2D Slice 3 introduced crates/assay-runner-linux/ as the
+        # Linux platform adapter for the Assay-Runner candidate. It
+        # currently hosts cgroup placement only; future macOS/Windows
+        # spikes belong in separate crates per
+        # platform-and-extraction-readiness.md. Linux platform changes
+        # require gates=all because cgroup placement is on the delegated
+        # acceptance path.
+        (["crates/assay-runner-linux/src/lib.rs"], Gate.ALL),
+        (["crates/assay-runner-linux/Cargo.toml"], Gate.ALL),
     ]
     for files, expected in cases:
         got = classify_files(files).gate

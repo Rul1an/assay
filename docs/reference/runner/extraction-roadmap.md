@@ -217,7 +217,13 @@ Resolves: blocker #2 fully (archive assembly relocates without crossing
 back into Assay artifact semantics; manifest semantics already moved
 in Slice 1).
 
-### Slice 3 — Cgroup API extraction
+### Slice 3 — Cgroup API extraction ✅ LANDED
+
+> Resolves blocker #3 fully. Executed via Option B (`crates/assay-runner-linux`
+> introduced immediately) with an extremely narrow scope: only cgroup
+> placement moved. eBPF monitor adapter remains in `assay-monitor`;
+> macOS/Windows adapters are out of scope until their separate platform
+> spikes open under `platform-and-extraction-readiness.md`.
 
 **Scope.** Move `crates/assay-cli/src/cgroup.rs` to a stable cgroup
 API surface that `assay-runner-core` depends on directly.
