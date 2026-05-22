@@ -139,3 +139,81 @@ GitHub artifacts and the delegated host wrote the archives to temporary paths
 cleaned after the job. Future delegated acceptance workflows should upload a
 first-class proof pack artifact during the run; that workflow follow-up is
 tracked in <https://github.com/Rul1an/assay/issues/1287>.
+
+## Subsequent Internal Landings
+
+This section is a chronology pointer only. It does not re-open or extend the
+Phase 1 acceptance claim above, does not promise future work, and does not
+introduce a new contract. It exists so that a reader returning later can
+reconstruct the Phase 2 sequence without PR archaeology.
+
+### Phase 2A — internal contract freeze
+
+The Phase 2 Follow-Up items above were consolidated into versioned internal
+references:
+
+- [Runner artifact v0 contracts](../reference/runner/artifacts-v0.md)
+- [Runner acceptance fixture v0 contract](../reference/runner/fixtures-v0.md)
+- [Runner CI lane contract](../reference/runner/ci-lanes.md)
+- [Assay-Runner boundary and extraction map](../reference/runner/boundary-map.md)
+
+### Phase 2B — first capability-diff slice
+
+- [Runner capability-diff Phase 2B plan](../reference/runner/capability-diff-plan.md)
+- [Runner capability-diff v0 contract](../reference/runner/capability-diff-v0.md)
+- Reference projection: `scripts/ci/assay_runner_capability_diff_validate.py`
+  produces `status=clean` for the accepted S5 fixture against itself.
+
+### Phase 2B — second runtime fixture (Gemini Python `google-genai`)
+
+The second-runtime fixture line landed against the Phase 2B entry discipline.
+It introduces a new fixture, not a new contract or a new artifact category.
+
+- [Runner second runtime Phase 2B plan](../reference/runner/second-runtime-plan.md)
+- [Runner second runtime candidate selection](../reference/runner/second-runtime-candidate-selection.md)
+- [Runner Gemini fixture design](../reference/runner/gemini-fixture-design.md)
+- Fixture root: `tests/fixtures/runner-spike/gemini-google-genai/`
+
+Delegated `gates=all` proof for the Gemini fixture:
+
+| Field | Value |
+|---|---|
+| Workflow | `Runner Spike Delegated` |
+| Run | `26280889075` |
+| URL | <https://github.com/Rul1an/assay/actions/runs/26280889075> |
+| Head SHA | `f917090a4a707eb485f57e82e8ed83ea8a52391e` |
+| Mode | `gates=all` (includes `gemini-google-genai-kernel-policy`) |
+| Proof-pack artifact | `assay-runner-delegated-proof-pack-26280889075` |
+| Host class | `assay-bpf-runner` self-hosted Linux runner |
+| Identity source | cassette-derived `FunctionCall.id`, level-3 stable identity verified by the maintainer probe outcome under `tests/fixtures/runner-spike/gemini-google-genai/probe-results/` |
+
+Scope discipline for this landing:
+
+- S5's `mcp-policy-agent.sh` and the OpenAI Agents fixture path were not
+  modified
+- The v0 artifact contracts, fixture v0 contract, and boundary map were not
+  modified
+- No narrower delegated gate name was introduced; the Gemini fixture runs
+  under the existing `gates=all` dispatch
+- Cross-runtime capability comparison between S5 and Gemini was not
+  introduced
+
+The Gemini delegated run is a second-runtime fixture acceptance only. It does
+not extend the Phase 1 OpenAI Agents claim above and does not establish a
+third runtime as eligible.
+
+### Phase 2C — cross-runtime diff (parked behind decision gate)
+
+- [Runner cross-runtime diff Phase 2C plan](../reference/runner/cross-runtime-diff-plan.md)
+- Decision gate: <https://github.com/Rul1an/assay/issues/1310>
+
+Phase 2C has no acceptance run, no contract slice, and no implementation work
+in progress. The contract slice is intentionally blocked behind the decision
+gate above until the three open interpretation questions (path projection,
+binding-id comparability, SDK metadata placement) are resolved.
+
+### Open backlog independent of this line
+
+- Ring-buffer drop debug follow-up:
+  <https://github.com/Rul1an/assay/issues/1271>. This must not weaken the
+  `ringbuf_drops=0` clean-health bar for any future fixture.
