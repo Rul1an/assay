@@ -603,9 +603,22 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
 
     root = Path(__file__).resolve().parents[2]
 
+    # Read with explicit utf-8 encoding so the self-test does not raise
+    # UnicodeDecodeError under a non-UTF-8 locale (Rust source files in
+    # the assay-cli crate contain non-ASCII characters such as em-dashes
+    # in comments). On a genuine decoding failure, surface a clear
+    # AssertionError naming the file rather than letting a UnicodeDecodeError
+    # traceback hide the self-test contract.
     cli_cargo = root / "crates" / "assay-cli" / "Cargo.toml"
     if cli_cargo.exists():
-        cargo_text = cli_cargo.read_text()
+        try:
+            cargo_text = cli_cargo.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise AssertionError(
+                f"Could not read {cli_cargo} as utf-8 while checking the "
+                f"Slice 6B spike-absence invariant: {exc}. The Cargo.toml "
+                "must be valid utf-8."
+            ) from exc
         # Match `assay-runner-spike` only when it appears as a top-level
         # dependency key, not when it appears inside a comment or string.
         # Cargo dep keys look like: `assay-runner-spike = ...`
@@ -623,9 +636,15 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
         offenders: list[str] = []
         for path in cli_src.rglob("*.rs"):
             try:
-                content = path.read_text()
+                content = path.read_text(encoding="utf-8")
             except OSError:
                 continue
+            except UnicodeDecodeError as exc:
+                raise AssertionError(
+                    f"Could not read {path} as utf-8 while checking the "
+                    f"Slice 6B spike-absence invariant: {exc}. assay-cli "
+                    "source files must be valid utf-8."
+                ) from exc
             if "assay_runner_spike::" in content:
                 offenders.append(str(path.relative_to(root)))
         if offenders:
