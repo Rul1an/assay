@@ -465,6 +465,42 @@ CLI, and without a workflow change. The next slice may extend
 validate against this golden, or introduce a separate cross-runtime
 projector. That decision is out of scope here.
 
+## Machine-Readable Schema
+
+A JSON Schema 2020-12 sidecar mirrors the clean-output v0 envelope:
+[`schema/cross-runtime-diff-v0-clean.schema.json`](schema/cross-runtime-diff-v0-clean.schema.json).
+
+The schema is a docs-only artifact. It is the third layer of contract
+defense alongside the prose contract above (review) and the
+[golden output shape](golden/cross-runtime-diff-s5-gemini-v0.json)
+(byte-determinism). Consumers MAY validate diff outputs against the
+schema using any JSON Schema 2020-12 validator. The reference projector
+`scripts/ci/assay_runner_cross_runtime_diff_validate.py` does not
+require the schema at runtime; its hand-written structural validator
+covers the same envelope plus invariants the schema cannot express.
+
+Schema scope:
+
+- v0 *clean* output only — `status=clean`, all preconditions `true`,
+  `unbound` categories empty, `ambiguities` empty, complete
+  `non_claims` and `notes` arrays in lexicographic order
+- `partial:health`, `partial:correlation`, `partial:unbound`, and
+  `failed` output shapes are out of scope for this schema; if a future
+  projector chooses to emit them, add their own sibling schema files
+
+Invariants the schema does **not** enforce (kept in the projector):
+
+- stable lexicographic sort *within* `surface.*` arrays (JSON Schema
+  expresses `uniqueItems` but not ordering)
+- SDK metadata leak-prevention into `surface.*` (cross-field
+  constraint not expressible as schema)
+- run-id consistency between health, surface, and correlation
+  artifacts within each side (cross-document constraint)
+
+The cross-field discipline `base_runtime != head_runtime` is enforced
+by a top-level `not` clause in the schema using the closed v0 runtime
+identifier enum.
+
 ## Notes Vocabulary
 
 `notes` follows the code-prefixed convention from

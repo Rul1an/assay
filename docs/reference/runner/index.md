@@ -17,6 +17,7 @@ Phase 2B capability-diff planning slice.
 - [Runner cross-runtime diff Phase 2C plan](cross-runtime-diff-plan.md)
 - [Runner cross-runtime diff Phase 2C decisions (A1+B3+C1)](cross-runtime-diff-decisions.md)
 - [Runner cross-runtime diff v0 contract](cross-runtime-diff-v0.md)
+- [Runner cross-runtime diff v0 clean-output JSON Schema](schema/cross-runtime-diff-v0-clean.schema.json)
 - [Runner second runtime Phase 2B plan](second-runtime-plan.md)
 - [Runner second runtime candidate selection](second-runtime-candidate-selection.md)
 - [Runner Gemini fixture design](gemini-fixture-design.md)
