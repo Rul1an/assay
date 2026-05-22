@@ -29,12 +29,16 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 GEMINI_FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/gemini-google-genai"
-GEMINI_VENV_PY="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-$GEMINI_FIXTURE_DIR/.venv/bin/python}"
-if [ ! -x "$GEMINI_VENV_PY" ]; then
-  echo "SKIP: Gemini fixture venv not found at $GEMINI_VENV_PY." >&2
-  echo "Hint: create it via:" >&2
-  echo "  python3 -m venv $GEMINI_FIXTURE_DIR/.venv" >&2
-  echo "  $GEMINI_FIXTURE_DIR/.venv/bin/pip install -r $GEMINI_FIXTURE_DIR/requirements.txt" >&2
+GEMINI_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-python3}"
+if ! command -v "$GEMINI_PYTHON" >/dev/null 2>&1; then
+  echo "SKIP: Gemini fixture Python interpreter not found: $GEMINI_PYTHON." >&2
+  exit 40
+fi
+GEMINI_PYTHONPATH="${ASSAY_RUNNER_GEMINI_PYTHONPATH:-$GEMINI_FIXTURE_DIR/.python-deps}"
+if [ ! -d "$GEMINI_PYTHONPATH" ]; then
+  echo "SKIP: Gemini fixture deps not found at $GEMINI_PYTHONPATH." >&2
+  echo "Hint: install them via:" >&2
+  echo "  python3 -m pip install --require-hashes --target $GEMINI_FIXTURE_DIR/.python-deps -r $GEMINI_FIXTURE_DIR/requirements.txt" >&2
   exit 40
 fi
 
@@ -96,7 +100,8 @@ EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-2.6.0}"
 
 export ASSAY_BIN
 export ASSAY_FIXTURE_ROOT="$ROOT"
-export ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON="$GEMINI_VENV_PY"
+export ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON="$GEMINI_PYTHON"
+export ASSAY_RUNNER_GEMINI_PYTHONPATH="$GEMINI_PYTHONPATH"
 export ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT="$GEMINI_FIXTURE_DIR/fixture.py"
 export ASSAY_RUNNER_GEMINI_EXTRACT_SCRIPT="$GEMINI_FIXTURE_DIR/extract_cassette_tool_call_id.py"
 export ASSAY_RUNNER_GEMINI_POLICY_WRAPPER="$POLICY_WRAPPER"

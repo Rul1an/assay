@@ -22,17 +22,21 @@ fi
 
 ROOT="${ASSAY_FIXTURE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 FIXTURE_DIR="$ROOT/tests/fixtures/runner-spike/gemini-google-genai"
-FIXTURE_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-$FIXTURE_DIR/.venv/bin/python}"
+FIXTURE_PYTHON="${ASSAY_RUNNER_GEMINI_FIXTURE_PYTHON:-python3}"
 FIXTURE_SCRIPT="${ASSAY_RUNNER_GEMINI_FIXTURE_SCRIPT:-$FIXTURE_DIR/fixture.py}"
 EXTRACT_SCRIPT="${ASSAY_RUNNER_GEMINI_EXTRACT_SCRIPT:-$FIXTURE_DIR/extract_cassette_tool_call_id.py}"
 POLICY_WRAPPER="${ASSAY_RUNNER_GEMINI_POLICY_WRAPPER:-$FIXTURE_DIR/policy-wrapper.sh}"
+PYTHON_DEPS="${ASSAY_RUNNER_GEMINI_PYTHONPATH:-$FIXTURE_DIR/.python-deps}"
 
-if [ ! -x "$FIXTURE_PYTHON" ]; then
-  echo "error: fixture-local Python interpreter not found or not executable at $FIXTURE_PYTHON" >&2
-  echo "hint: create the venv first:" >&2
-  echo "  python3 -m venv $FIXTURE_DIR/.venv" >&2
-  echo "  $FIXTURE_DIR/.venv/bin/pip install -r $FIXTURE_DIR/requirements.txt" >&2
+if ! command -v "$FIXTURE_PYTHON" >/dev/null 2>&1; then
+  echo "error: Gemini fixture Python interpreter not found: $FIXTURE_PYTHON" >&2
+  echo "hint: install fixture-local deps first:" >&2
+  echo "  python3 -m pip install --require-hashes --target $FIXTURE_DIR/.python-deps -r $FIXTURE_DIR/requirements.txt" >&2
   exit 69
+fi
+
+if [ -d "$PYTHON_DEPS" ]; then
+  export PYTHONPATH="$PYTHON_DEPS${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
 if [ ! -f "$FIXTURE_SCRIPT" ]; then

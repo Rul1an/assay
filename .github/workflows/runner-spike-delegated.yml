@@ -144,13 +144,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Fixture-local venv so the Gemini runtime is isolated from any
-          # system python state. The venv path is what the fixture wrapper
-          # and acceptance script look for (.venv/bin/python). Offline scope
-          # per #1307: install may use network here during workflow setup,
-          # fixture execution itself is cassette-replay only.
-          python3 -m venv .venv
-          .venv/bin/pip install --require-hashes -r requirements.txt
+          # Fixture-local target directory so the Gemini runtime is isolated
+          # from system Python packages without requiring python3-venv on the
+          # delegated host. Offline scope per #1307: install may use network
+          # here during workflow setup; fixture execution itself is
+          # cassette-replay only.
+          rm -rf .python-deps
+          python3 -m pip install --require-hashes --target .python-deps -r requirements.txt
 
       - name: Build assay CLI
         shell: bash
