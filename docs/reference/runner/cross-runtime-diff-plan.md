@@ -15,9 +15,10 @@ question for the first time. This document records the **scope and
 discipline** for opening that question. Cross-runtime diff is explicitly
 marked out of Phase 2B scope in
 [`second-runtime-plan.md` § Out Of Phase 2B Scope](second-runtime-plan.md#out-of-phase-2b-scope)
-and out of v0 in
-[`capability-diff-v0.md`](capability-diff-v0.md). This plan is the bridge
-from those non-goals to a contract slice.
+and is not covered by the current
+[`capability-diff-v0.md`](capability-diff-v0.md) contract, which defines
+intra-runtime diff semantics only. This plan is the bridge from those
+non-goals to a Phase 2C contract slice.
 
 ## Status
 
@@ -42,10 +43,15 @@ declared-capability input, or live-LLM cassette regeneration is out of
 scope for this slice and belongs in later Phase 2C+ contract decisions.
 
 The scope is intentionally **a projection over existing v0 artifacts**.
-No new artifact category, no new schema. The diff consumes
-`observation-health.json`, `capability-surface.json`,
-`correlation-report.json`, `layers/sdk.ndjson`, and `layers/policy.ndjson`
-unchanged, the same way `capability-diff-v0` consumes them.
+No new artifact category, no new schema. Per
+[`capability-diff-v0.md`](capability-diff-v0.md), the primary diff inputs
+are `observation-health.json`, `capability-surface.json`, and
+`correlation-report.json`; `layers/sdk.ndjson` and `layers/policy.ndjson`
+are diagnostic context, not required primary inputs. The Phase 2C
+cross-runtime slice inherits the same boundary: primary inputs remain
+those three artifacts; the layer streams may inform the decision-issue
+discussion of the open semantic questions below but are not required
+contract inputs.
 
 ## Inputs
 
@@ -53,8 +59,8 @@ Two evidence sets, each from a clean delegated `gates=all` run:
 
 | Source | Acceptance script | Cassette | Tool call id source |
 |---|---|---|---|
-| S5 OpenAI Agents | `scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh` | DeterministicToolCallModel (hardcoded `tc_runner_policy_001`) | fixture-chosen, allowed v0 |
-| Gemini google-genai | `scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` | `cassettes/fixture.yaml` (cassette-recorded `ho0csecf`) | provider-generated, level-3 qualifying |
+| S5 OpenAI Agents | `scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh` | DeterministicToolCallModel (hardcoded `tc_runner_policy_001`) | fixture-chosen; v0 accepted stable fixture binding id |
+| Gemini google-genai | `scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` | `tests/fixtures/runner-spike/gemini-google-genai/cassettes/fixture.yaml` (cassette-recorded `ho0csecf`) | provider-generated; level-3 qualifying per second-runtime selection |
 
 A Phase 2C diff over these two sets has structurally different binding ids
 (`tc_runner_policy_001` vs `ho0csecf`), structurally different SDK package
@@ -72,11 +78,18 @@ This slice inherits from `capability-diff-v0`:
 2. **Health remains strict.** Both evidence sets must satisfy the v0
    `observation-health` clean criteria; partial health on either side
    yields `partial:health`.
-3. **Stable binding identity.** Both sides must have level-3 stable
-   binding ids. S5 satisfies this via fixture-chosen `tc_runner_policy_001`
-   (allowed under v0 for accepted instance fixtures); Gemini satisfies it
-   via provider-generated `FunctionCall.id`. The diff treats both as
-   stable identities for its own window even though their *sources* differ.
+3. **Stable binding identity, with asymmetric sources.** Both sides must
+   have stable binding ids within their own run window, but their identity
+   *sources* differ in a way that matters for Phase 2C: S5 uses a
+   fixture-chosen `tc_runner_policy_001` (a v0 accepted stable fixture
+   binding id, explicitly allowed under the fixture-v0 accepted-instance
+   rules); Gemini uses a provider-generated `FunctionCall.id` that meets
+   the level-3 rule from
+   [`second-runtime-candidate-selection.md`](second-runtime-candidate-selection.md#stable-identity--level-3-checklist)
+   (runtime-generated, binding-intended, run-window unique). Cross-runtime
+   v0 must explicitly decide how to compare these different identity
+   sources — that is part of the central open question recorded below, not
+   a property the diff can assume.
 4. **No acceptability judgment.** The cross-runtime diff describes what
    differs; it does not declare whether any difference is acceptable for a
    project.
@@ -100,24 +113,42 @@ Three concrete categories where the answer is non-obvious:
 
 ### A. Fixture file paths
 
-S5's fixture writes `openai-agents-input.txt` plus the shared
-`policy-input.txt`. The Gemini fixture writes `gemini-input.txt` plus the
-same shared `policy-input.txt`. The capability-surface
-`filesystem_paths` arrays therefore differ by **two specific path
-strings**, but the *underlying capability* (a single `read_file`
-invocation on a deterministic work-dir input) is identical.
+`capability-surface.filesystem_paths` stores **full paths**, so the
+S5 and Gemini surfaces differ in two distinct ways at the same time:
+
+1. **Work-dir prefix.** S5 runs under
+   `/tmp/assay-runner-openai-agents-kernel-policy/work/...`; Gemini runs
+   under `/tmp/assay-runner-gemini-google-genai-kernel-policy/work/...`.
+   The prefix differs entirely because each acceptance script uses its
+   own `mktemp -d` template.
+2. **Fixture-local filename.** S5 writes `openai-agents-input.txt`;
+   Gemini writes `gemini-input.txt`. The shared companion file
+   `policy-input.txt` has the same name on both sides but a different
+   work-dir prefix per (1).
+
+The *underlying capability* (a single `read_file` invocation on a
+deterministic work-dir input) is identical, but two layers of path noise
+sit between the two surfaces. The Phase 2C contract slice must take a
+position on each layer separately:
+
+- **Work-dir prefix layer.** Almost certainly runtime noise — every
+  acceptance script picks its own prefix, and quotienting by the prefix
+  before comparison is straightforward (replace with a canonical
+  `<work>/` placeholder).
+- **Fixture-local filename layer.** Genuinely ambiguous — different
+  fixtures legitimately pick different file names, but those names also
+  appear in policy events and correlation bindings. A path-noise quotient
+  here is more invasive than at the prefix layer.
 
 Two interpretations are defensible:
 
-- **Path strings are runtime noise** — different fixtures legitimately
-  pick different file names; the diff should report
-  `added=[]`/`removed=[]` after a path-normalization quotient
-- **Path strings are capability-surface** — the v0 contract stores full
-  paths under `filesystem_paths`, and the diff should report them as
-  differing
+- **Both layers are noise** — quotient prefix and filename, report
+  `added=[]`/`removed=[]` if the underlying tool name and decision match
+- **Only the prefix layer is noise** — quotient prefix, keep fixture
+  filenames as capability-surface differences
 
-The Phase 2C contract slice must pick one and defend it. This mini-plan
-deliberately does not pick yet.
+The Phase 2C contract slice must pick one combination and defend it.
+This mini-plan deliberately does not pick yet.
 
 ### B. Tool-call binding ids
 
