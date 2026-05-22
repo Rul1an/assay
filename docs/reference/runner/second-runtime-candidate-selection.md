@@ -391,9 +391,73 @@ binding intent, but neither provides explicit public evidence for
 OpenAI direct SDKs and the public documentation reviewed here; it does not
 claim anything about other providers.
 
+### Candidate: Gemini Python `google-genai` direct
+
+The Gemini Python `google-genai` direct path means using the
+[`google-genai`](https://github.com/googleapis/python-genai) Python SDK (the
+official Google Gen AI Python SDK) against the Gemini API with a custom
+function tool, not through Vertex AI, not through the legacy
+`google-generativeai` SDK, and not through a wrapper framework.
+
+**Model pin:** `gemini-3.5-flash` (stable/GA, listed at
+[ai.google.dev/gemini-api/docs/models](https://ai.google.dev/gemini-api/docs/models)).
+This evaluation is scoped strictly to this model identifier; preview models
+(`gemini-3.1-pro-preview`, `gemini-3-flash-preview`, etc.) and non-Gemini-3
+models are out of scope. The "Gemini 3 model APIs" guarantees cited below
+apply to `gemini-3.5-flash` as a Gemini 3 family member.
+
+| # | Requirement | Outcome | Evidence |
+|---|---|---|---|
+| 1 | Offline execution | qualifies | Cassette-replay via [VCR.py](https://vcrpy.readthedocs.io/en/latest/usage.html) at the HTTPS layer against `generativelanguage.googleapis.com`. Live API key is required only during one-time cassette recording (curation step), never during delegated acceptance. `record_mode='none'` guarantees no network calls during fixture execution. Restrictions: non-streaming `client.models.generate_content()` only (streaming cassettes complicate determinism); `google-genai` SDK version pinned via `requirements.txt`/lockfile; `gemini-3.5-flash` model string pinned in fixture configuration; re-recording is maintainer-controlled, analogous to the [`@openai/agents` bump flow in `fixtures-v0.md`](fixtures-v0.md#dependency-upgrade-contract). |
+| 2 | Stable identity | qualifies | All three level-3 sub-conditions pass via literal citations in public docs and typed SDK source. See Stable identity detail below. |
+| 3 | Comparable surface | qualifies | A `read_file`-style function can be declared via `types.FunctionDeclaration` and called via the model's `tools` parameter, analogous to the S5 fixture's `read_file` MCP tool. The capability class is the same: one filesystem read returning deterministic content. The function-tool emit pattern produces one `functionCall` part in the assistant message and the fixture sends back one matching `functionResponse` — directly comparable to S5's single tool-call binding. |
+| 4 | Deterministic dependency lock | qualifies | `google-genai` is distributed via PyPI and supports standard Python dependency-lock workflows (`requirements.txt` with hash pins, `uv.lock`, or `poetry.lock`). Transitive dependencies are bounded by the SDK's published constraints. This is the same dependency-lock substrate as the Anthropic / OpenAI Python direct evaluations. |
+| 5 | Linux/eBPF fit | qualifies | The fixture runs as a standard Python subprocess on the delegated `assay-bpf-runner` host. No native extensions, no specialized runtimes, no host services beyond what the existing Python ecosystem requires. The existing cgroup capture model applies without modification. |
+| 6 | Small event shape | qualifies | One `generate_content` call with a single function tool produces one `functionCall` part, the fixture sends back one `functionResponse`, and the run completes. No multi-tool, branching, or multi-binding behavior is exercised in v0. This is the same one-binding shape as S5's `tc_runner_policy_001`. |
+| 7 | Evidence boundary fit | qualifies | Standard Python subprocess + cassette-replay produces no new evidence categories. The runner normalizer does not need to broaden filters or evidence taxonomy. Loader / locale / dependency-tree paths remain telemetry, not evidence, per the existing [telemetry-versus-evidence rules in `artifacts-v0.md`](artifacts-v0.md#telemetry-versus-evidence). |
+
+**Stable identity detail (row 2):**
+
+The candidate identity field is `FunctionCall.id` in the
+[`google-genai` Python SDK `types.py`](https://github.com/googleapis/python-genai/blob/main/google/genai/types.py).
+The class is declared with the field-level docstring quoted below.
+
+- Field name: `FunctionCall.id` (and the matching `FunctionResponse.id`)
+- Source: `functionCall` part in the assistant message of a `generate_content` response (or its streaming equivalent)
+- **runtime-generated evidence:** `qualifies`. Public docs at [ai.google.dev/gemini-api/docs/function-calling](https://ai.google.dev/gemini-api/docs/function-calling) state literally: *"**Important:** Gemini 3 model APIs now generate a unique `id` for every function call. If you are manually constructing the conversation history or using the REST API, when returning the result of your executed function to the model we recommend passing the matching `id` in your `functionResponse`. If you are using the standard Python or Node.js SDKs, this is handled automatically."* The typed SDK source ([`google/genai/types.py`](https://github.com/googleapis/python-genai/blob/main/google/genai/types.py)) declares the field with description *"The unique id of the function call. If populated, the client to execute the `function_call` and return the response with the matching `id`."* and `Field(default=None)` — no adapter-side default factory. The SDK propagates the model-generated id without synthesizing one.
+- **binding-intended evidence:** `qualifies`. Public docs state literally: *"**Always map function IDs:** Gemini 3 now always returns a unique `id` with every `functionCall`. Include this exact `id` in your `functionResponse` so the model can accurately map your result back to the original request."* The typed SDK docstring on `FunctionCall.id` reads literally: *"... return the response with the matching `id`."* Both sources document the binding contract explicitly.
+- **run-window unique evidence:** `qualifies`. Public docs state literally: *"generate a unique `id` for every function call"* and *"always returns a unique `id` with every `functionCall`."* The typed SDK docstring contains the literal word *"unique"*: *"The **unique** id of the function call."*
+
+**Expected delegated gate for first fixture PR (only filled if overall outcome is `qualifies`):**
+`gates=all` per [`second-runtime-plan.md` § Suggested PR Sequence](second-runtime-plan.md#suggested-pr-sequence)
+step 4. A narrower gate for the Gemini Python runtime is later coordinated work; do not introduce it as a side effect of the first fixture PR.
+
+**Overall outcome:** `qualifies`
+
+Per the lowest-row-wins rule in [Evaluation Discipline](#evaluation-discipline),
+all seven rows qualify; the candidate overall qualifies.
+
+**Notes:** Gemini Python `google-genai` direct is the first evaluated
+candidate to clear level-3 stable identity. The differentiator is
+documentation explicitness: the public Gemini 3 API docs state that Gemini 3
+model APIs generate a unique id for every function call and require the
+matching id in the function response, while the typed SDK field preserves
+that id without adapter-side generation. This observation is scoped to the
+exact `gemini-3.5-flash` model pin and `google-genai` evidence cited here;
+it does not generalize to Vertex AI, legacy `google-generativeai`,
+TypeScript SDKs, or non-Gemini-3 models.
+
+**Selection ≠ fixture approval.** This evaluation selects the candidate for
+the second-runtime line. Opening the first fixture PR under the
+[second-runtime plan](second-runtime-plan.md) is a separate step and is
+subject to that plan's "Acceptance Criteria For The First Fixture PR" and
+the [CI lane contract](ci-lanes.md). Nothing in this evaluation pre-approves
+fixture code, dependencies, cassette implementation, or a narrower delegated
+gate.
+
 ## Selection Outcome
 
-**No candidate currently qualifies.**
+**Selected second runtime candidate: Gemini Python `google-genai` direct, constrained to exact `gemini-3.5-flash` model pin.**
 
 Evaluated candidates and their overall outcomes:
 
@@ -404,15 +468,29 @@ Evaluated candidates and their overall outcomes:
 | OpenAI Python SDK direct | `insufficient evidence` |
 | Vercel AI SDK | `does not qualify as independent runtime` (path A); provider-wrapper path (B) is `insufficient evidence` and not a selection path |
 | OpenAI TypeScript SDK direct | `insufficient evidence` |
+| **Gemini Python `google-genai` direct** | **`qualifies` (with `gemini-3.5-flash` model pin)** |
 
 The selection issue
-[`#1295`](https://github.com/Rul1an/assay/issues/1295) remains open until a
-candidate evaluation reaches `qualifies` AND this section is explicitly
-updated to name that candidate as the selected second runtime.
+[`#1295`](https://github.com/Rul1an/assay/issues/1295) is satisfied by this
+outcome: Gemini Python `google-genai` direct is named here as the selected
+second runtime candidate, scoped strictly to the `gemini-3.5-flash` model
+identifier and the `google-genai` SDK as cited in the Gemini candidate
+evaluation above.
 
-Re-evaluation of an `insufficient evidence` outcome happens in a separate PR
-that cites the new public evidence which closes the previous gap; it does
-not happen by reinterpreting the same evidence more optimistically.
+**Selection ≠ fixture approval.** This selection authorizes a future first
+fixture PR under [`second-runtime-plan.md`](second-runtime-plan.md). It does
+not pre-approve fixture code, runtime dependencies, cassette implementation,
+a narrower delegated gate, or any modification to the v0 artifact contracts.
+The first fixture PR must independently satisfy the
+[Acceptance Criteria For The First Fixture PR](second-runtime-plan.md#acceptance-criteria-for-the-first-fixture-pr)
+and the [CI lane contract](ci-lanes.md).
+
+Re-evaluation of an `insufficient evidence` outcome for previously-evaluated
+candidates happens in a separate PR that cites new public evidence which
+closes the previous gap; it does not happen by reinterpreting the same
+evidence more optimistically. The selection of Gemini does not close those
+prior evaluations — it makes them historical evidence for the level-3 lat's
+properties rather than active candidates.
 
 ## Non-Goals For This Note
 
