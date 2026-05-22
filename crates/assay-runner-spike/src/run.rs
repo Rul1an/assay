@@ -104,7 +104,10 @@ impl RunSpec {
         if !is_safe_run_id(&self.run_id) {
             return Err(RunSpecError::RunIdContainsUnsafeCharacter);
         }
-        if !matches!(self.agent_shim.as_str(), "none" | "openai-agents") {
+        if !matches!(
+            self.agent_shim.as_str(),
+            "none" | "openai-agents" | "gemini-google-genai"
+        ) {
             return Err(RunSpecError::UnsupportedAgentShim(self.agent_shim.clone()));
         }
         Ok(())
@@ -303,6 +306,25 @@ mod tests {
             .skeleton_archive()
             .unwrap();
 
+        assert_eq!(archive.observation_health.sdk_layer, SdkLayerStatus::Absent);
+    }
+
+    #[test]
+    fn gemini_shim_is_accepted_and_records_self_reported_sdk_layer_after_events() {
+        // The Gemini Python google-genai second-runtime fixture (selected by
+        // #1305 via #1306) carries its own bundle metadata via the
+        // `gemini-google-genai` shim identifier. Reusing `openai-agents` would
+        // mislead any downstream tool that reads `agent_shim` from the bundle.
+        // Keep the allowlist explicit; do not relax validation more broadly.
+        let archive = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_platform("linux")
+            .with_agent_shim("gemini-google-genai")
+            .skeleton_archive()
+            .unwrap();
+
+        // Skeleton archive (no SDK events consumed yet) still reports Absent;
+        // SDK capture transitions to SelfReported once events are applied.
         assert_eq!(archive.observation_health.sdk_layer, SdkLayerStatus::Absent);
     }
 

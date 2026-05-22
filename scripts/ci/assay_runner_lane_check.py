@@ -165,6 +165,13 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
             f"{path}: OpenAI Agents kernel+policy acceptance surface requires gates=openai-agents-kernel-policy",
         )
 
+    if path.startswith("scripts/ci/runner-spike-gemini-google-genai-"):
+        # Gemini fixture runs under `gates=all` per #1307 non-goal: do not
+        # introduce a new narrower delegated gate name. A future narrower
+        # gate is a separate coordinated change (workflow inputs.gates enum
+        # + ci-lanes.md + classifier).
+        return Gate.ALL, f"{path}: Gemini google-genai acceptance surface requires gates=all"
+
     if path.startswith("scripts/ci/runner-spike-"):
         return Gate.ALL, f"{path}: shared runner-spike script requires gates=all"
 
@@ -184,6 +191,14 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
             Gate.OPENAI_AGENTS_KERNEL_POLICY,
             f"{path}: OpenAI Agents fixture requires gates=openai-agents-kernel-policy",
         )
+
+    if path.startswith("tests/fixtures/runner-spike/gemini-google-genai/") or path == (
+        "tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh"
+    ):
+        # Gemini fixture surface runs under `gates=all` per #1307 non-goal:
+        # no new narrower delegated gate name. Explicit rule above the
+        # ambiguous-fallback for diagnostic clarity.
+        return Gate.ALL, f"{path}: Gemini google-genai fixture requires gates=all"
 
     if path.startswith("tests/fixtures/runner-spike/"):
         return Gate.ALL, f"{path}: ambiguous runner fixture surface defaults to gates=all"
@@ -464,6 +479,11 @@ def self_test() -> None:
         (["crates/assay-xtask/src/main.rs"], Gate.ALL),
         (["scripts/ci/runner-spike-sdk-policy-correlation.sh"], Gate.ALL),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh", "crates/assay-ebpf/src/main.rs"], Gate.ALL),
+        # Gemini Python google-genai fixture paths route to gates=all per
+        # #1307 (no new narrower delegated gate name).
+        (["tests/fixtures/runner-spike/gemini-google-genai/fixture.py"], Gate.ALL),
+        (["tests/fixtures/runner-spike/gemini-google-genai-sdk-policy-agent.sh"], Gate.ALL),
+        (["scripts/ci/runner-spike-gemini-google-genai-acceptance.sh"], Gate.ALL),
     ]
     for files, expected in cases:
         got = classify_files(files).gate

@@ -139,6 +139,20 @@ jobs:
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Install Gemini google-genai fixture deps
+        working-directory: tests/fixtures/runner-spike/gemini-google-genai
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fixture-local venv so the Gemini runtime is isolated from any
+          # system python state. The venv path is what the fixture wrapper
+          # and acceptance script look for (.venv/bin/python). Offline scope
+          # per #1307: install may use network here during workflow setup,
+          # fixture execution itself is cassette-replay only.
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
       - name: Build assay CLI
         shell: bash
         run: |
@@ -215,6 +229,14 @@ jobs:
                 "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
               run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+              # Gemini Python google-genai second-runtime gate. Runs under
+              # the existing `all` umbrella per #1307 non-goal: do not
+              # introduce a new narrower delegated gate name. If a narrower
+              # gate is later coordinated, this run_gate call moves into
+              # its own case branch and a new enum value is added to
+              # inputs.gates.options as a separate decision PR.
+              run_gate "gemini-google-genai-kernel-policy" "Gemini google-genai kernel+policy+SDK three-run determinism" \
+                "$PWD/scripts/ci/runner-spike-gemini-google-genai-three-run-determinism.sh"
               ;;
             kernel-only)
               run_gate "kernel-only" "kernel-only three-run determinism" \
