@@ -107,6 +107,7 @@ def vcr_config() -> vcr.VCR:
     return vcr.VCR(
         filter_headers=HEADER_FILTERS,
         filter_query_parameters=QUERY_FILTERS,
+        decode_compressed_response=True,
         record_mode="none",  # default for replay; overridden in record mode
     )
 
@@ -247,8 +248,9 @@ class ProbeOutcome:
 
 def run_record(api_key: str) -> ProbeOutcome:
     CASSETTE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CASSETTE_PATH.unlink(missing_ok=True)
     cfg = vcr_config()
-    cfg.record_mode = "all"  # overwrite any existing cassette during record
+    cfg.record_mode = "all"  # record a fresh single-interaction cassette
     timestamp = datetime.now(timezone.utc).isoformat()
     with cfg.use_cassette(str(CASSETTE_PATH)):
         client = build_client(api_key)
