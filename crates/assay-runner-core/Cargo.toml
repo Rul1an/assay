@@ -5,9 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Runner orchestration, archive assembly, and layer normalizers for the Assay-Runner candidate (Phase 2D Slice 2)."
+description = "Internal/experimental substrate for Assay measured-run workflows. Runner orchestration, archive assembly, and layer normalizers for the Assay-Runner candidate (Phase 2D Slice 2). No standalone product guarantee; API surface remains narrow and intentionally undocumented for third-party use; semver tracks the Assay workspace."
 readme.workspace = true
-publish = false
 
 [dependencies]
 assay-common = { workspace = true, features = ["std"] }

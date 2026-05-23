@@ -5,9 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Compatibility wrapper crate that re-exports the Assay-Runner candidate surface from assay-runner-schema (Slice 1) and assay-runner-core (Slice 2)."
+description = "Internal/experimental substrate for Assay measured-run workflows. Compatibility wrapper crate that re-exports the Assay-Runner candidate surface from assay-runner-schema (Slice 1) and assay-runner-core (Slice 2). No standalone product guarantee; legacy alias retained for readers of pre-extraction history; semver tracks the Assay workspace."
 readme.workspace = true
-publish = false
 
 [dependencies]
 assay-runner-core = { workspace = true }

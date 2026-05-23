@@ -3,10 +3,18 @@ set -euo pipefail
 
 echo "📦 Starting Idempotent Publisher..."
 
-# Crates published in dependency order
+# Crates published in dependency order.
+#
 # Adapter crates are intentionally source/workspace-internal for this release
 # line. assay-adapter-api has historical crates.io versions, but no current
 # release-line publishing until ADR-026 gets a dedicated distribution freeze.
+#
+# As of v3.11.2 the four Assay-Runner crates publish too. They are marked as
+# internal/experimental substrate in their package descriptions; they exist on
+# crates.io so that `assay-cli` (which depends on them when the `runner`
+# feature is enabled, the default) can resolve them at publish time. Their
+# semver tracks the Assay workspace and they are not guaranteed standalone
+# product crates.
 CRATES=(
   "assay-common"
   "assay-registry"
@@ -16,6 +24,10 @@ CRATES=(
   "assay-policy"
   "assay-mcp-server"
   "assay-monitor"
+  "assay-runner-schema"
+  "assay-runner-linux"
+  "assay-runner-core"
+  "assay-runner-spike"
   "assay-sim"
   "assay-cli"
 )
@@ -119,30 +131,12 @@ try_publish() {
   local crate="$1"
   local ver="$2"
 
-  # Per-crate feature overrides for publish.
-  #
-  # `assay-cli` directly depends on `assay-runner-{schema,core,linux}`, which
-  # are `publish = false` internal crates. To keep cargo publish resolvable
-  # without changing repo/binary-build behaviour, those runner deps are
-  # `optional = true` behind the `runner` feature (in default for workspace
-  # consumers). cargo publish must therefore exclude `runner` from the active
-  # feature set: pass `--no-default-features --features tui,sim`.
-  local -a extra_args=()
-  case "$crate" in
-    assay-cli)
-      # `tui,sim` is a single cargo argument (comma-separated feature list),
-      # not three shell array elements.
-      # shellcheck disable=SC2054
-      extra_args=(--no-default-features --features tui,sim)
-      ;;
-  esac
-
   # Attempt publish; treat "already exists" as success for idempotency.
   # Using mktemp avoids pipefail issues with tee + grep.
   local log
   log="$(mktemp)"
   set +e
-  cargo publish --package "$crate" "${extra_args[@]}" --verbose 2>&1 | tee "$log"
+  cargo publish --package "$crate" --verbose 2>&1 | tee "$log"
   local rc="${PIPESTATUS[0]}"
   set -e
 
