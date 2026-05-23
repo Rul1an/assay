@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-05-23
+
+> **Publish-path hot-fix for `assay-cli`.**
+>
+> No behavioural change for repo / workspace consumers or for GitHub Release
+> binary tarballs. This release exists only to make `assay-cli` publishable to
+> crates.io again, restoring the `cargo install assay-cli` install path that
+> was incomplete in the `v3.11.0` line.
+
+### Known issue with the `v3.11.0` crates.io line
+
+The `v3.11.0` release published 8 of the 9 workspace crates to crates.io
+(`assay-common`, `assay-evidence`, `assay-core`, `assay-metrics`, `assay-policy`,
+`assay-mcp-server`, `assay-monitor`, `assay-sim`). `assay-cli@3.11.0` failed to
+publish because the Slice 6B extraction-readiness work (PR #1325) had
+introduced direct dependencies in `assay-cli/Cargo.toml` on the internal
+`assay-runner-{schema,core,linux}` crates, all of which are `publish = false`.
+Cargo refused the publish with `no matching package named "assay-runner-core"
+found`. The release workflow only exercises `cargo publish` on tag push, so
+PR CI never saw the failure mode.
+
+`v3.11.0` GitHub Release binaries and the workspace at tag `v3.11.0` are
+unchanged and correct; this hot-fix only changes how the CLI is packaged for
+crates.io.
+
+### Fix
+
+- `crates/assay-cli/Cargo.toml`: `assay-runner-{schema,core,linux}` deps are
+  now `optional = true`, gated behind a new `runner` feature that is in the
+  default feature set. Repo builds, `cargo install` from a checkout, and the
+  release binary tarballs are byte-equivalent in behaviour to `v3.11.0`.
+- The `runner-spike` command (`assay runner-spike`) is now gated behind
+  `#[cfg(feature = "runner")]` in `commands/mod.rs`, `args/mod.rs`, and
+  `dispatch.rs`. Default builds keep the command; `cargo install assay-cli`
+  from crates.io (which deactivates `runner`) ships an `assay-cli` without
+  the hidden internal command. This matches the existing CHANGELOG framing
+  that `assay runner-spike` is internal-only and outside the public CLI
+  contract.
+- `scripts/ci/publish_idempotent.sh`: `assay-cli` is published with
+  `--no-default-features --features tui,sim`, so the optional runner deps
+  are not required to resolve from crates.io. All other workspace crates
+  publish unchanged.
+
+### Guardrail
+
+- The runner workflows (`runner-spike-delegated.yml`, `runner-spike-sdk.yml`)
+  continue to build `assay-cli` with `--no-default-features`, but now also
+  pass `--features runner` so the delegated gates and SDK-correlation gates
+  still have the `runner-spike` command available. Default-feature builds
+  (release.yml binary tarballs, workspace dev) need no change.
+- A `cargo publish --dry-run -p assay-cli --no-default-features --features
+  tui,sim` smoke job has been added to PR CI so a future regression of this
+  shape is caught before tag, not after.
+
+### Non-change
+
+- No behavioural change to Assay-core / Trust Basis consumers, NDJSON
+  evidence, Trust Basis diff v1, Runner v0 archive contracts, or the
+  cross-runtime diff v0 surface. Workspace version pin bumps from
+  `3.11.0` to `3.11.1` only.
+
 ## [3.11.0] - 2026-05-23
 
 > **Internal Assay-Runner measured-run contracts and extraction-ready substrate.**

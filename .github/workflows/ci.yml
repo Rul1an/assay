@@ -168,6 +168,28 @@ jobs:
       - name: Check open core boundary
         run: ./scripts/ci/check-open-core-boundary.sh
 
+  publish-shape-cli:
+    # Guardrail: catch v3.11.0-style regressions where `assay-cli` accumulates
+    # a direct dependency on a `publish = false` workspace crate, which would
+    # only surface as a release-time `cargo publish` failure on tag push.
+    #
+    # We cannot use `cargo publish --dry-run` on PR CI because version pins
+    # naturally point at a not-yet-published workspace version during release
+    # prep. Instead we statically verify the shape that matters: every dep in
+    # `assay-cli`'s active publish-feature set must either be `optional = true`
+    # or target a workspace crate with `publish = true`.
+    name: Publish-shape guardrail (assay-cli)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - name: Verify no non-optional publish=false deps in assay-cli
+        shell: bash
+        run: ./scripts/ci/check_assay_cli_publish_shape.sh
+
   vendored-packs:
     name: Vendored Pack Sync
     runs-on: ubuntu-latest

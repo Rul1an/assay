@@ -77,6 +77,7 @@ pub enum Command {
     /// Learning Mode: Capture and Generate in one flow
     Record(super::commands::record::RecordArgs),
     /// Internal Assay-Runner Phase 1 spike command
+    #[cfg(feature = "runner")]
     #[command(name = "runner-spike", hide = true)]
     RunnerSpike(super::commands::runner_spike::RunnerSpikeArgs),
     /// Manage multi-run profiles for stability analysis
