@@ -96,8 +96,11 @@ Triggers for reopening extraction readiness review:
   without depending on Assay internals. This creates the missing external
   consumer and creates a real reason to move schemas to a shared crate.
 - The four structural blockers above are independently resolved.
-- The `assay.runner.*.v0` contracts pass a stable window of at least four to
-  six weeks without semantic churn.
+- The `assay.runner.*.v0` contracts pass the consolidation burn-in recorded
+  in [`phase-2d-consolidation-audit.md`](phase-2d-consolidation-audit.md)
+  without semantic churn. The consolidation window is an evidence
+  requirement, not a calendar requirement; 4-6 weeks of idle calendar time
+  does not by itself satisfy this trigger.
 
 Until those triggers fire, extraction stays closed by default. "We could
 extract now" is not a trigger.

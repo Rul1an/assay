@@ -1,5 +1,14 @@
 # Assay-Runner Reference
 
+> **Status:** Assay-Runner is an internal measured-run subsystem of Assay,
+> now split into extraction-ready Rust crates (`assay-runner-schema`,
+> `assay-runner-core`, `assay-runner-linux`) — all `publish = false` —
+> plus the `runner-fixtures/` package tree (Node fixture marked
+> `"private": true`; Python fixture has no distribution surface).
+> Everything stays inside this repository. Not a standalone product.
+> No release commitment. The extraction question is gated by the
+> [Phase 2D consolidation audit](phase-2d-consolidation-audit.md).
+
 Internal reference material for the Assay-Runner measured-run candidate.
 
 Assay-Runner is not a released product surface yet. These references freeze
@@ -25,4 +34,6 @@ Phase 2B capability-diff planning slice.
 - [Runner platform and extraction readiness](platform-and-extraction-readiness.md)
 - [Assay-Runner extraction roadmap (Phase 2D slice sequence)](extraction-roadmap.md)
 - [Assay consumes Runner as external — Slice 6A design note](assay-consumes-runner-external.md)
+- [Phase 2D consolidation audit (burn-in criteria, not calendar wait)](phase-2d-consolidation-audit.md)
+- [Measured-run proof-bundle walkthrough (read-only, explainable demo)](examples/measured-run-proof-bundle.md)
 - [Phase 1 delegated proof pack](proof-packs/phase1-delegated-2026-05-21.md)

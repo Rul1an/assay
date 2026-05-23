@@ -171,6 +171,16 @@ If the boundary map remains materially unstable after a 4-6 week consolidation
 window, treat that as evidence that extraction is premature. Do not force a
 repository split while the ownership line is still moving.
 
+The consolidation window is an evidence requirement, not a calendar
+requirement. After Phase 2D Slices 1-6B landed, the passive 4-6 week wait
+is replaced by the burn-in criteria defined in
+[`phase-2d-consolidation-audit.md`](phase-2d-consolidation-audit.md). The
+burn-in criteria are the new satisfaction condition for this consolidation
+gate; they are not necessarily satisfied yet — the audit page tracks which
+criteria are observed and which are still pending. Counting weeks without
+observing repo behavior is weak evidence; the audit page makes the
+evidence concrete.
+
 ## Extraction Blocking Conditions
 
 Extraction is blocked if any of these are true:
