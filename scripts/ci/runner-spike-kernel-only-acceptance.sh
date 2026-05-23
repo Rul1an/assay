@@ -35,7 +35,7 @@ EXTRACT_DIR="$TMP_ROOT/extract"
 BUNDLE="$TMP_ROOT/runner-kernel-only.tar.gz"
 RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_kernel_only_acceptance}"
 
-cargo run -p assay-cli --no-default-features -- \
+cargo run -p assay-cli --no-default-features --features runner -- \
   runner-spike run \
   --agent-shim none \
   --kernel-capture \

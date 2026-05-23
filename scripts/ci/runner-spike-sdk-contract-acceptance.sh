@@ -10,7 +10,7 @@ if [ -n "${ASSAY_BIN:-}" ]; then
     exit 2
   fi
 else
-  cargo build -p assay-cli --no-default-features
+  cargo build -p assay-cli --no-default-features --features runner
   ASSAY_BIN="$ROOT/target/debug/assay"
 fi
 

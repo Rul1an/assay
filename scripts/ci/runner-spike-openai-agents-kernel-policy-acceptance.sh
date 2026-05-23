@@ -35,7 +35,7 @@ fi
 
 ASSAY_BIN="${ASSAY_BIN:-$ROOT/target/debug/assay}"
 if [ ! -x "$ASSAY_BIN" ]; then
-  cargo build -p assay-cli --no-default-features
+  cargo build -p assay-cli --no-default-features --features runner
 fi
 
 if [ -n "${ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR:-}" ]; then
