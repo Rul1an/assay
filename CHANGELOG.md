@@ -4,6 +4,77 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.11.2] - 2026-05-23
+
+> **Corrected publish line.** `v3.11.0` and `v3.11.1` are partial-publish lines
+> on crates.io: 8 of the 9 workspace crates published, but `assay-cli` did not
+> (it remained pinned at `3.10.2` on crates.io). `v3.11.2` is the first
+> complete CLI publish since `v3.10.2`. The four Assay-Runner crates now ship
+> alongside the rest of the workspace, with internal/experimental framing in
+> their package descriptions.
+
+### Why `v3.11.1`'s `optional = true` was not enough
+
+`v3.11.1` attempted to make `assay-cli` publishable by marking its
+`assay-runner-{schema,core,linux}` deps as `optional = true` and passing
+`--no-default-features --features tui,sim` at publish. That was a wrong
+mental model of `cargo publish`. Cargo verifies **every** dep listed in the
+crate manifest at publish time, regardless of which features are active:
+optional deps must still have a `version` pin **and** that version must be
+resolvable from crates.io. Path-only deps without versions are rejected with
+`all dependencies must have a version requirement specified`. There is no
+combination of feature flags that lets a published crate keep deps on
+internal `publish = false` workspace siblings.
+
+### Resolution: flip the four Assay-Runner crates to `publish = true`
+
+The four runner crates ship to crates.io as of `v3.11.2`:
+
+- `assay-runner-schema`
+- `assay-runner-core`
+- `assay-runner-linux`
+- `assay-runner-spike`
+
+Each package description now opens with
+*"Internal/experimental substrate for Assay measured-run workflows… No
+standalone product guarantee; API surface remains narrow and intentionally
+undocumented for third-party use; semver tracks the Assay workspace."*
+
+This is a deliberate reframing, not an extraction. The crates were already
+*extraction-ready* per the Phase 2D Slice 6B work that landed for `v3.11.0`;
+making them resolvable on crates.io is the smallest step that restores
+`cargo install assay-cli` without splitting the repo. Slice 7 (separate
+repo extraction) stays closed; the burn-in criteria in
+`docs/reference/runner/phase-2d-consolidation-audit.md` continue to apply.
+
+### What this changes for consumers
+
+- `cargo install assay-cli` works again at `3.11.2`, with the `runner`
+  feature on by default (binary includes `assay runner-spike` per workspace
+  parity).
+- `cargo install assay-cli --no-default-features --features tui,sim`
+  still works and produces a `runner-spike`-free CLI for consumers who want
+  the publishing-minimal surface.
+- The four runner crates are visible on crates.io but **not** part of the
+  public Assay API contract. Third parties using them do so at their own
+  risk; their semver is the workspace's semver.
+- `scripts/ci/publish_idempotent.sh` now publishes the four runner crates
+  in dependency order (`assay-runner-schema → assay-runner-linux →
+  assay-runner-core → assay-runner-spike`) between `assay-monitor` and
+  `assay-sim`. The per-crate `--no-default-features --features tui,sim`
+  override for `assay-cli` is removed; default features are sufficient now.
+
+### Non-change
+
+- No behavioural change to Assay-core / Trust Basis consumers, NDJSON
+  evidence, Trust Basis diff v1, Runner v0 archive contracts, or the
+  cross-runtime diff v0 surface.
+- The `Publish-shape guardrail (assay-cli)` PR-CI job added in `v3.11.1`
+  stays in place as defense-in-depth: it will not fire today (no workspace
+  crate is `publish = false` any more), but will catch a future regression
+  if a new `publish = false` workspace crate is added back and reaches
+  `assay-cli`'s non-optional dep set.
+
 ## [3.11.1] - 2026-05-23
 
 > **Publish-path hot-fix for `assay-cli`.**

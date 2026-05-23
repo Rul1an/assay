@@ -5,9 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Versioned schema types and constants for the Assay-Runner v0 contracts (Phase 2D Slice 1)."
+description = "Internal/experimental substrate for Assay measured-run workflows. Versioned schema types and constants for the Assay-Runner v0 contracts (Phase 2D Slice 1). No standalone product guarantee; API surface remains narrow and intentionally undocumented for third-party use; semver tracks the Assay workspace."
 readme.workspace = true
-publish = false
 
 [dependencies]
 serde = { workspace = true, features = ["derive", "std"] }

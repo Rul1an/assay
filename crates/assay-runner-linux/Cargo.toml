@@ -5,9 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Linux-only platform adapter for the Assay-Runner candidate. Hosts cgroup placement primitives (Phase 2D Slice 3)."
+description = "Internal/experimental substrate for Assay measured-run workflows. Linux-only platform adapter for the Assay-Runner candidate; hosts cgroup placement primitives (Phase 2D Slice 3). No standalone product guarantee; API surface remains narrow and intentionally undocumented for third-party use; semver tracks the Assay workspace."
 readme.workspace = true
-publish = false
 
 [dependencies]
 anyhow = { workspace = true }
