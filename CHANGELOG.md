@@ -4,6 +4,85 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.11.3] - 2026-05-23
+
+> **Public crate contract update for Assay-Runner substrate.**
+>
+> `v3.11.0`, `v3.11.1`, and `v3.11.2` are all partial-publish lines on
+> crates.io: `assay-cli` did not publish on any of them. This release
+> registers the four `assay-runner-*` crates in the explicit public-crate
+> allow-list — a deliberate policy decision, not a manifest hot-fix —
+> and is the first complete crates.io publish line since `v3.10.2`.
+
+### Why `v3.11.2`'s manifest flip alone wasn't enough
+
+`v3.11.2` removed `publish = false` from the four runner crates so cargo
+could resolve them at publish time, but it did not update
+`scripts/ci/check-public-crate-policy.sh`. That script enforces an
+explicit allow-list of public crates as a release-truth-line contract
+against both `Cargo.toml` metadata and `publish_idempotent.sh`'s `CRATES`
+array. Because the script runs inside the release workflow on tag push
+(not in PR CI), the divergence between "manifest says publishable" and
+"policy allow-list says not allowed" only surfaced after merge, when the
+release workflow's policy check blocked the publish chain before any
+`cargo publish` ran.
+
+The gate worked as intended. The fix is to acknowledge the policy
+decision in the allow-list itself, not to soften the gate.
+
+### Resolution
+
+- `scripts/ci/check-public-crate-policy.sh`: add the four runner crates to
+  the `public_crates` array. The comment block now documents the framing:
+  these crates are published because `assay-cli` depends on them, with
+  explicit internal/experimental wording in their package descriptions;
+  adding any new public crate here is a deliberate public-surface
+  decision.
+- `.github/workflows/ci.yml`: new `Public crate policy` PR-CI job runs
+  `check-public-crate-policy.sh` on every PR, so the gate fires before
+  tag, not at release time. This is the same defense-in-depth pattern as
+  the `Publish-shape guardrail (assay-cli)` job added in `v3.11.1`.
+- `docs/contributing/WAVE0-GATES.md`: document the runner crates as
+  published-but-not-semver-checked, and note the new PR-CI guardrail.
+
+### What this changes for consumers
+
+- `cargo install assay-cli` works again at `3.11.3` (first complete CLI
+  publish since `3.10.2`). Default features include `runner`; CLI ships
+  with the hidden internal `runner-spike` command. Users who want a
+  runner-free CLI can install with
+  `--no-default-features --features tui,sim`.
+- `assay-runner-{schema,core,linux,spike}` are visible on crates.io at
+  `3.11.3` for the first time. Their package descriptions explicitly
+  state: *"Internal/experimental substrate for Assay measured-run
+  workflows … No standalone product guarantee; API surface remains narrow
+  and intentionally undocumented for third-party use; semver tracks the
+  Assay workspace."* They are **not** in the Wave 0 library semver
+  allowlist.
+
+### Known issue with the `v3.11.0`, `v3.11.1`, and `v3.11.2` lines
+
+All three earlier `v3.11.x` releases on crates.io are partial-publish:
+
+- `assay-cli` was not published; the published CLI line remains at
+  `3.10.2` for those tags.
+- `v3.11.0` and `v3.11.1` also did not publish the runner crates.
+- `v3.11.2` published the 8 non-runner workspace crates at `3.11.2` but
+  blocked at the policy gate before publishing the runner crates or
+  `assay-cli`.
+
+The corresponding GitHub Releases stay in place as a record of what
+shipped on the binary-tarball side and what the policy gate caught. Use
+`v3.11.3` for the first complete crates.io publish line.
+
+### Non-change
+
+- No behavioural change to Assay-core / Trust Basis consumers, NDJSON
+  evidence, Trust Basis diff v1, Runner v0 archive contracts, or the
+  cross-runtime diff v0 surface.
+- The `Publish-shape guardrail (assay-cli)` PR-CI job from `v3.11.1`
+  stays in place alongside the new `Public crate policy` job.
+
 ## [3.11.2] - 2026-05-23
 
 > **Corrected publish line.** `v3.11.0` and `v3.11.1` are partial-publish lines
