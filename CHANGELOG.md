@@ -85,12 +85,18 @@ shipped on the binary-tarball side and what the policy gate caught. Use
 
 ## [3.11.2] - 2026-05-23
 
-> **Corrected publish line.** `v3.11.0` and `v3.11.1` are partial-publish lines
-> on crates.io: 8 of the 9 workspace crates published, but `assay-cli` did not
-> (it remained pinned at `3.10.2` on crates.io). `v3.11.2` is the first
-> complete CLI publish since `v3.10.2`. The four Assay-Runner crates now ship
-> alongside the rest of the workspace, with internal/experimental framing in
-> their package descriptions.
+> **Intended as the corrected publish line; in practice a third partial-publish
+> line.** `v3.11.2` flipped the four Assay-Runner crates from `publish = false`
+> to publishable with internal/experimental framing, so cargo could resolve
+> them at publish time. The release-workflow policy gate
+> (`scripts/ci/check-public-crate-policy.sh`) then correctly blocked the
+> publish chain because the policy allow-list still listed only the original
+> 10 public crates. No runner crate and no `assay-cli` was published from this
+> tag; `assay-cli` remained at `3.10.2` on crates.io. See `[3.11.3]` for the
+> follow-up policy PR that registers the runner crates in the allow-list and
+> mirrors the policy check to PR CI. The framing of the runner crates as
+> internal/experimental substrate stays unchanged from what landed in this
+> release.
 
 ### Why `v3.11.1`'s `optional = true` was not enough
 
