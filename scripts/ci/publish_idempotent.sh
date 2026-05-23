@@ -119,12 +119,30 @@ try_publish() {
   local crate="$1"
   local ver="$2"
 
+  # Per-crate feature overrides for publish.
+  #
+  # `assay-cli` directly depends on `assay-runner-{schema,core,linux}`, which
+  # are `publish = false` internal crates. To keep cargo publish resolvable
+  # without changing repo/binary-build behaviour, those runner deps are
+  # `optional = true` behind the `runner` feature (in default for workspace
+  # consumers). cargo publish must therefore exclude `runner` from the active
+  # feature set: pass `--no-default-features --features tui,sim`.
+  local -a extra_args=()
+  case "$crate" in
+    assay-cli)
+      # `tui,sim` is a single cargo argument (comma-separated feature list),
+      # not three shell array elements.
+      # shellcheck disable=SC2054
+      extra_args=(--no-default-features --features tui,sim)
+      ;;
+  esac
+
   # Attempt publish; treat "already exists" as success for idempotency.
   # Using mktemp avoids pipefail issues with tee + grep.
   local log
   log="$(mktemp)"
   set +e
-  cargo publish --package "$crate" --verbose 2>&1 | tee "$log"
+  cargo publish --package "$crate" "${extra_args[@]}" --verbose 2>&1 | tee "$log"
   local rc="${PIPESTATUS[0]}"
   set -e
 

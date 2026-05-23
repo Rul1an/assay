@@ -160,7 +160,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build -p assay-cli --no-default-features
+          # `runner` is an explicit feature in 3.11.1+: with --no-default-features
+          # we must opt back in so `assay runner-spike` is compiled for the
+          # delegated gates. See CHANGELOG entry for v3.11.1.
+          cargo build -p assay-cli --no-default-features --features runner
 
       - name: Build eBPF artifact
         if: inputs.build_ebpf

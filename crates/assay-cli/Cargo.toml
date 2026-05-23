@@ -15,11 +15,23 @@ name = "assay"
 path = "src/main.rs"
 
 [features]
-default = ["tui", "sim"]
+default = ["tui", "sim", "runner"]
 experimental = ["assay-core/experimental"]
 profile-test-hook = []
 tui = ["dep:ratatui", "dep:crossterm"]
 sim = ["dep:assay-sim"]
+# Internal Assay-Runner Phase 1 spike command (`assay runner-spike`).
+# Gated behind a feature because the underlying `assay-runner-{core,schema,linux}`
+# crates are `publish = false`; cargo publish of `assay-cli` must therefore use
+# `--no-default-features --features tui,sim` so the optional runner deps are not
+# required to resolve from crates.io. Workspace builds and binary releases keep
+# the default features (`runner` included) so behaviour for repo/CI consumers is
+# unchanged from v3.11.0.
+runner = [
+    "dep:assay-runner-core",
+    "dep:assay-runner-schema",
+    "dep:assay-runner-linux",
+]
 
 [dependencies]
 anyhow.workspace = true
@@ -40,9 +52,9 @@ assay-policy = { workspace = true }
 assay-metrics = { workspace = true }
 assay-evidence = { workspace = true }
 assay-mcp-server = { workspace = true }
-assay-runner-core = { workspace = true }
-assay-runner-schema = { workspace = true }
-assay-runner-linux = { workspace = true }
+assay-runner-core = { workspace = true, optional = true }
+assay-runner-schema = { workspace = true, optional = true }
+assay-runner-linux = { workspace = true, optional = true }
 assay-sim = { workspace = true, optional = true }
 
 dialoguer = "0.12"

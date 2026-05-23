@@ -38,6 +38,7 @@ pub(crate) mod reporting;
 pub(crate) mod run;
 pub(crate) mod run_output;
 pub(crate) mod runner_builder;
+#[cfg(feature = "runner")]
 pub mod runner_spike;
 pub mod sandbox;
 pub(crate) mod session_state_window;
