@@ -70,10 +70,13 @@ repo extraction) stays closed; the burn-in criteria in
   evidence, Trust Basis diff v1, Runner v0 archive contracts, or the
   cross-runtime diff v0 surface.
 - The `Publish-shape guardrail (assay-cli)` PR-CI job added in `v3.11.1`
-  stays in place as defense-in-depth: it will not fire today (no workspace
-  crate is `publish = false` any more), but will catch a future regression
-  if a new `publish = false` workspace crate is added back and reaches
-  `assay-cli`'s non-optional dep set.
+  stays in place as defense-in-depth: it will not fire today (none of
+  `assay-cli`'s non-optional workspace deps are `publish = false`; other
+  workspace crates such as `assay-ebpf`, `assay-xtask`, and the adapter
+  crates remain `publish = false` by design, outside `assay-cli`'s dep
+  surface), but will catch a future regression if a new `publish = false`
+  workspace crate is added back and reaches `assay-cli`'s non-optional
+  dep set.
 
 ## [3.11.1] - 2026-05-23
 
