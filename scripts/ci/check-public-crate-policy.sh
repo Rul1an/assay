@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Public crate contract: every workspace member whose package metadata
+# allows publishing must appear here, and vice versa. This is the
+# release-truth-line allow-list; the policy script enforces it against
+# both `Cargo.toml` metadata and the publish_idempotent.sh `CRATES`
+# array.
+#
+# The four `assay-runner-*` crates are registered here as of v3.11.3,
+# with their package descriptions explicitly framing them as
+# internal/experimental substrate (no standalone product guarantee,
+# semver follows the Assay workspace, intentionally undocumented for
+# third-party use). They are published because `assay-cli` depends on
+# them; cargo publish requires every dep in `[dependencies]` to be
+# resolvable from crates.io regardless of feature activation, so
+# keeping them publish = false made `assay-cli` itself unpublishable
+# (see CHANGELOG entries for v3.11.0, v3.11.1, v3.11.2, v3.11.3).
+#
+# Adding any new public crate here is a deliberate public-surface
+# decision; the PR that does so must update package descriptions and
+# (when relevant) docs/contributing/WAVE0-GATES.md.
 public_crates=(
   assay-common
   assay-registry
@@ -10,6 +29,10 @@ public_crates=(
   assay-policy
   assay-mcp-server
   assay-monitor
+  assay-runner-schema
+  assay-runner-linux
+  assay-runner-core
+  assay-runner-spike
   assay-sim
   assay-cli
 )

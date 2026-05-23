@@ -43,7 +43,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "3.11.2"
+version = "3.11.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
@@ -74,19 +74,19 @@ codegen-units = 1
 
 [workspace.dependencies]
 # Internal crates
-assay-core = { path = "crates/assay-core", version = "3.11.2" }
-assay-common = { path = "crates/assay-common", version = "3.11.2", default-features = false }
-assay-monitor = { path = "crates/assay-monitor", version = "3.11.2" }
-assay-metrics = { path = "crates/assay-metrics", version = "3.11.2" }
-assay-policy = { path = "crates/assay-policy", version = "3.11.2" }
-assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.11.2" }
-assay-evidence = { path = "crates/assay-evidence", version = "3.11.2" }
-assay-sim = { path = "crates/assay-sim", version = "3.11.2" }
-assay-registry = { path = "crates/assay-registry", version = "3.11.2" }
-assay-runner-schema = { path = "crates/assay-runner-schema", version = "3.11.2" }
-assay-runner-core = { path = "crates/assay-runner-core", version = "3.11.2" }
-assay-runner-linux = { path = "crates/assay-runner-linux", version = "3.11.2" }
-assay-runner-spike = { path = "crates/assay-runner-spike", version = "3.11.2" }
+assay-core = { path = "crates/assay-core", version = "3.11.3" }
+assay-common = { path = "crates/assay-common", version = "3.11.3", default-features = false }
+assay-monitor = { path = "crates/assay-monitor", version = "3.11.3" }
+assay-metrics = { path = "crates/assay-metrics", version = "3.11.3" }
+assay-policy = { path = "crates/assay-policy", version = "3.11.3" }
+assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.11.3" }
+assay-evidence = { path = "crates/assay-evidence", version = "3.11.3" }
+assay-sim = { path = "crates/assay-sim", version = "3.11.3" }
+assay-registry = { path = "crates/assay-registry", version = "3.11.3" }
+assay-runner-schema = { path = "crates/assay-runner-schema", version = "3.11.3" }
+assay-runner-core = { path = "crates/assay-runner-core", version = "3.11.3" }
+assay-runner-linux = { path = "crates/assay-runner-linux", version = "3.11.3" }
+assay-runner-spike = { path = "crates/assay-runner-spike", version = "3.11.3" }
 
 # Common dependencies
 anyhow = "1"

@@ -58,6 +58,20 @@ Binary- or operational-facing crates such as `assay-cli`, `assay-monitor`,
 Wave 0 library semver allowlist unless a future gate slice adds stable library
 API coverage for them.
 
+The four Assay-Runner substrate crates — `assay-runner-schema`,
+`assay-runner-core`, `assay-runner-linux`, and `assay-runner-spike` — are
+also published as of `v3.11.3`, but their package descriptions explicitly
+frame them as internal/experimental substrate (no standalone product
+guarantee, intentionally undocumented for third-party use, semver tracks
+the Assay workspace). They are intentionally **not** in the Wave 0 library
+semver allowlist; they exist on crates.io only because `assay-cli` depends
+on them and cargo publish requires every declared dep to be resolvable
+from crates.io.
+
+As of `v3.11.3`, `check-public-crate-policy.sh` also runs as a PR-CI
+guardrail (job `Public crate policy` in `ci.yml`), so the policy gate
+fires before tag, not at release time.
+
 ## Nightly safety lane (Wave 0.1)
 
 - Current status: non-blocking stub job in Wave 0 workflow (`continue-on-error: true`).

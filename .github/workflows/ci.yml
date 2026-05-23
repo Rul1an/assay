@@ -190,6 +190,30 @@ jobs:
         shell: bash
         run: ./scripts/ci/check_assay_cli_publish_shape.sh
 
+  public-crate-policy:
+    # Guardrail: catch v3.11.2-style regressions where a workspace member
+    # flips between `publish = true` and `publish = false`, or the
+    # `publish_idempotent.sh` CRATES array drifts from the public crate
+    # contract, without the policy script's allow-list being updated in
+    # the same PR.
+    #
+    # `check-public-crate-policy.sh` previously only ran inside the release
+    # workflow, so a divergence between the policy allow-list and the
+    # actual workspace shape only surfaced at tag time after merge. This
+    # PR-CI mirror runs the same script on every PR so the gate fires
+    # before tag, not after.
+    name: Public crate policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Verify public crate contract is consistent
+        run: bash scripts/ci/check-public-crate-policy.sh
+
   vendored-packs:
     name: Vendored Pack Sync
     runs-on: ubuntu-latest
