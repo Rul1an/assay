@@ -4,6 +4,139 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-05-23
+
+> **Internal Assay-Runner measured-run contracts and extraction-ready substrate.**
+>
+> Assay-Runner remains an **internal** measured-run subsystem of Assay. This release
+> is **not** a standalone Runner release; the Runner crates stay `publish = false`
+> and Assay still owns measurement semantics. This release exists to mark a
+> durable line on `main` for what has accumulated since `v3.10.2`: Runner v0
+> archive contracts, a qualified second runtime fixture, the cross-runtime
+> diff v0 surface, and the extraction-ready crate split.
+
+This minor release has no breaking change for existing Assay-core / Trust Basis
+consumers. NDJSON evidence, Trust Basis diff v1, the three-family receipt
+adoption surface, and the existing public `assay` CLI verbs and their outputs
+are unchanged versus `v3.10.2`. The only new CLI surface is `assay runner-spike`,
+which is `hide = true`, internal-only, and explicitly outside the public CLI
+contract; it exists to back the Runner v0 archive contracts and is not part of
+the stable interface.
+
+### Assay-Runner v0 measured-run contracts are now durable
+
+The `assay.runner.*.v0` artifact contracts that Phase 1 produced are now living
+under explicit ownership rather than under the spike crate. Same wire shape,
+new boundary.
+
+- New publish-disabled crate `assay-runner-schema` hosts the v0 data
+  structures and constants for
+  `assay.runner.observation_health.v0`,
+  `assay.runner.capability_surface.v0`,
+  `assay.runner.correlation_report.v0`,
+  `assay.runner.sdk_event.v0`, and
+  `assay.runner.archive_manifest.v0`.
+- New publish-disabled crate `assay-runner-core` hosts archive assembly,
+  layer normalizers, and the `RunnerSpikeArchive` writer that turns measured
+  events into a deterministic `.tar.gz` bundle with `sha256:<hex>` per-file
+  digests.
+- New publish-disabled crate `assay-runner-linux` hosts cgroup v2 placement
+  primitives (`CgroupManager`, `SessionCgroup`) — Linux platform adapter
+  surface only.
+- `assay-cli` consumes Runner via these three crates directly. The
+  `assay-runner-spike` crate is retained as a legacy alias for readers of
+  pre-extraction history; no in-workspace consumer depends on it for
+  production code. A mechanical absence check in
+  `scripts/ci/assay_runner_lane_check.py --self-test` enforces this
+  invariant going forward.
+- The four structural extraction blockers tracked under Phase 2D are
+  resolved on main (Slices 1, 2, 3, 6B). Slice 7 — repository extraction —
+  stays closed; the consolidation gate has moved from a passive 4–6 week
+  calendar wait to explicit burn-in criteria documented in
+  `docs/reference/runner/phase-2d-consolidation-audit.md`.
+
+### Qualified second runtime fixture (Gemini)
+
+`runner-fixtures/gemini-google-genai/` is a second qualified runtime line
+producing artifacts under the same v0 contracts as the OpenAI Agents
+fixture. The fixture passes idempotent capability-diff acceptance on the
+delegated `assay-bpf-runner` host. Identity probe, deterministic local
+provider, recorded cassette, and acceptance harness all live in-tree.
+
+The fixture-package boundary now lives at top-level `runner-fixtures/`
+(formerly `tests/fixtures/runner-spike/`); Node fixture renamed to drop
+the `-js` suffix.
+
+### Cross-runtime diff v0 (frozen under A1+B3+C1)
+
+New artifact contract `assay.runner.cross_runtime_diff.v0` for comparing
+the v0 capability surface across two distinct qualified runtimes.
+
+- Normative golden shape at
+  `docs/reference/runner/golden/cross-runtime-diff-s5-gemini-v0.json`.
+- JSON Schema 2020-12 sidecar for the clean-output shape at
+  `docs/reference/runner/schema/cross-runtime-diff-v0-clean.schema.json`.
+  This schema is the wire-contract anchor consumers should pin against.
+- Decision record at `docs/reference/runner/cross-runtime-diff-decisions.md`
+  documents the A1+B3+C1 choices (work-dir prefix canonicalization,
+  side-band SDK metadata, out-of-scope binding-id/policy-outcome
+  comparison).
+- Reference projector at
+  `scripts/ci/assay_runner_cross_runtime_diff_validate.py`.
+- Explicit `non_claims` carry through: no acceptability judgment, no
+  declared-capability input, no derived binding identity, no filename
+  semantic equivalence, no SDK capability equivalence across runtimes.
+
+### Consumer side (Harness)
+
+The companion Harness recipe at [`Rul1an/Assay-Harness`](https://github.com/Rul1an/Assay-Harness)
+can now consume Runner archives and the cross-runtime diff artifact
+separately (`verify-runner`, `runner compare`, `runner cross-runtime
+report`, `runner cross-runtime gate`). Assay still owns measurement
+semantics; Harness only validates, projects, and gates. The Harness side
+is `Rul1an/Assay-Harness@v0.6.0` at the time of this release.
+
+### Documentation
+
+- New Phase 1 + Phase 2 retrospective at
+  `docs/notes/ASSAY-RUNNER-PHASE-1-AND-2-RETROSPECTIVE-2026-05-22.md`
+  collapses the whole arc into one read.
+- New read-only walkthrough at
+  `docs/reference/runner/examples/measured-run-proof-bundle.md` shows what
+  one measured-run bundle contains.
+- New conceptual note at
+  `docs/notes/ASSAY-RUNNER-MEASURED-RUNS-2026-05-23.md` explains why
+  measured runs are conceptually distinct from traces.
+- `docs/reference/runner/extraction-roadmap.md` defines the Phase 2D
+  slice sequence and the per-PR boundary discipline rule.
+- `docs/reference/runner/phase-2d-consolidation-audit.md` replaces the
+  passive 4–6 week wait with burn-in criteria.
+- README adds a short "Internal: Assay-Runner" section pointing at the
+  reference index, the consolidation audit, and the measured-run
+  walkthrough.
+
+### Non-claims (explicit)
+
+- Assay-Runner is **not** released as a standalone product. Runner crates
+  stay `publish = false`.
+- Slice 7 (repository extraction) is **not** opened. It stays gated on
+  consolidation burn-in plus a concrete external consumer use case.
+- macOS / Windows measurement paths are **not** in scope. They remain
+  separate platform spikes (see `platform-and-extraction-readiness.md`).
+- No new public-CLI surface is added on the Assay side; only the internal
+  crate boundary moved. `assay-cli` flags and outputs are unchanged for
+  existing users.
+- The cross-runtime diff carries explicit non-claims (no semantic
+  equivalence between runtimes); consumers (Harness or otherwise) must
+  not contradict them.
+
+### Release operations
+
+- Workspace version bumped `3.10.2` → `3.11.0`.
+- All workspace dependency pins for internal crates updated to `3.11.0`.
+- `Cargo.lock` refreshed.
+- P57 seeding pack updated to use the `v3.11.0` release-truth line.
+
 ## [3.10.2] - 2026-05-17
 
 This patch release carries the same three-family adoption surface as `v3.10.1`
