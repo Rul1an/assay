@@ -3,7 +3,7 @@
 > **Status:** ready for controlled seeding after Assay `v3.11.0` is tagged;
 > one Promptfoo-context follow-up has already been placed
 >
-> **Last updated:** 2026-05-17
+> **Last updated:** 2026-05-23
 > **Scope:** small repo-native sharing pack for the released evidence receipt
 > surface. This is not a launch plan, campaign, partnership claim, compliance
 > claim, or new product wedge.

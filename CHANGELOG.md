@@ -17,7 +17,11 @@ All notable changes to this project will be documented in this file.
 
 This minor release has no breaking change for existing Assay-core / Trust Basis
 consumers. NDJSON evidence, Trust Basis diff v1, the three-family receipt
-adoption surface, and all `assay` CLI verbs are byte-identical to `v3.10.2`.
+adoption surface, and the existing public `assay` CLI verbs and their outputs
+are unchanged versus `v3.10.2`. The only new CLI surface is `assay runner-spike`,
+which is `hide = true`, internal-only, and explicitly outside the public CLI
+contract; it exists to back the Runner v0 archive contracts and is not part of
+the stable interface.
 
 ### Assay-Runner v0 measured-run contracts are now durable
 
@@ -54,7 +58,7 @@ new boundary.
 ### Qualified second runtime fixture (Gemini)
 
 `runner-fixtures/gemini-google-genai/` is a second qualified runtime line
-producing artefacts under the same v0 contracts as the OpenAI Agents
+producing artifacts under the same v0 contracts as the OpenAI Agents
 fixture. The fixture passes idempotent capability-diff acceptance on the
 delegated `assay-bpf-runner` host. Identity probe, deterministic local
 provider, recorded cassette, and acceptance harness all live in-tree.
@@ -74,7 +78,7 @@ the v0 capability surface across two distinct qualified runtimes.
   `docs/reference/runner/schema/cross-runtime-diff-v0-clean.schema.json`.
   This schema is the wire-contract anchor consumers should pin against.
 - Decision record at `docs/reference/runner/cross-runtime-diff-decisions.md`
-  documents the A1+B3+C1 choices (work-dir prefix canonicalisation,
+  documents the A1+B3+C1 choices (work-dir prefix canonicalization,
   side-band SDK metadata, out-of-scope binding-id/policy-outcome
   comparison).
 - Reference projector at
@@ -86,7 +90,7 @@ the v0 capability surface across two distinct qualified runtimes.
 ### Consumer side (Harness)
 
 The companion Harness recipe at [`Rul1an/Assay-Harness`](https://github.com/Rul1an/Assay-Harness)
-can now consume Runner archives and the cross-runtime diff artefact
+can now consume Runner archives and the cross-runtime diff artifact
 separately (`verify-runner`, `runner compare`, `runner cross-runtime
 report`, `runner cross-runtime gate`). Assay still owns measurement
 semantics; Harness only validates, projects, and gates. The Harness side
