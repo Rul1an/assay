@@ -22,7 +22,7 @@ import {
   InMemorySpanExporter,
   ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
-import { Resource } from "@opentelemetry/resources";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { trace, Tracer } from "@opentelemetry/api";
 
 const SERVICE_NAME = "assay-runner-otel-experiment";
@@ -34,13 +34,15 @@ export function getTracer(): Tracer {
   if (providerSingleton === null) {
     exporterSingleton = new InMemorySpanExporter();
     providerSingleton = new BasicTracerProvider({
-      resource: new Resource({
+      resource: resourceFromAttributes({
         "service.name": SERVICE_NAME,
         "service.version": "0.0.0",
       }),
       spanProcessors: [new SimpleSpanProcessor(exporterSingleton)],
     });
-    providerSingleton.register();
+    // OTel SDK 2.x: BasicTracerProvider does not auto-register globally.
+    // Set it as the global trace provider so `trace.getTracer(...)` works.
+    trace.setGlobalTracerProvider(providerSingleton);
   }
   return trace.getTracer("assay-runner-otel-experiment");
 }

@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { Agent, Runner, Usage, tool } from "@openai/agents";
+import { z } from "zod";
 import { getTracer, flushTraceToFile } from "./otel-setup";
 import { computeManifestBinding } from "./manifest-binding";
 
@@ -90,13 +91,7 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
       const readFileTool = tool({
         name: "read_file",
         description: "Read the deterministic experiment fixture file.",
-        strict: false,
-        parameters: {
-          type: "object",
-          properties: { path: { type: "string" } },
-          required: ["path"],
-          additionalProperties: false,
-        },
+        parameters: z.object({ path: z.string() }),
         execute: async (input: { path: string }) =>
           readFileSync(input.path, "utf8"),
       });
