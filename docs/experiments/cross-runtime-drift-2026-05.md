@@ -6,7 +6,7 @@
 > was iterated before Slice 1 landed. Companion to that experiment;
 > reuses the same Runner archive + capability_surface contract, so
 > the L2 capture machinery is already proven on
-> [`assay-bpf-runner`](.github/workflows/runner-otel-experiment.yml).
+> [`assay-bpf-runner`](../../.github/workflows/runner-otel-experiment.yml).
 >
 > **Last updated:** 2026-05-25
 >
@@ -22,20 +22,36 @@ runtimes under a single Runner capture boundary, where does the
 measured capability_surface differ structurally?
 
 Concretely, for each of these dimensions, what changes between
-runtimes and what stays invariant?
+runtimes and what stays invariant? Each dimension is pinned to
+the **exact archive source** that supplies the data, so the
+comparator cannot silently mix layers.
 
-- **Filesystem**: which paths are read, written, created, removed
-- **Network**: which hosts, ports, CIDRs are contacted
-- **Process**: which child processes / execs occur (loader,
-  language runtime, sidecars)
-- **Tool registration**: which tools the SDK advertises to the
-  model
-- **Tool invocation**: which tools the model actually called, in
-  what order
-- **MCP layer**: which MCP servers/clients appear in
-  `capability_surface.mcp_tools`
-- **SDK layer**: which schema and event shapes appear in
-  `layers/sdk.ndjson`
+- **Filesystem paths touched** (source: `capability_surface.filesystem_paths`):
+  set of paths the runtime accessed. Under v0 this is *undifferentiated*
+  (read vs write vs create vs remove are not split). See Threats to
+  Validity #5 — the read/write/create/remove split is a deferred
+  v2-comparator follow-up that requires parsing `layers/kernel.ndjson`
+  directly.
+- **Network endpoints** (source: `capability_surface.network`):
+  hosts, ports, CIDRs the runtime contacted.
+- **Process execs** (source: `capability_surface.processes` /
+  exec events in `layers/kernel.ndjson`): child processes the
+  runtime spawned (loader, language runtime, sidecars).
+- **SDK-layer tool events** (source: `layers/sdk.ndjson`):
+  registration + invocation events emitted by the agent SDK via
+  `$ASSAY_RUNNER_SDK_EVENT_LOG`. This is the same channel
+  Slice 2 of `runner-vs-otel-2026-05` proved end-to-end. Only
+  available if the runtime emits SDK events; mark
+  `inconclusive` for runtimes that do not.
+- **MCP-layer tool surface** (source:
+  `capability_surface.mcp_tools`): server/client/tool names
+  surfaced by the Runner's policy/MCP layer. This is *not* the
+  same as SDK tool registration — it is the policy-side view of
+  what the runtime exposed.
+- **Tool invocation order**: only available where SDK events
+  carry sequence/timestamp info per `tool_call_id`. Mark
+  `inconclusive` if the runtime's SDK events do not preserve
+  ordering.
 
 The experiment does not ask "which runtime is better." It asks
 "what does the runtime choice cost or hide at the
@@ -79,9 +95,9 @@ These are the framing choices I want sharpened before any code
 lands. Pulling them up front so the plan does not silently bake
 in defaults.
 
-1. **Which second runtime?**
+1. **Which second runtime, and in which tool-calling mode?**
    - **Option A:** Google Gemini via `@google/genai` (unified SDK,
-     newest, has agent-style tool calling).
+     newest, supports both manual and automatic function calling).
    - **Option B:** Google Gemini via `@google/generative-ai` (older
      official SDK, narrower surface).
    - **Option C:** Anthropic Claude via `@anthropic-ai/sdk` with
@@ -94,6 +110,16 @@ in defaults.
    - **Recommended starting point:** Option A. Closest semantic
      parity with `@openai/agents`, single-vendor stack so we are
      measuring runtime drift not also-framework drift.
+   - **Sub-decision — manual vs automatic function calling.** Slice 1
+     must pin which Gemini mode is used. Recommended: **manual**
+     function-calling loop, so the wrapper loop is *our* code
+     (visible, deterministic, reviewable) instead of the SDK's
+     auto-dispatch path (which would itself contribute drift we
+     do not control). The OpenAI arm already runs the equivalent
+     manual loop via `@openai/agents` — same modality on both
+     sides keeps the comparison honest. Pins:
+     [Gemini function calling docs](https://ai.google.dev/gemini-api/docs/function-calling),
+     [Google Gen AI JS SDK docs](https://googleapis.github.io/js-genai/).
 
 2. **Same workload semantics or same workload code?**
    - **Same code** is impossible: the two SDKs register tools
@@ -169,17 +195,23 @@ fixed before the run is counted.
 The `compare/drift.py` comparator takes **two Runner archives**
 (one per arm) and emits per-dimension drift:
 
-| Dimension | What "drift" looks like |
-|---|---|
-| Filesystem reads | Set difference of paths read by each runtime |
-| Filesystem writes | Set difference of paths written |
-| Filesystem creates/removes | Set difference of paths touched |
-| Network hosts | Set difference of outbound hostnames |
-| Network ports/CIDRs | Set difference of port + CIDR combinations |
-| Process execs | Set difference of `exec` syscall targets |
-| Registered tools | Set difference of MCP/agent tool names |
-| Invoked tools | Set difference of actually-called tool names |
-| SDK layer schema | Schema string + event-shape diff |
+| Dimension | Source | What "drift" looks like |
+|---|---|---|
+| Filesystem paths touched | `capability_surface.filesystem_paths` | Set difference of paths touched (undifferentiated under v0; see Threats #5) |
+| Network hosts | `capability_surface.network` | Set difference of outbound hostnames |
+| Network ports/CIDRs | `capability_surface.network` | Set difference of port + CIDR combinations |
+| Process execs | `capability_surface.processes` / `layers/kernel.ndjson` | Set difference of exec targets |
+| SDK tool events | `layers/sdk.ndjson` | Set difference of SDK-emitted tool registration + invocation events; `inconclusive` for runtimes that emit no SDK events |
+| MCP tool surface | `capability_surface.mcp_tools` | Set difference of MCP server/client/tool names surfaced by the policy/MCP layer |
+| Tool invocation order | `layers/sdk.ndjson` (sequence/timestamp) | Per-`tool_call_id` ordering diff; `inconclusive` if the runtime's SDK events do not preserve order |
+
+**Out of scope for v0 of this comparator** (explicit follow-ups,
+not silent gaps): read-vs-write classification, per-path access
+counts, syscall-level kernel.ndjson parsing. Each of these
+requires a richer parser than `capability_surface` v0 supplies.
+They are tracked alongside the runner-vs-otel
+"What still does NOT prove" list and would arrive together as a
+v2-comparator follow-up.
 
 Each row carries a **classification label**:
 
@@ -255,8 +287,8 @@ A successful first findings doc:
 | Slice | Deliverable | External dependency |
 |---|---|---|
 | 0 | This plan-doc, reviewed and sharpened (Open Questions resolved) | None |
-| 1 | Workload contract written down. Both runtime implementations of the workload, runnable locally with API keys. Each passes the contract checker. | OpenAI key (already used), second runtime's key |
-| 2 | `compare/drift.py` MVP. Runs on two **synthetic** archives derived from existing runner-vs-otel fixtures, no live runs yet. Comparator output schema locked in. | None |
+| 1 | Workload contract written down (including the exact tool-calling mode: manual function-calling loop on both sides). Both runtime implementations of the workload, runnable locally with API keys. Each passes the contract checker. **Blocked on Open Question #1 resolution.** | OpenAI key (already used), second runtime's key |
+| 2 | `compare/drift.py` MVP. **Scope-locked to v0 surface**: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order where SDK events preserve it. Read/write/create classification and kernel-ndjson parsing are deferred. Runs on two synthetic archives derived from existing runner-vs-otel fixtures, no live runs yet. Comparator output schema locked in. | None |
 | 3 | Live Arm A0 + B0 dispatch on `assay-bpf-runner` (workflow extension). n=3 per arm. Baselines committed under `docs/experiments/cross-runtime-drift-2026-05/runs/{a0,b0}/`. | Second runtime API key as workflow secret |
 | 4 | `findings.md`. Drift table, classification, threats-to-validity, reproduction commands. | None |
 | 5 | Publication artefacts (issue + blog draft) following the same discipline as runner-vs-otel Slice 4: one narrow question per channel, no maintainer @-mentions, evidence link once. | OpenInference #3162 triage outcome should inform whether to file under same umbrella or separately |
