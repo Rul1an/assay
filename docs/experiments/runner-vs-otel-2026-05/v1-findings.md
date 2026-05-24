@@ -126,10 +126,14 @@ Three Arm C dual-capture iterations were performed on the
 (GitHub Actions run `26372344619`, head `c6508780`,
 `repetitions=3 require_binding_match=true build_ebpf=true`). Per-run
 artifacts are committed under
-[`runs/v1-arm-c/`](runs/v1-arm-c/) — each directory contains the raw
-`archive.tar.gz`, the OTLP/JSON `trace.json`, and the comparator's
-`matrix.json` + `matrix.md`. All three iterations passed
-`--require-binding-match` (exit code 0).
+[`runs/v1-arm-c/`](runs/v1-arm-c/) — each directory contains the
+extracted `archive-contents/` (manifest, capability surface,
+observation health, correlation report, ndjson layers), the
+OTLP/JSON `trace.json`, and the comparator's `matrix.json` +
+`matrix.md`. The raw `.tar.gz` tarballs are intentionally not
+tracked; see [`runs/v1-arm-c/README.md`](runs/v1-arm-c/README.md)
+for the tracking policy and the workflow-artifact link. All three
+iterations passed `--require-binding-match` (exit code 0).
 
 ### 5. Real L2 capture: eBPF observes Node.js file I/O the trace cannot see
 
