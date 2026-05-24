@@ -83,6 +83,11 @@ class TraceObservation:
     tool_call_ids: list[str]
     tool_names: list[str]
     span_count: int
+    # Slice 3: reported tool-call arguments per tool span.
+    # List of dicts {tool_call_id, tool_name, arguments_json,
+    # arguments_path}. Empty list when the trace does not opt into
+    # sensitive content capture (gen_ai.tool.call.arguments absent).
+    reported_tool_calls: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +285,42 @@ def parse_otlp_trace(path: Path) -> TraceObservation:
     tool_names: list[str] = []
 
     span_count = 0
+    reported_tool_calls: list[dict[str, Any]] = []
 
     for span in _iter_spans(trace_doc):
         span_count += 1
         attrs = _attrs_dict(span)
+
+        # Slice 3: capture (tool_call_id, tool_name, arguments) tuples
+        # from every tool span that opted into sensitive content. The
+        # arguments value is a JSON-encoded string per the OTel GenAI
+        # semconv; try to parse out a `.path` field for the
+        # intent-vs-effect check.
+        tool_call_id_attr = attrs.get("gen_ai.tool.call.id")
+        tool_args_attr = attrs.get("gen_ai.tool.call.arguments")
+        if (
+            isinstance(tool_call_id_attr, str)
+            and tool_call_id_attr
+            and isinstance(tool_args_attr, str)
+            and tool_args_attr
+        ):
+            arguments_path: str | None = None
+            try:
+                parsed = json.loads(tool_args_attr)
+                if isinstance(parsed, dict):
+                    p = parsed.get("path")
+                    if isinstance(p, str) and p:
+                        arguments_path = p
+            except json.JSONDecodeError:
+                pass
+            reported_tool_calls.append(
+                {
+                    "tool_call_id": tool_call_id_attr,
+                    "tool_name": attrs.get("gen_ai.tool.name"),
+                    "arguments_json": tool_args_attr,
+                    "arguments_path": arguments_path,
+                }
+            )
 
         run_id = run_id or attrs.get("assay.run.id")
         manifest_digest = manifest_digest or attrs.get("assay.archive.manifest_digest")
@@ -353,6 +390,7 @@ def parse_otlp_trace(path: Path) -> TraceObservation:
         tool_call_ids=sorted(tool_call_ids),
         tool_names=sorted(tool_names),
         span_count=span_count,
+        reported_tool_calls=reported_tool_calls,
     )
 
 
@@ -402,6 +440,41 @@ def _digest_binding_status(
     if archive_digest.lower() == trace_digest.lower():
         return "tamper-evident-match"
     return f"mismatch:archive={archive_digest},trace={trace_digest}"
+
+
+def _intent_effect_status(
+    runner: "RunnerObservation", trace: "TraceObservation"
+) -> str:
+    """
+    Slice 3: per reported tool-call argument (path), check whether the
+    kernel actually observed a file open at that path. The asymmetry
+    is the central demonstration of the runner-vs-otel experiment:
+
+      - intent-effect-match: every reported path appears in the
+        archive's capability_surface.filesystem_paths.
+      - intent-effect-mismatch:<path>: at least one reported path is
+        NOT present in the kernel-observed paths. Strong tampering
+        signal (the agent reported reading X, the kernel saw no read
+        of X).
+      - not-applicable: no reported tool-call arguments captured in
+        the trace (the workload did not opt into sensitive content).
+      - inconclusive: the archive has no kernel layer to compare
+        against (Arm B alone, no Arm C).
+    """
+    reported = [
+        c["arguments_path"]
+        for c in trace.reported_tool_calls
+        if c.get("arguments_path")
+    ]
+    if not reported:
+        return "not-applicable"
+    measured = set(runner.capability_surface.get("filesystem_paths", []))
+    if not measured:
+        return "inconclusive"
+    missing = [p for p in reported if p not in measured]
+    if not missing:
+        return "intent-effect-match"
+    return "intent-effect-mismatch:" + ",".join(missing)
 
 
 def build_field_matrix(
@@ -584,6 +657,35 @@ def build_field_matrix(
             claim_class="measurement integrity",
         )
     )
+    # Slice 3: intent-vs-effect row. Compares the reported tool-call
+    # argument (path) from the trace against the kernel-observed
+    # filesystem paths in the archive. Empty when the trace did not
+    # opt into sensitive content capture; surfaces a tampering signal
+    # when reported and measured paths diverge.
+    reported_paths = [
+        c["arguments_path"]
+        for c in trace.reported_tool_calls
+        if c.get("arguments_path")
+    ]
+    intent_status = _intent_effect_status(runner, trace)
+    rows.append(
+        FieldRow(
+            field="reported tool argument vs measured path",
+            l1_trace=(
+                ",".join(reported_paths) if reported_paths else "absent (no sensitive capture)"
+            ),
+            l2_archive=(
+                "see capability_surface.filesystem_paths"
+                if runner.capability_surface.get("filesystem_paths")
+                else "absent"
+            ),
+            join_key=intent_status,
+            claim_class="reported intent vs measured effect",
+            notes=(
+                "tampering signal" if intent_status.startswith("intent-effect-mismatch") else ""
+            ),
+        )
+    )
 
     return rows
 
@@ -607,6 +709,10 @@ def matrix_to_json(
             "tool_call_id_join": _join_status(
                 runner.sdk_tool_call_ids, trace.tool_call_ids
             ),
+            # Slice 3: top-level intent-vs-effect status (per-tool-call
+            # paths are in the matrix row "reported tool argument vs
+            # measured path").
+            "intent_effect_status": _intent_effect_status(runner, trace),
         },
         "runner_observation": dataclasses.asdict(runner),
         "trace_observation": dataclasses.asdict(trace),
@@ -624,6 +730,10 @@ def matrix_to_markdown(rows: list[FieldRow], summary: dict[str, Any]) -> str:
         f"- manifest-digest binding: {summary['manifest_digest_binding']}"
     )
     out.append(f"- tool_call_id join: {summary['tool_call_id_join']}")
+    if "intent_effect_status" in summary:
+        out.append(
+            f"- intent-vs-effect: {summary['intent_effect_status']}"
+        )
     out.append("")
     out.append("| Field | L1 Trace | L2 Archive | Join | Claim class | Notes |")
     out.append("|---|---|---|---|---|---|")

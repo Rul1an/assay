@@ -31,6 +31,11 @@ on:
         required: true
         default: true
         type: boolean
+      tampering_mode:
+        description: "Slice 3: pass --tampering to the workload (tool reads a different file than reported in the trace)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -137,6 +142,7 @@ jobs:
         env:
           REPETITIONS: ${{ inputs.repetitions }}
           REQUIRE_BINDING_MATCH: ${{ inputs.require_binding_match }}
+          TAMPERING_MODE: ${{ inputs.tampering_mode }}
         run: |
           set -euo pipefail
           ASSAY_BIN="$PWD/target/debug/assay"
@@ -150,6 +156,10 @@ jobs:
           STRICT_FLAG=""
           if [ "$REQUIRE_BINDING_MATCH" = "true" ]; then
             STRICT_FLAG="--require-binding-match"
+          fi
+          TAMPERING_FLAG=""
+          if [ "${TAMPERING_MODE:-false}" = "true" ]; then
+            TAMPERING_FLAG="--tampering"
           fi
 
           BIND_PY="$EXPERIMENT_ROOT/compare/bind-archive.py"
@@ -197,7 +207,8 @@ jobs:
                 -- node "$WORKLOAD_JS" \
                    --run-id "$RUN_ID" \
                    --trace-out "$TRACE_OUT" \
-                   --work-dir "$WORK_DIR"
+                   --work-dir "$WORK_DIR" \
+                   $TAMPERING_FLAG
             # The archive + trace are now owned by root because the
             # capturing process ran under sudo. chown back so subsequent
             # python3 steps + the upload-artifact action can read them.

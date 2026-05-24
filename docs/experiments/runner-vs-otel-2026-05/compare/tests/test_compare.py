@@ -32,6 +32,9 @@ FIXTURES = HERE / "fixtures"
 ARCHIVE_DIR = FIXTURES / "archive"
 TRACE_FILE = FIXTURES / "trace.json"
 TRACE_MATCHING_FILE = FIXTURES / "trace-matching-digest.json"
+# Slice 3 fixtures
+TRACE_TAMPERING_HONEST = FIXTURES / "trace-tampering.json"
+TRACE_TAMPERING_MISMATCH = FIXTURES / "trace-tampering-mismatch.json"
 
 
 class CompareTests(unittest.TestCase):
@@ -80,9 +83,10 @@ class CompareTests(unittest.TestCase):
         self.assertTrue(binding.startswith("mismatch:"), binding)
 
     def test_field_matrix_row_count(self) -> None:
-        # Sixteen well-known rows in v0 of the matrix; bumping this is an
-        # explicit decision.
-        self.assertEqual(len(self.rows), 16)
+        # Seventeen well-known rows in v0 of the matrix (the Slice 3
+        # intent-vs-effect row was added on top of the v1 sixteen);
+        # bumping this is an explicit decision.
+        self.assertEqual(len(self.rows), 17)
 
     def test_markdown_renders(self) -> None:
         md = compare.matrix_to_markdown(self.rows, self.matrix["summary"])
@@ -190,6 +194,64 @@ class ExitCodeTests(unittest.TestCase):
             ]
         )
         self.assertEqual(rc, compare.EXIT_BAD_INPUT)
+
+
+class IntentEffectTests(unittest.TestCase):
+    """
+    Slice 3: cover the reported-tool-argument vs measured-kernel-path
+    comparator path. Three states matter:
+
+      not-applicable    no sensitive content captured in trace
+      intent-effect-match   reported path appears in archive's
+                            capability_surface.filesystem_paths
+      intent-effect-mismatch:<path>   reported path NOT in archive's
+                                      paths (tampering signal)
+    """
+
+    def test_no_sensitive_capture_reports_not_applicable(self) -> None:
+        runner = compare.parse_runner_archive(ARCHIVE_DIR)
+        trace = compare.parse_otlp_trace(TRACE_FILE)
+        matrix = compare.matrix_to_json(
+            compare.build_field_matrix(runner, trace), runner, trace
+        )
+        self.assertEqual(
+            matrix["summary"]["intent_effect_status"], "not-applicable"
+        )
+
+    def test_reported_path_in_measured_reports_match(self) -> None:
+        # trace-tampering.json reports
+        # /tmp/fixture/openai-agents-input.txt, which is exactly what the
+        # fixture archive's capability_surface.filesystem_paths contains.
+        runner = compare.parse_runner_archive(ARCHIVE_DIR)
+        trace = compare.parse_otlp_trace(TRACE_TAMPERING_HONEST)
+        matrix = compare.matrix_to_json(
+            compare.build_field_matrix(runner, trace), runner, trace
+        )
+        self.assertEqual(
+            matrix["summary"]["intent_effect_status"], "intent-effect-match"
+        )
+
+    def test_reported_path_not_in_measured_reports_mismatch(self) -> None:
+        # trace-tampering-mismatch.json reports /workdir/safe.txt, which
+        # is NOT in the fixture archive's filesystem paths. That's the
+        # tampering signal: reported intent (safe.txt) diverges from
+        # measured effect (openai-agents-input.txt).
+        runner = compare.parse_runner_archive(ARCHIVE_DIR)
+        trace = compare.parse_otlp_trace(TRACE_TAMPERING_MISMATCH)
+        matrix = compare.matrix_to_json(
+            compare.build_field_matrix(runner, trace), runner, trace
+        )
+        status = matrix["summary"]["intent_effect_status"]
+        self.assertTrue(status.startswith("intent-effect-mismatch:"), status)
+        self.assertIn("/workdir/safe.txt", status)
+
+    def test_reported_paths_extracted_into_trace_observation(self) -> None:
+        trace = compare.parse_otlp_trace(TRACE_TAMPERING_MISMATCH)
+        self.assertEqual(len(trace.reported_tool_calls), 1)
+        call = trace.reported_tool_calls[0]
+        self.assertEqual(call["tool_call_id"], "tc_runner_policy_001")
+        self.assertEqual(call["tool_name"], "read_file")
+        self.assertEqual(call["arguments_path"], "/workdir/safe.txt")
 
 
 if __name__ == "__main__":
