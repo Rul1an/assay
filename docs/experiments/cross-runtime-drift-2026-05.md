@@ -59,20 +59,22 @@ capability_surface level."
 
 ## First Conclusion to Test
 
-Two agent runtimes that pass the same functional task (read file
-X, write file Y, call tool Z) will produce capability_surfaces
-that are **not** structurally identical, even after the workload
-is held constant. The drift is bounded and explainable: it falls
-into runtime-induced (SDK loader, telemetry sidecar, vendored
-deps), provider-induced (host endpoints, auth probes), and
-task-induced (the actual reads/writes the agent decided to do).
+Two agent runtimes that pass the same functional task (touch
+fixture path X, touch fixture path Y, call tool Z) will produce
+capability_surfaces that are **not** structurally identical,
+even after the workload is held constant. The drift is bounded
+and explainable: it falls into runtime-induced (SDK loader,
+telemetry sidecar, vendored deps), provider-induced (host
+endpoints, auth probes), and task-induced (the paths the agent
+actually touched to satisfy the workload contract).
 
 Useful artefact: a per-dimension drift report that names which
 slice of the surface is runtime-specific, which is
 provider-specific, and which is genuinely task-induced. That
 report becomes a runtime-selection input ("this runtime adds N
-extra outbound hosts and M extra writes purely from its own
-machinery") without becoming a benchmark ("runtime X is faster").
+extra outbound hosts and M extra touched paths purely from its
+own machinery") without becoming a benchmark ("runtime X is
+faster").
 
 ## SOTA Anchors
 
