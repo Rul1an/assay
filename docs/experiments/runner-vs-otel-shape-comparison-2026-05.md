@@ -186,6 +186,55 @@ artifact itself. It does not make the trace authoritative for archive content;
 it lets a consumer verify that the trace and archive are the pair claimed by
 the experiment.
 
+### Namespace separation: private vs proposed
+
+Two namespaces deliberately coexist in this experiment:
+
+- `assay.*` is the **private experiment namespace** used by the implementation
+  today (`assay.archive.manifest_digest`, `assay.run.id`,
+  `assay.runner.correlation_status`, ...). These names are stable for the
+  duration of the experiment but make no claim on the open vocabulary.
+- `agent.runtime_evidence.*` is the **proposed open-standard namespace**
+  documented in the OpenInference Discussion Payload section below
+  (`agent.runtime_evidence.digest`, `agent.runtime_evidence.health`,
+  `agent.runtime_evidence.boundary`). These are what we will offer up for
+  inclusion in the OTel GenAI / OpenInference vocabulary.
+
+The experiment intentionally emits `assay.*` attributes today. If and when the
+vocabulary discussion settles on neutral names, the instrumentation can be
+re-pointed at the agreed namespace without changing the comparator schema.
+
+### Implementation package
+
+The skeleton in this doc is now backed by a runnable experiment package under
+[`runner-vs-otel-2026-05/`](runner-vs-otel-2026-05/README.md):
+
+- `compare/compare.py` (stdlib only) is the field-matrix generator and lock
+  the comparator's wire format against the schemas in
+  `crates/assay-runner-schema`. It reads either a `.tar.gz` archive or an
+  extracted directory and an OTLP/JSON trace, and emits both a JSON and a
+  Markdown matrix.
+- `workload/` is the Node.js + TypeScript runtime that wraps the existing
+  `runner-fixtures/openai-agents/fixture-agent.js` workload with OTel
+  tracing and the `assay.archive.created` event binding.
+- `run-arm-b.sh` is the local trace-only orchestrator. Arms A and C run on
+  the delegated `assay-bpf-runner` host; see the experiment-package
+  `README.md` for the dispatch path.
+
+### Comparator exit codes
+
+`compare/compare.py` ships a stable exit-code contract so it can land in CI
+or Harness flows without re-inventing semantics:
+
+| Code | Meaning |
+|---:|---|
+| `0` | Comparison generated; no binding error required or satisfied |
+| `2` | Bad CLI / config / input path |
+| `3` | Malformed archive or trace, or `--require-binding-match` was set and the manifest digest did not match |
+
+Arm C dispatches set `--require-binding-match`; Arm A, Arm B, and unit tests
+do not, so a synthetic or absent counterpart does not cause a hard failure.
+
 ### TypeScript Sketch
 
 ```ts
