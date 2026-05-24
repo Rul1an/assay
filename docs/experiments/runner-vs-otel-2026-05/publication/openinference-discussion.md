@@ -20,92 +20,66 @@
 
 ## Body
 
-Hi OpenInference / OTel GenAI WG,
+Hey folks,
 
-We ran a controlled experiment (Linux/eBPF, n=3 per arm) that
-captures an agent run twice in the same execution:
+Was reading through how OpenInference handles agent tool spans
+(the `tool.call.id` propagation is exactly the join key I needed)
+and wanted to ask one vocabulary question before I default to a
+private namespace.
 
-- **L1 — reported control flow**: OTel/OpenInference-style trace
-  emitted in-process by the workload using
-  `@opentelemetry/sdk-trace-base` and the OTel GenAI semconv
-  attribute set (`gen_ai.provider.name`, `gen_ai.operation.name`,
-  `gen_ai.tool.name`, `gen_ai.tool.call.id`, optionally
-  `gen_ai.tool.call.arguments`).
-- **L2 — measured runtime evidence**: a content-addressed Runner
-  archive produced by an eBPF + cgroup-v2 capture that records the
-  kernel-observed filesystem paths, network endpoints, process
-  execs, plus measurement-health gates (`ringbuf_drops`,
-  `cgroup_correlation`).
+Sibling project does a Linux/eBPF measured-run capture for agent
+runs. Three slices of evidence committed in the repo: per-run
+`sha256` binding from an OTel span event to an out-of-band
+runtime-evidence archive, tool-level join between
+`gen_ai.tool.call.id` and the archive's SDK layer, and a
+controlled tampering scenario where the trace reports reading
+file X and the kernel observes a read of file Y at the same
+`tool_call_id`. All on real eBPF data with n=3 per arm.
 
-Both streams share the same `tool_call_id`, and a per-run
-`sha256:<manifest-bytes>` digest of the archive's `manifest.json`
-is attached to the trace's root span as an
-`assay.archive.created` event — a tamper-evident binding in the
-SLSA-provenance style. This lets us state per-run claims like
-"this trace and this archive describe the same execution" without
-the trace owning the archive's content.
+Need four attributes on the trace side so a consumer can verify
+the binding and read the intent-vs-effect verdict without owning
+the archive content. They sit in a private `assay.*` namespace
+today because squatting on unspecified OTel/OpenInference names
+felt wrong.
 
-We've also instrumented a controlled adversarial scenario where
-the agent reports reading file X and the kernel observes a read
-of file Y. With L1 and L2 joined on `tool_call_id`, the
-comparator expresses the asymmetry as "reported intent X !=
-measured effect Y at the same `tool_call_id`".
+Candidates:
 
-Today the binding + intent-effect attributes live in a private
-`assay.*` namespace because we did not want to squat on
-unspecified OTel GenAI / OpenInference attribute names. Three of
-them feel like they could be widely useful in any setup that
-pairs a tracing layer with an out-of-band runtime-evidence
-artifact:
+- `agent.runtime_evidence.digest`: content-addressed pointer,
+  `sha256:<bytes>` over the archive's manifest
+- `agent.runtime_evidence.health`: measurement integrity
+  (`clean`, `degraded`, `unknown`)
+- `agent.runtime_evidence.boundary`: declared measurement
+  boundary, e.g. `linux_ebpf_cgroup_v2`
+- `agent.runtime_evidence.intent_effect_status`:
+  reported-vs-measured verdict per tool call
 
-- `agent.runtime_evidence.digest` — content-addressed pointer to
-  the artifact (e.g., `sha256:<manifest-bytes>`).
-- `agent.runtime_evidence.health` — short enum/string for
-  measurement integrity (`clean`, `degraded`, `unknown`).
-- `agent.runtime_evidence.boundary` — declared measurement boundary
-  string (e.g., `linux_ebpf_cgroup_v2`).
+Narrow question:
 
-Plus a fourth that emerged from the adversarial scenario:
+> Where should attributes like these live? OpenInference spec,
+> an OTel GenAI extension, a separate namespace, or is there
+> something existing I should use instead?
 
-- `agent.runtime_evidence.intent_effect_status` — short enum/string
-  reporting how the trace's reported tool arguments compare to the
-  runtime artifact's measured effects (e.g.,
-  `intent-effect-match`, `intent-effect-mismatch:<path>`,
-  `not-applicable`, `inconclusive`).
+Three answers are all useful signal: "fits under OpenInference,
+here's the section", "belongs in OTel GenAI semconv, file it
+there", or "this is a different abstraction, keep it private and
+link from your namespace". Any of those settles it.
 
-The narrow question I'd like maintainer input on:
-
-> Where should attributes like these live? Do they fit under the
-> OpenInference spec, under an OTel GenAI extension, in a separate
-> namespace altogether, or is there an existing attribute we should
-> be using and just missed?
-
-The runtime-evidence artifact itself is intentionally out of scope
-for the trace; the trace only needs to refer to it by digest +
-short health + boundary fields. Whatever the right home is, we'd
-like to move our `assay.*` private names there so other consumers
-that pair OTel-family tracing with out-of-band runtime evidence
-can use the same vocabulary.
-
-I've attached the full experiment package in the repo we used to
-develop this (Linux/eBPF only, internal/experimental). The
-v1-findings.md walks through the four slices that produced the
-evidence; the per-run Arm C archives + traces + comparator output
-are committed under `runs/v1-arm-c/`, `runs/slice2-arm-c/`, and
-`runs/slice3-arm-c/`.
+Full evidence and reproduction commands:
 
 - Experiment package: <https://github.com/Rul1an/assay/tree/main/docs/experiments/runner-vs-otel-2026-05>
-- Plan doc with claim-class taxonomy + threats to validity: [`runner-vs-otel-shape-comparison-2026-05.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-shape-comparison-2026-05.md)
-- v1 findings (with Slice 2 + Slice 3 resolutions): [`v1-findings.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/v1-findings.md)
-- Comparator source (stdlib Python): [`compare/compare.py`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/compare/compare.py)
+- Plan and claim taxonomy: [`runner-vs-otel-shape-comparison-2026-05.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-shape-comparison-2026-05.md)
+- v1 findings with the four slice resolutions: [`v1-findings.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/v1-findings.md)
+- Comparator (stdlib Python, 17 unit tests): [`compare/compare.py`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/compare/compare.py)
+- Per-run baselines under `runs/{v1-arm-c, slice2-arm-c, slice3-arm-c}/`
 
-Happy to file separate narrower issues if the discussion suggests
-they're better tracked there. Not asking for adoption, not asking
-for integration; just want to know where the vocabulary should
-live so the cross-tool wiring stays clean.
+For transparency: Linux/eBPF only on the producer side, runtime
+crates publish to crates.io with explicit internal/experimental
+package descriptions, no third-party users, no integration ask.
+Just want the names to land in the right place.
 
-Thanks,
-Roel (Rul1an)
+Nice spec by the way, the Python / TS / Java / C# breadth shows
+real instrumentation work and came through clearly when I was
+reading it.
 
 ---
 
