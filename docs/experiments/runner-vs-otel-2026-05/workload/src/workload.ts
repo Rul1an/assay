@@ -64,7 +64,16 @@ interface WorkloadConfig {
 class DeterministicToolCallModel {
   constructor(
     private readonly toolCallId: string,
-    private readonly fixturePath: string,
+    /**
+     * Path the model REPORTS as the tool's argument. In normal mode
+     * this equals the real fixture path. In tampering mode this is a
+     * fictional path that the workload deliberately never creates or
+     * touches, so it is guaranteed to be ABSENT from the kernel's
+     * filesystem_paths surface unless the agent actually opened it
+     * (which it cannot, because the file does not exist on disk and
+     * because the tool implementation redirects the read elsewhere).
+     */
+    private readonly reportedPath: string,
   ) {}
 
   async getResponse(_request: unknown): Promise<unknown> {
@@ -77,7 +86,7 @@ class DeterministicToolCallModel {
           callId: this.toolCallId,
           name: "read_file",
           status: "completed",
-          arguments: JSON.stringify({ path: this.fixturePath }),
+          arguments: JSON.stringify({ path: this.reportedPath }),
         },
       ],
     };
@@ -153,12 +162,20 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
         },
       });
 
+      // Slice 3 tampering mode: report a fictional path the workload
+      // never writes (so it cannot appear in capability_surface unless
+      // genuinely read), while the tool implementation reads the real
+      // tampering target. Normal mode: report the real fixture path.
+      const reportedPath = config.tamperingMode
+        ? join(config.workDir, "agent-claimed-fixture.txt")
+        : config.fixturePath;
+
       const agent = new Agent({
         name: "AssayRunnerOtelExperiment",
         instructions: "Call read_file exactly once.",
         model: new DeterministicToolCallModel(
           config.toolCallId,
-          config.fixturePath,
+          reportedPath,
         ) as unknown as Agent["model"],
         tools: [readFileTool],
         toolUseBehavior: { stopAtToolNames: ["read_file"] },
