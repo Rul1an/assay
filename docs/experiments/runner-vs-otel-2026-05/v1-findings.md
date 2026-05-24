@@ -1,10 +1,12 @@
 # v1 Findings: Runner Archives Next to OTel Traces
 
-> **Status:** Arm B baseline (macOS local, n=3 + dual-simulation) and Arm C
-> baseline (delegated `assay-bpf-runner`, n=3 with real Linux/eBPF capture)
-> are both landed. Arm A (Runner-only) is implicitly covered by the archive
-> half of Arm C. v1.5 follow-ups (adversarial tool-call argument tampering,
-> SDK-layer correlation fix, overhead measurement at n>=20) stay open.
+> **Status:** Arm B baseline (macOS local, n=3 + dual-simulation), Arm C
+> baseline (delegated `assay-bpf-runner`, n=3 with real Linux/eBPF capture),
+> **and Slice 2 (SDK-layer ingestion fix) baseline** (delegated, n=3 with
+> tool-level L1↔L2 join working) are all landed. Arm A (Runner-only) is
+> implicitly covered by the archive half of Arm C. Slice 3 (adversarial
+> tool-call argument tampering) and overhead measurement at n≥20 remain
+> open.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >
@@ -222,36 +224,67 @@ today and is why the cross-runtime diff v0 work
 (A1+B3+C1 canonicalization, work-dir prefix normalization, side-band
 SDK metadata) exists in the first place.
 
+## Slice 2 resolution: SDK-layer ingestion + tool-level L1↔L2 join
+
+The primary v1 limitation flagged above is now resolved. Three new
+Arm C iterations were run on the delegated host with the Slice 2
+workload + workflow change applied; the evidence is under
+[`runs/slice2-arm-c/`](runs/slice2-arm-c/) (GitHub Actions run
+[`26373111099`](https://github.com/Rul1an/assay/actions/runs/26373111099),
+head `0a1e6884`).
+
+### Resolution mechanics
+
+Two changes, both small:
+
+- `workload/src/sdk-events.ts` (new): NDJSON emitter that writes
+  `assay.runner.sdk_event.v0` events into the path provided via
+  `$ASSAY_RUNNER_SDK_EVENT_LOG`. When the env var is not set
+  (Arm B local), the emitter is a no-op so existing behaviour is
+  preserved exactly.
+- `workload/src/workload.ts`: emit `tool_call_started`,
+  `tool_call_completed`, and `run_finished` events through the SDK
+  emitter alongside the existing OTel tool spans. Both streams share
+  the same `tool_call_id`, so the comparator can join L1 to L2 at
+  tool level.
+- `.github/workflows/runner-otel-experiment.yml`: pass
+  `--sdk-event-log $RUN_DIR/sdk-events.ndjson` to
+  `assay runner-spike run`, which is what triggers the env-var
+  injection into the workload child and the post-run fold of the
+  NDJSON into the archive (see `build_spec()` in
+  `crates/assay-cli/src/cli/commands/runner_spike.rs` line 85). The
+  `--agent-shim openai-agents` flag alone does not trigger this.
+
+### Before vs after
+
+| Metric | Pre-Slice 2 (`runs/v1-arm-c/`) | Post-Slice 2 (`runs/slice2-arm-c/`) |
+|---|---|---|
+| `archive_sdk_events` | 0 | **3 per run** |
+| `tool_call_id_join` | `archive-side-absent` | **`joined:tc_runner_policy_001`** |
+| `observation_health.sdk_layer` | `absent` | **`self_reported`** |
+| `archive.sdk_tools` | `[]` | **`["read_file"]`** |
+| `archive.sdk_tool_call_ids` | `[]` | **`["tc_runner_policy_001"]`** |
+| `manifest_digest_binding` | `tamper-evident-match` | `tamper-evident-match` (preserved) |
+| Health gates (`kernel_layer`, `ringbuf_drops`, `cgroup_correlation`) | clean | clean (preserved) |
+
+### What this enables
+
+The central claim now upgrades from run-level binding to **run-level
+binding + tool-level join**. The comparator can now demonstrate, on
+real Linux/eBPF measurement data, that:
+
+- the same `tool_call_id` is present in both the OTel trace
+  (`gen_ai.tool.call.id`) and the Runner archive's SDK layer, joined
+  at tool granularity; and
+- the manifest-digest binding still holds per-run.
+
+Slice 3 (adversarial tool-call argument tampering) can now be built
+on top of this evidence: with tool-level join working, the
+comparator can express "the trace reported tool with argument X, the
+kernel measured effect Y, and X ≠ Y at the same `tool_call_id`."
+Without Slice 2 that claim could not be made.
+
 ## What v1 still does NOT prove
-
-### Tool-level L1/L2 join is not yet demonstrated (primary v1 limitation)
-
-> Tool-level L1/L2 join is not yet demonstrated in this run because
-> the Runner archive has no SDK events. The comparison currently
-> joins at run level via `run_id` and `assay.archive.manifest_digest`;
-> restoring SDK-layer ingestion is the next prerequisite for
-> `gen_ai.tool.call.id` joins and the v1.5 tampering scenario.
-
-In numbers: `observation-health.json` reported `sdk_layer: absent` and
-`policy_layer: absent` for all three Arm C runs. `layers/sdk.ndjson`
-in the archive is empty (0 lines). The OTel trace correctly carries
-`gen_ai.tool.call.id = tc_runner_policy_001`, but the archive side
-has no corresponding `sdk_event.tool_call_id` to join against, so
-`compare.py` reports `tool_call_id join: archive-side-absent`.
-
-**Root cause:** the workload's in-process OTel `runner.on('agent_tool_start',
-...)` hook emits spans into the OTLP trace but does **not** write
-events into the `$ASSAY_RUNNER_SDK_EVENT_LOG` NDJSON file that
-`assay runner-spike --agent-shim openai-agents` watches and folds
-into the archive's SDK layer. The two streams currently live in
-parallel without a shared sink.
-
-**v1.5 prerequisite:** wire the workload to write SDK events through
-both paths — the OTLP exporter (for L1) and the SDK event log (for
-L2) — using the same `tool_call_id`. Once that lands, the comparator
-will see joined tool-level evidence, and only then can v1.5's
-adversarial tool-call argument tampering scenario be evaluated
-meaningfully.
 
 ### Other v1 follow-ups
 
