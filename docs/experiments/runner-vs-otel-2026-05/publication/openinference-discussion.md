@@ -1,85 +1,67 @@
-# OpenInference / OTel GenAI semconv — discussion draft
+# OpenInference / OTel GenAI semconv — filed issue
 
-> **Status:** draft, ready to file as a Discussion on
-> [`arize-ai/openinference`](https://github.com/Arize-ai/openinference/discussions)
-> (and optionally cross-linked to
-> [`open-telemetry/semantic-conventions`](https://github.com/open-telemetry/semantic-conventions/discussions)).
+> **Status:** filed on 2026-05-25 as
+> [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162).
+> Discussions were not enabled on the target repo, so we filed an
+> Issue under the `semantic conventions` umbrella instead. Same
+> narrow question, same evidence link, same discipline.
 >
-> **Intent:** narrow vocabulary question, *one* discussion, *one*
-> attached evidence link, *no* product pitch. Per the plan doc's
-> "External question packet" discipline.
+> **No cross-post** to
+> [`open-telemetry/semantic-conventions`](https://github.com/open-telemetry/semantic-conventions/issues)
+> until OpenInference triage says "this lives at OTel."
 >
-> **Not yet filed.** Maintainer is reviewing before posting; revisions
-> live here so the version sent matches what we'll defend.
+> This file is kept as the source-of-truth copy of what was filed
+> so the on-disk evidence package matches the public ask.
 
 ## Subject line
 
-> Vocabulary question: how should an OTel/OpenInference trace refer
-> to a content-addressed runtime-evidence artifact captured alongside
-> the same agent run?
+> [semantic conventions] Vocabulary for linking traces to runtime-evidence artifacts
 
-## Body
+## Body (as filed)
 
-Hey folks,
+## Question
 
-Was reading through how OpenInference handles agent tool spans
-(the `tool.call.id` propagation is exactly the join key I needed)
-and wanted to ask one vocabulary question before I default to a
-private namespace.
+Where should an OTel/OpenInference trace put attributes that link a span/run
+to an out-of-band runtime-evidence artifact captured alongside the same agent run?
 
-Sibling project does a Linux/eBPF measured-run capture for agent
-runs. Three slices of evidence committed in the repo: per-run
-`sha256` binding from an OTel span event to an out-of-band
-runtime-evidence archive, tool-level join between
-`gen_ai.tool.call.id` and the archive's SDK layer, and a
-controlled tampering scenario where the trace reports reading
-file X and the kernel observes a read of file Y at the same
-`tool_call_id`. All on real eBPF data with n=3 per arm.
+We ran a controlled experiment where the same agent execution produced:
 
-Need four attributes on the trace side so a consumer can verify
-the binding and read the intent-vs-effect verdict without owning
-the archive content. They sit in a private `assay.*` namespace
-today because squatting on unspecified OTel/OpenInference names
-felt wrong.
+- an OTel/OpenInference-style trace for reported control flow
+- a content-addressed runtime-evidence archive from Linux/eBPF + cgroup capture
 
-Candidates:
+The trace and archive are joined by `tool_call_id`, and the trace carries a
+digest of the archive manifest so consumers can verify that both artifacts
+describe the same execution.
 
-- `agent.runtime_evidence.digest`: content-addressed pointer,
-  `sha256:<bytes>` over the archive's manifest
-- `agent.runtime_evidence.health`: measurement integrity
-  (`clean`, `degraded`, `unknown`)
-- `agent.runtime_evidence.boundary`: declared measurement
-  boundary, e.g. `linux_ebpf_cgroup_v2`
-- `agent.runtime_evidence.intent_effect_status`:
-  reported-vs-measured verdict per tool call
+Evidence package:
+https://github.com/Rul1an/assay/tree/main/docs/experiments/runner-vs-otel-2026-05
 
-Narrow question:
+## Candidate attributes
 
-> Where should attributes like these live? OpenInference spec,
-> an OTel GenAI extension, a separate namespace, or is there
-> something existing I should use instead?
+We currently use private `assay.*` names, but do not want to squat on a namespace.
+The concepts are:
 
-Three answers are all useful signal: "fits under OpenInference,
-here's the section", "belongs in OTel GenAI semconv, file it
-there", or "this is a different abstraction, keep it private and
-link from your namespace". Any of those settles it.
+- `agent.runtime_evidence.digest`
+- `agent.runtime_evidence.health`
+- `agent.runtime_evidence.boundary`
+- `agent.runtime_evidence.intent_effect_status`
 
-Full evidence and reproduction commands:
+The last one came from a controlled tampering scenario: the trace reports tool
+argument X, while the measured runtime evidence shows effect Y at the same
+`tool_call_id`.
 
-- Experiment package: <https://github.com/Rul1an/assay/tree/main/docs/experiments/runner-vs-otel-2026-05>
-- Plan and claim taxonomy: [`runner-vs-otel-shape-comparison-2026-05.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-shape-comparison-2026-05.md)
-- v1 findings with the four slice resolutions: [`v1-findings.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/v1-findings.md)
-- Comparator (stdlib Python, 17 unit tests): [`compare/compare.py`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/compare/compare.py)
-- Per-run baselines under `runs/{v1-arm-c, slice2-arm-c, slice3-arm-c}/`
+## Narrow ask
 
-For transparency: Linux/eBPF only on the producer side, runtime
-crates publish to crates.io with explicit internal/experimental
-package descriptions, no third-party users, no integration ask.
-Just want the names to land in the right place.
+Should concepts like these live in OpenInference, OTel GenAI semantic
+conventions, a separate namespace, or is there already an existing attribute
+pattern we should use?
 
-Nice spec by the way, the Python / TS / Java / C# breadth shows
-real instrumentation work and came through clearly when I was
-reading it.
+## Non-goals
+
+- not asking OpenInference to adopt or integrate with Assay-Runner
+- not asking maintainers to validate our eBPF implementation
+- not proposing that traces should contain the runtime artifact itself
+- not claiming OTel is missing something it was supposed to capture
 
 ---
 
@@ -98,6 +80,6 @@ Per the plan doc's external-outreach discipline:
 
 | Repo | When to file |
 |---|---|
-| `arize-ai/openinference` Discussions | Primary. The four attributes naturally live in agent/tool observability space. |
-| `open-telemetry/semantic-conventions` Discussions | Optional cross-link if the OpenInference maintainers route us there. Do not double-file without a routing signal. |
-| `open-telemetry/community` issues | Only if OpenInference + semconv both say "wrong place". |
+| `arize-ai/openinference` Issues | Primary. Filed 2026-05-25 as [#3162](https://github.com/Arize-ai/openinference/issues/3162) under the `semantic conventions` umbrella. Discussions are not enabled on this repo, so an Issue was the correct channel. |
+| `open-telemetry/semantic-conventions` Issues | Only as a cross-post if OpenInference triage routes us there. Do not double-file without a routing signal. |
+| `open-telemetry/community` issues | Only if both OpenInference and semconv say "wrong place". |
