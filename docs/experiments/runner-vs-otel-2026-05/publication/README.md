@@ -1,9 +1,12 @@
-# Publication drafts (Slice 4)
+# Publication artifacts (Slice 4)
 
-> **Status:** drafts only. Not filed, not published, not announced.
-> Lives in the repo so the framing matches the evidence on disk and
-> so the maintainer (Rul1an) can revise both pieces in one place
-> before either goes out.
+> **Status:** OpenInference question filed on 2026-05-25 as
+> [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162).
+> Blog draft is **not yet published** and waits on maintainer
+> response per the sequencing rules below.
+> Files live in the repo so the on-disk framing matches the public
+> ask, and so the maintainer (Rul1an) can keep both pieces in sync
+> after the conversation moves.
 
 ## Files
 
@@ -14,14 +17,17 @@
 
 ## Sequencing
 
-1. File the OpenInference discussion. One question, one evidence
-   link. Wait for routing signal.
-2. If maintainers route us to `open-telemetry/semantic-conventions`,
-   cross-post the *same* question there — do not double-file
-   without routing.
-3. After at least one maintainer response (positive, negative, or
-   "this lives elsewhere"), publish the blog with the discussion
-   link embedded.
+1. **Done.** Filed the OpenInference question as
+   [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162)
+   (Issues, since Discussions are not enabled on that repo). One
+   question, one evidence link, no maintainer @-mentions.
+2. Wait for triage. Only cross-post to
+   `open-telemetry/semantic-conventions` if OpenInference
+   maintainers explicitly route us there. Do not double-file
+   without that routing signal.
+3. After at least one maintainer response on #3162 (positive,
+   negative, or "this lives elsewhere"), publish the blog with
+   the issue link embedded.
 4. Do not @-mention any individual maintainer. Do not promote on
    Slack / Discord / X without an explicit signal from the
    community that they want a broader audience.
