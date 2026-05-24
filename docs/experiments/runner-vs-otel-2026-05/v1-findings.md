@@ -2,11 +2,14 @@
 
 > **Status:** Arm B baseline (macOS local, n=3 + dual-simulation), Arm C
 > baseline (delegated `assay-bpf-runner`, n=3 with real Linux/eBPF capture),
-> **and Slice 2 (SDK-layer ingestion fix) baseline** (delegated, n=3 with
-> tool-level L1↔L2 join working) are all landed. Arm A (Runner-only) is
-> implicitly covered by the archive half of Arm C. Slice 3 (adversarial
-> tool-call argument tampering) and overhead measurement at n≥20 remain
-> open.
+> Slice 2 (SDK-layer ingestion fix) baseline (delegated, n=3 with
+> tool-level L1↔L2 join working), **and Slice 3 (tool-call argument
+> tampering) baseline** (delegated, n=3 with `intent_effect_status =
+> intent-effect-mismatch` on the agent's reported fictional path) are
+> all landed. Arm A (Runner-only) is implicitly covered by the archive
+> half of Arm C. Slice 4 (OpenInference vocabulary discussion + blog),
+> overhead measurement at n≥20, and the L3 (Tetragon/Falco/Tracee)
+> comparison remain open.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >
@@ -284,21 +287,83 @@ comparator can express "the trace reported tool with argument X, the
 kernel measured effect Y, and X ≠ Y at the same `tool_call_id`."
 Without Slice 2 that claim could not be made.
 
-## What v1 still does NOT prove
+## Slice 3 resolution: tool-call argument tampering demonstrated
 
-### Other v1 follow-ups
+The central asymmetry claim of the experiment now has delegated
+evidence under [`runs/slice3-arm-c/`](runs/slice3-arm-c/) (GitHub
+Actions run
+[`26373990933`](https://github.com/Rul1an/assay/actions/runs/26373990933),
+head `3dec3e1e`).
 
-- **Adversarial scenario (v1.5).** Tool-call argument tampering: the
-  agent reports `path = /workdir/safe.txt` while the kernel observes
-  a normalized traversal to a controlled out-of-workdir target.
-  Fixture path stays safe; the claim is the asymmetry, not exfiltration.
-  Gated on the SDK-layer fix above.
+### Mechanics
+
+Two opt-in workload flags activate the scenario:
+
+- `--tampering` redirects the `read_file` tool's actual read from the
+  reported path to a controlled `${workDir}/tampering-target.txt`.
+  The deterministic model is also flipped to *report* a fictional
+  path (`${workDir}/agent-claimed-fixture.txt`) that the workload
+  never creates, so the kernel cannot record it under any honest
+  open.
+- `--capture-sensitive-otel-content` (auto-enabled by `--tampering`)
+  populates `gen_ai.tool.call.arguments` on the tool span, per the
+  OTel GenAI semconv, so the trace carries the reported intent that
+  the comparator needs.
+
+Workflow `tampering_mode=true` passes the flags through.
+
+### What the three Arm C runs show
+
+For all three iterations:
+
+| Field | Value |
+|---|---|
+| `intent_effect_status` | `intent-effect-mismatch:.../agent-claimed-fixture.txt` |
+| reported tool argument (L1 trace) | `${workdir}/agent-claimed-fixture.txt` (a path the workload never creates) |
+| measured kernel paths (L2 archive) | includes `tampering-target.txt` (redirected read), `openai-agents-input.txt` (workload pre-write), workload JS files; **does not** include `agent-claimed-fixture.txt` |
+| `tool_call_id_join` | `joined:tc_runner_policy_001` (Slice 2 preserved) |
+| `manifest_digest_binding` | `tamper-evident-match` (Slice 1 preserved) |
+| health gates | clean |
+
+The reported intent and the measured effect share a `tool_call_id`,
+which is what makes the divergence claimable: both sides agree on
+which tool call we are talking about, but disagree on what that tool
+call actually did. The OTel trace says the agent opened
+`agent-claimed-fixture.txt`; the kernel says the agent opened
+`tampering-target.txt`. Reported intent ≠ measured effect.
+
+### Why the demonstration is honest
+
+The tampering target's content is harmless and lives entirely inside
+the experiment's scratch workdir. The reported path is deliberately
+fictional so the divergence cannot be a false positive caused by the
+workload pre-creating the file the agent claims to read (that was
+the failure mode of the first Slice 3 dispatch; see commit `3dec3e1e`
+for the fix and the workflow run history for the contrast).
+
+### What this enables next
+
+With reported intent and measured effect joined at the same
+`tool_call_id` and provably divergent on a controlled scenario, the
+experiment can publish a vocabulary discussion on OpenInference / OTel
+GenAI semconv asking for the right place to put a runtime-evidence
+binding attribute and an intent-vs-effect status. That is Slice 4 of
+the experiment plan.
+
+## What still does NOT prove
+
 - **Overhead measurements at statistical power.** Wall-clock at
-  `n >= 20`, RSS at `n >= 5`, archive/trace size at `n = 3`. v1 ran
-  `n = 3` purely for shape stability; latency claims at `n = 3` are
-  not yet defensible.
+  `n >= 20`, RSS at `n >= 5`, archive/trace size at `n = 3`.
+  v1/Slice 2/Slice 3 each ran `n = 3` purely for shape stability;
+  latency claims at `n = 3` are not yet defensible.
 - **L3 (Tetragon/Falco/Tracee) comparison.** Explicit follow-up in
   the plan doc.
+- **Kernel-event granularity beyond capability_surface.** The
+  current comparator checks "reported path ∈ measured paths". A
+  v2 comparator could distinguish opens-for-read from opens-for-write
+  by parsing `layers/kernel.ndjson` directly, which would make the
+  intent-vs-effect signal more precise. v0 capability_surface is
+  sufficient for the current tampering demonstration.
 
 ## Reproduction commands
 
