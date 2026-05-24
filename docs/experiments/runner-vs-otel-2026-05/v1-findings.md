@@ -1,17 +1,18 @@
 # v1 Findings: Runner Archives Next to OTel Traces
 
-> **Status:** All four central evidence slices landed on `main`. Arm B
-> baseline (macOS local, n=3 + dual-simulation), Arm C baseline
-> (delegated `assay-bpf-runner`, n=3, real Linux/eBPF), Slice 2
-> (SDK-layer ingestion fix, n=3, tool-level L1↔L2 join working), and
-> Slice 3 (tool-call argument tampering, n=3, `intent_effect_status =
+> **Status:** Slices 1–3 evidence landed on `main`. Arm B baseline
+> (macOS local, n=3 + dual-simulation), Arm C baseline (delegated
+> `assay-bpf-runner`, n=3, real Linux/eBPF), Slice 2 (SDK-layer
+> ingestion fix, n=3, tool-level L1↔L2 join working), and Slice 3
+> (tool-call argument tampering, n=3, `intent_effect_status =
 > intent-effect-mismatch` on the agent's reported fictional path) all
 > have committed per-run evidence. Arm A (Runner-only) is implicitly
 > covered by the archive half of Arm C. **Slice 4 publication drafts**
-> (OpenInference discussion + blog) live under
-> [`publication/`](publication/), not yet filed. Overhead measurement
-> at n≥20 and the L3 (Tetragon/Falco/Tracee) comparison remain open
-> follow-ups.
+> (OpenInference discussion + blog) are prepared under
+> [`publication/`](publication/) but not yet filed and not yet on
+> `main` either; the discipline is to revise both pieces in repo
+> before either goes outward. Overhead measurement at n≥20 and the L3
+> (Tetragon/Falco/Tracee) comparison remain open follow-ups.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >
@@ -407,8 +408,11 @@ RUN_DIR="../runs/$RUN_ID"
 mkdir -p "$RUN_DIR"
 node dist/workload.js --run-id "$RUN_ID" --trace-out "$RUN_DIR/trace.json"
 
-# Compare against the synthetic fixture archive (Arm B has no real archive)
-cd ../..
+# Compare against the synthetic fixture archive (Arm B has no real
+# archive). Paths below are repo-root relative, so cd up to the repo
+# root from the workload directory (four levels: workload ->
+# runner-vs-otel-2026-05 -> experiments -> docs -> repo root).
+cd ../../../..
 python3 docs/experiments/runner-vs-otel-2026-05/compare/compare.py \
   --archive docs/experiments/runner-vs-otel-2026-05/compare/tests/fixtures/archive \
   --trace docs/experiments/runner-vs-otel-2026-05/runs/$RUN_ID/trace.json \

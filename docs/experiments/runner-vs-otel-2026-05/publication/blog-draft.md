@@ -19,8 +19,10 @@ leaking sensitive content.
 This post is about a different cut of the same agent run.
 
 Internally we maintain a Linux/eBPF measured-run capture called
-Assay-Runner. It produces a deterministic content-addressed
-archive of an agent execution: cgroup-scoped kernel events,
+Assay-Runner. It produces a content-addressed measured-run
+archive of an agent execution (per-run tamper-evident binding,
+shape stability across runs, not byte-identical determinism):
+cgroup-scoped kernel events,
 normalized policy decisions, and SDK tool-call events bound by
 the same `tool_call_id` an OTel trace would carry. It is internal
 to a sibling project (`Rul1an/assay`), Linux-only, no public users,
@@ -282,10 +284,17 @@ repo at
   the same `tool_call_id`.
 - I'm not claiming Linux-only is a permanent limitation; it is
   the current measurement boundary of the prototype runtime.
-- I'm not running this as a product. The runtime is `publish =
-  false` in the workspace it lives in; the four contract crates
-  that *do* publish to crates.io carry explicit
-  internal/experimental framing in their descriptions.
+- I'm not running this as a product. The four Assay-Runner
+  crates that publish to crates.io
+  (`assay-runner-{schema, core, linux, spike}`) exist there only
+  so `assay-cli` and its workspace dependencies stay resolvable;
+  each crate's description carries explicit
+  internal/experimental framing
+  (`No standalone product guarantee; API surface remains narrow
+  and intentionally undocumented for third-party use; semver
+  tracks the Assay workspace`). See the v3.11.3 CHANGELOG entry
+  for why the crates are publishable and what that does and does
+  not commit us to.
 
 If the four candidate attribute names land in someone else's
 vocabulary, that's a good outcome and we move the experiment's
@@ -304,7 +313,9 @@ cd docs/experiments/runner-vs-otel-2026-05/workload
 npm install --no-audit --no-fund --ignore-scripts
 npx tsc -p tsconfig.json
 node dist/workload.js --run-id "demo" --trace-out "/tmp/trace.json"
-cd ../..
+
+# Comparator + Arm C verification run from the experiment package root
+cd ..
 python3 compare/compare.py \
   --archive compare/tests/fixtures/archive \
   --trace /tmp/trace.json --out-md /tmp/matrix.md
