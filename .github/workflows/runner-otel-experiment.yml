@@ -163,6 +163,7 @@ jobs:
             MATRIX_JSON="$RUN_DIR/matrix.json"
             MATRIX_MD="$RUN_DIR/matrix.md"
             WORK_DIR="$RUN_DIR/workdir"
+            SDK_LOG="$RUN_DIR/sdk-events.ndjson"
             mkdir -p "$WORK_DIR"
 
             echo "::group::Arm C iteration $i/$REPETITIONS ($RUN_ID)"
@@ -176,6 +177,14 @@ jobs:
             # -E to preserve env, with explicit PATH so node + python3 +
             # the workload's dist/ are still resolvable inside the
             # privileged subprocess.
+            # --sdk-event-log is required so that `assay runner-spike` sets
+            # ASSAY_RUNNER_SDK_EVENT_LOG / ASSAY_RUNNER_RUN_ID /
+            # ASSAY_RUNNER_SDK_EVENT_SCHEMA in the workload child's
+            # environment AND folds the resulting NDJSON into the
+            # archive's layers/sdk.ndjson + observation_health.sdk_layer
+            # + capability_surface.mcp_tools. Without this flag the SDK
+            # layer comes out empty even when the child writes events.
+            # See Slice 2 of the runner-vs-otel experiment plan.
             sudo -E env \
               "PATH=$PATH" \
               "$ASSAY_BIN" runner-spike run \
@@ -184,6 +193,7 @@ jobs:
                 --ebpf "$EBPF_OBJ" \
                 --run-id "$RUN_ID" \
                 --output "$ARCHIVE_OUT" \
+                --sdk-event-log "$SDK_LOG" \
                 -- node "$WORKLOAD_JS" \
                    --run-id "$RUN_ID" \
                    --trace-out "$TRACE_OUT" \
