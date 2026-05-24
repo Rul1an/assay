@@ -1,15 +1,17 @@
 # v1 Findings: Runner Archives Next to OTel Traces
 
-> **Status:** Arm B baseline (macOS local, n=3 + dual-simulation), Arm C
-> baseline (delegated `assay-bpf-runner`, n=3 with real Linux/eBPF capture),
-> Slice 2 (SDK-layer ingestion fix) baseline (delegated, n=3 with
-> tool-level L1↔L2 join working), **and Slice 3 (tool-call argument
-> tampering) baseline** (delegated, n=3 with `intent_effect_status =
-> intent-effect-mismatch` on the agent's reported fictional path) are
-> all landed. Arm A (Runner-only) is implicitly covered by the archive
-> half of Arm C. Slice 4 (OpenInference vocabulary discussion + blog),
-> overhead measurement at n≥20, and the L3 (Tetragon/Falco/Tracee)
-> comparison remain open.
+> **Status:** All four central evidence slices landed on `main`. Arm B
+> baseline (macOS local, n=3 + dual-simulation), Arm C baseline
+> (delegated `assay-bpf-runner`, n=3, real Linux/eBPF), Slice 2
+> (SDK-layer ingestion fix, n=3, tool-level L1↔L2 join working), and
+> Slice 3 (tool-call argument tampering, n=3, `intent_effect_status =
+> intent-effect-mismatch` on the agent's reported fictional path) all
+> have committed per-run evidence. Arm A (Runner-only) is implicitly
+> covered by the archive half of Arm C. **Slice 4 publication drafts**
+> (OpenInference discussion + blog) live under
+> [`publication/`](publication/), not yet filed. Overhead measurement
+> at n≥20 and the L3 (Tetragon/Falco/Tracee) comparison remain open
+> follow-ups.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >
@@ -349,6 +351,31 @@ experiment can publish a vocabulary discussion on OpenInference / OTel
 GenAI semconv asking for the right place to put a runtime-evidence
 binding attribute and an intent-vs-effect status. That is Slice 4 of
 the experiment plan.
+
+## Slice 4: publication drafts (not yet filed)
+
+Slice 4 produces two drafts, both committed under
+[`publication/`](publication/) so the wording matches the evidence
+on disk before either goes out:
+
+- [`publication/openinference-discussion.md`](publication/openinference-discussion.md)
+  — single narrow vocabulary question for the OpenInference / OTel
+  GenAI WG: where should `agent.runtime_evidence.{digest, health,
+  boundary, intent_effect_status}` live? Channels: file on
+  [`arize-ai/openinference`](https://github.com/Arize-ai/openinference/discussions)
+  first; cross-link to OTel semconv only if routed there. No
+  individual maintainer pings.
+- [`publication/blog-draft.md`](publication/blog-draft.md) — engineer
+  audience write-up covering the four slices, the per-run binding,
+  the tool-level join, and the intent-vs-effect mismatch on real
+  eBPF data. Posts only after the OpenInference discussion has at
+  least one maintainer response, so the blog can embed the
+  discussion link and the back-and-forth.
+
+The publication discipline (one channel at a time, no
+@-mentions, no multi-question dumps, no adoption asks) is
+documented in [`publication/README.md`](publication/README.md).
+Neither artifact is published yet.
 
 ## What still does NOT prove
 
