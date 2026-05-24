@@ -28,6 +28,7 @@ import { Agent, Runner, Usage, tool } from "@openai/agents";
 import { z } from "zod";
 import { getTracer, flushTraceToFile } from "./otel-setup";
 import { computeManifestBinding } from "./manifest-binding";
+import { sdkEmitterFromEnv } from "./sdk-events";
 
 interface WorkloadConfig {
   runId: string;
@@ -79,6 +80,19 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
 
   const tracer = getTracer();
 
+  // Slice 2: write SDK events into ASSAY_RUNNER_SDK_EVENT_LOG (when
+  // set by `assay runner-spike --agent-shim openai-agents`) in parallel
+  // to the OTel trace. Same tool_call_id flows through both streams,
+  // so the comparator's gen_ai.tool.call.id ↔ Runner tool_call_id join
+  // resolves cleanly under Arm C. When the env var is unset (Arm B
+  // local), the emitter is a no-op and existing behaviour is preserved.
+  const sdkEmitter = sdkEmitterFromEnv({
+    fallbackRunId: config.runId,
+    source: "runner-vs-otel-2026-05-workload",
+    sdkName: "@openai/agents",
+    sdkVersion: "0.11.4",
+  });
+
   await tracer.startActiveSpan("assay.runner.measured_run", async (rootSpan) => {
     rootSpan.setAttributes({
       "assay.run.id": config.runId,
@@ -116,6 +130,7 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
       runner.on(
         "agent_tool_start",
         async (_context, _agent, startedTool, details: any) => {
+          // L1: OTel tool span (drives the trace.json output)
           await tracer.startActiveSpan(
             `execute_tool ${startedTool.name}`,
             async (toolSpan) => {
@@ -129,12 +144,31 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
               toolSpan.end();
             },
           );
+          // L2: SDK event into $ASSAY_RUNNER_SDK_EVENT_LOG (drives the
+          // archive's layers/sdk.ndjson + observation_health.sdk_layer
+          // + capability_surface.mcp_tools); same tool_call_id as L1.
+          sdkEmitter.emit({
+            event_type: "tool_call_started",
+            tool_call_id: details.toolCall.callId,
+            tool: startedTool.name,
+          });
+        },
+      );
+      runner.on(
+        "agent_tool_end",
+        async (_context, _agent, finishedTool, _result, details: any) => {
+          sdkEmitter.emit({
+            event_type: "tool_call_completed",
+            tool_call_id: details.toolCall.callId,
+            tool: finishedTool.name,
+          });
         },
       );
 
       await runner.run(agent, "Read the deterministic fixture file.", {
         maxTurns: 2,
       });
+      sdkEmitter.emit({ event_type: "run_finished" });
 
       if (config.archivePath) {
         // In Arm B's dual-simulation mode the archive already exists (it is
