@@ -170,16 +170,28 @@ jobs:
             # Step 1: dual capture. assay runner-spike writes the .tar.gz
             # AFTER the child workload exits, so the workload itself
             # cannot bind the manifest digest in-process here.
-            "$ASSAY_BIN" runner-spike run \
-              --agent-shim openai-agents \
-              --kernel-capture \
-              --ebpf "$EBPF_OBJ" \
-              --run-id "$RUN_ID" \
-              --output "$ARCHIVE_OUT" \
-              -- node "$WORKLOAD_JS" \
-                 --run-id "$RUN_ID" \
-                 --trace-out "$TRACE_OUT" \
-                 --work-dir "$WORK_DIR"
+            #
+            # sudo is required for eBPF map creation (CIDR_RULES_V4 etc.).
+            # We mirror the pattern from runner-spike-delegated.yml: sudo
+            # -E to preserve env, with explicit PATH so node + python3 +
+            # the workload's dist/ are still resolvable inside the
+            # privileged subprocess.
+            sudo -E env \
+              "PATH=$PATH" \
+              "$ASSAY_BIN" runner-spike run \
+                --agent-shim openai-agents \
+                --kernel-capture \
+                --ebpf "$EBPF_OBJ" \
+                --run-id "$RUN_ID" \
+                --output "$ARCHIVE_OUT" \
+                -- node "$WORKLOAD_JS" \
+                   --run-id "$RUN_ID" \
+                   --trace-out "$TRACE_OUT" \
+                   --work-dir "$WORK_DIR"
+            # The archive + trace are now owned by root because the
+            # capturing process ran under sudo. chown back so subsequent
+            # python3 steps + the upload-artifact action can read them.
+            sudo chown -R "$(id -u):$(id -g)" "$RUN_DIR"
 
             # Step 2: now that the archive exists, attach the
             # assay.archive.created event with the manifest digest to the
