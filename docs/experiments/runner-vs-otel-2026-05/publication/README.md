@@ -9,8 +9,8 @@
 
 | File | Audience | Channel | When to ship |
 |---|---|---|---|
-| [`openinference-discussion.md`](openinference-discussion.md) | OpenInference / OTel GenAI WG maintainers | Discussion on [`arize-ai/openinference`](https://github.com/Arize-ai/openinference/discussions) (and optionally `open-telemetry/semantic-conventions` if OpenInference routes us there) | After one final read-through; deliberately single narrow question, no @-mentions, no multi-question dump. |
-| [`blog-draft.md`](blog-draft.md) | Engineers working on OTel-family AI observability, eBPF / agent-runtime observability | Personal blog / dev.to / Hashnode. Optional cross-post link from the OpenInference discussion if the conversation goes well. | After the OpenInference discussion has a maintainer response. Posting the blog before the discussion would skip the channel discipline the experiment plan committed to. |
+| [`openinference-discussion.md`](openinference-discussion.md) | OpenInference / OTel GenAI WG maintainers | **Filed 2026-05-25** as [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162). Discussions were not enabled on the target repo, so it landed as an Issue under the `semantic conventions` umbrella. | n/a — already filed. File is kept on disk as the source-of-truth copy of what was posted. |
+| [`blog-draft.md`](blog-draft.md) | Engineers working on OTel-family AI observability, eBPF / agent-runtime observability | Personal blog / dev.to / Hashnode. Optional cross-post link from the OpenInference issue if the conversation goes well. | After [#3162](https://github.com/Arize-ai/openinference/issues/3162) has a maintainer response. Posting the blog before the issue would skip the channel discipline the experiment plan committed to. |
 
 ## Sequencing
 

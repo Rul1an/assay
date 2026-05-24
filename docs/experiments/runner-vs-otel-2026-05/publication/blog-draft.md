@@ -268,8 +268,9 @@ Four candidate attribute names:
 - `agent.runtime_evidence.boundary` — declared measurement boundary
 - `agent.runtime_evidence.intent_effect_status` — reported vs measured verdict
 
-The discussion draft asking for placement guidance lives in the
-repo at
+The placement question is filed with OpenInference as
+[`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162);
+the on-disk source-of-truth copy lives at
 [`publication/openinference-discussion.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/runner-vs-otel-2026-05/publication/openinference-discussion.md).
 
 ## Non-claims (in case anyone reading this thinks I'm selling something)
