@@ -1,22 +1,30 @@
 # v1 Findings: Runner Archives Next to OTel Traces
 
-> **Status:** Arm B (trace-only) baseline complete on macOS Node 22 local
-> environment. Arms A and C remain pending on the delegated `assay-bpf-runner`
-> host. This document captures the v1 evidence that the experiment design and
-> tooling actually work end-to-end; substantive cross-arm findings land here
-> when Arm C dispatches succeed.
+> **Status:** Arm B baseline (macOS local, n=3 + dual-simulation) and Arm C
+> baseline (delegated `assay-bpf-runner`, n=3 with real Linux/eBPF capture)
+> are both landed. Arm A (Runner-only) is implicitly covered by the archive
+> half of Arm C. v1.5 follow-ups (adversarial tool-call argument tampering,
+> SDK-layer correlation fix, overhead measurement at n>=20) stay open.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >
 > **Date of v1 baseline runs:** 2026-05-24
 >
-> **Reproducibility:**
+> **Reproducibility (Arm B, macOS):**
 > - Node `v22.16.0` via nvm
 > - `@openai/agents@0.11.4`, `@opentelemetry/api@^1.9.0`,
 >   `@opentelemetry/sdk-trace-base@^2.0.0`,
 >   `@opentelemetry/resources@^2.0.0`
 > - Python `3.14.3` (stdlib only for `compare.py`)
-> - macOS / Apple Silicon (Linux for L2 capture; out of v1 scope here)
+> - macOS / Apple Silicon
+>
+> **Reproducibility (Arm C, delegated):**
+> - VM: Multipass Ubuntu 24.04.3 LTS, kernel `6.8.0-117-generic` (ARM64)
+> - GitHub Actions self-hosted runner labelled `assay-bpf-runner`
+> - Workflow: [`.github/workflows/runner-otel-experiment.yml`](../../../.github/workflows/runner-otel-experiment.yml)
+>   dispatched against `main` with `repetitions=3`, `require_binding_match=true`,
+>   `build_ebpf=true`
+> - `cargo 1.94.0`, `rustc 1.94.0`, eBPF artifact built via `cargo xtask build-ebpf`
 
 ## What the v1 baseline runs prove
 
@@ -110,24 +118,150 @@ The Arm B field matrix exhibits the expected asymmetry between L1
 The matrix-row count is exactly 16; the markdown render passes the
 smoke test in `tests/test_compare.py::test_markdown_renders`.
 
-## What v1 does NOT prove
+## What the Arm C (delegated, real eBPF) runs add
 
-These claims wait for Arms A and C to be dispatched on the
-`assay-bpf-runner` host:
+Three Arm C dual-capture iterations were performed on the
+`assay-bpf-runner` self-hosted runner via
+[`runner-otel-experiment.yml`](../../../.github/workflows/runner-otel-experiment.yml)
+(GitHub Actions run `26372344619`, head `c6508780`,
+`repetitions=3 require_binding_match=true build_ebpf=true`). Per-run
+artifacts are committed under
+[`runs/v1-arm-c/`](runs/v1-arm-c/) — each directory contains the raw
+`archive.tar.gz`, the OTLP/JSON `trace.json`, and the comparator's
+`matrix.json` + `matrix.md`. All three iterations passed
+`--require-binding-match` (exit code 0).
 
-- Linux/eBPF/cgroup-v2 actually populates `capability_surface.*` fields
-  on real workloads;
-- `observation_health.ringbuf_drops == 0` holds for the dual-capture
-  workload under the experiment's instrumentation overhead;
-- `correlation_report.status == clean` holds when both Runner and OTel
-  SDK instrumentation are active in the same process;
-- Per-run archive determinism: byte-identical `manifest.json` across
-  three Arm C runs of the same workload (a hard gate in the plan doc);
-- Overhead measurements (`n >= 20` wall clock, `n >= 5` RSS).
+### 5. Real L2 capture: eBPF observes Node.js file I/O the trace cannot see
 
-Until those land, v1 stands only as evidence that the **measurement
-infrastructure** is correct. The published claim of the experiment is
-gated on Arm C data.
+For each Arm C run, the archive's `capability_surface.filesystem_paths`
+records the *measured* file paths the kernel saw the Node.js workload
+open. These are not paths the OTel trace ever reports:
+
+```
+/opt/actions-runner/_work/assay/assay/docs/experiments/runner-vs-otel-2026-05/workload/dist/workload.js
+/opt/actions-runner/_work/assay/assay/docs/experiments/runner-vs-otel-2026-05/workload/dist/otel-setup.js
+/opt/actions-runner/_work/assay/assay/docs/experiments/runner-vs-otel-2026-05/workload/dist/manifest-binding.js
+/opt/actions-runner/_work/assay/assay/docs/experiments/runner-vs-otel-2026-05/workload/dist/package.json
+/opt/actions-runner/_work/assay/assay/docs/experiments/runner-vs-otel-2026-05/workload/package.json
+/opt/actions-runner/_work/assay/assay/arm-c-runs/<run-id>/workdir/openai-agents-input.txt
+/opt/actions-runner/_work/assay/assay/arm-c-runs/<run-id>/trace.json
+```
+
+L1 trace shows: `gen_ai.tool.name = read_file`,
+`gen_ai.tool.call.id = tc_runner_policy_001`, `gen_ai.provider.name = openai`.
+**It says nothing about the JavaScript module graph the Node runtime
+actually loaded, the `package.json` reads, or the trace-export write.**
+The archive records exactly those.
+
+This is the **measurement-effect asymmetry the experiment was
+designed to prove**, now on real Linux/eBPF data rather than a synthetic
+fixture.
+
+### 6. Measurement-health hard gates hold under real capture
+
+For all three Arm C runs:
+
+| Field | Value | Source |
+|---|---|---|
+| `observation_health.kernel_layer` | `complete` | per-archive `observation-health.json` |
+| `observation_health.ringbuf_drops` | `0` | same |
+| `observation_health.cgroup_correlation` | `clean` | same |
+| `correlation_report.status` | `clean` | per-archive `correlation-report.json` |
+| `events.ndjson` line count | `2` (stable across runs) | archive contents |
+| `layers/kernel.ndjson` line count | `7` (stable across runs) | archive contents |
+
+The hard gate `ringbuf_drops == 0` was satisfied for all three runs.
+This is the first time we have empirical confirmation that the
+experiment's instrumentation footprint (OTel SDK + workload + Node
+runtime) does not push the eBPF capture into ring-buffer drop
+territory on this delegated host.
+
+### 7. Tamper-evident binding works on real (not synthetic) archive bytes
+
+For each Arm C iteration, `compare/bind-archive.py` (run as a workflow
+post-step) computed the SHA-256 of the **exact bytes** of
+`manifest.json` from the `assay runner-spike`-produced `.tar.gz` and
+injected an `assay.archive.created` event onto the root span. The
+comparator then verified the trace-side digest against the
+archive-side digest under `--require-binding-match`:
+
+| Run | Manifest digest | Binding |
+|---|---|---|
+| `run_arm_c_20260524T205016Z_1` | `sha256:fe913819…dcd600` | `tamper-evident-match` |
+| `run_arm_c_20260524T205018Z_2` | `sha256:f42f2b63…2a82056e` | `tamper-evident-match` |
+| `run_arm_c_20260524T205020Z_3` | `sha256:1b32b461…51124594` | `tamper-evident-match` |
+
+The digests **differ across runs**: each archive has its own per-run
+identity (timestamps, PIDs, inodes, run_id). The binding is therefore
+**per-run tamper-evident**, not cross-run byte-identical. That is the
+honest claim to publish — a measured-run archive is not bit-stable
+across kernel measurements of the "same" workload, but each trace can
+still verifiably point at exactly one archive.
+
+### 8. Per-run binding integrity, not cross-run byte determinism
+
+> Arm C validates per-run binding integrity, not cross-run byte
+> determinism. Each trace binds to its own archive through
+> `assay.archive.manifest_digest`; across the three live eBPF runs,
+> archive bytes differ because run IDs, timestamps, process IDs, and
+> inode observations vary. The stable claim is shape stability plus
+> clean measurement health, not byte-identical archives.
+
+Concretely: the *shape* of the archive is identical across the three
+runs (same files present, same per-layer line counts — 2 events,
+7 kernel events — same `capability_surface.*` keys, same span tree,
+same join key `tc_runner_policy_001`). The *bytes* of `manifest.json`,
+`events.ndjson`, and `layers/kernel.ndjson` differ run-to-run, because
+they encode timestamps, PIDs, and inodes from the real kernel
+measurement. This matches what the v0 archive contract guarantees
+today and is why the cross-runtime diff v0 work
+(A1+B3+C1 canonicalization, work-dir prefix normalization, side-band
+SDK metadata) exists in the first place.
+
+## What v1 still does NOT prove
+
+### Tool-level L1/L2 join is not yet demonstrated (primary v1 limitation)
+
+> Tool-level L1/L2 join is not yet demonstrated in this run because
+> the Runner archive has no SDK events. The comparison currently
+> joins at run level via `run_id` and `assay.archive.manifest_digest`;
+> restoring SDK-layer ingestion is the next prerequisite for
+> `gen_ai.tool.call.id` joins and the v1.5 tampering scenario.
+
+In numbers: `observation-health.json` reported `sdk_layer: absent` and
+`policy_layer: absent` for all three Arm C runs. `layers/sdk.ndjson`
+in the archive is empty (0 lines). The OTel trace correctly carries
+`gen_ai.tool.call.id = tc_runner_policy_001`, but the archive side
+has no corresponding `sdk_event.tool_call_id` to join against, so
+`compare.py` reports `tool_call_id join: archive-side-absent`.
+
+**Root cause:** the workload's in-process OTel `runner.on('agent_tool_start',
+...)` hook emits spans into the OTLP trace but does **not** write
+events into the `$ASSAY_RUNNER_SDK_EVENT_LOG` NDJSON file that
+`assay runner-spike --agent-shim openai-agents` watches and folds
+into the archive's SDK layer. The two streams currently live in
+parallel without a shared sink.
+
+**v1.5 prerequisite:** wire the workload to write SDK events through
+both paths — the OTLP exporter (for L1) and the SDK event log (for
+L2) — using the same `tool_call_id`. Once that lands, the comparator
+will see joined tool-level evidence, and only then can v1.5's
+adversarial tool-call argument tampering scenario be evaluated
+meaningfully.
+
+### Other v1 follow-ups
+
+- **Adversarial scenario (v1.5).** Tool-call argument tampering: the
+  agent reports `path = /workdir/safe.txt` while the kernel observes
+  a normalized traversal to a controlled out-of-workdir target.
+  Fixture path stays safe; the claim is the asymmetry, not exfiltration.
+  Gated on the SDK-layer fix above.
+- **Overhead measurements at statistical power.** Wall-clock at
+  `n >= 20`, RSS at `n >= 5`, archive/trace size at `n = 3`. v1 ran
+  `n = 3` purely for shape stability; latency claims at `n = 3` are
+  not yet defensible.
+- **L3 (Tetragon/Falco/Tracee) comparison.** Explicit follow-up in
+  the plan doc.
 
 ## Reproduction commands
 

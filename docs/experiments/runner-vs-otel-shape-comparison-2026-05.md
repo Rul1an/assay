@@ -81,7 +81,7 @@ Use the same deterministic agent workload in all arms.
 
 | Arm | Runner archive | OTel / OpenInference trace | Purpose |
 |---|---:|---:|---|
-| A - Runner only | Yes | No | Establish measured-run baseline and archive determinism. |
+| A - Runner only | Yes | No | Establish measured-run baseline (capability surface + health gates) on a known-good archive. Archive shape stability across n=3 is the target; cross-run byte identity is a non-goal under live eBPF capture (run id, timestamps, PIDs, inodes vary). |
 | B - Trace only | No | Yes | Establish trace shape without eBPF/cgroup capture. |
 | C - Dual capture | Yes | Yes | Main comparison arm; both artifacts share `run_id` and tool-call join keys. |
 
@@ -321,7 +321,10 @@ OpenTelemetry cannot carry that content.
 
 | Metric | Purpose | Sample Size | Gate |
 |---|---|---:|---|
-| Archive determinism | Verify measured-run archive stability | n = 3 | Hard: manifest digests identical for deterministic workload, unless declared non-deterministic field exists |
+| Per-run tamper-evident binding | Verify each trace binds to its run's archive | n = 3 | Hard: trace digest matches that run's archive manifest bytes; `--require-binding-match` returns exit 0 |
+| Measurement health gates | Verify the run was capture-clean | n = 3 | Hard: `kernel_layer=complete`, `ringbuf_drops=0`, `cgroup_correlation=clean`, `correlation_report.status=clean` |
+| Archive shape stability | Verify schema + capability surface + event-count shape | n = 3 | Soft: same files present, same per-layer line counts, same `capability_surface.*` keys |
+| Archive byte determinism | Cross-run identical manifest bytes | n = 3 | **Non-goal** under live eBPF capture: run IDs, timestamps, PIDs, inodes vary; archives are bound per-run, not bit-stable across runs |
 | Trace shape stability | Verify span tree and attribute keys are stable | n = 3 | Soft: timestamps/durations may vary |
 | `gen_ai.tool.call.id` presence | Measure joinability in practice | n = 3 per instrumentation path | Report as primary/secondary/no join |
 | End-to-end wall clock | Capture observability overhead | n >= 20 per arm | Report median, p95, p99, p99/median |
