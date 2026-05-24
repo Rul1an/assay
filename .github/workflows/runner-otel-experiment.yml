@@ -1,0 +1,216 @@
+name: Runner OTel Experiment (Arm C)
+
+# Manually-dispatched workflow that runs the runner-vs-otel-2026-05
+# experiment's Arm C (dual capture) on the delegated `assay-bpf-runner`
+# host. Produces real Runner archives + matching OTel traces + comparator
+# output. Not part of the release gate set; not part of PR CI.
+#
+# Discipline:
+#  - workflow_dispatch only; no pull_request trigger (matches the existing
+#    runner-spike-delegated.yml discipline).
+#  - Uses the same self-hosted runner as the Phase 1 delegated gates.
+#  - Uploads the run artifacts so a separate PR can land them as
+#    runs/v1-arm-c/ baseline evidence without needing to checkout from
+#    the runner itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: "Number of dual-capture runs to perform (for determinism)"
+        required: true
+        default: "3"
+        type: string
+      require_binding_match:
+        description: "Run compare.py with --require-binding-match (fail on mismatch)"
+        required: true
+        default: true
+        type: boolean
+      build_ebpf:
+        description: "Rebuild eBPF artifact (target/assay-ebpf.o) before the run"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-otel-experiment-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-delegated-runner:
+    name: Prepare delegated runner
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 5
+    steps:
+      - name: Reset workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Mirror the prepare-delegated-runner pattern from
+          # runner-spike-delegated.yml so action and cargo cache state from a
+          # previous run does not block this job.
+          sudo find "$GITHUB_WORKSPACE/.." -maxdepth 2 -type d -name "_actions" -exec rm -rf {} + 2>/dev/null || true
+          if [ -d "$GITHUB_WORKSPACE" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          fi
+
+  arm-c:
+    name: Arm C (dual capture)
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: prepare-delegated-runner
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in cargo node npm python3 rustc tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "ERROR: delegated runner must expose cgroup v2 at /sys/fs/cgroup" >&2
+            exit 1
+          fi
+          {
+            echo "## Delegated runner preflight"
+            echo "- kernel: $(uname -r)"
+            echo "- node: $(node --version)"
+            echo "- rustc: $(rustc --version)"
+            echo "- python3: $(python3 --version)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build assay CLI (runner feature)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli --no-default-features --features runner
+
+      - name: Build eBPF artifact
+        if: ${{ inputs.build_ebpf }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-image
+            cargo xtask build-ebpf --docker
+          else
+            cargo xtask build-ebpf
+          fi
+          test -f target/assay-ebpf.o
+
+      - name: Verify eBPF artifact present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f target/assay-ebpf.o ]; then
+            echo "ERROR: target/assay-ebpf.o is required for Arm C. Run with build_ebpf=true." >&2
+            exit 1
+          fi
+
+      - name: Build experiment workload
+        working-directory: docs/experiments/runner-vs-otel-2026-05/workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          npx tsc -p tsconfig.json
+          test -f dist/workload.js
+
+      - name: Run Arm C dual capture (N times)
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+          REQUIRE_BINDING_MATCH: ${{ inputs.require_binding_match }}
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay"
+          EBPF_OBJ="$PWD/target/assay-ebpf.o"
+          EXPERIMENT_ROOT="$PWD/docs/experiments/runner-vs-otel-2026-05"
+          WORKLOAD_JS="$EXPERIMENT_ROOT/workload/dist/workload.js"
+          COMPARE_PY="$EXPERIMENT_ROOT/compare/compare.py"
+          OUT_ROOT="$PWD/arm-c-runs"
+          mkdir -p "$OUT_ROOT"
+
+          STRICT_FLAG=""
+          if [ "$REQUIRE_BINDING_MATCH" = "true" ]; then
+            STRICT_FLAG="--require-binding-match"
+          fi
+
+          BIND_PY="$EXPERIMENT_ROOT/compare/bind-archive.py"
+
+          for i in $(seq 1 "$REPETITIONS"); do
+            RUN_ID="run_arm_c_$(date -u +%Y%m%dT%H%M%SZ)_$i"
+            RUN_DIR="$OUT_ROOT/$RUN_ID"
+            mkdir -p "$RUN_DIR"
+            ARCHIVE_OUT="$RUN_DIR/archive.tar.gz"
+            TRACE_OUT="$RUN_DIR/trace.json"
+            MATRIX_JSON="$RUN_DIR/matrix.json"
+            MATRIX_MD="$RUN_DIR/matrix.md"
+            WORK_DIR="$RUN_DIR/workdir"
+            mkdir -p "$WORK_DIR"
+
+            echo "::group::Arm C iteration $i/$REPETITIONS ($RUN_ID)"
+
+            # Step 1: dual capture. assay runner-spike writes the .tar.gz
+            # AFTER the child workload exits, so the workload itself
+            # cannot bind the manifest digest in-process here.
+            "$ASSAY_BIN" runner-spike run \
+              --agent-shim openai-agents \
+              --kernel-capture \
+              --ebpf "$EBPF_OBJ" \
+              --run-id "$RUN_ID" \
+              --output "$ARCHIVE_OUT" \
+              -- node "$WORKLOAD_JS" \
+                 --run-id "$RUN_ID" \
+                 --trace-out "$TRACE_OUT" \
+                 --work-dir "$WORK_DIR"
+
+            # Step 2: now that the archive exists, attach the
+            # assay.archive.created event with the manifest digest to the
+            # root span in the trace.json.
+            python3 "$BIND_PY" \
+              --trace "$TRACE_OUT" \
+              --archive "$ARCHIVE_OUT"
+
+            # Step 3: comparator. --require-binding-match is the gate that
+            # turns the binding into a hard contract under Arm C.
+            python3 "$COMPARE_PY" \
+              --archive "$ARCHIVE_OUT" \
+              --trace "$TRACE_OUT" \
+              --out-json "$MATRIX_JSON" \
+              --out-md "$MATRIX_MD" \
+              $STRICT_FLAG
+
+            {
+              echo "### $RUN_ID"
+              echo
+              cat "$MATRIX_MD"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            echo "::endgroup::"
+          done
+
+      - name: Upload Arm C run artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-otel-experiment-arm-c-${{ github.run_id }}
+          path: arm-c-runs/
+          if-no-files-found: error
+          retention-days: 30

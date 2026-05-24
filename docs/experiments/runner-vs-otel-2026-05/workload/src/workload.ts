@@ -137,14 +137,31 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
       });
 
       if (config.archivePath) {
-        const binding = computeManifestBinding(config.archivePath);
-        rootSpan.addEvent("assay.archive.created", {
-          "assay.archive.schema": "assay.runner.archive_manifest.v0",
-          "assay.archive.manifest_digest": binding.manifestDigest,
-          "assay.archive.path": binding.archivePath,
-          "assay.archive.manifest_bytes": binding.manifestBytes,
-          "assay.archive.source": binding.source,
-        });
+        // In Arm B's dual-simulation mode the archive already exists (it is
+        // a pre-built fixture), so the workload can bind in-process. In Arm
+        // C the archive is finalized by `assay runner-spike` AFTER this
+        // process exits; in that case the binding event is attached
+        // post-hoc by `compare/bind-archive.py`. Be tolerant of the
+        // missing-archive case here so the workload can be the same
+        // binary in both arms.
+        try {
+          const binding = computeManifestBinding(config.archivePath);
+          rootSpan.addEvent("assay.archive.created", {
+            "assay.archive.schema": "assay.runner.archive_manifest.v0",
+            "assay.archive.manifest_digest": binding.manifestDigest,
+            "assay.archive.path": binding.archivePath,
+            "assay.archive.manifest_bytes": binding.manifestBytes,
+            "assay.archive.source": binding.source,
+          });
+        } catch (err) {
+          // Stdout instead of stderr so it does not look like a workload
+          // failure to the parent runner-spike process.
+          process.stdout.write(
+            "workload: archive not yet present at trace-flush time; " +
+              "binding will be attached post-hoc by bind-archive.py. " +
+              `(reason: ${err instanceof Error ? err.message : String(err)})\n`,
+          );
+        }
       }
 
       rootSpan.setStatus({ code: SpanStatusCode.OK });
