@@ -1,6 +1,16 @@
 # Runner Archives Next to OTel Traces: Shape Comparison Plan
 
-> **Status:** experiment skeleton; no data collected yet
+> **Status:** v1 baselines landed. Arm B (trace-only, macOS local, n=3 +
+> dual-simulation) and Arm C (delegated `assay-bpf-runner`, n=3 with real
+> Linux/eBPF capture) both have committed evidence. Run-level
+> `assay.run.id` + `assay.archive.manifest_digest` binding is verifiable
+> from the committed artefacts. Tool-level `gen_ai.tool.call.id` join is
+> **not yet demonstrated** because the Arm C archive's `sdk_layer` was
+> `absent` (the workload writes OTel spans but does not yet emit into
+> `$ASSAY_RUNNER_SDK_EVENT_LOG`). Live-eBPF byte-identical archive
+> determinism is an explicit non-goal. See
+> [`runner-vs-otel-2026-05/v1-findings.md`](runner-vs-otel-2026-05/v1-findings.md)
+> for the per-run evidence and refined claims.
 >
 > **Last updated:** 2026-05-24
 >
@@ -83,7 +93,7 @@ Use the same deterministic agent workload in all arms.
 |---|---:|---:|---|
 | A - Runner only | Yes | No | Establish measured-run baseline (capability surface + health gates) on a known-good archive. Archive shape stability across n=3 is the target; cross-run byte identity is a non-goal under live eBPF capture (run id, timestamps, PIDs, inodes vary). |
 | B - Trace only | No | Yes | Establish trace shape without eBPF/cgroup capture. |
-| C - Dual capture | Yes | Yes | Main comparison arm; both artifacts share `run_id` and tool-call join keys. |
+| C - Dual capture | Yes | Yes | Main comparison arm. v1 demonstrates run-level binding via `assay.run.id` + `assay.archive.manifest_digest`. Tool-level `gen_ai.tool.call.id` join across L1 and L2 is gated on the SDK-layer ingestion fix (Slice 2) — see v1-findings.md. |
 
 v1 should run arm C at least three times for shape stability and archive
 determinism. Overhead measurements need a larger sample; see

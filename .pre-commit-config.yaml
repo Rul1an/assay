@@ -18,7 +18,16 @@ repos:
           )$
       - id: check-toml
       - id: end-of-file-fixer
+        # Skip experiment archive-contents/: these are extracted from
+        # measured-run .tar.gz archives and must match the original bytes
+        # exactly so the manifest sha256 digest committed in matrix.json
+        # is reproducible from the committed files. Adding a trailing
+        # newline silently breaks the tamper-evident binding contract.
+        exclude: |
+          (?x)^docs/experiments/.+/archive-contents/.+$
       - id: trailing-whitespace
+        exclude: |
+          (?x)^docs/experiments/.+/archive-contents/.+$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
   - repo: https://github.com/gitguardian/ggshield
