@@ -1,0 +1,60 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "assay-runner-otel-experiment" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "assay-runner-otel-experiment" },
+          "spans": [
+            {
+              "name": "assay.runner.measured_run",
+              "spanId": "0000000000000001",
+              "traceId": "00000000000000000000000000000001",
+              "kind": "SPAN_KIND_INTERNAL",
+              "attributes": [
+                { "key": "assay.run.id", "value": { "stringValue": "run_fixture_001" } },
+                { "key": "assay.measurement.boundary", "value": { "stringValue": "linux_ebpf_cgroup_v2" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o-mini" } },
+                { "key": "gen_ai.response.model", "value": { "stringValue": "gpt-4o-mini" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "42" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "17" } }
+              ],
+              "events": [
+                {
+                  "name": "assay.archive.created",
+                  "attributes": [
+                    { "key": "assay.archive.schema", "value": { "stringValue": "assay.runner.archive_manifest.v0" } },
+                    { "key": "assay.archive.manifest_digest", "value": { "stringValue": "sha256:fixture_will_replace_at_runtime" } },
+                    { "key": "assay.archive.path", "value": { "stringValue": "runs/run_fixture_001.tar.gz" } },
+                    { "key": "assay.runner.kernel_layer", "value": { "stringValue": "complete" } },
+                    { "key": "assay.runner.ringbuf_drops", "value": { "intValue": "0" } },
+                    { "key": "assay.runner.correlation_status", "value": { "stringValue": "clean" } }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "execute_tool read_file",
+              "spanId": "0000000000000002",
+              "parentSpanId": "0000000000000001",
+              "traceId": "00000000000000000000000000000001",
+              "kind": "SPAN_KIND_INTERNAL",
+              "attributes": [
+                { "key": "assay.run.id", "value": { "stringValue": "run_fixture_001" } },
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                { "key": "gen_ai.tool.name", "value": { "stringValue": "read_file" } },
+                { "key": "gen_ai.tool.type", "value": { "stringValue": "function" } },
+                { "key": "gen_ai.tool.call.id", "value": { "stringValue": "tc_runner_policy_001" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
