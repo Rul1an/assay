@@ -148,6 +148,8 @@ jobs:
           ASSAY_BIN="$PWD/target/debug/assay"
           EBPF_OBJ="$PWD/target/assay-ebpf.o"
           WORKLOAD_JS="$PWD/${{ env.WORKLOAD_DIR }}/dist/workload.js"
+          CONTRACT_CHECK="$PWD/docs/experiments/cross-runtime-drift-2026-05/contract-checker/check.py"
+          HEALTH_GATE="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py"
           OUT_ROOT="$PWD/arm-${ARM}-runs"
           mkdir -p "$OUT_ROOT"
 
@@ -177,6 +179,19 @@ jobs:
             # Child ran under sudo; chown so subsequent steps + the
             # artifact upload action can read.
             sudo chown -R "$(id -u):$(id -g)" "$RUN_DIR"
+
+            # Health gate. Fail the iteration if eBPF dropped events,
+            # the kernel layer is degraded, or cgroup correlation broke.
+            # The docs document discarding such runs; the workflow
+            # enforces it before any artifact upload (P2 review).
+            python3 "$HEALTH_GATE" --archive "$ARCHIVE_OUT"
+
+            # Workload contract check. A run where the workload exited
+            # 0 but produced wrong tool order, missing output, or
+            # non-uppercase contents is a Slice 1 contract violation and
+            # must not be shipped as a valid Slice 3 baseline (P1
+            # review).
+            python3 "$CONTRACT_CHECK" --work-dir "$WORK_DIR"
 
             echo "::endgroup::"
           done
@@ -282,6 +297,8 @@ jobs:
           ASSAY_BIN="$PWD/target/debug/assay"
           EBPF_OBJ="$PWD/target/assay-ebpf.o"
           WORKLOAD_JS="$PWD/${{ env.WORKLOAD_DIR }}/dist/workload.js"
+          CONTRACT_CHECK="$PWD/docs/experiments/cross-runtime-drift-2026-05/contract-checker/check.py"
+          HEALTH_GATE="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py"
           OUT_ROOT="$PWD/arm-${ARM}-runs"
           mkdir -p "$OUT_ROOT"
 
@@ -309,6 +326,11 @@ jobs:
                 -- node "$WORKLOAD_JS"
 
             sudo chown -R "$(id -u):$(id -g)" "$RUN_DIR"
+
+            # Health gate + workload contract check. Same gates as
+            # Arm A — P1 + P2 review feedback on PR #1347.
+            python3 "$HEALTH_GATE" --archive "$ARCHIVE_OUT"
+            python3 "$CONTRACT_CHECK" --work-dir "$WORK_DIR"
 
             echo "::endgroup::"
           done
@@ -364,6 +386,13 @@ jobs:
             exit 1
           fi
 
+          # Per pair we extract the four real fixture paths from each
+          # run's tool-calls.ndjson — that is the absolute path the
+          # workload actually called (and the kernel observed). The
+          # contract-checker has already verified these line-by-line in
+          # the per-iteration step, so reading them here is safe.
+          EXTRACT_PATHS="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/extract_fixture_paths.py"
+
           for i in "${!A_RUNS[@]}"; do
             A_DIR="${A_RUNS[$i]}"
             B_DIR="${B_RUNS[$i]}"
@@ -371,12 +400,21 @@ jobs:
             B_ARCHIVE="$B_DIR/archive.tar.gz"
             REPORT_BASE="$DRIFT_OUT/drift_pair_$((i + 1))"
 
+            # Four fixture paths: input + output for each arm. Without
+            # these, the absolute /workdir paths the workload actually
+            # touched would be misclassified as runtime-induced
+            # filesystem drift (P1 review on PR #1347).
+            mapfile -t A_PATHS < <(python3 "$EXTRACT_PATHS" --tool-calls "$A_DIR/workdir/tool-calls.ndjson")
+            mapfile -t B_PATHS < <(python3 "$EXTRACT_PATHS" --tool-calls "$B_DIR/workdir/tool-calls.ndjson")
+
             echo "::group::Drift pair $((i + 1)): $A_DIR vs $B_DIR"
             python3 "$DRIFT_PY" \
               --archive-a "$A_ARCHIVE" \
               --archive-b "$B_ARCHIVE" \
-              --fixture-path "/tmp/work/fixture-input.txt" \
-              --fixture-path "/tmp/work/fixture-output.txt" \
+              --fixture-path "${A_PATHS[0]}" \
+              --fixture-path "${A_PATHS[1]}" \
+              --fixture-path "${B_PATHS[0]}" \
+              --fixture-path "${B_PATHS[1]}" \
               --out-json "${REPORT_BASE}.json" \
               --out-md "${REPORT_BASE}.md"
             {
