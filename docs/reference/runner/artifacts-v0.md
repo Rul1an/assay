@@ -74,6 +74,15 @@ Schema string:
 assay.runner.kernel_event.v0
 ```
 
+Machine-readable line schema:
+
+[`schema/kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json)
+
+`layers/kernel.ndjson` is an NDJSON stream: each non-empty line validates
+independently against the line schema. The schema covers the enriched
+open metadata shape now emitted by Runner while preserving compatibility
+with older v0 archives where those open metadata fields are absent.
+
 Each line is one normalized kernel event. Common fields:
 
 | Field | Type | Required | Semantics |

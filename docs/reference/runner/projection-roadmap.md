@@ -294,12 +294,20 @@ Example row:
 }
 ```
 
-## Phase 6: Kernel Event v0.2
+## Phase 6: Kernel Event Metadata Schema
 
 Kernel expansion is valuable, but it should come after the projection
-layer is readable. The open metadata added to kernel event v0 already
-supports operation-aware projections for `openat` and `openat2` calls.
-Successful calls can project access and operation hints:
+layer is readable. That condition is now met by
+[`runtime-drift-v0.md`](runtime-drift-v0.md). The first kernel follow-up
+is deliberately small: freeze the current enriched `kernel_event.v0`
+line shape in
+[`schema/kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json)
+so consumers can validate whether an archive supports operation-aware
+open projections.
+
+The open metadata added to kernel event v0 already supports
+operation-aware projections for `openat` and `openat2` calls. Successful
+calls can project access and operation hints:
 
 - `read`;
 - `write`;
@@ -312,7 +320,7 @@ Failed calls are represented separately by the kernel event `status`
 field (`status=error`) derived from the syscall return value. `error` is
 not an operation class alongside `read` or `write`.
 
-Kernel event v0.2 should consider:
+Future kernel-event expansion should consider:
 
 | Candidate | Why | Caution |
 |---|---|---|
@@ -346,7 +354,7 @@ Projection reports MUST carry explicit non-claims. Initial codes:
 | 3 | Report provenance metadata block | Existing live run can be re-rendered with metadata |
 | 4 | Network projection helper | Exact endpoint, CIDR, and unknown fallback tests |
 | 5 | Freeze `assay.runner.runtime_drift.v0` projection schema | Synthetic fixture covers all claim levels + schema sidecar matches comparator output |
-| 6 | Kernel event v0.2 feasibility note | No code until projection reports prove value |
+| 6 | Kernel event metadata schema sidecar | Enriched open metadata line shape is machine-readable; no new syscall claims |
 
 ## Relationship To Existing Contracts
 

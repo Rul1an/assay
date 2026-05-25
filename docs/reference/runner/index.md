@@ -29,6 +29,7 @@ Phase 2B capability-diff planning slice.
 - [Runner projection roadmap](projection-roadmap.md)
 - [Runner runtime drift projection v0 contract](runtime-drift-v0.md)
 - [Runner cross-runtime diff v0 clean-output JSON Schema](schema/cross-runtime-diff-v0-clean.schema.json)
+- [Runner kernel event v0 JSON Schema](schema/kernel-event-v0.schema.json)
 - [Runner runtime drift projection v0 JSON Schema](schema/runtime-drift-v0.schema.json)
 - [Runner second runtime Phase 2B plan](second-runtime-plan.md)
 - [Runner second runtime candidate selection](second-runtime-candidate-selection.md)

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/runner/schema/kernel-event-v0.schema.json",
+  "title": "Assay Runner Kernel Event v0",
+  "description": "Line schema for one layers/kernel.ndjson record. The stream is NDJSON: validate each non-empty line independently against this schema. Open-event metadata fields are optional so older v0 archives remain readable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "seq",
+    "pid",
+    "event_type",
+    "kind",
+    "value"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.runner.kernel_event.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_type": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalized kernel event kind such as openat, connect, exec, file_blocked, connect_blocked, or event_<id>."
+    },
+    "value": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Normalized path or endpoint when available."
+    },
+    "flags": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Linux open flags captured from an open-style syscall."
+    },
+    "mode": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Linux create mode argument when present."
+    },
+    "resolve": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "openat2 resolve flags when non-zero."
+    },
+    "return_value": {
+      "type": "integer",
+      "description": "Syscall return value; non-negative means success for open-style events."
+    },
+    "access_mode": {
+      "enum": [
+        "read",
+        "write",
+        "read_write",
+        "unknown"
+      ],
+      "description": "Derived from flags & O_ACCMODE for open-style events."
+    },
+    "operation_flags": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "create",
+          "truncate",
+          "append",
+          "exclusive"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Derived operation hints from open flags. These are open-intent hints, not fd-level byte evidence."
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "description": "Derived from return_value for open-style events."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "return_value"
+        ]
+      }
+    }
+  ]
+}
