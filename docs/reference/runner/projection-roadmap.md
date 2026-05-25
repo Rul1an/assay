@@ -160,7 +160,9 @@ Implementation note: the cross-runtime drift comparator now emits a
 versions, observation-health gates, and correlation status are derived
 from the two input archives. Workflow URL, runner label, kernel tuple,
 Assay version/capture commit, render metadata, and eBPF object digest
-are caller-supplied anchors and stay `null` when not provided.
+are caller-supplied anchors. `render_metadata.kind` is always present
+and defaults to `unspecified`; the other optional render metadata fields
+stay `null` when not provided.
 
 Minimum metadata block:
 

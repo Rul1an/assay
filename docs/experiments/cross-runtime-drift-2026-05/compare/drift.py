@@ -1641,9 +1641,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--raw-captures-unchanged",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=None,
-        help="Declare that report rendering did not mutate the input archives.",
+        help=(
+            "Declare whether report rendering mutated the input archives. "
+            "Use --raw-captures-unchanged, --no-raw-captures-unchanged, "
+            "or omit for unknown/null."
+        ),
     )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
     parser.add_argument("--runner-label", help="Runner label or host class.")

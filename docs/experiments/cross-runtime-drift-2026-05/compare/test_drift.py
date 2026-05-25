@@ -1142,6 +1142,29 @@ class MainCliTests(unittest.TestCase):
                 provenance["ebpf_object_digest"], "sha256:" + "1" * 64
             )
 
+    def test_main_can_declare_raw_captures_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "drift.json"
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(ARM_A),
+                    "--archive-b",
+                    str(ARM_B),
+                    "--out-json",
+                    str(out_json),
+                    "--no-raw-captures-unchanged",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            self.assertIs(
+                payload["provenance"]["render_metadata"][
+                    "raw_captures_unchanged"
+                ],
+                False,
+            )
+
     def test_main_returns_3_on_bad_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc = drift.main(
