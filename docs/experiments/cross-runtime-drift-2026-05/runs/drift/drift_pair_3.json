@@ -103,8 +103,8 @@
     "assay_commit": "e3f6ef9d",
     "render_metadata": {
       "kind": "re_render",
-      "rendered_at": "2026-05-25T19:20:03Z",
-      "comparator_commit": "c5495af5",
+      "rendered_at": "2026-05-25T19:25:22Z",
+      "comparator_commit": "02d31f40",
       "source_run_url": "https://github.com/Rul1an/assay/actions/runs/26398427430",
       "raw_captures_unchanged": true
     },
