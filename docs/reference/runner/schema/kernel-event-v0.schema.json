@@ -32,12 +32,26 @@
     },
     "event_type": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Internal monitor event id. Known v0 ids are 1=openat, 2=connect, 4=exec, 10=file_blocked, 20=connect_blocked; unknown ids are represented by kind=event_<id>."
     },
     "kind": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Normalized kernel event kind such as openat, connect, exec, file_blocked, connect_blocked, or event_<id>."
+      "anyOf": [
+        {
+          "enum": [
+            "openat",
+            "connect",
+            "exec",
+            "file_blocked",
+            "connect_blocked"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^event_[0-9]+$"
+        }
+      ],
+      "description": "Normalized kernel event kind. Known v0 kinds are enumerated; unrecognized monitor ids use event_<id>."
     },
     "value": {
       "type": [
@@ -98,6 +112,101 @@
   "allOf": [
     {
       "if": {
+        "properties": {
+          "kind": {
+            "const": "openat"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "connect"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 2
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "exec"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 4
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "file_blocked"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 10
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "connect_blocked"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 20
+          }
+        }
+      }
+    },
+    {
+      "if": {
         "required": [
           "status"
         ]
@@ -107,6 +216,71 @@
           "return_value"
         ]
       }
+    }
+  ],
+  "examples": [
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 0,
+      "pid": 1234,
+      "event_type": 1,
+      "kind": "openat",
+      "value": "/tmp/work/fixture-output.txt",
+      "flags": 577,
+      "mode": 420,
+      "return_value": 4,
+      "access_mode": "write",
+      "operation_flags": [
+        "create",
+        "truncate"
+      ],
+      "status": "success"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 1,
+      "pid": 1234,
+      "event_type": 2,
+      "kind": "connect",
+      "value": "203.0.113.10:443"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 2,
+      "pid": 1234,
+      "event_type": 4,
+      "kind": "exec",
+      "value": "/usr/bin/node"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 3,
+      "pid": 1234,
+      "event_type": 10,
+      "kind": "file_blocked",
+      "value": "/etc/shadow"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 4,
+      "pid": 1234,
+      "event_type": 20,
+      "kind": "connect_blocked",
+      "value": "198.51.100.7:25"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 5,
+      "pid": 1234,
+      "event_type": 999,
+      "kind": "event_999",
+      "value": null
     }
   ]
 }

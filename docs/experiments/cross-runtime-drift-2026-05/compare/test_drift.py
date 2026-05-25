@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
@@ -36,6 +38,139 @@ import drift  # noqa: E402  (after sys.path tweak)
 FIXTURES = THIS_DIR / "fixtures"
 ARM_A = FIXTURES / "arm-a-openai"
 ARM_B = FIXTURES / "arm-b-gemini"
+
+
+def _schema_ref(root: dict[str, Any], ref: str) -> dict[str, Any]:
+    if not ref.startswith("#/$defs/"):
+        raise AssertionError(f"unsupported schema ref: {ref}")
+    node: Any = root
+    for part in ref.lstrip("#/").split("/"):
+        node = node[part]
+    if not isinstance(node, dict):
+        raise AssertionError(f"schema ref did not resolve to object: {ref}")
+    return node
+
+
+def _json_type_matches(value: Any, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    if expected == "boolean":
+        return isinstance(value, bool)
+    raise AssertionError(f"unsupported JSON Schema type in test helper: {expected}")
+
+
+def assert_json_schema_subset(
+    testcase: unittest.TestCase,
+    value: Any,
+    schema: dict[str, Any],
+    root: dict[str, Any] | None = None,
+    path: str = "$",
+) -> None:
+    """Validate the JSON Schema subset used by Runner sidecar tests.
+
+    This is intentionally small and stdlib-only. It covers the keywords
+    present in the Runner schema sidecars so tests catch type/enum drift
+    without pulling in a runtime dependency on `jsonschema`.
+    """
+
+    root = schema if root is None else root
+
+    if "$ref" in schema:
+        assert_json_schema_subset(
+            testcase, value, _schema_ref(root, schema["$ref"]), root, path
+        )
+        return
+
+    if "allOf" in schema:
+        for index, subschema in enumerate(schema["allOf"]):
+            assert_json_schema_subset(
+                testcase, value, subschema, root, f"{path}.allOf[{index}]"
+            )
+
+    if "anyOf" in schema:
+        failures = []
+        for index, subschema in enumerate(schema["anyOf"]):
+            try:
+                assert_json_schema_subset(
+                    testcase, value, subschema, root, f"{path}.anyOf[{index}]"
+                )
+                break
+            except AssertionError as exc:
+                failures.append(str(exc))
+        else:
+            raise AssertionError(f"{path}: no anyOf branch matched: {failures}")
+
+    if "if" in schema:
+        try:
+            assert_json_schema_subset(testcase, value, schema["if"], root, path)
+        except AssertionError:
+            pass
+        else:
+            if "then" in schema:
+                assert_json_schema_subset(
+                    testcase, value, schema["then"], root, f"{path}.then"
+                )
+
+    if "const" in schema:
+        testcase.assertEqual(value, schema["const"], f"{path}: const mismatch")
+
+    if "enum" in schema:
+        testcase.assertIn(value, schema["enum"], f"{path}: enum mismatch")
+
+    expected_type = schema.get("type")
+    if expected_type is not None:
+        types = expected_type if isinstance(expected_type, list) else [expected_type]
+        testcase.assertTrue(
+            any(_json_type_matches(value, item) for item in types),
+            f"{path}: expected type {types}, got {type(value).__name__}",
+        )
+
+    if isinstance(value, str):
+        if "minLength" in schema:
+            testcase.assertGreaterEqual(len(value), schema["minLength"], path)
+        if "pattern" in schema:
+            testcase.assertRegex(value, re.compile(schema["pattern"]), path)
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        if "minimum" in schema:
+            testcase.assertGreaterEqual(value, schema["minimum"], path)
+
+    if isinstance(value, list):
+        if "minItems" in schema:
+            testcase.assertGreaterEqual(len(value), schema["minItems"], path)
+        if "maxItems" in schema:
+            testcase.assertLessEqual(len(value), schema["maxItems"], path)
+        if schema.get("uniqueItems"):
+            testcase.assertEqual(len(value), len(set(map(json.dumps, value))), path)
+        if "items" in schema:
+            for index, item in enumerate(value):
+                assert_json_schema_subset(
+                    testcase, item, schema["items"], root, f"{path}[{index}]"
+                )
+
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            testcase.assertIn(key, value, f"{path}: missing required key {key}")
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            testcase.assertLessEqual(
+                set(value),
+                set(properties),
+                f"{path}: unexpected keys {set(value) - set(properties)}",
+            )
+        for key, prop_schema in properties.items():
+            if key in value:
+                assert_json_schema_subset(
+                    testcase, value[key], prop_schema, root, f"{path}.{key}"
+                )
 
 
 def _make_tarball(src_dir: Path, dest: Path) -> Path:
@@ -1067,7 +1202,7 @@ class MarkdownEscapeTests(unittest.TestCase):
 
 
 class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
-    def test_schema_sidecar_matches_comparator_contract(self) -> None:
+    def test_schema_sidecar_validates_comparator_output(self) -> None:
         schema_path = (
             THIS_DIR.parents[2]
             / "reference"
@@ -1112,10 +1247,40 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
                 "summary",
             ],
         )
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(
+            a,
+            b,
+            fixture_paths=frozenset(
+                [
+                    "/tmp/work/fixture-input.txt",
+                    "/tmp/work/fixture-output.txt",
+                ]
+            ),
+            path_aliases=(
+                drift.PathAlias(
+                    "/tmp/work/fixture-input.txt",
+                    "workdir/input",
+                ),
+                drift.PathAlias(
+                    "/tmp/work/fixture-output.txt",
+                    "workdir/output",
+                ),
+            ),
+            network_aliases=(
+                drift.NetworkAlias(
+                    "api.openai.com:443",
+                    drift.NETWORK_CLASS_PROVIDER_API,
+                ),
+            ),
+        )
+        payload = drift.report_to_json(a, b, rows)
+        assert_json_schema_subset(self, payload, schema)
 
 
 class KernelEventSchemaSidecarTests(unittest.TestCase):
-    def test_kernel_event_schema_sidecar_matches_fixture_shape(self) -> None:
+    def test_kernel_event_schema_sidecar_validates_fixture_lines(self) -> None:
         schema_path = (
             THIS_DIR.parents[2]
             / "reference"
@@ -1140,19 +1305,22 @@ class KernelEventSchemaSidecarTests(unittest.TestCase):
             schema["properties"]["operation_flags"]["items"]["enum"],
             ["create", "truncate", "append", "exclusive"],
         )
+        known_kinds = schema["properties"]["kind"]["anyOf"][0]["enum"]
+        self.assertEqual(
+            known_kinds,
+            ["openat", "connect", "exec", "file_blocked", "connect_blocked"],
+        )
 
-        allowed_keys = set(schema["properties"])
-        required_keys = set(schema["required"])
         for fixture in (ARM_A, ARM_B):
             kernel_path = fixture / "layers" / "kernel.ndjson"
             for line in kernel_path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
                 event = json.loads(line)
-                self.assertTrue(required_keys.issubset(event))
-                self.assertLessEqual(set(event), allowed_keys)
-                if "status" in event:
-                    self.assertIn("return_value", event)
+                assert_json_schema_subset(self, event, schema)
+
+        for index, example in enumerate(schema["examples"]):
+            assert_json_schema_subset(self, example, schema, path=f"examples[{index}]")
 
 
 if __name__ == "__main__":
