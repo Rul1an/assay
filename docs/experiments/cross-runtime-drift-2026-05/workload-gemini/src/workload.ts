@@ -18,6 +18,7 @@ import {
   statSync,
 } from "node:fs";
 import { resolve, dirname, relative, isAbsolute } from "node:path";
+import { sdkEmitterFromEnv, type SdkEmitter } from "./sdk-events";
 import {
   GoogleGenAI,
   type Content,
@@ -55,7 +56,14 @@ function loadEnv(): WorkloadEnv {
   );
   const inputContents =
     process.env.WORKLOAD_INPUT_CONTENTS ?? "cross-runtime drift fixture\n";
-  const model = process.env.WORKLOAD_MODEL ?? "gemini-2.0-flash";
+  // gemini-2.0-flash is no longer available to new users as of 2026-05;
+  // the API returns 404 with "Please update your code to use a newer
+  // model for the latest features and improvements." Default bumped to
+  // gemini-2.5-flash, which is the current generally-available stable
+  // model. Override via WORKLOAD_MODEL if you need to pin a specific
+  // version (the run-meta.json captures whatever was used so the
+  // baseline carries the pin).
+  const model = process.env.WORKLOAD_MODEL ?? "gemini-2.5-flash";
 
   return {
     workDir: absWorkDir,
@@ -173,6 +181,7 @@ async function runManualLoop(
   env: WorkloadEnv,
   toolCallsPath: string,
   seq: { value: number },
+  sdk: SdkEmitter,
 ): Promise<DispatchOutcome> {
   const prompt =
     `Read the file at \`${env.inputPath}\`, uppercase its contents, then ` +
@@ -203,6 +212,7 @@ async function runManualLoop(
     if (!calls || calls.length === 0) {
       const text = String(response.text ?? "").trim();
       if (/^DONE[.!]?$/i.test(text)) {
+        sdk.emit({ event_type: "run_finished" });
         return { exitCode: 0, modelReply: text };
       }
       return { exitCode: 3, modelReply: text };
@@ -220,14 +230,31 @@ async function runManualLoop(
       const name = call.name ?? "";
       const args = (call.args ?? {}) as Record<string, unknown>;
 
+      // Synthesize a tool_call_id from the call's own .id when the SDK
+      // provides it, otherwise from seq — both work for the drift
+      // comparator's tool_invocation_order dimension.
+      const callId =
+        (typeof call.id === "string" && call.id) ||
+        `tc_gemini_${seq.value + 1}`;
+
       if (name === "read_file") {
         const path = ensureInsideWorkDir(
           env.workDir,
           String(args.path ?? ""),
         );
         assertPathEquals("read_file", env.inputPath, path);
+        sdk.emit({
+          event_type: "tool_call_started",
+          tool_call_id: callId,
+          tool: "read_file",
+        });
         appendToolCall(toolCallsPath, seq, "read_file", { path });
         const data = readFileSync(path, "utf-8");
+        sdk.emit({
+          event_type: "tool_call_completed",
+          tool_call_id: callId,
+          tool: "read_file",
+        });
         responseParts.push({
           functionResponse: {
             name,
@@ -241,12 +268,22 @@ async function runManualLoop(
         );
         assertPathEquals("write_file", env.outputPath, path);
         const fileContents = String(args.contents ?? "");
+        sdk.emit({
+          event_type: "tool_call_started",
+          tool_call_id: callId,
+          tool: "write_file",
+        });
         appendToolCall(toolCallsPath, seq, "write_file", {
           path,
           contents: fileContents,
         });
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, fileContents, { encoding: "utf-8" });
+        sdk.emit({
+          event_type: "tool_call_completed",
+          tool_call_id: callId,
+          tool: "write_file",
+        });
         responseParts.push({
           functionResponse: {
             name,
@@ -284,10 +321,32 @@ async function main(): Promise<number> {
   const seq = { value: 0 };
   const ai = new GoogleGenAI({ apiKey: env.apiKey });
 
+  // SDK-event emitter. Active when assay runner-spike has set
+  // ASSAY_RUNNER_SDK_EVENT_LOG; no-op for local dev. The emitter's
+  // constructor truncates the log path, which is what runner-spike
+  // requires in order to ingest layers/sdk.ndjson — without this the
+  // runner exits with "failed to read runner-spike SDK event log ...
+  // No such file or directory" even when the workload itself ran fine.
+  let geminiSdkVersion = "unknown";
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    geminiSdkVersion = (require("@google/genai/package.json") as {
+      version: string;
+    }).version;
+  } catch {
+    // best-effort
+  }
+  const sdk = sdkEmitterFromEnv({
+    fallbackRunId: process.env.ASSAY_RUNNER_RUN_ID ?? `local_${Date.now()}`,
+    source: "gemini-genai",
+    sdkName: "@google/genai",
+    sdkVersion: geminiSdkVersion,
+  });
+
   const startedAt = new Date().toISOString();
   let outcome: DispatchOutcome = { exitCode: 1, modelReply: "" };
   try {
-    outcome = await runManualLoop(ai, env, toolCallsPath, seq);
+    outcome = await runManualLoop(ai, env, toolCallsPath, seq, sdk);
   } catch (err) {
     process.stderr.write(`workload-gemini error: ${(err as Error).message}\n`);
     if (err instanceof ContractViolationError) {

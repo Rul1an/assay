@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from
 import { resolve, dirname, relative, isAbsolute } from "node:path";
 import { Agent, Runner, tool } from "@openai/agents";
 import { z } from "zod";
+import { sdkEmitterFromEnv } from "./sdk-events";
 
 interface WorkloadEnv {
   workDir: string;
@@ -113,6 +114,29 @@ async function main(): Promise<number> {
 
   const seq = { value: 0 };
 
+  // SDK-event emitter. Active when assay runner-spike has set
+  // ASSAY_RUNNER_SDK_EVENT_LOG; no-op for local dev runs. The
+  // emitter's constructor truncates the log file, which is what
+  // runner-spike requires in order to ingest layers/sdk.ndjson.
+  // Without this the runner exits with
+  // "failed to read runner-spike SDK event log ... No such file or
+  // directory" even when the workload itself ran fine.
+  let openaiSdkVersion = "unknown";
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    openaiSdkVersion = (require("@openai/agents/package.json") as {
+      version: string;
+    }).version;
+  } catch {
+    // best-effort; emitter accepts unknown
+  }
+  const sdk = sdkEmitterFromEnv({
+    fallbackRunId: process.env.ASSAY_RUNNER_RUN_ID ?? `local_${Date.now()}`,
+    source: "openai-agents",
+    sdkName: "@openai/agents",
+    sdkVersion: openaiSdkVersion,
+  });
+
   const readFileTool = tool({
     name: "read_file",
     description: "Read a UTF-8 file from the workload work directory.",
@@ -122,8 +146,20 @@ async function main(): Promise<number> {
     execute: async ({ path }) => {
       const abs = ensureInsideWorkDir(env.workDir, path);
       assertPathEquals("read_file", env.inputPath, abs);
+      const callId = `tc_openai_${seq.value + 1}`;
+      sdk.emit({
+        event_type: "tool_call_started",
+        tool_call_id: callId,
+        tool: "read_file",
+      });
       appendToolCall(toolCallsPath, seq, "read_file", { path: abs });
-      return readFileSync(abs, "utf-8");
+      const data = readFileSync(abs, "utf-8");
+      sdk.emit({
+        event_type: "tool_call_completed",
+        tool_call_id: callId,
+        tool: "read_file",
+      });
+      return data;
     },
   });
 
@@ -137,12 +173,23 @@ async function main(): Promise<number> {
     execute: async ({ path, contents }) => {
       const abs = ensureInsideWorkDir(env.workDir, path);
       assertPathEquals("write_file", env.outputPath, abs);
+      const callId = `tc_openai_${seq.value + 1}`;
+      sdk.emit({
+        event_type: "tool_call_started",
+        tool_call_id: callId,
+        tool: "write_file",
+      });
       appendToolCall(toolCallsPath, seq, "write_file", {
         path: abs,
         contents,
       });
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, contents, { encoding: "utf-8" });
+      sdk.emit({
+        event_type: "tool_call_completed",
+        tool_call_id: callId,
+        tool: "write_file",
+      });
       return "ok";
     },
   });
@@ -177,6 +224,7 @@ async function main(): Promise<number> {
     if (!/^DONE[.!]?$/i.test(modelReply)) {
       exitCode = 3;
     }
+    sdk.emit({ event_type: "run_finished" });
   } catch (err) {
     process.stderr.write(`workload-openai error: ${(err as Error).message}\n`);
     if (err instanceof ContractViolationError) {
