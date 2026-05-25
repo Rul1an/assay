@@ -11,10 +11,10 @@ Scope (v0, Slice 2):
   - SDK tool events (layers/sdk.ndjson — tool names per archive)
   - MCP tool surface (capability_surface.mcp_tools)
   - tool invocation order (SDK events' seq per tool_call_id)
+  - kernel file operations (layers/kernel.ndjson open metadata)
 
 Out of scope (explicit follow-ups, NOT silent gaps):
-  - read/write/create/remove classification (requires
-    kernel.ndjson parsing — deferred to a v2 comparator)
+  - unlink/remove classification
   - per-path access counts
   - latency / token / cost (not a drift signal)
 
@@ -61,6 +61,7 @@ CAPABILITY_SURFACE_PATH = "capability-surface.json"
 OBSERVATION_HEALTH_PATH = "observation-health.json"
 CORRELATION_REPORT_PATH = "correlation-report.json"
 SDK_LAYER_PATH = "layers/sdk.ndjson"
+KERNEL_LAYER_PATH = "layers/kernel.ndjson"
 
 # Hostnames we treat as model-provider transport / auth endpoints.
 # Conservative whitelist; runs that surface anything else default to
@@ -111,6 +112,7 @@ class ArchiveObservation:
     sdk_tools: list[str]
     sdk_tool_call_ids: list[str]
     sdk_tool_order: list[str]  # (tool_call_id, tool) sequence per seq order
+    kernel_file_operations: list[str] = dataclasses.field(default_factory=list)
 
 
 def _open_archive_member(source: Path, member: str) -> bytes | None:
@@ -225,6 +227,28 @@ def parse_archive(source: Path) -> ArchiveObservation:
                     f"invalid JSON: {exc}"
                 ) from exc
 
+    kernel_events: list[dict[str, Any]] = []
+    kernel_bytes = _open_archive_member(source, KERNEL_LAYER_PATH)
+    if kernel_bytes is not None:
+        try:
+            text = kernel_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BadArchiveError(
+                f"{source}!{KERNEL_LAYER_PATH}: invalid UTF-8: {exc}"
+            ) from exc
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise BadArchiveError(
+                    f"{source}!{KERNEL_LAYER_PATH}:{lineno}: "
+                    f"invalid JSON: {exc}"
+                ) from exc
+            if isinstance(event, dict):
+                kernel_events.append(event)
+
     # Derive runtime label from the first SDK event that carries a
     # `source` field. The Runner SDK-event v0 schema sets source to the
     # workload-side identifier (e.g. "openai-agents", "gemini-genai"),
@@ -265,6 +289,7 @@ def parse_archive(source: Path) -> ArchiveObservation:
                 seq_invocations.append((seq, call_id, tool))
     seq_invocations.sort(key=lambda t: t[0])
     sdk_tool_order = [f"{call_id}:{tool}" for _, call_id, tool in seq_invocations]
+    kernel_file_operations = _kernel_file_operations(kernel_events)
 
     return ArchiveObservation(
         path=str(source),
@@ -277,7 +302,38 @@ def parse_archive(source: Path) -> ArchiveObservation:
         sdk_tools=sorted(sdk_tools),
         sdk_tool_call_ids=sorted(sdk_tool_call_ids),
         sdk_tool_order=sdk_tool_order,
+        kernel_file_operations=kernel_file_operations,
     )
+
+
+def _kernel_file_operations(events: list[dict[str, Any]]) -> list[str]:
+    """Project operation-aware open events into stable `op:path` strings.
+
+    The Runner kernel-event v0 shape gained optional `access_mode`,
+    `operation_flags`, and `status` fields after the first live baseline.
+    Older archives simply produce an empty projection so the comparator
+    reports this row as inconclusive instead of pretending touched paths
+    can be split into read/write semantics.
+    """
+
+    out: set[str] = set()
+    for event in events:
+        if event.get("kind") != "openat":
+            continue
+        if event.get("status") not in (None, "success"):
+            continue
+        path = event.get("value")
+        if not isinstance(path, str) or not path:
+            continue
+        access_mode = event.get("access_mode")
+        if isinstance(access_mode, str) and access_mode:
+            out.add(f"{access_mode}:{path}")
+        operation_flags = event.get("operation_flags")
+        if isinstance(operation_flags, list):
+            for flag in operation_flags:
+                if isinstance(flag, str) and flag:
+                    out.add(f"{flag}:{path}")
+    return sorted(out)
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +491,29 @@ def build_drift_report(
         DriftRow(
             dimension="filesystem_paths_touched",
             source="capability_surface.filesystem_paths",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+        )
+    )
+
+    # --- operation-aware filesystem opens ---
+    only_a, only_b, both = _diff_lists(a.kernel_file_operations, b.kernel_file_operations)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a.kernel_file_operations),
+        bool(b.kernel_file_operations),
+        provider_hosts,
+        _operation_fixture_paths(fixture_paths),
+    )
+    rows.append(
+        DriftRow(
+            dimension="kernel_file_operations",
+            source="layers/kernel.ndjson (openat access_mode + operation_flags)",
             only_in_a=only_a,
             only_in_b=only_b,
             in_both=both,
@@ -609,6 +688,11 @@ def build_drift_report(
         )
 
     return rows
+
+
+def _operation_fixture_paths(fixture_paths: frozenset[str]) -> frozenset[str]:
+    prefixes = ("read", "write", "read_write", "create", "truncate", "append", "exclusive")
+    return frozenset(f"{prefix}:{path}" for path in fixture_paths for prefix in prefixes)
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,20 @@ pub struct KernelLayerEvent {
     pub event_type: u32,
     pub kind: String,
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolve: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_value: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_mode: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub operation_flags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +157,13 @@ impl KernelLayerBuilder {
             event_type: event.event_type,
             kind: decoded.kind,
             value: decoded.value,
+            flags: decoded.flags,
+            mode: decoded.mode,
+            resolve: decoded.resolve,
+            return_value: decoded.return_value,
+            access_mode: decoded.access_mode,
+            operation_flags: decoded.operation_flags,
+            status: decoded.status,
         };
         self.next_seq += 1;
         serde_json::to_writer(&mut self.kernel_layer_ndjson, &record)?;
@@ -239,35 +260,88 @@ impl KernelLayerCapture {
 struct DecodedKernelEvent {
     kind: String,
     value: Option<String>,
+    flags: Option<u64>,
+    mode: Option<u64>,
+    resolve: Option<u64>,
+    return_value: Option<i64>,
+    access_mode: Option<String>,
+    operation_flags: Vec<String>,
+    status: Option<String>,
 }
 
 fn decode_monitor_event(event: &MonitorEvent) -> DecodedKernelEvent {
     match event.event_type {
-        EVENT_OPENAT => DecodedKernelEvent {
-            kind: "openat".to_string(),
-            value: decode_c_string(&event.data),
-        },
-        EVENT_CONNECT => DecodedKernelEvent {
-            kind: "connect".to_string(),
-            value: decode_sockaddr_endpoint(&event.data),
-        },
-        EVENT_EXEC => DecodedKernelEvent {
-            kind: "exec".to_string(),
-            value: decode_c_string(&event.data),
-        },
-        EVENT_FILE_BLOCKED => DecodedKernelEvent {
-            kind: "file_blocked".to_string(),
-            value: decode_c_string(&event.data),
-        },
-        EVENT_CONNECT_BLOCKED => DecodedKernelEvent {
-            kind: "connect_blocked".to_string(),
-            value: decode_sockaddr_endpoint(&event.data),
-        },
-        other => DecodedKernelEvent {
-            kind: format!("event_{other}"),
-            value: None,
-        },
+        EVENT_OPENAT => decoded_open_event(event),
+        EVENT_CONNECT => decoded_plain_event("connect", decode_sockaddr_endpoint(&event.data)),
+        EVENT_EXEC => decoded_plain_event("exec", decode_c_string(&event.data)),
+        EVENT_FILE_BLOCKED => decoded_plain_event("file_blocked", decode_c_string(&event.data)),
+        EVENT_CONNECT_BLOCKED => {
+            decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
+        }
+        other => decoded_plain_event(&format!("event_{other}"), None),
     }
+}
+
+fn decoded_plain_event(kind: &str, value: Option<String>) -> DecodedKernelEvent {
+    DecodedKernelEvent {
+        kind: kind.to_string(),
+        value,
+        flags: None,
+        mode: None,
+        resolve: None,
+        return_value: None,
+        access_mode: None,
+        operation_flags: Vec::new(),
+        status: None,
+    }
+}
+
+fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
+    let flags = event.flags;
+    DecodedKernelEvent {
+        kind: "openat".to_string(),
+        value: decode_c_string(&event.data),
+        flags: Some(flags),
+        mode: Some(event.mode),
+        resolve: (event.resolve != 0).then_some(event.resolve),
+        return_value: Some(event.return_value),
+        access_mode: Some(open_access_mode(flags).to_string()),
+        operation_flags: open_operation_flags(flags),
+        status: Some(
+            if event.return_value < 0 {
+                "error"
+            } else {
+                "success"
+            }
+            .to_string(),
+        ),
+    }
+}
+
+fn open_access_mode(flags: u64) -> &'static str {
+    match flags & 0o3 {
+        0 => "read",
+        1 => "write",
+        2 => "read_write",
+        _ => "unknown",
+    }
+}
+
+fn open_operation_flags(flags: u64) -> Vec<String> {
+    let mut out = Vec::new();
+    if flags & 0o100 != 0 {
+        out.push("create".to_string());
+    }
+    if flags & 0o1000 != 0 {
+        out.push("truncate".to_string());
+    }
+    if flags & 0o2000 != 0 {
+        out.push("append".to_string());
+    }
+    if flags & 0o400 != 0 {
+        out.push("exclusive".to_string());
+    }
+    out
 }
 
 fn decode_c_string(bytes: &[u8]) -> Option<String> {
@@ -523,6 +597,14 @@ mod tests {
         event
     }
 
+    fn open_event(value: &[u8], flags: u64, return_value: i64) -> MonitorEvent {
+        let mut event = event(EVENT_OPENAT, value);
+        event.flags = flags;
+        event.mode = 0o644;
+        event.return_value = return_value;
+        event
+    }
+
     #[test]
     fn openat_event_records_filesystem_capability() {
         let mut builder = KernelLayerBuilder::new("run_001").unwrap();
@@ -543,6 +625,54 @@ mod tests {
             .filesystem_paths
             .contains("/tmp/assay-known-file"));
         assert_eq!(capture.ringbuf_drops, 0);
+    }
+
+    #[test]
+    fn openat_event_records_flags_access_mode_and_return_value() {
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&open_event(
+                b"/tmp/assay-created-file\0",
+                0o1 | 0o100 | 0o1000,
+                7,
+            ))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+        let record: KernelLayerEvent =
+            serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
+
+        assert_eq!(record.flags, Some(0o1 | 0o100 | 0o1000));
+        assert_eq!(record.mode, Some(0o644));
+        assert_eq!(record.return_value, Some(7));
+        assert_eq!(record.access_mode.as_deref(), Some("write"));
+        assert_eq!(
+            record.operation_flags,
+            vec!["create".to_string(), "truncate".to_string()]
+        );
+        assert_eq!(record.status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn failed_openat_event_records_error_status() {
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&open_event(b"/tmp/missing\0", 0, -2))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+        let record: KernelLayerEvent =
+            serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
+
+        assert_eq!(record.access_mode.as_deref(), Some("read"));
+        assert_eq!(record.return_value, Some(-2));
+        assert_eq!(record.status.as_deref(), Some("error"));
     }
 
     #[test]

@@ -3,8 +3,8 @@
 > **Status:** live baseline committed. The Slice 3 workflow
 > [`Cross-Runtime Drift Experiment`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
 > ran successfully on `assay-bpf-runner` as
-> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
-> on head `91d6dbf2`, with `repetitions=3` and `build_ebpf=true`.
+> [GitHub Actions run 26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
+> on head `e3f6ef9d`, with `repetitions=3` and `build_ebpf=true`.
 > Arm A (`@openai/agents`) baselines are under `runs/a0/`,
 > Arm B (`@google/genai`) baselines are under `runs/b0/`,
 > and per-pair drift reports are under `runs/drift/`.
@@ -33,13 +33,14 @@ Across all three live archive pairs, the drift labels were stable:
 | Dimension | Live classification | Stability | Short read |
 |---|---|---|---|
 | `filesystem_paths_touched` | **runtime-induced** | 3/3 | Each arm touched its own run-local SDK/tool-call files and workload package metadata; shared `/etc/*` resolver config appeared in both. |
+| `kernel_file_operations` | **runtime-induced** | 3/3 | New open metadata splits successful `openat`/`openat2` events into `read`, `write`, `create`, `truncate`, and `append` operation strings. |
 | `network_endpoints` | **runtime-induced** under v0 | 3/3 | v0 records IP endpoints, not provider hostnames. The comparator cannot map these back to OpenAI/Google hostnames, so the non-shared IPs remain unclassified and the row lands runtime-induced. |
 | `process_execs` | **inconclusive** | 3/3 | Empty in both arms under capability_surface v0. The workload process itself is not represented as a child exec. |
 | `sdk_tool_events` | **task-induced** | 3/3 | Both arms emitted SDK events for `read_file` and `write_file`. |
 | `mcp_tool_surface` | **inconclusive** | 3/3 | Empty in both arms; the workload contract forbids MCP servers. |
 | `tool_invocation_order` | **task-induced** | 3/3 | Both arms invoked `read_file -> write_file` in order. |
 
-Summary per pair: **2 task-induced, 2 runtime-induced,
+Summary per pair: **2 task-induced, 3 runtime-induced,
 2 inconclusive, 0 provider-induced**.
 
 That differs from the synthetic fixture, which deliberately exercised
@@ -56,8 +57,9 @@ vary.
 
 | Dimension | Source | Pair 1 | Pair 2 | Pair 3 | Interpretation |
 |---|---|---:|---:|---:|---|
-| `filesystem_paths_touched` | `capability_surface.filesystem_paths` | runtime-induced, 6 non-shared | runtime-induced, 6 non-shared | runtime-induced, 6 non-shared | Runtime/run-local files differ by arm. Shared resolver config appears in both. |
-| `network_endpoints` | `capability_surface.network_endpoints` | runtime-induced, 20 non-shared | runtime-induced, 19 non-shared | runtime-induced, 20 non-shared | OpenAI/Gemini traffic appears as IP endpoints. Provider attribution is not possible from v0 hostless data. |
+| `filesystem_paths_touched` | `capability_surface.filesystem_paths` | runtime-induced, 18 non-shared | runtime-induced, 18 non-shared | runtime-induced, 18 non-shared | Runtime/run-local files differ by arm. Shared resolver config appears in both. |
+| `kernel_file_operations` | `layers/kernel.ndjson` open metadata | runtime-induced, 42 non-shared | runtime-induced, 42 non-shared | runtime-induced, 42 non-shared | Operation-aware kernel rows now distinguish `read`, `write`, `create`, `truncate`, and `append` for successful opens. |
+| `network_endpoints` | `capability_surface.network_endpoints` | runtime-induced, 19 non-shared | runtime-induced, 18 non-shared | runtime-induced, 18 non-shared | OpenAI/Gemini traffic appears as IP endpoints. Provider attribution is not possible from v0 hostless data. |
 | `process_execs` | `capability_surface.process_execs` | inconclusive | inconclusive | inconclusive | Empty in both arms. |
 | `sdk_tool_events` | `layers/sdk.ndjson` tool field | task-induced | task-induced | task-induced | Full overlap: `read_file`, `write_file`. |
 | `mcp_tool_surface` | `capability_surface.mcp_tools` | inconclusive | inconclusive | inconclusive | Empty in both arms by contract. |
@@ -67,15 +69,21 @@ vary.
 
 ### Filesystem drift is real but narrow
 
-Each live pair has three Arm-A-only paths and three Arm-B-only paths.
+Each live pair has nine Arm-A-only paths and nine Arm-B-only paths.
 They are not arbitrary application files; they are run-local or
 runtime-specific support files:
 
 - `.../arm-a-openai-runs/<run>/sdk-events.ndjson`
+- `.../arm-a-openai-runs/<run>/workdir/fixture-input.txt`
+- `.../arm-a-openai-runs/<run>/workdir/fixture-output.txt`
+- `.../arm-a-openai-runs/<run>/workdir/run-meta.json`
 - `.../arm-a-openai-runs/<run>/workdir/tool-calls.ndjson`
+- `.../workload-openai/dist/sdk-events.js`
+- `.../workload-openai/dist/workload.js`
 - `.../workload-openai/dist/package.json`
+- `.../workload-openai/package.json`
 - the equivalent Gemini paths under `arm-b-gemini-runs/` and
-  `workload-gemini/dist/package.json`
+  `workload-gemini/`
 
 The seven paths shared by both arms are host resolver configuration:
 `/etc/gai.conf`, `/etc/host.conf`, `/etc/hosts`, `/etc/netsvc.conf`,
@@ -85,6 +93,27 @@ The live claim is therefore modest and useful: under the same Runner
 boundary and same workload contract, the two runtime arms expose a
 different touched-path surface, but in this v0 run the difference is
 small and dominated by run-local/runtime package plumbing.
+
+### Kernel file operations now split read/write/create/truncate
+
+This rerun includes Runner kernel-event open metadata: `flags`, `mode`,
+`resolve`, `return_value`, derived `access_mode`, derived
+`operation_flags`, and success/error `status`. The drift comparator now
+uses `layers/kernel.ndjson` to project successful open events into
+operation strings such as:
+
+- `read:<workdir>/fixture-input.txt`
+- `write:<workdir>/fixture-output.txt`
+- `create:<workdir>/fixture-output.txt`
+- `truncate:<workdir>/fixture-output.txt`
+
+Across all three live pairs, both arms show the same logical fixture
+operation shape, but the absolute run directories differ by arm. The row
+therefore still lands `runtime-induced`: the comparator sees
+arm-local paths, not a normalized task alias. That is an honest v0
+boundary, not a missing signal. The useful change is that the archive now
+contains enough kernel metadata to avoid the older "touched path only"
+claim.
 
 ### Network drift is the sharpest v0 limitation
 
@@ -168,9 +197,11 @@ adds four things the synthetic fixture could not:
 4. **One snapshot in time.** SDK versions move fast. The source package
    pins are `@openai/agents@0.11.4` and `@google/genai@2.6.0`; rerun
    the experiment if either changes materially.
-5. **Capability_surface v0 granularity.** v0 records which paths were
-   touched but not read/write/create/remove, access counts, or syscall
-   ordering. A v2 comparator would need to parse `layers/kernel.ndjson`.
+5. **Capability_surface v0 granularity.** `capability_surface.v0` still
+   records touched paths undifferentiated. Operation-aware rows now come
+   from optional `layers/kernel.ndjson` open metadata and only cover
+   successful open-style events; unlink/remove and fd-level reads/writes
+   remain outside this projection.
 6. **The drift report is not a security claim.** "Runtime B contacts more
    IP endpoints" is a runtime-selection input, not a verdict that the
    runtime is insecure.
@@ -179,13 +210,15 @@ adds four things the synthetic fixture could not:
 
 - **Provider-level network attribution.** Live network rows are IP-based.
   They do not prove provider-induced drift without a hostname/DNS layer.
-- **Read/write/create/remove classification.** Capability_surface v0
-  records touched paths undifferentiated. The follow-up diagnostic
-  [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) confirms that
-  the current `layers/kernel.ndjson` v0 shape also lacks open flags or
-  operation categories, so read/write classification needs a Runner
-  schema extension rather than only a comparator change.
-- **Per-path access counts and ordering.** Same v2-comparator follow-up.
+- **Full filesystem semantics.** The new kernel row can classify
+  open-style `read`/`write`/`create`/`truncate`/`append` observations
+  when `layers/kernel.ndjson` carries open metadata. It still does not
+  claim unlink/remove, fd-level read/write byte counts, or complete
+  per-path access counts.
+- **Normalized task-path equivalence.** The comparator treats absolute
+  run-local paths as evidence. It does not yet normalize
+  `<arm-run>/workdir/fixture-input.txt` to a shared logical
+  `fixture-input` alias for the operation-aware row.
 - **Cross-distro portability.** All captures are Linux/kernel-specific.
 - **N > 3 stability.** n=3 is enough for this shape claim; if future runs
   show label flips, bump to n>=5.
@@ -236,8 +269,8 @@ done
 
 ## Pinned versions for this live baseline
 
-- Assay head: `91d6dbf2`
-- Workflow run: [26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+- Assay head: `e3f6ef9d`
+- Workflow run: [26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
 - Runner boundary: `assay runner-spike`, Linux/eBPF + cgroup v2 on
   `assay-bpf-runner`
 - OpenAI workload package pin: `@openai/agents@0.11.4`

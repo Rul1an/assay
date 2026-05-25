@@ -26,7 +26,7 @@ use aya_ebpf::{
         bpf_get_current_ancestor_cgroup_id, bpf_get_current_cgroup_id, bpf_get_current_pid_tgid,
     },
     macros::{map, tracepoint},
-    maps::{Array, HashMap, RingBuf},
+    maps::{Array, HashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 
@@ -87,13 +87,31 @@ pub static LSM_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 #[map]
 pub static STATS: Array<u32> = Array::with_max_entries(MONITOR_STATS_LEN, 0);
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PendingOpen {
+    data: [u8; DATA_LEN],
+    flags: u64,
+    mode: u64,
+    resolve: u64,
+}
+
+#[map]
+static PENDING_OPEN: HashMap<u64, PendingOpen> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+static OPEN_SCRATCH: PerCpuArray<PendingOpen> = PerCpuArray::with_max_entries(1, 0);
+
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
 const KEY_OFFSET_FORK_PARENT: u32 = 2;
 const KEY_OFFSET_FORK_CHILD: u32 = 3;
 const KEY_OFFSET_FILENAME_OPENAT2: u32 = 4;
+const KEY_OFFSET_OPENAT_FLAGS: u32 = 5;
+const KEY_OFFSET_OPENAT_MODE: u32 = 6;
+const KEY_OFFSET_OPENAT2_HOW: u32 = 7;
+const KEY_OFFSET_SYSCALL_EXIT_RET: u32 = 8;
 const DEFAULT_OFFSET: u32 = 24;
-const OPEN_PATH_FILTER_LEN: usize = 96;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
@@ -159,6 +177,10 @@ const DATA_LEN: usize = 512;
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
     (*ev).pid = pid;
     (*ev).event_type = event_type;
+    (*ev).flags = 0;
+    (*ev).mode = 0;
+    (*ev).resolve = 0;
+    (*ev).return_value = 0;
     // Zero payload in-place
     core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
 }
@@ -180,17 +202,53 @@ pub fn assay_monitor_openat2(ctx: TracePointContext) -> u32 {
     }
 }
 
+#[tracepoint]
+pub fn assay_monitor_openat_exit(ctx: TracePointContext) -> u32 {
+    match try_open_exit(
+        ctx,
+        MONITOR_STAT_OPENAT_EVENTS_EMITTED,
+        MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+    ) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
+#[tracepoint]
+pub fn assay_monitor_openat2_exit(ctx: TracePointContext) -> u32 {
+    match try_open_exit(
+        ctx,
+        MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
+        MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+    ) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
 fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
         unsafe { *hits += 1 };
     }
 
-    emit_open_path(
-        ctx,
-        KEY_OFFSET_FILENAME_OPENAT2,
-        MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
-        MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-    )
+    let how_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT2_HOW) }
+        .map(|v| *v as usize)
+        .unwrap_or(32);
+    let how_ptr: u64 = unsafe { ctx.read_at(how_offset).map_err(|_| 1u32)? };
+    let mut flags = 0u64;
+    let mut mode = 0u64;
+    let mut resolve = 0u64;
+    if how_ptr != 0 {
+        if let Ok(how) =
+            unsafe { aya_ebpf::helpers::bpf_probe_read_user(how_ptr as *const vmlinux::open_how) }
+        {
+            flags = how.flags;
+            mode = how.mode;
+            resolve = how.resolve;
+        }
+    }
+
+    store_open_pending(ctx, KEY_OFFSET_FILENAME_OPENAT2, flags, mode, resolve)
 }
 
 fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
@@ -198,19 +256,25 @@ fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
         unsafe { *hits += 1 };
     }
 
-    emit_open_path(
-        ctx,
-        KEY_OFFSET_FILENAME,
-        MONITOR_STAT_OPENAT_EVENTS_EMITTED,
-        MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-    )
+    let flags_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_FLAGS) }
+        .map(|v| *v as usize)
+        .unwrap_or(32);
+    let mode_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_MODE) }
+        .map(|v| *v as usize)
+        .unwrap_or(40);
+    let flags: i32 = unsafe { ctx.read_at(flags_offset).unwrap_or(0) };
+    let mode: u64 = unsafe { ctx.read_at::<u64>(mode_offset).unwrap_or(0) };
+
+    store_open_pending(ctx, KEY_OFFSET_FILENAME, flags as u64, mode, 0)
 }
 
-fn emit_open_path(
+#[inline(always)]
+fn store_open_pending(
     ctx: TracePointContext,
     offset_key: u32,
-    emitted_stat: u32,
-    dropped_stat: u32,
+    flags: u64,
+    mode: u64,
+    resolve: u64,
 ) -> Result<u32, u32> {
     if !is_monitored() {
         return Ok(0);
@@ -225,35 +289,66 @@ fn emit_open_path(
         return Ok(0);
     }
 
-    let mut path_prefix = [0u8; OPEN_PATH_FILTER_LEN];
-    let prefix_result = unsafe {
+    let pending = match OPEN_SCRATCH.get_ptr_mut(0) {
+        Some(pending) => pending,
+        None => return Ok(0),
+    };
+    unsafe {
+        core::ptr::write_bytes((*pending).data.as_mut_ptr(), 0, DATA_LEN);
+        (*pending).flags = flags;
+        (*pending).mode = mode;
+        (*pending).resolve = resolve;
+    }
+    let read_result = unsafe {
         aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
             filename_ptr as *const u8,
-            &mut path_prefix,
+            &mut (*pending).data,
         )
     };
-    if prefix_result.is_err() {
+    if read_result.is_err() {
         return Ok(0);
     }
-    if is_loader_telemetry_open_path(&path_prefix) {
+    let path = unsafe { &(*pending).data };
+    if is_loader_telemetry_open_path(path) {
         return Ok(0);
     }
-    if should_dedup_open_path(&path_prefix) {
+    if should_dedup_open_path(path, flags) {
         return Ok(0);
     }
 
+    let key = bpf_get_current_pid_tgid();
+    let _ = unsafe { PENDING_OPEN.insert(&key, &*pending, 0) };
+
+    Ok(0)
+}
+
+#[inline(always)]
+fn try_open_exit(ctx: TracePointContext, emitted_stat: u32, dropped_stat: u32) -> Result<u32, u32> {
+    let key = bpf_get_current_pid_tgid();
+    let pending = match unsafe { PENDING_OPEN.get(&key) } {
+        Some(pending) => pending,
+        None => return Ok(0),
+    };
+    let _ = PENDING_OPEN.remove(&key);
+
+    let ret_offset = unsafe { CONFIG.get(&KEY_OFFSET_SYSCALL_EXIT_RET) }
+        .map(|v| *v as usize)
+        .unwrap_or(16);
+    let ret: i64 = unsafe { ctx.read_at(ret_offset).unwrap_or(0) };
+
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        let read_result = unsafe {
+        unsafe {
             write_event_header(ev, current_tgid(), EVENT_OPENAT);
-            aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-                filename_ptr as *const u8,
-                &mut (*ev).data,
-            )
-        };
-        if read_result.is_err() {
-            entry.discard(0);
-            return Ok(0);
+            (*ev).flags = pending.flags;
+            (*ev).mode = pending.mode;
+            (*ev).resolve = pending.resolve;
+            (*ev).return_value = ret;
+            core::ptr::copy_nonoverlapping(
+                pending.data.as_ptr(),
+                (*ev).data.as_mut_ptr(),
+                DATA_LEN,
+            );
         }
         entry.submit(0);
         inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
@@ -267,7 +362,7 @@ fn emit_open_path(
 }
 
 #[inline(always)]
-fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+fn should_dedup_open_path(path: &[u8; DATA_LEN], flags: u64) -> bool {
     let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
         .copied()
         .unwrap_or(0)
@@ -276,7 +371,7 @@ fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
         return false;
     }
 
-    let key = hash_open_path(path);
+    let key = hash_open_path(path, flags);
     if unsafe { OPEN_PATH_SEEN.get(&key) }.is_some() {
         return true;
     }
@@ -286,9 +381,11 @@ fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
 }
 
 #[inline(always)]
-fn hash_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> u64 {
+fn hash_open_path(path: &[u8; DATA_LEN], flags: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
-    for index in 0..OPEN_PATH_FILTER_LEN {
+    hash ^= flags;
+    hash = hash.wrapping_mul(0x100000001b3u64);
+    for index in 0..DATA_LEN {
         let byte = path[index];
         if byte == 0 {
             break;
@@ -300,7 +397,7 @@ fn hash_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> u64 {
 }
 
 #[inline(always)]
-fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+fn is_loader_telemetry_open_path(path: &[u8; DATA_LEN]) -> bool {
     // Dynamic linker and libc config probes flooded delegated runs without
     // carrying runner-spike attribution evidence.
     bytes_start_with(path, b"/etc/ld.so.cache\0")
@@ -336,8 +433,8 @@ fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
 }
 
 #[inline(always)]
-fn bytes_start_with(path: &[u8; OPEN_PATH_FILTER_LEN], prefix: &[u8]) -> bool {
-    for index in 0..OPEN_PATH_FILTER_LEN {
+fn bytes_start_with(path: &[u8; DATA_LEN], prefix: &[u8]) -> bool {
+    for index in 0..DATA_LEN {
         if index >= prefix.len() {
             return true;
         }
@@ -410,7 +507,7 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
 

@@ -2,11 +2,11 @@
 
 > **Status:** Slices 1–5 are on disk, with live n=3 baselines
 > committed from
-> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+> [GitHub Actions run 26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
 > on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
-> produces per-dimension drift reports (50 stdlib unit tests covering
+> produces per-dimension drift reports (51 stdlib unit tests covering
 > `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), live
 > Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
 > reflects the live data, and [`publication/`](publication/) holds
@@ -26,10 +26,10 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
-| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 50 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
-| [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26394765509. See [`runs/README.md`](runs/README.md). |
+| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 51 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
+| [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26398427430. See [`runs/README.md`](runs/README.md). |
 | [`findings.md`](findings.md) | Slice 4: live n=3 findings write-up plus threats to validity and reproduction commands. |
-| [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) | Follow-up diagnostic: what `layers/kernel.ndjson` v0 can support today, and why read/write/create/remove classification still needs a Runner schema extension. |
+| [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) | Follow-up diagnostic: what `layers/kernel.ndjson` can support now that open metadata is present, and what still remains out of scope. |
 | [`publication/`](publication/) | Slice 5: blog draft + discussion-comment draft, both gated on the OpenInference #3162 triage signal. Not filed, not published. |
 
 ## Running locally
@@ -135,14 +135,14 @@ starting point; the findings doc (Slice 4) explains every
 - `compare/drift.py` MVP: stdlib Python comparator that reads two
   Runner archives (directories or `.tar.gz`) and emits a
   per-dimension drift report. Dimensions are pinned to v0
-  capability_surface sources (no read/write/create/remove split
-  — that's an explicit v2 follow-up tracked in the plan-doc).
+  capability_surface plus optional `layers/kernel.ndjson` open
+  metadata for operation-aware file rows.
 - `compare/fixtures/arm-a-openai/` and `arm-b-gemini/` synthetic
   archives wired to exercise every classification label exactly
   once: filesystem-paths `runtime-induced`, network-endpoints
   `provider-induced`, process-execs / SDK tools /
   tool-invocation-order `task-induced`, MCP `inconclusive`.
-- 16 stdlib unit tests cover parsing (directory + tar.gz),
+- 17 stdlib unit tests cover parsing (directory + tar.gz),
   failure modes (missing manifest, corrupt JSON, broken tar),
   every classification label, fixture-path overrides, and CLI
   output (`--out-json`, `--out-md`).
@@ -156,9 +156,9 @@ starting point; the findings doc (Slice 4) explains every
   `ringbuf_drops=0`, `kernel_layer=complete`,
   `cgroup_correlation=clean`.
 - Live findings are stable across all three pairs:
-  filesystem + network rows classify `runtime-induced`, SDK tool
-  events + invocation order classify `task-induced`, process and MCP
-  rows classify `inconclusive`.
+  filesystem, kernel-file-operation, and network rows classify
+  `runtime-induced`; SDK tool events + invocation order classify
+  `task-induced`; process and MCP rows classify `inconclusive`.
 - Publication drafts now describe the live baseline, not a synthetic
   placeholder. They remain unpublished until #3162 triage gives a
   maintainer signal.
@@ -167,9 +167,7 @@ starting point; the findings doc (Slice 4) explains every
 
 - No OTel trace emission. The cross-runtime comparison is
   between two Runner archives; traces are an explicit follow-up.
-- No read/write/create/remove split, no per-path access counts,
-  no operation-aware kernel parsing. The follow-up note
-  [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) records what
-  the current kernel-event v0 shape can support and why read/write
-  classification remains a schema-level follow-up rather than a
-  comparator-only patch.
+- No unlink/remove classification, no fd-level byte-count semantics,
+  and no normalized logical task-path aliases for operation-aware rows.
+  The follow-up note [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md)
+  records what the current kernel-event shape can and cannot support.

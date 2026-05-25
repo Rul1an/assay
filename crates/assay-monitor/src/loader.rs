@@ -96,11 +96,7 @@ impl LinuxMonitor {
     }
 
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
-        // Example: Set default offsets for common kernels
-        let config = std::collections::HashMap::from([
-            (0, 24), // openat filename offset
-            (1, 24), // connect sockaddr offset
-        ]);
+        let config = crate::tracepoint::TracepointResolver::resolve_default_offsets();
         self.set_config(&config)
     }
 
@@ -175,6 +171,34 @@ impl LinuxMonitor {
                 let link = tp.take_link(link_id)?;
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_openat2");
+            }
+        }
+        if let Some(prog) = bpf.program_mut("assay_monitor_openat_exit") {
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                match tp.attach("syscalls", "sys_exit_openat") {
+                    Ok(link_id) => {
+                        if let Ok(link) = tp.take_link(link_id) {
+                            self.links.push(MonitorLink::TracePoint(link));
+                            println!("DEBUG: Attached Tracepoint sys_exit_openat");
+                        }
+                    }
+                    Err(e) => eprintln!("WARN: Failed to attach sys_exit_openat: {}", e),
+                }
+            }
+        }
+        if let Some(prog) = bpf.program_mut("assay_monitor_openat2_exit") {
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                match tp.attach("syscalls", "sys_exit_openat2") {
+                    Ok(link_id) => {
+                        if let Ok(link) = tp.take_link(link_id) {
+                            self.links.push(MonitorLink::TracePoint(link));
+                            println!("DEBUG: Attached Tracepoint sys_exit_openat2");
+                        }
+                    }
+                    Err(e) => eprintln!("WARN: Failed to attach sys_exit_openat2: {}", e),
+                }
             }
         }
         if let Some(prog) = bpf.program_mut("assay_monitor_connect") {

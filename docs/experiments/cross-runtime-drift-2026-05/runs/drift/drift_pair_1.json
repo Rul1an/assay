@@ -1,17 +1,17 @@
 {
   "schema": "assay.cross_runtime_drift.v0",
   "archive_a": {
-    "path": "arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/archive.tar.gz",
-    "run_id": "run_arm_a-openai_20260525T100626Z_1",
+    "path": "arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/archive.tar.gz",
+    "run_id": "run_arm_a-openai_20260525T113813Z_1",
     "runtime_label": "openai-agents",
-    "manifest_digest": "sha256:3382eafd0323a94da6fd505d6b94659cde45fd8d283ca05a8de8444d58c409b2",
+    "manifest_digest": "sha256:686b57e6bc0cd4f1d99e354ed6c35846c8d64cfc90b6fc9e75e9c75c05c8d800",
     "sdk_event_count": 5
   },
   "archive_b": {
-    "path": "arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/archive.tar.gz",
-    "run_id": "run_arm_b-gemini_20260525T100327Z_1",
+    "path": "arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/archive.tar.gz",
+    "run_id": "run_arm_b-gemini_20260525T114112Z_1",
     "runtime_label": "gemini-genai",
-    "manifest_digest": "sha256:104c77ecbf29af553a6ad1e96a93490a0d750aeb9bcd158dd62bec2902ac159e",
+    "manifest_digest": "sha256:f392cea861f0d671d66756c608960ed5e58154e4f1cc24be6e1b53748bea94d0",
     "sdk_event_count": 5
   },
   "rows": [
@@ -19,14 +19,26 @@
       "dimension": "filesystem_paths_touched",
       "source": "capability_surface.filesystem_paths",
       "only_in_a": [
-        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/sdk-events.ndjson",
-        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/workdir/tool-calls.ndjson",
-        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json"
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json"
       ],
       "only_in_b": [
-        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/sdk-events.ndjson",
-        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/workdir/tool-calls.ndjson",
-        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json"
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json"
       ],
       "in_both": [
         "/etc/gai.conf",
@@ -38,7 +50,66 @@
         "/etc/svc.conf"
       ],
       "classification": "runtime-induced",
-      "detail": "6 non-shared item(s); 0 fixture, 6 unclassified"
+      "detail": "18 non-shared item(s); 4 fixture, 14 unclassified"
+    },
+    {
+      "dimension": "kernel_file_operations",
+      "source": "layers/kernel.ndjson (openat access_mode + operation_flags)",
+      "only_in_a": [
+        "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+        "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+        "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+        "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+        "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+        "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+        "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+        "read:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+        "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+        "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+        "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+        "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+        "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson"
+      ],
+      "only_in_b": [
+        "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+        "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+        "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+        "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+        "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+        "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+        "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+        "read:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+        "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+        "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+        "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+        "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+        "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+        "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+        "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson"
+      ],
+      "in_both": [
+        "read:/etc/gai.conf",
+        "read:/etc/host.conf",
+        "read:/etc/hosts",
+        "read:/etc/nsswitch.conf",
+        "read:/etc/resolv.conf"
+      ],
+      "classification": "runtime-induced",
+      "detail": "42 non-shared item(s); 14 fixture, 28 unclassified"
     },
     {
       "dimension": "network_endpoints",
@@ -52,26 +123,25 @@
       "only_in_b": [
         "142.250.180.10:0",
         "142.251.142.202:0",
-        "142.251.142.202:443",
         "142.251.209.234:0",
         "142.251.39.138:0",
         "172.217.17.202:0",
         "172.217.171.106:0",
         "172.217.23.234:0",
         "192.178.25.202:0",
-        "216.58.198.106:0",
         "216.58.198.10:0",
         "216.58.198.42:0",
+        "216.58.198.42:443",
         "[2a00:1450:400e:806::200a]:0",
-        "[2a00:1450:400e:808::200a]:0",
         "[2a00:1450:400e:809::200a]:0",
-        "[2a00:1450:400e:80a::200a]:0"
+        "[2a00:1450:400e:813::200a]:0",
+        "[2a00:1450:400e:815::200a]:0"
       ],
       "in_both": [
         "127.0.0.53:53"
       ],
       "classification": "runtime-induced",
-      "detail": "20 non-shared item(s); 0 provider, 0 fixture, 20 unclassified"
+      "detail": "19 non-shared item(s); 0 provider, 0 fixture, 19 unclassified"
     },
     {
       "dimension": "process_execs",
@@ -117,10 +187,10 @@
     }
   ],
   "summary": {
-    "dimensions_checked": 6,
+    "dimensions_checked": 7,
     "task_induced": 2,
     "provider_induced": 0,
-    "runtime_induced": 2,
+    "runtime_induced": 3,
     "inconclusive": 2
   }
 }
