@@ -59,7 +59,7 @@ projection/report layer is newer and records its own render metadata.
 For these committed reports, `provenance.assay_commit` is the original
 capture commit (`e3f6ef9d`) and
 `provenance.render_metadata.comparator_commit` is the comparator support
-commit used for the latest re-render (`54ebec44`). That re-render keeps
+commit used for the latest re-render (`b1b4983f`). That re-render keeps
 declared projection mappings explicit while summarizing unmatched raw
 values by count and sample.
 
