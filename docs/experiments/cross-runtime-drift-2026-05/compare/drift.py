@@ -13,6 +13,7 @@ Scope (v0, Slice 2):
   - tool invocation order (SDK events' seq per tool_call_id)
   - kernel file operations (layers/kernel.ndjson open metadata)
   - path projection v0 over explicitly declared raw=logical aliases
+  - network projection v0 over explicitly declared endpoint/CIDR aliases
   - runtime/noise taxonomy v0 metadata for projection classes
 
 Out of scope (explicit follow-ups, NOT silent gaps):
@@ -45,11 +46,14 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import ipaddress
 import json
 import sys
 import tarfile
 from pathlib import Path
 from typing import Any, Iterable
+
+ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 # ---------------------------------------------------------------------------
 # Schema strings (also used to identify fixture archives in tests)
@@ -85,6 +89,7 @@ CLASSIFICATION_RUNTIME = "runtime-induced"
 CLASSIFICATION_INCONCLUSIVE = "inconclusive"
 
 PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
+NETWORK_PROJECTION_SCHEMA = "assay.runner.network_projection.v0"
 RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
 
 CLAIM_RAW_OBSERVED = "raw_observed"
@@ -452,6 +457,38 @@ class PathAlias:
         _validate_taxonomy_class(self.path_class, domain="path")
 
 
+@dataclasses.dataclass(frozen=True)
+class NetworkAlias:
+    """A declared raw endpoint -> network role projection rule."""
+
+    raw_endpoint: str
+    network_class: str
+    relation: str = "declared_endpoint"
+    rule: str = "declared_network_alias"
+    confidence: str = "declared"
+
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.network_class, domain="network")
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkCidrAlias:
+    """A declared CIDR -> network role projection rule."""
+
+    cidr: str
+    network_class: str
+    relation: str = "declared_cidr"
+    rule: str = "declared_network_cidr_alias"
+    confidence: str = "declared"
+
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.network_class, domain="network")
+        try:
+            ipaddress.ip_network(self.cidr, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"invalid network CIDR {self.cidr!r}: {exc}") from exc
+
+
 def _taxonomy_payload() -> dict[str, Any]:
     return {
         "schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
@@ -499,6 +536,28 @@ def _parse_path_alias(raw: str) -> PathAlias:
     if not raw_path or not projected_path:
         raise ValueError("expected non-empty RAW and PROJECTED")
     return PathAlias(raw_path=raw_path, projected_path=projected_path)
+
+
+def _parse_network_alias(raw: str) -> NetworkAlias:
+    if "=" not in raw:
+        raise ValueError("expected RAW_ENDPOINT=CLASS")
+    raw_endpoint, network_class = raw.split("=", 1)
+    raw_endpoint = raw_endpoint.strip()
+    network_class = network_class.strip()
+    if not raw_endpoint or not network_class:
+        raise ValueError("expected non-empty RAW_ENDPOINT and CLASS")
+    return NetworkAlias(raw_endpoint=raw_endpoint, network_class=network_class)
+
+
+def _parse_network_cidr(raw: str) -> NetworkCidrAlias:
+    if "=" not in raw:
+        raise ValueError("expected CIDR=CLASS")
+    cidr, network_class = raw.split("=", 1)
+    cidr = cidr.strip()
+    network_class = network_class.strip()
+    if not cidr or not network_class:
+        raise ValueError("expected non-empty CIDR and CLASS")
+    return NetworkCidrAlias(cidr=cidr, network_class=network_class)
 
 
 def _project_single_path(path: str, aliases: dict[str, PathAlias]) -> ProjectedValue:
@@ -615,6 +674,159 @@ def _path_alias_dict(path_aliases: tuple[PathAlias, ...]) -> dict[str, PathAlias
     return out
 
 
+@dataclasses.dataclass(frozen=True)
+class NetworkProjectedValue:
+    raw_value: str
+    projected_value: str
+    network_class: str
+    relation: str
+    rule: str
+    confidence: str
+    claim_level: str
+
+
+def _network_alias_dict(
+    network_aliases: tuple[NetworkAlias, ...]
+) -> dict[str, NetworkAlias]:
+    out: dict[str, NetworkAlias] = {}
+    for alias in network_aliases:
+        if alias.raw_endpoint in out:
+            raise ValueError(
+                f"duplicate network alias for {alias.raw_endpoint!r}"
+            )
+        out[alias.raw_endpoint] = alias
+    return out
+
+
+def _network_cidr_tuple(
+    network_cidrs: tuple[NetworkCidrAlias, ...]
+) -> tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...]:
+    out: list[tuple[ParsedNetwork, NetworkCidrAlias]] = []
+    seen: set[str] = set()
+    for alias in network_cidrs:
+        network = ipaddress.ip_network(alias.cidr, strict=False)
+        key = str(network)
+        if key in seen:
+            raise ValueError(f"duplicate network CIDR alias for {key!r}")
+        seen.add(key)
+        out.append((network, alias))
+    return tuple(out)
+
+
+def _endpoint_host(endpoint: str) -> str:
+    if endpoint.startswith("["):
+        end = endpoint.find("]")
+        if end > 1:
+            return endpoint[1:end]
+    return endpoint.rsplit(":", 1)[0] if ":" in endpoint else endpoint
+
+
+def _project_network_endpoint(
+    endpoint: str,
+    exact_aliases: dict[str, NetworkAlias],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
+) -> NetworkProjectedValue:
+    exact = exact_aliases.get(endpoint)
+    if exact is not None:
+        return NetworkProjectedValue(
+            raw_value=endpoint,
+            projected_value=exact.network_class,
+            network_class=exact.network_class,
+            relation=exact.relation,
+            rule=exact.rule,
+            confidence=exact.confidence,
+            claim_level=CLAIM_PROJECTED_EQUIVALENT,
+        )
+
+    host = _endpoint_host(endpoint)
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        for network, alias in cidr_aliases:
+            if address in network:
+                return NetworkProjectedValue(
+                    raw_value=endpoint,
+                    projected_value=alias.network_class,
+                    network_class=alias.network_class,
+                    relation=alias.relation,
+                    rule=alias.rule,
+                    confidence=alias.confidence,
+                    claim_level=CLAIM_PROJECTED_EQUIVALENT,
+                )
+
+    return NetworkProjectedValue(
+        raw_value=endpoint,
+        projected_value=endpoint,
+        network_class=PATH_CLASS_UNKNOWN,
+        relation="unmatched",
+        rule="no_declared_network_alias",
+        confidence="unknown",
+        claim_level=CLAIM_RAW_OBSERVED,
+    )
+
+
+def _network_projection_payload(
+    dimension: str,
+    a_values: list[str],
+    b_values: list[str],
+    exact_aliases: dict[str, NetworkAlias],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
+) -> dict[str, Any]:
+    if not exact_aliases and not cidr_aliases:
+        return {
+            "schema": NETWORK_PROJECTION_SCHEMA,
+            "status": "not_applied",
+            "reason": "no network aliases declared",
+            "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+            "non_claims": list(PROJECTION_NON_CLAIMS),
+        }
+
+    projected_a = [
+        _project_network_endpoint(value, exact_aliases, cidr_aliases)
+        for value in a_values
+    ]
+    projected_b = [
+        _project_network_endpoint(value, exact_aliases, cidr_aliases)
+        for value in b_values
+    ]
+    a_projected_values = [item.projected_value for item in projected_a]
+    b_projected_values = [item.projected_value for item in projected_b]
+    only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
+    mappings = [
+        {"side": "a", **dataclasses.asdict(item)} for item in projected_a
+    ] + [{"side": "b", **dataclasses.asdict(item)} for item in projected_b]
+    rules = sorted(
+        {
+            item.rule
+            for item in [*projected_a, *projected_b]
+            if item.rule != "no_declared_network_alias"
+        }
+    )
+    has_projected_match = any(
+        item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+        and item.projected_value in both
+        for item in [*projected_a, *projected_b]
+    )
+    claim_level = (
+        CLAIM_PROJECTED_EQUIVALENT if has_projected_match else CLAIM_INCONCLUSIVE
+    )
+    return {
+        "schema": NETWORK_PROJECTION_SCHEMA,
+        "status": "applied",
+        "dimension": dimension,
+        "claim_level": claim_level,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "only_in_a": only_a,
+        "only_in_b": only_b,
+        "in_both": both,
+        "rules": rules,
+        "mappings": mappings,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
+
+
 def _network_endpoint_matches_provider(
     item: str, provider_hosts: tuple[str, ...]
 ) -> bool:
@@ -725,6 +937,8 @@ def build_drift_report(
     provider_hosts: tuple[str, ...] = DEFAULT_PROVIDER_HOSTS,
     fixture_paths: frozenset[str] = frozenset(),
     path_aliases: tuple[PathAlias, ...] = (),
+    network_aliases: tuple[NetworkAlias, ...] = (),
+    network_cidrs: tuple[NetworkCidrAlias, ...] = (),
 ) -> list[DriftRow]:
     """Compute per-dimension drift rows between two archives.
 
@@ -736,6 +950,8 @@ def build_drift_report(
 
     rows: list[DriftRow] = []
     aliases = _path_alias_dict(path_aliases)
+    exact_network_aliases = _network_alias_dict(network_aliases)
+    cidr_network_aliases = _network_cidr_tuple(network_cidrs)
 
     # --- filesystem paths touched ---
     a_paths = a.capability_surface.get("filesystem_paths", [])
@@ -817,6 +1033,13 @@ def build_drift_report(
             in_both=both,
             classification=cls,
             detail=detail,
+            projection=_network_projection_payload(
+                "network_endpoints",
+                a_net,
+                b_net,
+                exact_network_aliases,
+                cidr_network_aliases,
+            ),
         )
     )
 
@@ -1126,6 +1349,28 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--network-alias",
+        action="append",
+        default=[],
+        help=(
+            "Declare an exact raw network endpoint to taxonomy class "
+            "projection as RAW_ENDPOINT=CLASS. The raw endpoint remains "
+            "in only_in_a/only_in_b/in_both; the projection is emitted "
+            "under row.projection. Example: "
+            "--network-alias 127.0.0.53:53=dns."
+        ),
+    )
+    parser.add_argument(
+        "--network-cidr",
+        action="append",
+        default=[],
+        help=(
+            "Declare a CIDR to taxonomy class projection as CIDR=CLASS. "
+            "The endpoint host must be an IP address and fall inside the "
+            "CIDR. Example: --network-cidr 34.120.0.0/14=provider_api."
+        ),
+    )
+    parser.add_argument(
         "--provider-host",
         action="append",
         default=[],
@@ -1152,9 +1397,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"bad --path-alias: {exc}", file=sys.stderr)
         return 2
     try:
-        _path_alias_dict(path_aliases)
+        network_aliases = tuple(
+            _parse_network_alias(item) for item in args.network_alias
+        )
     except ValueError as exc:
-        print(f"bad --path-alias: {exc}", file=sys.stderr)
+        print(f"bad --network-alias: {exc}", file=sys.stderr)
+        return 2
+    try:
+        network_cidrs = tuple(
+            _parse_network_cidr(item) for item in args.network_cidr
+        )
+    except ValueError as exc:
+        print(f"bad --network-cidr: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _path_alias_dict(path_aliases)
+        _network_alias_dict(network_aliases)
+        _network_cidr_tuple(network_cidrs)
+    except ValueError as exc:
+        print(f"bad projection config: {exc}", file=sys.stderr)
         return 2
 
     try:
@@ -1164,6 +1425,8 @@ def main(argv: list[str] | None = None) -> int:
             provider_hosts=provider_hosts,
             fixture_paths=fixture_paths,
             path_aliases=path_aliases,
+            network_aliases=network_aliases,
+            network_cidrs=network_cidrs,
         )
     except ValueError as exc:
         print(f"bad projection config: {exc}", file=sys.stderr)
