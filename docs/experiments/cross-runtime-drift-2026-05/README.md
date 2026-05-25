@@ -29,6 +29,7 @@
 | [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 50 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
 | [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26394765509. See [`runs/README.md`](runs/README.md). |
 | [`findings.md`](findings.md) | Slice 4: live n=3 findings write-up plus threats to validity and reproduction commands. |
+| [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) | Follow-up diagnostic: what `layers/kernel.ndjson` v0 can support today, and why read/write/create/remove classification still needs a Runner schema extension. |
 | [`publication/`](publication/) | Slice 5: blog draft + discussion-comment draft, both gated on the OpenInference #3162 triage signal. Not filed, not published. |
 
 ## Running locally
@@ -167,5 +168,8 @@ starting point; the findings doc (Slice 4) explains every
 - No OTel trace emission. The cross-runtime comparison is
   between two Runner archives; traces are an explicit follow-up.
 - No read/write/create/remove split, no per-path access counts,
-  no kernel-ndjson parsing. All tracked as deferred v2 follow-ups
-  in the plan-doc.
+  no operation-aware kernel parsing. The follow-up note
+  [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) records what
+  the current kernel-event v0 shape can support and why read/write
+  classification remains a schema-level follow-up rather than a
+  comparator-only patch.
