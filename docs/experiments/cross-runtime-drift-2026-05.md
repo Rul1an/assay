@@ -1,9 +1,10 @@
 # Cross-Runtime Capability-Surface Drift: Plan
 
-> **Status:** **draft, no code written yet.** Plan-doc only, lives in
-> the repo so it can be sharpened the same way
-> [`runner-vs-otel-shape-comparison-2026-05.md`](runner-vs-otel-shape-comparison-2026-05.md)
-> was iterated before Slice 1 landed. Companion to that experiment;
+> **Status:** Slice 0 (this plan) and Slice 1 (workload contract +
+> two implementations + contract-checker) landed. See
+> [`cross-runtime-drift-2026-05/README.md`](cross-runtime-drift-2026-05/README.md)
+> for the Slice 1 layout. Companion to
+> [`runner-vs-otel-shape-comparison-2026-05.md`](runner-vs-otel-shape-comparison-2026-05.md);
 > reuses the same Runner archive + capability_surface contract, so
 > the L2 capture machinery is already proven on
 > [`assay-bpf-runner`](../../.github/workflows/runner-otel-experiment.yml).
@@ -91,13 +92,15 @@ The drift report is a **new** comparator. It does **not** reuse
 which is a trace-vs-archive comparator. A new
 `compare/drift.py` is the artefact.
 
-## Open Questions (must resolve before Slice 1)
+## Open Questions
 
-These are the framing choices I want sharpened before any code
-lands. Pulling them up front so the plan does not silently bake
-in defaults.
+These were the framing choices pulled up front so the plan did
+not silently bake in defaults. **Q1 and Q3 are resolved by
+Slice 1** (see
+[`cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md));
+Q2, Q4, Q5 remain open.
 
-1. **Which second runtime, and in which tool-calling mode?**
+1. **[RESOLVED — Slice 1]** **Which second runtime, and in which tool-calling mode?**
    - **Option A:** Google Gemini via `@google/genai` (unified SDK,
      newest, supports both manual and automatic function calling).
    - **Option B:** Google Gemini via `@google/generative-ai` (older
@@ -134,7 +137,7 @@ in defaults.
      Then the drift is the *runtime overhead* of the same
      contract, not "two different programs."
 
-3. **Determinism?**
+3. **[RESOLVED — Slice 1]** **Determinism?**
    - OpenAI Agents has `temperature: 0` + structured output
      mode; we already exercise this in the runner-vs-otel
      workload's `--deterministic-fixture` path.
@@ -286,14 +289,14 @@ A successful first findings doc:
 
 ## Sequencing (slices)
 
-| Slice | Deliverable | External dependency |
-|---|---|---|
-| 0 | This plan-doc, reviewed and sharpened (Open Questions resolved) | None |
-| 1 | Workload contract written down (including the exact tool-calling mode: manual function-calling loop on both sides). Both runtime implementations of the workload, runnable locally with API keys. Each passes the contract checker. **Blocked on Open Question #1 resolution.** | OpenAI key (already used), second runtime's key |
-| 2 | `compare/drift.py` MVP. **Scope-locked to v0 surface**: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order where SDK events preserve it. Read/write/create classification and kernel-ndjson parsing are deferred. Runs on two synthetic archives derived from existing runner-vs-otel fixtures, no live runs yet. Comparator output schema locked in. | None |
-| 3 | Live Arm A0 + B0 dispatch on `assay-bpf-runner` (workflow extension). n=3 per arm. Baselines committed under `docs/experiments/cross-runtime-drift-2026-05/runs/{a0,b0}/`. | Second runtime API key as workflow secret |
-| 4 | `findings.md`. Drift table, classification, threats-to-validity, reproduction commands. | None |
-| 5 | Publication artefacts (issue + blog draft) following the same discipline as runner-vs-otel Slice 4: one narrow question per channel, no maintainer @-mentions, evidence link once. | OpenInference #3162 triage outcome should inform whether to file under same umbrella or separately |
+| Slice | Status | Deliverable | External dependency |
+|---|---|---|---|
+| 0 | **Done** | This plan-doc, reviewed and sharpened (Open Questions #1 + #3 resolved) | None |
+| 1 | **Done** | Workload contract ([`WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)), `@openai/agents` workload, `@google/genai` manual-function-calling workload, stdlib contract-checker with 10 unit tests | OpenAI key (already used), Google key for live local testing |
+| 2 | TODO | `compare/drift.py` MVP. **Scope-locked to v0 surface**: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order where SDK events preserve it. Read/write/create classification and kernel-ndjson parsing are deferred. Runs on two synthetic archives derived from existing runner-vs-otel fixtures, no live runs yet. Comparator output schema locked in. | None |
+| 3 | TODO | Live Arm A0 + B0 dispatch on `assay-bpf-runner` (workflow extension). n=3 per arm. Baselines committed under `docs/experiments/cross-runtime-drift-2026-05/runs/{a0,b0}/`. | Second runtime API key as workflow secret |
+| 4 | TODO | `findings.md`. Drift table, classification, threats-to-validity, reproduction commands. | None |
+| 5 | TODO | Publication artefacts (issue + blog draft) following the same discipline as runner-vs-otel Slice 4: one narrow question per channel, no maintainer @-mentions, evidence link once. | OpenInference #3162 triage outcome should inform whether to file under same umbrella or separately |
 
 ## What this experiment deliberately does NOT do
 
