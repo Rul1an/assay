@@ -27,7 +27,9 @@
   *not* use a cassette/fake model here — the whole point is to
   measure each runtime's actual transport, loader, and SDK
   machinery against the kernel. Variance in the model's
-  *exact* string output is tolerated; variance in the
+  *exact* string output is tolerated; specifically, one terminal
+  newline on the uppercased file contents is not a drift dimension.
+  Variance in the
   *tool-call sequence* is a contract violation.
 
 ## Inputs
@@ -91,6 +93,11 @@ The agent **must** invoke tools in this order:
 1. `read_file(path = WORKLOAD_INPUT_PATH)`
 2. `write_file(path = WORKLOAD_OUTPUT_PATH, contents = <uppercase of step-1 result>)`
 
+The checker treats one terminal newline as insignificant for the
+uppercased contents. This keeps model style variance ("same text,
+missing final line terminator") from blocking a runtime-drift
+capture; any other content difference remains a contract failure.
+
 Any other order, any other tool, any repeated invocation of
 either tool, or any extra invocations counts as a contract
 violation. The contract-checker enforces this by reading a
@@ -129,11 +136,13 @@ code is advisory, not authoritative.
 Given `$WORKLOAD_WORK_DIR`, the checker confirms:
 
 1. `fixture-output.txt` exists and is non-empty.
-2. `fixture-output.txt` equals `WORKLOAD_INPUT_CONTENTS` uppercased.
+2. `fixture-output.txt` equals `WORKLOAD_INPUT_CONTENTS` uppercased
+   modulo one terminal newline.
 3. `tool-calls.ndjson` exists, has exactly two lines.
 4. Line 1: `tool == "read_file"`, `args.path == WORKLOAD_INPUT_PATH`.
 5. Line 2: `tool == "write_file"`, `args.path == WORKLOAD_OUTPUT_PATH`,
-   `args.contents == WORKLOAD_INPUT_CONTENTS.upper()`.
+   `args.contents == WORKLOAD_INPUT_CONTENTS.upper()` modulo one terminal
+   newline.
 6. `run-meta.json` exists and parses; `exit_code == 0`; `runtime`
    matches one of the two allowed values.
 7. (Design rule, not auto-checked) Both implementations use the

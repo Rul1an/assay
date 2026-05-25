@@ -212,7 +212,6 @@ async function runManualLoop(
     if (!calls || calls.length === 0) {
       const text = String(response.text ?? "").trim();
       if (/^DONE[.!]?$/i.test(text)) {
-        sdk.emit({ event_type: "run_finished" });
         return { exitCode: 0, modelReply: text };
       }
       return { exitCode: 3, modelReply: text };
@@ -368,20 +367,14 @@ async function main(): Promise<number> {
     }
   }
 
-  const sdkVersion: string = (() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pkg = require("@google/genai/package.json") as { version: string };
-      return pkg.version;
-    } catch {
-      return "unknown";
-    }
-  })();
+  sdk.emit({
+    event_type: outcome.exitCode === 0 ? "run_finished" : "run_failed",
+  });
 
   const meta = {
     runtime: "gemini-genai",
     model: env.model,
-    sdk_version: sdkVersion,
+    sdk_version: geminiSdkVersion,
     started_at: startedAt,
     ended_at: endedAt,
     exit_code: outcome.exitCode,

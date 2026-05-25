@@ -1,9 +1,9 @@
 /**
- * Parallel SDK event emitter for the runner-vs-otel-2026-05 experiment.
+ * Parallel SDK event emitter for the cross-runtime-drift-2026-05 experiment.
  *
- * Under Arm C (`assay runner-spike --agent-shim openai-agents -- node
- * workload.js`), the parent `assay` process exposes three env vars that
- * the agent shim is expected to honour:
+ * In live Runner captures, the workflow invokes `assay runner-spike` with
+ * `--sdk-event-log <path>`. The parent `assay` process then exposes three
+ * env vars that each runtime workload is expected to honour:
  *
  *   ASSAY_RUNNER_SDK_EVENT_LOG   path to an NDJSON log file the runner
  *                                folds into the archive's
@@ -15,13 +15,10 @@
  *   ASSAY_RUNNER_SDK_EVENT_SCHEMA the schema string events must declare;
  *                                normally `assay.runner.sdk_event.v0`
  *
- * The pre-existing `runner-fixtures/openai-agents/fixture-agent.js`
- * fixture writes into this log; our experiment workload was missing
- * this path, which left the archive's SDK layer empty and made the
- * comparator's `gen_ai.tool.call.id` join report `archive-side-absent`
- * for Arm C. Slice 2 of the runner-vs-otel experiment closes that gap
- * without removing the OTel tracing path (the two streams now run in
- * parallel and share the same `tool_call_id`).
+ * These events give each runtime archive a non-empty SDK layer for the drift
+ * comparator's SDK-tool and invocation-order dimensions. The same helper is
+ * used by the OpenAI and Gemini workload implementations so both arms produce
+ * the same event shape.
  *
  * Event shape mirrors what assay-runner-schema's `SdkLayerEvent`
  * accepts (see crates/assay-runner-schema/src/sdk_event.rs): schema,
@@ -55,9 +52,9 @@ export interface SdkEmitter {
 
 /**
  * Construct an emitter from environment variables. If
- * `ASSAY_RUNNER_SDK_EVENT_LOG` is not set (Arm B, local dev), the
+ * `ASSAY_RUNNER_SDK_EVENT_LOG` is not set (local dev / no runner-spike), the
  * emitter is a no-op and `active` is false — the workload can call
- * `emit()` unconditionally and Arm B behaviour is preserved.
+ * `emit()` unconditionally and local behaviour is preserved.
  */
 export function sdkEmitterFromEnv(opts: {
   fallbackRunId: string;
@@ -85,7 +82,7 @@ export function sdkEmitterFromEnv(opts: {
 class NoOpSdkEmitter implements SdkEmitter {
   public readonly active = false;
   emit(_event: SdkEventCore): void {
-    // intentional no-op; Arm B and local dev have no SDK log to write to
+    // intentional no-op; local dev has no SDK log to write to
   }
 }
 

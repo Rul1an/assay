@@ -95,6 +95,36 @@ class HappyPathTests(unittest.TestCase):
             rc = check.main(["--work-dir", str(tmpdir)])
             self.assertEqual(rc, 0)
 
+    def test_missing_final_newline_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp).resolve()
+            input_contents = "cross-runtime drift fixture\n"
+            output_contents = "CROSS-RUNTIME DRIFT FIXTURE"
+            input_path = tmpdir / "fixture-input.txt"
+            output_path = tmpdir / "fixture-output.txt"
+            write_valid_workdir(
+                tmpdir,
+                input_contents=input_contents,
+                output_contents=output_contents,
+                tool_calls=[
+                    {
+                        "seq": 1,
+                        "tool": "read_file",
+                        "args": {"path": str(input_path)},
+                    },
+                    {
+                        "seq": 2,
+                        "tool": "write_file",
+                        "args": {
+                            "path": str(output_path),
+                            "contents": output_contents,
+                        },
+                    },
+                ],
+            )
+            rc = check.main(["--work-dir", str(tmpdir)])
+            self.assertEqual(rc, 0)
+
 
 class RuleFailureTests(unittest.TestCase):
     def test_missing_output_file_fails(self) -> None:

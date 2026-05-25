@@ -224,7 +224,6 @@ async function main(): Promise<number> {
     if (!/^DONE[.!]?$/i.test(modelReply)) {
       exitCode = 3;
     }
-    sdk.emit({ event_type: "run_finished" });
   } catch (err) {
     process.stderr.write(`workload-openai error: ${(err as Error).message}\n`);
     if (err instanceof ContractViolationError) {
@@ -257,20 +256,12 @@ async function main(): Promise<number> {
     }
   }
 
-  const sdkVersion: string = (() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pkg = require("@openai/agents/package.json") as { version: string };
-      return pkg.version;
-    } catch {
-      return "unknown";
-    }
-  })();
+  sdk.emit({ event_type: exitCode === 0 ? "run_finished" : "run_failed" });
 
   const meta = {
     runtime: "openai-agents",
     model: env.model,
-    sdk_version: sdkVersion,
+    sdk_version: openaiSdkVersion,
     started_at: startedAt,
     ended_at: endedAt,
     exit_code: exitCode,
