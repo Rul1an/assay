@@ -292,6 +292,147 @@ class DriftReportClassificationTests(unittest.TestCase):
                 path_class=drift.NETWORK_CLASS_PROVIDER_API,
             )
 
+    def test_network_projection_exact_alias_maps_provider_role(self) -> None:
+        rows = drift.build_drift_report(
+            self.a,
+            self.b,
+            network_aliases=(
+                drift.NetworkAlias(
+                    "api.openai.com:443", drift.NETWORK_CLASS_PROVIDER_API
+                ),
+                drift.NetworkAlias(
+                    "generativelanguage.googleapis.com:443",
+                    drift.NETWORK_CLASS_PROVIDER_API,
+                ),
+                drift.NetworkAlias(
+                    "oauth2.googleapis.com:443",
+                    drift.NETWORK_CLASS_PROVIDER_API,
+                ),
+            ),
+        )
+        row = self._by_dim(rows)["network_endpoints"]
+        # Raw values stay exactly as observed.
+        self.assertIn("api.openai.com:443", row.only_in_a)
+        projection = row.projection
+        self.assertEqual(
+            projection["schema"], drift.NETWORK_PROJECTION_SCHEMA
+        )
+        self.assertEqual(projection["status"], "applied")
+        self.assertIn(drift.NETWORK_CLASS_PROVIDER_API, projection["in_both"])
+        self.assertIn(
+            "declared_network_alias", projection["rules"]
+        )
+
+    def test_network_projection_cidr_alias_maps_ip_endpoints(self) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:aa",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["162.159.140.245:443"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+        )
+        b = drift.ArchiveObservation(
+            path="b",
+            run_id="b",
+            runtime_label="gemini-genai",
+            manifest_digest="sha256:bb",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["172.66.0.243:443"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+        )
+        rows = drift.build_drift_report(
+            a,
+            b,
+            network_cidrs=(
+                drift.NetworkCidrAlias(
+                    "162.159.0.0/16", drift.NETWORK_CLASS_PROVIDER_API
+                ),
+                drift.NetworkCidrAlias(
+                    "172.66.0.0/16", drift.NETWORK_CLASS_PROVIDER_API
+                ),
+            ),
+        )
+        row = self._by_dim(rows)["network_endpoints"]
+        self.assertIn(drift.NETWORK_CLASS_PROVIDER_API, row.projection["in_both"])
+        self.assertIn(
+            "declared_network_cidr_alias", row.projection["rules"]
+        )
+
+    def test_network_projection_cidr_alias_handles_bracketed_ipv6(self) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:aa",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["[2a00:1450:400e:806::200a]:443"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+        )
+        rows = drift.build_drift_report(
+            a,
+            a,
+            network_cidrs=(
+                drift.NetworkCidrAlias(
+                    "2a00:1450:400e::/48", drift.NETWORK_CLASS_PROVIDER_API
+                ),
+            ),
+        )
+        row = self._by_dim(rows)["network_endpoints"]
+        self.assertIn(drift.NETWORK_CLASS_PROVIDER_API, row.projection["in_both"])
+
+    def test_duplicate_network_alias_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.build_drift_report(
+                self.a,
+                self.b,
+                network_aliases=(
+                    drift.NetworkAlias(
+                        "api.openai.com:443",
+                        drift.NETWORK_CLASS_PROVIDER_API,
+                    ),
+                    drift.NetworkAlias(
+                        "api.openai.com:443",
+                        drift.NETWORK_CLASS_TELEMETRY,
+                    ),
+                ),
+            )
+
+    def test_network_alias_rejects_path_only_taxonomy_class(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.NetworkAlias(
+                "api.openai.com:443",
+                drift.PATH_CLASS_WORKLOAD_FIXTURE,
+            )
+
     def test_taxonomy_payload_preserves_unknowns_and_non_claims(self) -> None:
         payload = drift._taxonomy_payload()
         self.assertEqual(
@@ -544,6 +685,21 @@ class MainCliTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(rc, 2)
+
+    def test_main_returns_2_on_duplicate_network_alias(self) -> None:
+        rc = drift.main(
+            [
+                "--archive-a",
+                str(ARM_A),
+                "--archive-b",
+                str(ARM_B),
+                "--network-alias",
+                "api.openai.com:443=provider_api",
+                "--network-alias",
+                "api.openai.com:443=telemetry",
+            ]
+        )
+        self.assertEqual(rc, 2)
 
 
 class RuntimeLabelDerivationTests(unittest.TestCase):

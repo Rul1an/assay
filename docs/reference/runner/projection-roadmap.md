@@ -192,16 +192,21 @@ upgrade a projection into primary evidence.
 Network projection should follow path projection. Keep the taxonomy
 small and allow `unknown`.
 
+Implementation note: the cross-runtime drift comparator now supports
+declared exact endpoint aliases and CIDR aliases. Raw endpoints remain
+unchanged in the report; projection is additive and unmatched endpoints
+stay `unknown`.
+
 ### Shape
 
 ```json
 {
   "raw_endpoint": "34.120.x.x:443",
   "projected_endpoint": "provider_api",
-  "provider": "google",
-  "rule": "provider_allowlist",
-  "confidence": "allowlist",
-  "claim_level": "classified_drift"
+  "network_class": "provider_api",
+  "rule": "declared_network_cidr_alias",
+  "confidence": "declared",
+  "claim_level": "projected_equivalent"
 }
 ```
 
@@ -315,7 +320,7 @@ Projection reports MUST carry explicit non-claims. Initial codes:
 | 1 | Path projection helper over existing cross-runtime drift fixtures | Unit tests with raw/projected dual view |
 | 2 | Runtime/noise taxonomy constants and docs | Unknown-preserving tests |
 | 3 | Report provenance metadata block | Existing live run can be re-rendered with metadata |
-| 4 | Network projection helper | Provider allowlist and unknown fallback tests |
+| 4 | Network projection helper | Exact endpoint, CIDR, and unknown fallback tests |
 | 5 | Draft `assay.runner.runtime_drift.v0` projection schema | Synthetic fixture covers all claim levels |
 | 6 | Kernel event v0.2 feasibility note | No code until projection reports prove value |
 

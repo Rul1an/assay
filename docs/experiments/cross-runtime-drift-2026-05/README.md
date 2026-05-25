@@ -120,6 +120,11 @@ Runtime/Noise Taxonomy v0 is also emitted in JSON reports, but it is
 vocabulary-only in this slice: it validates declared projection classes
 and preserves `unknown`; it does not infer loader, package, SDK, or cache
 classes heuristically.
+Network projection v0 follows the same additive discipline for
+`network_endpoints`: `--network-alias RAW_ENDPOINT=CLASS` and
+`--network-cidr CIDR=CLASS` can project declared endpoints or IP ranges
+to taxonomy classes such as `provider_api` or `dns`, while unmatched
+endpoints remain raw/unknown.
 
 ## What's done in Slice 1
 

@@ -449,6 +449,7 @@ jobs:
               --path-alias "${A_PATHS[1]}=workdir/output" \
               --path-alias "${B_PATHS[0]}=workdir/input" \
               --path-alias "${B_PATHS[1]}=workdir/output" \
+              --network-alias "127.0.0.53:53=dns" \
               --out-json "${REPORT_BASE}.json" \
               --out-md "${REPORT_BASE}.md"
             {
