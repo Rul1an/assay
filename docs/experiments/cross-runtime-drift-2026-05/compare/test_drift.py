@@ -67,6 +67,15 @@ class ParseArchiveHappyPathTests(unittest.TestCase):
             ["api.openai.com:443"],
         )
         self.assertEqual(obs.sdk_tools, ["read_file", "write_file"])
+        self.assertEqual(
+            obs.kernel_file_operations,
+            [
+                "create:/tmp/work/fixture-output.txt",
+                "read:/tmp/work/fixture-input.txt",
+                "truncate:/tmp/work/fixture-output.txt",
+                "write:/tmp/work/fixture-output.txt",
+            ],
+        )
         # Ordering: read_file first (seq=0), then write_file (seq=2).
         self.assertEqual(
             obs.sdk_tool_order,
@@ -192,6 +201,22 @@ class DriftReportClassificationTests(unittest.TestCase):
             "generativelanguage.googleapis.com:443", row.only_in_b
         )
         self.assertEqual(row.classification, drift.CLASSIFICATION_PROVIDER)
+
+    def test_kernel_file_operations_task_induced(self) -> None:
+        rows = drift.build_drift_report(
+            self.a, self.b, fixture_paths=self.fixture_paths
+        )
+        row = self._by_dim(rows)["kernel_file_operations"]
+        self.assertEqual(
+            row.in_both,
+            [
+                "create:/tmp/work/fixture-output.txt",
+                "read:/tmp/work/fixture-input.txt",
+                "truncate:/tmp/work/fixture-output.txt",
+                "write:/tmp/work/fixture-output.txt",
+            ],
+        )
+        self.assertEqual(row.classification, drift.CLASSIFICATION_TASK)
 
     def test_process_execs_task_induced(self) -> None:
         rows = drift.build_drift_report(self.a, self.b)
@@ -366,6 +391,7 @@ class MainCliTests(unittest.TestCase):
             )
             dims = [r["dimension"] for r in payload["rows"]]
             self.assertIn("filesystem_paths_touched", dims)
+            self.assertIn("kernel_file_operations", dims)
             self.assertIn("network_endpoints", dims)
             self.assertIn("tool_invocation_order", dims)
             # Markdown carries a header + a row per dimension.

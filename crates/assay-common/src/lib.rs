@@ -47,6 +47,10 @@ pub const SOCKET_STAT_RINGBUF_DROPPED: u32 = 5;
 pub struct MonitorEvent {
     pub pid: u32,
     pub event_type: u32,
+    pub flags: u64,
+    pub mode: u64,
+    pub resolve: u64,
+    pub return_value: i64,
     pub data: [u8; DATA_LEN],
 }
 
@@ -133,6 +137,10 @@ impl MonitorEvent {
         Self {
             pid: 0,
             event_type: 0,
+            flags: 0,
+            mode: 0,
+            resolve: 0,
+            return_value: 0,
             data: [0u8; DATA_LEN],
         }
     }
@@ -148,11 +156,11 @@ impl Default for MonitorEvent {
 // Compile-time ABI/layout checks
 // -----------------------------
 
-// Exact size: 4 + 4 + 512 = 520 bytes
-const _: [(); 520] = [(); core::mem::size_of::<MonitorEvent>()];
+// Exact size: 4 + 4 + 8 + 8 + 8 + 8 + 512 = 552 bytes.
+const _: [(); 552] = [(); core::mem::size_of::<MonitorEvent>()];
 
-// Alignment should be 4 on all sane targets; if this fails, your ABI is different.
-const _: [(); 4] = [(); core::mem::align_of::<MonitorEvent>()];
+// Alignment is 8 because the ABI carries u64/i64 syscall metadata.
+const _: [(); 8] = [(); core::mem::align_of::<MonitorEvent>()];
 
 #[cfg(all(target_os = "linux", feature = "std"))]
 pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {

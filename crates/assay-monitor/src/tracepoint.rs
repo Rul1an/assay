@@ -17,6 +17,10 @@ impl TracepointResolver {
         // Key 2: fork parent
         // Key 3: fork child
         // Key 4: openat2 filename (SOTA)
+        // Key 5: openat flags
+        // Key 6: openat mode
+        // Key 7: openat2 how
+        // Key 8: syscall exit return value
 
         let openat_fn = Self::find_offset("syscalls", "sys_enter_openat", "filename").unwrap_or(24);
         map.insert(0, openat_fn);
@@ -37,6 +41,18 @@ impl TracepointResolver {
         let openat2_fn =
             Self::find_offset("syscalls", "sys_enter_openat2", "filename").unwrap_or(24);
         map.insert(4, openat2_fn);
+
+        let openat_flags = Self::find_offset("syscalls", "sys_enter_openat", "flags").unwrap_or(32);
+        map.insert(5, openat_flags);
+
+        let openat_mode = Self::find_offset("syscalls", "sys_enter_openat", "mode").unwrap_or(40);
+        map.insert(6, openat_mode);
+
+        let openat2_how = Self::find_offset("syscalls", "sys_enter_openat2", "how").unwrap_or(32);
+        map.insert(7, openat2_how);
+
+        let exit_ret = Self::find_offset("syscalls", "sys_exit_openat", "ret").unwrap_or(16);
+        map.insert(8, exit_ret);
 
         map
     }
