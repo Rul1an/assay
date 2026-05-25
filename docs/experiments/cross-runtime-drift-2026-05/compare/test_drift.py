@@ -218,6 +218,49 @@ class DriftReportClassificationTests(unittest.TestCase):
         )
         self.assertEqual(row.classification, drift.CLASSIFICATION_TASK)
 
+    def test_path_projection_preserves_raw_and_maps_logical_roles(self) -> None:
+        rows = drift.build_drift_report(
+            self.a,
+            self.b,
+            fixture_paths=self.fixture_paths,
+            path_aliases=(
+                drift.PathAlias(
+                    "/tmp/work/fixture-input.txt", "workdir/input"
+                ),
+                drift.PathAlias(
+                    "/tmp/work/fixture-output.txt", "workdir/output"
+                ),
+            ),
+        )
+        row = self._by_dim(rows)["kernel_file_operations"]
+        # Raw values stay exactly as observed.
+        self.assertIn("read:/tmp/work/fixture-input.txt", row.in_both)
+        projection = row.projection
+        self.assertEqual(
+            projection["schema"], drift.PATH_PROJECTION_SCHEMA
+        )
+        self.assertEqual(projection["status"], "applied")
+        self.assertIn("read:workdir/input", projection["in_both"])
+        self.assertIn("write:workdir/output", projection["in_both"])
+        self.assertIn(
+            "projection_no_raw_evidence_rewrite",
+            projection["non_claims"],
+        )
+
+    def test_path_projection_unknown_only_is_inconclusive(self) -> None:
+        rows = drift.build_drift_report(
+            self.a,
+            self.b,
+            path_aliases=(
+                drift.PathAlias("/does/not/exist.txt", "workdir/missing"),
+            ),
+        )
+        row = self._by_dim(rows)["filesystem_paths_touched"]
+        self.assertEqual(row.projection["status"], "applied")
+        self.assertEqual(
+            row.projection["claim_level"], drift.CLAIM_INCONCLUSIVE
+        )
+
     def test_process_execs_task_induced(self) -> None:
         rows = drift.build_drift_report(self.a, self.b)
         row = self._by_dim(rows)["process_execs"]
@@ -376,6 +419,10 @@ class MainCliTests(unittest.TestCase):
                     "/tmp/work/fixture-input.txt",
                     "--fixture-path",
                     "/tmp/work/fixture-output.txt",
+                    "--path-alias",
+                    "/tmp/work/fixture-input.txt=workdir/input",
+                    "--path-alias",
+                    "/tmp/work/fixture-output.txt=workdir/output",
                 ]
             )
             self.assertEqual(rc, 0)
@@ -394,10 +441,18 @@ class MainCliTests(unittest.TestCase):
             self.assertIn("kernel_file_operations", dims)
             self.assertIn("network_endpoints", dims)
             self.assertIn("tool_invocation_order", dims)
+            kernel_row = next(
+                r for r in payload["rows"]
+                if r["dimension"] == "kernel_file_operations"
+            )
+            self.assertIn(
+                "read:workdir/input", kernel_row["projection"]["in_both"]
+            )
             # Markdown carries a header + a row per dimension.
             md = out_md.read_text(encoding="utf-8")
             self.assertIn("# Cross-Runtime Drift Report", md)
             self.assertIn("filesystem_paths_touched", md)
+            self.assertIn("read:workdir/input", md)
 
     def test_main_returns_3_on_bad_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -595,13 +650,13 @@ class MarkdownEscapeTests(unittest.TestCase):
             if not line.startswith("|"):
                 continue
             unescaped = line.replace("\\|", "")
-            # Each table row in our schema has 8 unescaped `|` chars
-            # (7 cell separators + leading and trailing pipe = 8).
+            # Each table row in our schema has 9 unescaped `|` chars
+            # (8 cell separators + leading and trailing pipe = 9).
             count = unescaped.count("|")
             self.assertEqual(
                 count,
-                8,
-                f"row has {count} unescaped pipes, expected 8: {line!r}",
+                9,
+                f"row has {count} unescaped pipes, expected 9: {line!r}",
             )
 
 

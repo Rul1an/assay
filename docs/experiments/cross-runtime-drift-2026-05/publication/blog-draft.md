@@ -31,7 +31,7 @@ experiment in [`Rul1an/assay`](https://github.com/Rul1an/assay)
 tries to answer. Everything in this post is verifiable from
 [`docs/experiments/cross-runtime-drift-2026-05/`](https://github.com/Rul1an/assay/tree/main/docs/experiments/cross-runtime-drift-2026-05)
 — including a stdlib-only Python comparator
-(`compare/drift.py`, 50 unit tests passing) that takes two
+(`compare/drift.py`, 53 unit tests passing) that takes two
 Runner archives and produces the table shown below.
 
 ## TL;DR for runtime-selection folks
@@ -234,7 +234,7 @@ git clone https://github.com/Rul1an/assay
 cd assay
 export REPO_ROOT="$PWD"
 
-# Comparator + helpers (50 unit tests, no API keys required).
+# Comparator + helpers (53 unit tests, no API keys required).
 python3 -m unittest discover \
   -s "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare" \
   -p 'test_*.py'
@@ -245,6 +245,8 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
   --archive-b "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-b-gemini" \
   --fixture-path /tmp/work/fixture-input.txt \
   --fixture-path /tmp/work/fixture-output.txt \
+  --path-alias /tmp/work/fixture-input.txt=workdir/input \
+  --path-alias /tmp/work/fixture-output.txt=workdir/output \
   --out-md /tmp/drift.md
 cat /tmp/drift.md
 

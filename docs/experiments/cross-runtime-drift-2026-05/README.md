@@ -6,7 +6,7 @@
 > on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
-> produces per-dimension drift reports (51 stdlib unit tests covering
+> produces per-dimension drift reports (53 stdlib unit tests covering
 > `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), live
 > Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
 > reflects the live data, and [`publication/`](publication/) holds
@@ -26,7 +26,7 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
-| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 51 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
+| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 53 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
 | [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26398427430. See [`runs/README.md`](runs/README.md). |
 | [`findings.md`](findings.md) | Slice 4: live n=3 findings write-up plus threats to validity and reproduction commands. |
 | [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) | Follow-up diagnostic: what `layers/kernel.ndjson` can support now that open metadata is present, and what still remains out of scope. |
@@ -95,6 +95,8 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
   --archive-b "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-b-gemini" \
   --fixture-path /tmp/work/fixture-input.txt \
   --fixture-path /tmp/work/fixture-output.txt \
+  --path-alias /tmp/work/fixture-input.txt=workdir/input \
+  --path-alias /tmp/work/fixture-output.txt=workdir/output \
   --out-md /tmp/drift.md
 
 # Tests (no API keys required):
@@ -109,6 +111,10 @@ classification: `task-induced` / `provider-induced` /
 `runtime-induced` / `inconclusive`. The classification is a
 starting point; the findings doc (Slice 4) explains every
 `inconclusive` row by hand or downgrades it to a known limitation.
+Path projection v0 is additive: raw `only_in_*` and `in_both`
+values stay unchanged, while `--path-alias RAW=PROJECTED` emits an
+auditable `row.projection` block with mapping rule, confidence,
+claim level, and non-claims.
 
 ## What's done in Slice 1
 
