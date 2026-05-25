@@ -1504,20 +1504,38 @@ def _fmt_optional(value: str | None) -> str:
     return value if value else "<unknown>"
 
 
+def _single_line(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _md_inline_code(value: str) -> str:
+    value = _single_line(value)
+    max_run = 0
+    current_run = 0
+    for char in value:
+        if char == "`":
+            current_run += 1
+            max_run = max(max_run, current_run)
+        else:
+            current_run = 0
+    fence = "`" * (max_run + 1)
+    return f"{fence}{value}{fence}"
+
+
 def _fmt_render_metadata(provenance: ReportProvenance) -> str:
     parts = [
-        f"`{_md_escape_cell(provenance.render_kind)}`",
-        f"at `{_md_escape_cell(_fmt_optional(provenance.rendered_at))}`",
+        _md_inline_code(provenance.render_kind),
+        f"at {_md_inline_code(_fmt_optional(provenance.rendered_at))}",
         (
             "using comparator "
-            f"`{_md_escape_cell(_fmt_optional(provenance.comparator_commit))}`"
+            f"{_md_inline_code(_fmt_optional(provenance.comparator_commit))}"
         ),
     ]
     if provenance.source_run_url:
-        parts.append(f"from {provenance.source_run_url}")
+        parts.append(f"from {_md_inline_code(provenance.source_run_url)}")
     if provenance.raw_captures_unchanged is not None:
         raw_state = str(provenance.raw_captures_unchanged).lower()
-        parts.append(f"raw captures unchanged `{raw_state}`")
+        parts.append(f"raw captures unchanged {_md_inline_code(raw_state)}")
     return "; ".join(parts)
 
 

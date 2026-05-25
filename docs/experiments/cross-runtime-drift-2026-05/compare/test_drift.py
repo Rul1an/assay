@@ -1209,6 +1209,23 @@ class MainCliTests(unittest.TestCase):
         self.assertIn("`def4567`", md)
         self.assertIn("raw captures unchanged `true`", md)
 
+    def test_report_markdown_normalizes_source_run_url(self) -> None:
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(a, b)
+        md = drift.report_to_md(
+            a,
+            b,
+            rows,
+            drift.ReportProvenance(
+                comparator_commit="def4567",
+                render_kind="re_render",
+                source_run_url="https://example.test/run\n- injected",
+            ),
+        )
+        self.assertIn("from `https://example.test/run - injected`", md)
+        self.assertNotIn("\n- injected", md)
+
     def test_main_can_declare_raw_captures_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_json = Path(tmp) / "drift.json"
@@ -1508,6 +1525,10 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         self.assertEqual(
             schema["$defs"]["provenance"]["properties"]["schema"]["const"],
             drift.DRIFT_REPORT_PROVENANCE_SCHEMA,
+        )
+        self.assertIn(
+            "assay_commit",
+            schema["$defs"]["provenance"]["required"],
         )
         self.assertEqual(
             schema["$defs"]["render_metadata"]["properties"]["kind"]["enum"],

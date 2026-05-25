@@ -130,6 +130,7 @@
       "additionalProperties": true,
       "required": [
         "schema",
+        "assay_commit",
         "render_metadata",
         "input_archives",
         "runner_schema_versions",
