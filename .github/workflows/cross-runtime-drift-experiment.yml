@@ -412,18 +412,19 @@ jobs:
           KERNEL_ARCH="$(uname -m)"
           WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           RUNNER_LABEL="${RUNNER_NAME:-assay-bpf-runner}"
-          EBPF_OBJECT_DIGEST=""
-          if [ -f arm-a-openai-runs/ebpf-object.sha256 ] && [ -f arm-b-gemini-runs/ebpf-object.sha256 ]; then
-            A_EBPF_DIGEST="$(cat arm-a-openai-runs/ebpf-object.sha256)"
-            B_EBPF_DIGEST="$(cat arm-b-gemini-runs/ebpf-object.sha256)"
-            if [ "$A_EBPF_DIGEST" != "$B_EBPF_DIGEST" ]; then
-              echo "ERROR: arm A and arm B used different eBPF object digests" >&2
-              echo "arm A: $A_EBPF_DIGEST" >&2
-              echo "arm B: $B_EBPF_DIGEST" >&2
-              exit 1
-            fi
-            EBPF_OBJECT_DIGEST="$A_EBPF_DIGEST"
+          if [ ! -f arm-a-openai-runs/ebpf-object.sha256 ] || [ ! -f arm-b-gemini-runs/ebpf-object.sha256 ]; then
+            echo "ERROR: missing eBPF object digest file from one or both arms" >&2
+            exit 1
           fi
+          A_EBPF_DIGEST="$(cat arm-a-openai-runs/ebpf-object.sha256)"
+          B_EBPF_DIGEST="$(cat arm-b-gemini-runs/ebpf-object.sha256)"
+          if [ "$A_EBPF_DIGEST" != "$B_EBPF_DIGEST" ]; then
+            echo "ERROR: arm A and arm B used different eBPF object digests" >&2
+            echo "arm A: $A_EBPF_DIGEST" >&2
+            echo "arm B: $B_EBPF_DIGEST" >&2
+            exit 1
+          fi
+          EBPF_OBJECT_DIGEST="$A_EBPF_DIGEST"
           mkdir -p "$DRIFT_OUT"
 
           # Stable sort to align iterations: i-th OpenAI run vs i-th
