@@ -85,6 +85,16 @@ produced the drift report from those archives. These can intentionally
 differ when old archives are re-rendered after a projection or schema
 change.
 
+Commit anchors are Git SHA identifiers: either full 40-character SHAs
+or unambiguous 7-40 character lowercase hexadecimal abbreviations.
+`render_metadata.rendered_at` uses RFC3339 date-time syntax such as
+`2026-05-25T19:00:35Z`.
+
+Runtime drift v0 uses a required-but-nullable convention for provenance:
+schema-critical keys are present even when the caller does not know the
+value yet. A present `null` means "unknown/not supplied"; absence means
+the report does not satisfy the v0 shape.
+
 ## Contract Principles
 
 1. **Raw evidence is preserved.** `only_in_a`, `only_in_b`, and

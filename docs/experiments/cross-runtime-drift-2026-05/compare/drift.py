@@ -1500,10 +1500,32 @@ def _fmt_projection(projection: dict[str, Any]) -> str:
     return _md_escape_cell(claim)
 
 
+def _fmt_optional(value: str | None) -> str:
+    return value if value else "<unknown>"
+
+
+def _fmt_render_metadata(provenance: ReportProvenance) -> str:
+    parts = [
+        f"`{_md_escape_cell(provenance.render_kind)}`",
+        f"at `{_md_escape_cell(_fmt_optional(provenance.rendered_at))}`",
+        (
+            "using comparator "
+            f"`{_md_escape_cell(_fmt_optional(provenance.comparator_commit))}`"
+        ),
+    ]
+    if provenance.source_run_url:
+        parts.append(f"from {provenance.source_run_url}")
+    if provenance.raw_captures_unchanged is not None:
+        raw_state = str(provenance.raw_captures_unchanged).lower()
+        parts.append(f"raw captures unchanged `{raw_state}`")
+    return "; ".join(parts)
+
+
 def report_to_md(
     a: ArchiveObservation,
     b: ArchiveObservation,
     rows: list[DriftRow],
+    provenance: ReportProvenance | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("# Cross-Runtime Drift Report")
@@ -1518,6 +1540,8 @@ def report_to_md(
         f"(`{_md_escape_cell(b.path)}`, "
         f"manifest `{b.manifest_digest}`)"
     )
+    if provenance is not None:
+        lines.append(f"- **Render:** {_fmt_render_metadata(provenance)}")
     lines.append("")
     lines.append(
         "| Dimension | Source | Classification | Only in A | Only in B | "
@@ -1743,7 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             args.out_md.parent.mkdir(parents=True, exist_ok=True)
             args.out_md.write_text(
-                report_to_md(a, b, rows), encoding="utf-8"
+                report_to_md(a, b, rows, provenance), encoding="utf-8"
             )
         except OSError as exc:
             print(f"failed to write --out-md: {exc}", file=sys.stderr)

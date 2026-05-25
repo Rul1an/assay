@@ -51,6 +51,14 @@
         "null"
       ]
     },
+    "git_sha_or_null": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Full Git SHA or unambiguous abbreviation."
+    },
     "string_array": {
       "type": "array",
       "items": {
@@ -133,6 +141,9 @@
         "schema": {
           "const": "assay.runner.drift_report_provenance.v0"
         },
+        "assay_commit": {
+          "$ref": "#/$defs/git_sha_or_null"
+        },
         "render_metadata": {
           "$ref": "#/$defs/render_metadata"
         },
@@ -178,10 +189,14 @@
           ]
         },
         "rendered_at": {
-          "$ref": "#/$defs/nullable_string"
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
         },
         "comparator_commit": {
-          "$ref": "#/$defs/nullable_string"
+          "$ref": "#/$defs/git_sha_or_null"
         },
         "source_run_url": {
           "$ref": "#/$defs/nullable_string"
