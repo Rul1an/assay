@@ -747,6 +747,11 @@ class MainCliTests(unittest.TestCase):
             self.assertIn("kernel_file_operations", dims)
             self.assertIn("network_endpoints", dims)
             self.assertIn("tool_invocation_order", dims)
+            for row in payload["rows"]:
+                self.assertIn("schema", row["projection"])
+                self.assertIn("status", row["projection"])
+                self.assertIn("taxonomy_schema", row["projection"])
+                self.assertIn("non_claims", row["projection"])
             kernel_row = next(
                 r for r in payload["rows"]
                 if r["dimension"] == "kernel_file_operations"
@@ -1059,6 +1064,54 @@ class MarkdownEscapeTests(unittest.TestCase):
                 9,
                 f"row has {count} unescaped pipes, expected 9: {line!r}",
             )
+
+
+class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
+    def test_schema_sidecar_matches_comparator_contract(self) -> None:
+        schema_path = (
+            THIS_DIR.parents[2]
+            / "reference"
+            / "runner"
+            / "schema"
+            / "runtime-drift-v0.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            schema["properties"]["schema"]["const"],
+            drift.DRIFT_REPORT_SCHEMA,
+        )
+        self.assertEqual(
+            schema["$defs"]["taxonomy"]["properties"]["schema"]["const"],
+            drift.RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        )
+        self.assertEqual(
+            schema["$defs"]["provenance"]["properties"]["schema"]["const"],
+            drift.DRIFT_REPORT_PROVENANCE_SCHEMA,
+        )
+        self.assertIn(
+            drift.PATH_PROJECTION_SCHEMA,
+            schema["$defs"]["projection"]["properties"]["schema"]["enum"],
+        )
+        self.assertIn(
+            drift.NETWORK_PROJECTION_SCHEMA,
+            schema["$defs"]["projection"]["properties"]["schema"]["enum"],
+        )
+        self.assertIn(
+            drift.PROJECTION_NOT_APPLIED_SCHEMA,
+            schema["$defs"]["projection"]["properties"]["schema"]["enum"],
+        )
+        self.assertEqual(
+            schema["required"],
+            [
+                "schema",
+                "archive_a",
+                "archive_b",
+                "taxonomy",
+                "provenance",
+                "rows",
+                "summary",
+            ],
+        )
 
 
 if __name__ == "__main__":

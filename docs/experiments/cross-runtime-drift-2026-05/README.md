@@ -6,9 +6,10 @@
 > on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
-> produces per-dimension drift reports (stdlib unit tests cover
-> `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), and emits
-> Runtime/Noise Taxonomy v0 metadata as vocabulary-only context. Live
+> produces `assay.runner.runtime_drift.v0` per-dimension projection
+> reports (stdlib unit tests cover `drift.py` + `health_gate.py` +
+> `extract_fixture_paths.py`), and emits Runtime/Noise Taxonomy v0
+> metadata as vocabulary-only context. Live
 > Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
 > reflects the live data, and [`publication/`](publication/) holds
 > blog + discussion-comment drafts gated on OpenInference #3162 triage.
@@ -167,7 +168,11 @@ remain `null` when the caller does not provide them.
   failure modes (missing manifest, corrupt JSON, broken tar),
   every classification label, fixture-path overrides, and CLI
   output (`--out-json`, `--out-md`).
-- Output schema locked in: `assay.cross_runtime_drift.v0`.
+- Output schema locked in for new comparator output:
+  `assay.runner.runtime_drift.v0`. The already-committed live
+  `runs/drift/` baselines are historical outputs from before the
+  Runner projection artifact name was frozen; regenerate them with the
+  current comparator when a byte-level schema refresh is needed.
 
 ## What's now done in Slice 3-5
 

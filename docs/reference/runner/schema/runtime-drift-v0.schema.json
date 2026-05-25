@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/runner/schema/runtime-drift-v0.schema.json",
+  "title": "Assay Runner Runtime Drift Projection v0",
+  "description": "Projection artifact emitted by the cross-runtime drift comparator. Raw evidence stays in the source Runner archives; this report records raw set differences plus declared projection views, taxonomy metadata, and provenance anchors.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "archive_a",
+    "archive_b",
+    "taxonomy",
+    "provenance",
+    "rows",
+    "summary"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.runner.runtime_drift.v0"
+    },
+    "archive_a": {
+      "$ref": "#/$defs/archive_ref"
+    },
+    "archive_b": {
+      "$ref": "#/$defs/archive_ref"
+    },
+    "taxonomy": {
+      "$ref": "#/$defs/taxonomy"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/drift_row"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    }
+  },
+  "$defs": {
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "string_array": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "archive_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "run_id",
+        "runtime_label",
+        "manifest_digest",
+        "sdk_event_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "runtime_label": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/sha256_digest"
+        },
+        "sdk_event_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "status",
+        "categories",
+        "non_claims"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.runner.runtime_noise_taxonomy.v0"
+        },
+        "status": {
+          "const": "vocabulary_only"
+        },
+        "categories": {
+          "type": "object"
+        },
+        "non_claims": {
+          "$ref": "#/$defs/string_array"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schema",
+        "input_archives",
+        "runner_schema_versions",
+        "kernel",
+        "workflow",
+        "non_claims"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.runner.drift_report_provenance.v0"
+        },
+        "input_archives": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object"
+          }
+        },
+        "runner_schema_versions": {
+          "type": "object"
+        },
+        "kernel": {
+          "type": "object"
+        },
+        "workflow": {
+          "type": "object"
+        },
+        "non_claims": {
+          "$ref": "#/$defs/string_array"
+        }
+      }
+    },
+    "classification": {
+      "enum": [
+        "task-induced",
+        "provider-induced",
+        "runtime-induced",
+        "inconclusive"
+      ]
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schema",
+        "status",
+        "taxonomy_schema",
+        "non_claims"
+      ],
+      "properties": {
+        "schema": {
+          "enum": [
+            "assay.runner.path_projection.v0",
+            "assay.runner.network_projection.v0",
+            "assay.runner.projection_not_applied.v0"
+          ]
+        },
+        "status": {
+          "enum": [
+            "applied",
+            "not_applied"
+          ]
+        },
+        "taxonomy_schema": {
+          "const": "assay.runner.runtime_noise_taxonomy.v0"
+        },
+        "claim_level": {
+          "enum": [
+            "raw_observed",
+            "projected_equivalent",
+            "inconclusive"
+          ]
+        },
+        "only_in_a": {
+          "$ref": "#/$defs/string_array"
+        },
+        "only_in_b": {
+          "$ref": "#/$defs/string_array"
+        },
+        "in_both": {
+          "$ref": "#/$defs/string_array"
+        },
+        "rules": {
+          "$ref": "#/$defs/string_array"
+        },
+        "mappings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "non_claims": {
+          "$ref": "#/$defs/string_array"
+        }
+      }
+    },
+    "drift_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "source",
+        "only_in_a",
+        "only_in_b",
+        "in_both",
+        "classification",
+        "detail",
+        "projection"
+      ],
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "only_in_a": {
+          "$ref": "#/$defs/string_array"
+        },
+        "only_in_b": {
+          "$ref": "#/$defs/string_array"
+        },
+        "in_both": {
+          "$ref": "#/$defs/string_array"
+        },
+        "classification": {
+          "$ref": "#/$defs/classification"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "projection": {
+          "$ref": "#/$defs/projection"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimensions_checked",
+        "task_induced",
+        "provider_induced",
+        "runtime_induced",
+        "inconclusive"
+      ],
+      "properties": {
+        "dimensions_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "task_induced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provider_induced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runtime_induced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inconclusive": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Cross-runtime drift comparator.
+"""Cross-runtime drift projection comparator.
 
 Reads two Runner measured-run archives (one per agent runtime) and
-emits per-dimension drift between their capability surfaces.
+emits an `assay.runner.runtime_drift.v0` projection artifact. The report
+preserves raw observed values and adds explicit projection views where
+the caller supplied path or network aliases.
 
 Scope (v0, Slice 2):
   - filesystem paths touched (capability_surface.filesystem_paths)
@@ -61,7 +63,7 @@ ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 CAPABILITY_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
 SDK_EVENT_SCHEMA = "assay.runner.sdk_event.v0"
-DRIFT_REPORT_SCHEMA = "assay.cross_runtime_drift.v0"
+DRIFT_REPORT_SCHEMA = "assay.runner.runtime_drift.v0"
 DRIFT_REPORT_PROVENANCE_SCHEMA = "assay.runner.drift_report_provenance.v0"
 
 MANIFEST_PATH = "manifest.json"
@@ -91,6 +93,7 @@ CLASSIFICATION_INCONCLUSIVE = "inconclusive"
 
 PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
 NETWORK_PROJECTION_SCHEMA = "assay.runner.network_projection.v0"
+PROJECTION_NOT_APPLIED_SCHEMA = "assay.runner.projection_not_applied.v0"
 RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
 
 CLAIM_RAW_OBSERVED = "raw_observed"
@@ -163,6 +166,18 @@ PROJECTION_NON_CLAIMS = (
     "projection_unknowns_preserved",
     "projection_no_heuristic_noise_taxonomy",
 )
+
+
+def _projection_not_applied(
+    reason: str = "dimension has no v0 projector",
+) -> dict[str, Any]:
+    return {
+        "schema": PROJECTION_NOT_APPLIED_SCHEMA,
+        "status": "not_applied",
+        "reason": reason,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +518,9 @@ class DriftRow:
     in_both: list[str]
     classification: str  # one of CLASSIFICATION_* above
     detail: str
-    projection: dict[str, Any] = dataclasses.field(default_factory=dict)
+    projection: dict[str, Any] = dataclasses.field(
+        default_factory=_projection_not_applied
+    )
 
 
 @dataclasses.dataclass(frozen=True)
