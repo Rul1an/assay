@@ -1,12 +1,14 @@
 # cross-runtime-drift-2026-05
 
-> **Status:** Slices 1 and 2 landed. Workload contract written, two
-> runtime implementations runnable locally with API keys,
-> contract-checker validates outputs (13 stdlib unit tests), and the
-> `compare/drift.py` MVP produces a per-dimension drift report
-> against the synthetic fixtures with 16 stdlib unit tests passing.
-> Slices 3–5 still TODO (live captures on `assay-bpf-runner`,
-> findings doc, publication artefacts).
+> **Status:** Slices 1–2 landed; Slice 3 workflow is ready to
+> dispatch. Workload contract written, two runtime implementations
+> runnable locally with API keys, contract-checker validates outputs
+> (13 stdlib unit tests), the `compare/drift.py` MVP produces a
+> per-dimension drift report against the synthetic fixtures (27
+> stdlib unit tests), and the
+> [`Cross-Runtime Drift Experiment`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
+> workflow is wired for live captures on `assay-bpf-runner`. Slices 4–5
+> (findings doc, publication artefacts) still TODO.
 >
 > **Plan-doc:** [`../cross-runtime-drift-2026-05.md`](../cross-runtime-drift-2026-05.md)
 > (research question, drift dimensions, threats to validity, sequencing).
@@ -22,10 +24,8 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
-| [`compare/`](compare/) | Slice 2: `drift.py` stdlib comparator + `test_drift.py` (16 tests) + `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift dimension. |
-
-`runs/` will appear once Slice 3 dispatches live captures on
-`assay-bpf-runner`. Not present yet.
+| [`compare/`](compare/) | Slice 2: `drift.py` stdlib comparator + `test_drift.py` (27 tests) + `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift dimension. |
+| [`runs/`](runs/) | Slice 3: target for live Arm A0 + B0 baselines + per-pair drift reports. Currently empty — committed in a follow-up after the maintainer dispatches the workflow. See [`runs/README.md`](runs/README.md). |
 
 ## Running locally
 
