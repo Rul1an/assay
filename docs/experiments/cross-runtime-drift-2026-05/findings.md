@@ -4,7 +4,8 @@
 > `compare/drift.py` MVP runs against
 > [`compare/fixtures/{arm-a-openai,arm-b-gemini}/`](compare/fixtures)
 > and produces the per-dimension drift report below. The Slice 3
-> workflow (`.github/workflows/cross-runtime-drift-experiment.yml`)
+> workflow
+> [`cross-runtime-drift-experiment.yml`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
 > is ready to dispatch; once the maintainer dispatches it and
 > commits the live baselines under
 > [`runs/{a0,b0,drift}/`](runs/README.md), this document is
