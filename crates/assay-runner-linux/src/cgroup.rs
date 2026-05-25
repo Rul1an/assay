@@ -68,7 +68,7 @@ impl CgroupManager {
         loop {
             let cgroup_type = fs::read_to_string(path.join("cgroup.type"))
                 .with_context(|| format!("Failed to read cgroup type for {}", path.display()))?;
-            if cgroup_type.trim() == "domain" {
+            if cgroup_type.trim() == "domain" && !Self::is_systemd_scope(&path) {
                 return Ok(path);
             }
 
@@ -84,6 +84,12 @@ impl CgroupManager {
                 .ok_or_else(|| anyhow!("Could not ascend from cgroup path {}", path.display()))?
                 .to_path_buf();
         }
+    }
+
+    fn is_systemd_scope(path: &Path) -> bool {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".scope"))
     }
 
     /// Creates a new ephemeral cgroup.
@@ -305,6 +311,28 @@ mod tests {
             CgroupManager::nearest_domain_root(&root, service).expect("resolve domain root");
 
         assert_eq!(resolved, system_slice);
+        fs::remove_dir_all(root).expect("remove temp cgroup tree");
+    }
+
+    #[test]
+    fn nearest_domain_root_ascends_from_systemd_session_scope() {
+        let root = temp_cgroup_tree("session-scope");
+        let user_slice = root.join("user.slice");
+        let user_id_slice = user_slice.join("user-1000.slice");
+        let session_scope = user_id_slice.join("session-263.scope");
+        fs::create_dir_all(&session_scope).expect("create fake session cgroup");
+        fs::write(root.join("cgroup.type"), "domain\n").expect("write root cgroup type");
+        fs::write(user_slice.join("cgroup.type"), "domain\n")
+            .expect("write user slice cgroup type");
+        fs::write(user_id_slice.join("cgroup.type"), "domain\n")
+            .expect("write user id slice cgroup type");
+        fs::write(session_scope.join("cgroup.type"), "domain\n")
+            .expect("write session scope cgroup type");
+
+        let resolved =
+            CgroupManager::nearest_domain_root(&root, session_scope).expect("resolve domain root");
+
+        assert_eq!(resolved, user_id_slice);
         fs::remove_dir_all(root).expect("remove temp cgroup tree");
     }
 }

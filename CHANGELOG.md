@@ -4,6 +4,106 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-05-25
+
+> **Runner evidence and drift-reporting release.**
+>
+> `v3.12.0` turns the post-`v3.11.3` measured-run work into a release
+> line: real Linux/eBPF experiment packages, runtime-drift projection
+> reports, schema sidecars, and release-grade provenance around how drift
+> reports were rendered. The new surfaces remain low-level and
+> evidence-first. They do not introduce new Trust Card claims, policy
+> verdicts, or standalone guarantees for the `assay-runner-*` crates.
+
+### Runner-vs-OTel / OpenInference experiment package
+
+- Added the `runner-vs-otel-2026-05` experiment package with a controlled
+  three-arm comparison between in-process OTel/OpenInference-style traces
+  and out-of-band Runner archives captured with Linux/eBPF + cgroup-v2.
+- Recorded real delegated Arm C baselines (`n=3`) with per-run
+  tamper-evident manifest binding, clean measurement-health gates
+  (`ringbuf_drops=0`, `kernel_layer=complete`,
+  `cgroup_correlation=clean`), and explicit non-claims around archive byte
+  determinism.
+- Added SDK-layer ingestion for tool-level `gen_ai.tool.call.id` joins and
+  a controlled tool-call argument tampering scenario where reported intent
+  and measured filesystem effect diverge at the same tool call id.
+- Added publication drafts and the filed OpenInference vocabulary discussion
+  framing for runtime-evidence artifact links. The ask stays vocabulary-only:
+  no request for OpenInference or OTel to adopt Assay-Runner.
+
+### Cross-runtime drift experiment package
+
+- Added the `cross-runtime-drift-2026-05` experiment package: workload
+  contract, OpenAI Agents and Google GenAI implementations, stdlib contract
+  checker, delegated runner workflow, live Arm A0/B0 baselines, and a
+  stdlib drift comparator.
+- Added path projection v0 and network projection v0 as additive report
+  projections. Raw observed values remain the source of truth; declared
+  projection aliases add logical labels such as `workdir/input`,
+  `workdir/output`, and `dns` without claiming semantic equivalence.
+- Added runtime/noise taxonomy v0 as vocabulary-only metadata. The taxonomy
+  travels with drift reports but does not yet classify raw paths or endpoints
+  heuristically.
+- Added drift-report provenance v0 and render metadata so each report
+  records the capture anchor, comparator/render anchor, workflow URL, runner
+  schema versions, and whether committed reports are re-renders over
+  unchanged raw archives.
+- Polished drift-report UX: compact projection mappings, per-arm unmatched
+  summaries, deduplicated Markdown `raw -> projected` examples, and
+  regenerated committed drift reports with self-contained provenance.
+
+### Runner artifact contracts and schema validation
+
+- Hardened Linux cgroup root selection for delegated runner-spike runs under
+  `sudo`: systemd `*.scope` cgroups are now treated as leaf scopes and the
+  runner ascends to the surrounding slice before creating the Assay session
+  cgroup. This avoids `Operation not supported (os error 95)` failures on
+  revived self-hosted runner services.
+- Added kernel-event metadata support for `openat` / `openat2` observations:
+  decoded flags, access mode, operation flags, return value, and
+  success/error status where available. This improves file-operation
+  granularity without overclaiming read/write semantics outside the captured
+  metadata.
+- Added JSON Schema sidecars for the runtime drift report and kernel event
+  NDJSON line shape, plus stdlib schema-walker tests that validate committed
+  fixtures and examples without adding a test-time `jsonschema` dependency.
+- Tightened schema documentation around nullable-required fields, git commit
+  anchors versus content-addressed `sha256:` digests, `kind` /
+  `event_type` consistency, and committed re-render path conventions.
+
+### Release and CI hygiene
+
+- Synced the Runner-vs-OTel and cross-runtime drift roadmaps so completed
+  slices on `main` are clearly distinguished from future follow-ups.
+- Kept release-truth wording bounded: experiment artifacts and reports are
+  committed evidence packages, not product endorsements, Trust Card claims,
+  or policy verdicts.
+- Updated the release checklist to include the four `assay-runner-*` crates
+  in the Trusted Publishing review, matching the public-crate contract that
+  `v3.11.3` established.
+
+### Known follow-ups
+
+- Runtime drift `unmatched_summary` is emitted in a stable shape but the
+  current `runtime-drift-v0` schema only types it as an object. A future
+  v0.2 schema bump should lock the per-arm summary sub-shape.
+- Drift projections still avoid heuristic path/runtime noise classification.
+  Unknown raw values remain raw until a declared projection rule or a future
+  taxonomy rule classifies them.
+- The Runner-vs-OTel and cross-runtime experiments do not yet include
+  statistically powered overhead measurements or an L3 generic kernel
+  observability comparison.
+
+### Non-change
+
+- No new Trust Basis or Trust Card claim family ships in this release.
+- No new public guarantee is made for the `assay-runner-*` crates beyond the
+  `v3.11.3` framing: they remain internal/experimental substrate crates
+  published so `assay-cli` can resolve its default `runner` feature.
+- The cross-runtime drift reports are comparison/projection artifacts, not a
+  policy verdict about which runtime is "better" or "safer".
+
 ## [3.11.3] - 2026-05-23
 
 > **Public crate contract update for Assay-Runner substrate.**
