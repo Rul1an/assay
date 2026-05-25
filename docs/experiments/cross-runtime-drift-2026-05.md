@@ -1,13 +1,16 @@
 # Cross-Runtime Capability-Surface Drift: Plan
 
-> **Status:** Slices 0–2 landed, Slice 3 workflow ready to dispatch.
-> This plan, the workload contract + two implementations +
-> contract-checker (Slice 1), and the `compare/drift.py` MVP with
-> synthetic fixtures (Slice 2) live in the repo. Slice 3 ships the
-> [`Cross-Runtime Drift Experiment`](../../.github/workflows/cross-runtime-drift-experiment.yml)
-> workflow on `assay-bpf-runner`; the maintainer dispatches it with
-> `OPENAI_API_KEY` + `GOOGLE_API_KEY` secrets to produce the
-> live `runs/{a0,b0}/` baselines + drift reports.
+> **Status:** Slices 0–5 drafted. Slices 0–2 are live; Slice 3
+> workflow + helpers are ready to dispatch; Slice 4
+> [`findings.md`](cross-runtime-drift-2026-05/findings.md) and
+> Slice 5 [`publication/`](cross-runtime-drift-2026-05/publication/)
+> are draft against synthetic fixtures with explicit substitution
+> hooks for live data. The only step left to maintainer-action is
+> dispatching the Slice 3 workflow with the
+> `OPENAI_API_KEY` + `GOOGLE_API_KEY` secrets, committing the
+> resulting `runs/{a0,b0,drift}/` baselines, and substituting the
+> synthetic-fixture tables in `findings.md` / `publication/blog-draft.md`
+> per the procedure documented in `findings.md`.
 > See [`cross-runtime-drift-2026-05/README.md`](cross-runtime-drift-2026-05/README.md)
 > for the layout. Companion to
 > [`runner-vs-otel-shape-comparison-2026-05.md`](runner-vs-otel-shape-comparison-2026-05.md);
@@ -301,8 +304,8 @@ A successful first findings doc:
 | 1 | **Done** | Workload contract ([`WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)), `@openai/agents` workload, `@google/genai` manual-function-calling workload, stdlib contract-checker with 10 unit tests | OpenAI key (already used), Google key for live local testing |
 | 2 | **Done** | `compare/drift.py` MVP ([`compare/drift.py`](cross-runtime-drift-2026-05/compare/drift.py)) with 16 stdlib unit tests. Scope-locked to v0 surface: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order. Synthetic fixtures under [`compare/fixtures/{arm-a-openai, arm-b-gemini}/`](cross-runtime-drift-2026-05/compare/fixtures/) exercise every classification label exactly once. Output schema: `assay.cross_runtime_drift.v0`. | None |
 | 3 | **Workflow ready** | Live Arm A0 + B0 dispatch on `assay-bpf-runner` via [`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml) (workflow_dispatch only). Three jobs: `arm-a-openai`, `arm-b-gemini`, `drift-compare`. Awaits maintainer dispatch with `GOOGLE_API_KEY` secret added; baselines then committed under `runs/{a0,b0}/` per [`runs/README.md`](cross-runtime-drift-2026-05/runs/README.md). | `OPENAI_API_KEY` (already set) + `GOOGLE_API_KEY` as repo secrets |
-| 4 | TODO | `findings.md`. Drift table, classification, threats-to-validity, reproduction commands. | None |
-| 5 | TODO | Publication artefacts (issue + blog draft) following the same discipline as runner-vs-otel Slice 4: one narrow question per channel, no maintainer @-mentions, evidence link once. | OpenInference #3162 triage outcome should inform whether to file under same umbrella or separately |
+| 4 | **Drafted (synthetic-fixture baseline)** | [`findings.md`](cross-runtime-drift-2026-05/findings.md) — drift table, classification, threats-to-validity, reproduction commands. Explicit substitution procedure for the live-data tables once Slice 3 baselines are committed. | None |
+| 5 | **Drafted (not filed, not published)** | [`publication/`](cross-runtime-drift-2026-05/publication/) — `README.md` sequencing rules, `blog-draft.md` engineering write-up, `discussion-draft.md` for the **comment** on #3162 (not a new issue). Held until live baselines land and OpenInference #3162 sees triage. | OpenInference #3162 triage outcome |
 
 ## What this experiment deliberately does NOT do
 
