@@ -1,19 +1,16 @@
 # cross-runtime-drift-2026-05
 
-> **Status:** Slices 1–5 drafted on disk; the only step left to
-> maintainer action is dispatching the Slice 3 workflow and
-> committing live baselines. Workload contract written, two runtime
+> **Status:** Slices 1–5 are on disk, with live n=3 baselines
+> committed from
+> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+> on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
-> validates outputs (13 stdlib unit tests), the `compare/drift.py`
-> MVP produces a per-dimension drift report against the synthetic
-> fixtures (50 stdlib unit tests covering `drift.py` +
-> `health_gate.py` + `extract_fixture_paths.py`), the
-> [`Cross-Runtime Drift Experiment`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
-> workflow is wired for live captures on `assay-bpf-runner`,
-> [`findings.md`](findings.md) carries a synthetic-fixture
-> baseline with an explicit substitution procedure for live data,
-> and [`publication/`](publication/) holds blog + discussion-comment
-> drafts gated on OpenInference #3162 triage.
+> validates outputs (14 stdlib unit tests), `compare/drift.py`
+> produces per-dimension drift reports (50 stdlib unit tests covering
+> `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), live
+> Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
+> reflects the live data, and [`publication/`](publication/) holds
+> blog + discussion-comment drafts gated on OpenInference #3162 triage.
 >
 > **Plan-doc:** [`../cross-runtime-drift-2026-05.md`](../cross-runtime-drift-2026-05.md)
 > (research question, drift dimensions, threats to validity, sequencing).
@@ -29,9 +26,9 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
-| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 50 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift dimension. |
-| [`runs/`](runs/) | Slice 3 target for live Arm A0 + B0 baselines + per-pair drift reports. Currently empty — committed in a follow-up after the maintainer dispatches the workflow. See [`runs/README.md`](runs/README.md). |
-| [`findings.md`](findings.md) | Slice 4: synthetic-fixture baseline write-up with an explicit substitution procedure for live data once Slice 3 baselines land. |
+| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 50 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
+| [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26394765509. See [`runs/README.md`](runs/README.md). |
+| [`findings.md`](findings.md) | Slice 4: live n=3 findings write-up plus threats to validity and reproduction commands. |
 | [`publication/`](publication/) | Slice 5: blog draft + discussion-comment draft, both gated on the OpenInference #3162 triage signal. Not filed, not published. |
 
 ## Running locally
@@ -127,9 +124,10 @@ starting point; the findings doc (Slice 4) explains every
 - Both workloads emit `tool-calls.ndjson` and `run-meta.json`
   per the contract; checker validates without any Runner
   archive present.
-- 13 contract-checker unit tests cover the happy path for both
+- 14 contract-checker unit tests cover the happy path for both
   runtimes plus each individual rule failure mode plus malformed
-  JSON / symlinked workdir handling.
+  JSON / symlinked workdir handling, and the final-newline-insensitive
+  content check required by the live OpenAI run.
 
 ## What's done in Slice 2
 
@@ -149,13 +147,23 @@ starting point; the findings doc (Slice 4) explains every
   output (`--out-json`, `--out-md`).
 - Output schema locked in: `assay.cross_runtime_drift.v0`.
 
-## What's deliberately NOT in Slice 1 or Slice 2
+## What's now done in Slice 3-5
 
-- No Runner capture wiring. That arrives in Slice 3 alongside an
-  `assay-bpf-runner` workflow extension.
-- No `GOOGLE_API_KEY` workflow secret. Local-only until Slice 3.
-- No live n=3 baselines. Comparator runs against synthetic
-  fixtures only; live data is Slice 3.
+- Slice 3 live workflow ran successfully on `assay-bpf-runner`:
+  n=3 OpenAI captures, n=3 Gemini captures, and n=3 drift reports.
+- All six archives passed the health gate:
+  `ringbuf_drops=0`, `kernel_layer=complete`,
+  `cgroup_correlation=clean`.
+- Live findings are stable across all three pairs:
+  filesystem + network rows classify `runtime-induced`, SDK tool
+  events + invocation order classify `task-induced`, process and MCP
+  rows classify `inconclusive`.
+- Publication drafts now describe the live baseline, not a synthetic
+  placeholder. They remain unpublished until #3162 triage gives a
+  maintainer signal.
+
+## What's deliberately NOT in this package
+
 - No OTel trace emission. The cross-runtime comparison is
   between two Runner archives; traces are an explicit follow-up.
 - No read/write/create/remove split, no per-path access counts,

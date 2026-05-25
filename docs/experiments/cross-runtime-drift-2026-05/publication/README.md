@@ -1,7 +1,7 @@
 # Publication artefacts (Slice 5)
 
-> **Status:** drafts only. No blog post is published; no follow-up
-> issue is filed.
+> **Status:** drafts only. Live baselines are now committed, but no
+> blog post is published and no follow-up issue is filed.
 >
 > The vocabulary question for this experiment is *deliberately
 > held* until [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162)
@@ -14,7 +14,7 @@
 
 | File | Audience | Channel | When to ship |
 |---|---|---|---|
-| [`blog-draft.md`](blog-draft.md) | Engineers working on agent-runtime selection, eBPF / agent-runtime observability | Personal blog / dev.to / Hashnode | After (a) the live Slice 3 baselines are committed under [`runs/`](../runs/README.md) and the findings doc reflects live data, and (b) at least one OpenInference maintainer responds to #3162. Posting before either skips the channel discipline the experiment plan committed to. |
+| [`blog-draft.md`](blog-draft.md) | Engineers working on agent-runtime selection, eBPF / agent-runtime observability | Personal blog / dev.to / Hashnode | Live baselines are committed; still wait for at least one OpenInference maintainer response on #3162 before publishing. |
 | [`discussion-draft.md`](discussion-draft.md) | OpenInference / OTel GenAI semconv maintainers | Comment on [`Arize-ai/openinference#3162`](https://github.com/Arize-ai/openinference/issues/3162), **only if** maintainers ask for concrete examples. Not a separate issue. | Only if triage on #3162 explicitly asks for a concrete example of cross-runtime drift surfacing through their proposed vocabulary. Otherwise the draft stays on disk. |
 
 ## Sequencing
@@ -22,8 +22,9 @@
 1. Wait for OpenInference triage on #3162. Do not @-mention any
    individual maintainer. Do not promote on Slack / Discord / X
    without an explicit signal from the community.
-2. Dispatch the Slice 3 workflow, commit the live baselines, update
-   `findings.md` per the substitution procedure documented there.
+2. Live baselines are already committed under [`../runs/`](../runs/README.md)
+   and reflected in [`../findings.md`](../findings.md). Do not repeat
+   the synthetic-only framing in outbound text.
 3. If #3162 triage routes to OTel semconv, mention this experiment
    in the routing comment as evidence — do not open a parallel
    issue.
@@ -42,8 +43,8 @@ These drafts honour:
   integration ask, no "have you seen this in general?" question,
   no individual maintainer pings.
 - The Threats to Validity from the plan doc — both drafts repeat
-  the synthetic-fixture / Linux-only / single-host / single-snapshot
-  caveats up front so reviewers do not have to chase them down.
+  the live-data / Linux-only / single-host / single-snapshot caveats
+  up front so reviewers do not have to chase them down.
 
 ## What this experiment deliberately does NOT publish
 

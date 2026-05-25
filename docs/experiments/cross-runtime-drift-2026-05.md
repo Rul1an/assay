@@ -1,16 +1,15 @@
 # Cross-Runtime Capability-Surface Drift: Plan
 
-> **Status:** Slices 0–5 drafted. Slices 0–2 are live; Slice 3
-> workflow + helpers are ready to dispatch; Slice 4
-> [`findings.md`](cross-runtime-drift-2026-05/findings.md) and
-> Slice 5 [`publication/`](cross-runtime-drift-2026-05/publication/)
-> are draft against synthetic fixtures with explicit substitution
-> hooks for live data. The only step left to maintainer-action is
-> dispatching the Slice 3 workflow with the
-> `OPENAI_API_KEY` + `GOOGLE_API_KEY` secrets, committing the
-> resulting `runs/{a0,b0,drift}/` baselines, and substituting the
-> synthetic-fixture tables in `findings.md` / `publication/blog-draft.md`
-> per the procedure documented in `findings.md`.
+> **Status:** Slices 0–5 are complete on disk. Slice 3 live capture
+> ran on `assay-bpf-runner` as
+> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+> with `repetitions=3` and `build_ebpf=true`; live baselines are
+> committed under
+> [`cross-runtime-drift-2026-05/runs/{a0,b0,drift}/`](cross-runtime-drift-2026-05/runs/README.md).
+> Slice 4 [`findings.md`](cross-runtime-drift-2026-05/findings.md)
+> now reflects the live n=3 data. Slice 5
+> [`publication/`](cross-runtime-drift-2026-05/publication/) remains
+> draft-only and gated on OpenInference #3162 triage.
 > See [`cross-runtime-drift-2026-05/README.md`](cross-runtime-drift-2026-05/README.md)
 > for the layout. Companion to
 > [`runner-vs-otel-shape-comparison-2026-05.md`](runner-vs-otel-shape-comparison-2026-05.md);
@@ -94,7 +93,7 @@ This experiment sits on top of three things that already exist:
 |---|---|---|
 | L2 Runner capture | `assay runner-spike` + cgroup-v2 + eBPF | Stable, proven on slices 1-3 of the runner-vs-otel-2026-05 experiment |
 | Capability_surface v0 schema | `assay-runner-schema` crate | Stable, used by [`v1-findings.md`](runner-vs-otel-2026-05/v1-findings.md) |
-| Agent runtimes under comparison | OpenAI Agents SDK (Node) and one other | OpenAI side proven; second runtime TBD — see Open Questions |
+| Agent runtimes under comparison | OpenAI Agents SDK (Node) and Google GenAI SDK (Node) | Both implemented and captured under Runner in the live baseline |
 
 The drift report is a **new** comparator. It does **not** reuse
 [`runner-vs-otel-2026-05/compare/compare.py`](runner-vs-otel-2026-05/compare/compare.py),
@@ -104,10 +103,8 @@ which is a trace-vs-archive comparator. A new
 ## Open Questions
 
 These were the framing choices pulled up front so the plan did
-not silently bake in defaults. **Q1 and Q3 are resolved by
-Slice 1** (see
-[`cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md));
-Q2, Q4, Q5 remain open.
+not silently bake in defaults. All five have now been resolved by
+the completed slice sequence.
 
 1. **[RESOLVED — Slice 1]** **Which second runtime, and in which tool-calling mode?**
    - **Option A:** Google Gemini via `@google/genai` (unified SDK,
@@ -135,7 +132,7 @@ Q2, Q4, Q5 remain open.
      [Gemini function calling docs](https://ai.google.dev/gemini-api/docs/function-calling),
      [Google Gen AI JS SDK docs](https://googleapis.github.io/js-genai/).
 
-2. **Same workload semantics or same workload code?**
+2. **[RESOLVED — Slice 1]** **Same workload semantics or same workload code?**
    - **Same code** is impossible: the two SDKs register tools
      differently.
    - **Same semantics** means: same prompt intent, same logical
@@ -153,14 +150,14 @@ Q2, Q4, Q5 remain open.
    - Gemini supports `temperature: 0` but does not expose a
      proper deterministic mode.
    - Anthropic supports `temperature: 0` only.
-   - **Recommended:** sidestep the model entirely by going
-     "tool-calling-only with a deterministic synthetic prompt
-     that forces a specific tool sequence." We do not need the
-     model to be smart; we need the *runtime* to dispatch
-     known tool calls. Mirrors the runner-vs-otel deterministic
-     fixture pattern.
+   - **Resolved shape:** real model calls with `temperature: 0`, a
+     tight prompt, and a contract-checker that requires the same
+     two-tool sequence (`read_file -> write_file`). The model remains
+     real so runtime/provider transport is captured; the contract
+     checker prevents model-output variance from becoming a drift
+     signal.
 
-4. **N per arm?**
+4. **[RESOLVED — Slice 3]** **N per arm?**
    - Slice 1-3 of runner-vs-otel used n=3 for shape stability.
    - Drift comparison is also a shape claim, not a latency
      claim, so n=3 is sufficient *for the drift report itself*.
@@ -168,21 +165,22 @@ Q2, Q4, Q5 remain open.
      bump to n>=5 only if drift turns out to be noisy across
      runs of the same runtime.
 
-5. **Provider credentials in CI?**
+5. **[RESOLVED — Slice 3]** **Provider credentials in CI?**
    - OpenAI key already configured for runner-vs-otel.
    - Gemini key would be new. Decision: do we add it as a
      workflow secret, or do we keep this experiment local-only
      until the plan is approved?
-   - **Recommended:** local-only for the proof-of-shape Slice 1,
-     then add the secret + dispatch on `assay-bpf-runner` for
-     Slice 2.
+   - **Resolved shape:** local-only for Slice 1 proof-of-shape, then
+     add the secret and dispatch on `assay-bpf-runner` for Slice 3.
+     This is now done; run 26394765509 used both secrets and produced
+     the committed live baselines.
 
 ## Experimental Arms
 
 | Arm | Runtime | Provider | Capture | Purpose |
 |---|---|---|---|---|
 | A0 | `@openai/agents` Node SDK | OpenAI | Runner Arm C (eBPF + sdk-event-log) | Baseline; already covered by runner-vs-otel Slice 1-3 evidence |
-| B0 | TBD (Option A recommended: `@google/genai`) | TBD | Runner Arm C | The drift target |
+| B0 | `@google/genai` | Google Gemini | Runner Arm C (eBPF + sdk-event-log) | The drift target |
 
 Both arms run **the same workload contract** under the same
 Runner boundary, capture, and host. The only deliberately
@@ -303,17 +301,17 @@ A successful first findings doc:
 | 0 | **Done** | This plan-doc, reviewed and sharpened (Open Questions #1 + #3 resolved) | None |
 | 1 | **Done** | Workload contract ([`WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)), `@openai/agents` workload, `@google/genai` manual-function-calling workload, stdlib [`contract-checker`](cross-runtime-drift-2026-05/contract-checker/) with stdlib unit-test coverage of the happy path and each rule failure mode | OpenAI key (already used), Google key for live local testing |
 | 2 | **Done** | [`compare/drift.py`](cross-runtime-drift-2026-05/compare/drift.py) MVP + [`health_gate.py`](cross-runtime-drift-2026-05/compare/health_gate.py) + [`extract_fixture_paths.py`](cross-runtime-drift-2026-05/compare/extract_fixture_paths.py) helpers, with stdlib unit-test coverage. Scope-locked to v0 surface: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order. Synthetic fixtures under [`compare/fixtures/{arm-a-openai, arm-b-gemini}/`](cross-runtime-drift-2026-05/compare/fixtures/) exercise every classification label exactly once. Output schema: `assay.cross_runtime_drift.v0`. | None |
-| 3 | **Workflow ready** | Live Arm A0 + B0 dispatch on `assay-bpf-runner` via [`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml) (workflow_dispatch only). Three jobs: `arm-a-openai`, `arm-b-gemini`, `drift-compare`. Awaits maintainer dispatch with `GOOGLE_API_KEY` secret added; baselines then committed under `runs/{a0,b0}/` per [`runs/README.md`](cross-runtime-drift-2026-05/runs/README.md). | `OPENAI_API_KEY` (already set) + `GOOGLE_API_KEY` as repo secrets |
-| 4 | **Drafted (synthetic-fixture baseline)** | [`findings.md`](cross-runtime-drift-2026-05/findings.md) — drift table, classification, threats-to-validity, reproduction commands. Explicit substitution procedure for the live-data tables once Slice 3 baselines are committed. | None |
-| 5 | **Drafted (not filed, not published)** | [`publication/`](cross-runtime-drift-2026-05/publication/) — `README.md` sequencing rules, `blog-draft.md` engineering write-up, `discussion-draft.md` for the **comment** on #3162 (not a new issue). Held until live baselines land and OpenInference #3162 sees triage. | OpenInference #3162 triage outcome |
+| 3 | **Done** | Live Arm A0 + B0 dispatch on `assay-bpf-runner` via [`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml) (workflow_dispatch only). Run 26394765509 produced n=3 OpenAI archives, n=3 Gemini archives, and n=3 drift reports committed under [`runs/`](cross-runtime-drift-2026-05/runs/README.md). | Done; repo secrets were present |
+| 4 | **Done** | [`findings.md`](cross-runtime-drift-2026-05/findings.md) — live n=3 drift table, classification, threats-to-validity, reproduction commands, and v0 limitations. | None |
+| 5 | **Drafted (not filed, not published)** | [`publication/`](cross-runtime-drift-2026-05/publication/) — `README.md` sequencing rules, `blog-draft.md` engineering write-up, `discussion-draft.md` for the **comment** on #3162 (not a new issue). Held until OpenInference #3162 sees triage. | OpenInference #3162 triage outcome |
 
 ## What this experiment deliberately does NOT do
 
 - Does not benchmark latency or cost. n=3 is a shape claim, not
   a perf claim.
-- Does not compare model output quality between runtimes. The
-  deterministic synthetic prompt makes the model's role
-  minimal; we measure the runtime's machinery, not its brain.
+- Does not compare model output quality between runtimes. The tight
+  two-tool workload contract makes the model's role minimal; we measure
+  the runtime's machinery, not its brain.
 - Does not declare a winner. "Runtime A is simpler/safer/etc"
   is out of scope; the drift report is descriptive only.
 - Does not propose new capability_surface schema fields. v0 is
@@ -338,6 +336,6 @@ attributes work for both runtimes captured here.
 
 ## Next step
 
-Decide the Open Questions (especially #1 and #3), then Slice 1.
-No code lands until those are pinned. This file is the place to
-record the decisions when they are made.
+Wait for OpenInference #3162 triage before posting any Slice 5
+publication material. Any external comment should point at the live
+`runs/` evidence and keep the vocabulary question narrow.

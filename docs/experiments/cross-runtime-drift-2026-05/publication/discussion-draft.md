@@ -16,25 +16,14 @@
 
 ## When to send this
 
-The draft body below describes a *live* cross-runtime
-comparison; posting it before the Slice 3 baselines are
-actually committed would be an overclaim. Two conditions must
-both hold before this comment goes out:
+The draft body below describes a *live* cross-runtime comparison.
+The live Slice 3 baselines are now committed, so only one condition
+remains before this comment goes out:
 
-1. **Live baselines are committed** under
-   [`../runs/`](../runs/README.md) (Slice 3 dispatched, archives
-   passed the health gate + contract-checker, the `findings.md`
-   substitution procedure has run).
-2. **A maintainer on #3162 asks** for a concrete example along
+1. **A maintainer on #3162 asks** for a concrete example along
    the lines of "can you show what
    `agent.runtime_evidence.{health, boundary}` would carry
    across two different agent runtimes running the same task?"
-
-If only condition 2 holds and the baselines are still synthetic,
-either reply with a *substantially different* comment that
-explicitly says "synthetic-fixture demonstration, live captures
-pending" and links the synthetic drift report — or wait. Do not
-post the body below.
 
 Trigger to **not** post (regardless of baseline state):
 
@@ -58,12 +47,15 @@ Trigger to **not** post (regardless of baseline state):
 > (`automaticFunctionCalling.disable = true`). Both produce a
 > Runner archive with `observation_health.v0`,
 > `capability_surface.v0`, and `layers/sdk.ndjson`.
+> The committed baseline is n=3 per arm from
+> <https://github.com/Rul1an/assay/actions/runs/26394765509>.
 >
-> Per-run, the four attributes from #3162 work identically in
-> both arms:
+> Per-run, if an OTel/OpenInference trace were emitted alongside
+> these archives, the four attributes from #3162 would carry the
+> same shape in both arms:
 >
 > - `agent.runtime_evidence.digest` — `sha256:<manifest-bytes>`,
->   binds the trace to that arm's archive.
+>   binds a trace to that arm's archive.
 > - `agent.runtime_evidence.health` — `clean` (we gate every
 >   iteration on `ringbuf_drops == 0`,
 >   `kernel_layer == complete`, `cgroup_correlation == clean`
@@ -76,13 +68,21 @@ Trigger to **not** post (regardless of baseline state):
 >
 > The interesting cross-runtime signal is one layer down: a
 > per-dimension drift report computed from the two archives'
-> capability_surfaces. Each row carries a classification —
-> task-induced, provider-induced, runtime-induced,
-> inconclusive — that's intentionally distinct from
+> capability_surfaces. Each row carries a downstream-comparator
+> classification — task-induced, provider-induced,
+> runtime-induced, inconclusive — that's intentionally distinct from
 > `runtime_evidence.intent_effect_status` (which is a
 > per-tool-call verdict). The four classification labels are
 > downstream-comparator territory, not trace metadata, and we
 > are explicitly NOT proposing to attach them to spans.
+>
+> In the live n=3 data, the stable labels are: filesystem and
+> network rows `runtime-induced` under the v0 comparator, SDK tool
+> surface and tool invocation order `task-induced`, process and MCP
+> rows `inconclusive`. The network row is a useful limitation:
+> the archive carries IP endpoints, not provider hostnames, so the
+> comparator refuses to call that row provider-induced without a
+> DNS/hostname binding.
 >
 > Full evidence + reproduction commands:
 > <https://github.com/Rul1an/assay/tree/main/docs/experiments/cross-runtime-drift-2026-05>

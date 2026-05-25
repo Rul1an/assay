@@ -3,17 +3,17 @@
 Per-arm Runner archives + per-iteration drift reports for the
 cross-runtime-drift-2026-05 experiment.
 
-> **Status:** empty. Slice 3 ships the dispatch workflow
-> (`.github/workflows/cross-runtime-drift-experiment.yml`); actual
-> baselines arrive in a follow-up commit after the maintainer dispatches
-> the workflow with the required API secrets.
+> **Status:** live baseline committed from
+> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+> on head `91d6dbf2`, dispatched with `repetitions=3` and
+> `build_ebpf=true`.
 
-## Expected layout (post-dispatch)
+## Layout
 
 ```
 runs/
-  a0/                     # Arm A — OpenAI Agents, n>=3 captures
-    run_arm_a-openai_<ts>_1/
+  a0/                     # Arm A — OpenAI Agents, n=3 captures
+    run_arm_a-openai_20260525T100626Z_1/
       archive.tar.gz
       sdk-events.ndjson
       workdir/
@@ -21,12 +21,12 @@ runs/
         fixture-output.txt
         tool-calls.ndjson
         run-meta.json
-    run_arm_a-openai_<ts>_2/
-    run_arm_a-openai_<ts>_3/
-  b0/                     # Arm B — Gemini GenAI, n>=3 captures
-    run_arm_b-gemini_<ts>_1/
-    run_arm_b-gemini_<ts>_2/
-    run_arm_b-gemini_<ts>_3/
+    run_arm_a-openai_20260525T100636Z_2/
+    run_arm_a-openai_20260525T100645Z_3/
+  b0/                     # Arm B — Gemini GenAI, n=3 captures
+    run_arm_b-gemini_20260525T100327Z_1/
+    run_arm_b-gemini_20260525T100331Z_2/
+    run_arm_b-gemini_20260525T100334Z_3/
   drift/                  # drift.py output per (A_i, B_i) pair
     drift_pair_1.json
     drift_pair_1.md
@@ -36,65 +36,60 @@ runs/
     drift_pair_3.md
 ```
 
-## Dispatch procedure
+## Provenance
 
-The actual experiment runs on the delegated `assay-bpf-runner`
-self-hosted runner; only the maintainer can dispatch.
+| Field | Value |
+|---|---|
+| Workflow | `Cross-Runtime Drift Experiment` |
+| Run | <https://github.com/Rul1an/assay/actions/runs/26394765509> |
+| Head SHA | `91d6dbf2` |
+| Runner | `assay-bpf-runner` |
+| Capture | `assay runner-spike`, Linux/eBPF + cgroup v2 |
+| Arm A | `openai-agents`, model `gpt-4o-mini` |
+| Arm B | `gemini-genai`, model `gemini-2.5-flash` |
 
-1. Ensure repo secrets `OPENAI_API_KEY` and `GOOGLE_API_KEY` are set
-   in **Settings → Secrets and variables → Actions**. The workflow
-   fails fast with a clear error message if either is missing.
-2. Go to **Actions → Cross-Runtime Drift Experiment → Run workflow**.
-3. Pick `repetitions = 3` (or more for shape stability beyond n=3),
-   leave `build_ebpf = true`.
-4. Wait for all three jobs to complete: `arm-a-openai`,
-   `arm-b-gemini`, `drift-compare`.
-5. Download the three artifacts produced by the run:
-   `cross-runtime-drift-arm-a-openai-<id>`,
-   `cross-runtime-drift-arm-b-gemini-<id>`,
-   `cross-runtime-drift-reports-<id>`.
+All six archives passed the workflow health gate before artifact upload:
+`ringbuf_drops == 0`, `kernel_layer == "complete"`, and
+`cgroup_correlation == "clean"`. The workflow also ran the workload
+contract-checker per iteration before upload.
 
-## Committing baselines
+## Local verification
 
-After downloading the artifacts:
+Verify committed archive health:
 
-1. Extract `arm-a-openai` artifact into `runs/a0/`.
-2. Extract `arm-b-gemini` artifact into `runs/b0/`.
-3. Extract `drift-reports` artifact into `runs/drift/`.
-4. Verify each archive's measurement health locally:
+```bash
+export REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-   ```bash
-   python3 docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py \
-     --archive path/to/run_arm_a-openai_<ts>_<i>/archive.tar.gz
-   ```
+for archive in \
+  "$REPO_ROOT"/docs/experiments/cross-runtime-drift-2026-05/runs/a0/*/archive.tar.gz \
+  "$REPO_ROOT"/docs/experiments/cross-runtime-drift-2026-05/runs/b0/*/archive.tar.gz
+do
+  python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py" \
+    --archive "$archive"
+done
+```
 
-   This is the same gate the workflow runs per iteration. It exits 0
-   only when `ringbuf_drops == 0`, `kernel_layer == "complete"`, and
-   `cgroup_correlation == "clean"`. (`assay evidence lint` is for Assay
-   *evidence bundles* — a different artifact shape — and does not
-   apply here.)
+Inspect raw health values:
 
-   If you want to eyeball the raw values:
+```bash
+tar -xOzf runs/a0/run_arm_a-openai_20260525T100626Z_1/archive.tar.gz \
+  observation-health.json | python3 -m json.tool
+tar -xOzf runs/b0/run_arm_b-gemini_20260525T100327Z_1/archive.tar.gz \
+  observation-health.json | python3 -m json.tool
+```
 
-   ```bash
-   tar -xOzf archive.tar.gz observation-health.json | python3 -m json.tool
-   tar -xOzf archive.tar.gz correlation-report.json | python3 -m json.tool
-   ```
-
-   Discard any run where the health gate fails and re-dispatch — the
-   dropped events break the kernel-layer completeness invariant the
-   experiment depends on.
-5. Open a follow-up PR titled
-   `docs(experiments): Slice 3 — live Arm A0 + B0 baselines + drift reports`.
-
-The findings doc (Slice 4) then reads these committed baselines and
-the drift reports.
+The `workdir/tool-calls.ndjson` files preserve the absolute paths used
+on the delegated runner (`/opt/actions-runner/_work/...`). That is
+intentional: these are committed evidence artifacts, not relocated local
+workdirs. The contract-checker already ran in the workflow before upload.
+For local inspection, read `tool-calls.ndjson` and `run-meta.json`
+directly rather than re-running the checker with relocated paths.
 
 ## What this directory does NOT contain
 
 - No traces. The runner-vs-otel-2026-05 experiment already proved the
   OTel binding pattern; the cross-runtime-drift experiment compares
-  Runner archives directly, no OTel layer required.
+  Runner archives directly.
 - No raw kernel-event ndjson outside the archive's `layers/`. Per the
   plan-doc, kernel-event granularity beyond `capability_surface` v0 is
   an explicit v2-comparator follow-up.

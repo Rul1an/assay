@@ -4,12 +4,9 @@
 > framing matches the evidence on disk and so reviewers can verify
 > every number from the committed artefacts.
 >
-> **Caveat up front:** the published-ready version of this post
-> waits for the Slice 3 live captures on `assay-bpf-runner`. The
-> tables below are from the synthetic-fixture baseline — they
-> demonstrate the *shape* of the drift report, not the live
-> numbers. Substituted in-place once [`runs/`](https://github.com/Rul1an/assay/tree/main/docs/experiments/cross-runtime-drift-2026-05/runs)
-> has committed baselines.
+> **Caveat up front:** the tables below are from live Linux/eBPF
+> captures on `assay-bpf-runner`, n=3 per arm. The synthetic fixtures
+> still exist, but only as comparator smoke tests.
 >
 > **Date drafted:** 2026-05-25.
 
@@ -39,25 +36,22 @@ Runner archives and produces the table shown below.
 
 ## TL;DR for runtime-selection folks
 
-> **Draft caveat:** the published version of this section asserts
-> the four-shape pattern *empirically* against the live Slice 3
-> baselines. As long as the tables further down are synthetic, the
-> only claim this post supports is "the report can *represent*
-> drift in these four shapes," not "live runtimes actually drift
-> in this pattern."
-
-The comparator's per-dimension drift report can represent
-drift in **four shapes** by design. The synthetic-fixture run
-exercises one example of each; live captures will tell us how
-the labels distribute on real runs.
+The comparator's per-dimension drift report can represent drift in
+**four shapes** by design. The live n=3 run exercised three of them
+stably: task-induced, runtime-induced, and inconclusive. The synthetic
+fixture still exercises provider-induced as a smoke-test shape, but the
+live network data exposed a v0 boundary: the archive carries IP
+endpoints, not provider hostnames, so the comparator refuses to label
+network drift provider-induced without hostname/DNS binding.
 
 1. **Task-induced drift** — both runtimes touched the same
    surface element to satisfy the contract. This is the "good"
    case: drift is zero where the contract pinned it down.
 2. **Provider-induced drift** — non-shared items match a
    provider-host whitelist (`api.openai.com`,
-   `generativelanguage.googleapis.com`, ...). Attributable to
-   the model provider's transport, not the framework choice.
+   `generativelanguage.googleapis.com`, ...). This label is
+   supported by the comparator and synthetic fixture; the live v0
+   baseline does not carry enough hostname data to use it.
 3. **Runtime-induced drift** — non-shared items not on the
    provider whitelist and not in the fixture-path whitelist.
    Attributable to the runtime's loader, sidecar machinery, or
@@ -66,11 +60,10 @@ the labels distribute on real runs.
    has some; cannot mechanically tell whether the dimension is
    genuinely empty in that arm or just not measured.
 
-These four labels are the publishable artefact. The numbers
-behind each label are descriptive. The labels themselves are
-prescriptive only in the negative direction: a row labelled
-`runtime-induced` is information you should weigh when picking
-between two otherwise-equivalent agent runtimes.
+These four labels are the report vocabulary. The live claim is narrower:
+across three real archive pairs, filesystem and network rows landed
+`runtime-induced`, SDK tool surface and invocation order landed
+`task-induced`, and process/MCP rows landed `inconclusive`.
 
 What this post does **not** show:
 
@@ -184,37 +177,28 @@ Other dimensions never run the provider check at all. Same
 reasoning — a filesystem path that happens to contain a provider
 hostname is not a provider transport, it's a filename.
 
-## What the synthetic-fixture run shows
-
-> **Reminder:** these numbers are from the synthetic fixtures
-> under
-> [`compare/fixtures/`](https://github.com/Rul1an/assay/tree/main/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures).
-> Live captures replace this table once the Slice 3 workflow
-> dispatches and the baselines are committed under `runs/`.
+## What the live n=3 run shows
 
 | Dimension | Classification | Why |
 |---|---|---|
-| `filesystem_paths_touched` | **runtime-induced** | Both arms touch the two fixture paths; each adds its own `node_modules` tree on top. Six non-shared items, zero provider matches, zero fixture matches → runtime-induced. |
-| `network_endpoints` | **provider-induced** | `api.openai.com:443` on Arm A vs `generativelanguage.googleapis.com:443` + `oauth2.googleapis.com:443` on Arm B. All three non-shared items match the provider whitelist. |
-| `process_execs` | **task-induced** | Both arms exec `/usr/bin/node`. |
-| `sdk_tool_events` | **task-induced** | Both arms register `read_file` + `write_file`. |
+| `filesystem_paths_touched` | **runtime-induced** | Each arm touches three arm-local/runtime-specific paths (`sdk-events.ndjson`, `tool-calls.ndjson`, and that workload's `dist/package.json`) plus shared host resolver config. |
+| `network_endpoints` | **runtime-induced** under v0 | Live capture records IP endpoints rather than provider hostnames. Non-shared OpenAI/Gemini IPs cannot be matched to the provider-host whitelist, so the comparator refuses to guess. |
+| `process_execs` | **inconclusive** | Empty in both arms under capability_surface v0; the captured Node workload is not represented as a child exec. |
+| `sdk_tool_events` | **task-induced** | Both arms emit SDK events for `read_file` + `write_file`. |
 | `mcp_tool_surface` | **inconclusive** | Empty in both arms (the workload contract forbids MCP). Expected-inconclusive, not surprising-inconclusive. |
 | `tool_invocation_order` | **task-induced** | Both arms invoke `read_file → write_file` in that order. Contract enforces it. |
 
-Three task-induced, one provider-induced, one runtime-induced,
-one inconclusive — every classification label is exercised at
-least once, which is the comparator MVP's acceptance criterion.
+Two task-induced, two runtime-induced, two inconclusive — stable across
+all three live pairs.
 
-The interesting row is `filesystem_paths_touched`. The two
-fixture paths are in `in_both` (good — the contract was honored).
-The six non-shared paths under each arm's `node_modules` tree
-are the published drift signal: "if you pick `@openai/agents`,
-you're carrying `zod` and `@openai/agents/dist/...` into your
-agent's runtime image. If you pick `@google/genai`, you're
-carrying `@google/genai/dist/...` and `google-auth-library/...`
-instead. Same workload contract, different filesystem cost,
-attributable to the runtime, not to the model provider, not to
-your application code."
+The most interesting row changed from what the synthetic fixture
+predicted. I expected network drift to classify provider-induced. In
+the live data, it does not, because v0 `network_endpoints` stores IPs:
+Cloudflare/OpenAI-side IPs, Google-side IPs, and shared local resolver
+traffic at `127.0.0.53:53`. Without hostname/DNS evidence in the
+archive, assigning those IPs to providers would be an inference outside
+the contract. The right result is to say "v0 cannot make that provider
+claim."
 
 ## Why the four labels matter
 
@@ -242,7 +226,7 @@ that produces only runtime-induced rows means you're comparing
 two very different stacks. Most real runs sit in the middle,
 which is the whole point.
 
-## Reproducing the synthetic-fixture run
+## Reproducing the run
 
 ```bash
 git clone https://github.com/Rul1an/assay
@@ -254,7 +238,7 @@ python3 -m unittest discover \
   -s "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare" \
   -p 'test_*.py'
 
-# Smoke run against the synthetic fixtures.
+# Smoke run against the synthetic fixtures (exercises all classifier labels).
 python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.py" \
   --archive-a "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-a-openai" \
   --archive-b "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-b-gemini" \
@@ -262,6 +246,15 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
   --fixture-path /tmp/work/fixture-output.txt \
   --out-md /tmp/drift.md
 cat /tmp/drift.md
+
+# Verify the committed live archives' health.
+for archive in \
+  "$REPO_ROOT"/docs/experiments/cross-runtime-drift-2026-05/runs/a0/*/archive.tar.gz \
+  "$REPO_ROOT"/docs/experiments/cross-runtime-drift-2026-05/runs/b0/*/archive.tar.gz
+do
+  python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py" \
+    --archive "$archive"
+done
 ```
 
 If you have OpenAI + Gemini keys and a Linux host with cgroup
@@ -277,13 +270,14 @@ npm install --ignore-scripts && npx tsc -p tsconfig.json
 WORKLOAD_WORK_DIR=$(mktemp -d) GOOGLE_API_KEY=... node dist/workload.js
 ```
 
-Then run the contract-checker on each work directory; both
-should exit 0. To get a real Runner archive (and therefore a
-real drift report), you need `assay runner-spike run` on a
-Linux/eBPF host — the
+Then run the contract-checker on each work directory; both should exit
+0. To get a fresh Runner archive (and therefore a fresh drift report),
+you need `assay runner-spike run` on a Linux/eBPF host — the
 [`Cross-Runtime Drift Experiment`](https://github.com/Rul1an/assay/blob/main/.github/workflows/cross-runtime-drift-experiment.yml)
 workflow on `assay-bpf-runner` does this end-to-end and uploads
-both arm archives + the per-pair drift reports as artefacts.
+both arm archives + the per-pair drift reports as artefacts. The
+committed baseline in this repo comes from run
+[`26394765509`](https://github.com/Rul1an/assay/actions/runs/26394765509).
 
 ## Relationship to the OpenInference vocabulary question
 
@@ -326,13 +320,7 @@ ask, and otherwise stays on disk in the publication folder.
 
 ## Next
 
-When the Slice 3 live captures land in `runs/`, the synthetic
-tables above get substituted in-place per the substitution
-procedure in
-[`findings.md`](https://github.com/Rul1an/assay/blob/main/docs/experiments/cross-runtime-drift-2026-05/findings.md).
-At that point this post can stop carrying the
-"synthetic-fixture caveat" header and become a real published
-write-up.
-
-Until then it sits in the repo as a draft and the OpenInference
-issue #3162 keeps doing its triage work in the open.
+The data is now live, but the publication discipline has not changed:
+wait for OpenInference #3162 triage before posting this broadly. If a
+maintainer asks for a concrete cross-runtime example, point at the
+committed `runs/` package and keep the vocabulary question narrow.
