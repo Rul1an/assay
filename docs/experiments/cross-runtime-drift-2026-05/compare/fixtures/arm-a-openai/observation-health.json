@@ -1,0 +1,11 @@
+{
+  "schema": "assay.runner.observation_health.v0",
+  "run_id": "drift_fixture_a_openai_001",
+  "platform": "linux",
+  "kernel_layer": "complete",
+  "ringbuf_drops": 0,
+  "policy_layer": "present",
+  "sdk_layer": "present",
+  "cgroup_correlation": "clean",
+  "notes": []
+}

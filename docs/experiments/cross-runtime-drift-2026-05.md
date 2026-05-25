@@ -1,9 +1,10 @@
 # Cross-Runtime Capability-Surface Drift: Plan
 
-> **Status:** Slice 0 (this plan) and Slice 1 (workload contract +
-> two implementations + contract-checker) landed. See
+> **Status:** Slices 0–2 landed: this plan, the workload contract +
+> two implementations + contract-checker (Slice 1), and the
+> `compare/drift.py` MVP with synthetic fixtures (Slice 2). See
 > [`cross-runtime-drift-2026-05/README.md`](cross-runtime-drift-2026-05/README.md)
-> for the Slice 1 layout. Companion to
+> for the layout. Companion to
 > [`runner-vs-otel-shape-comparison-2026-05.md`](runner-vs-otel-shape-comparison-2026-05.md);
 > reuses the same Runner archive + capability_surface contract, so
 > the L2 capture machinery is already proven on
@@ -293,7 +294,7 @@ A successful first findings doc:
 |---|---|---|---|
 | 0 | **Done** | This plan-doc, reviewed and sharpened (Open Questions #1 + #3 resolved) | None |
 | 1 | **Done** | Workload contract ([`WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)), `@openai/agents` workload, `@google/genai` manual-function-calling workload, stdlib contract-checker with 10 unit tests | OpenAI key (already used), Google key for live local testing |
-| 2 | TODO | `compare/drift.py` MVP. **Scope-locked to v0 surface**: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order where SDK events preserve it. Read/write/create classification and kernel-ndjson parsing are deferred. Runs on two synthetic archives derived from existing runner-vs-otel fixtures, no live runs yet. Comparator output schema locked in. | None |
+| 2 | **Done** | `compare/drift.py` MVP ([`compare/drift.py`](cross-runtime-drift-2026-05/compare/drift.py)) with 16 stdlib unit tests. Scope-locked to v0 surface: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order. Synthetic fixtures under [`compare/fixtures/{arm-a-openai, arm-b-gemini}/`](cross-runtime-drift-2026-05/compare/fixtures/) exercise every classification label exactly once. Output schema: `assay.cross_runtime_drift.v0`. | None |
 | 3 | TODO | Live Arm A0 + B0 dispatch on `assay-bpf-runner` (workflow extension). n=3 per arm. Baselines committed under `docs/experiments/cross-runtime-drift-2026-05/runs/{a0,b0}/`. | Second runtime API key as workflow secret |
 | 4 | TODO | `findings.md`. Drift table, classification, threats-to-validity, reproduction commands. | None |
 | 5 | TODO | Publication artefacts (issue + blog draft) following the same discipline as runner-vs-otel Slice 4: one narrow question per channel, no maintainer @-mentions, evidence link once. | OpenInference #3162 triage outcome should inform whether to file under same umbrella or separately |

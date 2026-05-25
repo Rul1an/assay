@@ -1,9 +1,12 @@
 # cross-runtime-drift-2026-05
 
-> **Status:** Slice 1 landed. Workload contract written, two runtime
-> implementations runnable locally with API keys, contract-checker
-> validates outputs with 10 stdlib unit tests passing. Slices 2–5
-> still TODO.
+> **Status:** Slices 1 and 2 landed. Workload contract written, two
+> runtime implementations runnable locally with API keys,
+> contract-checker validates outputs (13 stdlib unit tests), and the
+> `compare/drift.py` MVP produces a per-dimension drift report
+> against the synthetic fixtures with 16 stdlib unit tests passing.
+> Slices 3–5 still TODO (live captures on `assay-bpf-runner`,
+> findings doc, publication artefacts).
 >
 > **Plan-doc:** [`../cross-runtime-drift-2026-05.md`](../cross-runtime-drift-2026-05.md)
 > (research question, drift dimensions, threats to validity, sequencing).
@@ -19,6 +22,7 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
+| [`compare/`](compare/) | Slice 2: `drift.py` stdlib comparator + `test_drift.py` (16 tests) + `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift dimension. |
 
 `runs/` will appear once Slice 3 dispatches live captures on
 `assay-bpf-runner`. Not present yet.
@@ -76,6 +80,31 @@ python3 -m unittest discover \
   -p 'test_*.py'
 ```
 
+### compare/drift.py (Slice 2)
+
+```bash
+# Smoke run against the synthetic fixtures. Produces drift.json on
+# stdout and drift.md if --out-md is given. No live runs required.
+python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.py" \
+  --archive-a "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-a-openai" \
+  --archive-b "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-b-gemini" \
+  --fixture-path /tmp/work/fixture-input.txt \
+  --fixture-path /tmp/work/fixture-output.txt \
+  --out-md /tmp/drift.md
+
+# Tests (no API keys required):
+python3 -m unittest discover \
+  -s "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare" \
+  -p 'test_*.py'
+```
+
+The comparator takes two Runner archives (directories or `.tar.gz`)
+and emits per-dimension drift rows. Each row carries a
+classification: `task-induced` / `provider-induced` /
+`runtime-induced` / `inconclusive`. The classification is a
+starting point; the findings doc (Slice 4) explains every
+`inconclusive` row by hand or downgrades it to a known limitation.
+
 ## What's done in Slice 1
 
 - Open Question #1 resolved: Gemini via `@google/genai`, manual
@@ -91,17 +120,37 @@ python3 -m unittest discover \
 - Both workloads emit `tool-calls.ndjson` and `run-meta.json`
   per the contract; checker validates without any Runner
   archive present.
-- 10 contract-checker unit tests cover the happy path for both
-  runtimes plus each individual rule failure mode.
+- 13 contract-checker unit tests cover the happy path for both
+  runtimes plus each individual rule failure mode plus malformed
+  JSON / symlinked workdir handling.
 
-## What's deliberately NOT in Slice 1
+## What's done in Slice 2
+
+- `compare/drift.py` MVP: stdlib Python comparator that reads two
+  Runner archives (directories or `.tar.gz`) and emits a
+  per-dimension drift report. Dimensions are pinned to v0
+  capability_surface sources (no read/write/create/remove split
+  — that's an explicit v2 follow-up tracked in the plan-doc).
+- `compare/fixtures/arm-a-openai/` and `arm-b-gemini/` synthetic
+  archives wired to exercise every classification label exactly
+  once: filesystem-paths `runtime-induced`, network-endpoints
+  `provider-induced`, process-execs / SDK tools /
+  tool-invocation-order `task-induced`, MCP `inconclusive`.
+- 16 stdlib unit tests cover parsing (directory + tar.gz),
+  failure modes (missing manifest, corrupt JSON, broken tar),
+  every classification label, fixture-path overrides, and CLI
+  output (`--out-json`, `--out-md`).
+- Output schema locked in: `assay.cross_runtime_drift.v0`.
+
+## What's deliberately NOT in Slice 1 or Slice 2
 
 - No Runner capture wiring. That arrives in Slice 3 alongside an
   `assay-bpf-runner` workflow extension.
-- No `compare/drift.py` yet. That is Slice 2 (works against
-  synthetic archives first to lock the output schema).
-- No CI dispatch. `GOOGLE_API_KEY` is local-only until the
-  workload contract is reviewed and Slice 2's comparator schema
-  is stable.
+- No `GOOGLE_API_KEY` workflow secret. Local-only until Slice 3.
+- No live n=3 baselines. Comparator runs against synthetic
+  fixtures only; live data is Slice 3.
 - No OTel trace emission. The cross-runtime comparison is
   between two Runner archives; traces are an explicit follow-up.
+- No read/write/create/remove split, no per-path access counts,
+  no kernel-ndjson parsing. All tracked as deferred v2 follow-ups
+  in the plan-doc.
