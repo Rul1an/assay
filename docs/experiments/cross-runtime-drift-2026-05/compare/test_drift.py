@@ -115,6 +115,13 @@ class ParseArchiveFailureTests(unittest.TestCase):
             (tmpdir / "manifest.json").write_text(
                 json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
             )
+            # capability-surface.json is required (P1 #2 review); provide
+            # a minimal one so the test exercises the *SDK* parse failure
+            # rather than the missing-capability-surface gate.
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps({"schema": "assay.runner.capability_surface.v0"}),
+                encoding="utf-8",
+            )
             (tmpdir / "layers").mkdir()
             (tmpdir / "layers" / "sdk.ndjson").write_text(
                 "{bad json}\n", encoding="utf-8"
@@ -122,6 +129,24 @@ class ParseArchiveFailureTests(unittest.TestCase):
             with self.assertRaises(drift.BadArchiveError) as ctx:
                 drift.parse_archive(tmpdir)
             self.assertIn("invalid JSON", str(ctx.exception))
+
+    def test_nonexistent_archive_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(Path(tmp) / "does-not-exist.tar.gz")
+            self.assertIn("does not exist", str(ctx.exception))
+
+    def test_missing_capability_surface_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            # No capability-surface.json — must be a hard exit-3, not a
+            # silent "everything inconclusive" report.
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(tmpdir)
+            self.assertIn("capability-surface.json", str(ctx.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +384,199 @@ class MainCliTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(rc, 3)
+
+    def test_main_returns_3_on_nonexistent_archive(self) -> None:
+        """The CLI must not crash with a traceback when a path is wrong
+        — that was P1 #1 in the Slice 2 review."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(Path(tmp) / "does-not-exist.tar.gz"),
+                    "--archive-b",
+                    str(ARM_B),
+                ]
+            )
+            self.assertEqual(rc, 3)
+
+
+class RuntimeLabelDerivationTests(unittest.TestCase):
+    """runtime_label must come from SDK events' `source` field, not from
+    a made-up manifest field (P2 #3 in the Slice 2 review)."""
+
+    def test_label_derived_from_sdk_event_source(self) -> None:
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        self.assertEqual(a.runtime_label, "openai-agents")
+        self.assertEqual(b.runtime_label, "gemini-genai")
+
+    def test_label_is_none_when_no_sdk_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps({"schema": "assay.runner.capability_surface.v0"}),
+                encoding="utf-8",
+            )
+            obs = drift.parse_archive(tmpdir)
+            self.assertIsNone(obs.runtime_label)
+
+
+class ProviderClassificationScopeTests(unittest.TestCase):
+    """Provider-host classification must only apply to the
+    network_endpoints dimension. A filesystem path that happens to
+    contain a provider hostname must NOT be labelled provider-induced
+    (P2 #1 in the Slice 2 review)."""
+
+    def _make_obs(
+        self, label: str, fs_extra: str
+    ) -> drift.ArchiveObservation:
+        return drift.ArchiveObservation(
+            path=label,
+            run_id=label,
+            runtime_label=label,
+            manifest_digest="sha256:" + "0" * 64,
+            capability_surface={
+                "filesystem_paths": sorted(
+                    [
+                        "/tmp/work/fixture-input.txt",
+                        "/tmp/work/fixture-output.txt",
+                        fs_extra,
+                    ]
+                ),
+                "network_endpoints": [],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+        )
+
+    def test_provider_hostname_in_fs_path_is_runtime_not_provider(
+        self,
+    ) -> None:
+        # A filesystem path that contains 'api.openai.com' must not
+        # bleed into the provider-host classification.
+        a = self._make_obs(
+            "openai-agents",
+            "/tmp/cache/api.openai.com.json",
+        )
+        b = self._make_obs(
+            "gemini-genai",
+            "/tmp/cache/generativelanguage.googleapis.com.json",
+        )
+        rows = drift.build_drift_report(a, b)
+        row = next(
+            r for r in rows if r.dimension == "filesystem_paths_touched"
+        )
+        self.assertEqual(row.classification, drift.CLASSIFICATION_RUNTIME)
+        # And the detail must NOT claim "all match provider whitelist".
+        self.assertNotIn("provider", row.detail)
+
+
+class NetworkEndpointParsingTests(unittest.TestCase):
+    """Provider-host check must parse `host:port` properly and reject
+    non-matching substrings."""
+
+    def test_host_port_split(self) -> None:
+        self.assertTrue(
+            drift._network_endpoint_matches_provider(
+                "api.openai.com:443", drift.DEFAULT_PROVIDER_HOSTS
+            )
+        )
+
+    def test_subdomain_match(self) -> None:
+        self.assertTrue(
+            drift._network_endpoint_matches_provider(
+                "auth.openai.com:443", drift.DEFAULT_PROVIDER_HOSTS
+            )
+        )
+
+    def test_substring_does_not_match(self) -> None:
+        # A path-shaped string containing the host should not match.
+        self.assertFalse(
+            drift._network_endpoint_matches_provider(
+                "/tmp/api.openai.com.json", drift.DEFAULT_PROVIDER_HOSTS
+            )
+        )
+
+    def test_lookalike_host_does_not_match(self) -> None:
+        # `evil-api.openai.com.attacker.example` must NOT be accepted.
+        self.assertFalse(
+            drift._network_endpoint_matches_provider(
+                "evil-api.openai.com.attacker.example:443",
+                drift.DEFAULT_PROVIDER_HOSTS,
+            )
+        )
+
+
+class MarkdownEscapeTests(unittest.TestCase):
+    """Markdown table cells must escape `|` so that a runtime-induced
+    invocation-order row with `a: ... | b: ...` in the detail does not
+    break the table (P2 #2 in the Slice 2 review)."""
+
+    def test_pipe_in_detail_is_escaped(self) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:" + "0" * 64,
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": [],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=2,
+            sdk_tools=["read_file", "write_file"],
+            sdk_tool_call_ids=["tc_1", "tc_2"],
+            sdk_tool_order=["tc_1:read_file", "tc_2:write_file"],
+        )
+        b = drift.ArchiveObservation(
+            path="b",
+            run_id="b",
+            runtime_label="gemini-genai",
+            manifest_digest="sha256:" + "0" * 64,
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": [],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=2,
+            sdk_tools=["read_file", "write_file"],
+            sdk_tool_call_ids=["tc_1", "tc_2"],
+            # Reversed order to trigger the runtime-induced detail
+            # that contains "a: ... | b: ...".
+            sdk_tool_order=["tc_1:write_file", "tc_2:read_file"],
+        )
+        rows = drift.build_drift_report(a, b)
+        md = drift.report_to_md(a, b, rows)
+        # Every line that starts with `|` must have the same number of
+        # unescaped `|` separators — otherwise the table breaks. We
+        # count by stripping escaped pipes first.
+        for line in md.splitlines():
+            if not line.startswith("|"):
+                continue
+            unescaped = line.replace("\\|", "")
+            # Each table row in our schema has 8 unescaped `|` chars
+            # (7 cell separators + leading and trailing pipe = 8).
+            count = unescaped.count("|")
+            self.assertEqual(
+                count,
+                8,
+                f"row has {count} unescaped pipes, expected 8: {line!r}",
+            )
 
 
 if __name__ == "__main__":

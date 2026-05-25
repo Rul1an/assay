@@ -118,7 +118,12 @@ def _open_archive_member(source: Path, member: str) -> bytes | None:
         path = source / member
         if not path.exists():
             return None
-        return path.read_bytes()
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise BadArchiveError(
+                f"{source}!{member}: read failed: {exc}"
+            ) from exc
     try:
         with tarfile.open(source, "r:*") as tf:
             try:
@@ -130,6 +135,9 @@ def _open_archive_member(source: Path, member: str) -> bytes | None:
             return extracted.read()
     except tarfile.TarError as exc:
         raise BadArchiveError(f"{source}: corrupt tar archive: {exc}") from exc
+    except OSError as exc:
+        # FileNotFoundError, PermissionError, etc. when opening the tarball.
+        raise BadArchiveError(f"{source}: cannot open archive: {exc}") from exc
 
 
 def _parse_json(path_repr: str, data: bytes) -> Any:
@@ -143,13 +151,20 @@ def _parse_json(path_repr: str, data: bytes) -> Any:
 
 def parse_archive(source: Path) -> ArchiveObservation:
     """Parse a Runner archive (directory or .tar.gz). Raises
-    BadArchiveError if the manifest is missing or any required file is
-    corrupt.
+    BadArchiveError if the path does not exist, the manifest is missing,
+    capability-surface.json is missing, or any required file is corrupt.
 
     Note: we read the exact manifest bytes for the digest, never
     re-serialized JSON. The drift comparator does not enforce binding
     against a trace (that's compare.py's job in the runner-vs-otel
     experiment), but it still records the digest for traceability."""
+
+    if not source.exists():
+        raise BadArchiveError(f"{source}: archive path does not exist")
+    if not (source.is_dir() or source.is_file()):
+        raise BadArchiveError(
+            f"{source}: archive path is neither a directory nor a file"
+        )
 
     manifest_bytes = _open_archive_member(source, MANIFEST_PATH)
     if manifest_bytes is None:
@@ -157,10 +172,24 @@ def parse_archive(source: Path) -> ArchiveObservation:
     manifest = _parse_json(f"{source}!{MANIFEST_PATH}", manifest_bytes)
     manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
     run_id = manifest.get("run_id") if isinstance(manifest, dict) else None
-    runtime_label = (
-        manifest.get("runtime_label") if isinstance(manifest, dict) else None
-    )
+    # runtime_label is derived from SDK events below (the real Runner
+    # archive_manifest.v0 schema does not carry a runtime field; the SDK
+    # event `source` is the canonical signal).
+    runtime_label: str | None = None
 
+    # capability-surface.json is the primary evidence source for the
+    # drift comparator. Missing it is a hard exit-3, not a silent
+    # "everything inconclusive" report — otherwise an incomplete
+    # Runner capture could ship as a valid drift report in Slice 3.
+    capability_bytes = _open_archive_member(source, CAPABILITY_SURFACE_PATH)
+    if capability_bytes is None:
+        raise BadArchiveError(
+            f"{source}: capability-surface.json not found "
+            f"(required by the drift comparator)"
+        )
+    capability = _parse_json(
+        f"{source}!{CAPABILITY_SURFACE_PATH}", capability_bytes
+    )
     capability_surface: dict[str, list[str]] = {
         "filesystem_paths": [],
         "network_endpoints": [],
@@ -168,18 +197,13 @@ def parse_archive(source: Path) -> ArchiveObservation:
         "mcp_tools": [],
         "policy_decisions": [],
     }
-    capability_bytes = _open_archive_member(source, CAPABILITY_SURFACE_PATH)
-    if capability_bytes is not None:
-        capability = _parse_json(
-            f"{source}!{CAPABILITY_SURFACE_PATH}", capability_bytes
-        )
-        if isinstance(capability, dict):
-            for key in capability_surface:
-                value = capability.get(key, [])
-                if isinstance(value, list):
-                    capability_surface[key] = sorted(
-                        [str(v) for v in value if isinstance(v, str)]
-                    )
+    if isinstance(capability, dict):
+        for key in capability_surface:
+            value = capability.get(key, [])
+            if isinstance(value, list):
+                capability_surface[key] = sorted(
+                    [str(v) for v in value if isinstance(v, str)]
+                )
 
     sdk_events: list[dict[str, Any]] = []
     sdk_bytes = _open_archive_member(source, SDK_LAYER_PATH)
@@ -200,6 +224,18 @@ def parse_archive(source: Path) -> ArchiveObservation:
                     f"{source}!{SDK_LAYER_PATH}:{lineno}: "
                     f"invalid JSON: {exc}"
                 ) from exc
+
+    # Derive runtime label from the first SDK event that carries a
+    # `source` field. The Runner SDK-event v0 schema sets source to the
+    # workload-side identifier (e.g. "openai-agents", "gemini-genai"),
+    # which is the canonical signal. Falls back to None when SDK layer
+    # is absent or events do not carry source — the drift report then
+    # renders the label as `<unknown>`.
+    for event in sdk_events:
+        candidate = event.get("source")
+        if isinstance(candidate, str) and candidate:
+            runtime_label = candidate
+            break
 
     # Derive tool registration / invocation summary from SDK events.
     sdk_tools: list[str] = []
@@ -262,6 +298,23 @@ class DriftRow:
     detail: str
 
 
+def _network_endpoint_matches_provider(
+    item: str, provider_hosts: tuple[str, ...]
+) -> bool:
+    """Return True iff `item` parses as a `host:port` network endpoint
+    where the host equals (or is a subdomain of) one of the whitelisted
+    provider hosts. Substring matching is deliberately avoided so
+    filesystem paths containing `api.openai.com` do not get
+    misclassified as provider-induced when this function is mistakenly
+    called for a non-network dimension."""
+
+    host = item.rsplit(":", 1)[0] if ":" in item else item
+    for provider in provider_hosts:
+        if host == provider or host.endswith("." + provider):
+            return True
+    return False
+
+
 def _classify_row(
     only_in_a: list[str],
     only_in_b: list[str],
@@ -270,10 +323,16 @@ def _classify_row(
     has_data_b: bool,
     provider_hosts: tuple[str, ...],
     fixture_paths: frozenset[str],
+    *,
+    is_network_dimension: bool = False,
 ) -> tuple[str, str]:
     """Return (classification, detail) for one drift row.
 
-    Conservative ruleset (see module docstring for the four labels)."""
+    `is_network_dimension` gates the provider-host classification path.
+    Only the `network_endpoints` row should pass True; for other
+    dimensions a filesystem path or tool name that happens to contain a
+    provider hostname would otherwise be misclassified as
+    `provider-induced` (P2 review feedback)."""
 
     # Dimension wholly empty on both sides — task didn't exercise it.
     if not has_data_a and not has_data_b:
@@ -294,10 +353,9 @@ def _classify_row(
         return CLASSIFICATION_TASK, "full overlap"
 
     def _is_provider(item: str) -> bool:
-        for host in provider_hosts:
-            if host in item:
-                return True
-        return False
+        if not is_network_dimension:
+            return False
+        return _network_endpoint_matches_provider(item, provider_hosts)
 
     def _is_fixture(item: str) -> bool:
         return item in fixture_paths
@@ -305,7 +363,7 @@ def _classify_row(
     provider_count = sum(1 for x in non_shared if _is_provider(x))
     fixture_count = sum(1 for x in non_shared if _is_fixture(x))
     total = len(non_shared)
-    if provider_count == total:
+    if is_network_dimension and provider_count == total:
         return (
             CLASSIFICATION_PROVIDER,
             f"all {total} non-shared item(s) match provider host whitelist",
@@ -316,12 +374,18 @@ def _classify_row(
             f"all {total} non-shared item(s) match known fixture paths",
         )
     # Mixed or none-of-the-above → attribute to the runtime.
-    return (
-        CLASSIFICATION_RUNTIME,
-        f"{total} non-shared item(s); {provider_count} provider, "
-        f"{fixture_count} fixture, {total - provider_count - fixture_count} "
-        f"unclassified",
-    )
+    detail = f"{total} non-shared item(s); "
+    if is_network_dimension:
+        detail += (
+            f"{provider_count} provider, "
+            f"{fixture_count} fixture, "
+            f"{total - provider_count - fixture_count} unclassified"
+        )
+    else:
+        detail += (
+            f"{fixture_count} fixture, {total - fixture_count} unclassified"
+        )
+    return CLASSIFICATION_RUNTIME, detail
 
 
 def _diff_lists(
@@ -391,6 +455,7 @@ def build_drift_report(
         bool(b_net),
         provider_hosts,
         fixture_paths,
+        is_network_dimension=True,
     )
     rows.append(
         DriftRow(
@@ -593,11 +658,20 @@ def report_to_json(
     }
 
 
+def _md_escape_cell(text: str) -> str:
+    """Escape a string for inclusion in a Markdown table cell.
+
+    GitHub-flavoured Markdown uses `|` as column separator; an unescaped
+    `|` inside a cell ends the cell early and breaks the row. Backslash
+    escapes both the pipe and the backslash itself."""
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
 def _fmt_list(items: Iterable[str]) -> str:
     items = list(items)
     if not items:
         return "—"
-    return ", ".join(f"`{i}`" for i in items)
+    return ", ".join(f"`{_md_escape_cell(i)}`" for i in items)
 
 
 def report_to_md(
@@ -609,12 +683,14 @@ def report_to_md(
     lines.append("# Cross-Runtime Drift Report")
     lines.append("")
     lines.append(
-        f"- **Arm A:** `{a.runtime_label or '<unknown>'}` "
-        f"(`{a.path}`, manifest `{a.manifest_digest}`)"
+        f"- **Arm A:** `{_md_escape_cell(a.runtime_label or '<unknown>')}` "
+        f"(`{_md_escape_cell(a.path)}`, "
+        f"manifest `{a.manifest_digest}`)"
     )
     lines.append(
-        f"- **Arm B:** `{b.runtime_label or '<unknown>'}` "
-        f"(`{b.path}`, manifest `{b.manifest_digest}`)"
+        f"- **Arm B:** `{_md_escape_cell(b.runtime_label or '<unknown>')}` "
+        f"(`{_md_escape_cell(b.path)}`, "
+        f"manifest `{b.manifest_digest}`)"
     )
     lines.append("")
     lines.append(
@@ -624,9 +700,13 @@ def report_to_md(
     lines.append("|---|---|---|---|---|---|---|")
     for r in rows:
         lines.append(
-            f"| `{r.dimension}` | `{r.source}` | **{r.classification}** | "
-            f"{_fmt_list(r.only_in_a)} | {_fmt_list(r.only_in_b)} | "
-            f"{_fmt_list(r.in_both)} | {r.detail} |"
+            f"| `{_md_escape_cell(r.dimension)}` "
+            f"| `{_md_escape_cell(r.source)}` "
+            f"| **{_md_escape_cell(r.classification)}** "
+            f"| {_fmt_list(r.only_in_a)} "
+            f"| {_fmt_list(r.only_in_b)} "
+            f"| {_fmt_list(r.in_both)} "
+            f"| {_md_escape_cell(r.detail)} |"
         )
     return "\n".join(lines) + "\n"
 

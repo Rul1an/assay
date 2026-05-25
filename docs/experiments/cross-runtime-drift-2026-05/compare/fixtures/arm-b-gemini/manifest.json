@@ -1,12 +1,26 @@
 {
   "schema": "assay.runner.archive_manifest.v0",
   "run_id": "drift_fixture_b_gemini_001",
-  "runtime_label": "gemini-genai",
   "files": {
-    "manifest.json": {
-      "path": "manifest.json",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "bytes": 0
+    "capability-surface.json": {
+      "path": "capability-surface.json",
+      "sha256": "sha256:6d964d14fc6fcfa7f2d4b9c3aca2853fc871a9326c4287bb461da9c44c022fd1",
+      "bytes": 650
+    },
+    "observation-health.json": {
+      "path": "observation-health.json",
+      "sha256": "sha256:33f78e8268963f042a65660c43c7944536dec6a96f6ee1728e4cef408c5d81aa",
+      "bytes": 273
+    },
+    "correlation-report.json": {
+      "path": "correlation-report.json",
+      "sha256": "sha256:056f84cf967013499a224050a2517840e900255999b1ccd74ff6a1fb2cffedb0",
+      "bytes": 131
+    },
+    "layers/sdk.ndjson": {
+      "path": "layers/sdk.ndjson",
+      "sha256": "sha256:d43530893a54c9f1ca2ebf8ab76ed7127152b73d89d449fd5c03e5fabbc29df9",
+      "bytes": 1156
     }
   }
 }
