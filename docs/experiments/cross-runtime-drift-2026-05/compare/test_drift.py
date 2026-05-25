@@ -58,6 +58,27 @@ class ParseArchiveHappyPathTests(unittest.TestCase):
         self.assertEqual(obs.runtime_label, "openai-agents")
         self.assertEqual(obs.run_id, "drift_fixture_a_openai_001")
         self.assertTrue(obs.manifest_digest.startswith("sha256:"))
+        self.assertEqual(
+            obs.manifest_schema, "assay.runner.archive_manifest.v0"
+        )
+        self.assertEqual(
+            obs.capability_surface_schema,
+            "assay.runner.capability_surface.v0",
+        )
+        self.assertEqual(
+            obs.observation_health_schema,
+            "assay.runner.observation_health.v0",
+        )
+        self.assertEqual(
+            obs.correlation_report_schema,
+            "assay.runner.correlation_report.v0",
+        )
+        self.assertEqual(obs.sdk_event_schema, drift.SDK_EVENT_SCHEMA)
+        self.assertEqual(
+            obs.kernel_event_schema, "assay.runner.kernel_event.v0"
+        )
+        self.assertEqual(obs.observation_health["ringbuf_drops"], 0)
+        self.assertEqual(obs.correlation_report["status"], "clean")
         self.assertIn(
             "/tmp/work/fixture-input.txt",
             obs.capability_surface["filesystem_paths"],
@@ -635,6 +656,22 @@ class MainCliTests(unittest.TestCase):
                 drift.RUNTIME_NOISE_TAXONOMY_SCHEMA,
             )
             self.assertEqual(
+                payload["provenance"]["schema"],
+                drift.DRIFT_REPORT_PROVENANCE_SCHEMA,
+            )
+            self.assertEqual(
+                payload["provenance"]["input_archives"][0]["schemas"][
+                    "archive_manifest"
+                ],
+                "assay.runner.archive_manifest.v0",
+            )
+            self.assertEqual(
+                payload["provenance"]["input_archives"][0][
+                    "observation_health"
+                ]["ringbuf_drops"],
+                0,
+            )
+            self.assertEqual(
                 payload["archive_a"]["runtime_label"], "openai-agents"
             )
             self.assertEqual(
@@ -657,6 +694,52 @@ class MainCliTests(unittest.TestCase):
             self.assertIn("# Cross-Runtime Drift Report", md)
             self.assertIn("filesystem_paths_touched", md)
             self.assertIn("read:workdir/input", md)
+
+    def test_main_writes_explicit_report_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "drift.json"
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(ARM_A),
+                    "--archive-b",
+                    str(ARM_B),
+                    "--out-json",
+                    str(out_json),
+                    "--assay-version",
+                    "3.11.3",
+                    "--assay-commit",
+                    "abc123",
+                    "--workflow-url",
+                    "https://github.com/Rul1an/assay/actions/runs/1",
+                    "--runner-label",
+                    "assay-bpf-runner",
+                    "--kernel-os",
+                    "linux",
+                    "--kernel-release",
+                    "6.8.0-117-generic",
+                    "--kernel-arch",
+                    "aarch64",
+                    "--ebpf-object-digest",
+                    "sha256:" + "1" * 64,
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            provenance = payload["provenance"]
+            self.assertEqual(provenance["assay_version"], "3.11.3")
+            self.assertEqual(provenance["assay_commit"], "abc123")
+            self.assertEqual(
+                provenance["workflow"]["url"],
+                "https://github.com/Rul1an/assay/actions/runs/1",
+            )
+            self.assertEqual(
+                provenance["workflow"]["runner_label"], "assay-bpf-runner"
+            )
+            self.assertEqual(provenance["kernel"]["os"], "linux")
+            self.assertEqual(
+                provenance["ebpf_object_digest"], "sha256:" + "1" * 64
+            )
 
     def test_main_returns_3_on_bad_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
