@@ -39,8 +39,17 @@ Runner archives and produces the table shown below.
 
 ## TL;DR for runtime-selection folks
 
-When you swap an agent runtime under a fixed workload contract,
-the capability_surface drifts in **four shapes**:
+> **Draft caveat:** the published version of this section asserts
+> the four-shape pattern *empirically* against the live Slice 3
+> baselines. As long as the tables further down are synthetic, the
+> only claim this post supports is "the report can *represent*
+> drift in these four shapes," not "live runtimes actually drift
+> in this pattern."
+
+The comparator's per-dimension drift report can represent
+drift in **four shapes** by design. The synthetic-fixture run
+exercises one example of each; live captures will tell us how
+the labels distribute on real runs.
 
 1. **Task-induced drift** — both runtimes touched the same
    surface element to satisfy the contract. This is the "good"

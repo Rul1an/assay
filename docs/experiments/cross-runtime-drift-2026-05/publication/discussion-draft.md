@@ -16,12 +16,27 @@
 
 ## When to send this
 
-Trigger to post: maintainer on #3162 asks something like "can
-you show what `agent.runtime_evidence.{health, boundary}` would
-carry across two different agent runtimes running the same
-task?"
+The draft body below describes a *live* cross-runtime
+comparison; posting it before the Slice 3 baselines are
+actually committed would be an overclaim. Two conditions must
+both hold before this comment goes out:
 
-Trigger to **not** post:
+1. **Live baselines are committed** under
+   [`../runs/`](../runs/README.md) (Slice 3 dispatched, archives
+   passed the health gate + contract-checker, the `findings.md`
+   substitution procedure has run).
+2. **A maintainer on #3162 asks** for a concrete example along
+   the lines of "can you show what
+   `agent.runtime_evidence.{health, boundary}` would carry
+   across two different agent runtimes running the same task?"
+
+If only condition 2 holds and the baselines are still synthetic,
+either reply with a *substantially different* comment that
+explicitly says "synthetic-fixture demonstration, live captures
+pending" and links the synthetic drift report — or wait. Do not
+post the body below.
+
+Trigger to **not** post (regardless of baseline state):
 
 - Triage routes us to OTel semconv — then mention this experiment
   in the routing comment as evidence, not as a new question.

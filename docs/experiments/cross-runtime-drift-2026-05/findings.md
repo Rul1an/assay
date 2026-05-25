@@ -37,9 +37,12 @@ The drift is bounded and falls into four classifications:
   whitelist and not in the fixture-path whitelist. Attributable
   to the runtime's loader, sidecar machinery, or vendored
   dependencies.
-- **inconclusive** — one arm has zero data and the other has
-  some; cannot tell whether the dimension is genuinely empty in
-  that arm or just not measured.
+- **inconclusive** — either both arms have zero data on this
+  dimension (the task didn't exercise it, e.g. `mcp_tools` under
+  this contract), or one arm has zero data and the other has
+  some (cannot tell whether the dimension is genuinely empty in
+  the absent arm or just not measured). Matches `drift.py`'s
+  two-pronged inconclusive rule verbatim.
 
 The comparator (`compare/drift.py`) produces a per-dimension
 drift report with this classification per row. The publishable
@@ -140,7 +143,7 @@ honest.
 ## Live-data substitution procedure
 
 When the maintainer dispatches
-[`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml)
+[`.github/workflows/cross-runtime-drift-experiment.yml`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
 and commits the resulting baselines:
 
 1. Replace this status block with `Live baselines committed
