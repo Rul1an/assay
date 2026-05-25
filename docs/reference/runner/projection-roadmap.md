@@ -247,17 +247,20 @@ raise confidence, but the report must say which source was used.
 
 ## Phase 5: Runtime Drift Projection Artifact
 
-Only after path projection, network projection, taxonomy, and metadata
-are stable should Assay freeze a projection artifact shape.
+Path projection, network projection, taxonomy, and metadata are now
+stable enough to freeze the first projection artifact shape.
 
-Candidate schema:
+Implemented schema:
 
 ```text
 assay.runner.runtime_drift.v0
 ```
 
-This should be a projection artifact, not a primary evidence artifact.
-It reads Runner archives and emits a comparison report.
+This is a projection artifact, not a primary evidence artifact. It reads
+Runner archives and emits a comparison report. The contract is documented
+in [`runtime-drift-v0.md`](runtime-drift-v0.md), with a machine-readable
+schema at
+[`schema/runtime-drift-v0.schema.json`](schema/runtime-drift-v0.schema.json).
 
 Required design properties:
 
@@ -342,7 +345,7 @@ Projection reports MUST carry explicit non-claims. Initial codes:
 | 2 | Runtime/noise taxonomy constants and docs | Unknown-preserving tests |
 | 3 | Report provenance metadata block | Existing live run can be re-rendered with metadata |
 | 4 | Network projection helper | Exact endpoint, CIDR, and unknown fallback tests |
-| 5 | Draft `assay.runner.runtime_drift.v0` projection schema | Synthetic fixture covers all claim levels |
+| 5 | Freeze `assay.runner.runtime_drift.v0` projection schema | Synthetic fixture covers all claim levels + schema sidecar matches comparator output |
 | 6 | Kernel event v0.2 feasibility note | No code until projection reports prove value |
 
 ## Relationship To Existing Contracts
