@@ -48,7 +48,7 @@ Trigger to **not** post (regardless of baseline state):
 > Runner archive with `observation_health.v0`,
 > `capability_surface.v0`, and `layers/sdk.ndjson`.
 > The committed baseline is n=3 per arm from
-> <https://github.com/Rul1an/assay/actions/runs/26394765509>.
+> <https://github.com/Rul1an/assay/actions/runs/26398427430>.
 >
 > Per-run, if an OTel/OpenInference trace were emitted alongside
 > these archives, the four attributes from #3162 would carry the

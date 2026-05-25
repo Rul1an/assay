@@ -4,8 +4,8 @@ Per-arm Runner archives + per-iteration drift reports for the
 cross-runtime-drift-2026-05 experiment.
 
 > **Status:** live baseline committed from
-> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
-> on head `91d6dbf2`, dispatched with `repetitions=3` and
+> [GitHub Actions run 26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
+> on head `e3f6ef9d`, dispatched with `repetitions=3` and
 > `build_ebpf=true`.
 
 ## Layout
@@ -13,7 +13,7 @@ cross-runtime-drift-2026-05 experiment.
 ```
 runs/
   a0/                     # Arm A — OpenAI Agents, n=3 captures
-    run_arm_a-openai_20260525T100626Z_1/
+    run_arm_a-openai_20260525T113813Z_1/
       archive.tar.gz
       sdk-events.ndjson
       workdir/
@@ -21,12 +21,12 @@ runs/
         fixture-output.txt
         tool-calls.ndjson
         run-meta.json
-    run_arm_a-openai_20260525T100636Z_2/
-    run_arm_a-openai_20260525T100645Z_3/
+    run_arm_a-openai_20260525T113821Z_2/
+    run_arm_a-openai_20260525T113828Z_3/
   b0/                     # Arm B — Gemini GenAI, n=3 captures
-    run_arm_b-gemini_20260525T100327Z_1/
-    run_arm_b-gemini_20260525T100331Z_2/
-    run_arm_b-gemini_20260525T100334Z_3/
+    run_arm_b-gemini_20260525T114112Z_1/
+    run_arm_b-gemini_20260525T114117Z_2/
+    run_arm_b-gemini_20260525T114122Z_3/
   drift/                  # drift.py output per (A_i, B_i) pair
     drift_pair_1.json
     drift_pair_1.md
@@ -41,8 +41,8 @@ runs/
 | Field | Value |
 |---|---|
 | Workflow | `Cross-Runtime Drift Experiment` |
-| Run | <https://github.com/Rul1an/assay/actions/runs/26394765509> |
-| Head SHA | `91d6dbf2` |
+| Run | <https://github.com/Rul1an/assay/actions/runs/26398427430> |
+| Head SHA | `e3f6ef9d` |
 | Runner | `assay-bpf-runner` |
 | Capture | `assay runner-spike`, Linux/eBPF + cgroup v2 |
 | Arm A | `openai-agents`, model `gpt-4o-mini` |
@@ -72,9 +72,9 @@ done
 Inspect raw health values:
 
 ```bash
-tar -xOzf runs/a0/run_arm_a-openai_20260525T100626Z_1/archive.tar.gz \
+tar -xOzf runs/a0/run_arm_a-openai_20260525T113813Z_1/archive.tar.gz \
   observation-health.json | python3 -m json.tool
-tar -xOzf runs/b0/run_arm_b-gemini_20260525T100327Z_1/archive.tar.gz \
+tar -xOzf runs/b0/run_arm_b-gemini_20260525T114112Z_1/archive.tar.gz \
   observation-health.json | python3 -m json.tool
 ```
 
@@ -90,6 +90,7 @@ directly rather than re-running the checker with relocated paths.
 - No traces. The runner-vs-otel-2026-05 experiment already proved the
   OTel binding pattern; the cross-runtime-drift experiment compares
   Runner archives directly.
-- No raw kernel-event ndjson outside the archive's `layers/`. Per the
-  plan-doc, kernel-event granularity beyond `capability_surface` v0 is
-  an explicit v2-comparator follow-up.
+- No raw kernel-event ndjson outside the archive's `layers/`. The drift
+  reports now parse optional open metadata from
+  `layers/kernel.ndjson` for operation-aware rows; the archive remains
+  the source of truth.

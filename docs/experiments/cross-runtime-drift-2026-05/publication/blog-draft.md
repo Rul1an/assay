@@ -72,9 +72,9 @@ What this post does **not** show:
 - This post does not claim the provider-host whitelist is
   exhaustive — new providers need a `--provider-host` override.
 - This post does not say more than the v0 `capability_surface`
-  schema can supply. Read/write/create/remove classification
-  and per-path access counts are an explicit
-  v2-comparator follow-up.
+  schema can supply. Operation-aware file rows use optional
+  `layers/kernel.ndjson` open metadata; unlink/remove and per-path
+  access counts remain out of scope.
 
 ## The setup
 
@@ -114,12 +114,13 @@ for both arms by construction; whatever drifts is the
 
 ## The drift dimensions
 
-The comparator looks at six dimensions, each pinned to an
+The comparator looks at seven dimensions, each pinned to an
 exact archive source so it cannot silently mix layers:
 
 | Dimension | Source | What "drift" looks like |
 |---|---|---|
 | `filesystem_paths_touched` | `capability_surface.filesystem_paths` | Set diff of paths touched (undifferentiated under v0) |
+| `kernel_file_operations` | `layers/kernel.ndjson` open metadata | Set diff of `operation:path` strings for successful opens |
 | `network_endpoints` | `capability_surface.network_endpoints` | Set diff of `host:port` strings |
 | `process_execs` | `capability_surface.process_execs` / `layers/kernel.ndjson` | Set diff of exec targets |
 | `sdk_tool_events` | `layers/sdk.ndjson` | Set diff of SDK-emitted tool names |
@@ -129,10 +130,10 @@ exact archive source so it cannot silently mix layers:
 Three things are deliberately out of scope for the v0
 comparator:
 
-- Read-vs-write-vs-create-vs-remove classification of
-  filesystem paths. Capability_surface v0 records "touched
-  paths" undifferentiated; the split needs a kernel.ndjson
-  parser and is a v2 follow-up.
+- Unlink/remove and fd-level byte-count semantics. The committed
+  baseline can split successful open events into
+  `read`/`write`/`create`/`truncate`/`append` using kernel open
+  metadata, but it does not claim full filesystem semantics.
 - Per-path access counts.
 - Latency, token cost, model output quality.
 
@@ -277,7 +278,7 @@ you need `assay runner-spike run` on a Linux/eBPF host — the
 workflow on `assay-bpf-runner` does this end-to-end and uploads
 both arm archives + the per-pair drift reports as artefacts. The
 committed baseline in this repo comes from run
-[`26394765509`](https://github.com/Rul1an/assay/actions/runs/26394765509).
+[`26398427430`](https://github.com/Rul1an/assay/actions/runs/26398427430).
 
 ## Relationship to the OpenInference vocabulary question
 

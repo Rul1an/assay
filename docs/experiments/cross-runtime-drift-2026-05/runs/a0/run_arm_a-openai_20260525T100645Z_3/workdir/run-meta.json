@@ -1,9 +1,0 @@
-{
-  "runtime": "openai-agents",
-  "model": "gpt-4o-mini",
-  "sdk_version": "unknown",
-  "started_at": "2026-05-25T10:06:46.377Z",
-  "ended_at": "2026-05-25T10:06:53.046Z",
-  "exit_code": 0,
-  "model_reply": "DONE"
-}

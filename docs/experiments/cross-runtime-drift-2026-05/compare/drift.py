@@ -11,10 +11,10 @@ Scope (v0, Slice 2):
   - SDK tool events (layers/sdk.ndjson — tool names per archive)
   - MCP tool surface (capability_surface.mcp_tools)
   - tool invocation order (SDK events' seq per tool_call_id)
+  - kernel file operations (layers/kernel.ndjson open metadata)
 
 Out of scope (explicit follow-ups, NOT silent gaps):
-  - read/write/create/remove classification (requires
-    kernel.ndjson parsing — deferred to a v2 comparator)
+  - unlink/remove classification
   - per-path access counts
   - latency / token / cost (not a drift signal)
 

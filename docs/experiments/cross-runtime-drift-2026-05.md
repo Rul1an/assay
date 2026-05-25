@@ -2,7 +2,7 @@
 
 > **Status:** Slices 0–5 are complete on disk. Slice 3 live capture
 > ran on `assay-bpf-runner` as
-> [GitHub Actions run 26394765509](https://github.com/Rul1an/assay/actions/runs/26394765509)
+> [GitHub Actions run 26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
 > with `repetitions=3` and `build_ebpf=true`; live baselines are
 > committed under
 > [`cross-runtime-drift-2026-05/runs/{a0,b0,drift}/`](cross-runtime-drift-2026-05/runs/README.md).
@@ -37,10 +37,12 @@ comparator cannot silently mix layers.
 
 - **Filesystem paths touched** (source: `capability_surface.filesystem_paths`):
   set of paths the runtime accessed. Under v0 this is *undifferentiated*
-  (read vs write vs create vs remove are not split). See Threats to
-  Validity #5 — the read/write/create/remove split is a deferred
-  v2-comparator follow-up that requires parsing `layers/kernel.ndjson`
-  directly.
+  (read vs write vs create vs remove are not split).
+- **Kernel file operations** (source: `layers/kernel.ndjson`):
+  operation-aware projection of successful `openat` / `openat2`
+  events where open metadata is present. Supports `read`, `write`,
+  `create`, `truncate`, and `append`; does not claim unlink/remove or
+  fd-level byte-count semantics.
 - **Network endpoints** (source: `capability_surface.network`):
   hosts, ports, CIDRs the runtime contacted.
 - **Process execs** (source: `capability_surface.processes` /
@@ -172,7 +174,7 @@ the completed slice sequence.
      until the plan is approved?
    - **Resolved shape:** local-only for Slice 1 proof-of-shape, then
      add the secret and dispatch on `assay-bpf-runner` for Slice 3.
-     This is now done; run 26394765509 used both secrets and produced
+     This is now done; run 26398427430 used both secrets and produced
      the committed live baselines.
 
 ## Experimental Arms
@@ -210,6 +212,7 @@ The `compare/drift.py` comparator takes **two Runner archives**
 | Dimension | Source | What "drift" looks like |
 |---|---|---|
 | Filesystem paths touched | `capability_surface.filesystem_paths` | Set difference of paths touched (undifferentiated under v0; see Threats #5) |
+| Kernel file operations | `layers/kernel.ndjson` open metadata | Set difference of `operation:path` strings for successful opens |
 | Network hosts | `capability_surface.network` | Set difference of outbound hostnames |
 | Network ports/CIDRs | `capability_surface.network` | Set difference of port + CIDR combinations |
 | Process execs | `capability_surface.processes` / `layers/kernel.ndjson` | Set difference of exec targets |
@@ -218,12 +221,10 @@ The `compare/drift.py` comparator takes **two Runner archives**
 | Tool invocation order | `layers/sdk.ndjson` (sequence/timestamp) | Per-`tool_call_id` ordering diff; `inconclusive` if the runtime's SDK events do not preserve order |
 
 **Out of scope for v0 of this comparator** (explicit follow-ups,
-not silent gaps): read-vs-write classification, per-path access
-counts, syscall-level kernel.ndjson parsing. Each of these
-requires a richer parser than `capability_surface` v0 supplies.
-They are tracked alongside the runner-vs-otel
-"What still does NOT prove" list and would arrive together as a
-v2-comparator follow-up.
+not silent gaps): unlink/remove classification, fd-level byte-count
+semantics, normalized task-path aliases, and per-path access counts.
+Operation-aware open rows are available only when `layers/kernel.ndjson`
+carries the optional open metadata.
 
 Each row carries a **classification label**:
 
@@ -300,8 +301,8 @@ A successful first findings doc:
 |---|---|---|---|
 | 0 | **Done** | This plan-doc, reviewed and sharpened (Open Questions #1 + #3 resolved) | None |
 | 1 | **Done** | Workload contract ([`WORKLOAD_CONTRACT.md`](cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)), `@openai/agents` workload, `@google/genai` manual-function-calling workload, stdlib [`contract-checker`](cross-runtime-drift-2026-05/contract-checker/) with stdlib unit-test coverage of the happy path and each rule failure mode | OpenAI key (already used), Google key for live local testing |
-| 2 | **Done** | [`compare/drift.py`](cross-runtime-drift-2026-05/compare/drift.py) MVP + [`health_gate.py`](cross-runtime-drift-2026-05/compare/health_gate.py) + [`extract_fixture_paths.py`](cross-runtime-drift-2026-05/compare/extract_fixture_paths.py) helpers, with stdlib unit-test coverage. Scope-locked to v0 surface: touched-path set diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order. Synthetic fixtures under [`compare/fixtures/{arm-a-openai, arm-b-gemini}/`](cross-runtime-drift-2026-05/compare/fixtures/) exercise every classification label exactly once. Output schema: `assay.cross_runtime_drift.v0`. | None |
-| 3 | **Done** | Live Arm A0 + B0 dispatch on `assay-bpf-runner` via [`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml) (workflow_dispatch only). Run 26394765509 produced n=3 OpenAI archives, n=3 Gemini archives, and n=3 drift reports committed under [`runs/`](cross-runtime-drift-2026-05/runs/README.md). | Done; repo secrets were present |
+| 2 | **Done** | [`compare/drift.py`](cross-runtime-drift-2026-05/compare/drift.py) MVP + [`health_gate.py`](cross-runtime-drift-2026-05/compare/health_gate.py) + [`extract_fixture_paths.py`](cross-runtime-drift-2026-05/compare/extract_fixture_paths.py) helpers, with stdlib unit-test coverage. Scope-locked to v0 surface plus optional kernel open metadata: touched-path set diff, kernel operation diff, network host/port/CIDR diff, process exec diff, SDK tool-event diff, MCP tool-surface diff, tool invocation order. Synthetic fixtures under [`compare/fixtures/{arm-a-openai, arm-b-gemini}/`](cross-runtime-drift-2026-05/compare/fixtures/) exercise every classification label exactly once. Output schema: `assay.cross_runtime_drift.v0`. | None |
+| 3 | **Done** | Live Arm A0 + B0 dispatch on `assay-bpf-runner` via [`.github/workflows/cross-runtime-drift-experiment.yml`](../../.github/workflows/cross-runtime-drift-experiment.yml) (workflow_dispatch only). Run 26398427430 produced n=3 OpenAI archives, n=3 Gemini archives, and n=3 drift reports committed under [`runs/`](cross-runtime-drift-2026-05/runs/README.md). | Done; repo secrets were present |
 | 4 | **Done** | [`findings.md`](cross-runtime-drift-2026-05/findings.md) — live n=3 drift table, classification, threats-to-validity, reproduction commands, and v0 limitations. | None |
 | 5 | **Drafted (not filed, not published)** | [`publication/`](cross-runtime-drift-2026-05/publication/) — `README.md` sequencing rules, `blog-draft.md` engineering write-up, `discussion-draft.md` for the **comment** on #3162 (not a new issue). Held until OpenInference #3162 sees triage. | OpenInference #3162 triage outcome |
 
