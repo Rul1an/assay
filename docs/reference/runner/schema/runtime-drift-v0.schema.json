@@ -56,8 +56,8 @@
         "string",
         "null"
       ],
-      "pattern": "^[0-9a-f]{7,40}$",
-      "description": "Full Git SHA or unambiguous abbreviation."
+      "pattern": "^[0-9a-f]{7,64}$",
+      "description": "Full Git object id or unambiguous abbreviation. Allows SHA-1 and SHA-256 era Git object ids."
     },
     "string_array": {
       "type": "array",
