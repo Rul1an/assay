@@ -9,7 +9,8 @@
 > **Conclusion:** old archives can only support event-kind counts and
 > touched path / endpoint summaries. New archives can support honest
 > read/write/create/truncate classification for successful `openat` /
-> `openat2` events.
+> `openat2` events. The enriched line shape is now frozen in
+> [`../../reference/runner/schema/kernel-event-v0.schema.json`](../../reference/runner/schema/kernel-event-v0.schema.json).
 
 ## Why this note exists
 

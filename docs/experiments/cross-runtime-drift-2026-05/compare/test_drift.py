@@ -1114,5 +1114,46 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         )
 
 
+class KernelEventSchemaSidecarTests(unittest.TestCase):
+    def test_kernel_event_schema_sidecar_matches_fixture_shape(self) -> None:
+        schema_path = (
+            THIS_DIR.parents[2]
+            / "reference"
+            / "runner"
+            / "schema"
+            / "kernel-event-v0.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            schema["properties"]["schema"]["const"],
+            "assay.runner.kernel_event.v0",
+        )
+        self.assertEqual(
+            schema["properties"]["access_mode"]["enum"],
+            ["read", "write", "read_write", "unknown"],
+        )
+        self.assertEqual(
+            schema["properties"]["status"]["enum"],
+            ["success", "error"],
+        )
+        self.assertEqual(
+            schema["properties"]["operation_flags"]["items"]["enum"],
+            ["create", "truncate", "append", "exclusive"],
+        )
+
+        allowed_keys = set(schema["properties"])
+        required_keys = set(schema["required"])
+        for fixture in (ARM_A, ARM_B):
+            kernel_path = fixture / "layers" / "kernel.ndjson"
+            for line in kernel_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                self.assertTrue(required_keys.issubset(event))
+                self.assertLessEqual(set(event), allowed_keys)
+                if "status" in event:
+                    self.assertIn("return_value", event)
+
+
 if __name__ == "__main__":
     unittest.main()
