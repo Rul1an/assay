@@ -85,10 +85,20 @@ produced the drift report from those archives. These can intentionally
 differ when old archives are re-rendered after a projection or schema
 change.
 
-Commit anchors are Git SHA identifiers: either full 40-character SHAs
-or unambiguous 7-40 character lowercase hexadecimal abbreviations.
+Commit anchors are bare Git object identifiers: either full SHAs or
+unambiguous 7-64 character lowercase hexadecimal abbreviations. The
+upper bound deliberately allows both SHA-1-era 40-character object IDs
+and SHA-256-era 64-character object IDs.
 `render_metadata.rendered_at` uses RFC3339 date-time syntax such as
 `2026-05-25T19:00:35Z`.
+
+This schema uses two SHA conventions:
+
+- Git commit anchors use bare lowercase hex because Git itself resolves
+  full or abbreviated object IDs.
+- Content-addressed evidence digests use an algorithm prefix such as
+  `sha256:<hex>` so future multi-algorithm digest handling stays
+  explicit.
 
 Runtime drift v0 uses a required-but-nullable convention for provenance:
 schema-critical keys are present even when the caller does not know the

@@ -27,6 +27,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -99,15 +100,19 @@ def _json_type_matches(value: Any, expected: str) -> bool:
 
 
 def _is_rfc3339_date_time(value: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}T"
-            r"\d{2}:\d{2}:\d{2}"
-            r"(?:\.\d+)?"
-            r"(?:Z|[+-]\d{2}:\d{2})",
-            value,
-        )
-    )
+    if not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T"
+        r"\d{2}:\d{2}:\d{2}"
+        r"(?:\.\d+)?"
+        r"(?:Z|[+-]\d{2}:\d{2})",
+        value,
+    ):
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
 
 
 def assert_schema_uses_only_supported_keywords(
@@ -1542,7 +1547,7 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         )
         self.assertEqual(
             schema["$defs"]["git_sha_or_null"]["pattern"],
-            "^[0-9a-f]{7,40}$",
+            "^[0-9a-f]{7,64}$",
         )
         self.assertIn(
             drift.PATH_PROJECTION_SCHEMA,
@@ -1598,6 +1603,24 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         )
         payload = drift.report_to_json(a, b, rows)
         assert_matches_supported_schema_keywords(self, payload, schema)
+
+    def test_schema_helper_rejects_semantically_invalid_date_time(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                "2026-13-99T25:99:99Z",
+                {"type": "string", "format": "date-time"},
+            )
+
+    def test_schema_helper_accepts_sha256_length_git_object_id(self) -> None:
+        assert_matches_supported_schema_keywords(
+            self,
+            "a" * 64,
+            {
+                "type": ["string", "null"],
+                "pattern": "^[0-9a-f]{7,64}$",
+            },
+        )
 
 
 class KernelEventSchemaSidecarTests(unittest.TestCase):
