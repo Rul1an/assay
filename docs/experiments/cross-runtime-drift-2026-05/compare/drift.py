@@ -1546,20 +1546,37 @@ def _fmt_projection(projection: dict[str, Any]) -> str:
     mappings = projection.get("mappings")
     if isinstance(mappings, list) and mappings:
         examples = []
-        for mapping in mappings[:PROJECTION_SAMPLE_LIMIT]:
+        seen_examples: set[tuple[str, str]] = set()
+        for mapping in mappings:
             if not isinstance(mapping, dict):
                 continue
             raw = str(mapping.get("raw_value", ""))
             projected = str(mapping.get("projected_value", ""))
-            if raw and projected:
+            key = (raw, projected)
+            if raw and projected and key not in seen_examples:
+                seen_examples.add(key)
                 examples.append(
                     f"`{_md_escape_cell(raw)}` -> "
                     f"`{_md_escape_cell(projected)}`"
                 )
+            if len(examples) >= PROJECTION_SAMPLE_LIMIT:
+                break
         if examples:
             suffix = ""
-            if len(mappings) > PROJECTION_SAMPLE_LIMIT:
-                suffix = f"; +{len(mappings) - PROJECTION_SAMPLE_LIMIT} more"
+            unique_count = len(
+                {
+                    (
+                        str(item.get("raw_value", "")),
+                        str(item.get("projected_value", "")),
+                    )
+                    for item in mappings
+                    if isinstance(item, dict)
+                    and item.get("raw_value")
+                    and item.get("projected_value")
+                }
+            )
+            if unique_count > PROJECTION_SAMPLE_LIMIT:
+                suffix = f"; +{unique_count - PROJECTION_SAMPLE_LIMIT} more"
             parts.append(f"maps: {', '.join(examples)}{suffix}")
 
     unmatched = projection.get("unmatched_summary")

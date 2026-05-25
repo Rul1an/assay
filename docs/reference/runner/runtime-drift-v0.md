@@ -175,11 +175,12 @@ Rows without an applicable projection carry the
 `status=not_applied` so downstream consumers do not confuse absence of
 projection with a parser failure.
 
-`mappings` is intentionally compact in v0.1: it lists declared
+The v0 projection convention keeps `mappings` compact: it lists declared
 projected mappings, not every unmatched raw value. Unmatched raw values
 are summarized in `unmatched_summary` with per-arm counts and small
-samples. The full raw values remain in each row's `only_in_a`,
-`only_in_b`, and `in_both` sets.
+samples. This is a v0-compatible clarification; the schema identifier
+remains `assay.runner.runtime_drift.v0`. The full raw values remain in
+each row's `only_in_a`, `only_in_b`, and `in_both` sets.
 
 Operation-aware path values use the shape `op:/absolute/path` before
 projection, for example `read:/tmp/run/workdir/input.txt`. The

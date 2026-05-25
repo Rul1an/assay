@@ -1292,6 +1292,31 @@ class MainCliTests(unittest.TestCase):
         )
         self.assertIn("unmatched raw: a=", md)
 
+    def test_report_markdown_deduplicates_projection_examples(self) -> None:
+        projection = {
+            "status": "applied",
+            "claim_level": drift.CLAIM_PROJECTED_EQUIVALENT,
+            "in_both": ["dns"],
+            "mappings": [
+                {
+                    "raw_value": "127.0.0.53:53",
+                    "projected_value": "dns",
+                    "claim_level": drift.CLAIM_PROJECTED_EQUIVALENT,
+                },
+                {
+                    "raw_value": "127.0.0.53:53",
+                    "projected_value": "dns",
+                    "claim_level": drift.CLAIM_PROJECTED_EQUIVALENT,
+                },
+            ],
+            "unmatched_summary": {
+                "a": {"count": 1},
+                "b": {"count": 2},
+            },
+        }
+        rendered = drift._fmt_projection(projection)
+        self.assertEqual(rendered.count("`127.0.0.53:53` -> `dns`"), 1)
+
     def test_main_can_declare_raw_captures_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_json = Path(tmp) / "drift.json"
