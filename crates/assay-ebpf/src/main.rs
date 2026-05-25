@@ -112,7 +112,6 @@ const KEY_OFFSET_OPENAT_MODE: u32 = 6;
 const KEY_OFFSET_OPENAT2_HOW: u32 = 7;
 const KEY_OFFSET_SYSCALL_EXIT_RET: u32 = 8;
 const DEFAULT_OFFSET: u32 = 24;
-const OPEN_PATH_FILTER_LEN: usize = 96;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
 const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
@@ -290,23 +289,6 @@ fn store_open_pending(
         return Ok(0);
     }
 
-    let mut path_prefix = [0u8; OPEN_PATH_FILTER_LEN];
-    let prefix_result = unsafe {
-        aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-            filename_ptr as *const u8,
-            &mut path_prefix,
-        )
-    };
-    if prefix_result.is_err() {
-        return Ok(0);
-    }
-    if is_loader_telemetry_open_path(&path_prefix) {
-        return Ok(0);
-    }
-    if should_dedup_open_path(&path_prefix) {
-        return Ok(0);
-    }
-
     let pending = match OPEN_SCRATCH.get_ptr_mut(0) {
         Some(pending) => pending,
         None => return Ok(0),
@@ -326,6 +308,14 @@ fn store_open_pending(
     if read_result.is_err() {
         return Ok(0);
     }
+    let path = unsafe { &(*pending).data };
+    if is_loader_telemetry_open_path(path) {
+        return Ok(0);
+    }
+    if should_dedup_open_path(path) {
+        return Ok(0);
+    }
+
     let key = bpf_get_current_pid_tgid();
     let _ = unsafe { PENDING_OPEN.insert(&key, &*pending, 0) };
 
@@ -372,7 +362,7 @@ fn try_open_exit(ctx: TracePointContext, emitted_stat: u32, dropped_stat: u32) -
 }
 
 #[inline(always)]
-fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+fn should_dedup_open_path(path: &[u8; DATA_LEN]) -> bool {
     let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
         .copied()
         .unwrap_or(0)
@@ -391,9 +381,9 @@ fn should_dedup_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
 }
 
 #[inline(always)]
-fn hash_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> u64 {
+fn hash_open_path(path: &[u8; DATA_LEN]) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
-    for index in 0..OPEN_PATH_FILTER_LEN {
+    for index in 0..DATA_LEN {
         let byte = path[index];
         if byte == 0 {
             break;
@@ -405,7 +395,7 @@ fn hash_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> u64 {
 }
 
 #[inline(always)]
-fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
+fn is_loader_telemetry_open_path(path: &[u8; DATA_LEN]) -> bool {
     // Dynamic linker and libc config probes flooded delegated runs without
     // carrying runner-spike attribution evidence.
     bytes_start_with(path, b"/etc/ld.so.cache\0")
@@ -441,8 +431,8 @@ fn is_loader_telemetry_open_path(path: &[u8; OPEN_PATH_FILTER_LEN]) -> bool {
 }
 
 #[inline(always)]
-fn bytes_start_with(path: &[u8; OPEN_PATH_FILTER_LEN], prefix: &[u8]) -> bool {
-    for index in 0..OPEN_PATH_FILTER_LEN {
+fn bytes_start_with(path: &[u8; DATA_LEN], prefix: &[u8]) -> bool {
+    for index in 0..DATA_LEN {
         if index >= prefix.len() {
             return true;
         }
