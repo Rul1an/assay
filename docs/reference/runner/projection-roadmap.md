@@ -159,8 +159,8 @@ Implementation note: the cross-runtime drift comparator now emits a
 `provenance` block in JSON reports. Archive manifest digests, schema
 versions, observation-health gates, and correlation status are derived
 from the two input archives. Workflow URL, runner label, kernel tuple,
-Assay version/commit, and eBPF object digest are caller-supplied anchors
-and stay `null` when not provided.
+Assay version/capture commit, render metadata, and eBPF object digest
+are caller-supplied anchors and stay `null` when not provided.
 
 Minimum metadata block:
 
@@ -168,6 +168,13 @@ Minimum metadata block:
 {
   "assay_version": "3.x.y",
   "assay_commit": "sha",
+  "render_metadata": {
+    "kind": "live_capture | re_render | synthetic_fixture | unspecified",
+    "rendered_at": "2026-05-25T18:55:39Z",
+    "comparator_commit": "sha",
+    "source_run_url": "https://github.com/Rul1an/assay/actions/runs/...",
+    "raw_captures_unchanged": true
+  },
   "runner_schema_versions": {
     "archive": "assay.runner.archive.v0",
     "kernel_event": "assay.runner.kernel_event.v0"

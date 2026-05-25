@@ -68,6 +68,23 @@ Top-level fields:
 | `rows` | array | yes | Per-dimension drift rows |
 | `summary` | object | yes | Classification counts across rows |
 
+### Archive References
+
+`archive_a.path` and `archive_b.path` are informational location
+anchors, not identity fields. For committed re-renders they are normally
+repo-root-relative paths so a reviewer can follow them in the repository.
+For fresh workflow captures they may be absolute paths on the capture
+host. Archive identity comes from `manifest_digest`.
+
+### Provenance Anchors
+
+`provenance.assay_commit` is the **capture** anchor: the Assay revision
+that produced the input archives. `provenance.render_metadata` is the
+**render** anchor: the comparator revision and render context that
+produced the drift report from those archives. These can intentionally
+differ when old archives are re-rendered after a projection or schema
+change.
+
 ## Contract Principles
 
 1. **Raw evidence is preserved.** `only_in_a`, `only_in_b`, and
@@ -84,7 +101,7 @@ Top-level fields:
    recalculate capture health.
 6. **Provenance anchors the comparison.** Input manifest digests, Runner
    schema versions, kernel metadata, eBPF object digest, workflow URL,
-   and Assay commit are report metadata when available.
+   capture commit, and render metadata are report metadata when available.
 7. **Policy acceptability is out of scope.** A `runtime-induced` row is
    evidence shape, not a policy failure.
 

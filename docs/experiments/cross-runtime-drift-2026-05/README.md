@@ -131,6 +131,10 @@ report. The comparator derives input archive manifest digests, schema
 versions, observation-health gates, and correlation status from the
 archives; workflow/commit/kernel/eBPF anchors are optional CLI inputs and
 remain `null` when the caller does not provide them.
+`provenance.assay_commit` is the capture anchor for the input archives.
+`provenance.render_metadata.comparator_commit` is the render anchor for
+the comparator that produced the report. They intentionally differ when
+committed archives are re-rendered after projection/schema changes.
 
 ## What's done in Slice 1
 

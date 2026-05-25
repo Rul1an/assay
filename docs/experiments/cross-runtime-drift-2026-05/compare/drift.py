@@ -528,7 +528,14 @@ class ReportProvenance:
     """Optional report-level anchors supplied by the caller/workflow."""
 
     assay_version: str | None = None
+    # Capture anchor: the Assay revision that produced the input archives.
     assay_commit: str | None = None
+    # Render anchor: the comparator revision that produced this report.
+    comparator_commit: str | None = None
+    rendered_at: str | None = None
+    render_kind: str = "unspecified"
+    source_run_url: str | None = None
+    raw_captures_unchanged: bool | None = None
     workflow_url: str | None = None
     runner_label: str | None = None
     kernel_os: str | None = None
@@ -1391,6 +1398,13 @@ def _provenance_payload(
         "schema": DRIFT_REPORT_PROVENANCE_SCHEMA,
         "assay_version": provenance.assay_version,
         "assay_commit": provenance.assay_commit,
+        "render_metadata": {
+            "kind": provenance.render_kind,
+            "rendered_at": provenance.rendered_at,
+            "comparator_commit": provenance.comparator_commit,
+            "source_run_url": provenance.source_run_url,
+            "raw_captures_unchanged": provenance.raw_captures_unchanged,
+        },
         "runner_schema_versions": _schema_versions(a, b),
         "kernel": {
             "os": provenance.kernel_os,
@@ -1410,6 +1424,7 @@ def _provenance_payload(
             "provenance_no_evidence_rewrite",
             "provenance_unknowns_preserved",
             "provenance_metadata_not_policy_verdict",
+            "provenance_capture_commit_distinct_from_render_commit",
         ],
     }
 
@@ -1602,7 +1617,34 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--assay-version", help="Assay version that produced the report.")
-    parser.add_argument("--assay-commit", help="Git commit associated with the report.")
+    parser.add_argument(
+        "--assay-commit",
+        help="Capture commit: Git commit that produced the input archives.",
+    )
+    parser.add_argument(
+        "--comparator-commit",
+        help="Render commit: Git commit whose comparator produced this report.",
+    )
+    parser.add_argument(
+        "--rendered-at",
+        help="UTC timestamp for report rendering, usually RFC3339/Zulu.",
+    )
+    parser.add_argument(
+        "--render-kind",
+        choices=("live_capture", "re_render", "synthetic_fixture", "unspecified"),
+        default="unspecified",
+        help="Whether this report came from a fresh workflow capture or a re-render.",
+    )
+    parser.add_argument(
+        "--source-run-url",
+        help="Original workflow/run URL for the source captures, if different from this render.",
+    )
+    parser.add_argument(
+        "--raw-captures-unchanged",
+        action="store_true",
+        default=None,
+        help="Declare that report rendering did not mutate the input archives.",
+    )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
     parser.add_argument("--runner-label", help="Runner label or host class.")
     parser.add_argument("--kernel-os", help="Kernel OS for the capture host.")
@@ -1666,6 +1708,11 @@ def main(argv: list[str] | None = None) -> int:
     provenance = ReportProvenance(
         assay_version=args.assay_version or None,
         assay_commit=args.assay_commit or None,
+        comparator_commit=args.comparator_commit or None,
+        rendered_at=args.rendered_at or None,
+        render_kind=args.render_kind,
+        source_run_url=args.source_run_url or None,
+        raw_captures_unchanged=args.raw_captures_unchanged,
         workflow_url=args.workflow_url or None,
         runner_label=args.runner_label or None,
         kernel_os=args.kernel_os or None,
