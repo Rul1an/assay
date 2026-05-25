@@ -53,6 +53,7 @@ SUPPORTED_SCHEMA_KEYWORDS = frozenset(
         "else",
         "enum",
         "examples",
+        "format",
         "if",
         "items",
         "maxItems",
@@ -95,6 +96,18 @@ def _json_type_matches(value: Any, expected: str) -> bool:
     if expected == "boolean":
         return isinstance(value, bool)
     raise AssertionError(f"unsupported JSON Schema type in test helper: {expected}")
+
+
+def _is_rfc3339_date_time(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T"
+            r"\d{2}:\d{2}:\d{2}"
+            r"(?:\.\d+)?"
+            r"(?:Z|[+-]\d{2}:\d{2})",
+            value,
+        )
+    )
 
 
 def assert_schema_uses_only_supported_keywords(
@@ -219,6 +232,11 @@ def assert_matches_supported_schema_keywords(
             testcase.assertGreaterEqual(len(value), schema["minLength"], path)
         if "pattern" in schema:
             testcase.assertRegex(value, re.compile(schema["pattern"]), path)
+        if schema.get("format") == "date-time":
+            testcase.assertTrue(
+                _is_rfc3339_date_time(value),
+                f"{path}: expected RFC3339 date-time, got {value!r}",
+            )
 
     if isinstance(value, int) and not isinstance(value, bool):
         if "minimum" in schema:
@@ -1075,6 +1093,33 @@ class MainCliTests(unittest.TestCase):
             self.assertIn("filesystem_paths_touched", md)
             self.assertIn("read:workdir/input", md)
 
+    def test_main_can_emit_synthetic_fixture_render_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "drift.json"
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(ARM_A),
+                    "--archive-b",
+                    str(ARM_B),
+                    "--out-json",
+                    str(out_json),
+                    "--render-kind",
+                    "synthetic_fixture",
+                    "--rendered-at",
+                    "2026-05-25T19:20:00Z",
+                    "--comparator-commit",
+                    "abcdef1",
+                    "--raw-captures-unchanged",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["provenance"]["render_metadata"]["kind"],
+                "synthetic_fixture",
+            )
+
     def test_main_writes_explicit_report_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_json = Path(tmp) / "drift.json"
@@ -1089,9 +1134,9 @@ class MainCliTests(unittest.TestCase):
                     "--assay-version",
                     "3.11.3",
                     "--assay-commit",
-                    "abc123",
+                    "abc1234",
                     "--comparator-commit",
-                    "def456",
+                    "def4567",
                     "--rendered-at",
                     "2026-05-25T18:55:39Z",
                     "--render-kind",
@@ -1117,13 +1162,13 @@ class MainCliTests(unittest.TestCase):
             payload = json.loads(out_json.read_text(encoding="utf-8"))
             provenance = payload["provenance"]
             self.assertEqual(provenance["assay_version"], "3.11.3")
-            self.assertEqual(provenance["assay_commit"], "abc123")
+            self.assertEqual(provenance["assay_commit"], "abc1234")
             self.assertEqual(
                 provenance["render_metadata"],
                 {
                     "kind": "re_render",
                     "rendered_at": "2026-05-25T18:55:39Z",
-                    "comparator_commit": "def456",
+                    "comparator_commit": "def4567",
                     "source_run_url": (
                         "https://github.com/Rul1an/assay/actions/runs/source"
                     ),
@@ -1141,6 +1186,45 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(
                 provenance["ebpf_object_digest"], "sha256:" + "1" * 64
             )
+
+    def test_report_markdown_surfaces_render_metadata(self) -> None:
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(a, b)
+        md = drift.report_to_md(
+            a,
+            b,
+            rows,
+            drift.ReportProvenance(
+                assay_commit="abc1234",
+                comparator_commit="def4567",
+                rendered_at="2026-05-25T18:55:39Z",
+                render_kind="re_render",
+                source_run_url="https://github.com/Rul1an/assay/actions/runs/1",
+                raw_captures_unchanged=True,
+            ),
+        )
+        self.assertIn("**Render:** `re_render`", md)
+        self.assertIn("`2026-05-25T18:55:39Z`", md)
+        self.assertIn("`def4567`", md)
+        self.assertIn("raw captures unchanged `true`", md)
+
+    def test_report_markdown_normalizes_source_run_url(self) -> None:
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(a, b)
+        md = drift.report_to_md(
+            a,
+            b,
+            rows,
+            drift.ReportProvenance(
+                comparator_commit="def4567",
+                render_kind="re_render",
+                source_run_url="https://example.test/run\n- injected",
+            ),
+        )
+        self.assertIn("from `https://example.test/run - injected`", md)
+        self.assertNotIn("\n- injected", md)
 
     def test_main_can_declare_raw_captures_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1442,9 +1526,23 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             schema["$defs"]["provenance"]["properties"]["schema"]["const"],
             drift.DRIFT_REPORT_PROVENANCE_SCHEMA,
         )
+        self.assertIn(
+            "assay_commit",
+            schema["$defs"]["provenance"]["required"],
+        )
         self.assertEqual(
             schema["$defs"]["render_metadata"]["properties"]["kind"]["enum"],
             ["live_capture", "re_render", "synthetic_fixture", "unspecified"],
+        )
+        self.assertEqual(
+            schema["$defs"]["render_metadata"]["properties"]["rendered_at"][
+                "format"
+            ],
+            "date-time",
+        )
+        self.assertEqual(
+            schema["$defs"]["git_sha_or_null"]["pattern"],
+            "^[0-9a-f]{7,40}$",
         )
         self.assertIn(
             drift.PATH_PROJECTION_SCHEMA,
