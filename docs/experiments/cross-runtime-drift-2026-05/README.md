@@ -168,11 +168,11 @@ remain `null` when the caller does not provide them.
   failure modes (missing manifest, corrupt JSON, broken tar),
   every classification label, fixture-path overrides, and CLI
   output (`--out-json`, `--out-md`).
-- Output schema locked in for new comparator output:
-  `assay.runner.runtime_drift.v0`. The already-committed live
-  `runs/drift/` baselines are historical outputs from before the
-  Runner projection artifact name was frozen; regenerate them with the
-  current comparator when a byte-level schema refresh is needed.
+- Output schema locked in for comparator output:
+  `assay.runner.runtime_drift.v0`. The committed live
+  [`runs/drift/`](runs/drift/) baselines have been re-rendered from
+  the original A0/B0 archives with that schema, including explicit
+  path/network projection and provenance blocks.
 
 ## What's now done in Slice 3-5
 

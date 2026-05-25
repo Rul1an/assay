@@ -1,18 +1,197 @@
 {
-  "schema": "assay.cross_runtime_drift.v0",
+  "schema": "assay.runner.runtime_drift.v0",
   "archive_a": {
-    "path": "arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/archive.tar.gz",
+    "path": "docs/experiments/cross-runtime-drift-2026-05/runs/a0/run_arm_a-openai_20260525T113813Z_1/archive.tar.gz",
     "run_id": "run_arm_a-openai_20260525T113813Z_1",
     "runtime_label": "openai-agents",
     "manifest_digest": "sha256:686b57e6bc0cd4f1d99e354ed6c35846c8d64cfc90b6fc9e75e9c75c05c8d800",
     "sdk_event_count": 5
   },
   "archive_b": {
-    "path": "arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/archive.tar.gz",
+    "path": "docs/experiments/cross-runtime-drift-2026-05/runs/b0/run_arm_b-gemini_20260525T114112Z_1/archive.tar.gz",
     "run_id": "run_arm_b-gemini_20260525T114112Z_1",
     "runtime_label": "gemini-genai",
     "manifest_digest": "sha256:f392cea861f0d671d66756c608960ed5e58154e4f1cc24be6e1b53748bea94d0",
     "sdk_event_count": 5
+  },
+  "taxonomy": {
+    "schema": "assay.runner.runtime_noise_taxonomy.v0",
+    "status": "vocabulary_only",
+    "categories": {
+      "workload_fixture": {
+        "applies_to": [
+          "path",
+          "operation"
+        ],
+        "meaning": "declared workload input, output, or scratch value"
+      },
+      "runtime_package": {
+        "applies_to": [
+          "path"
+        ],
+        "meaning": "language runtime or package tree behavior"
+      },
+      "provider_sdk": {
+        "applies_to": [
+          "path",
+          "network",
+          "sdk_event"
+        ],
+        "meaning": "provider client implementation behavior"
+      },
+      "loader": {
+        "applies_to": [
+          "path",
+          "process"
+        ],
+        "meaning": "dynamic loader, interpreter, locale, or bootstrap behavior"
+      },
+      "experiment_harness": {
+        "applies_to": [
+          "path",
+          "process",
+          "metadata"
+        ],
+        "meaning": "runner, workflow, comparator, or test harness plumbing"
+      },
+      "cache": {
+        "applies_to": [
+          "path"
+        ],
+        "meaning": "package manager, runtime, or tool cache path"
+      },
+      "provider_api": {
+        "applies_to": [
+          "network"
+        ],
+        "meaning": "model/provider API endpoint"
+      },
+      "dns": {
+        "applies_to": [
+          "network"
+        ],
+        "meaning": "DNS lookup endpoint when visible"
+      },
+      "telemetry": {
+        "applies_to": [
+          "network"
+        ],
+        "meaning": "observability or SDK telemetry endpoint"
+      },
+      "package_fetch": {
+        "applies_to": [
+          "network"
+        ],
+        "meaning": "dependency or package retrieval endpoint"
+      },
+      "unknown": {
+        "applies_to": [
+          "all"
+        ],
+        "meaning": "observed value did not match a declared taxonomy rule"
+      }
+    },
+    "non_claims": [
+      "taxonomy_no_heuristic_classification",
+      "taxonomy_unknowns_preserved",
+      "taxonomy_no_policy_verdict"
+    ]
+  },
+  "provenance": {
+    "schema": "assay.runner.drift_report_provenance.v0",
+    "assay_version": null,
+    "assay_commit": "e3f6ef9d",
+    "runner_schema_versions": {
+      "archive_manifest": [
+        "assay.runner.archive_manifest.v0"
+      ],
+      "capability_surface": [
+        "assay.runner.capability_surface.v0"
+      ],
+      "observation_health": [
+        "assay.runner.observation_health.v0"
+      ],
+      "correlation_report": [
+        "assay.runner.correlation_report.v0"
+      ],
+      "sdk_event": [
+        "assay.runner.sdk_event.v0"
+      ],
+      "kernel_event": [
+        "assay.runner.kernel_event.v0"
+      ]
+    },
+    "kernel": {
+      "os": null,
+      "release": null,
+      "arch": null
+    },
+    "ebpf_object_digest": null,
+    "workflow": {
+      "url": "https://github.com/Rul1an/assay/actions/runs/26398427430",
+      "runner_label": "assay-bpf-runner"
+    },
+    "input_archives": [
+      {
+        "role": "archive_a",
+        "path": "docs/experiments/cross-runtime-drift-2026-05/runs/a0/run_arm_a-openai_20260525T113813Z_1/archive.tar.gz",
+        "run_id": "run_arm_a-openai_20260525T113813Z_1",
+        "runtime_label": "openai-agents",
+        "manifest_digest": "sha256:686b57e6bc0cd4f1d99e354ed6c35846c8d64cfc90b6fc9e75e9c75c05c8d800",
+        "schemas": {
+          "archive_manifest": "assay.runner.archive_manifest.v0",
+          "capability_surface": "assay.runner.capability_surface.v0",
+          "observation_health": "assay.runner.observation_health.v0",
+          "correlation_report": "assay.runner.correlation_report.v0",
+          "sdk_event": "assay.runner.sdk_event.v0",
+          "kernel_event": "assay.runner.kernel_event.v0"
+        },
+        "observation_health": {
+          "schema": "assay.runner.observation_health.v0",
+          "kernel_layer": "complete",
+          "ringbuf_drops": 0,
+          "cgroup_correlation": "clean",
+          "policy_layer": "absent",
+          "sdk_layer": "self_reported"
+        },
+        "correlation_report": {
+          "schema": "assay.runner.correlation_report.v0",
+          "status": "clean"
+        }
+      },
+      {
+        "role": "archive_b",
+        "path": "docs/experiments/cross-runtime-drift-2026-05/runs/b0/run_arm_b-gemini_20260525T114112Z_1/archive.tar.gz",
+        "run_id": "run_arm_b-gemini_20260525T114112Z_1",
+        "runtime_label": "gemini-genai",
+        "manifest_digest": "sha256:f392cea861f0d671d66756c608960ed5e58154e4f1cc24be6e1b53748bea94d0",
+        "schemas": {
+          "archive_manifest": "assay.runner.archive_manifest.v0",
+          "capability_surface": "assay.runner.capability_surface.v0",
+          "observation_health": "assay.runner.observation_health.v0",
+          "correlation_report": "assay.runner.correlation_report.v0",
+          "sdk_event": "assay.runner.sdk_event.v0",
+          "kernel_event": "assay.runner.kernel_event.v0"
+        },
+        "observation_health": {
+          "schema": "assay.runner.observation_health.v0",
+          "kernel_layer": "complete",
+          "ringbuf_drops": 0,
+          "cgroup_correlation": "clean",
+          "policy_layer": "absent",
+          "sdk_layer": "self_reported"
+        },
+        "correlation_report": {
+          "schema": "assay.runner.correlation_report.v0",
+          "status": "clean"
+        }
+      }
+    ],
+    "non_claims": [
+      "provenance_no_evidence_rewrite",
+      "provenance_unknowns_preserved",
+      "provenance_metadata_not_policy_verdict"
+    ]
   },
   "rows": [
     {
@@ -50,7 +229,375 @@
         "/etc/svc.conf"
       ],
       "classification": "runtime-induced",
-      "detail": "18 non-shared item(s); 4 fixture, 14 unclassified"
+      "detail": "18 non-shared item(s); 4 fixture, 14 unclassified",
+      "projection": {
+        "schema": "assay.runner.path_projection.v0",
+        "status": "applied",
+        "dimension": "filesystem_paths_touched",
+        "claim_level": "projected_equivalent",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "only_in_a": [
+          "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+          "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+          "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json"
+        ],
+        "only_in_b": [
+          "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+          "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+          "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+          "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json"
+        ],
+        "in_both": [
+          "/etc/gai.conf",
+          "/etc/host.conf",
+          "/etc/hosts",
+          "/etc/netsvc.conf",
+          "/etc/nsswitch.conf",
+          "/etc/resolv.conf",
+          "/etc/svc.conf",
+          "workdir/input",
+          "workdir/output"
+        ],
+        "rules": [
+          "declared_path_alias"
+        ],
+        "mappings": [
+          {
+            "side": "a",
+            "raw_value": "/etc/gai.conf",
+            "projected_value": "/etc/gai.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/host.conf",
+            "projected_value": "/etc/host.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/hosts",
+            "projected_value": "/etc/hosts",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/netsvc.conf",
+            "projected_value": "/etc/netsvc.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/nsswitch.conf",
+            "projected_value": "/etc/nsswitch.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/resolv.conf",
+            "projected_value": "/etc/resolv.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/etc/svc.conf",
+            "projected_value": "/etc/svc.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+            "projected_value": "workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+            "projected_value": "workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/gai.conf",
+            "projected_value": "/etc/gai.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/host.conf",
+            "projected_value": "/etc/host.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/hosts",
+            "projected_value": "/etc/hosts",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/netsvc.conf",
+            "projected_value": "/etc/netsvc.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/nsswitch.conf",
+            "projected_value": "/etc/nsswitch.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/resolv.conf",
+            "projected_value": "/etc/resolv.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/etc/svc.conf",
+            "projected_value": "/etc/svc.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+            "projected_value": "workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+            "projected_value": "workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+            "projected_value": "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          }
+        ],
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "kernel_file_operations",
@@ -109,7 +656,592 @@
         "read:/etc/resolv.conf"
       ],
       "classification": "runtime-induced",
-      "detail": "42 non-shared item(s); 14 fixture, 28 unclassified"
+      "detail": "42 non-shared item(s); 14 fixture, 28 unclassified",
+      "projection": {
+        "schema": "assay.runner.path_projection.v0",
+        "status": "applied",
+        "dimension": "kernel_file_operations",
+        "claim_level": "projected_equivalent",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "only_in_a": [
+          "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+          "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+          "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+          "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+          "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+          "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+          "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+          "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson"
+        ],
+        "only_in_b": [
+          "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+          "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+          "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+          "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+          "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+          "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+          "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+          "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+          "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+          "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson"
+        ],
+        "in_both": [
+          "create:workdir/input",
+          "create:workdir/output",
+          "read:/etc/gai.conf",
+          "read:/etc/host.conf",
+          "read:/etc/hosts",
+          "read:/etc/nsswitch.conf",
+          "read:/etc/resolv.conf",
+          "read:workdir/input",
+          "truncate:workdir/input",
+          "truncate:workdir/output",
+          "write:workdir/input",
+          "write:workdir/output"
+        ],
+        "rules": [
+          "declared_path_alias"
+        ],
+        "mappings": [
+          {
+            "side": "a",
+            "raw_value": "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "projected_value": "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "append:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+            "projected_value": "create:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+            "projected_value": "create:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/etc/gai.conf",
+            "projected_value": "read:/etc/gai.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/etc/host.conf",
+            "projected_value": "read:/etc/host.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/etc/hosts",
+            "projected_value": "read:/etc/hosts",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/etc/nsswitch.conf",
+            "projected_value": "read:/etc/nsswitch.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/etc/resolv.conf",
+            "projected_value": "read:/etc/resolv.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+            "projected_value": "read:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/sdk-events.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/workload.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+            "projected_value": "truncate:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+            "projected_value": "truncate:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-input.txt",
+            "projected_value": "write:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/fixture-output.txt",
+            "projected_value": "write:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T113813Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "projected_value": "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "append:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+            "projected_value": "create:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+            "projected_value": "create:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "create:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/etc/gai.conf",
+            "projected_value": "read:/etc/gai.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/etc/host.conf",
+            "projected_value": "read:/etc/host.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/etc/hosts",
+            "projected_value": "read:/etc/hosts",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/etc/nsswitch.conf",
+            "projected_value": "read:/etc/nsswitch.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/etc/resolv.conf",
+            "projected_value": "read:/etc/resolv.conf",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+            "projected_value": "read:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/sdk-events.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/workload.js",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+            "projected_value": "read:/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/package.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+            "projected_value": "truncate:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+            "projected_value": "truncate:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "truncate:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/sdk-events.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-input.txt",
+            "projected_value": "write:workdir/input",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/fixture-output.txt",
+            "projected_value": "write:workdir/output",
+            "path_class": "workload_fixture",
+            "relation": "declared_path",
+            "rule": "declared_path_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/run-meta.json",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "projected_value": "write:/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T114112Z_1/workdir/tool-calls.ndjson",
+            "path_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          }
+        ],
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "network_endpoints",
@@ -141,7 +1273,262 @@
         "127.0.0.53:53"
       ],
       "classification": "runtime-induced",
-      "detail": "19 non-shared item(s); 0 provider, 0 fixture, 19 unclassified"
+      "detail": "19 non-shared item(s); 0 provider, 0 fixture, 19 unclassified",
+      "projection": {
+        "schema": "assay.runner.network_projection.v0",
+        "status": "applied",
+        "dimension": "network_endpoints",
+        "claim_level": "projected_equivalent",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "only_in_a": [
+          "162.159.140.245:0",
+          "162.159.140.245:443",
+          "172.66.0.243:0",
+          "172.66.0.243:443"
+        ],
+        "only_in_b": [
+          "142.250.180.10:0",
+          "142.251.142.202:0",
+          "142.251.209.234:0",
+          "142.251.39.138:0",
+          "172.217.17.202:0",
+          "172.217.171.106:0",
+          "172.217.23.234:0",
+          "192.178.25.202:0",
+          "216.58.198.10:0",
+          "216.58.198.42:0",
+          "216.58.198.42:443",
+          "[2a00:1450:400e:806::200a]:0",
+          "[2a00:1450:400e:809::200a]:0",
+          "[2a00:1450:400e:813::200a]:0",
+          "[2a00:1450:400e:815::200a]:0"
+        ],
+        "in_both": [
+          "dns"
+        ],
+        "rules": [
+          "declared_network_alias"
+        ],
+        "mappings": [
+          {
+            "side": "a",
+            "raw_value": "127.0.0.53:53",
+            "projected_value": "dns",
+            "network_class": "dns",
+            "relation": "declared_endpoint",
+            "rule": "declared_network_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "a",
+            "raw_value": "162.159.140.245:0",
+            "projected_value": "162.159.140.245:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "162.159.140.245:443",
+            "projected_value": "162.159.140.245:443",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "172.66.0.243:0",
+            "projected_value": "172.66.0.243:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "a",
+            "raw_value": "172.66.0.243:443",
+            "projected_value": "172.66.0.243:443",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "127.0.0.53:53",
+            "projected_value": "dns",
+            "network_class": "dns",
+            "relation": "declared_endpoint",
+            "rule": "declared_network_alias",
+            "confidence": "declared",
+            "claim_level": "projected_equivalent"
+          },
+          {
+            "side": "b",
+            "raw_value": "142.250.180.10:0",
+            "projected_value": "142.250.180.10:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "142.251.142.202:0",
+            "projected_value": "142.251.142.202:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "142.251.209.234:0",
+            "projected_value": "142.251.209.234:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "142.251.39.138:0",
+            "projected_value": "142.251.39.138:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "172.217.17.202:0",
+            "projected_value": "172.217.17.202:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "172.217.171.106:0",
+            "projected_value": "172.217.171.106:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "172.217.23.234:0",
+            "projected_value": "172.217.23.234:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "192.178.25.202:0",
+            "projected_value": "192.178.25.202:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "216.58.198.10:0",
+            "projected_value": "216.58.198.10:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "216.58.198.42:0",
+            "projected_value": "216.58.198.42:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "216.58.198.42:443",
+            "projected_value": "216.58.198.42:443",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "[2a00:1450:400e:806::200a]:0",
+            "projected_value": "[2a00:1450:400e:806::200a]:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "[2a00:1450:400e:809::200a]:0",
+            "projected_value": "[2a00:1450:400e:809::200a]:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "[2a00:1450:400e:813::200a]:0",
+            "projected_value": "[2a00:1450:400e:813::200a]:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          },
+          {
+            "side": "b",
+            "raw_value": "[2a00:1450:400e:815::200a]:0",
+            "projected_value": "[2a00:1450:400e:815::200a]:0",
+            "network_class": "unknown",
+            "relation": "unmatched",
+            "rule": "no_declared_network_alias",
+            "confidence": "unknown",
+            "claim_level": "raw_observed"
+          }
+        ],
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "process_execs",
@@ -150,7 +1537,20 @@
       "only_in_b": [],
       "in_both": [],
       "classification": "inconclusive",
-      "detail": "dimension empty in both arms"
+      "detail": "dimension empty in both arms",
+      "projection": {
+        "schema": "assay.runner.projection_not_applied.v0",
+        "status": "not_applied",
+        "reason": "dimension has no v0 projector",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "sdk_tool_events",
@@ -162,7 +1562,20 @@
         "write_file"
       ],
       "classification": "task-induced",
-      "detail": "full overlap"
+      "detail": "full overlap",
+      "projection": {
+        "schema": "assay.runner.projection_not_applied.v0",
+        "status": "not_applied",
+        "reason": "dimension has no v0 projector",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "mcp_tool_surface",
@@ -171,7 +1584,20 @@
       "only_in_b": [],
       "in_both": [],
       "classification": "inconclusive",
-      "detail": "dimension empty in both arms"
+      "detail": "dimension empty in both arms",
+      "projection": {
+        "schema": "assay.runner.projection_not_applied.v0",
+        "status": "not_applied",
+        "reason": "dimension has no v0 projector",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     },
     {
       "dimension": "tool_invocation_order",
@@ -183,7 +1609,20 @@
         "write_file"
       ],
       "classification": "task-induced",
-      "detail": "identical sequence: read_file -> write_file"
+      "detail": "identical sequence: read_file -> write_file",
+      "projection": {
+        "schema": "assay.runner.projection_not_applied.v0",
+        "status": "not_applied",
+        "reason": "dimension has no v0 projector",
+        "taxonomy_schema": "assay.runner.runtime_noise_taxonomy.v0",
+        "non_claims": [
+          "projection_no_raw_evidence_rewrite",
+          "projection_no_semantic_workload_equivalence",
+          "projection_no_policy_acceptability_verdict",
+          "projection_unknowns_preserved",
+          "projection_no_heuristic_noise_taxonomy"
+        ]
+      }
     }
   ],
   "summary": {
