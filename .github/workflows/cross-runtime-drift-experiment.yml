@@ -76,6 +76,17 @@ jobs:
             exit 1
           fi
 
+      - name: Pre-clean self-hosted workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Previous runner-spike steps build/load eBPF with sudo and
+          # can leave root-owned target-ebpf files behind. Clean before
+          # checkout so actions/checkout never trips over stale state.
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+          shopt -s dotglob nullglob
+          sudo rm -rf "$GITHUB_WORKSPACE"/*
+
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
@@ -207,7 +218,10 @@ jobs:
   arm-b-gemini:
     name: Arm B — Gemini GenAI (capture)
     runs-on: [self-hosted, linux, assay-bpf-runner]
-    needs: prepare-delegated-runner
+    # The self-hosted runner uses a shared per-repo workspace. Run the
+    # two capture arms sequentially so one arm cannot clean or checkout
+    # over the other while sudo-owned eBPF build outputs exist.
+    needs: [prepare-delegated-runner, arm-a-openai]
     timeout-minutes: 30
     env:
       ARM: b-gemini
@@ -224,6 +238,14 @@ jobs:
             echo "ERROR: GOOGLE_API_KEY repo secret is not set" >&2
             exit 1
           fi
+
+      - name: Pre-clean self-hosted workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+          shopt -s dotglob nullglob
+          sudo rm -rf "$GITHUB_WORKSPACE"/*
 
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -349,6 +371,14 @@ jobs:
     needs: [arm-a-openai, arm-b-gemini]
     timeout-minutes: 10
     steps:
+      - name: Pre-clean self-hosted workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+          shopt -s dotglob nullglob
+          sudo rm -rf "$GITHUB_WORKSPACE"/*
+
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
