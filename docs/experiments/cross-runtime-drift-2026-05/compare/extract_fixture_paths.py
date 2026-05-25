@@ -3,7 +3,8 @@
 recorded in its tool-calls.ndjson.
 
 Used by the cross-runtime-drift-experiment workflow's drift-compare
-job to pass the *actual* fixture paths to `drift.py --fixture-path`.
+job to pass the *actual* fixture paths to `drift.py --fixture-path`
+and `--path-alias`.
 Hardcoding `/tmp/work/fixture-*.txt` would only work for local
 testing; live captures put the workdir under
 `arm-X-runs/run_arm_X_<ts>_i/workdir/...` (P1 review on PR #1347).

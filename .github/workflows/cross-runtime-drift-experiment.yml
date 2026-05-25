@@ -445,6 +445,10 @@ jobs:
               --fixture-path "${A_PATHS[1]}" \
               --fixture-path "${B_PATHS[0]}" \
               --fixture-path "${B_PATHS[1]}" \
+              --path-alias "${A_PATHS[0]}=workdir/input" \
+              --path-alias "${A_PATHS[1]}=workdir/output" \
+              --path-alias "${B_PATHS[0]}=workdir/input" \
+              --path-alias "${B_PATHS[1]}=workdir/output" \
               --out-json "${REPORT_BASE}.json" \
               --out-md "${REPORT_BASE}.md"
             {

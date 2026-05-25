@@ -12,10 +12,12 @@ Scope (v0, Slice 2):
   - MCP tool surface (capability_surface.mcp_tools)
   - tool invocation order (SDK events' seq per tool_call_id)
   - kernel file operations (layers/kernel.ndjson open metadata)
+  - path projection v0 over explicitly declared raw=logical aliases
 
 Out of scope (explicit follow-ups, NOT silent gaps):
   - unlink/remove classification
   - per-path access counts
+  - heuristic path taxonomy (node_modules/cache/provider SDK/etc.)
   - latency / token / cost (not a drift signal)
 
 Classification labels per row:
@@ -80,6 +82,22 @@ CLASSIFICATION_TASK = "task-induced"
 CLASSIFICATION_PROVIDER = "provider-induced"
 CLASSIFICATION_RUNTIME = "runtime-induced"
 CLASSIFICATION_INCONCLUSIVE = "inconclusive"
+
+PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
+
+CLAIM_RAW_OBSERVED = "raw_observed"
+CLAIM_PROJECTED_EQUIVALENT = "projected_equivalent"
+CLAIM_INCONCLUSIVE = "inconclusive"
+
+PATH_CLASS_WORKLOAD_FIXTURE = "workload_fixture"
+PATH_CLASS_UNKNOWN = "unknown"
+
+PROJECTION_NON_CLAIMS = (
+    "projection_no_raw_evidence_rewrite",
+    "projection_no_semantic_workload_equivalence",
+    "projection_no_policy_acceptability_verdict",
+    "projection_unknowns_preserved",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +370,158 @@ class DriftRow:
     in_both: list[str]
     classification: str  # one of CLASSIFICATION_* above
     detail: str
+    projection: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class PathAlias:
+    """A declared raw path -> logical path projection rule.
+
+    The comparator deliberately starts with exact aliases only. This
+    keeps projection auditable and prevents path-normalization from
+    becoming a hidden rewrite layer.
+    """
+
+    raw_path: str
+    projected_path: str
+    path_class: str = PATH_CLASS_WORKLOAD_FIXTURE
+    relation: str = "declared_path"
+    rule: str = "declared_path_alias"
+    confidence: str = "declared"
+
+
+@dataclasses.dataclass(frozen=True)
+class ProjectedValue:
+    raw_value: str
+    projected_value: str
+    path_class: str
+    relation: str
+    rule: str
+    confidence: str
+    claim_level: str
+
+
+def _parse_path_alias(raw: str) -> PathAlias:
+    if "=" not in raw:
+        raise ValueError("expected RAW=PROJECTED")
+    raw_path, projected_path = raw.split("=", 1)
+    raw_path = raw_path.strip()
+    projected_path = projected_path.strip()
+    if not raw_path or not projected_path:
+        raise ValueError("expected non-empty RAW and PROJECTED")
+    return PathAlias(raw_path=raw_path, projected_path=projected_path)
+
+
+def _project_single_path(path: str, aliases: dict[str, PathAlias]) -> ProjectedValue:
+    alias = aliases.get(path)
+    if alias is None:
+        return ProjectedValue(
+            raw_value=path,
+            projected_value=path,
+            path_class=PATH_CLASS_UNKNOWN,
+            relation="unmatched",
+            rule="no_declared_alias",
+            confidence="unknown",
+            claim_level=CLAIM_RAW_OBSERVED,
+        )
+    return ProjectedValue(
+        raw_value=path,
+        projected_value=alias.projected_path,
+        path_class=alias.path_class,
+        relation=alias.relation,
+        rule=alias.rule,
+        confidence=alias.confidence,
+        claim_level=CLAIM_PROJECTED_EQUIVALENT,
+    )
+
+
+def _project_path_value(
+    value: str, aliases: dict[str, PathAlias]
+) -> ProjectedValue:
+    """Project either a plain path or an operation-aware `op:path`.
+
+    `kernel_file_operations` values use `read:/path`, `write:/path`,
+    etc. The operation prefix is raw evidence from kernel-event open
+    metadata, so projection only touches the path suffix.
+    """
+
+    if ":" not in value:
+        return _project_single_path(value, aliases)
+    op, path = value.split(":", 1)
+    # Avoid treating URI-ish or host:port values as path operations.
+    if "/" not in path:
+        return _project_single_path(value, aliases)
+    projected = _project_single_path(path, aliases)
+    return ProjectedValue(
+        raw_value=value,
+        projected_value=f"{op}:{projected.projected_value}",
+        path_class=projected.path_class,
+        relation=projected.relation,
+        rule=projected.rule,
+        confidence=projected.confidence,
+        claim_level=projected.claim_level,
+    )
+
+
+def _projection_payload(
+    dimension: str,
+    a_values: list[str],
+    b_values: list[str],
+    aliases: dict[str, PathAlias],
+) -> dict[str, Any]:
+    if not aliases:
+        return {
+            "schema": PATH_PROJECTION_SCHEMA,
+            "status": "not_applied",
+            "reason": "no path aliases declared",
+            "non_claims": list(PROJECTION_NON_CLAIMS),
+        }
+
+    projected_a = [_project_path_value(value, aliases) for value in a_values]
+    projected_b = [_project_path_value(value, aliases) for value in b_values]
+    a_projected_values = [item.projected_value for item in projected_a]
+    b_projected_values = [item.projected_value for item in projected_b]
+    only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
+    mappings = [
+        {"side": "a", **dataclasses.asdict(item)} for item in projected_a
+    ] + [{"side": "b", **dataclasses.asdict(item)} for item in projected_b]
+    rules = sorted(
+        {
+            item.rule
+            for item in [*projected_a, *projected_b]
+            if item.rule != "no_declared_alias"
+        }
+    )
+    has_projected_match = any(
+        item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+        and item.projected_value in both
+        for item in [*projected_a, *projected_b]
+    )
+    if has_projected_match:
+        claim_level = CLAIM_PROJECTED_EQUIVALENT
+    else:
+        claim_level = CLAIM_INCONCLUSIVE
+    return {
+        "schema": PATH_PROJECTION_SCHEMA,
+        "status": "applied",
+        "dimension": dimension,
+        "claim_level": claim_level,
+        "only_in_a": only_a,
+        "only_in_b": only_b,
+        "in_both": both,
+        "rules": rules,
+        "mappings": mappings,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
+
+
+def _path_alias_dict(path_aliases: tuple[PathAlias, ...]) -> dict[str, PathAlias]:
+    out: dict[str, PathAlias] = {}
+    for alias in path_aliases:
+        if alias.raw_path in out:
+            raise ValueError(f"duplicate path alias for {alias.raw_path!r}")
+        out[alias.raw_path] = alias
+    return out
 
 
 def _network_endpoint_matches_provider(
@@ -463,6 +633,7 @@ def build_drift_report(
     *,
     provider_hosts: tuple[str, ...] = DEFAULT_PROVIDER_HOSTS,
     fixture_paths: frozenset[str] = frozenset(),
+    path_aliases: tuple[PathAlias, ...] = (),
 ) -> list[DriftRow]:
     """Compute per-dimension drift rows between two archives.
 
@@ -473,6 +644,7 @@ def build_drift_report(
     """
 
     rows: list[DriftRow] = []
+    aliases = _path_alias_dict(path_aliases)
 
     # --- filesystem paths touched ---
     a_paths = a.capability_surface.get("filesystem_paths", [])
@@ -496,6 +668,9 @@ def build_drift_report(
             in_both=both,
             classification=cls,
             detail=detail,
+            projection=_projection_payload(
+                "filesystem_paths_touched", a_paths, b_paths, aliases
+            ),
         )
     )
 
@@ -519,6 +694,12 @@ def build_drift_report(
             in_both=both,
             classification=cls,
             detail=detail,
+            projection=_projection_payload(
+                "kernel_file_operations",
+                a.kernel_file_operations,
+                b.kernel_file_operations,
+                aliases,
+            ),
         )
     )
 
@@ -758,6 +939,16 @@ def _fmt_list(items: Iterable[str]) -> str:
     return ", ".join(f"`{_md_escape_cell(i)}`" for i in items)
 
 
+def _fmt_projection(projection: dict[str, Any]) -> str:
+    if projection.get("status") != "applied":
+        return "—"
+    claim = str(projection.get("claim_level", CLAIM_INCONCLUSIVE))
+    in_both = projection.get("in_both")
+    if isinstance(in_both, list) and in_both:
+        return f"{_md_escape_cell(claim)}: {_fmt_list(str(i) for i in in_both)}"
+    return _md_escape_cell(claim)
+
+
 def report_to_md(
     a: ArchiveObservation,
     b: ArchiveObservation,
@@ -779,9 +970,9 @@ def report_to_md(
     lines.append("")
     lines.append(
         "| Dimension | Source | Classification | Only in A | Only in B | "
-        "In both | Detail |"
+        "In both | Projection | Detail |"
     )
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for r in rows:
         lines.append(
             f"| `{_md_escape_cell(r.dimension)}` "
@@ -790,6 +981,7 @@ def report_to_md(
             f"| {_fmt_list(r.only_in_a)} "
             f"| {_fmt_list(r.only_in_b)} "
             f"| {_fmt_list(r.in_both)} "
+            f"| {_fmt_projection(r.projection)} "
             f"| {_md_escape_cell(r.detail)} |"
         )
     return "\n".join(lines) + "\n"
@@ -830,11 +1022,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--path-alias",
+        action="append",
+        default=[],
+        help=(
+            "Declare an exact raw-path to logical-path projection as "
+            "RAW=PROJECTED. The raw value remains in only_in_a/only_in_b/"
+            "in_both; the projection is emitted under row.projection. May "
+            "be passed multiple times, e.g. "
+            "--path-alias $A_INPUT=workdir/input."
+        ),
+    )
+    parser.add_argument(
         "--provider-host",
         action="append",
         default=[],
         help=(
-            "Add a hostname/substring to the provider-endpoint whitelist. "
+            "Add a hostname to the provider-endpoint whitelist. "
             "May be passed multiple times. Defaults: "
             + ", ".join(DEFAULT_PROVIDER_HOSTS)
         ),
@@ -850,10 +1054,28 @@ def main(argv: list[str] | None = None) -> int:
 
     provider_hosts = DEFAULT_PROVIDER_HOSTS + tuple(args.provider_host)
     fixture_paths = frozenset(args.fixture_path)
+    try:
+        path_aliases = tuple(_parse_path_alias(item) for item in args.path_alias)
+    except ValueError as exc:
+        print(f"bad --path-alias: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _path_alias_dict(path_aliases)
+    except ValueError as exc:
+        print(f"bad --path-alias: {exc}", file=sys.stderr)
+        return 2
 
-    rows = build_drift_report(
-        a, b, provider_hosts=provider_hosts, fixture_paths=fixture_paths
-    )
+    try:
+        rows = build_drift_report(
+            a,
+            b,
+            provider_hosts=provider_hosts,
+            fixture_paths=fixture_paths,
+            path_aliases=path_aliases,
+        )
+    except ValueError as exc:
+        print(f"bad projection config: {exc}", file=sys.stderr)
+        return 2
     payload = report_to_json(a, b, rows)
 
     if args.out_json:

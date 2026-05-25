@@ -239,6 +239,8 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
   --archive-b "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/fixtures/arm-b-gemini" \
   --fixture-path /tmp/work/fixture-input.txt \
   --fixture-path /tmp/work/fixture-output.txt \
+  --path-alias /tmp/work/fixture-input.txt=workdir/input \
+  --path-alias /tmp/work/fixture-output.txt=workdir/output \
   --out-md /tmp/drift-smoke.md
 
 # 2. Unit tests.
