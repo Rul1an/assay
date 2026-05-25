@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+PROJECTION_SAMPLE_LIMIT = 3
 
 # ---------------------------------------------------------------------------
 # Schema strings (also used to identify fixture archives in tests)
@@ -703,8 +704,11 @@ def _project_path_value(
     if ":" not in value:
         return _project_single_path(value, aliases)
     op, path = value.split(":", 1)
-    # Avoid treating URI-ish or host:port values as path operations.
-    if "/" not in path:
+    # Kernel operation values are shaped as `op:/absolute/path`.
+    # Anything else (URI-ish values, host:port, or `op:relative`) stays
+    # a single raw value so projection does not accidentally parse
+    # unrelated colon-separated strings.
+    if not path.startswith("/") or path.startswith("//"):
         return _project_single_path(value, aliases)
     projected = _project_single_path(path, aliases)
     return ProjectedValue(
@@ -716,6 +720,32 @@ def _project_path_value(
         confidence=projected.confidence,
         claim_level=projected.claim_level,
     )
+
+
+def _projection_mappings(
+    side: str, items: Iterable[ProjectedValue | NetworkProjectedValue]
+) -> list[dict[str, Any]]:
+    return [
+        {"side": side, **dataclasses.asdict(item)}
+        for item in items
+        if item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+    ]
+
+
+def _projection_unmatched_summary(
+    side: str, items: Iterable[ProjectedValue | NetworkProjectedValue]
+) -> dict[str, Any]:
+    raw_values = [
+        item.raw_value
+        for item in items
+        if item.claim_level == CLAIM_RAW_OBSERVED
+    ]
+    return {
+        "side": side,
+        "count": len(raw_values),
+        "samples": raw_values[:PROJECTION_SAMPLE_LIMIT],
+        "sample_limit": PROJECTION_SAMPLE_LIMIT,
+    }
 
 
 def _projection_payload(
@@ -738,9 +768,13 @@ def _projection_payload(
     a_projected_values = [item.projected_value for item in projected_a]
     b_projected_values = [item.projected_value for item in projected_b]
     only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
-    mappings = [
-        {"side": "a", **dataclasses.asdict(item)} for item in projected_a
-    ] + [{"side": "b", **dataclasses.asdict(item)} for item in projected_b]
+    mappings = _projection_mappings("a", projected_a) + _projection_mappings(
+        "b", projected_b
+    )
+    unmatched_summary = {
+        "a": _projection_unmatched_summary("a", projected_a),
+        "b": _projection_unmatched_summary("b", projected_b),
+    }
     rules = sorted(
         {
             item.rule
@@ -768,6 +802,7 @@ def _projection_payload(
         "in_both": both,
         "rules": rules,
         "mappings": mappings,
+        "unmatched_summary": unmatched_summary,
         "non_claims": list(PROJECTION_NON_CLAIMS),
     }
 
@@ -901,9 +936,13 @@ def _network_projection_payload(
     a_projected_values = [item.projected_value for item in projected_a]
     b_projected_values = [item.projected_value for item in projected_b]
     only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
-    mappings = [
-        {"side": "a", **dataclasses.asdict(item)} for item in projected_a
-    ] + [{"side": "b", **dataclasses.asdict(item)} for item in projected_b]
+    mappings = _projection_mappings("a", projected_a) + _projection_mappings(
+        "b", projected_b
+    )
+    unmatched_summary = {
+        "a": _projection_unmatched_summary("a", projected_a),
+        "b": _projection_unmatched_summary("b", projected_b),
+    }
     rules = sorted(
         {
             item.rule
@@ -930,6 +969,7 @@ def _network_projection_payload(
         "in_both": both,
         "rules": rules,
         "mappings": mappings,
+        "unmatched_summary": unmatched_summary,
         "non_claims": list(PROJECTION_NON_CLAIMS),
     }
 
@@ -1495,9 +1535,44 @@ def _fmt_projection(projection: dict[str, Any]) -> str:
         return "—"
     claim = str(projection.get("claim_level", CLAIM_INCONCLUSIVE))
     in_both = projection.get("in_both")
+    parts: list[str] = []
     if isinstance(in_both, list) and in_both:
-        return f"{_md_escape_cell(claim)}: {_fmt_list(str(i) for i in in_both)}"
-    return _md_escape_cell(claim)
+        parts.append(
+            f"{_md_escape_cell(claim)}: {_fmt_list(str(i) for i in in_both)}"
+        )
+    else:
+        parts.append(_md_escape_cell(claim))
+
+    mappings = projection.get("mappings")
+    if isinstance(mappings, list) and mappings:
+        examples = []
+        for mapping in mappings[:PROJECTION_SAMPLE_LIMIT]:
+            if not isinstance(mapping, dict):
+                continue
+            raw = str(mapping.get("raw_value", ""))
+            projected = str(mapping.get("projected_value", ""))
+            if raw and projected:
+                examples.append(
+                    f"`{_md_escape_cell(raw)}` -> "
+                    f"`{_md_escape_cell(projected)}`"
+                )
+        if examples:
+            suffix = ""
+            if len(mappings) > PROJECTION_SAMPLE_LIMIT:
+                suffix = f"; +{len(mappings) - PROJECTION_SAMPLE_LIMIT} more"
+            parts.append(f"maps: {', '.join(examples)}{suffix}")
+
+    unmatched = projection.get("unmatched_summary")
+    if isinstance(unmatched, dict):
+        counts = []
+        for side in ("a", "b"):
+            item = unmatched.get(side)
+            if isinstance(item, dict):
+                count = _md_escape_cell(str(item.get("count", 0)))
+                counts.append(f"{side}={count}")
+        if counts:
+            parts.append(f"unmatched raw: {', '.join(counts)}")
+    return "<br>".join(parts)
 
 
 def _fmt_optional(value: str | None) -> str:

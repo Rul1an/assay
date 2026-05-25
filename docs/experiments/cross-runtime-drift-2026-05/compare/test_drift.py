@@ -665,6 +665,17 @@ class DriftReportClassificationTests(unittest.TestCase):
             "projection_no_raw_evidence_rewrite",
             projection["non_claims"],
         )
+        self.assertTrue(projection["mappings"])
+        self.assertTrue(
+            all(
+                item["claim_level"] == drift.CLAIM_PROJECTED_EQUIVALENT
+                for item in projection["mappings"]
+            )
+        )
+        self.assertEqual(
+            projection["unmatched_summary"]["a"]["sample_limit"],
+            drift.PROJECTION_SAMPLE_LIMIT,
+        )
 
     def test_path_projection_unknown_only_is_inconclusive(self) -> None:
         rows = drift.build_drift_report(
@@ -679,6 +690,27 @@ class DriftReportClassificationTests(unittest.TestCase):
         self.assertEqual(
             row.projection["claim_level"], drift.CLAIM_INCONCLUSIVE
         )
+        self.assertEqual(row.projection["mappings"], [])
+        self.assertGreater(row.projection["unmatched_summary"]["a"]["count"], 0)
+
+    def test_path_projection_operation_values_require_absolute_path(self) -> None:
+        aliases = {
+            "/tmp/work/fixture-input.txt": drift.PathAlias(
+                "/tmp/work/fixture-input.txt", "workdir/input"
+            )
+        }
+        projected = drift._project_path_value(
+            "read:/tmp/work/fixture-input.txt", aliases
+        )
+        self.assertEqual(projected.projected_value, "read:workdir/input")
+
+        for value in ("read:relative/path", "https://example.test/file"):
+            with self.subTest(value=value):
+                unprojected = drift._project_path_value(value, aliases)
+                self.assertEqual(unprojected.projected_value, value)
+                self.assertEqual(
+                    unprojected.claim_level, drift.CLAIM_RAW_OBSERVED
+                )
 
     def test_duplicate_path_alias_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -741,6 +773,14 @@ class DriftReportClassificationTests(unittest.TestCase):
         self.assertIn(
             "declared_network_alias", projection["rules"]
         )
+        self.assertTrue(projection["mappings"])
+        self.assertTrue(
+            all(
+                item["claim_level"] == drift.CLAIM_PROJECTED_EQUIVALENT
+                for item in projection["mappings"]
+            )
+        )
+        self.assertIn("b", projection["unmatched_summary"])
 
     def test_network_projection_cidr_alias_maps_ip_endpoints(self) -> None:
         a = drift.ArchiveObservation(
@@ -1230,6 +1270,27 @@ class MainCliTests(unittest.TestCase):
         )
         self.assertIn("from `https://example.test/run - injected`", md)
         self.assertNotIn("\n- injected", md)
+
+    def test_report_markdown_shows_projection_examples(self) -> None:
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(
+            a,
+            b,
+            path_aliases=(
+                drift.PathAlias(
+                    "/tmp/work/fixture-input.txt", "workdir/input"
+                ),
+                drift.PathAlias(
+                    "/tmp/work/fixture-output.txt", "workdir/output"
+                ),
+            ),
+        )
+        md = drift.report_to_md(a, b, rows)
+        self.assertIn(
+            "`/tmp/work/fixture-input.txt` -> `workdir/input`", md
+        )
+        self.assertIn("unmatched raw: a=", md)
 
     def test_main_can_declare_raw_captures_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
