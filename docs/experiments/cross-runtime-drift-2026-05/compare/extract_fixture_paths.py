@@ -61,6 +61,12 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     first = lines[0]
     second = lines[1]
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        print(
+            "tool-calls.ndjson entries are not JSON objects",
+            file=sys.stderr,
+        )
+        return 3
     if (
         first.get("tool") != "read_file"
         or second.get("tool") != "write_file"
@@ -71,8 +77,20 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 3
-    input_path = first.get("args", {}).get("path")
-    output_path = second.get("args", {}).get("path")
+    # `args` is required and must be a JSON object. The contract-checker
+    # already enforces this in the per-iteration step, but the helper
+    # claims to handle malformed input cleanly so we cannot assume the
+    # call site always pre-validated.
+    first_args = first.get("args")
+    second_args = second.get("args")
+    if not isinstance(first_args, dict) or not isinstance(second_args, dict):
+        print(
+            "tool args missing or not a JSON object",
+            file=sys.stderr,
+        )
+        return 3
+    input_path = first_args.get("path")
+    output_path = second_args.get("path")
     if not isinstance(input_path, str) or not isinstance(output_path, str):
         print("tool args.path missing or not a string", file=sys.stderr)
         return 3

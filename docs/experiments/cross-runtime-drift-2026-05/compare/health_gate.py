@@ -52,17 +52,26 @@ def _read_member(source: Path, member: str) -> bytes:
 
 
 def evaluate_health(health: dict[str, Any]) -> list[str]:
-    """Return a list of failure descriptions; empty list means PASS."""
+    """Return a list of failure descriptions; empty list means PASS.
+
+    `ringbuf_drops` is a required health invariant: missing, null, or
+    non-int values are a failure (not silently treated as 0). Same for
+    the other two: a missing field is *not* assumed to mean "clean"."""
     issues: list[str] = []
-    drops = health.get("ringbuf_drops", 0)
-    if not isinstance(drops, int) or drops != 0:
-        issues.append(f"ringbuf_drops={drops!r}")
-    kernel_layer = health.get("kernel_layer")
-    if kernel_layer != "complete":
-        issues.append(f"kernel_layer={kernel_layer!r}")
-    cgroup = health.get("cgroup_correlation")
-    if cgroup != "clean":
-        issues.append(f"cgroup_correlation={cgroup!r}")
+    if "ringbuf_drops" not in health:
+        issues.append("ringbuf_drops=<missing>")
+    else:
+        drops = health["ringbuf_drops"]
+        if not isinstance(drops, int) or isinstance(drops, bool) or drops != 0:
+            issues.append(f"ringbuf_drops={drops!r}")
+    if "kernel_layer" not in health:
+        issues.append("kernel_layer=<missing>")
+    elif health["kernel_layer"] != "complete":
+        issues.append(f"kernel_layer={health['kernel_layer']!r}")
+    if "cgroup_correlation" not in health:
+        issues.append("cgroup_correlation=<missing>")
+    elif health["cgroup_correlation"] != "clean":
+        issues.append(f"cgroup_correlation={health['cgroup_correlation']!r}")
     return issues
 
 

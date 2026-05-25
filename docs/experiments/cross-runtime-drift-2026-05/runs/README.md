@@ -61,11 +61,29 @@ After downloading the artifacts:
 1. Extract `arm-a-openai` artifact into `runs/a0/`.
 2. Extract `arm-b-gemini` artifact into `runs/b0/`.
 3. Extract `drift-reports` artifact into `runs/drift/`.
-4. Verify each archive locally with `assay evidence lint` (the v0
-   manifest will lint clean only when `observation_health.ringbuf_drops
-   == 0` and `correlation_report.status == "clean"`). Discard any run
-   where `ringbuf_drops > 0` and re-dispatch — the dropped events break
-   the kernel-layer completeness invariant.
+4. Verify each archive's measurement health locally:
+
+   ```bash
+   python3 docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py \
+     --archive path/to/run_arm_a-openai_<ts>_<i>/archive.tar.gz
+   ```
+
+   This is the same gate the workflow runs per iteration. It exits 0
+   only when `ringbuf_drops == 0`, `kernel_layer == "complete"`, and
+   `cgroup_correlation == "clean"`. (`assay evidence lint` is for Assay
+   *evidence bundles* — a different artifact shape — and does not
+   apply here.)
+
+   If you want to eyeball the raw values:
+
+   ```bash
+   tar -xOzf archive.tar.gz observation-health.json | python3 -m json.tool
+   tar -xOzf archive.tar.gz correlation-report.json | python3 -m json.tool
+   ```
+
+   Discard any run where the health gate fails and re-dispatch — the
+   dropped events break the kernel-layer completeness invariant the
+   experiment depends on.
 5. Open a follow-up PR titled
    `docs(experiments): Slice 3 — live Arm A0 + B0 baselines + drift reports`.
 

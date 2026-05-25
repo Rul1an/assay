@@ -84,6 +84,45 @@ class EvaluateHealthTests(unittest.TestCase):
         issues = health_gate.evaluate_health(h)
         self.assertEqual(len(issues), 3)
 
+    def test_missing_ringbuf_drops_fails(self) -> None:
+        """ringbuf_drops is a required invariant; missing must not be
+        silently treated as 0 (P2 review on PR #1348)."""
+        h = {k: v for k, v in CLEAN_HEALTH.items() if k != "ringbuf_drops"}
+        issues = health_gate.evaluate_health(h)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("ringbuf_drops", issues[0])
+        self.assertIn("missing", issues[0])
+
+    def test_null_ringbuf_drops_fails(self) -> None:
+        h = {**CLEAN_HEALTH, "ringbuf_drops": None}
+        issues = health_gate.evaluate_health(h)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("ringbuf_drops", issues[0])
+
+    def test_bool_ringbuf_drops_fails(self) -> None:
+        # In Python, bool is a subclass of int; True == 1 sneaks past a
+        # naive int check. Reject explicitly.
+        h = {**CLEAN_HEALTH, "ringbuf_drops": False}
+        issues = health_gate.evaluate_health(h)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("ringbuf_drops", issues[0])
+
+    def test_missing_kernel_layer_fails(self) -> None:
+        h = {k: v for k, v in CLEAN_HEALTH.items() if k != "kernel_layer"}
+        issues = health_gate.evaluate_health(h)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("kernel_layer", issues[0])
+
+    def test_missing_cgroup_correlation_fails(self) -> None:
+        h = {
+            k: v
+            for k, v in CLEAN_HEALTH.items()
+            if k != "cgroup_correlation"
+        }
+        issues = health_gate.evaluate_health(h)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("cgroup_correlation", issues[0])
+
 
 class HealthGateMainTests(unittest.TestCase):
     def test_clean_directory_archive_passes(self) -> None:

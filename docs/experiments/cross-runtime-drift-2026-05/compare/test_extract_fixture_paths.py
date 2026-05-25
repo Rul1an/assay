@@ -120,6 +120,29 @@ class FailureTests(unittest.TestCase):
             rc, _ = _run_main_capturing(["--tool-calls", str(tc)])
             self.assertEqual(rc, 3)
 
+    def test_null_args_returns_3(self) -> None:
+        """`{"args": null}` must surface as a clean exit 3, not a
+        traceback (P2 review on PR #1348)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tc = Path(tmp) / "tool-calls.ndjson"
+            _write_tool_calls(
+                tc,
+                [
+                    {"seq": 1, "tool": "read_file", "args": None},
+                    {"seq": 2, "tool": "write_file", "args": None},
+                ],
+            )
+            rc, _ = _run_main_capturing(["--tool-calls", str(tc)])
+            self.assertEqual(rc, 3)
+
+    def test_non_object_entry_returns_3(self) -> None:
+        """A list entry that is not a JSON object must not crash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tc = Path(tmp) / "tool-calls.ndjson"
+            tc.write_text("[1, 2, 3]\n42\n", encoding="utf-8")
+            rc, _ = _run_main_capturing(["--tool-calls", str(tc)])
+            self.assertEqual(rc, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
