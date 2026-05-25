@@ -254,8 +254,8 @@ Example row:
   },
   "rules": ["workload_contract_input_path"],
   "non_claims": [
-    "runtime_drift_no_semantic_workload_equivalence",
-    "runtime_drift_no_policy_acceptability_verdict"
+    "projection_no_semantic_workload_equivalence",
+    "projection_no_policy_acceptability_verdict"
   ]
 }
 ```
@@ -264,16 +264,19 @@ Example row:
 
 Kernel expansion is valuable, but it should come after the projection
 layer is readable. The open metadata added to kernel event v0 already
-supports operation-aware open projections for successful `openat` and
-`openat2` calls:
+supports operation-aware projections for `openat` and `openat2` calls.
+Successful calls can project access and operation hints:
 
 - `read`;
 - `write`;
 - `read_write`;
 - `create`;
 - `truncate`;
-- `append`;
-- `error`.
+- `append`.
+
+Failed calls are represented separately by the kernel event `status`
+field (`status=error`) derived from the syscall return value. `error` is
+not an operation class alongside `read` or `write`.
 
 Kernel event v0.2 should consider:
 
