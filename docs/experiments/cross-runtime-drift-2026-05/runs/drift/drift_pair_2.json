@@ -101,6 +101,13 @@
     "schema": "assay.runner.drift_report_provenance.v0",
     "assay_version": null,
     "assay_commit": "e3f6ef9d",
+    "render_metadata": {
+      "kind": "re_render",
+      "rendered_at": "2026-05-25T19:00:35Z",
+      "comparator_commit": "d1277d82",
+      "source_run_url": "https://github.com/Rul1an/assay/actions/runs/26398427430",
+      "raw_captures_unchanged": true
+    },
     "runner_schema_versions": {
       "archive_manifest": [
         "assay.runner.archive_manifest.v0"
@@ -190,7 +197,8 @@
     "non_claims": [
       "provenance_no_evidence_rewrite",
       "provenance_unknowns_preserved",
-      "provenance_metadata_not_policy_verdict"
+      "provenance_metadata_not_policy_verdict",
+      "provenance_capture_commit_distinct_from_render_commit"
     ]
   },
   "rows": [
