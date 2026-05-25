@@ -71,6 +71,24 @@ def _result(rule: str, passed: bool, detail: str = "") -> CheckResult:
     return CheckResult(rule=rule, passed=passed, detail=detail)
 
 
+def _strip_single_final_newline(value: str) -> str:
+    """Ignore one terminal newline for model-style variance only.
+
+    The drift experiment cares that the model/tool path uppercased the fixture
+    content; it does not use a final line terminator as a drift dimension.
+    """
+
+    if value.endswith("\n"):
+        return value[:-1]
+    return value
+
+
+def _contents_match(actual: str, expected: str) -> bool:
+    return _strip_single_final_newline(actual) == _strip_single_final_newline(
+        expected
+    )
+
+
 def check_output_exists(output_path: Path) -> CheckResult:
     if not output_path.is_file():
         return _result(
@@ -92,13 +110,16 @@ def check_output_uppercased(
 ) -> CheckResult:
     actual = output_path.read_text(encoding="utf-8")
     expected = expected_contents.upper()
-    if actual != expected:
+    if not _contents_match(actual, expected):
         return _result(
-            "2. fixture-output.txt equals input uppercased",
+            "2. fixture-output.txt equals input uppercased (final newline-insensitive)",
             False,
             f"expected {expected!r}, got {actual!r}",
         )
-    return _result("2. fixture-output.txt equals input uppercased", True)
+    return _result(
+        "2. fixture-output.txt equals input uppercased (final newline-insensitive)",
+        True,
+    )
 
 
 def check_tool_calls_two_lines(
@@ -170,14 +191,15 @@ def check_second_call_write(
         )
     actual = str(args.get("contents", ""))
     expected = expected_contents.upper()
-    if actual != expected:
+    if not _contents_match(actual, expected):
         return _result(
-            "5. line 2: write_file with correct path + contents",
+            "5. line 2: write_file with correct path + contents (final newline-insensitive)",
             False,
             f"expected contents {expected!r}, got {actual!r}",
         )
     return _result(
-        "5. line 2: write_file with correct path + contents", True
+        "5. line 2: write_file with correct path + contents (final newline-insensitive)",
+        True,
     )
 
 
