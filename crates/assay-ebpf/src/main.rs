@@ -26,7 +26,7 @@ use aya_ebpf::{
         bpf_get_current_ancestor_cgroup_id, bpf_get_current_cgroup_id, bpf_get_current_pid_tgid,
     },
     macros::{map, tracepoint},
-    maps::{Array, HashMap, RingBuf},
+    maps::{Array, HashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 
@@ -98,6 +98,9 @@ struct PendingOpen {
 
 #[map]
 static PENDING_OPEN: HashMap<u64, PendingOpen> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+static OPEN_SCRATCH: PerCpuArray<PendingOpen> = PerCpuArray::with_max_entries(1, 0);
 
 const KEY_OFFSET_FILENAME: u32 = 0;
 const KEY_OFFSET_SOCKADDR: u32 = 1;
@@ -266,6 +269,7 @@ fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
     store_open_pending(ctx, KEY_OFFSET_FILENAME, flags as u64, mode, 0)
 }
 
+#[inline(always)]
 fn store_open_pending(
     ctx: TracePointContext,
     offset_key: u32,
@@ -303,31 +307,36 @@ fn store_open_pending(
         return Ok(0);
     }
 
-    let mut pending = PendingOpen {
-        data: [0u8; DATA_LEN],
-        flags,
-        mode,
-        resolve,
+    let pending = match OPEN_SCRATCH.get_ptr_mut(0) {
+        Some(pending) => pending,
+        None => return Ok(0),
     };
+    unsafe {
+        core::ptr::write_bytes((*pending).data.as_mut_ptr(), 0, DATA_LEN);
+        (*pending).flags = flags;
+        (*pending).mode = mode;
+        (*pending).resolve = resolve;
+    }
     let read_result = unsafe {
         aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
             filename_ptr as *const u8,
-            &mut pending.data,
+            &mut (*pending).data,
         )
     };
     if read_result.is_err() {
         return Ok(0);
     }
     let key = bpf_get_current_pid_tgid();
-    let _ = PENDING_OPEN.insert(&key, &pending, 0);
+    let _ = unsafe { PENDING_OPEN.insert(&key, &*pending, 0) };
 
     Ok(0)
 }
 
+#[inline(always)]
 fn try_open_exit(ctx: TracePointContext, emitted_stat: u32, dropped_stat: u32) -> Result<u32, u32> {
     let key = bpf_get_current_pid_tgid();
     let pending = match unsafe { PENDING_OPEN.get(&key) } {
-        Some(pending) => *pending,
+        Some(pending) => pending,
         None => return Ok(0),
     };
     let _ = PENDING_OPEN.remove(&key);
