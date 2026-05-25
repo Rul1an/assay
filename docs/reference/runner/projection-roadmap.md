@@ -155,6 +155,13 @@ depending on the policy layer that consumes the report.
 Report-level provenance should land early because it improves every
 later experiment at low implementation cost.
 
+Implementation note: the cross-runtime drift comparator now emits a
+`provenance` block in JSON reports. Archive manifest digests, schema
+versions, observation-health gates, and correlation status are derived
+from the two input archives. Workflow URL, runner label, kernel tuple,
+Assay version/commit, and eBPF object digest are caller-supplied anchors
+and stay `null` when not provided.
+
 Minimum metadata block:
 
 ```json

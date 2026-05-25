@@ -125,6 +125,11 @@ Network projection v0 follows the same additive discipline for
 `--network-cidr CIDR=CLASS` can project declared endpoints or IP ranges
 to taxonomy classes such as `provider_api` or `dns`, while unmatched
 endpoints remain raw/unknown.
+Report provenance metadata is emitted under `provenance` in every JSON
+report. The comparator derives input archive manifest digests, schema
+versions, observation-health gates, and correlation status from the
+archives; workflow/commit/kernel/eBPF anchors are optional CLI inputs and
+remain `null` when the caller does not provide them.
 
 ## What's done in Slice 1
 

@@ -62,6 +62,7 @@ ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 CAPABILITY_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
 SDK_EVENT_SCHEMA = "assay.runner.sdk_event.v0"
 DRIFT_REPORT_SCHEMA = "assay.cross_runtime_drift.v0"
+DRIFT_REPORT_PROVENANCE_SCHEMA = "assay.runner.drift_report_provenance.v0"
 
 MANIFEST_PATH = "manifest.json"
 CAPABILITY_SURFACE_PATH = "capability-surface.json"
@@ -195,6 +196,14 @@ class ArchiveObservation:
     sdk_tool_call_ids: list[str]
     sdk_tool_order: list[str]  # (tool_call_id, tool) sequence per seq order
     kernel_file_operations: list[str] = dataclasses.field(default_factory=list)
+    manifest_schema: str | None = None
+    capability_surface_schema: str | None = None
+    observation_health_schema: str | None = None
+    correlation_report_schema: str | None = None
+    sdk_event_schema: str | None = None
+    kernel_event_schema: str | None = None
+    observation_health: dict[str, Any] = dataclasses.field(default_factory=dict)
+    correlation_report: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def _open_archive_member(source: Path, member: str) -> bytes | None:
@@ -233,6 +242,14 @@ def _parse_json(path_repr: str, data: bytes) -> Any:
         raise BadArchiveError(f"{path_repr}: invalid UTF-8: {exc}") from exc
 
 
+def _schema_from(value: Any) -> str | None:
+    if isinstance(value, dict):
+        schema = value.get("schema")
+        if isinstance(schema, str) and schema:
+            return schema
+    return None
+
+
 def parse_archive(source: Path) -> ArchiveObservation:
     """Parse a Runner archive (directory or .tar.gz). Raises
     BadArchiveError if the path does not exist, the manifest is missing,
@@ -256,6 +273,7 @@ def parse_archive(source: Path) -> ArchiveObservation:
     manifest = _parse_json(f"{source}!{MANIFEST_PATH}", manifest_bytes)
     manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
     run_id = manifest.get("run_id") if isinstance(manifest, dict) else None
+    manifest_schema = _schema_from(manifest)
     # runtime_label is derived from SDK events below (the real Runner
     # archive_manifest.v0 schema does not carry a runtime field; the SDK
     # event `source` is the canonical signal).
@@ -274,6 +292,11 @@ def parse_archive(source: Path) -> ArchiveObservation:
     capability = _parse_json(
         f"{source}!{CAPABILITY_SURFACE_PATH}", capability_bytes
     )
+    if not isinstance(capability, dict):
+        raise BadArchiveError(
+            f"{source}!{CAPABILITY_SURFACE_PATH}: expected JSON object"
+        )
+    capability_surface_schema = _schema_from(capability)
     capability_surface: dict[str, list[str]] = {
         "filesystem_paths": [],
         "network_endpoints": [],
@@ -281,15 +304,43 @@ def parse_archive(source: Path) -> ArchiveObservation:
         "mcp_tools": [],
         "policy_decisions": [],
     }
-    if isinstance(capability, dict):
-        for key in capability_surface:
-            value = capability.get(key, [])
-            if isinstance(value, list):
-                capability_surface[key] = sorted(
-                    [str(v) for v in value if isinstance(v, str)]
-                )
+    for key in capability_surface:
+        value = capability.get(key, [])
+        if isinstance(value, list):
+            capability_surface[key] = sorted(
+                [str(v) for v in value if isinstance(v, str)]
+            )
+
+    observation_health: dict[str, Any] = {}
+    observation_health_schema: str | None = None
+    observation_bytes = _open_archive_member(source, OBSERVATION_HEALTH_PATH)
+    if observation_bytes is not None:
+        health = _parse_json(
+            f"{source}!{OBSERVATION_HEALTH_PATH}", observation_bytes
+        )
+        if not isinstance(health, dict):
+            raise BadArchiveError(
+                f"{source}!{OBSERVATION_HEALTH_PATH}: expected JSON object"
+            )
+        observation_health = health
+        observation_health_schema = _schema_from(health)
+
+    correlation_report: dict[str, Any] = {}
+    correlation_report_schema: str | None = None
+    correlation_bytes = _open_archive_member(source, CORRELATION_REPORT_PATH)
+    if correlation_bytes is not None:
+        correlation = _parse_json(
+            f"{source}!{CORRELATION_REPORT_PATH}", correlation_bytes
+        )
+        if not isinstance(correlation, dict):
+            raise BadArchiveError(
+                f"{source}!{CORRELATION_REPORT_PATH}: expected JSON object"
+            )
+        correlation_report = correlation
+        correlation_report_schema = _schema_from(correlation)
 
     sdk_events: list[dict[str, Any]] = []
+    sdk_event_schema: str | None = None
     sdk_bytes = _open_archive_member(source, SDK_LAYER_PATH)
     if sdk_bytes is not None:
         try:
@@ -302,14 +353,22 @@ def parse_archive(source: Path) -> ArchiveObservation:
             if not line.strip():
                 continue
             try:
-                sdk_events.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise BadArchiveError(
                     f"{source}!{SDK_LAYER_PATH}:{lineno}: "
                     f"invalid JSON: {exc}"
                 ) from exc
+            if not isinstance(event, dict):
+                raise BadArchiveError(
+                    f"{source}!{SDK_LAYER_PATH}:{lineno}: expected JSON object"
+                )
+            sdk_events.append(event)
+            if sdk_event_schema is None:
+                sdk_event_schema = _schema_from(event)
 
     kernel_events: list[dict[str, Any]] = []
+    kernel_event_schema: str | None = None
     kernel_bytes = _open_archive_member(source, KERNEL_LAYER_PATH)
     if kernel_bytes is not None:
         try:
@@ -330,6 +389,8 @@ def parse_archive(source: Path) -> ArchiveObservation:
                 ) from exc
             if isinstance(event, dict):
                 kernel_events.append(event)
+                if kernel_event_schema is None:
+                    kernel_event_schema = _schema_from(event)
 
     # Derive runtime label from the first SDK event that carries a
     # `source` field. The Runner SDK-event v0 schema sets source to the
@@ -385,6 +446,14 @@ def parse_archive(source: Path) -> ArchiveObservation:
         sdk_tool_call_ids=sorted(sdk_tool_call_ids),
         sdk_tool_order=sdk_tool_order,
         kernel_file_operations=kernel_file_operations,
+        manifest_schema=manifest_schema,
+        capability_surface_schema=capability_surface_schema,
+        observation_health_schema=observation_health_schema,
+        correlation_report_schema=correlation_report_schema,
+        sdk_event_schema=sdk_event_schema,
+        kernel_event_schema=kernel_event_schema,
+        observation_health=observation_health,
+        correlation_report=correlation_report,
     )
 
 
@@ -435,6 +504,20 @@ class DriftRow:
     classification: str  # one of CLASSIFICATION_* above
     detail: str
     projection: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class ReportProvenance:
+    """Optional report-level anchors supplied by the caller/workflow."""
+
+    assay_version: str | None = None
+    assay_commit: str | None = None
+    workflow_url: str | None = None
+    runner_label: str | None = None
+    kernel_os: str | None = None
+    kernel_release: str | None = None
+    kernel_arch: str | None = None
+    ebpf_object_digest: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1186,8 +1269,18 @@ def build_drift_report(
 
 
 def _operation_fixture_paths(fixture_paths: frozenset[str]) -> frozenset[str]:
-    prefixes = ("read", "write", "read_write", "create", "truncate", "append", "exclusive")
-    return frozenset(f"{prefix}:{path}" for path in fixture_paths for prefix in prefixes)
+    prefixes = (
+        "read",
+        "write",
+        "read_write",
+        "create",
+        "truncate",
+        "append",
+        "exclusive",
+    )
+    return frozenset(
+        f"{prefix}:{path}" for path in fixture_paths for prefix in prefixes
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1195,10 +1288,120 @@ def _operation_fixture_paths(fixture_paths: frozenset[str]) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
+def _compact_health(archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "schema": archive.observation_health_schema,
+        "kernel_layer": archive.observation_health.get("kernel_layer"),
+        "ringbuf_drops": archive.observation_health.get("ringbuf_drops"),
+        "cgroup_correlation": archive.observation_health.get(
+            "cgroup_correlation"
+        ),
+        "policy_layer": archive.observation_health.get("policy_layer"),
+        "sdk_layer": archive.observation_health.get("sdk_layer"),
+    }
+
+
+def _compact_correlation(archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "schema": archive.correlation_report_schema,
+        "status": archive.correlation_report.get("status"),
+    }
+
+
+def _archive_provenance(role: str, archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "role": role,
+        "path": archive.path,
+        "run_id": archive.run_id,
+        "runtime_label": archive.runtime_label,
+        "manifest_digest": archive.manifest_digest,
+        "schemas": {
+            "archive_manifest": archive.manifest_schema,
+            "capability_surface": archive.capability_surface_schema,
+            "observation_health": archive.observation_health_schema,
+            "correlation_report": archive.correlation_report_schema,
+            "sdk_event": archive.sdk_event_schema,
+            "kernel_event": archive.kernel_event_schema,
+        },
+        "observation_health": _compact_health(archive),
+        "correlation_report": _compact_correlation(archive),
+    }
+
+
+def _schema_versions(
+    a: ArchiveObservation, b: ArchiveObservation
+) -> dict[str, list[str]]:
+    return {
+        "archive_manifest": sorted(
+            {x for x in (a.manifest_schema, b.manifest_schema) if x}
+        ),
+        "capability_surface": sorted(
+            {
+                x
+                for x in (a.capability_surface_schema, b.capability_surface_schema)
+                if x
+            }
+        ),
+        "observation_health": sorted(
+            {
+                x
+                for x in (a.observation_health_schema, b.observation_health_schema)
+                if x
+            }
+        ),
+        "correlation_report": sorted(
+            {
+                x
+                for x in (a.correlation_report_schema, b.correlation_report_schema)
+                if x
+            }
+        ),
+        "sdk_event": sorted(
+            {x for x in (a.sdk_event_schema, b.sdk_event_schema) if x}
+        ),
+        "kernel_event": sorted(
+            {x for x in (a.kernel_event_schema, b.kernel_event_schema) if x}
+        ),
+    }
+
+
+def _provenance_payload(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    provenance: ReportProvenance,
+) -> dict[str, Any]:
+    return {
+        "schema": DRIFT_REPORT_PROVENANCE_SCHEMA,
+        "assay_version": provenance.assay_version,
+        "assay_commit": provenance.assay_commit,
+        "runner_schema_versions": _schema_versions(a, b),
+        "kernel": {
+            "os": provenance.kernel_os,
+            "release": provenance.kernel_release,
+            "arch": provenance.kernel_arch,
+        },
+        "ebpf_object_digest": provenance.ebpf_object_digest,
+        "workflow": {
+            "url": provenance.workflow_url,
+            "runner_label": provenance.runner_label,
+        },
+        "input_archives": [
+            _archive_provenance("archive_a", a),
+            _archive_provenance("archive_b", b),
+        ],
+        "non_claims": [
+            "provenance_no_evidence_rewrite",
+            "provenance_unknowns_preserved",
+            "provenance_metadata_not_policy_verdict",
+        ],
+    }
+
+
 def report_to_json(
     a: ArchiveObservation,
     b: ArchiveObservation,
     rows: list[DriftRow],
+    provenance: ReportProvenance = ReportProvenance(),
 ) -> dict[str, Any]:
     return {
         "schema": DRIFT_REPORT_SCHEMA,
@@ -1217,6 +1420,7 @@ def report_to_json(
             "sdk_event_count": b.sdk_event_count,
         },
         "taxonomy": _taxonomy_payload(),
+        "provenance": _provenance_payload(a, b, provenance),
         "rows": [dataclasses.asdict(r) for r in rows],
         "summary": {
             "dimensions_checked": len(rows),
@@ -1380,6 +1584,17 @@ def main(argv: list[str] | None = None) -> int:
             + ", ".join(DEFAULT_PROVIDER_HOSTS)
         ),
     )
+    parser.add_argument("--assay-version", help="Assay version that produced the report.")
+    parser.add_argument("--assay-commit", help="Git commit associated with the report.")
+    parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
+    parser.add_argument("--runner-label", help="Runner label or host class.")
+    parser.add_argument("--kernel-os", help="Kernel OS for the capture host.")
+    parser.add_argument("--kernel-release", help="Kernel release for the capture host.")
+    parser.add_argument("--kernel-arch", help="Kernel architecture for the capture host.")
+    parser.add_argument(
+        "--ebpf-object-digest",
+        help="sha256 digest of the eBPF object used for capture, if known.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1431,7 +1646,17 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"bad projection config: {exc}", file=sys.stderr)
         return 2
-    payload = report_to_json(a, b, rows)
+    provenance = ReportProvenance(
+        assay_version=args.assay_version or None,
+        assay_commit=args.assay_commit or None,
+        workflow_url=args.workflow_url or None,
+        runner_label=args.runner_label or None,
+        kernel_os=args.kernel_os or None,
+        kernel_release=args.kernel_release or None,
+        kernel_arch=args.kernel_arch or None,
+        ebpf_object_digest=args.ebpf_object_digest or None,
+    )
+    payload = report_to_json(a, b, rows, provenance)
 
     if args.out_json:
         try:

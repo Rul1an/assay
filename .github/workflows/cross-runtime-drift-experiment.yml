@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for bin in cargo node npm python3 rustc tar; do
+          for bin in awk cargo node npm python3 rustc sha256sum tar; do
             command -v "$bin" >/dev/null 2>&1 || {
               echo "ERROR: required command not found on delegated runner: $bin" >&2
               exit 1
@@ -163,6 +163,7 @@ jobs:
           HEALTH_GATE="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py"
           OUT_ROOT="$PWD/arm-${ARM}-runs"
           mkdir -p "$OUT_ROOT"
+          sha256sum "$EBPF_OBJ" | awk '{ print "sha256:" $1 }' > "$OUT_ROOT/ebpf-object.sha256"
 
           for i in $(seq 1 "$REPETITIONS"); do
             RUN_ID="run_arm_${ARM}_$(date -u +%Y%m%dT%H%M%SZ)_$i"
@@ -256,7 +257,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for bin in cargo node npm python3 rustc tar; do
+          for bin in awk cargo node npm python3 rustc sha256sum tar; do
             command -v "$bin" >/dev/null 2>&1 || {
               echo "ERROR: required command not found on delegated runner: $bin" >&2
               exit 1
@@ -323,6 +324,7 @@ jobs:
           HEALTH_GATE="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/health_gate.py"
           OUT_ROOT="$PWD/arm-${ARM}-runs"
           mkdir -p "$OUT_ROOT"
+          sha256sum "$EBPF_OBJ" | awk '{ print "sha256:" $1 }' > "$OUT_ROOT/ebpf-object.sha256"
 
           for i in $(seq 1 "$REPETITIONS"); do
             RUN_ID="run_arm_${ARM}_$(date -u +%Y%m%dT%H%M%SZ)_$i"
@@ -404,6 +406,24 @@ jobs:
           set -euo pipefail
           DRIFT_PY="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/drift.py"
           DRIFT_OUT="$PWD/drift-reports"
+          ASSAY_VERSION="$(awk -F'"' '/^version =/ { print $2; exit }' Cargo.toml)"
+          KERNEL_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          KERNEL_RELEASE="$(uname -r)"
+          KERNEL_ARCH="$(uname -m)"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          RUNNER_LABEL="${RUNNER_NAME:-assay-bpf-runner}"
+          EBPF_OBJECT_DIGEST=""
+          if [ -f arm-a-openai-runs/ebpf-object.sha256 ] && [ -f arm-b-gemini-runs/ebpf-object.sha256 ]; then
+            A_EBPF_DIGEST="$(cat arm-a-openai-runs/ebpf-object.sha256)"
+            B_EBPF_DIGEST="$(cat arm-b-gemini-runs/ebpf-object.sha256)"
+            if [ "$A_EBPF_DIGEST" != "$B_EBPF_DIGEST" ]; then
+              echo "ERROR: arm A and arm B used different eBPF object digests" >&2
+              echo "arm A: $A_EBPF_DIGEST" >&2
+              echo "arm B: $B_EBPF_DIGEST" >&2
+              exit 1
+            fi
+            EBPF_OBJECT_DIGEST="$A_EBPF_DIGEST"
+          fi
           mkdir -p "$DRIFT_OUT"
 
           # Stable sort to align iterations: i-th OpenAI run vs i-th
@@ -450,6 +470,14 @@ jobs:
               --path-alias "${B_PATHS[0]}=workdir/input" \
               --path-alias "${B_PATHS[1]}=workdir/output" \
               --network-alias "127.0.0.53:53=dns" \
+              --assay-version "$ASSAY_VERSION" \
+              --assay-commit "$GITHUB_SHA" \
+              --workflow-url "$WORKFLOW_URL" \
+              --runner-label "$RUNNER_LABEL" \
+              --kernel-os "$KERNEL_OS" \
+              --kernel-release "$KERNEL_RELEASE" \
+              --kernel-arch "$KERNEL_ARCH" \
+              --ebpf-object-digest "$EBPF_OBJECT_DIGEST" \
               --out-json "${REPORT_BASE}.json" \
               --out-md "${REPORT_BASE}.md"
             {
