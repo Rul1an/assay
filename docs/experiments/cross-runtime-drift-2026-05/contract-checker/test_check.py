@@ -3,8 +3,16 @@
 Stdlib unittest only. Simulates a workload's WORK_DIR layout and exercises
 both the happy path and each individual rule failure mode.
 
-Run: python3 -m unittest contract-checker/test_check.py
-or:  python3 -m unittest discover -s contract-checker -p 'test_*.py'
+Run from repo root:
+  python3 -m unittest discover \
+    -s docs/experiments/cross-runtime-drift-2026-05/contract-checker \
+    -p 'test_*.py'
+Or directly:
+  python3 docs/experiments/cross-runtime-drift-2026-05/contract-checker/test_check.py
+
+(`python3 -m unittest <module>` cannot be used because the
+directory name contains a hyphen, which Python's module
+importer rejects. Use the discover form above instead.)
 """
 from __future__ import annotations
 

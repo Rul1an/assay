@@ -17,7 +17,7 @@ import {
   appendFileSync,
   statSync,
 } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, relative, isAbsolute } from "node:path";
 import {
   GoogleGenAI,
   type Content,
@@ -82,7 +82,15 @@ class ContractViolationError extends Error {
 
 function ensureInsideWorkDir(workDir: string, candidate: string): string {
   const abs = resolve(candidate);
-  if (!abs.startsWith(workDir + "/") && abs !== workDir) {
+  // Use path.relative() instead of a "/" string-prefix check so the
+  // containment test is portable across path separators. A candidate is
+  // inside workDir iff relative(workDir, abs) is empty (same path),
+  // does not start with "..", and is not absolute (different drive on
+  // Windows).
+  const rel = relative(workDir, abs);
+  const insideOrSame =
+    rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (!insideOrSame) {
     throw new ContractViolationError(
       `Path ${candidate} is outside WORKLOAD_WORK_DIR (${workDir})`,
     );

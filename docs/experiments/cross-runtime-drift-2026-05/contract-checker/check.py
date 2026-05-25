@@ -5,10 +5,14 @@ See WORKLOAD_CONTRACT.md for the rules enforced here. This script is
 stdlib-only by policy. Independent of Runner capture — runs against the
 work directory the workload itself produced.
 
+Output:
+  Per-rule PASS/FAIL lines are written to stdout. Bad-input messages
+  (exit 3) are written to stderr.
+
 Exit codes:
   0 - all rules pass
-  2 - one or more rules failed (details on stderr)
-  3 - bad inputs (work-dir missing, unreadable JSON, etc.)
+  2 - one or more rules failed (details on stdout)
+  3 - bad inputs (work-dir missing, unreadable JSON, etc.) — message on stderr
 """
 from __future__ import annotations
 
