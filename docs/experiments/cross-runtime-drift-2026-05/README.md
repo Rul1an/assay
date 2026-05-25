@@ -7,8 +7,8 @@
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
 > produces per-dimension drift reports (stdlib unit tests cover
-> `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), emits
-> Runtime/Noise Taxonomy v0 metadata as vocabulary-only context, live
+> `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), and emits
+> Runtime/Noise Taxonomy v0 metadata as vocabulary-only context. Live
 > Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
 > reflects the live data, and [`publication/`](publication/) holds
 > blog + discussion-comment drafts gated on OpenInference #3162 triage.
