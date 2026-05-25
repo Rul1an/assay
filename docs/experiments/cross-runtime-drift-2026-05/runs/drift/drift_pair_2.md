@@ -2,6 +2,7 @@
 
 - **Arm A:** `openai-agents` (`docs/experiments/cross-runtime-drift-2026-05/runs/a0/run_arm_a-openai_20260525T113821Z_2/archive.tar.gz`, manifest `sha256:cf7b63c6adfb8903a9b339b3a0e9e87d962cc3edaf4e3ed2d69b83ff6c3ac1e7`)
 - **Arm B:** `gemini-genai` (`docs/experiments/cross-runtime-drift-2026-05/runs/b0/run_arm_b-gemini_20260525T114117Z_2/archive.tar.gz`, manifest `sha256:d00cbb92bdb3f967fc0d2c735964594e2474d4dda027f2e477bf46f433f29c2d`)
+- **Render:** `re_render`; at `2026-05-25T19:20:03Z`; using comparator `c5495af5`; from https://github.com/Rul1an/assay/actions/runs/26398427430; raw captures unchanged `true`
 
 | Dimension | Source | Classification | Only in A | Only in B | In both | Projection | Detail |
 |---|---|---|---|---|---|---|---|
