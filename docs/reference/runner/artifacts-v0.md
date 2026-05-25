@@ -91,9 +91,23 @@ Each line is one normalized kernel event. Common fields:
 | `run_id` | string | yes | Run identifier shared by all archive artifacts |
 | `seq` | integer | yes | Runner-assigned sequence in normalized kernel layer order |
 | `pid` | integer | yes | Kernel-observed thread-group id for the event |
-| `event_type` | integer | yes | Internal monitor event id (`1` for open, `2` for connect, etc.) |
-| `kind` | string | yes | Normalized event kind such as `openat`, `connect`, `exec`, `file_blocked` |
+| `event_type` | integer | yes | Internal monitor event id (`1` for `openat`, `2` for `connect`, etc.) |
+| `kind` | string | yes | Normalized event kind: `openat`, `connect`, `exec`, `file_blocked`, `connect_blocked`, or reserved `event_<id>` for unrecognized monitor ids |
 | `value` | string or null | yes | Normalized path or endpoint when available |
+
+Known v0 `event_type` / `kind` pairs:
+
+| `event_type` | `kind` |
+|---:|---|
+| `1` | `openat` |
+| `2` | `connect` |
+| `4` | `exec` |
+| `10` | `file_blocked` |
+| `20` | `connect_blocked` |
+
+Other internal monitor ids remain valid only as `kind=event_<id>`.
+`value=null` means the monitor event was preserved but the normalizer
+could not decode a path or endpoint from it.
 
 Open events may additionally carry syscall metadata:
 
@@ -110,6 +124,40 @@ Open events may additionally carry syscall metadata:
 These fields are optional so older v0 archives remain readable. Consumers that
 need read/write/create/remove distinctions must require the optional open
 metadata and treat older archives as inconclusive for that dimension.
+
+Open metadata example:
+
+```json
+{
+  "schema": "assay.runner.kernel_event.v0",
+  "run_id": "run_001",
+  "seq": 0,
+  "pid": 1234,
+  "event_type": 1,
+  "kind": "openat",
+  "value": "/tmp/work/fixture-output.txt",
+  "flags": 577,
+  "mode": 420,
+  "return_value": 4,
+  "access_mode": "write",
+  "operation_flags": ["create", "truncate"],
+  "status": "success"
+}
+```
+
+Undecoded event example:
+
+```json
+{
+  "schema": "assay.runner.kernel_event.v0",
+  "run_id": "run_001",
+  "seq": 1,
+  "pid": 1234,
+  "event_type": 999,
+  "kind": "event_999",
+  "value": null
+}
+```
 
 ## `observation-health.json`
 
