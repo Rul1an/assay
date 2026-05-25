@@ -8,11 +8,13 @@
 > intent-effect-mismatch` on the agent's reported fictional path) all
 > have committed per-run evidence. Arm A (Runner-only) is implicitly
 > covered by the archive half of Arm C. **Slice 4 publication drafts**
-> (OpenInference discussion + blog) are prepared under
-> [`publication/`](publication/) but not yet filed and not yet on
-> `main` either; the discipline is to revise both pieces in repo
-> before either goes outward. Overhead measurement at n≥20 and the L3
-> (Tetragon/Falco/Tracee) comparison remain open follow-ups.
+> (OpenInference discussion + blog) are committed under
+> [`publication/`](publication/). The narrow OpenInference vocabulary
+> question is filed as
+> [Arize-ai/openinference#3162](https://github.com/Arize-ai/openinference/issues/3162);
+> the blog remains unpublished pending maintainer triage. Overhead
+> measurement at n≥20 and the L3 (Tetragon/Falco/Tracee) comparison
+> remain open follow-ups.
 >
 > **Plan:** [../runner-vs-otel-shape-comparison-2026-05.md](../runner-vs-otel-shape-comparison-2026-05.md)
 >

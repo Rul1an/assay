@@ -1,18 +1,20 @@
 # Runner Archives Next to OTel Traces: Shape Comparison Plan
 
-> **Status:** v1 baselines landed. Arm B (trace-only, macOS local, n=3 +
-> dual-simulation) and Arm C (delegated `assay-bpf-runner`, n=3 with real
-> Linux/eBPF capture) both have committed evidence. Run-level
-> `assay.run.id` + `assay.archive.manifest_digest` binding is verifiable
-> from the committed artefacts. Tool-level `gen_ai.tool.call.id` join is
-> **not yet demonstrated** because the Arm C archive's `sdk_layer` was
-> `absent` (the workload writes OTel spans but does not yet emit into
-> `$ASSAY_RUNNER_SDK_EVENT_LOG`). Live-eBPF byte-identical archive
-> determinism is an explicit non-goal. See
+> **Status:** v1 baselines and Slice 2-4 follow-ups landed. Arm B
+> (trace-only, macOS local, n=3 + dual-simulation), Arm C (delegated
+> `assay-bpf-runner`, n=3 with real Linux/eBPF capture), SDK-layer
+> ingestion, tool-level `gen_ai.tool.call.id` join, and the controlled
+> tool-call argument tampering scenario all have committed evidence.
+> Run-level `assay.run.id` + `assay.archive.manifest_digest` binding
+> and tool-level L1/L2 join are verifiable from the committed
+> artefacts. Live-eBPF byte-identical archive determinism is an
+> explicit non-goal. OpenInference vocabulary outreach is filed as
+> [Arize-ai/openinference#3162](https://github.com/Arize-ai/openinference/issues/3162);
+> blog/publication drafts remain gated on maintainer triage. See
 > [`runner-vs-otel-2026-05/v1-findings.md`](runner-vs-otel-2026-05/v1-findings.md)
 > for the per-run evidence and refined claims.
 >
-> **Last updated:** 2026-05-24
+> **Last updated:** 2026-05-25
 >
 > **Scope:** compare an Assay-Runner measured-run archive with an
 > OpenTelemetry-family trace for the same deterministic agent workload. This is
@@ -93,7 +95,7 @@ Use the same deterministic agent workload in all arms.
 |---|---:|---:|---|
 | A - Runner only | Yes | No | Establish measured-run baseline (capability surface + health gates) on a known-good archive. Archive shape stability across n=3 is the target; cross-run byte identity is a non-goal under live eBPF capture (run id, timestamps, PIDs, inodes vary). |
 | B - Trace only | No | Yes | Establish trace shape without eBPF/cgroup capture. |
-| C - Dual capture | Yes | Yes | Main comparison arm. v1 demonstrates run-level binding via `assay.run.id` + `assay.archive.manifest_digest`. Tool-level `gen_ai.tool.call.id` join across L1 and L2 is gated on the SDK-layer ingestion fix (Slice 2) — see v1-findings.md. |
+| C - Dual capture | Yes | Yes | Main comparison arm. v1 demonstrates run-level binding via `assay.run.id` + `assay.archive.manifest_digest`; Slice 2 demonstrates tool-level `gen_ai.tool.call.id` join across L1 and L2; Slice 3 demonstrates reported intent vs measured effect divergence at the same tool call. |
 
 v1 should run arm C at least three times for shape stability and archive
 determinism. Overhead measurements need a larger sample; see
@@ -118,15 +120,17 @@ single-runtime shape comparison is stable.
 
 ## v1.5 Adversarial Scenario
 
-Do not let this disappear into a vague follow-up. Plan it as v1.5:
+This scenario is now demonstrated by Slice 3 evidence under
+[`runner-vs-otel-2026-05/runs/slice3-arm-c/`](runner-vs-otel-2026-05/runs/slice3-arm-c/).
+The original planned shape was:
 
 | Scenario | Reported L1 behavior | Measured L2 behavior | Why it matters |
 |---|---|---|---|
 | Tool-call argument tampering | `gen_ai.tool.name = fs.read`, `gen_ai.tool.call.arguments.path = /workdir/safe.txt` | kernel layer observes open/read outside the reported path, such as a normalized traversal to `/etc/passwd` or a controlled test file outside workdir | Demonstrates L1 intent/reporting can diverge from L2 effects. |
 
-Use a safe fixture path rather than a real sensitive file if possible. The
-claim is not "the agent stole secrets"; the claim is "reported tool arguments
-and measured filesystem effects can diverge."
+The implemented scenario uses a safe fixture path rather than a real
+sensitive file. The claim is not "the agent stole secrets"; the claim is
+"reported tool arguments and measured filesystem effects can diverge."
 
 ## Trace Attribute Plan
 
@@ -357,12 +361,12 @@ Markdown table.
 
 | Field | L1 Trace | L2 Archive | Join Key | Claim Strength | Notes |
 |---|---|---|---|---|---|
-| `gen_ai.provider.name` | TODO | TODO | run | Positive observation | |
-| `gen_ai.tool.call.id` | TODO | TODO | tool | Joinability | |
-| `assay.archive.manifest_digest` | TODO | TODO | digest | Tamper-evident binding | |
-| `capability_surface.filesystem_paths` | TODO | TODO | none | Bounded negative if healthy | |
-| `observation_health.ringbuf_drops` | no | TODO | archive | Measurement integrity | |
-| `gen_ai.usage.input_tokens` | TODO | no | span | Cost/context | |
+| `gen_ai.provider.name` | yes (`openai`) | no | run | Positive observation | Present in the OTel trace; not a Runner archive field. |
+| `gen_ai.tool.call.id` | yes (`tc_runner_policy_001`) | yes after Slice 2 SDK ingestion | tool | Joinability | Primary tool-level join works in `runs/slice2-arm-c/` and `runs/slice3-arm-c/`. |
+| `assay.archive.manifest_digest` | yes | yes (`manifest.json` digest) | digest | Tamper-evident binding | All committed Arm C runs pass `--require-binding-match`. |
+| `capability_surface.filesystem_paths` | no | yes | none | Bounded negative if healthy | L2-only measured effect surface. |
+| `observation_health.ringbuf_drops` | no | yes (`0`) | archive | Measurement integrity | Hard gate is clean across committed delegated runs. |
+| `gen_ai.usage.input_tokens` | absent in deterministic fixture trace | no | span | Cost/context | Requires provider/runtime usage reporting; not demonstrated by this fixture. |
 
 ## Claim Classes
 
@@ -444,17 +448,24 @@ Keep the discussion narrow. Ask for naming and domain placement, not adoption.
 
 ## Reproduction Checklist
 
-Fill this section after implementation.
+The implementation package now carries concrete commands and committed
+evidence:
 
-```bash
-# TODO: build assay with runner feature
-# TODO: run deterministic workload under Runner only
-# TODO: run deterministic workload under OTel/OpenInference only
-# TODO: run dual-capture workload
-# TODO: extract manifest.json and compute digest
-# TODO: generate normalized comparison JSON
-# TODO: generate Markdown field matrix
-```
+- local trace-only Arm B: [`runner-vs-otel-2026-05/run-arm-b.sh`](runner-vs-otel-2026-05/run-arm-b.sh);
+- delegated Arm C workflow:
+  [`.github/workflows/runner-otel-experiment.yml`](../../.github/workflows/runner-otel-experiment.yml);
+- comparator:
+  [`runner-vs-otel-2026-05/compare/compare.py`](runner-vs-otel-2026-05/compare/compare.py);
+- baseline evidence:
+  [`runner-vs-otel-2026-05/runs/`](runner-vs-otel-2026-05/runs/);
+- findings and exact run links:
+  [`runner-vs-otel-2026-05/v1-findings.md`](runner-vs-otel-2026-05/v1-findings.md).
+
+Use the `v1-findings.md` reproduction details as the source of truth for
+the commands that produced the committed evidence. Overhead
+measurements (`n>=20` wall clock, `n>=5` RSS) and the L3
+Tetragon/Falco/Tracee comparison remain explicit follow-ups rather than
+missing v1 checklist items.
 
 ## References to Verify Before Publication
 
