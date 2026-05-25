@@ -52,6 +52,14 @@ The A0/B0 archives are the original workflow artifacts. The
 `runs/drift/` reports were re-rendered from those committed archives
 after the runtime-drift projection schema was frozen as
 `assay.runner.runtime_drift.v0`; the raw captures were not regenerated.
+The comparator at re-render time uses projection, taxonomy, and
+provenance fields that did not exist at original capture time. This
+asymmetry is intentional: raw evidence is unchanged, while the
+projection/report layer is newer and records its own render metadata.
+For these committed reports, `provenance.assay_commit` is the original
+capture commit (`e3f6ef9d`) and
+`provenance.render_metadata.comparator_commit` is the comparator support
+commit used for the re-render (`d1277d82`).
 
 All six archives passed the workflow health gate before artifact upload:
 `ringbuf_drops == 0`, `kernel_layer == "complete"`, and

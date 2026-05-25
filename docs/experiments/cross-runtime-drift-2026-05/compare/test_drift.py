@@ -1090,6 +1090,15 @@ class MainCliTests(unittest.TestCase):
                     "3.11.3",
                     "--assay-commit",
                     "abc123",
+                    "--comparator-commit",
+                    "def456",
+                    "--rendered-at",
+                    "2026-05-25T18:55:39Z",
+                    "--render-kind",
+                    "re_render",
+                    "--source-run-url",
+                    "https://github.com/Rul1an/assay/actions/runs/source",
+                    "--raw-captures-unchanged",
                     "--workflow-url",
                     "https://github.com/Rul1an/assay/actions/runs/1",
                     "--runner-label",
@@ -1110,6 +1119,18 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(provenance["assay_version"], "3.11.3")
             self.assertEqual(provenance["assay_commit"], "abc123")
             self.assertEqual(
+                provenance["render_metadata"],
+                {
+                    "kind": "re_render",
+                    "rendered_at": "2026-05-25T18:55:39Z",
+                    "comparator_commit": "def456",
+                    "source_run_url": (
+                        "https://github.com/Rul1an/assay/actions/runs/source"
+                    ),
+                    "raw_captures_unchanged": True,
+                },
+            )
+            self.assertEqual(
                 provenance["workflow"]["url"],
                 "https://github.com/Rul1an/assay/actions/runs/1",
             )
@@ -1119,6 +1140,29 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(provenance["kernel"]["os"], "linux")
             self.assertEqual(
                 provenance["ebpf_object_digest"], "sha256:" + "1" * 64
+            )
+
+    def test_main_can_declare_raw_captures_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "drift.json"
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(ARM_A),
+                    "--archive-b",
+                    str(ARM_B),
+                    "--out-json",
+                    str(out_json),
+                    "--no-raw-captures-unchanged",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out_json.read_text(encoding="utf-8"))
+            self.assertIs(
+                payload["provenance"]["render_metadata"][
+                    "raw_captures_unchanged"
+                ],
+                False,
             )
 
     def test_main_returns_3_on_bad_archive(self) -> None:
@@ -1397,6 +1441,10 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         self.assertEqual(
             schema["$defs"]["provenance"]["properties"]["schema"]["const"],
             drift.DRIFT_REPORT_PROVENANCE_SCHEMA,
+        )
+        self.assertEqual(
+            schema["$defs"]["render_metadata"]["properties"]["kind"]["enum"],
+            ["live_capture", "re_render", "synthetic_fixture", "unspecified"],
         )
         self.assertIn(
             drift.PATH_PROJECTION_SCHEMA,

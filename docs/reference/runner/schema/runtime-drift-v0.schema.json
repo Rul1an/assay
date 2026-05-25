@@ -57,6 +57,12 @@
         "type": "string"
       }
     },
+    "nullable_boolean": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "archive_ref": {
       "type": "object",
       "additionalProperties": false,
@@ -69,7 +75,8 @@
       ],
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "Archive path as emitted by the comparator. Committed re-renders normally use repo-root-relative paths; fresh workflow captures may use capture-host absolute paths."
         },
         "run_id": {
           "$ref": "#/$defs/nullable_string"
@@ -115,6 +122,7 @@
       "additionalProperties": true,
       "required": [
         "schema",
+        "render_metadata",
         "input_archives",
         "runner_schema_versions",
         "kernel",
@@ -124,6 +132,9 @@
       "properties": {
         "schema": {
           "const": "assay.runner.drift_report_provenance.v0"
+        },
+        "render_metadata": {
+          "$ref": "#/$defs/render_metadata"
         },
         "input_archives": {
           "type": "array",
@@ -144,6 +155,39 @@
         },
         "non_claims": {
           "$ref": "#/$defs/string_array"
+        }
+      }
+    },
+    "render_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "rendered_at",
+        "comparator_commit",
+        "source_run_url",
+        "raw_captures_unchanged"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "live_capture",
+            "re_render",
+            "synthetic_fixture",
+            "unspecified"
+          ]
+        },
+        "rendered_at": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "comparator_commit": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "source_run_url": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "raw_captures_unchanged": {
+          "$ref": "#/$defs/nullable_boolean"
         }
       }
     },

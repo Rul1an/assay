@@ -473,6 +473,11 @@ jobs:
               --network-alias "127.0.0.53:53=dns" \
               --assay-version "$ASSAY_VERSION" \
               --assay-commit "$GITHUB_SHA" \
+              --comparator-commit "$GITHUB_SHA" \
+              --rendered-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --render-kind "live_capture" \
+              --source-run-url "$WORKFLOW_URL" \
+              --raw-captures-unchanged \
               --workflow-url "$WORKFLOW_URL" \
               --runner-label "$RUNNER_LABEL" \
               --kernel-os "$KERNEL_OS" \
