@@ -22,6 +22,12 @@ semantic equivalence beyond the declared rule, and must not synthesize
 cross-runtime binding identity. Acceptability remains policy, reviewer,
 or Harness responsibility.
 
+Richer path, network, taxonomy, provenance, and runtime-drift projection
+work is tracked separately in the
+[Runner projection roadmap](projection-roadmap.md). That roadmap does not
+change this v0 contract; it describes later projection layers that must
+preserve raw evidence and name their rules, confidence, and non-claims.
+
 ## Decision Lineage
 
 This contract freezes the combination resolved by the Phase 2C decision
