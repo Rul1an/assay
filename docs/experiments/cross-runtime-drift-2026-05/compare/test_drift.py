@@ -39,6 +39,36 @@ FIXTURES = THIS_DIR / "fixtures"
 ARM_A = FIXTURES / "arm-a-openai"
 ARM_B = FIXTURES / "arm-b-gemini"
 
+SUPPORTED_SCHEMA_KEYWORDS = frozenset(
+    {
+        "$ref",
+        "$defs",
+        "$id",
+        "$schema",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "const",
+        "description",
+        "else",
+        "enum",
+        "examples",
+        "if",
+        "items",
+        "maxItems",
+        "minItems",
+        "minimum",
+        "minLength",
+        "pattern",
+        "properties",
+        "required",
+        "then",
+        "title",
+        "type",
+        "uniqueItems",
+    }
+)
+
 
 def _schema_ref(root: dict[str, Any], ref: str) -> dict[str, Any]:
     if not ref.startswith("#/$defs/"):
@@ -67,14 +97,62 @@ def _json_type_matches(value: Any, expected: str) -> bool:
     raise AssertionError(f"unsupported JSON Schema type in test helper: {expected}")
 
 
-def assert_json_schema_subset(
+def assert_schema_uses_only_supported_keywords(
+    testcase: unittest.TestCase,
+    schema: dict[str, Any],
+    path: str = "$schema",
+) -> None:
+    unknown_keywords = set(schema) - SUPPORTED_SCHEMA_KEYWORDS
+    testcase.assertFalse(
+        unknown_keywords,
+        f"{path}: unsupported JSON Schema keyword(s): {sorted(unknown_keywords)}",
+    )
+    if "else" in schema:
+        raise AssertionError(
+            f"{path}: JSON Schema 'else' is not supported by this test helper"
+        )
+
+    for key, subschema in schema.get("$defs", {}).items():
+        if isinstance(subschema, dict):
+            assert_schema_uses_only_supported_keywords(
+                testcase, subschema, f"{path}.$defs.{key}"
+            )
+    for key, subschema in schema.get("properties", {}).items():
+        if isinstance(subschema, dict):
+            assert_schema_uses_only_supported_keywords(
+                testcase, subschema, f"{path}.properties.{key}"
+            )
+    if isinstance(schema.get("items"), dict):
+        assert_schema_uses_only_supported_keywords(
+            testcase, schema["items"], f"{path}.items"
+        )
+    for list_key in ("allOf", "anyOf"):
+        for index, subschema in enumerate(schema.get(list_key, [])):
+            if isinstance(subschema, dict):
+                assert_schema_uses_only_supported_keywords(
+                    testcase, subschema, f"{path}.{list_key}[{index}]"
+                )
+    for cond_key in ("if", "then"):
+        if isinstance(schema.get(cond_key), dict):
+            assert_schema_uses_only_supported_keywords(
+                testcase, schema[cond_key], f"{path}.{cond_key}"
+            )
+    if isinstance(schema.get("additionalProperties"), dict):
+        assert_schema_uses_only_supported_keywords(
+            testcase,
+            schema["additionalProperties"],
+            f"{path}.additionalProperties",
+        )
+
+
+def assert_matches_supported_schema_keywords(
     testcase: unittest.TestCase,
     value: Any,
     schema: dict[str, Any],
     root: dict[str, Any] | None = None,
     path: str = "$",
 ) -> None:
-    """Validate the JSON Schema subset used by Runner sidecar tests.
+    """Validate the JSON Schema keywords used by Runner sidecar tests.
 
     This is intentionally small and stdlib-only. It covers the keywords
     present in the Runner schema sidecars so tests catch type/enum drift
@@ -82,16 +160,17 @@ def assert_json_schema_subset(
     """
 
     root = schema if root is None else root
+    assert_schema_uses_only_supported_keywords(testcase, schema, path)
 
     if "$ref" in schema:
-        assert_json_schema_subset(
+        assert_matches_supported_schema_keywords(
             testcase, value, _schema_ref(root, schema["$ref"]), root, path
         )
         return
 
     if "allOf" in schema:
         for index, subschema in enumerate(schema["allOf"]):
-            assert_json_schema_subset(
+            assert_matches_supported_schema_keywords(
                 testcase, value, subschema, root, f"{path}.allOf[{index}]"
             )
 
@@ -99,7 +178,7 @@ def assert_json_schema_subset(
         failures = []
         for index, subschema in enumerate(schema["anyOf"]):
             try:
-                assert_json_schema_subset(
+                assert_matches_supported_schema_keywords(
                     testcase, value, subschema, root, f"{path}.anyOf[{index}]"
                 )
                 break
@@ -110,12 +189,14 @@ def assert_json_schema_subset(
 
     if "if" in schema:
         try:
-            assert_json_schema_subset(testcase, value, schema["if"], root, path)
+            assert_matches_supported_schema_keywords(
+                testcase, value, schema["if"], root, path
+            )
         except AssertionError:
             pass
         else:
             if "then" in schema:
-                assert_json_schema_subset(
+                assert_matches_supported_schema_keywords(
                     testcase, value, schema["then"], root, f"{path}.then"
                 )
 
@@ -152,7 +233,7 @@ def assert_json_schema_subset(
             testcase.assertEqual(len(value), len(set(map(json.dumps, value))), path)
         if "items" in schema:
             for index, item in enumerate(value):
-                assert_json_schema_subset(
+                assert_matches_supported_schema_keywords(
                     testcase, item, schema["items"], root, f"{path}[{index}]"
                 )
 
@@ -168,7 +249,7 @@ def assert_json_schema_subset(
             )
         for key, prop_schema in properties.items():
             if key in value:
-                assert_json_schema_subset(
+                assert_matches_supported_schema_keywords(
                     testcase, value[key], prop_schema, root, f"{path}.{key}"
                 )
 
@@ -180,6 +261,100 @@ def _make_tarball(src_dir: Path, dest: Path) -> Path:
             if path.is_file():
                 tf.add(path, arcname=str(path.relative_to(src_dir)))
     return dest
+
+
+class SupportedSchemaKeywordTests(unittest.TestCase):
+    def test_missing_required_fails(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                {"schema": "x"},
+                {
+                    "type": "object",
+                    "required": ["schema", "run_id"],
+                    "properties": {
+                        "schema": {"type": "string"},
+                        "run_id": {"type": "string"},
+                    },
+                },
+            )
+
+    def test_bad_enum_fails(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                {"access_mode": "purple"},
+                {
+                    "type": "object",
+                    "properties": {
+                        "access_mode": {"enum": ["read", "write"]},
+                    },
+                },
+            )
+
+    def test_wrong_type_fails(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                {"seq": "0"},
+                {
+                    "type": "object",
+                    "properties": {
+                        "seq": {"type": "integer", "minimum": 0},
+                    },
+                },
+            )
+
+    def test_any_of_no_match_fails(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                "open",
+                {
+                    "anyOf": [
+                        {"enum": ["openat", "connect"]},
+                        {"type": "string", "pattern": "^event_[0-9]+$"},
+                    ]
+                },
+            )
+
+    def test_unique_items_fails(self) -> None:
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(
+                self,
+                ["create", "create"],
+                {
+                    "type": "array",
+                    "uniqueItems": True,
+                    "items": {"enum": ["create", "truncate"]},
+                },
+            )
+
+    def test_else_keyword_fails_loudly(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "else"):
+            assert_matches_supported_schema_keywords(
+                self,
+                {"kind": "connect"},
+                {
+                    "if": {"properties": {"kind": {"const": "openat"}}},
+                    "then": {"required": ["return_value"]},
+                    "else": {"properties": {"status": {"const": None}}},
+                },
+            )
+
+    def test_unsupported_keyword_inside_if_fails_loudly(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "unsupported"):
+            assert_matches_supported_schema_keywords(
+                self,
+                {"kind": "connect"},
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "openat"}},
+                        "unsupportedKeyword": True,
+                    },
+                    "then": {"required": ["return_value"]},
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1276,7 +1451,7 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             ),
         )
         payload = drift.report_to_json(a, b, rows)
-        assert_json_schema_subset(self, payload, schema)
+        assert_matches_supported_schema_keywords(self, payload, schema)
 
 
 class KernelEventSchemaSidecarTests(unittest.TestCase):
@@ -1317,10 +1492,12 @@ class KernelEventSchemaSidecarTests(unittest.TestCase):
                 if not line.strip():
                     continue
                 event = json.loads(line)
-                assert_json_schema_subset(self, event, schema)
+                assert_matches_supported_schema_keywords(self, event, schema)
 
         for index, example in enumerate(schema["examples"]):
-            assert_json_schema_subset(self, example, schema, path=f"examples[{index}]")
+            assert_matches_supported_schema_keywords(
+                self, example, schema, path=f"examples[{index}]"
+            )
 
 
 if __name__ == "__main__":
