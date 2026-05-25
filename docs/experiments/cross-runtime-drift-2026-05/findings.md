@@ -180,7 +180,11 @@ adds four things the synthetic fixture could not:
 - **Provider-level network attribution.** Live network rows are IP-based.
   They do not prove provider-induced drift without a hostname/DNS layer.
 - **Read/write/create/remove classification.** Capability_surface v0
-  records touched paths undifferentiated.
+  records touched paths undifferentiated. The follow-up diagnostic
+  [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) confirms that
+  the current `layers/kernel.ndjson` v0 shape also lacks open flags or
+  operation categories, so read/write classification needs a Runner
+  schema extension rather than only a comparator change.
 - **Per-path access counts and ordering.** Same v2-comparator follow-up.
 - **Cross-distro portability.** All captures are Linux/kernel-specific.
 - **N > 3 stability.** n=3 is enough for this shape claim; if future runs
