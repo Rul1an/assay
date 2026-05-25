@@ -276,6 +276,33 @@ class DriftReportClassificationTests(unittest.TestCase):
                 ),
             )
 
+    def test_path_alias_rejects_unknown_taxonomy_class(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.PathAlias(
+                "/tmp/work/fixture-input.txt",
+                "workdir/input",
+                path_class="not-a-real-class",
+            )
+
+    def test_path_alias_rejects_network_only_taxonomy_class(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.PathAlias(
+                "/tmp/work/fixture-input.txt",
+                "workdir/input",
+                path_class=drift.NETWORK_CLASS_PROVIDER_API,
+            )
+
+    def test_taxonomy_payload_preserves_unknowns_and_non_claims(self) -> None:
+        payload = drift._taxonomy_payload()
+        self.assertEqual(
+            payload["schema"], drift.RUNTIME_NOISE_TAXONOMY_SCHEMA
+        )
+        self.assertEqual(payload["status"], "vocabulary_only")
+        self.assertIn(drift.PATH_CLASS_UNKNOWN, payload["categories"])
+        self.assertIn(
+            "taxonomy_unknowns_preserved", payload["non_claims"]
+        )
+
     def test_process_execs_task_induced(self) -> None:
         rows = drift.build_drift_report(self.a, self.b)
         row = self._by_dim(rows)["process_execs"]
@@ -445,6 +472,10 @@ class MainCliTests(unittest.TestCase):
             self.assertTrue(out_md.is_file())
             payload = json.loads(out_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["schema"], drift.DRIFT_REPORT_SCHEMA)
+            self.assertEqual(
+                payload["taxonomy"]["schema"],
+                drift.RUNTIME_NOISE_TAXONOMY_SCHEMA,
+            )
             self.assertEqual(
                 payload["archive_a"]["runtime_label"], "openai-agents"
             )

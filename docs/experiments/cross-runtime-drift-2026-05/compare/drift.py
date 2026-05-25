@@ -13,6 +13,7 @@ Scope (v0, Slice 2):
   - tool invocation order (SDK events' seq per tool_call_id)
   - kernel file operations (layers/kernel.ndjson open metadata)
   - path projection v0 over explicitly declared raw=logical aliases
+  - runtime/noise taxonomy v0 metadata for projection classes
 
 Out of scope (explicit follow-ups, NOT silent gaps):
   - unlink/remove classification
@@ -84,19 +85,77 @@ CLASSIFICATION_RUNTIME = "runtime-induced"
 CLASSIFICATION_INCONCLUSIVE = "inconclusive"
 
 PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
+RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
 
 CLAIM_RAW_OBSERVED = "raw_observed"
 CLAIM_PROJECTED_EQUIVALENT = "projected_equivalent"
 CLAIM_INCONCLUSIVE = "inconclusive"
 
 PATH_CLASS_WORKLOAD_FIXTURE = "workload_fixture"
+PATH_CLASS_RUNTIME_PACKAGE = "runtime_package"
+PATH_CLASS_PROVIDER_SDK = "provider_sdk"
+PATH_CLASS_LOADER = "loader"
+PATH_CLASS_EXPERIMENT_HARNESS = "experiment_harness"
+PATH_CLASS_CACHE = "cache"
+NETWORK_CLASS_PROVIDER_API = "provider_api"
+NETWORK_CLASS_DNS = "dns"
+NETWORK_CLASS_TELEMETRY = "telemetry"
+NETWORK_CLASS_PACKAGE_FETCH = "package_fetch"
 PATH_CLASS_UNKNOWN = "unknown"
+
+TAXONOMY_CATEGORIES: dict[str, dict[str, Any]] = {
+    PATH_CLASS_WORKLOAD_FIXTURE: {
+        "applies_to": ["path", "operation"],
+        "meaning": "declared workload input, output, or scratch value",
+    },
+    PATH_CLASS_RUNTIME_PACKAGE: {
+        "applies_to": ["path"],
+        "meaning": "language runtime or package tree behavior",
+    },
+    PATH_CLASS_PROVIDER_SDK: {
+        "applies_to": ["path", "network", "sdk_event"],
+        "meaning": "provider client implementation behavior",
+    },
+    PATH_CLASS_LOADER: {
+        "applies_to": ["path", "process"],
+        "meaning": "dynamic loader, interpreter, locale, or bootstrap behavior",
+    },
+    PATH_CLASS_EXPERIMENT_HARNESS: {
+        "applies_to": ["path", "process", "metadata"],
+        "meaning": "runner, workflow, comparator, or test harness plumbing",
+    },
+    PATH_CLASS_CACHE: {
+        "applies_to": ["path"],
+        "meaning": "package manager, runtime, or tool cache path",
+    },
+    NETWORK_CLASS_PROVIDER_API: {
+        "applies_to": ["network"],
+        "meaning": "model/provider API endpoint",
+    },
+    NETWORK_CLASS_DNS: {
+        "applies_to": ["network"],
+        "meaning": "DNS lookup endpoint when visible",
+    },
+    NETWORK_CLASS_TELEMETRY: {
+        "applies_to": ["network"],
+        "meaning": "observability or SDK telemetry endpoint",
+    },
+    NETWORK_CLASS_PACKAGE_FETCH: {
+        "applies_to": ["network"],
+        "meaning": "dependency or package retrieval endpoint",
+    },
+    PATH_CLASS_UNKNOWN: {
+        "applies_to": ["all"],
+        "meaning": "observed value did not match a declared taxonomy rule",
+    },
+}
 
 PROJECTION_NON_CLAIMS = (
     "projection_no_raw_evidence_rewrite",
     "projection_no_semantic_workload_equivalence",
     "projection_no_policy_acceptability_verdict",
     "projection_unknowns_preserved",
+    "projection_no_heuristic_noise_taxonomy",
 )
 
 
@@ -389,6 +448,36 @@ class PathAlias:
     rule: str = "declared_path_alias"
     confidence: str = "declared"
 
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.path_class, domain="path")
+
+
+def _taxonomy_payload() -> dict[str, Any]:
+    return {
+        "schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "status": "vocabulary_only",
+        "categories": TAXONOMY_CATEGORIES,
+        "non_claims": [
+            "taxonomy_no_heuristic_classification",
+            "taxonomy_unknowns_preserved",
+            "taxonomy_no_policy_verdict",
+        ],
+    }
+
+
+def _validate_taxonomy_class(category: str, *, domain: str) -> None:
+    spec = TAXONOMY_CATEGORIES.get(category)
+    if spec is None:
+        allowed = ", ".join(sorted(TAXONOMY_CATEGORIES))
+        raise ValueError(
+            f"unknown taxonomy class {category!r}; expected one of: {allowed}"
+        )
+    applies_to = spec.get("applies_to", [])
+    if "all" not in applies_to and domain not in applies_to:
+        raise ValueError(
+            f"taxonomy class {category!r} does not apply to {domain!r}"
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class ProjectedValue:
@@ -474,6 +563,7 @@ def _projection_payload(
             "schema": PATH_PROJECTION_SCHEMA,
             "status": "not_applied",
             "reason": "no path aliases declared",
+            "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
             "non_claims": list(PROJECTION_NON_CLAIMS),
         }
 
@@ -506,6 +596,7 @@ def _projection_payload(
         "status": "applied",
         "dimension": dimension,
         "claim_level": claim_level,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
         "only_in_a": only_a,
         "only_in_b": only_b,
         "in_both": both,
@@ -902,6 +993,7 @@ def report_to_json(
             "manifest_digest": b.manifest_digest,
             "sdk_event_count": b.sdk_event_count,
         },
+        "taxonomy": _taxonomy_payload(),
         "rows": [dataclasses.asdict(r) for r in rows],
         "summary": {
             "dimensions_checked": len(rows),

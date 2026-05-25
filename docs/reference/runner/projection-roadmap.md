@@ -126,6 +126,11 @@ paths; it is to add a logical path layer above them.
 The taxonomy should be designed in parallel with path projection because
 path and network projection both need the same classification language.
 
+Implementation note: the cross-runtime drift comparator now emits this
+taxonomy as vocabulary-only metadata. It validates declared projection
+classes and preserves `unknown`, but it does not yet infer taxonomy
+classes from paths or endpoints.
+
 Initial taxonomy:
 
 | Category | Applies to | Notes |
