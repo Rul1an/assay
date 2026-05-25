@@ -53,6 +53,8 @@ import tarfile
 from pathlib import Path
 from typing import Any, Iterable
 
+ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
 # ---------------------------------------------------------------------------
 # Schema strings (also used to identify fixture archives in tests)
 # ---------------------------------------------------------------------------
@@ -698,8 +700,8 @@ def _network_alias_dict(
 
 def _network_cidr_tuple(
     network_cidrs: tuple[NetworkCidrAlias, ...]
-) -> tuple[tuple[Any, NetworkCidrAlias], ...]:
-    out: list[tuple[Any, NetworkCidrAlias]] = []
+) -> tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...]:
+    out: list[tuple[ParsedNetwork, NetworkCidrAlias]] = []
     seen: set[str] = set()
     for alias in network_cidrs:
         network = ipaddress.ip_network(alias.cidr, strict=False)
@@ -722,7 +724,7 @@ def _endpoint_host(endpoint: str) -> str:
 def _project_network_endpoint(
     endpoint: str,
     exact_aliases: dict[str, NetworkAlias],
-    cidr_aliases: tuple[tuple[Any, NetworkCidrAlias], ...],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
 ) -> NetworkProjectedValue:
     exact = exact_aliases.get(endpoint)
     if exact is not None:
@@ -770,7 +772,7 @@ def _network_projection_payload(
     a_values: list[str],
     b_values: list[str],
     exact_aliases: dict[str, NetworkAlias],
-    cidr_aliases: tuple[tuple[Any, NetworkCidrAlias], ...],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
 ) -> dict[str, Any]:
     if not exact_aliases and not cidr_aliases:
         return {

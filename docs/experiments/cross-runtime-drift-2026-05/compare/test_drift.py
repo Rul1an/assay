@@ -426,6 +426,23 @@ class DriftReportClassificationTests(unittest.TestCase):
                 ),
             )
 
+    def test_duplicate_network_cidr_alias_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.build_drift_report(
+                self.a,
+                self.b,
+                network_cidrs=(
+                    drift.NetworkCidrAlias(
+                        "162.159.0.0/16",
+                        drift.NETWORK_CLASS_PROVIDER_API,
+                    ),
+                    drift.NetworkCidrAlias(
+                        "162.159.140.245/16",
+                        drift.NETWORK_CLASS_TELEMETRY,
+                    ),
+                ),
+            )
+
     def test_network_alias_rejects_path_only_taxonomy_class(self) -> None:
         with self.assertRaises(ValueError):
             drift.NetworkAlias(
@@ -697,6 +714,21 @@ class MainCliTests(unittest.TestCase):
                 "api.openai.com:443=provider_api",
                 "--network-alias",
                 "api.openai.com:443=telemetry",
+            ]
+        )
+        self.assertEqual(rc, 2)
+
+    def test_main_returns_2_on_duplicate_network_cidr(self) -> None:
+        rc = drift.main(
+            [
+                "--archive-a",
+                str(ARM_A),
+                "--archive-b",
+                str(ARM_B),
+                "--network-cidr",
+                "162.159.0.0/16=provider_api",
+                "--network-cidr",
+                "162.159.140.245/16=telemetry",
             ]
         )
         self.assertEqual(rc, 2)

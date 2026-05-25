@@ -201,12 +201,26 @@ stay `unknown`.
 
 ```json
 {
-  "raw_endpoint": "34.120.x.x:443",
-  "projected_endpoint": "provider_api",
-  "network_class": "provider_api",
-  "rule": "declared_network_cidr_alias",
-  "confidence": "declared",
-  "claim_level": "projected_equivalent"
+  "projection": {
+    "schema": "assay.runner.network_projection.v0",
+    "status": "applied",
+    "dimension": "network_endpoints",
+    "claim_level": "projected_equivalent",
+    "in_both": ["provider_api"],
+    "rules": ["declared_network_cidr_alias"],
+    "mappings": [
+      {
+        "side": "a",
+        "raw_value": "34.120.10.20:443",
+        "projected_value": "provider_api",
+        "network_class": "provider_api",
+        "relation": "declared_cidr",
+        "rule": "declared_network_cidr_alias",
+        "confidence": "declared",
+        "claim_level": "projected_equivalent"
+      }
+    ]
+  }
 }
 ```
 
