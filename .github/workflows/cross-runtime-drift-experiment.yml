@@ -1,0 +1,397 @@
+name: Cross-Runtime Drift Experiment
+
+# Manually-dispatched workflow that runs the
+# cross-runtime-drift-2026-05 experiment's Arm A (OpenAI Agents) and
+# Arm B (Gemini GenAI) on the delegated `assay-bpf-runner` host, then
+# runs `compare/drift.py` over each (A_i, B_i) pair. Produces real
+# Runner archives + drift reports as workflow artifacts; baselines
+# under `runs/{a0,b0}/` are committed separately by the maintainer
+# after reviewing the artifacts.
+#
+# Discipline:
+#  - workflow_dispatch only; no pull_request trigger (matches
+#    runner-otel-experiment.yml).
+#  - Uses the same self-hosted runner as the Phase 1 delegated gates.
+#  - Requires repo secrets OPENAI_API_KEY and GOOGLE_API_KEY. The job
+#    fails fast with a clear message if either is missing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: "Number of dual-capture iterations per arm (n)"
+        required: true
+        default: "3"
+        type: string
+      build_ebpf:
+        description: "Rebuild eBPF artifact (target/assay-ebpf.o) before the run"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-runtime-drift-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-delegated-runner:
+    name: Prepare delegated runner
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 5
+    steps:
+      - name: Reset workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Mirror the prepare-delegated-runner pattern from
+          # runner-otel-experiment.yml / runner-spike-delegated.yml so
+          # action and cargo cache state from a previous run does not
+          # block this job.
+          sudo find "$GITHUB_WORKSPACE/.." -maxdepth 2 -type d -name "_actions" -exec rm -rf {} + 2>/dev/null || true
+          if [ -d "$GITHUB_WORKSPACE" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          fi
+
+  arm-a-openai:
+    name: Arm A — OpenAI Agents (capture)
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: prepare-delegated-runner
+    timeout-minutes: 30
+    env:
+      ARM: a-openai
+      AGENT_SHIM: openai-agents
+      WORKLOAD_DIR: docs/experiments/cross-runtime-drift-2026-05/workload-openai
+    steps:
+      - name: Fail fast if OPENAI_API_KEY is missing
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "ERROR: OPENAI_API_KEY repo secret is not set" >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in cargo node npm python3 rustc tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "ERROR: delegated runner must expose cgroup v2 at /sys/fs/cgroup" >&2
+            exit 1
+          fi
+
+      - name: Build assay CLI (runner feature)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli --no-default-features --features runner
+
+      - name: Build eBPF artifact
+        if: ${{ inputs.build_ebpf }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-image
+            cargo xtask build-ebpf --docker
+          else
+            cargo xtask build-ebpf
+          fi
+          test -f target/assay-ebpf.o
+
+      - name: Verify eBPF artifact present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f target/assay-ebpf.o ]; then
+            echo "ERROR: target/assay-ebpf.o is required. Run with build_ebpf=true." >&2
+            exit 1
+          fi
+
+      - name: Build workload-openai
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          npx tsc -p tsconfig.json
+          test -f dist/workload.js
+
+      - name: Run Arm A captures (N times)
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay"
+          EBPF_OBJ="$PWD/target/assay-ebpf.o"
+          WORKLOAD_JS="$PWD/${{ env.WORKLOAD_DIR }}/dist/workload.js"
+          OUT_ROOT="$PWD/arm-${ARM}-runs"
+          mkdir -p "$OUT_ROOT"
+
+          for i in $(seq 1 "$REPETITIONS"); do
+            RUN_ID="run_arm_${ARM}_$(date -u +%Y%m%dT%H%M%SZ)_$i"
+            RUN_DIR="$OUT_ROOT/$RUN_ID"
+            mkdir -p "$RUN_DIR/workdir"
+            ARCHIVE_OUT="$RUN_DIR/archive.tar.gz"
+            SDK_LOG="$RUN_DIR/sdk-events.ndjson"
+            WORK_DIR="$RUN_DIR/workdir"
+
+            echo "::group::Arm A iteration $i/$REPETITIONS ($RUN_ID)"
+
+            sudo -E env \
+              "PATH=$PATH" \
+              "OPENAI_API_KEY=$OPENAI_API_KEY" \
+              "WORKLOAD_WORK_DIR=$WORK_DIR" \
+              "$ASSAY_BIN" runner-spike run \
+                --agent-shim "$AGENT_SHIM" \
+                --kernel-capture \
+                --ebpf "$EBPF_OBJ" \
+                --run-id "$RUN_ID" \
+                --output "$ARCHIVE_OUT" \
+                --sdk-event-log "$SDK_LOG" \
+                -- node "$WORKLOAD_JS"
+
+            # Child ran under sudo; chown so subsequent steps + the
+            # artifact upload action can read.
+            sudo chown -R "$(id -u):$(id -g)" "$RUN_DIR"
+
+            echo "::endgroup::"
+          done
+
+      - name: Upload Arm A run artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cross-runtime-drift-arm-a-openai-${{ github.run_id }}
+          path: arm-a-openai-runs/
+          if-no-files-found: error
+          retention-days: 30
+
+  arm-b-gemini:
+    name: Arm B — Gemini GenAI (capture)
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: prepare-delegated-runner
+    timeout-minutes: 30
+    env:
+      ARM: b-gemini
+      AGENT_SHIM: gemini-google-genai
+      WORKLOAD_DIR: docs/experiments/cross-runtime-drift-2026-05/workload-gemini
+    steps:
+      - name: Fail fast if GOOGLE_API_KEY is missing
+        shell: bash
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_API_KEY:-}" ]; then
+            echo "ERROR: GOOGLE_API_KEY repo secret is not set" >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in cargo node npm python3 rustc tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "ERROR: delegated runner must expose cgroup v2 at /sys/fs/cgroup" >&2
+            exit 1
+          fi
+
+      - name: Build assay CLI (runner feature)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli --no-default-features --features runner
+
+      - name: Build eBPF artifact
+        if: ${{ inputs.build_ebpf }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-image
+            cargo xtask build-ebpf --docker
+          else
+            cargo xtask build-ebpf
+          fi
+          test -f target/assay-ebpf.o
+
+      - name: Verify eBPF artifact present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f target/assay-ebpf.o ]; then
+            echo "ERROR: target/assay-ebpf.o is required. Run with build_ebpf=true." >&2
+            exit 1
+          fi
+
+      - name: Build workload-gemini
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          npx tsc -p tsconfig.json
+          test -f dist/workload.js
+
+      - name: Run Arm B captures (N times)
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          ASSAY_BIN="$PWD/target/debug/assay"
+          EBPF_OBJ="$PWD/target/assay-ebpf.o"
+          WORKLOAD_JS="$PWD/${{ env.WORKLOAD_DIR }}/dist/workload.js"
+          OUT_ROOT="$PWD/arm-${ARM}-runs"
+          mkdir -p "$OUT_ROOT"
+
+          for i in $(seq 1 "$REPETITIONS"); do
+            RUN_ID="run_arm_${ARM}_$(date -u +%Y%m%dT%H%M%SZ)_$i"
+            RUN_DIR="$OUT_ROOT/$RUN_ID"
+            mkdir -p "$RUN_DIR/workdir"
+            ARCHIVE_OUT="$RUN_DIR/archive.tar.gz"
+            SDK_LOG="$RUN_DIR/sdk-events.ndjson"
+            WORK_DIR="$RUN_DIR/workdir"
+
+            echo "::group::Arm B iteration $i/$REPETITIONS ($RUN_ID)"
+
+            sudo -E env \
+              "PATH=$PATH" \
+              "GOOGLE_API_KEY=$GOOGLE_API_KEY" \
+              "WORKLOAD_WORK_DIR=$WORK_DIR" \
+              "$ASSAY_BIN" runner-spike run \
+                --agent-shim "$AGENT_SHIM" \
+                --kernel-capture \
+                --ebpf "$EBPF_OBJ" \
+                --run-id "$RUN_ID" \
+                --output "$ARCHIVE_OUT" \
+                --sdk-event-log "$SDK_LOG" \
+                -- node "$WORKLOAD_JS"
+
+            sudo chown -R "$(id -u):$(id -g)" "$RUN_DIR"
+
+            echo "::endgroup::"
+          done
+
+      - name: Upload Arm B run artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cross-runtime-drift-arm-b-gemini-${{ github.run_id }}
+          path: arm-b-gemini-runs/
+          if-no-files-found: error
+          retention-days: 30
+
+  drift-compare:
+    name: Compute drift reports (A_i vs B_i)
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: [arm-a-openai, arm-b-gemini]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download Arm A artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cross-runtime-drift-arm-a-openai-${{ github.run_id }}
+          path: arm-a-openai-runs/
+
+      - name: Download Arm B artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cross-runtime-drift-arm-b-gemini-${{ github.run_id }}
+          path: arm-b-gemini-runs/
+
+      - name: Run drift comparator for each (A_i, B_i) pair
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          set -euo pipefail
+          DRIFT_PY="$PWD/docs/experiments/cross-runtime-drift-2026-05/compare/drift.py"
+          DRIFT_OUT="$PWD/drift-reports"
+          mkdir -p "$DRIFT_OUT"
+
+          # Stable sort to align iterations: i-th OpenAI run vs i-th
+          # Gemini run. Folder names embed the iteration index already.
+          mapfile -t A_RUNS < <(find arm-a-openai-runs -maxdepth 1 -type d -name 'run_arm_*' | sort)
+          mapfile -t B_RUNS < <(find arm-b-gemini-runs -maxdepth 1 -type d -name 'run_arm_*' | sort)
+
+          if [ "${#A_RUNS[@]}" -ne "${#B_RUNS[@]}" ]; then
+            echo "ERROR: arm A produced ${#A_RUNS[@]} runs, arm B produced ${#B_RUNS[@]}" >&2
+            exit 1
+          fi
+
+          for i in "${!A_RUNS[@]}"; do
+            A_DIR="${A_RUNS[$i]}"
+            B_DIR="${B_RUNS[$i]}"
+            A_ARCHIVE="$A_DIR/archive.tar.gz"
+            B_ARCHIVE="$B_DIR/archive.tar.gz"
+            REPORT_BASE="$DRIFT_OUT/drift_pair_$((i + 1))"
+
+            echo "::group::Drift pair $((i + 1)): $A_DIR vs $B_DIR"
+            python3 "$DRIFT_PY" \
+              --archive-a "$A_ARCHIVE" \
+              --archive-b "$B_ARCHIVE" \
+              --fixture-path "/tmp/work/fixture-input.txt" \
+              --fixture-path "/tmp/work/fixture-output.txt" \
+              --out-json "${REPORT_BASE}.json" \
+              --out-md "${REPORT_BASE}.md"
+            {
+              echo "### Drift pair $((i + 1))"
+              echo
+              cat "${REPORT_BASE}.md"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::endgroup::"
+          done
+
+      - name: Upload drift reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cross-runtime-drift-reports-${{ github.run_id }}
+          path: drift-reports/
+          if-no-files-found: error
+          retention-days: 30
