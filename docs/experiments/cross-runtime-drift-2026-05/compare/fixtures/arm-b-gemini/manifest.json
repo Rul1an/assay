@@ -1,0 +1,12 @@
+{
+  "schema": "assay.runner.archive_manifest.v0",
+  "run_id": "drift_fixture_b_gemini_001",
+  "runtime_label": "gemini-genai",
+  "files": {
+    "manifest.json": {
+      "path": "manifest.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": 0
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "assay.runner.archive_manifest.v0",
+  "run_id": "drift_fixture_a_openai_001",
+  "runtime_label": "openai-agents",
+  "files": {
+    "manifest.json": {
+      "path": "manifest.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": 0
+    }
+  }
+}
