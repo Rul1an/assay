@@ -1,0 +1,13 @@
+# Cross-Runtime Drift Report
+
+- **Arm A:** `openai-agents` (`arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/archive.tar.gz`, manifest `sha256:3382eafd0323a94da6fd505d6b94659cde45fd8d283ca05a8de8444d58c409b2`)
+- **Arm B:** `gemini-genai` (`arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/archive.tar.gz`, manifest `sha256:104c77ecbf29af553a6ad1e96a93490a0d750aeb9bcd158dd62bec2902ac159e`)
+
+| Dimension | Source | Classification | Only in A | Only in B | In both | Detail |
+|---|---|---|---|---|---|---|
+| `filesystem_paths_touched` | `capability_surface.filesystem_paths` | **runtime-induced** | `/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/sdk-events.ndjson`, `/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100626Z_1/workdir/tool-calls.ndjson`, `/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json` | `/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/sdk-events.ndjson`, `/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100327Z_1/workdir/tool-calls.ndjson`, `/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json` | `/etc/gai.conf`, `/etc/host.conf`, `/etc/hosts`, `/etc/netsvc.conf`, `/etc/nsswitch.conf`, `/etc/resolv.conf`, `/etc/svc.conf` | 6 non-shared item(s); 0 fixture, 6 unclassified |
+| `network_endpoints` | `capability_surface.network_endpoints` | **runtime-induced** | `162.159.140.245:0`, `162.159.140.245:443`, `172.66.0.243:0`, `172.66.0.243:443` | `142.250.180.10:0`, `142.251.142.202:0`, `142.251.142.202:443`, `142.251.209.234:0`, `142.251.39.138:0`, `172.217.17.202:0`, `172.217.171.106:0`, `172.217.23.234:0`, `192.178.25.202:0`, `216.58.198.106:0`, `216.58.198.10:0`, `216.58.198.42:0`, `[2a00:1450:400e:806::200a]:0`, `[2a00:1450:400e:808::200a]:0`, `[2a00:1450:400e:809::200a]:0`, `[2a00:1450:400e:80a::200a]:0` | `127.0.0.53:53` | 20 non-shared item(s); 0 provider, 0 fixture, 20 unclassified |
+| `process_execs` | `capability_surface.process_execs` | **inconclusive** | — | — | — | dimension empty in both arms |
+| `sdk_tool_events` | `layers/sdk.ndjson (tool field, deduplicated)` | **task-induced** | — | — | `read_file`, `write_file` | full overlap |
+| `mcp_tool_surface` | `capability_surface.mcp_tools` | **inconclusive** | — | — | — | dimension empty in both arms |
+| `tool_invocation_order` | `layers/sdk.ndjson (event_type=tool_call_started, ordered by seq)` | **task-induced** | — | — | `read_file`, `write_file` | identical sequence: read_file -> write_file |

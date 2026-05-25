@@ -1,0 +1,126 @@
+{
+  "schema": "assay.cross_runtime_drift.v0",
+  "archive_a": {
+    "path": "arm-a-openai-runs/run_arm_a-openai_20260525T100645Z_3/archive.tar.gz",
+    "run_id": "run_arm_a-openai_20260525T100645Z_3",
+    "runtime_label": "openai-agents",
+    "manifest_digest": "sha256:0c98952c1e0fe61c9ae005f383991094ef9676d58d248a5e270f298d6793c4f5",
+    "sdk_event_count": 5
+  },
+  "archive_b": {
+    "path": "arm-b-gemini-runs/run_arm_b-gemini_20260525T100334Z_3/archive.tar.gz",
+    "run_id": "run_arm_b-gemini_20260525T100334Z_3",
+    "runtime_label": "gemini-genai",
+    "manifest_digest": "sha256:483562e9544af9a31d27d396e96a721df0aa1a5b78b29c079d528b9fe1953ec7",
+    "sdk_event_count": 5
+  },
+  "rows": [
+    {
+      "dimension": "filesystem_paths_touched",
+      "source": "capability_surface.filesystem_paths",
+      "only_in_a": [
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100645Z_3/sdk-events.ndjson",
+        "/opt/actions-runner/_work/assay/assay/arm-a-openai-runs/run_arm_a-openai_20260525T100645Z_3/workdir/tool-calls.ndjson",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-openai/dist/package.json"
+      ],
+      "only_in_b": [
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100334Z_3/sdk-events.ndjson",
+        "/opt/actions-runner/_work/assay/assay/arm-b-gemini-runs/run_arm_b-gemini_20260525T100334Z_3/workdir/tool-calls.ndjson",
+        "/opt/actions-runner/_work/assay/assay/docs/experiments/cross-runtime-drift-2026-05/workload-gemini/dist/package.json"
+      ],
+      "in_both": [
+        "/etc/gai.conf",
+        "/etc/host.conf",
+        "/etc/hosts",
+        "/etc/netsvc.conf",
+        "/etc/nsswitch.conf",
+        "/etc/resolv.conf",
+        "/etc/svc.conf"
+      ],
+      "classification": "runtime-induced",
+      "detail": "6 non-shared item(s); 0 fixture, 6 unclassified"
+    },
+    {
+      "dimension": "network_endpoints",
+      "source": "capability_surface.network_endpoints",
+      "only_in_a": [
+        "162.159.140.245:0",
+        "162.159.140.245:443",
+        "172.66.0.243:0",
+        "172.66.0.243:443"
+      ],
+      "only_in_b": [
+        "142.250.180.10:0",
+        "142.251.142.202:0",
+        "142.251.209.234:0",
+        "142.251.39.138:0",
+        "172.217.17.202:0",
+        "172.217.171.106:0",
+        "172.217.23.234:0",
+        "172.217.23.234:443",
+        "192.178.25.202:0",
+        "216.58.198.106:0",
+        "216.58.198.10:0",
+        "216.58.198.42:0",
+        "[2a00:1450:400e:806::200a]:0",
+        "[2a00:1450:400e:808::200a]:0",
+        "[2a00:1450:400e:809::200a]:0",
+        "[2a00:1450:400e:80a::200a]:0"
+      ],
+      "in_both": [
+        "127.0.0.53:53"
+      ],
+      "classification": "runtime-induced",
+      "detail": "20 non-shared item(s); 0 provider, 0 fixture, 20 unclassified"
+    },
+    {
+      "dimension": "process_execs",
+      "source": "capability_surface.process_execs",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": [],
+      "classification": "inconclusive",
+      "detail": "dimension empty in both arms"
+    },
+    {
+      "dimension": "sdk_tool_events",
+      "source": "layers/sdk.ndjson (tool field, deduplicated)",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": [
+        "read_file",
+        "write_file"
+      ],
+      "classification": "task-induced",
+      "detail": "full overlap"
+    },
+    {
+      "dimension": "mcp_tool_surface",
+      "source": "capability_surface.mcp_tools",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": [],
+      "classification": "inconclusive",
+      "detail": "dimension empty in both arms"
+    },
+    {
+      "dimension": "tool_invocation_order",
+      "source": "layers/sdk.ndjson (event_type=tool_call_started, ordered by seq)",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": [
+        "read_file",
+        "write_file"
+      ],
+      "classification": "task-induced",
+      "detail": "identical sequence: read_file -> write_file"
+    }
+  ],
+  "summary": {
+    "dimensions_checked": 6,
+    "task_induced": 2,
+    "provider_induced": 0,
+    "runtime_induced": 2,
+    "inconclusive": 2
+  }
+}
