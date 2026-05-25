@@ -48,6 +48,11 @@ runs/
 | Arm A | `openai-agents`, model `gpt-4o-mini` |
 | Arm B | `gemini-genai`, model `gemini-2.5-flash` |
 
+The A0/B0 archives are the original workflow artifacts. The
+`runs/drift/` reports were re-rendered from those committed archives
+after the runtime-drift projection schema was frozen as
+`assay.runner.runtime_drift.v0`; the raw captures were not regenerated.
+
 All six archives passed the workflow health gate before artifact upload:
 `ringbuf_drops == 0`, `kernel_layer == "complete"`, and
 `cgroup_correlation == "clean"`. The workflow also ran the workload
