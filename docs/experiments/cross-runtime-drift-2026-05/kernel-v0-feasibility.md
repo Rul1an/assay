@@ -1,22 +1,23 @@
-# Kernel v0 feasibility note
+# Kernel operation metadata note
 
-> **Status:** follow-up diagnostic after the live n=3 baseline. This
-> note inspects the committed `layers/kernel.ndjson` files and decides
-> what the current Runner kernel-event v0 shape can and cannot support
-> for the cross-runtime drift experiment.
+> **Status:** follow-up diagnostic after the first live n=3 baseline,
+> superseded by the kernel-event metadata implementation on the
+> `codex/kernel-open-flags-return-values` branch. The first baseline
+> showed why touched paths were not enough; the new Runner shape adds
+> optional open flags, return values, access modes, and operation flags.
 >
-> **Conclusion:** kernel v0 can support event-kind counts and touched
-> path / endpoint summaries. It cannot support honest read/write/create
-> / remove classification yet, because each event carries only `kind`,
-> `value`, `seq`, `pid`, `run_id`, `schema`, and numeric `event_type`.
+> **Conclusion:** old archives can only support event-kind counts and
+> touched path / endpoint summaries. New archives can support honest
+> read/write/create/truncate classification for successful `openat` /
+> `openat2` events.
 
 ## Why this note exists
 
-The Slice 4 findings mark read/write/create/remove path drift as a v2
-follow-up. Before building a larger comparator, we need to know whether
-the committed kernel layer already carries enough evidence.
+The first Slice 4 findings marked read/write/create/remove path drift
+as a v2 follow-up. Before building a larger comparator, we checked
+whether the committed kernel layer already carried enough evidence.
 
-It does not. The relevant records currently look like:
+The first baseline did not. The relevant records looked like:
 
 ```json
 {
@@ -30,10 +31,30 @@ It does not. The relevant records currently look like:
 }
 ```
 
-There is no open flag, syscall return value, access mode, file
-descriptor correlation, or close/write/read pairing. A v2 comparator
-that labels a path as "read" or "write" from this shape would be
+There was no open flag, syscall return value, access mode, file
+descriptor correlation, or close/write/read pairing. A comparator that
+labels a path as "read" or "write" from this older shape would be
 guessing.
+
+The Runner implementation now emits enriched open events shaped like:
+
+```json
+{
+  "schema": "assay.runner.kernel_event.v0",
+  "run_id": "run_arm_a-openai_...",
+  "seq": 0,
+  "pid": 146927,
+  "event_type": 1,
+  "kind": "openat",
+  "value": "/path/to/fixture-output.txt",
+  "flags": 577,
+  "mode": 420,
+  "return_value": 4,
+  "access_mode": "write",
+  "operation_flags": ["create", "truncate"],
+  "status": "success"
+}
+```
 
 ## Live kernel-event counts
 
@@ -59,9 +80,10 @@ The main findings doc already reflects the high-level result:
 - Gemini has a larger observed connect surface in this particular run,
   but v0 cannot convert that into a provider-host claim.
 
-## What v0 can support next
+## What old v0 can support
 
-A small comparator extension could add these non-ambiguous rows:
+Old archives without open metadata can still support these
+non-ambiguous rows:
 
 | Candidate row | Evidence source | Safe interpretation |
 |---|---|---|
@@ -70,23 +92,23 @@ A small comparator extension could add these non-ambiguous rows:
 | `kernel_open_paths_sequence` | ordered `openat.value` | Ordered touched-path shape, not read/write semantics. |
 | `kernel_connect_sequence` | ordered `connect.value` | Ordered endpoint shape, still IP-based. |
 
-Those rows would make the live drift report more transparent without
-pretending v0 knows more than it does.
+Those rows make the old live drift report more transparent without
+pretending old archives know more than they do.
 
-## What requires a Runner schema change
+## What the new metadata supports
 
-Read/write/create/remove path classification needs more evidence in the
-kernel layer, for example:
+The cross-runtime drift comparator now projects successful open events
+into operation strings such as:
 
-- syscall-specific open flags for `openat` / `openat2`;
-- return-value success/failure;
-- file descriptor correlation if later `read`, `write`, or `close`
-  events are used;
-- normalized operation category emitted by Runner after parsing the raw
-  syscall fields.
+- `read:/path/to/fixture-input.txt`
+- `write:/path/to/fixture-output.txt`
+- `create:/path/to/fixture-output.txt`
+- `truncate:/path/to/fixture-output.txt`
 
-Until then, the correct publication language is "filesystem paths
-touched", not "files read" or "files written".
+This is enough to distinguish the experiment workload's read tool from
+its write tool. Full remove/unlink classification, fd-level read/write
+byte counts, and close pairing remain out of scope until the monitor
+captures those syscall families too.
 
 ## Reproduction
 

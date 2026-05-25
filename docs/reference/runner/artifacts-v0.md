@@ -66,6 +66,42 @@ event for `/lib/.../libc.so.6` is preserved because the policy decision is the
 claim, even though ordinary loader `openat` telemetry for that path is
 filtered.
 
+## `layers/kernel.ndjson`
+
+Schema string:
+
+```text
+assay.runner.kernel_event.v0
+```
+
+Each line is one normalized kernel event. Common fields:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `schema` | string | yes | Must equal `assay.runner.kernel_event.v0` |
+| `run_id` | string | yes | Run identifier shared by all archive artifacts |
+| `seq` | integer | yes | Runner-assigned sequence in normalized kernel layer order |
+| `pid` | integer | yes | Kernel-observed thread-group id for the event |
+| `event_type` | integer | yes | Internal monitor event id (`1` for open, `2` for connect, etc.) |
+| `kind` | string | yes | Normalized event kind such as `openat`, `connect`, `exec`, `file_blocked` |
+| `value` | string or null | yes | Normalized path or endpoint when available |
+
+Open events may additionally carry syscall metadata:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `flags` | integer | no | Linux open flags captured at syscall entry |
+| `mode` | integer | no | Linux create mode argument, when provided |
+| `resolve` | integer | no | `openat2` resolve flags, when non-zero |
+| `return_value` | integer | no | Syscall return value from `sys_exit_openat*` |
+| `access_mode` | enum | no | `read`, `write`, `read_write`, or `unknown`, derived from `flags & O_ACCMODE` |
+| `operation_flags` | array[string] | no | Derived operation hints such as `create`, `truncate`, `append`, `exclusive` |
+| `status` | enum | no | `success` when return value is non-negative, otherwise `error` |
+
+These fields are optional so older v0 archives remain readable. Consumers that
+need read/write/create/remove distinctions must require the optional open
+metadata and treat older archives as inconclusive for that dimension.
+
 ## `observation-health.json`
 
 Schema string:
