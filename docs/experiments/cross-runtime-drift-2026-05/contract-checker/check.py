@@ -23,6 +23,12 @@ ALLOWED_RUNTIMES = {"openai-agents", "gemini-genai"}
 DEFAULT_INPUT_CONTENTS = "cross-runtime drift fixture\n"
 
 
+class BadInputError(Exception):
+    """Raised when an artifact is present but unreadable (corrupt JSON,
+    decode error, etc.). Surfaced as exit code 3 — the contract cannot be
+    evaluated, distinct from a rule failure (exit 2)."""
+
+
 @dataclass
 class CheckResult:
     rule: str
@@ -31,15 +37,29 @@ class CheckResult:
 
 
 def _load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BadInputError(f"{path}: invalid JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise BadInputError(f"{path}: invalid UTF-8: {exc}") from exc
 
 
 def _load_ndjson(path: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise BadInputError(f"{path}: invalid UTF-8: {exc}") from exc
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
-        out.append(json.loads(line))
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise BadInputError(
+                f"{path}:{lineno}: invalid JSON: {exc}"
+            ) from exc
     return out
 
 
@@ -164,14 +184,10 @@ def check_run_meta(meta_path: Path) -> CheckResult:
             False,
             f"missing: {meta_path}",
         )
-    try:
-        meta = _load_json(meta_path)
-    except json.JSONDecodeError as exc:
-        return _result(
-            "6. run-meta.json exists, exit_code=0, runtime allowed",
-            False,
-            f"invalid JSON: {exc}",
-        )
+    # Corrupt JSON bubbles up as BadInputError (exit 3), distinct from
+    # rule-violation (exit 2). The "rule failed" case is reserved for
+    # well-formed-but-wrong content like a non-allowed runtime string.
+    meta = _load_json(meta_path)
     issues: list[str] = []
     if meta.get("exit_code") != 0:
         issues.append(f"exit_code={meta.get('exit_code')!r}")
@@ -280,23 +296,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    work_dir: Path = args.work_dir.resolve()
+    # Use .absolute() (not .resolve()) so we do not collapse macOS
+    # /var/... -> /private/var/... symlinks. The Node workloads use
+    # `path.resolve()`, which also stops at filesystem-symlink boundaries.
+    # The two sides must agree, otherwise local mktemp -d runs falsely
+    # fail the path-equality rules.
+    work_dir: Path = args.work_dir.absolute()
     if not work_dir.is_dir():
         print(f"work-dir is not a directory: {work_dir}", file=sys.stderr)
         return 3
 
     input_path = (
-        args.input_path.resolve()
+        args.input_path.absolute()
         if args.input_path
         else work_dir / "fixture-input.txt"
     )
     output_path = (
-        args.output_path.resolve()
+        args.output_path.absolute()
         if args.output_path
         else work_dir / "fixture-output.txt"
     )
 
-    results = run_checks(work_dir, input_path, output_path, args.input_contents)
+    try:
+        results = run_checks(
+            work_dir, input_path, output_path, args.input_contents
+        )
+    except BadInputError as exc:
+        print(f"bad input: {exc}", file=sys.stderr)
+        return 3
     print(render_results(results))
 
     if all(r.passed for r in results):

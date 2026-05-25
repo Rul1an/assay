@@ -67,14 +67,39 @@ function loadEnv(): WorkloadEnv {
   };
 }
 
+/**
+ * Contract violation: the model asked for an action the workload contract
+ * does not allow (path outside WORK_DIR, wrong path for tool, etc.). The
+ * outer try/catch turns this into exit code 2. Distinct from generic
+ * Errors which become exit code 1.
+ */
+class ContractViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContractViolationError";
+  }
+}
+
 function ensureInsideWorkDir(workDir: string, candidate: string): string {
   const abs = resolve(candidate);
   if (!abs.startsWith(workDir + "/") && abs !== workDir) {
-    throw new Error(
+    throw new ContractViolationError(
       `Path ${candidate} is outside WORKLOAD_WORK_DIR (${workDir})`,
     );
   }
   return abs;
+}
+
+function assertPathEquals(
+  toolName: string,
+  expected: string,
+  candidate: string,
+): void {
+  if (candidate !== expected) {
+    throw new ContractViolationError(
+      `${toolName}: path mismatch — expected ${expected}, got ${candidate}`,
+    );
+  }
 }
 
 function appendToolCall(
@@ -192,6 +217,7 @@ async function runManualLoop(
           env.workDir,
           String(args.path ?? ""),
         );
+        assertPathEquals("read_file", env.inputPath, path);
         appendToolCall(toolCallsPath, seq, "read_file", { path });
         const data = readFileSync(path, "utf-8");
         responseParts.push({
@@ -205,6 +231,7 @@ async function runManualLoop(
           env.workDir,
           String(args.path ?? ""),
         );
+        assertPathEquals("write_file", env.outputPath, path);
         const fileContents = String(args.contents ?? "");
         appendToolCall(toolCallsPath, seq, "write_file", {
           path,
@@ -255,7 +282,11 @@ async function main(): Promise<number> {
     outcome = await runManualLoop(ai, env, toolCallsPath, seq);
   } catch (err) {
     process.stderr.write(`workload-gemini error: ${(err as Error).message}\n`);
-    outcome = { exitCode: 1, modelReply: "" };
+    if (err instanceof ContractViolationError) {
+      outcome = { exitCode: 2, modelReply: (err as Error).message };
+    } else {
+      outcome = { exitCode: 1, modelReply: "" };
+    }
   }
   const endedAt = new Date().toISOString();
 

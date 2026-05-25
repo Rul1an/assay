@@ -118,7 +118,7 @@ the run was captured under Runner.
 |---|---|
 | 0 | Workload completed and (the workload believes) satisfied the contract |
 | 1 | Internal workload error (failed to bootstrap, SDK error, etc.) |
-| 2 | Workload self-detected a contract violation (e.g. agent tried to call an unregistered tool) |
+| 2 | Workload self-detected a contract violation. Fail-fast cases: agent called `read_file` with `path != WORKLOAD_INPUT_PATH`, `write_file` with `path != WORKLOAD_OUTPUT_PATH`, a path outside `WORKLOAD_WORK_DIR`, or an unregistered tool. Both implementations throw a `ContractViolationError` from the tool handler so the side effect never lands on disk. |
 | 3 | Model output rejected (no `DONE` produced within the allowed iterations) |
 
 Contract-checker independently re-verifies; the workload's exit

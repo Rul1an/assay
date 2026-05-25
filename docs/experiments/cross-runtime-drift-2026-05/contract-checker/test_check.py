@@ -175,6 +175,90 @@ class BadInputTests(unittest.TestCase):
             rc = check.main(["--work-dir", os.path.join(tmp, "nope")])
             self.assertEqual(rc, 3)
 
+    def test_malformed_tool_calls_ndjson_returns_3(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp).resolve()
+            write_valid_workdir(tmpdir)
+            (tmpdir / "tool-calls.ndjson").write_text(
+                "{bad json}\n", encoding="utf-8"
+            )
+            rc = check.main(["--work-dir", str(tmpdir)])
+            self.assertEqual(rc, 3)
+
+    def test_malformed_run_meta_json_returns_3(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp).resolve()
+            write_valid_workdir(tmpdir)
+            (tmpdir / "run-meta.json").write_text(
+                "{not valid", encoding="utf-8"
+            )
+            rc = check.main(["--work-dir", str(tmpdir)])
+            self.assertEqual(rc, 3)
+
+
+class PathCanonicalizationTests(unittest.TestCase):
+    """The checker must NOT collapse symlinks via Path.resolve(), because
+    the Node workloads use path.resolve() which stops at filesystem
+    symlinks. On macOS, /var is a symlink to /private/var, so collapsing
+    would falsely fail path-equality rules on local mktemp -d runs."""
+
+    def test_workdir_passed_as_symlink_path_is_not_canonicalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_real:
+            real_dir = Path(tmp_real).resolve()
+            # Build a symlink that points at the real workdir under a
+            # different prefix.
+            symlink_dir = real_dir.parent / (real_dir.name + "-symlink")
+            try:
+                symlink_dir.symlink_to(real_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("filesystem does not support symlinks")
+
+            try:
+                # Record tool-calls with the symlink-prefix path (what a
+                # Node workload's path.resolve() would produce if the
+                # user passed the symlink as WORKLOAD_WORK_DIR).
+                input_path = symlink_dir / "fixture-input.txt"
+                output_path = symlink_dir / "fixture-output.txt"
+                contents = "cross-runtime drift fixture\n"
+                input_path.write_text(contents, encoding="utf-8")
+                output_path.write_text(contents.upper(), encoding="utf-8")
+                tool_calls = [
+                    {
+                        "seq": 1,
+                        "tool": "read_file",
+                        "args": {"path": str(input_path)},
+                    },
+                    {
+                        "seq": 2,
+                        "tool": "write_file",
+                        "args": {
+                            "path": str(output_path),
+                            "contents": contents.upper(),
+                        },
+                    },
+                ]
+                (symlink_dir / "tool-calls.ndjson").write_text(
+                    "\n".join(json.dumps(c) for c in tool_calls) + "\n",
+                    encoding="utf-8",
+                )
+                (symlink_dir / "run-meta.json").write_text(
+                    json.dumps(
+                        {
+                            "runtime": "openai-agents",
+                            "model": "test-model",
+                            "sdk_version": "0.0.0",
+                            "started_at": "2026-05-25T00:00:00Z",
+                            "ended_at": "2026-05-25T00:00:01Z",
+                            "exit_code": 0,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                rc = check.main(["--work-dir", str(symlink_dir)])
+                self.assertEqual(rc, 0)
+            finally:
+                symlink_dir.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()

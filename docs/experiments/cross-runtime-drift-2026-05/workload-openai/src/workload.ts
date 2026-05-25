@@ -43,14 +43,39 @@ function loadEnv(): WorkloadEnv {
   return { workDir: absWorkDir, inputPath, outputPath, inputContents, model };
 }
 
+/**
+ * Contract violation: the model asked for an action the workload contract
+ * does not allow (path outside WORK_DIR, wrong path for tool, etc.). The
+ * outer try/catch turns this into exit code 2. Distinct from generic
+ * Errors which become exit code 1.
+ */
+class ContractViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContractViolationError";
+  }
+}
+
 function ensureInsideWorkDir(workDir: string, candidate: string): string {
   const abs = resolve(candidate);
   if (!abs.startsWith(workDir + "/") && abs !== workDir) {
-    throw new Error(
+    throw new ContractViolationError(
       `Path ${candidate} is outside WORKLOAD_WORK_DIR (${workDir})`,
     );
   }
   return abs;
+}
+
+function assertPathEquals(
+  toolName: string,
+  expected: string,
+  candidate: string,
+): void {
+  if (candidate !== expected) {
+    throw new ContractViolationError(
+      `${toolName}: path mismatch — expected ${expected}, got ${candidate}`,
+    );
+  }
 }
 
 function appendToolCall(
@@ -88,6 +113,7 @@ async function main(): Promise<number> {
     }),
     execute: async ({ path }) => {
       const abs = ensureInsideWorkDir(env.workDir, path);
+      assertPathEquals("read_file", env.inputPath, abs);
       appendToolCall(toolCallsPath, seq, "read_file", { path: abs });
       return readFileSync(abs, "utf-8");
     },
@@ -102,6 +128,7 @@ async function main(): Promise<number> {
     }),
     execute: async ({ path, contents }) => {
       const abs = ensureInsideWorkDir(env.workDir, path);
+      assertPathEquals("write_file", env.outputPath, abs);
       appendToolCall(toolCallsPath, seq, "write_file", {
         path: abs,
         contents,
@@ -144,7 +171,20 @@ async function main(): Promise<number> {
     }
   } catch (err) {
     process.stderr.write(`workload-openai error: ${(err as Error).message}\n`);
-    exitCode = 1;
+    if (err instanceof ContractViolationError) {
+      exitCode = 2;
+    } else {
+      // @openai/agents wraps tool execute errors in its own error type.
+      // Detect by name as a fallback so contract violations bubble up
+      // even if the SDK rewraps them.
+      const name = (err as Error)?.name ?? "";
+      const msg = (err as Error)?.message ?? "";
+      if (name === "ContractViolationError" || msg.includes("ContractViolationError")) {
+        exitCode = 2;
+      } else {
+        exitCode = 1;
+      }
+    }
   }
   const endedAt = new Date().toISOString();
 

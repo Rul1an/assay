@@ -28,10 +28,18 @@
 Each workload is a self-contained Node 22+ TypeScript project. The
 contract-checker is stdlib Python 3.10+.
 
+All examples below assume `$REPO_ROOT` points at the assay repo
+root, so each block can run independently of where the previous
+one left the shell:
+
+```bash
+export REPO_ROOT="$(git rev-parse --show-toplevel)"
+```
+
 ### workload-openai
 
 ```bash
-cd docs/experiments/cross-runtime-drift-2026-05/workload-openai
+cd "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/workload-openai"
 npm install --no-audit --no-fund --ignore-scripts
 npx tsc -p tsconfig.json
 
@@ -44,7 +52,7 @@ OPENAI_API_KEY="$OPENAI_API_KEY" \
 ### workload-gemini
 
 ```bash
-cd docs/experiments/cross-runtime-drift-2026-05/workload-gemini
+cd "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/workload-gemini"
 npm install --no-audit --no-fund --ignore-scripts
 npx tsc -p tsconfig.json
 
@@ -57,13 +65,14 @@ GOOGLE_API_KEY="$GOOGLE_API_KEY" \
 ### contract-checker
 
 ```bash
-# From the work-dir produced by either workload above:
-python3 docs/experiments/cross-runtime-drift-2026-05/contract-checker/check.py \
+# Against the work-dir produced by either workload above. Runs from
+# any cwd thanks to $REPO_ROOT.
+python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/contract-checker/check.py" \
   --work-dir "$WORK"
 
 # Tests (no API keys required):
 python3 -m unittest discover \
-  -s docs/experiments/cross-runtime-drift-2026-05/contract-checker \
+  -s "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/contract-checker" \
   -p 'test_*.py'
 ```
 
