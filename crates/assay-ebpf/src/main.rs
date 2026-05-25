@@ -312,7 +312,7 @@ fn store_open_pending(
     if is_loader_telemetry_open_path(path) {
         return Ok(0);
     }
-    if should_dedup_open_path(path) {
+    if should_dedup_open_path(path, flags) {
         return Ok(0);
     }
 
@@ -362,7 +362,7 @@ fn try_open_exit(ctx: TracePointContext, emitted_stat: u32, dropped_stat: u32) -
 }
 
 #[inline(always)]
-fn should_dedup_open_path(path: &[u8; DATA_LEN]) -> bool {
+fn should_dedup_open_path(path: &[u8; DATA_LEN], flags: u64) -> bool {
     let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
         .copied()
         .unwrap_or(0)
@@ -371,7 +371,7 @@ fn should_dedup_open_path(path: &[u8; DATA_LEN]) -> bool {
         return false;
     }
 
-    let key = hash_open_path(path);
+    let key = hash_open_path(path, flags);
     if unsafe { OPEN_PATH_SEEN.get(&key) }.is_some() {
         return true;
     }
@@ -381,8 +381,10 @@ fn should_dedup_open_path(path: &[u8; DATA_LEN]) -> bool {
 }
 
 #[inline(always)]
-fn hash_open_path(path: &[u8; DATA_LEN]) -> u64 {
+fn hash_open_path(path: &[u8; DATA_LEN], flags: u64) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
+    hash ^= flags;
+    hash = hash.wrapping_mul(0x100000001b3u64);
     for index in 0..DATA_LEN {
         let byte = path[index];
         if byte == 0 {
