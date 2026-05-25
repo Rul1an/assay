@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for bin in cargo node npm python3 rustc tar; do
+          for bin in awk cargo node npm python3 rustc sha256sum tar; do
             command -v "$bin" >/dev/null 2>&1 || {
               echo "ERROR: required command not found on delegated runner: $bin" >&2
               exit 1
@@ -257,7 +257,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for bin in cargo node npm python3 rustc tar; do
+          for bin in awk cargo node npm python3 rustc sha256sum tar; do
             command -v "$bin" >/dev/null 2>&1 || {
               echo "ERROR: required command not found on delegated runner: $bin" >&2
               exit 1

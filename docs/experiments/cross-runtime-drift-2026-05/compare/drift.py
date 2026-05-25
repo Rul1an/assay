@@ -292,6 +292,10 @@ def parse_archive(source: Path) -> ArchiveObservation:
     capability = _parse_json(
         f"{source}!{CAPABILITY_SURFACE_PATH}", capability_bytes
     )
+    if not isinstance(capability, dict):
+        raise BadArchiveError(
+            f"{source}!{CAPABILITY_SURFACE_PATH}: expected JSON object"
+        )
     capability_surface_schema = _schema_from(capability)
     capability_surface: dict[str, list[str]] = {
         "filesystem_paths": [],
@@ -300,13 +304,12 @@ def parse_archive(source: Path) -> ArchiveObservation:
         "mcp_tools": [],
         "policy_decisions": [],
     }
-    if isinstance(capability, dict):
-        for key in capability_surface:
-            value = capability.get(key, [])
-            if isinstance(value, list):
-                capability_surface[key] = sorted(
-                    [str(v) for v in value if isinstance(v, str)]
-                )
+    for key in capability_surface:
+        value = capability.get(key, [])
+        if isinstance(value, list):
+            capability_surface[key] = sorted(
+                [str(v) for v in value if isinstance(v, str)]
+            )
 
     observation_health: dict[str, Any] = {}
     observation_health_schema: str | None = None
@@ -315,9 +318,12 @@ def parse_archive(source: Path) -> ArchiveObservation:
         health = _parse_json(
             f"{source}!{OBSERVATION_HEALTH_PATH}", observation_bytes
         )
-        if isinstance(health, dict):
-            observation_health = health
-            observation_health_schema = _schema_from(health)
+        if not isinstance(health, dict):
+            raise BadArchiveError(
+                f"{source}!{OBSERVATION_HEALTH_PATH}: expected JSON object"
+            )
+        observation_health = health
+        observation_health_schema = _schema_from(health)
 
     correlation_report: dict[str, Any] = {}
     correlation_report_schema: str | None = None
@@ -326,9 +332,12 @@ def parse_archive(source: Path) -> ArchiveObservation:
         correlation = _parse_json(
             f"{source}!{CORRELATION_REPORT_PATH}", correlation_bytes
         )
-        if isinstance(correlation, dict):
-            correlation_report = correlation
-            correlation_report_schema = _schema_from(correlation)
+        if not isinstance(correlation, dict):
+            raise BadArchiveError(
+                f"{source}!{CORRELATION_REPORT_PATH}: expected JSON object"
+            )
+        correlation_report = correlation
+        correlation_report_schema = _schema_from(correlation)
 
     sdk_events: list[dict[str, Any]] = []
     sdk_event_schema: str | None = None
@@ -344,14 +353,19 @@ def parse_archive(source: Path) -> ArchiveObservation:
             if not line.strip():
                 continue
             try:
-                sdk_events.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise BadArchiveError(
                     f"{source}!{SDK_LAYER_PATH}:{lineno}: "
                     f"invalid JSON: {exc}"
                 ) from exc
+            if not isinstance(event, dict):
+                raise BadArchiveError(
+                    f"{source}!{SDK_LAYER_PATH}:{lineno}: expected JSON object"
+                )
+            sdk_events.append(event)
             if sdk_event_schema is None:
-                sdk_event_schema = _schema_from(sdk_events[-1])
+                sdk_event_schema = _schema_from(event)
 
     kernel_events: list[dict[str, Any]] = []
     kernel_event_schema: str | None = None

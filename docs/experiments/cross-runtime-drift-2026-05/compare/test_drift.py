@@ -178,6 +178,71 @@ class ParseArchiveFailureTests(unittest.TestCase):
                 drift.parse_archive(tmpdir)
             self.assertIn("capability-surface.json", str(ctx.exception))
 
+    def test_non_object_capability_surface_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps(["not", "an", "object"]), encoding="utf-8"
+            )
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(tmpdir)
+            self.assertIn("expected JSON object", str(ctx.exception))
+
+    def test_non_object_observation_health_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps({"schema": "assay.runner.capability_surface.v0"}),
+                encoding="utf-8",
+            )
+            (tmpdir / "observation-health.json").write_text(
+                json.dumps(["not", "an", "object"]), encoding="utf-8"
+            )
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(tmpdir)
+            self.assertIn("expected JSON object", str(ctx.exception))
+
+    def test_non_object_correlation_report_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps({"schema": "assay.runner.capability_surface.v0"}),
+                encoding="utf-8",
+            )
+            (tmpdir / "correlation-report.json").write_text(
+                json.dumps(["not", "an", "object"]), encoding="utf-8"
+            )
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(tmpdir)
+            self.assertIn("expected JSON object", str(ctx.exception))
+
+    def test_non_object_sdk_event_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            (tmpdir / "manifest.json").write_text(
+                json.dumps({"schema": "x", "run_id": "y"}), encoding="utf-8"
+            )
+            (tmpdir / "capability-surface.json").write_text(
+                json.dumps({"schema": "assay.runner.capability_surface.v0"}),
+                encoding="utf-8",
+            )
+            (tmpdir / "layers").mkdir()
+            (tmpdir / "layers" / "sdk.ndjson").write_text(
+                json.dumps(["not", "an", "object"]) + "\n", encoding="utf-8"
+            )
+            with self.assertRaises(drift.BadArchiveError) as ctx:
+                drift.parse_archive(tmpdir)
+            self.assertIn("expected JSON object", str(ctx.exception))
+
 
 # ---------------------------------------------------------------------------
 # build_drift_report
