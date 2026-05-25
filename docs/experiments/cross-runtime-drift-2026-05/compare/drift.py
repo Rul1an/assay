@@ -515,6 +515,15 @@ def _projection_payload(
     }
 
 
+def _path_alias_dict(path_aliases: tuple[PathAlias, ...]) -> dict[str, PathAlias]:
+    out: dict[str, PathAlias] = {}
+    for alias in path_aliases:
+        if alias.raw_path in out:
+            raise ValueError(f"duplicate path alias for {alias.raw_path!r}")
+        out[alias.raw_path] = alias
+    return out
+
+
 def _network_endpoint_matches_provider(
     item: str, provider_hosts: tuple[str, ...]
 ) -> bool:
@@ -635,7 +644,7 @@ def build_drift_report(
     """
 
     rows: list[DriftRow] = []
-    aliases = {alias.raw_path: alias for alias in path_aliases}
+    aliases = _path_alias_dict(path_aliases)
 
     # --- filesystem paths touched ---
     a_paths = a.capability_surface.get("filesystem_paths", [])
@@ -1050,14 +1059,23 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"bad --path-alias: {exc}", file=sys.stderr)
         return 2
+    try:
+        _path_alias_dict(path_aliases)
+    except ValueError as exc:
+        print(f"bad --path-alias: {exc}", file=sys.stderr)
+        return 2
 
-    rows = build_drift_report(
-        a,
-        b,
-        provider_hosts=provider_hosts,
-        fixture_paths=fixture_paths,
-        path_aliases=path_aliases,
-    )
+    try:
+        rows = build_drift_report(
+            a,
+            b,
+            provider_hosts=provider_hosts,
+            fixture_paths=fixture_paths,
+            path_aliases=path_aliases,
+        )
+    except ValueError as exc:
+        print(f"bad projection config: {exc}", file=sys.stderr)
+        return 2
     payload = report_to_json(a, b, rows)
 
     if args.out_json:

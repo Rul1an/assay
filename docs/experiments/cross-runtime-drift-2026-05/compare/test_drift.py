@@ -261,6 +261,21 @@ class DriftReportClassificationTests(unittest.TestCase):
             row.projection["claim_level"], drift.CLAIM_INCONCLUSIVE
         )
 
+    def test_duplicate_path_alias_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.build_drift_report(
+                self.a,
+                self.b,
+                path_aliases=(
+                    drift.PathAlias(
+                        "/tmp/work/fixture-input.txt", "workdir/input"
+                    ),
+                    drift.PathAlias(
+                        "/tmp/work/fixture-input.txt", "workdir/again"
+                    ),
+                ),
+            )
+
     def test_process_execs_task_induced(self) -> None:
         rows = drift.build_drift_report(self.a, self.b)
         row = self._by_dim(rows)["process_execs"]
@@ -479,6 +494,25 @@ class MainCliTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(rc, 3)
+
+    def test_main_returns_2_on_duplicate_path_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "drift.json"
+            rc = drift.main(
+                [
+                    "--archive-a",
+                    str(ARM_A),
+                    "--archive-b",
+                    str(ARM_B),
+                    "--path-alias",
+                    "/tmp/work/fixture-input.txt=workdir/input",
+                    "--path-alias",
+                    "/tmp/work/fixture-input.txt=workdir/again",
+                    "--out-json",
+                    str(out_json),
+                ]
+            )
+            self.assertEqual(rc, 2)
 
 
 class RuntimeLabelDerivationTests(unittest.TestCase):

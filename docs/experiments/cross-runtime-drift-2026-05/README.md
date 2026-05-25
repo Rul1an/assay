@@ -6,7 +6,7 @@
 > on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
-> produces per-dimension drift reports (53 stdlib unit tests covering
+> produces per-dimension drift reports (stdlib unit tests cover
 > `drift.py` + `health_gate.py` + `extract_fixture_paths.py`), live
 > Arm A0/B0 archives are under [`runs/`](runs/), [`findings.md`](findings.md)
 > reflects the live data, and [`publication/`](publication/) holds
@@ -26,7 +26,7 @@
 | [`workload-openai/`](workload-openai/) | `@openai/agents` implementation (standard agent loop). |
 | [`workload-gemini/`](workload-gemini/) | `@google/genai` implementation (manual function-calling loop, `automaticFunctionCalling.disable = true`). |
 | [`contract-checker/`](contract-checker/) | Stdlib-only Python validator. Independent of Runner capture. |
-| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, 53 stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
+| [`compare/`](compare/) | Slice 2 + Slice 3 helpers: `drift.py` stdlib comparator, `health_gate.py`, `extract_fixture_paths.py`, stdlib unit tests, and `fixtures/{arm-a-openai,arm-b-gemini}/` synthetic archives that exercise every drift classification label. |
 | [`runs/`](runs/) | Slice 3 live Arm A0 + B0 baselines + per-pair drift reports from workflow run 26398427430. See [`runs/README.md`](runs/README.md). |
 | [`findings.md`](findings.md) | Slice 4: live n=3 findings write-up plus threats to validity and reproduction commands. |
 | [`kernel-v0-feasibility.md`](kernel-v0-feasibility.md) | Follow-up diagnostic: what `layers/kernel.ndjson` can support now that open metadata is present, and what still remains out of scope. |
