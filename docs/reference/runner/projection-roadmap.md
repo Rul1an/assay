@@ -117,6 +117,9 @@ paths; it is to add a logical path layer above them.
 
 - Raw path sets remain present in the report.
 - Every projected path carries `rule` and `confidence`.
+- Projection mappings stay compact: declared mappings are explicit,
+  unmatched raw values are summarized by count and samples, and raw row
+  sets remain the source of truth.
 - Projection is idempotent.
 - A report can show "raw differs, projected matches" without calling the
   workloads semantically equivalent.

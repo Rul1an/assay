@@ -116,7 +116,10 @@ starting point; the findings doc (Slice 4) explains every
 Path projection v0 is additive: raw `only_in_*` and `in_both`
 values stay unchanged, while `--path-alias RAW=PROJECTED` emits an
 auditable `row.projection` block with mapping rule, confidence,
-claim level, and non-claims.
+claim level, compact declared mappings, unmatched raw counts, and
+non-claims. Markdown reports show a few `raw -> projected` examples so
+reviewers can see which evidence produced the logical role without
+opening the JSON.
 Runtime/Noise Taxonomy v0 is also emitted in JSON reports, but it is
 vocabulary-only in this slice: it validates declared projection classes
 and preserves `unknown`; it does not infer loader, package, SDK, or cache
@@ -168,7 +171,7 @@ committed archives are re-rendered after projection/schema changes.
   once: filesystem-paths `runtime-induced`, network-endpoints
   `provider-induced`, process-execs / SDK tools /
   tool-invocation-order `task-induced`, MCP `inconclusive`.
-- 17 stdlib unit tests cover parsing (directory + tar.gz),
+- Stdlib unit tests cover parsing (directory + tar.gz),
   failure modes (missing manifest, corrupt JSON, broken tar),
   every classification label, fixture-path overrides, and CLI
   output (`--out-json`, `--out-md`).

@@ -113,7 +113,8 @@ the report does not satisfy the v0 shape.
 2. **Projection is additive.** A row may carry a `projection` object,
    but projection output never replaces the raw row values.
 3. **Projection rules are named.** Applied projections carry `rules`,
-   `mappings`, confidence, relation, and taxonomy class information.
+   compact `mappings`, confidence, relation, and taxonomy class
+   information.
 4. **Unknowns stay visible.** Values without a declared rule remain
    raw or `unknown`; they are not collapsed into a convenient class.
 5. **Health is copied, not reinterpreted.** Observation health and
@@ -173,6 +174,19 @@ Rows without an applicable projection carry the
 `assay.runner.projection_not_applied.v0` sentinel with
 `status=not_applied` so downstream consumers do not confuse absence of
 projection with a parser failure.
+
+The v0 projection convention keeps `mappings` compact: it lists declared
+projected mappings, not every unmatched raw value. Unmatched raw values
+are summarized in `unmatched_summary` with per-arm counts and small
+samples. This is a v0-compatible clarification; the schema identifier
+remains `assay.runner.runtime_drift.v0`. The full raw values remain in
+each row's `only_in_a`, `only_in_b`, and `in_both` sets.
+
+Operation-aware path values use the shape `op:/absolute/path` before
+projection, for example `read:/tmp/run/workdir/input.txt`. The
+projection applies only to the absolute path suffix and preserves the
+operation prefix. Other colon-separated strings, such as URI-like values
+or relative `op:path` values, are treated as one raw value.
 
 ## Non-Claims
 

@@ -266,6 +266,9 @@
             "type": "object"
           }
         },
+        "unmatched_summary": {
+          "type": "object"
+        },
         "non_claims": {
           "$ref": "#/$defs/string_array"
         }
