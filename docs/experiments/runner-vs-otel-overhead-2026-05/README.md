@@ -1,13 +1,14 @@
 # Runner vs OTel Overhead Harness
 
-> **Status:** Slice 1 local Arm B harness. This directory contains the
-> experiment-scoped measurement harness and schema sidecars for the
-> plan in [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
+> **Status:** Slice 1 local Arm B harness plus Slice 2 delegated Arm C
+> dispatch pipeline. This directory contains the experiment-scoped
+> measurement harness and schema sidecars for the plan in
+> [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
 
 ## What This Emits
 
-The local harness writes:
+The harness writes:
 
 - `arm-b-otel/samples.jsonl` using
   `assay.experiment.overhead_sample.v0`;
@@ -18,10 +19,14 @@ The local harness writes:
 - `artifacts/trace-sizes.json`, a trace-size side artifact for overhead
   bookkeeping; and
 - `artifacts/archive-sizes.json`, an archive-size side artifact that is
-  present but empty for Slice 1.
+  empty for Arm B and populated for Arm C.
 
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
+
+BMF metric keys use the full arm slug so future arms stay
+unambiguous: `runner_vs_otel.arm_b_otel.*` for local Arm B and
+`runner_vs_otel.arm_c_dual_capture.*` for delegated Arm C.
 
 ## Local Smoke
 
@@ -39,6 +44,22 @@ For the Slice 1 acceptance dry run, use `--iterations 20` and a
 temporary output directory. Do not commit generated measurements until
 the findings slice decides what should become evidence. The default
 `runs/overhead-2026-05/` output path is ignored for this reason.
+
+## Delegated Arm C
+
+Arm C is dispatched manually through
+[`runner-otel-overhead-experiment.yml`](../../../.github/workflows/runner-otel-overhead-experiment.yml).
+The workflow runs on `assay-bpf-runner`, invokes the same harness with
+`--arm arm-c-dual-capture`, uploads `overhead-runs/`, and fails if any
+sample is either non-zero exit or capture-unclean.
+
+The local unit tests exercise the Arm C path with a fake `assay` binary
+that emits the expected archive shape. The first validation against real
+`assay runner-spike` output happens on the first delegated workflow
+dispatch.
+
+Do not commit the uploaded artifacts until the findings slice decides
+which measurements should become evidence.
 
 ## Tests
 

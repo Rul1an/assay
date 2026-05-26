@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
   `assay.experiment.overhead_summary.v0` schema sidecars and tests. The
   harness emits local measurement artifacts but does not commit or
   publish benchmark numbers.
+- Added the Slice 2 delegated Arm C overhead workflow for
+  `assay-bpf-runner`. The workflow uploads health-gated overhead
+  artifacts for review but still does not commit benchmark numbers. BMF
+  metric keys now use full arm slugs such as `arm_b_otel` and
+  `arm_c_dual_capture` to keep future arms unambiguous.
 
 ## [3.12.0] - 2026-05-25
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Local Arm B overhead harness for runner-vs-OTel.
+"""Overhead harness for runner-vs-OTel.
 
-Slice 1 intentionally measures only the local OTel-only workload path.
-It emits experiment-scoped samples and summaries; the optional BMF file
-is derived from the summary and is the only Bencher-shaped artifact.
+Slice 1 measures the local OTel-only workload path. Slice 2 adds the
+delegated Arm C Runner capture path. The harness emits
+experiment-scoped samples and summaries; the optional BMF file is
+derived from the summary and is the only Bencher-shaped artifact.
 """
 
 from __future__ import annotations
@@ -11,10 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import platform
 import shutil
 import socket
 import subprocess
+import tarfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +27,8 @@ EXPERIMENT = "runner-vs-otel-overhead-2026-05"
 SAMPLE_SCHEMA = "assay.experiment.overhead_sample.v0"
 SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 DEFAULT_ARM = "arm-b-otel"
+ARM_B = "arm-b-otel"
+ARM_C = "arm-c-dual-capture"
 
 
 def repo_root() -> Path:
@@ -112,6 +117,40 @@ def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
 
 
+def directory_size(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            total += child.stat().st_size
+    return total
+
+
+def load_archive_health(archive_contents: Path) -> dict[str, Any]:
+    health_path = archive_contents / "observation-health.json"
+    if not health_path.exists():
+        return {
+            "kernel_layer": "absent",
+            "ringbuf_drops": 0,
+            "cgroup_correlation": "unknown",
+        }
+    payload = json.loads(health_path.read_text(encoding="utf-8"))
+    return {
+        "kernel_layer": payload.get("kernel_layer", "unknown"),
+        "ringbuf_drops": int(payload.get("ringbuf_drops", -1)),
+        "cgroup_correlation": payload.get("cgroup_correlation", "unknown"),
+    }
+
+
+def extract_archive(archive: Path, destination: Path) -> None:
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(destination, filter="data")
+
+
 def percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -139,28 +178,68 @@ def normalized_exit_code(returncode: int) -> int:
 def one_sample(
     *,
     arm_dir: Path,
+    arm: str,
     workload_dir: Path,
     iteration: int,
     commit: str,
     versions: dict[str, str | None],
     timeout_seconds: float,
+    assay_bin: Path | None = None,
+    ebpf_obj: Path | None = None,
+    use_sudo: bool = False,
 ) -> dict[str, Any]:
-    run_id = f"overhead_arm_b_{iteration:03d}"
+    run_id = f"overhead_{arm.replace('-', '_')}_{iteration:03d}"
     run_dir = arm_dir / f"run_{iteration:03d}"
     work_dir = run_dir / "work"
     trace_path = run_dir / "trace.json"
+    archive_path = run_dir / "archive.tar.gz"
+    archive_contents = run_dir / "archive-contents"
+    sdk_log = run_dir / "sdk-events.ndjson"
     run_dir.mkdir(parents=True, exist_ok=True)
     started_at = utc_now()
-    command = [
-        "node",
-        "dist/workload.js",
-        "--run-id",
-        run_id,
-        "--work-dir",
-        str(work_dir),
-        "--trace-out",
-        str(trace_path),
-    ]
+    if arm == ARM_B:
+        command = [
+            "node",
+            "dist/workload.js",
+            "--run-id",
+            run_id,
+            "--work-dir",
+            str(work_dir),
+            "--trace-out",
+            str(trace_path),
+        ]
+    elif arm == ARM_C:
+        if assay_bin is None or ebpf_obj is None:
+            raise ValueError("Arm C requires --assay-bin and --ebpf-obj")
+        command = [
+            str(assay_bin),
+            "runner-spike",
+            "run",
+            "--agent-shim",
+            "openai-agents",
+            "--kernel-capture",
+            "--ebpf",
+            str(ebpf_obj),
+            "--run-id",
+            run_id,
+            "--output",
+            str(archive_path),
+            "--sdk-event-log",
+            str(sdk_log),
+            "--",
+            "node",
+            str(workload_dir / "dist/workload.js"),
+            "--run-id",
+            run_id,
+            "--work-dir",
+            str(work_dir),
+            "--trace-out",
+            str(trace_path),
+        ]
+        if use_sudo:
+            command = ["sudo", "-E", "env", f"PATH={os_environ_path()}"] + command
+    else:
+        raise ValueError(f"unsupported arm: {arm}")
 
     start = time.perf_counter()
     try:
@@ -183,11 +262,25 @@ def one_sample(
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     (run_dir / "stdout.log").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.log").write_text(stderr, encoding="utf-8")
+    if use_sudo and run_dir.exists():
+        subprocess.run(
+            ["sudo", "chown", "-R", f"{os_getuid()}:{os_getgid()}", str(run_dir)],
+            check=False,
+        )
+
+    health = None
+    archive_targz = None
+    archive_extracted = None
+    if archive_path.exists():
+        archive_targz = file_size(archive_path)
+        extract_archive(archive_path, archive_contents)
+        health = load_archive_health(archive_contents)
+        archive_extracted = directory_size(archive_contents)
 
     return {
         "schema": SAMPLE_SCHEMA,
         "experiment": EXPERIMENT,
-        "arm": DEFAULT_ARM,
+        "arm": arm,
         "iteration": iteration,
         "host": socket.gethostname(),
         "host_class": host_class(),
@@ -197,13 +290,36 @@ def one_sample(
         "wall_clock_ms": elapsed_ms,
         "peak_rss_bytes": None,
         "exit_code": exit_code,
-        "health": None,
+        "health": health,
         "artifact_bytes": {
             "trace_json": file_size(trace_path),
-            "archive_targz": None,
-            "archive_extracted": None,
+            "archive_targz": archive_targz,
+            "archive_extracted": archive_extracted,
         },
     }
+
+
+def os_environ_path() -> str:
+    return os.environ.get("PATH", "")
+
+
+def os_getuid() -> int:
+    return os.getuid()
+
+
+def os_getgid() -> int:
+    return os.getgid()
+
+
+def is_capture_clean(sample: dict[str, Any]) -> bool:
+    health = sample.get("health")
+    if health is None:
+        return True
+    return (
+        health.get("kernel_layer") == "complete"
+        and health.get("ringbuf_drops") == 0
+        and health.get("cgroup_correlation") == "clean"
+    )
 
 
 def summarize(
@@ -211,7 +327,11 @@ def summarize(
     *,
     delegated_workflow_url: str | None,
 ) -> dict[str, Any]:
-    valid = [sample for sample in samples if sample["exit_code"] == 0]
+    valid = [
+        sample
+        for sample in samples
+        if sample["exit_code"] == 0 and is_capture_clean(sample)
+    ]
     wall = [float(sample["wall_clock_ms"]) for sample in valid]
     rss = [
         int(sample["peak_rss_bytes"])
@@ -239,7 +359,7 @@ def summarize(
     return {
         "schema": SUMMARY_SCHEMA,
         "experiment": EXPERIMENT,
-        "arm": DEFAULT_ARM,
+        "arm": first.get("arm", ARM_B),
         "host": first.get("host", socket.gethostname()),
         "host_class": first.get("host_class", host_class()),
         "kernel": platform.release(),
@@ -270,7 +390,8 @@ def summarize(
 
 
 def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
-    prefix = "runner_vs_otel.arm_b"
+    arm_key = str(summary["arm"]).replace("arm-", "arm_").replace("-", "_")
+    prefix = f"runner_vs_otel.{arm_key}"
     values: dict[str, float | int | None] = {
         f"{prefix}.wall_clock_ms.median": summary["wall_clock_ms"]["median"],
         f"{prefix}.wall_clock_ms.p95": summary["wall_clock_ms"]["p95"],
@@ -295,6 +416,7 @@ def write_json(path: Path, payload: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--arm", choices=[ARM_B, ARM_C], default=ARM_B)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--out-dir", type=Path, default=default_out_dir())
     parser.add_argument("--workload-dir", type=Path, default=default_workload_dir())
@@ -302,6 +424,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clean", action="store_true")
     parser.add_argument("--delegated-workflow-url")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--assay-bin", type=Path)
+    parser.add_argument("--ebpf-obj", type=Path)
+    parser.add_argument("--sudo", action="store_true")
     args = parser.parse_args(argv)
 
     if args.iterations < 1:
@@ -310,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(args.out_dir)
 
     ensure_workload_built(args.workload_dir, skip_build=args.skip_build)
-    arm_dir = args.out_dir / DEFAULT_ARM
+    arm_dir = args.out_dir / args.arm
     artifacts_dir = args.out_dir / "artifacts"
     arm_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -320,11 +445,15 @@ def main(argv: list[str] | None = None) -> int:
     samples = [
         one_sample(
             arm_dir=arm_dir,
+            arm=args.arm,
             workload_dir=args.workload_dir,
             iteration=iteration,
             commit=commit,
             versions=versions,
             timeout_seconds=args.timeout_seconds,
+            assay_bin=args.assay_bin,
+            ebpf_obj=args.ebpf_obj,
+            use_sudo=args.sudo,
         )
         for iteration in range(1, args.iterations + 1)
     ]
@@ -339,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     write_json(
         artifacts_dir / "trace-sizes.json",
         {
-            "arm": DEFAULT_ARM,
+            "arm": args.arm,
             "trace_json_bytes": [
                 sample["artifact_bytes"]["trace_json"] for sample in samples
             ],
@@ -348,9 +477,17 @@ def main(argv: list[str] | None = None) -> int:
     write_json(
         artifacts_dir / "archive-sizes.json",
         {
-            "arm": DEFAULT_ARM,
-            "archive_targz_bytes": [],
-            "archive_extracted_bytes": [],
+            "arm": args.arm,
+            "archive_targz_bytes": [
+                sample["artifact_bytes"]["archive_targz"]
+                for sample in samples
+                if sample["artifact_bytes"]["archive_targz"] is not None
+            ],
+            "archive_extracted_bytes": [
+                sample["artifact_bytes"]["archive_extracted"]
+                for sample in samples
+                if sample["artifact_bytes"]["archive_extracted"] is not None
+            ],
         },
     )
     write_json(artifacts_dir / "bmf.json", bmf_export(summary))
