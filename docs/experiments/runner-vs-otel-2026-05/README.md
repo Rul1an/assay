@@ -119,6 +119,10 @@ Emit wall-clock and RSS in Bencher Metric Format (`BMF_JSON=1` per
 `docs/PERFORMANCE-ASSESSMENT.md`) so the overhead numbers slot into the
 existing Criterion / Bencher baseline.
 
+The follow-up measurement contract is tracked in
+[`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
+Do not publish overhead claims from the `n=3` evidence slices.
+
 ## Comparator tests
 
 ```bash

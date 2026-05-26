@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added a plan-only Runner-vs-OTel overhead measurement follow-up that
+  fixes the sample sizes, host-boundary rules, BMF-compatible output
+  shape, and non-claims required before publishing wall-clock or RSS
+  numbers.
+
 ## [3.12.0] - 2026-05-25
 
 > **Runner evidence and drift-reporting release.**
