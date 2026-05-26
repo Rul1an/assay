@@ -4,6 +4,10 @@
 > It lists the current Runner-adjacent contracts, their stability scope,
 > and whether they are archive evidence, projection output, or
 > experiment-only measurement output.
+>
+> For top-level namespace governance across `assay.runner.*`,
+> `assay.experiment.*`, and `assay.observability.*`, see
+> [`../schemas-overview.md`](../schemas-overview.md).
 
 ## Namespace Rules
 

@@ -68,7 +68,7 @@ or commit SHAs before publishing findings.
 | OpenInference semantic conventions | v1 trace vocabulary above OpenTelemetry | Chosen for v1 because the capture target is independent of the outcome of OpenInference issue discussions. |
 | traceAI | Optional v2 replication run | Do not mix into the v1 trace arm. |
 | AgentSight | Motivation for high-level/low-level semantic gap and eBPF relevance | Cite only for the gap, not as an equivalent product goal. |
-| Existing Assay Runner contracts | Measured-run archive, health, correlation, and capability-surface vocabulary | Link exact schema strings and Assay commit. |
+| Existing Assay Runner contracts | Measured-run archive, health, correlation, and capability-surface vocabulary | Link exact schema strings, [`../reference/runner/schemas-overview.md`](../reference/runner/schemas-overview.md), and Assay commit. |
 
 ## Claim Vocabulary v0
 
@@ -140,7 +140,9 @@ below `run_id`, the row must be marked weak or diagnostic.
 ## Run Modes
 
 Use the same deterministic workload and host-class discipline across all
-reported arms.
+reported arms. `host_class` should use the same schema-safe format as
+the overhead experiment (`^[A-Za-z0-9_.-]+$`) so cross-experiment
+comparisons do not invent a second host fingerprint dialect.
 
 | Arm | Capture | Purpose | Required For v1 |
 |---|---|---|---|
@@ -169,6 +171,15 @@ from capture overhead.
 | Join success rate | every dual run | A3, A4 if used | Whether the evidence story can be joined without weak fallback. |
 | Measurement health | every Runner run | A1, A3, A4 if used | Validity gate for measured claims. |
 
+The wall-clock and RSS sample counts mirror the
+[`runner-vs-otel-overhead-2026-05`](../experiments/runner-vs-otel-overhead-2026-05.md)
+plan so the experiment lines use the same evidence bar.
+
+A0-A3 with n >= 20 wall-clock samples means at least 80 captures before
+shape samples and reruns. The workflow slice should budget for that
+explicitly, with a timeout closer to 120 minutes than the default
+30-minute experiment setting.
+
 Do not report cross-host deltas as direct overhead. If A0/A1/A2/A3 do
 not run on the same host class, publish host-class baselines instead.
 
@@ -190,8 +201,10 @@ part of the comparison.
 
 ## Workload Contract
 
-Reuse the existing deterministic runner-vs-otel workload where possible,
-but freeze the v2 workload contract before capturing data:
+For v1, reuse the existing deterministic workload contract from
+[`cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md`](../experiments/cross-runtime-drift-2026-05/WORKLOAD_CONTRACT.md)
+where possible. If the observability line needs a materially different
+workload, freeze that as a v2 workload contract before capturing data:
 
 - one agent invocation;
 - one stable tool call with a stable `tool_call_id`;
@@ -243,7 +256,7 @@ slice, but their enums are frozen here.
 | Health gates | Every Runner sample used for measured-effect claims has clean observation health. |
 | Join disclosure | Every joined claim names the key used and marks weak fallbacks as weak. |
 | Capture-policy disclosure | Findings say whether sensitive trace content capture was enabled. |
-| Publication discipline | Positioning sweep waits until `findings.md` exists. |
+| Publication discipline | Positioning sweep waits until `findings.md` exists. If findings disprove or narrow the working claim, the positioning candidate must be revised, withdrawn, or explicitly limited in scope. |
 
 ## Suggested Slices
 
@@ -253,7 +266,7 @@ slice, but their enums are frozen here.
 | 1 | **Drafted:** `docs/reference/observability/claim-classes-v0.md` plus JSON schema sidecar | Enums match this plan; synthetic table validates. |
 | 2 | **Drafted:** `docs/reference/observability/join-contract-v0.md` plus JSON schema sidecar | Strong/weak join grades validated on synthetic rows. |
 | 3 | OpenInference capture infrastructure for existing workload | Trace-only A2 dry run emits stable trace shape without content by default. |
-| 4 | Five run modes in workflow, A0-A3 required and A4 optional | Same workload and same host-class labels recorded. |
+| 4 | Five run modes in workflow, A0-A3 required and A4 optional | Same workload and same host-class labels recorded; workflow timeout budget accounts for at least 80 required wall-clock captures. |
 | 5 | Live captures with n >= 20 per required arm for overhead and n >= 3 for shape artifacts | Health gates pass for Runner arms. |
 | 6 | `findings.md` with completed claim classes table | No direct deltas unless same-host-class rule is satisfied. |
 | 7 | Positioning sweep informed by findings | README/scope/package descriptions cite claim classes rather than marketing assertions. |
@@ -344,4 +357,6 @@ inputs into bounded review artifacts.
 ```
 
 This sentence remains a positioning candidate, not a result of this
-plan.
+plan. It is conditional on the findings table supporting the
+complementarity claim; if the findings narrow or reject that claim, this
+sentence must be revised or withdrawn.
