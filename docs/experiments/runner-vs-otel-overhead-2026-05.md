@@ -40,6 +40,11 @@
 > `linux-aarch64-6.8.0-117-generic` host class as Arm C, so the findings
 > document now reports a narrow same-host delta for this deterministic
 > workload.
+>
+> **Slice 7 status:** the delegated workflow can now dispatch optional
+> Arm A (`arm-a-runner-only`) on `assay-bpf-runner`. Arm A is only for
+> decomposing the current Arm C delta into "Runner archive only" versus
+> "Runner archive plus OTel trace"; it is not a new product benchmark.
 
 ## Research Question
 
@@ -112,6 +117,9 @@ The harness should produce one directory per arm:
 
 ```text
 runs/overhead-2026-05/
+  arm-a-runner-only/
+    samples.jsonl
+    summary.json
   arm-b-otel/
     samples.jsonl
     summary.json
@@ -230,10 +238,10 @@ requires Arm B to run on the delegated runner too. `host_class` is the
 mechanical comparison key for this rule. It should be a stable label for
 the hardware/OS/kernel boundary, not a free-form display name.
 
-Arm A stays out of the v0 sequence unless Arm C overhead needs
+Arm A stays out of the headline delta unless Arm C overhead needs
 decomposition into "Runner archive only" versus "Runner archive plus
-OTel trace". If needed, add it as a follow-up Slice 6 with the same
-sample-count, health, and provenance gates.
+OTel trace". It uses the same sample-count, health, and provenance gates
+as Arm C.
 
 ## Tooling
 
@@ -304,7 +312,7 @@ investigation before publication.
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
-| 7 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
+| 7 | **Ready to dispatch**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only` | separately dispatch n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arms B/C |
 
 ## Publication Rule
 

@@ -116,5 +116,6 @@ The correct publication language is now:
 > workload. The result is not co-temporal and does not decompose Runner
 > archive-only cost.
 
-Optional Arm A remains deferred unless Arm C needs decomposition into
+Optional Arm A now has dispatch wiring, but measurements have not landed
+yet. Use it only if the current Arm C delta needs decomposition into
 "Runner archive only" versus "Runner archive plus OTel trace".
