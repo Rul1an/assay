@@ -14,14 +14,13 @@ on:
         default: "20"
         type: string
       arm:
-        description: "Measurement arm to run"
+        description: "Measurement arm to run (dispatch once per arm)"
         required: true
         default: "arm-c-dual-capture"
         type: choice
         options:
           - arm-c-dual-capture
           - arm-b-otel
-          - both
       build_ebpf:
         description: "Rebuild eBPF artifact before running Arm C"
         required: true
@@ -62,10 +61,10 @@ jobs:
 
   arm-c-overhead:
     name: Arm C overhead capture
-    if: ${{ inputs.arm == 'arm-c-dual-capture' || inputs.arm == 'both' }}
+    if: ${{ inputs.arm == 'arm-c-dual-capture' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -188,10 +187,10 @@ jobs:
 
   arm-b-overhead:
     name: Arm B overhead capture
-    if: ${{ inputs.arm == 'arm-b-otel' || inputs.arm == 'both' }}
+    if: ${{ inputs.arm == 'arm-b-otel' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1

@@ -299,7 +299,7 @@ investigation before publication.
 | 3 | **Done**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 on `assay-bpf-runner`, platform-specific parser tests, tool versions recorded per sample |
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
-| 6 | **Ready to dispatch**: same-host Arm B delegated workflow path via `arm=arm-b-otel` | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arm C |
+| 6 | **Ready to dispatch**: same-host Arm B delegated workflow path via `arm=arm-b-otel` | separately dispatch n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arm C |
 | 7 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
 
 ## Publication Rule
