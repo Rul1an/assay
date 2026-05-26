@@ -28,6 +28,9 @@ All notable changes to this project will be documented in this file.
 - Added the Slice 5 overhead findings document. The findings summarize
   the clean delegated Arm C host-class baseline and explicitly withhold
   Arm B-vs-Arm C deltas until same-host Arm B measurements land.
+- Added a delegated same-host Arm B path to the Runner-vs-OTel overhead
+  workflow so `arm-b-otel` can be measured on `assay-bpf-runner` before
+  any Arm B-vs-Arm C delta is published.
 
 ## [3.12.0] - 2026-05-25
 

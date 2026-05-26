@@ -32,6 +32,10 @@
 > [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
 > The result is an Arm C host-class baseline, not a same-host overhead
 > delta.
+>
+> **Slice 6 status:** the delegated workflow can now dispatch same-host
+> Arm B (`arm-b-otel`) on `assay-bpf-runner`. The first same-host Arm B
+> measurement is still pending, so Arm B-vs-Arm C deltas remain withheld.
 
 ## Research Question
 
@@ -295,7 +299,8 @@ investigation before publication.
 | 3 | **Done**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 on `assay-bpf-runner`, platform-specific parser tests, tool versions recorded per sample |
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
-| 6 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
+| 6 | **Ready to dispatch**: same-host Arm B delegated workflow path via `arm=arm-b-otel` | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arm C |
+| 7 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
 
 ## Publication Rule
 
