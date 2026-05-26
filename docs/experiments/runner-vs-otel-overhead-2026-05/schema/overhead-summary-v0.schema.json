@@ -18,7 +18,8 @@
     "discarded_samples",
     "wall_clock_ms",
     "peak_rss_bytes",
-    "artifact_bytes"
+    "artifact_bytes",
+    "phase_timings_ms"
   ],
   "properties": {
     "schema": {
@@ -74,6 +75,16 @@
     },
     "artifact_bytes": {
       "$ref": "#/$defs/artifact_stats"
+    },
+    "phase_timings_ms": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/phase_timing_summary"
+        }
+      ]
     }
   },
   "$defs": {
@@ -148,6 +159,53 @@
         },
         "archive_extracted_median": {
           "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "phase_timing_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "p95",
+        "p99"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p95": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "phase_timing_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preflight_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "cgroup_prepare_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "monitor_attach_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "child_spawn_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "child_runtime_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "event_flush_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "archive_write_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
         }
       }
     }

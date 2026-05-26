@@ -50,6 +50,10 @@ pub struct RunnerSpikeRunArgs {
     #[arg(long, hide = true)]
     pub sdk_event_log: Option<PathBuf>,
 
+    /// Hidden overhead experiment path: write runner phase timing diagnostics.
+    #[arg(long, hide = true)]
+    pub phase_timing_log: Option<PathBuf>,
+
     /// Command to run.
     #[arg(allow_hyphen_values = true, required = true, trailing_var_arg = true)]
     pub command: Vec<String>,
@@ -130,9 +134,13 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     use assay_runner_core::KernelLayerBuilder;
     use assay_runner_linux::CgroupManager;
     use assay_runner_schema::CgroupCorrelationStatus;
+    use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
     use tokio_stream::StreamExt;
 
+    let total_start = Instant::now();
+    let mut phases = BTreeMap::new();
+    let phase_log = args.phase_timing_log.clone();
     let spec = build_spec(&args);
     spec.validate()?;
     let output = bundle_output_path(&args, &spec.run_id);
@@ -146,37 +154,105 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
             "Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>.",
             ebpf_path.display()
         );
+        record_phase(&mut phases, "preflight_ms", total_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("ebpf_object_missing"),
+        )?;
         return Ok(40);
     }
 
+    record_phase(&mut phases, "preflight_ms", total_start);
+
+    let monitor_start = Instant::now();
     let mut monitor = match Monitor::load_file(&ebpf_path) {
         Ok(monitor) => monitor,
         Err(error) => {
             eprintln!("Failed to load eBPF: {error}");
+            record_phase(&mut phases, "monitor_attach_ms", monitor_start);
+            write_phase_timing_log(
+                phase_log.as_ref(),
+                &spec,
+                &phases,
+                Some(40),
+                None,
+                Some("ebpf_load_failed"),
+            )?;
             return Ok(40);
         }
     };
     if let Err(error) = monitor.configure_defaults() {
         eprintln!("Failed to configure eBPF defaults: {error}");
+        record_phase(&mut phases, "monitor_attach_ms", monitor_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("ebpf_configure_failed"),
+        )?;
         return Ok(40);
     }
     if let Err(error) = monitor.set_emit_inode_resolved(false) {
         eprintln!("Failed to disable runner-spike inode telemetry: {error}");
+        record_phase(&mut phases, "monitor_attach_ms", monitor_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("ebpf_inode_telemetry_config_failed"),
+        )?;
         return Ok(40);
     }
     if let Err(error) = monitor.set_dedup_open_paths(true) {
         eprintln!("Failed to enable runner-spike open path dedupe: {error}");
+        record_phase(&mut phases, "monitor_attach_ms", monitor_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("ebpf_open_path_dedupe_config_failed"),
+        )?;
         return Ok(40);
     }
     if let Err(error) = monitor.attach() {
         eprintln!("Failed to attach eBPF probes: {error}");
+        record_phase(&mut phases, "monitor_attach_ms", monitor_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("ebpf_attach_failed"),
+        )?;
         return Ok(40);
     }
+    record_phase(&mut phases, "monitor_attach_ms", monitor_start);
 
+    let cgroup_start = Instant::now();
     let cgroup_manager = match CgroupManager::new() {
         Ok(manager) => manager,
         Err(error) => {
             eprintln!("Failed to initialize runner cgroup manager: {error}");
+            record_phase(&mut phases, "cgroup_prepare_ms", cgroup_start);
+            write_phase_timing_log(
+                phase_log.as_ref(),
+                &spec,
+                &phases,
+                Some(40),
+                None,
+                Some("cgroup_manager_init_failed"),
+            )?;
             return Ok(40);
         }
     };
@@ -184,13 +260,32 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
         Ok(cgroup) => cgroup,
         Err(error) => {
             eprintln!("Failed to create runner cgroup session: {error}");
+            record_phase(&mut phases, "cgroup_prepare_ms", cgroup_start);
+            write_phase_timing_log(
+                phase_log.as_ref(),
+                &spec,
+                &phases,
+                Some(40),
+                None,
+                Some("cgroup_session_create_failed"),
+            )?;
             return Ok(40);
         }
     };
     if let Err(error) = monitor.set_monitored_cgroups(&[session_cgroup.id()]) {
         eprintln!("Failed to populate runner cgroup map: {error}");
+        record_phase(&mut phases, "cgroup_prepare_ms", cgroup_start);
+        write_phase_timing_log(
+            phase_log.as_ref(),
+            &spec,
+            &phases,
+            Some(40),
+            None,
+            Some("cgroup_monitor_map_failed"),
+        )?;
         return Ok(40);
     }
+    record_phase(&mut phases, "cgroup_prepare_ms", cgroup_start);
 
     let before_stats = monitor.snapshot_stats()?;
     // Stream is armed against the empty session cgroup. No events flow until
@@ -202,9 +297,28 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     let clock = Instant::now();
     spec.append_run_started(&mut archive, 0, Duration::ZERO)?;
 
-    let mut child = spawn_child_in_cgroup(&spec, &session_cgroup)?;
+    let child_spawn_start = Instant::now();
+    let mut child = match spawn_child_in_cgroup(&spec, &session_cgroup) {
+        Ok(child) => {
+            record_phase(&mut phases, "child_spawn_ms", child_spawn_start);
+            child
+        }
+        Err(error) => {
+            record_phase(&mut phases, "child_spawn_ms", child_spawn_start);
+            write_phase_timing_log(
+                phase_log.as_ref(),
+                &spec,
+                &phases,
+                None,
+                None,
+                Some("child_spawn_failed"),
+            )?;
+            return Err(error);
+        }
+    };
     let mut cgroup_correlation = CgroupCorrelationStatus::Clean;
 
+    let child_runtime_start = Instant::now();
     let status = loop {
         tokio::select! {
             status = child.wait() => break status?,
@@ -224,7 +338,9 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
             }
         }
     };
+    record_phase(&mut phases, "child_runtime_ms", child_runtime_start);
 
+    let event_flush_start = Instant::now();
     let drain_complete = drain_kernel_events(
         &mut stream,
         &mut builder,
@@ -242,12 +358,16 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
     apply_policy_then_sdk_logs_if_requested(&spec, &args, &mut archive)?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
+    record_phase(&mut phases, "event_flush_ms", event_flush_start);
 
+    let archive_write_start = Instant::now();
     let mut file = File::create(&output)?;
     archive.write(&mut file)?;
+    record_phase(&mut phases, "archive_write_ms", archive_write_start);
     let exit_code = status.code();
     let signal = exit_signal(&status);
     let exit_status = exit_status_label(exit_code, signal);
+    write_phase_timing_log(phase_log.as_ref(), &spec, &phases, exit_code, signal, None)?;
 
     println!(
         "wrote runner-spike bundle: {} (run_id={}, status={}, kernel_capture={})",
@@ -258,6 +378,43 @@ async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> anyhow::Result
     );
 
     Ok(exit_status_code(exit_code, signal))
+}
+
+#[cfg(target_os = "linux")]
+fn record_phase(
+    phases: &mut std::collections::BTreeMap<&'static str, f64>,
+    name: &'static str,
+    start: std::time::Instant,
+) {
+    phases.insert(name, start.elapsed().as_secs_f64() * 1000.0);
+}
+
+#[cfg(target_os = "linux")]
+fn write_phase_timing_log(
+    path: Option<&PathBuf>,
+    spec: &RunSpec,
+    phases: &std::collections::BTreeMap<&'static str, f64>,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    error: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let payload = serde_json::json!({
+        "schema": "assay.experiment.runner_phase_timing.v0",
+        "run_id": &spec.run_id,
+        "agent_shim": &spec.agent_shim,
+        "phases_ms": phases,
+        "exit_code": exit_code,
+        "signal": signal,
+        "error": error,
+    });
+    std::fs::write(path, serde_json::to_vec_pretty(&payload)?)?;
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -504,5 +661,26 @@ mod tests {
         let len = write_u32_decimal(12345, &mut buf);
 
         assert_eq!(&buf[..len], b"12345");
+    }
+
+    #[test]
+    fn phase_timing_log_is_experiment_scoped_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("phase-timing.json");
+        let spec = RunSpec::new(vec!["true".to_string()])
+            .with_run_id("run_001")
+            .with_agent_shim("openai-agents");
+        let mut phases = std::collections::BTreeMap::new();
+        phases.insert("child_runtime_ms", 12.5);
+
+        write_phase_timing_log(Some(&path), &spec, &phases, Some(0), None, None).unwrap();
+
+        let payload: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(payload["schema"], "assay.experiment.runner_phase_timing.v0");
+        assert_eq!(payload["run_id"], "run_001");
+        assert_eq!(payload["phases_ms"]["child_runtime_ms"], 12.5);
+        assert_eq!(payload["exit_code"], 0);
+        assert!(payload["error"].is_null());
     }
 }

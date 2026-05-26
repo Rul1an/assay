@@ -48,6 +48,11 @@ All notable changes to this project will be documented in this file.
 - Refreshed the Runner-vs-OTel overhead findings with a healthy Arm A
   wall-clock repeat, preserving the conclusion that RSS decomposes
   cleanly while wall-clock does not yet support an additive split.
+- Added Runner-vs-OTel overhead phase-timing diagnostics for Arm A/C:
+  `assay runner-spike` can now emit an experiment-scoped
+  `assay.experiment.runner_phase_timing.v0` side log, and the overhead
+  harness aggregates those phases into samples, summaries, Markdown, and
+  BMF output without changing Runner archive contracts.
 
 ## [3.12.0] - 2026-05-25
 
