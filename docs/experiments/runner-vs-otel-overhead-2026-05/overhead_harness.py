@@ -472,6 +472,70 @@ def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
     return {key: {"value": value} for key, value in values.items() if value is not None}
 
 
+def _md_value(value: Any, *, unit: str = "") -> str:
+    if value is None:
+        return "`null`"
+    if isinstance(value, (float, int)):
+        if unit == "bytes" and float(value).is_integer():
+            rendered = f"{int(value):,}"
+        else:
+            rendered = f"{float(value):,.3f}".rstrip("0").rstrip(".")
+    else:
+        rendered = str(value)
+    suffix = f" {unit}" if unit else ""
+    return f"`{rendered}{suffix}`"
+
+
+def tail_ratio_status(value: float | int | None) -> str:
+    if value is None:
+        return "unknown"
+    if value < 1.5:
+        return "healthy"
+    if value <= 2.0:
+        return "warning"
+    return "fail"
+
+
+def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = None) -> str:
+    wall = summary["wall_clock_ms"]
+    rss = summary["peak_rss_bytes"]
+    artifacts = summary["artifact_bytes"]
+    tail_ratio = wall["p99_over_median"]
+    lines = [
+        "## Runner-vs-OTel Overhead Summary",
+        "",
+        "| Field | Value |",
+        "|---|---:|",
+        f"| Arm | `{summary['arm']}` |",
+        f"| Host class | `{summary['host_class']}` |",
+        f"| Kernel | `{summary['kernel']}` |",
+        f"| Valid samples | `{summary['valid_samples']}` |",
+        f"| Discarded samples | `{summary['discarded_samples']}` |",
+        f"| Wall median | {_md_value(wall['median'], unit='ms')} |",
+        f"| Wall p95 | {_md_value(wall['p95'], unit='ms')} |",
+        f"| Wall p99 | {_md_value(wall['p99'], unit='ms')} |",
+        f"| Wall p99/median | {_md_value(tail_ratio)} ({tail_ratio_status(tail_ratio)}) |",
+        f"| Peak RSS median | {_md_value(rss['median'], unit='bytes')} |",
+        f"| Peak RSS max | {_md_value(rss['max'], unit='bytes')} |",
+        f"| Trace JSON median | {_md_value(artifacts['trace_json_median'], unit='bytes')} |",
+        f"| Archive .tar.gz median | {_md_value(artifacts['archive_targz_median'], unit='bytes')} |",
+        f"| Archive extracted median | {_md_value(artifacts['archive_extracted_median'], unit='bytes')} |",
+    ]
+    if summary.get("delegated_workflow_url"):
+        lines.append(f"| Workflow | {summary['delegated_workflow_url']} |")
+    if artifact_name:
+        lines.append(f"| Artifact | `{artifact_name}` |")
+    lines.extend(
+        [
+            "",
+            "> Non-claim: this is a host-class baseline. Do not publish cross-host",
+            "> overhead deltas unless compared arms were measured on the same host class.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -537,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     write_json(arm_dir / "summary.json", summary)
+    (arm_dir / "summary.md").write_text(summary_markdown(summary), encoding="utf-8")
     write_json(
         artifacts_dir / "trace-sizes.json",
         {
@@ -577,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"wrote {samples_path}")
     print(f"wrote {arm_dir / 'summary.json'}")
+    print(f"wrote {arm_dir / 'summary.md'}")
     print(f"wrote {artifacts_dir / 'bmf.json'}")
     if summary["valid_samples"] != args.iterations:
         return 2
