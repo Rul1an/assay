@@ -162,26 +162,11 @@ jobs:
             --delegated-workflow-url "$WORKFLOW_URL" \
             "${RSS_FLAG[@]}"
 
-          SUMMARY="$OUT_DIR/arm-c-dual-capture/summary.json"
-          python3 - "$SUMMARY" "runner-otel-overhead-arm-c-${GITHUB_RUN_ID}" <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          import sys
-
-          summary_path, artifact_name = sys.argv[1], sys.argv[2]
-          with open(summary_path, encoding="utf-8") as fh:
-              summary = json.load(fh)
-          wall = summary["wall_clock_ms"]
-          print("## Arm C overhead summary")
-          print(f"- valid samples: {summary['valid_samples']}")
-          print(f"- discarded samples: {summary['discarded_samples']}")
-          print(f"- wall median ms: {wall['median']}")
-          print(f"- wall p95 ms: {wall['p95']}")
-          print(f"- wall p99 ms: {wall['p99']}")
-          print(f"- wall p99/median: {wall['p99_over_median']}")
-          print(f"- peak RSS median bytes: {summary['peak_rss_bytes']['median']}")
-          print(f"- peak RSS max bytes: {summary['peak_rss_bytes']['max']}")
-          print(f"- artifact: {artifact_name}")
-          PY
+          cat "$OUT_DIR/arm-c-dual-capture/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "- artifact: \`runner-otel-overhead-arm-c-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Arm C overhead artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

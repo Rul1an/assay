@@ -1,8 +1,9 @@
 # Runner vs OTel Overhead Harness
 
-> **Status:** Slice 1 local Arm B harness plus Slice 2 delegated Arm C
-> dispatch pipeline. This directory contains the experiment-scoped
-> measurement harness and schema sidecars for the plan in
+> **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
+> dispatch pipeline, Slice 3 RSS collection, and Slice 4 summary/BMF
+> rendering. This directory contains the experiment-scoped measurement
+> harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
 
@@ -14,6 +15,8 @@ The harness writes:
   `assay.experiment.overhead_sample.v0`;
 - `arm-b-otel/summary.json` using
   `assay.experiment.overhead_summary.v0`;
+- `arm-b-otel/summary.md`, a reviewer-friendly rendering of the same
+  summary;
 - `artifacts/bmf.json`, a derived Bencher Metric Format export whose
   metric keys map to `{ "value": ... }` objects;
 - `artifacts/trace-sizes.json`, a trace-size side artifact for overhead
@@ -62,7 +65,9 @@ sample is either non-zero exit or capture-unclean.
 For the Slice 3 RSS run, dispatch the same workflow with
 `repetitions=5` and `measure_rss=true`. Keep `build_ebpf=true` unless a
 known-good `target/assay-ebpf.o` is already present on the delegated
-runner.
+runner. The first delegated RSS run passed as
+[GitHub Actions run 26454010701](https://github.com/Rul1an/assay/actions/runs/26454010701):
+5/5 valid samples, 0 discarded samples, all health gates clean.
 
 The local unit tests exercise the Arm C path with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
