@@ -53,6 +53,10 @@ All notable changes to this project will be documented in this file.
   `assay.experiment.runner_phase_timing.v0` side log, and the overhead
   harness aggregates those phases into samples, summaries, Markdown, and
   BMF output without changing Runner archive contracts.
+- Updated the overhead findings after the Slice 8 Arm A/C phase-timing
+  dispatches. The phase data explains part of the Arm A / Arm C median
+  wall-clock gap, mostly around monitor attach, but still withholds an
+  additive wall-clock decomposition claim.
 
 ## [3.12.0] - 2026-05-25
 
