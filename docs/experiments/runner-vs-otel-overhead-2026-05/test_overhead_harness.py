@@ -175,6 +175,7 @@ if phase_timing is not None:
     phase_timing.write_text(json.dumps({
         "schema": "assay.experiment.runner_phase_timing.v0",
         "run_id": "fake_run",
+        "agent_shim": "openai-agents",
         "phases_ms": {
             "preflight_ms": 1.0,
             "cgroup_prepare_ms": 2.0,
@@ -257,6 +258,23 @@ class OverheadHarnessTests(unittest.TestCase):
             }
         )
         assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_phase_timing_schema_accepts_side_log(self) -> None:
+        schema = load_schema("runner-phase-timing-v0.schema.json")
+        payload = {
+            "schema": "assay.experiment.runner_phase_timing.v0",
+            "run_id": "run_001",
+            "agent_shim": "openai-agents",
+            "phases_ms": {
+                "preflight_ms": 1.0,
+                "child_runtime_ms": 42.0,
+                "archive_write_ms": 7.0,
+            },
+            "exit_code": 0,
+            "signal": None,
+            "error": None,
+        }
+        assert_matches_schema(self, payload, schema, root=schema)
 
     def test_sample_schema_requires_extracted_size_key(self) -> None:
         schema = load_schema("overhead-sample-v0.schema.json")
